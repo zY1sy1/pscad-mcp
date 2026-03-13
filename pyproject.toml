@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pscad-mcp"
+version = "0.1.0"
+description = "A professional, robust MCP server for PSCAD."
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [
+    {name = "LL0pez20", email = "luansantos@poli.ufrj.br"}
+]
+dependencies = [
+    "mhi-pscad",
+    "mcp",
+    "psutil",
+    "mhi-psout"
+]
+
+[project.scripts]
+pscad-mcp = "pscad_mcp.main:main"
+
+[tool.setuptools.packages.find]
+include = ["pscad_mcp*"]
