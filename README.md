@@ -12,33 +12,62 @@ A professional, robust Model Context Protocol (MCP) server for **Power System Co
 
 ---
 
-## 🛠 Installation (Simplified)
+## 🛠 Installation
 
-We've automated the setup process. Simply run the installer:
+### 1. Prerequisites
+- **Windows OS**: Required for local PSCAD automation (RMI).
+- **PSCAD Installed**: Ensure PSCAD and its Python libraries are available on your system.
+- **Python 3.10+**: Recommended for best compatibility.
+
+### 2. Automated Setup
+The easiest way to get started is by running the automated installer:
 
 ```bash
-# 1. Clone the repository
-# 2. Run the automated installer
+# Clone the repository
+git clone https://github.com/LL0pez20/pscad-mcp.git
+cd pscad-mcp
+
+# Run the installer
 python mcp_installer.py
 ```
 
 The installer will:
-- Check for PSCAD and Python prerequisites.
 - Install the `pscad-mcp` package and all dependencies.
-- Synchronize your local PSCAD API documentation (Markdown + Raw) for AI reference.
-- Generate the exact configuration snippets for **Claude Desktop** and **Gemini CLI**.
+- Synchronize your local PSCAD API documentation (Markdown + Raw).
+- Generate the exact configuration commands for your AI tools.
 
 ---
 
 ## 🤖 AI Tool Integration
 
-After running the installer, follow the printed instructions to add the server to your favorite AI tool.
-
-### Claude Desktop
-Copy the generated JSON into your `claude_desktop_config.json`.
+Once the server is installed, you can add it to your favorite AI assistant using the following commands:
 
 ### Gemini CLI
-Run the `gemini mcp add` command provided by the installer.
+Connect the PSCAD MCP server to your Gemini CLI:
+```bash
+gemini mcp add pscad-mcp python pscad_mcp/main.py
+```
+
+### Claude Code
+If you are using Anthropic's **Claude Code** (the agentic CLI), add it with:
+```bash
+claude mcp add pscad-mcp python pscad_mcp/main.py
+```
+
+### Claude Desktop
+For the **Claude Desktop** app, add the following to your `claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "pscad": {
+      "command": "python",
+      "args": ["/path/to/pscad-mcp/pscad_mcp/main.py"]
+    }
+  }
+}
+```
+*Note: The `mcp_installer.py` will print the absolute path for you.*
 
 ---
 
