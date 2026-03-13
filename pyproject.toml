@@ -13,9 +13,13 @@ authors = [
     {name = "LL0pez20", email = "luansantos@poli.ufrj.br"}
 ]
 dependencies = [
-    "mhi-pscad",
     "mcp",
-    "psutil",
+    "psutil"
+]
+
+[project.optional-dependencies]
+windows = [
+    "mhi-pscad",
     "mhi-psout"
 ]
 

@@ -26,9 +26,16 @@ def check_pscad():
 
 def install_package():
     """Install the pscad-mcp package in editable mode."""
-    logger.info("🔧 Installing pscad-mcp and dependencies...")
+    logger.info("🔧 Installing pscad-mcp and base dependencies...")
+    
+    install_cmd = [sys.executable, "-m", "pip", "install", "-e", "."]
+    
+    if platform.system() == "Windows":
+        logger.info("🪟 Windows detected. Installing PSCAD RMI dependencies...")
+        install_cmd[-1] = ".[windows]"
+    
     try:
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "-e", "."])
+        subprocess.check_call(install_cmd)
         logger.info("✅ Installation successful.")
     except subprocess.CalledProcessError as e:
         logger.error("❌ Installation failed: %s", e)

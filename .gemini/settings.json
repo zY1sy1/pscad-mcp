@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "pscad-mcp": {
+      "command": "/home/lua/miniconda/bin/python",
+      "args": [
+        "/home/lua/Documents/06_pscad_mcp/pscad_mcp/main.py"
+      ]
+    }
+  }
+}

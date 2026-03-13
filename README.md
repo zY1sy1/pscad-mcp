@@ -5,10 +5,10 @@ A professional, robust Model Context Protocol (MCP) server for **Power System Co
 ## 🚀 Key Features
 
 - **Local-First Approach**: Optimized for local Windows automation using `mhi.pscad.application()`.
+- **Source-Enriched Documentation**: Uses AST (Abstract Syntax Tree) analysis to extract decorators (like `@rmi` and `@requires`) and type hints directly from the `mhi-pscad` library, providing the AI with deep API awareness.
 - **Execution Watchdog**: A 30-second timeout layer prevents AI tools from hanging if PSCAD is frozen or showing a modal dialog.
 - **Process Monitoring**: OS-level detection of `PSCAD.exe` crashes or closures.
 - **Thread-Safe Command Queue**: Ensures sequential execution, critical for PSCAD's single-threaded COM/RMI interface.
-- **Self-Healing Docs**: The `sync_documentation` tool re-extracts API references directly from your installed `mhi-pscad` version.
 
 ---
 
@@ -25,7 +25,7 @@ python mcp_installer.py
 The installer will:
 - Check for PSCAD and Python prerequisites.
 - Install the `pscad-mcp` package and all dependencies.
-- Synchronize your local PSCAD API documentation for AI reference.
+- Synchronize your local PSCAD API documentation (Markdown + Raw) for AI reference.
 - Generate the exact configuration snippets for **Claude Desktop** and **Gemini CLI**.
 
 ---
@@ -48,12 +48,12 @@ Run the `gemini mcp add` command provided by the installer.
 The server is built using a modular package structure to ensure maintainability and testability:
 - **`core/connection_manager.py`**: A **Singleton** that manages the lifecycle of the PSCAD instance and monitors OS-level process health.
 - **`core/executor.py`**: Implements the **Command/Proxy Pattern**. All calls to PSCAD are proxied through a single-worker thread pool with an `asyncio` watchdog.
-- **`tools/`**: Modularized toolsets (App, Project, Data) following the **Single Responsibility Principle**.
+- **`tools/`**: Modularized toolsets (App, Project, Data, SimSet) following the **Single Responsibility Principle**.
 
 ### Safety Mechanisms
-1. **JSON-RPC Compliance**: The server enforces strict JSON serializability of all return types and prevents `stdout` pollution (which would break the protocol).
+1. **JSON-RPC Compliance**: The server enforces strict JSON serializability of all return types and prevents `stdout` pollution.
 2. **Heartbeat Checks**: Before every command, the server performs a "heartbeat" check (`is_busy()`) to ensure the connection is still valid.
-3. **Stale Handle Recovery**: If a project handle is lost (e.g., due to a manual reload), the `repair_connection` tool allows the AI to re-synchronize state without restarting the server.
+3. **Parameter Validation**: The `validate_component_parameters` tool uses the library's internal `range()` metadata to verify values before execution.
 
 ---
 
@@ -62,7 +62,7 @@ The server is built using a modular package structure to ensure maintainability 
 ### System & Lifecycle
 - `get_local_pscad`: Attach to/Launch a local PSCAD instance.
 - `get_pscad_status`: Health check and version info.
-- `sync_documentation`: Extract and update AI's internal reference files.
+- `sync_documentation`: Extract and update AI's internal reference files (20 modules covered).
 - `list_documentation`: List available PSCAD API documentation modules.
 - `read_documentation`: Read clean, LLM-optimized Markdown documentation for a specific module.
 - `repair_connection`: Force-reset the RMI connection.
@@ -74,6 +74,16 @@ The server is built using a modular package structure to ensure maintainability 
 - `run_project`: Start a simulation (includes license verification).
 - `get_run_status`: Monitor simulation progress.
 - `find_components`: Locate components by name or definition.
+- `get_component_parameters`: Retrieve all parameter values for a component.
+- `set_component_parameters`: Update multiple parameters at once.
+- `validate_component_parameters`: Check if values are within the legal range before setting.
+- `get_project_settings`: Retrieve project runtime settings.
+- `set_project_settings`: Update project runtime settings (Duration, TimeStep, etc.).
+
+### Simulation Sets (Batch)
+- `list_simulation_sets`: Discover defined batch runs in a project.
+- `run_simulation_set`: Execute a collection of project tasks.
+- `add_task_to_set`: Programmatically add project tasks to a simulation set.
 
 ### Data & Results
 - `get_project_output`: Capture simulation runtime messages.
@@ -82,8 +92,12 @@ The server is built using a modular package structure to ensure maintainability 
 ---
 
 ## 🧪 Testing & Validation
-Run the full test suite to verify logic and protocol integrity:
+Run the full test suite to verify logic, protocol integrity, and tool behavior:
 ```bash
+# Run all tests
 python -m unittest discover tests
+
+# Run enhanced tool tests specifically
+python -m unittest tests/test_enhanced_tools.py
 ```
 *Note: Unit tests use mocks to simulate PSCAD behavior, allowing verification on any OS.*
