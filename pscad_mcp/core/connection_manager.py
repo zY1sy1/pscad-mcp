@@ -1,8 +1,12 @@
 import psutil
 import logging
-from typing import Optional
-import mhi.pscad
+from typing import Optional, Any
 from .executor import robust_executor
+
+try:
+    import mhi.pscad
+except ImportError:
+    mhi = None  # type: ignore
 
 logger = logging.getLogger("pscad-mcp.connection")
 
@@ -11,7 +15,7 @@ class PSCADConnectionManager:
     Singleton Manager for PSCAD lifecycle and connection health.
     """
     _instance: Optional['PSCADConnectionManager'] = None
-    _pscad: Optional[mhi.pscad.PSCAD] = None
+    _pscad: Optional[Any] = None
 
     def __new__(cls):
         if cls._instance is None:
@@ -19,7 +23,7 @@ class PSCADConnectionManager:
         return cls._instance
 
     @property
-    def pscad(self) -> mhi.pscad.PSCAD:
+    def pscad(self):
         """Get a safe, verified PSCAD instance."""
         if self._pscad is None:
             raise RuntimeError("PSCAD not connected. Use get_local_pscad or launch_pscad first.")

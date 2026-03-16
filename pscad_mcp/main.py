@@ -4,6 +4,9 @@ from .tools.app_tools import register_app_tools
 from .tools.project_tools import register_project_tools
 from .tools.data_tools import register_data_tools
 from .tools.simset_tools import register_simset_tools
+from .tools.creation_tools import register_creation_tools
+from .tools.canvas_tools import register_canvas_tools
+from .tools.component_tools import register_component_tools
 
 # Configure central logging
 logging.basicConfig(
@@ -24,7 +27,10 @@ def create_server() -> FastMCP:
     register_project_tools(mcp)
     register_data_tools(mcp)
     register_simset_tools(mcp)
-    
+    register_creation_tools(mcp)
+    register_canvas_tools(mcp)
+    register_component_tools(mcp)
+
     logger.info("PSCAD MCP Server initialized with modular tools.")
     return mcp
 

@@ -4,7 +4,10 @@ from mcp.server.fastmcp import FastMCP
 from ..core.connection_manager import pscad_manager
 from ..core.executor import robust_executor
 from ..utils.doc_manager import doc_manager
-import mhi.pscad
+try:
+    import mhi.pscad
+except ImportError:
+    mhi = None  # type: ignore
 
 async def get_local_pscad() -> str:
     """Attach to a running local PSCAD instance or launch a new one."""

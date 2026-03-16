@@ -17,8 +17,16 @@ class RobustExecutor:
         # PSCAD is single-threaded via COM; use a single worker executor
         self.executor = ThreadPoolExecutor(max_workers=1)
 
-    async def run_safe(self, func: Callable, *args, **kwargs) -> Any:
-        """Execute a PSCAD call in a separate thread with a watchdog timeout."""
+    async def run_safe(self, func: Callable, *args, timeout: float = None, **kwargs) -> Any:
+        """Execute a PSCAD call in a separate thread with a watchdog timeout.
+
+        Args:
+            func: The callable to execute.
+            *args: Positional arguments for func.
+            timeout: Override the default timeout (seconds). Use for long operations like builds.
+            **kwargs: Keyword arguments for func.
+        """
+        effective_timeout = timeout if timeout is not None else self.timeout
         loop = asyncio.get_running_loop()
         func_name = getattr(func, "__name__", str(func))
 
@@ -28,8 +36,8 @@ class RobustExecutor:
 
         try:
             return await asyncio.wait_for(
-                loop.run_in_executor(self.executor, wrapped_call), 
-                timeout=self.timeout
+                loop.run_in_executor(self.executor, wrapped_call),
+                timeout=effective_timeout
             )
         except asyncio.TimeoutError:
             logger.error(f"PSCAD Command {func_name} timed out after {self.timeout}s.")

@@ -76,6 +76,22 @@ async def validate_component_parameters(project_name: str, component_id: int, pa
             
     return validation_results
 
+async def pause_simulation(project_name: str) -> str:
+    """Pause the running simulation for a project."""
+    pscad = pscad_manager.pscad
+    project = await robust_executor.run_safe(pscad.project, project_name)
+    await robust_executor.run_safe(project.pause)
+    return f"Simulation paused for '{project_name}'."
+
+
+async def stop_simulation(project_name: str) -> str:
+    """Stop/terminate the running simulation for a project."""
+    pscad = pscad_manager.pscad
+    project = await robust_executor.run_safe(pscad.project, project_name)
+    await robust_executor.run_safe(project.stop)
+    return f"Simulation stopped for '{project_name}'."
+
+
 async def get_project_settings(project_name: str) -> Dict[str, Any]:
     """Get all settings for a project."""
     pscad = pscad_manager.pscad
@@ -100,5 +116,7 @@ def register_project_tools(mcp: FastMCP):
     mcp.tool()(get_component_parameters)
     mcp.tool()(set_component_parameters)
     mcp.tool()(validate_component_parameters)
+    mcp.tool()(pause_simulation)
+    mcp.tool()(stop_simulation)
     mcp.tool()(get_project_settings)
     mcp.tool()(set_project_settings)
