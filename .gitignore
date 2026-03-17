@@ -64,5 +64,3 @@ venv.bak/
 *.swo
 .DS_Store
 
-# Project specific
-.claude/settings.local.json

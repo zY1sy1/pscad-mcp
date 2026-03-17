@@ -24,7 +24,7 @@ except Exception as e:
 ```
 
 ## 2. MCP Approach (The "Intelligent" Way)
-The user simply provides a goal to the AI:
+The user simply provides a goal to GitHub Copilot CLI:
 
 **User Prompt:**
 > "Launch PSCAD, load the vdiv project, set R1 to 100 ohms and run it. Summarize the output messages for me."

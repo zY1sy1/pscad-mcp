@@ -1,4 +1,3 @@
-import os
 import sys
 import subprocess
 import json
@@ -51,41 +50,36 @@ def sync_docs():
     except Exception as e:
         logger.warning("⚠️ Doc sync failed (maybe PSCAD is not installed?). Skipping. Error: %s", e)
 
-def print_claude_config():
-    """Generate and print Claude Desktop configuration."""
-    current_dir = os.path.abspath(os.getcwd())
+def print_copilot_cli_setup():
+    """Generate and print GitHub Copilot CLI configuration guidance."""
     python_exe = sys.executable
-    
-    # In a packaged install, we use the 'pscad-mcp' command if it's in PATH,
-    # but for Claude it's safer to use the absolute path to the main.py or the installed script.
-    
+
     config = {
         "mcpServers": {
             "pscad": {
+                "type": "stdio",
                 "command": python_exe,
-                "args": [os.path.join(current_dir, "pscad_mcp", "main.py")]
+                "args": ["-m", "pscad_mcp.main"],
+                "tools": ["*"]
             }
         }
     }
-    
-    logger.info("\n--- 🤖 CLAUDE DESKTOP CONFIGURATION ---")
-    logger.info("Add the following to your claude_desktop_config.json:")
-    logger.info(json.dumps(config, indent=2))
-    
-    if platform.system() == "Windows":
-        logger.info("\nConfig Location: %%APPDATA%%\\Claude\\claude_desktop_config.json")
-    elif platform.system() == "Darwin":
-        logger.info("\nConfig Location: ~/Library/Application Support/Claude/claude_desktop_config.json")
 
-def print_gemini_config():
-    """Generate and print Gemini CLI command."""
-    current_dir = os.path.abspath(os.getcwd())
-    python_exe = sys.executable
-    main_py = os.path.join(current_dir, "pscad_mcp", "main.py")
-    
-    logger.info("\n--- 🤖 GEMINI CLI CONFIGURATION ---")
-    logger.info("Run this command in your terminal:")
-    logger.info(f"gemini mcp add pscad-mcp {python_exe} {main_py}")
+    logger.info("\n--- 🤖 GITHUB COPILOT CLI SETUP ---")
+    logger.info("Start GitHub Copilot CLI in this repository and run `/mcp add`.")
+    logger.info("Use the following values in the form:")
+    logger.info("  Name: pscad")
+    logger.info("  Type: stdio")
+    logger.info("  Command: %s", python_exe)
+    logger.info("  Args: -m pscad_mcp.main")
+    logger.info("Press Ctrl+S in Copilot CLI to save the server definition.")
+    logger.info("\nIf you prefer editing the config file directly, add this JSON to mcp-config.json:")
+    logger.info(json.dumps(config, indent=2))
+
+    if platform.system() == "Windows":
+        logger.info("\nDefault config location: %%USERPROFILE%%\\.copilot\\mcp-config.json")
+    else:
+        logger.info("\nDefault config location: ~/.copilot/mcp-config.json")
 
 def main():
     logger.info("=== PSCAD MCP SERVER INSTALLER ===")
@@ -93,11 +87,10 @@ def main():
     check_pscad()
     install_package()
     sync_docs()
-    
-    print_claude_config()
-    print_gemini_config()
-    
-    logger.info("\n🎉 Setup Complete! You can now use PSCAD tools in your AI assistant.")
+
+    print_copilot_cli_setup()
+
+    logger.info("\n🎉 Setup Complete! You can now use PSCAD tools from GitHub Copilot CLI.")
 
 if __name__ == "__main__":
     main()

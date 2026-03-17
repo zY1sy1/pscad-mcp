@@ -1,132 +1,235 @@
-# PSCAD Enterprise MCP Server
+# PSCAD MCP for GitHub Copilot CLI
 
-A professional, robust Model Context Protocol (MCP) server for **Power System Computer Aided Design (PSCAD)**. This server enables AI assistants (like Claude and Gemini) to automate PSCAD simulations, manage projects, and analyze results directly on a local Windows machine.
+`pscad-mcp` is a Model Context Protocol (MCP) server that lets GitHub Copilot CLI control PSCAD through the `mhi.pscad` automation API.
 
-## 🚀 Key Features
+The server is designed for Windows-based power-system workflows where you want Copilot to do more than explain code: it can connect to a live PSCAD session, open projects, edit parameters, build cases, run simulations, inspect outputs, and manipulate the canvas.
 
-- **Local-First Approach**: Optimized for local Windows automation using `mhi.pscad.application()`.
-- **Source-Enriched Documentation**: Uses AST (Abstract Syntax Tree) analysis to extract decorators (like `@rmi` and `@requires`) and type hints directly from the `mhi-pscad` library, providing the AI with deep API awareness.
-- **Execution Watchdog**: A 30-second timeout layer prevents AI tools from hanging if PSCAD is frozen or showing a modal dialog.
-- **Process Monitoring**: OS-level detection of `PSCAD.exe` crashes or closures.
-- **Thread-Safe Command Queue**: Ensures sequential execution, critical for PSCAD's single-threaded COM/RMI interface.
+## Why this repo exists
 
----
+PSCAD automation is powerful, but the raw API is not especially friendly for conversational workflows. This project packages that API into structured MCP tools so Copilot CLI can:
 
-## 🛠 Installation
+- attach to an existing PSCAD session or launch one
+- inspect projects, simulation status, and output messages
+- update project settings and component parameters
+- create, place, wire, move, and delete components on the canvas
+- run builds, simulation sets, and output file reads
+- read synced PSCAD API documentation when it needs extra context
 
-### 1. Prerequisites
-- **Windows OS**: Required for local PSCAD automation (RMI).
-- **PSCAD Installed**: Ensure PSCAD and its Python libraries are available on your system.
-- **Python 3.10+**: Recommended for best compatibility.
+## Tool coverage
 
-### 2. Automated Setup
-The easiest way to get started is by running the automated installer:
+The server currently exposes tool groups for:
 
-```bash
-# Clone the repository
-git clone https://github.com/LL0pez20/pscad-mcp.git
-cd pscad-mcp
+- application lifecycle and documentation access
+- project loading, simulation control, and settings
+- component search, parameter reads, and updates
+- canvas creation and editing
+- component transforms and port inspection
+- simulation-set operations
+- project creation, save, and build tasks
+- simulation output capture and file parsing
 
-# Run the installer
-python mcp_installer.py
+The implementation is modular, with each tool family registered from its own module in `pscad_mcp\tools`.
+
+## Requirements
+
+For full PSCAD automation you need:
+
+- Windows
+- Python 3.10+
+- PSCAD installed
+- the PSCAD Python packages, typically installed through the optional `windows` extras in this repo
+- GitHub Copilot CLI
+
+You can still run tests and documentation-related tasks without PSCAD installed.
+
+## Install GitHub Copilot CLI
+
+Install Copilot CLI using one of the supported methods from GitHub. On Windows, the most direct option is:
+
+```powershell
+winget install GitHub.Copilot
 ```
 
-The installer will:
-- Install the `pscad-mcp` package and all dependencies.
-- Synchronize your local PSCAD API documentation (Markdown + Raw).
-- Generate the exact configuration commands for your AI tools.
+You can also install via npm:
 
----
-
-## 🤖 AI Tool Integration
-
-Once the server is installed, you can add it to your favorite AI assistant using the following commands:
-
-### Gemini CLI
-Connect the PSCAD MCP server to your Gemini CLI:
-```bash
-gemini mcp add pscad-mcp python pscad_mcp/main.py
+```powershell
+npm install -g @github/copilot
 ```
 
-### Claude Code
-If you are using Anthropic's **Claude Code** (the agentic CLI), add it with:
-```bash
-claude mcp add pscad-mcp python pscad_mcp/main.py
+Then start it with:
+
+```powershell
+copilot
 ```
 
-### Claude Desktop
-For the **Claude Desktop** app, add the following to your `claude_desktop_config.json`:
+If needed, sign in from inside the CLI using `/login`.
+
+## Install this MCP server
+
+From the repository root:
+
+```powershell
+py -3 -m pip install -e ".[windows]"
+```
+
+If `python` is available on your machine, this is equivalent:
+
+```powershell
+python -m pip install -e ".[windows]"
+```
+
+For non-Windows development tasks such as tests or documentation work, install base dependencies only:
+
+```powershell
+py -3 -m pip install -e .
+```
+
+## Quick setup for Copilot CLI
+
+The easiest path is the included installer:
+
+```powershell
+py -3 mcp_installer.py
+```
+
+It installs the package, tries to sync PSCAD documentation, and prints the values you should enter into Copilot CLI.
+
+You can also configure the server manually.
+
+### Option 1: Add the server interactively in Copilot CLI
+
+1. Start Copilot CLI in this repository:
+
+   ```powershell
+   copilot
+   ```
+
+2. Run:
+
+   ```text
+   /mcp add
+   ```
+
+3. Fill in the server details:
+
+   - Name: `pscad`
+   - Type: `stdio`
+   - Command: your Python executable
+   - Args: `-m pscad_mcp.main`
+
+4. Press `Ctrl+S` to save.
+
+By default, Copilot CLI stores MCP definitions in `~/.copilot/mcp-config.json` on Windows as `%USERPROFILE%\.copilot\mcp-config.json`.
+
+### Option 2: Edit `mcp-config.json` directly
+
+If you prefer editing the config file yourself, add an entry like this:
 
 ```json
 {
   "mcpServers": {
     "pscad": {
-      "command": "python",
-      "args": ["/path/to/pscad-mcp/pscad_mcp/main.py"]
+      "type": "stdio",
+      "command": "C:\\Path\\To\\Python\\python.exe",
+      "args": ["-m", "pscad_mcp.main"],
+      "tools": ["*"]
     }
   }
 }
 ```
-*Note: The `mcp_installer.py` will print the absolute path for you.*
 
----
+Replace the `command` path with the interpreter from the environment where `pscad-mcp` is installed.
 
-## 🏗 Implementation Details
+## First prompts to try in Copilot CLI
 
-### Architecture (SOLID Principles)
-The server is built using a modular package structure to ensure maintainability and testability:
-- **`core/connection_manager.py`**: A **Singleton** that manages the lifecycle of the PSCAD instance and monitors OS-level process health.
-- **`core/executor.py`**: Implements the **Command/Proxy Pattern**. All calls to PSCAD are proxied through a single-worker thread pool with an `asyncio` watchdog.
-- **`tools/`**: Modularized toolsets (App, Project, Data, SimSet) following the **Single Responsibility Principle**.
+Once the server is registered, open `copilot` in this repository and try prompts like:
 
-### Safety Mechanisms
-1. **JSON-RPC Compliance**: The server enforces strict JSON serializability of all return types and prevents `stdout` pollution.
-2. **Heartbeat Checks**: Before every command, the server performs a "heartbeat" check (`is_busy()`) to ensure the connection is still valid.
-3. **Parameter Validation**: The `validate_component_parameters` tool uses the library's internal `range()` metadata to verify values before execution.
+- `Connect to my local PSCAD instance and show me its status.`
+- `List the projects currently loaded in PSCAD.`
+- `Load C:\Projects\IEEE_9Bus.pscx and start the simulation.`
+- `Find the component named MainTransformer and show its parameters.`
+- `Read the PSCAD project documentation module and summarize the run_status API.`
+- `Create a bus on the main canvas and connect it to the selected components.`
 
----
+## Running the server directly
 
-## 📖 Available Tools
+To launch the MCP server without the installer:
 
-### System & Lifecycle
-- `get_local_pscad`: Attach to/Launch a local PSCAD instance.
-- `get_pscad_status`: Health check and version info.
-- `sync_documentation`: Extract and update AI's internal reference files (20 modules covered).
-- `list_documentation`: List available PSCAD API documentation modules.
-- `read_documentation`: Read clean, LLM-optimized Markdown documentation for a specific module.
-- `repair_connection`: Force-reset the RMI connection.
-- `quit_pscad`: Terminate the PSCAD application.
-
-### Project & Components
-- `load_projects`: Load `.pscx`, `.pslx`, or `.pswx` files.
-- `list_projects`: Get a list of loaded cases/libraries.
-- `run_project`: Start a simulation (includes license verification).
-- `get_run_status`: Monitor simulation progress.
-- `find_components`: Locate components by name or definition.
-- `get_component_parameters`: Retrieve all parameter values for a component.
-- `set_component_parameters`: Update multiple parameters at once.
-- `validate_component_parameters`: Check if values are within the legal range before setting.
-- `get_project_settings`: Retrieve project runtime settings.
-- `set_project_settings`: Update project runtime settings (Duration, TimeStep, etc.).
-
-### Simulation Sets (Batch)
-- `list_simulation_sets`: Discover defined batch runs in a project.
-- `run_simulation_set`: Execute a collection of project tasks.
-- `add_task_to_set`: Programmatically add project tasks to a simulation set.
-
-### Data & Results
-- `get_project_output`: Capture simulation runtime messages.
-- `read_output_file`: Parse `.psout` or `.out` results into JSON.
-
----
-
-## 🧪 Testing & Validation
-Run the full test suite to verify logic, protocol integrity, and tool behavior:
-```bash
-# Run all tests
-python -m unittest discover tests
-
-# Run enhanced tool tests specifically
-python -m unittest tests/test_enhanced_tools.py
+```powershell
+py -3 -m pscad_mcp.main
 ```
-*Note: Unit tests use mocks to simulate PSCAD behavior, allowing verification on any OS.*
+
+An installed entry point is also available:
+
+```powershell
+pscad-mcp
+```
+
+## Development workflow
+
+### Sync documentation snapshots
+
+This project can generate PSCAD API reference snapshots that are easier for LLMs to consume:
+
+```powershell
+py -3 -m pscad_mcp.utils.doc_manager
+```
+
+Generated files are written to:
+
+- `docs\raw` for raw extracted output
+- `docs\md` for enriched Markdown
+
+### Run tests
+
+```powershell
+py -3 -m unittest discover tests
+```
+
+Tests mock the PSCAD layer, so they can run without PSCAD installed.
+
+## Project structure
+
+```text
+pscad_mcp\
+  core\
+    connection_manager.py
+    executor.py
+  tools\
+    app_tools.py
+    project_tools.py
+    data_tools.py
+    simset_tools.py
+    creation_tools.py
+    canvas_tools.py
+    component_tools.py
+  utils\
+    doc_manager.py
+  main.py
+tests\
+docs\
+```
+
+## Architecture notes
+
+Two implementation details matter for reliability:
+
+- `PSCADConnectionManager` tracks the live PSCAD handle and checks process health before reuse.
+- `RobustExecutor` serializes PSCAD calls through a single-worker executor with a timeout guard to reduce hangs from COM/RMI operations.
+
+Those guardrails are important because PSCAD automation is effectively single-threaded and can become unstable if calls are issued concurrently.
+
+## Troubleshooting
+
+If Copilot CLI can see the server but tool calls fail:
+
+- verify the configured Python executable matches the environment where `pscad-mcp` is installed
+- confirm PSCAD is installed and licensed
+- rerun `py -3 mcp_installer.py`
+- run `py -3 -m unittest discover tests` to verify the Python package is still healthy
+
+If documentation tools return no modules, run the documentation sync command again.
+
+## License
+
+MIT

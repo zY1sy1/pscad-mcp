@@ -1,6 +1,8 @@
-# PSCAD MCP Server: Chat Examples & Prompts
+# PSCAD MCP Server: Copilot CLI Examples & Prompts
 
-This guide provides practical examples of how to interact with the PSCAD MCP server using AI assistants like Gemini CLI, Claude Code, or Claude Desktop.
+This guide provides practical examples of how to interact with the PSCAD MCP server from GitHub Copilot CLI.
+
+Before using the prompts below, add the server in Copilot CLI with `/mcp add`, then start a session in this repository with `copilot`.
 
 ---
 
@@ -30,12 +32,12 @@ This guide provides practical examples of how to interact with the PSCAD MCP ser
 
 ---
 
-## 💬 Recorded Chat Example
+## 💬 Recorded Copilot CLI Example
 
 **User:**
 "Hey, I need to automate some tests. Can you connect to my local PSCAD, load the 'Wind_Farm_Test' project from my Documents, and find a component named 'MainTransformer'? I want to see its current 'Tap' setting."
 
-**Assistant:**
+**Copilot:**
 > I will first establish a connection to your local PSCAD instance and then proceed to load the requested project and locate the component.
 
 1.  **Tool Call:** `get_local_pscad()` → *Success (Attached to PSCAD v5.0.2)*
@@ -43,13 +45,13 @@ This guide provides practical examples of how to interact with the PSCAD MCP ser
 3.  **Tool Call:** `find_components(project_name="Wind_Farm_Test", name="MainTransformer")` → *Success (Found 1 component, ID: 12345)*
 4.  **Tool Call:** `get_component_parameters(project_name="Wind_Farm_Test", component_id=12345)` → *Returns Parameters*
 
-**Assistant:**
+**Copilot:**
 "I've successfully connected to PSCAD and loaded your project. I found the 'MainTransformer' (ID: 12345). Its current 'Tap' setting is `1.02 [pu]`. Would you like me to adjust this value or run a simulation now?"
 
 **User:**
 "Actually, set the Tap to 1.05 and run the simulation. Let me know when it finishes."
 
-**Assistant:**
+**Copilot:**
 > I'll update the component parameter and then start the project execution, monitoring its status until completion.
 
 1.  **Tool Call:** `set_component_parameters(project_name="Wind_Farm_Test", component_id=12345, parameters={"Tap": "1.05"})` → *Success*
@@ -57,5 +59,5 @@ This guide provides practical examples of how to interact with the PSCAD MCP ser
 3.  **Tool Call:** `get_run_status(project_name="Wind_Farm_Test")` → *Returns ("Run", 45)*
 4.  **Tool Call:** `get_run_status(project_name="Wind_Farm_Test")` → *Returns (None, None)*
 
-**Assistant:**
+**Copilot:**
 "The Tap setting has been updated to 1.05, and the simulation for 'Wind_Farm_Test' is complete. No errors were reported in the output log. Would you like to see the final results or the output messages?"
