@@ -12,8 +12,8 @@ CLASSES
     class Remotable(mhi.common.remote.Remotable)
      |  Remotable(
      |      *,
-     |      _ctx: 'Optional[Context]' = None,
-     |      _ident: 'Optional[Dict[str, Any]]' = None
+     |      _ctx: Optional[Context] = None,
+     |      _ident: Optional[Dict[str, Any]] = None
      |  )
      |
      |  The Remote Proxy
@@ -30,11 +30,6 @@ CLASSES
      |      ``Remotable`` object.
      |
      |  ----------------------------------------------------------------------
-     |  Data and other attributes defined here:
-     |
-     |  __annotations__ = {}
-     |
-     |  ----------------------------------------------------------------------
      |  Methods inherited from mhi.common.remote.Remotable:
      |
      |  __eq__(self, other)
@@ -46,8 +41,8 @@ CLASSES
      |  __init__(
      |      self,
      |      *,
-     |      _ctx: 'Optional[Context]' = None,
-     |      _ident: 'Optional[Dict[str, Any]]' = None
+     |      _ctx: Optional[Context] = None,
+     |      _ident: Optional[Dict[str, Any]] = None
      |  )
      |      Initialize self.  See help(type(self)) for accurate signature.
      |
@@ -65,6 +60,11 @@ CLASSES
      |
      |  __weakref__
      |      list of weak references to the object
+     |
+     |  ----------------------------------------------------------------------
+     |  Data and other attributes inherited from mhi.common.remote.Remotable:
+     |
+     |  __annotations__ = {}
 
     class rmi_property(builtins.property)
      |  rmi_property(fget=None, fset=None, doc=None, name=None, requires=None)
@@ -117,9 +117,6 @@ CLASSES
      |  ----------------------------------------------------------------------
      |  Methods inherited from builtins.property:
      |
-     |  __getattribute__(self, name, /)
-     |      Return getattr(self, name).
-     |
      |  deleter(self, object, /)
      |      Descriptor to obtain a copy of the property with a different deleter.
      |
@@ -150,7 +147,7 @@ FUNCTIONS
     deprecated(message='This method is deprecated')
         Flag a method as deprecated
 
-    requires(version: 'str')
+    requires(version: str)
         Requires a specific application version
 
         Ensures the appropriate remote application version before attempting to
@@ -171,5 +168,5 @@ DATA
     __all__ = ('Remotable', 'rmi', 'rmi_property', 'deprecated', 'requires...
 
 FILE
-    /home/lua/miniconda/lib/python3.13/site-packages/mhi/pscad/remote.py
+    c:\users\as0135\appdata\local\programs\python\python314\lib\site-packages\mhi\pscad\remote.py
 

@@ -1,6 +1,6 @@
 # Module mhi.pscad.unit
 
-*Source: /home/lua/miniconda/lib/python3.13/site-packages/mhi/pscad/unit.py*
+*Source: C:\Users\AS0135\AppData\Local\Programs\Python\Python314\Lib\site-packages\mhi\pscad\unit.py*
 
 Python Library Documentation: module mhi.pscad.unit in mhi.pscad
 
@@ -111,9 +111,6 @@ Python Library Documentation: module mhi.pscad.unit in mhi.pscad
 - **__ge__(self, value, /)**
             Return self>=value.
 
-- **__getattribute__(self, name, /)**
-- **Return getattr(self, name).**
-
 - **__getnewargs__(self, /)**
 
 - **__gt__(self, value, /)**
@@ -166,6 +163,12 @@ Python Library Documentation: module mhi.pscad.unit in mhi.pscad
 
 - **conjugate(self, /)**
 - **Return the complex conjugate of its argument. (3-4j).conjugate() == 3+4j.**
+
+        ----------------------------------------------------------------------
+        Class methods inherited from builtins.complex:
+
+- **from_number(number, /)**
+            Convert number to a complex floating-point number.
 
         ----------------------------------------------------------------------
         Data descriptors inherited from builtins.complex:
@@ -234,9 +237,6 @@ Python Library Documentation: module mhi.pscad.unit in mhi.pscad
         Unit = <class 'mhi.pscad.unit.Unit'>
 - **Unit(symbol, base, factor, alias, inverse)**
 
-
-        __annotations__ = {'_unit': typing.Dict[str, mhi.pscad.unit.Unit]}
-
 ### class UnknownUnitError(builtins.KeyError)
         Unknown Unit exception
 
@@ -256,9 +256,6 @@ Python Library Documentation: module mhi.pscad.unit in mhi.pscad
         ----------------------------------------------------------------------
         Methods inherited from builtins.KeyError:
 
-- **__init__(self, /, *args, **kwargs)**
-- **Initialize self.  See help(type(self)) for accurate signature.**
-
 - **__str__(self, /)**
 - **Return str(self).**
 
@@ -271,8 +268,8 @@ Python Library Documentation: module mhi.pscad.unit in mhi.pscad
         ----------------------------------------------------------------------
         Methods inherited from builtins.BaseException:
 
-- **__getattribute__(self, name, /)**
-- **Return getattr(self, name).**
+- **__init__(self, /, *args, **kwargs)**
+- **Initialize self.  See help(type(self)) for accurate signature.**
 
 - **__reduce__(self, /)**
             Helper for pickle.
@@ -280,24 +277,20 @@ Python Library Documentation: module mhi.pscad.unit in mhi.pscad
 - **__repr__(self, /)**
 - **Return repr(self).**
 
-- **__setstate__(self, object, /)**
+- **__setstate__(self, state, /)**
 
-- **add_note(self, object, /)**
-- **Exception.add_note(note) --**
-            add a note to the exception
+- **add_note(self, note, /)**
+            Add a note to the exception
 
-- **with_traceback(self, object, /)**
-- **Exception.with_traceback(tb) --**
-            set self.__traceback__ to tb and return self.
+- **with_traceback(self, tb, /)**
+            Set self.__traceback__ to tb and return self.
 
         ----------------------------------------------------------------------
         Data descriptors inherited from builtins.BaseException:
 
         __cause__
-            exception cause
 
         __context__
-            exception context
 
         __dict__
 
@@ -526,6 +519,9 @@ Python Library Documentation: module mhi.pscad.unit in mhi.pscad
             little-endian' best describes the format of floating-point numbers used by the
             C type named by typestr.
 
+- **from_number(number, /)**
+            Convert real number to a floating-point number.
+
 - **fromhex(string, /)**
             Create a floating-point number from a hexadecimal string.
 
@@ -547,35 +543,5 @@ Python Library Documentation: module mhi.pscad.unit in mhi.pscad
     Dict = typing.Dict
         A generic version of dict.
 
-    Union = typing.Union
-        Union type; Union[X, Y] means either X or Y.
-
-        On Python 3.10 and higher, the   operator
-        can also be used to denote unions;
-        X   Y means the same thing to the type checker as Union[X, Y].
-
-        To define a union, use e.g. Union[int, str]. Details:
-        - The arguments must be types and there must be at least one.
-        - None as an argument is a special case and is replaced by
-          type(None).
-        - Unions of unions are flattened, e.g.::
-
-            assert Union[Union[int, str], float] == Union[int, str, float]
-
-        - Unions of a single argument vanish, e.g.::
-
-            assert Union[int] == int  # The constructor actually returns int
-
-        - Redundant arguments are skipped, e.g.::
-
-            assert Union[int, str, int] == Union[int, str]
-
-        - When comparing unions, the argument order is ignored, e.g.::
-
-            assert Union[int, str] == Union[str, int]
-
-        - You cannot subclass or instantiate a union.
-        - You can use Optional[X] as a shorthand for Union[X, None].
-
 ## FILE
-    /home/lua/miniconda/lib/python3.13/site-packages/mhi/pscad/unit.py
+    c:\users\as0135\appdata\local\programs\python\python314\lib\site-packages\mhi\pscad\unit.py

@@ -1,6 +1,6 @@
 # Module mhi.pscad.types
 
-*Source: /home/lua/miniconda/lib/python3.13/site-packages/mhi/pscad/types.py*
+*Source: C:\Users\AS0135\AppData\Local\Programs\Python\Python314\Lib\site-packages\mhi\pscad\types.py*
 
 Python Library Documentation: module mhi.pscad.types in mhi.pscad
 
@@ -370,8 +370,6 @@ Python Library Documentation: module mhi.pscad.types in mhi.pscad
         ----------------------------------------------------------------------
         Data and other attributes defined here:
 
-        __annotations__ = {'classid': <class 'str'>, 'group': <class 'int'>, '...
-
 - **__match_args__ = ('text', 'label', 'status', 'scope', 'name', 'link', ...**
 
 - **__orig_bases__ = (<function NamedTuple>,)**
@@ -419,7 +417,7 @@ Python Library Documentation: module mhi.pscad.types in mhi.pscad
         ----------------------------------------------------------------------
 
 ### class Point(builtins.tuple)
-- **Point(x: ForwardRef('int'), y: ForwardRef('int'))**
+- **Point(x: int, y: int)**
 
         Point class that supports Euclidean distance calculation.
 
@@ -446,7 +444,7 @@ Python Library Documentation: module mhi.pscad.types in mhi.pscad
 
         Methods defined here:
 
-- **__add__(self, other) -> 'Point'** -> `Point`
+- **__add__(self, other) -> Point** -> `Point`
             Return self+value.
 
 - **__getnewargs__(self) from collections.Point**
@@ -457,7 +455,7 @@ Python Library Documentation: module mhi.pscad.types in mhi.pscad
 - **__repr__(self) from collections.Point**
             Return a nicely formatted representation string
 
-- **__sub__(self, other) -> 'Point'** -> `Point`
+- **__sub__(self, other) -> Point** -> `Point`
 
 - **_asdict(self) from collections.Point**
             Return a new dict which maps field names to their values.
@@ -465,7 +463,7 @@ Python Library Documentation: module mhi.pscad.types in mhi.pscad
 - **_replace(self, /, **kwds) from collections.Point**
             Return a new Point object replacing specified fields with new values
 
-- **distance(self, other: "Union[Tuple[int, int], 'Point']") -> 'float'** -> `float`
+- **distance(self, other: Union[Tuple[int, int], 'Point']) -> float** -> `float`
             Measures the Euclidean distance to a given point.
 
             Parameters
@@ -497,7 +495,7 @@ Python Library Documentation: module mhi.pscad.types in mhi.pscad
         ----------------------------------------------------------------------
         Static methods defined here:
 
-- **__new__(_cls, x: ForwardRef('int'), y: ForwardRef('int')) from namedtuple_Point.Point**
+- **__new__(_cls, x: int, y: int) from namedtuple_Point.Point**
 - **Create new instance of Point(x, y)**
 
         ----------------------------------------------------------------------
@@ -512,8 +510,6 @@ Python Library Documentation: module mhi.pscad.types in mhi.pscad
         ----------------------------------------------------------------------
         Data and other attributes defined here:
 
-- **__annotations__ = {'x': ForwardRef('int'), 'y': ForwardRef('int')}**
-
 - **__match_args__ = ('x', 'y')**
 
 - **__orig_bases__ = (<function NamedTuple>,)**
@@ -526,13 +522,13 @@ Python Library Documentation: module mhi.pscad.types in mhi.pscad
 
 ### class Port(builtins.tuple)
 - **Port(**
-- **x: ForwardRef('int'),**
-- **y: ForwardRef('int'),**
-- **name: ForwardRef('str'),**
-- **dim: ForwardRef('int'),**
-- **type: ForwardRef('NodeType'),**
-- **electrical: ForwardRef('Electrical'),**
-- **signal: ForwardRef('Signal')**
+            x: int,
+            y: int,
+            name: str,
+            dim: int,
+            type: NodeType,
+            electrical: Electrical,
+            signal: Signal
         )
 
 - **A named Port (input, output, or electrical connection) for a Component**
@@ -569,13 +565,13 @@ Python Library Documentation: module mhi.pscad.types in mhi.pscad
 
 - **__new__(**
             _cls,
-- **x: ForwardRef('int'),**
-- **y: ForwardRef('int'),**
-- **name: ForwardRef('str'),**
-- **dim: ForwardRef('int'),**
-- **type: ForwardRef('NodeType'),**
-- **electrical: ForwardRef('Electrical'),**
-- **signal: ForwardRef('Signal')**
+            x: int,
+            y: int,
+            name: str,
+            dim: int,
+            type: NodeType,
+            electrical: Electrical,
+            signal: Signal
         ) from namedtuple_Port.Port
 - **Create new instance of Port(x, y, name, dim, type, electrical, signal)**
 
@@ -613,8 +609,6 @@ Python Library Documentation: module mhi.pscad.types in mhi.pscad
 
         ----------------------------------------------------------------------
         Data and other attributes defined here:
-
-- **__annotations__ = {'dim': ForwardRef('int'), 'electrical': ForwardRef(...**
 
 - **__match_args__ = ('x', 'y', 'name', 'dim', 'type', 'electrical', 'sign...**
 
@@ -657,12 +651,7 @@ Python Library Documentation: module mhi.pscad.types in mhi.pscad
         ----------------------------------------------------------------------
 
 ### class Rect(builtins.tuple)
-- **Rect(**
-- **left: ForwardRef('int'),**
-- **top: ForwardRef('int'),**
-- **right: ForwardRef('int'),**
-- **bottom: ForwardRef('int')**
-        )
+- **Rect(left: int, top: int, right: int, bottom: int)**
 
         A class to represent rectangles on the canvas that supports mid-point
         calculation.
@@ -704,7 +693,7 @@ Python Library Documentation: module mhi.pscad.types in mhi.pscad
 - **_make(iterable) from collections.Rect**
             Make a new Rect object from a sequence or iterable
 
-- **from_mid(mid_point: 'Union[Tuple[int, int], Point]', w: 'int', h: 'int') -> 'Rect'** `@classmethod` -> `Rect`
+- **from_mid(mid_point: Union[Tuple[int, int], Point], w: int, h: int) -> Rect** `@classmethod` -> `Rect`
                 Initializes a rectangle given mid-point, width and height.
                 For even ``w`` and/or ``h``, mid-point would not be exactly at the
                 centre but closer to top left corner.
@@ -718,13 +707,7 @@ Python Library Documentation: module mhi.pscad.types in mhi.pscad
         ----------------------------------------------------------------------
         Static methods defined here:
 
-- **__new__(**
-            _cls,
-- **left: ForwardRef('int'),**
-- **top: ForwardRef('int'),**
-- **right: ForwardRef('int'),**
-- **bottom: ForwardRef('int')**
-        ) from namedtuple_Rect.Rect
+- **__new__(_cls, left: int, top: int, right: int, bottom: int) from namedtuple_Rect.Rect**
 - **Create new instance of Rect(left, top, right, bottom)**
 
         ----------------------------------------------------------------------
@@ -757,8 +740,6 @@ Python Library Documentation: module mhi.pscad.types in mhi.pscad
 
         ----------------------------------------------------------------------
         Data and other attributes defined here:
-
-- **__annotations__ = {'bottom': ForwardRef('int'), 'left': ForwardRef('in...**
 
 - **__match_args__ = ('left', 'top', 'right', 'bottom')**
 
@@ -847,7 +828,7 @@ Python Library Documentation: module mhi.pscad.types in mhi.pscad
         ----------------------------------------------------------------------
 
 ### class Size(builtins.tuple)
-- **Size(width: ForwardRef('int'), height: ForwardRef('int'))**
+- **Size(width: int, height: int)**
 
 - **A class to represent rectangular size (width & height).**
 
@@ -883,7 +864,7 @@ Python Library Documentation: module mhi.pscad.types in mhi.pscad
         ----------------------------------------------------------------------
         Static methods defined here:
 
-- **__new__(_cls, width: ForwardRef('int'), height: ForwardRef('int')) from namedtuple_Size.Size**
+- **__new__(_cls, width: int, height: int) from namedtuple_Size.Size**
 - **Create new instance of Size(width, height)**
 
         ----------------------------------------------------------------------
@@ -897,8 +878,6 @@ Python Library Documentation: module mhi.pscad.types in mhi.pscad
 
         ----------------------------------------------------------------------
         Data and other attributes defined here:
-
-- **__annotations__ = {'height': ForwardRef('int'), 'width': ForwardRef('i...**
 
 - **__match_args__ = ('width', 'height')**
 
@@ -953,13 +932,13 @@ Python Library Documentation: module mhi.pscad.types in mhi.pscad
         Return the square root of x.
 
 ## DATA
-    AnyPoint = typing.Union[mhi.pscad.types.Point, mhi.pscad.types.Port, t...
+    AnyPoint = mhi.pscad.types.Point   mhi.pscad.types.Port   typing.Tuple...
     BUILTIN_COMPONENTS = frozenset({'BookmarkCmp', 'Bus', 'Button', 'Cable...
     BUILTIN_COMPONENT_ALIAS = {'Bookmark': 'BookmarkCmp', 'StickyWire': 'W...
     Dict = typing.Dict
         A generic version of dict.
 
-    ParameterRange = typing.Union[typing.Tuple, typing.Set, range, NoneTyp...
+    ParameterRange = typing.Tuple   typing.Set   range   None
     Parameters = typing.Dict[str, typing.Any]
     Set = typing.Set
         A generic version of set.
@@ -975,35 +954,5 @@ Python Library Documentation: module mhi.pscad.types in mhi.pscad
 
         To specify a variable-length tuple of homogeneous type, use Tuple[T, ...].
 
-    Union = typing.Union
-        Union type; Union[X, Y] means either X or Y.
-
-        On Python 3.10 and higher, the   operator
-        can also be used to denote unions;
-        X   Y means the same thing to the type checker as Union[X, Y].
-
-        To define a union, use e.g. Union[int, str]. Details:
-        - The arguments must be types and there must be at least one.
-        - None as an argument is a special case and is replaced by
-          type(None).
-        - Unions of unions are flattened, e.g.::
-
-            assert Union[Union[int, str], float] == Union[int, str, float]
-
-        - Unions of a single argument vanish, e.g.::
-
-            assert Union[int] == int  # The constructor actually returns int
-
-        - Redundant arguments are skipped, e.g.::
-
-            assert Union[int, str, int] == Union[int, str]
-
-        - When comparing unions, the argument order is ignored, e.g.::
-
-            assert Union[int, str] == Union[str, int]
-
-        - You cannot subclass or instantiate a union.
-        - You can use Optional[X] as a shorthand for Union[X, None].
-
 ## FILE
-    /home/lua/miniconda/lib/python3.13/site-packages/mhi/pscad/types.py
+    c:\users\as0135\appdata\local\programs\python\python314\lib\site-packages\mhi\pscad\types.py

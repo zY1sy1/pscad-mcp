@@ -1,6 +1,6 @@
 # Module mhi.pscad.simset
 
-*Source: /home/lua/miniconda/lib/python3.13/site-packages/mhi/pscad/simset.py*
+*Source: C:\Users\AS0135\AppData\Local\Programs\Python\Python314\Lib\site-packages\mhi\pscad\simset.py*
 
 Python Library Documentation: module mhi.pscad.simset in mhi.pscad
 
@@ -45,8 +45,8 @@ Python Library Documentation: module mhi.pscad.simset in mhi.pscad
 ### class ExternalTask(SimsetTask)
 - **ExternalTask(**
             *,
-            _ctx: 'Optional[Context]' = None,
-            _ident: 'Optional[Dict[str, Any]]' = None
+            _ctx: Optional[Context] = None,
+            _ident: Optional[Dict[str, Any]] = None
         )
 
         External Simulation Set Task
@@ -63,7 +63,7 @@ Python Library Documentation: module mhi.pscad.simset in mhi.pscad
 - **__repr__(self)**
 - **Return repr(self).**
 
-- **parameters(self, parameters: 'Optional[Parameters]' = None, **kwargs) -> 'Optional[Parameters]'** -> `Optional[Parameters]`
+- **parameters(self, parameters: Optional[Parameters] = None, **kwargs) -> Optional[Parameters]** -> `Optional[Parameters]`
 - **parameters(parameter=value, ...)** -> `Optional[Parameters]`
             Get/set External Task Settings
 
@@ -78,13 +78,8 @@ Python Library Documentation: module mhi.pscad.simset in mhi.pscad
                platform      Choice Platform: X86, X64
                ============= ====== ===========================================
 
-- **stop(self) -> 'None'** `@rmi` -> `None`
+- **stop(self) -> None** `@rmi` -> `None`
             Unconditionally stop the external task
-
-        ----------------------------------------------------------------------
-        Data and other attributes defined here:
-
-        __annotations__ = {}
 
         ----------------------------------------------------------------------
         Methods inherited from SimsetTask:
@@ -92,16 +87,16 @@ Python Library Documentation: module mhi.pscad.simset in mhi.pscad
 - **__str__(self)**
 - **Return str(self).**
 
-- **move_down(self) -> 'None'**
+- **move_down(self) -> None**
             Move the task down one spot in the the task list of the simulation
 
-- **move_up(self) -> 'None'**
+- **move_up(self) -> None**
             Move the task up one spot in the the task list of the simulation
 
-- **to_bottom(self) -> 'None'**
+- **to_bottom(self) -> None**
             Move the task to the bottom of the task list of the simulation
 
-- **to_top(self) -> 'None'**
+- **to_top(self) -> None**
             Move the task to the top of the task list of the simulation
 
         ----------------------------------------------------------------------
@@ -132,8 +127,8 @@ Python Library Documentation: module mhi.pscad.simset in mhi.pscad
 - **__init__(**
             self,
             *,
-            _ctx: 'Optional[Context]' = None,
-            _ident: 'Optional[Dict[str, Any]]' = None
+            _ctx: Optional[Context] = None,
+            _ident: Optional[Dict[str, Any]] = None
         )
 - **Initialize self.  See help(type(self)) for accurate signature.**
 
@@ -149,11 +144,16 @@ Python Library Documentation: module mhi.pscad.simset in mhi.pscad
         __weakref__
             list of weak references to the object
 
+        ----------------------------------------------------------------------
+        Data and other attributes inherited from mhi.common.remote.Remotable:
+
+        __annotations__ = {}
+
 ### class ProjectTask(SimsetTask)
 - **ProjectTask(**
             *,
-            _ctx: 'Optional[Context]' = None,
-            _ident: 'Optional[Dict[str, Any]]' = None
+            _ctx: Optional[Context] = None,
+            _ident: Optional[Dict[str, Any]] = None
         )
 
         Project Simulation Set Task
@@ -179,9 +179,9 @@ Python Library Documentation: module mhi.pscad.simset in mhi.pscad
 
 - **layers(** -> `Dict[str, Union[str, bool, None]]`
             self,
-            layer_states: 'Optional[Dict[str, Union[str, bool, None]]]' = None,
+            layer_states: Optional[Dict[str, Union[str, bool, None]]] = None,
             **kwargs
-        ) -> 'Dict[str, Union[str, bool, None]]'
+        ) -> Dict[str, Union[str, bool, None]]
 - **layers(layer_name=state, ...)** -> `Dict[str, Union[str, bool, None]]`
             Get / set layer overrides for this Simulation Task.
 
@@ -212,10 +212,10 @@ Python Library Documentation: module mhi.pscad.simset in mhi.pscad
 - **task.layers(region1=True, region2=False, region3="Special",** -> `Dict[str, Union[str, bool, None]]`
                             region4=None)
 
-- **namespace(self) -> 'str'** -> `str`
+- **namespace(self) -> str** -> `str`
             Get the namespace of the task
 
-- **overrides(self, parameters: 'Optional[Parameters]' = None, **kwargs) -> 'Optional[Parameters]'** -> `Optional[Parameters]`
+- **overrides(self, parameters: Optional[Parameters] = None, **kwargs) -> Optional[Parameters]** -> `Optional[Parameters]`
 - **overrides(parameter=value, ...)** -> `Optional[Parameters]`
             Get / set override parameters for this Simulation Task.
 
@@ -247,7 +247,7 @@ Python Library Documentation: module mhi.pscad.simset in mhi.pscad
             It is automatically set to ``"true"`` if a value other than ``None`` is given,
             and to ``"false"`` if the `None` value is given.
 
-- **parameters(self, parameters: 'Optional[Parameters]' = None, **kwargs) -> 'Optional[Parameters]'** -> `Optional[Parameters]`
+- **parameters(self, parameters: Optional[Parameters] = None, **kwargs) -> Optional[Parameters]** -> `Optional[Parameters]`
 - **parameters(parameter=value, ...)** -> `Optional[Parameters]`
             Get/set simulation set task parameters
 
@@ -270,26 +270,21 @@ Python Library Documentation: module mhi.pscad.simset in mhi.pscad
             Get or set the volley count
 
         ----------------------------------------------------------------------
-        Data and other attributes defined here:
-
-        __annotations__ = {}
-
-        ----------------------------------------------------------------------
         Methods inherited from SimsetTask:
 
 - **__str__(self)**
 - **Return str(self).**
 
-- **move_down(self) -> 'None'**
+- **move_down(self) -> None**
             Move the task down one spot in the the task list of the simulation
 
-- **move_up(self) -> 'None'**
+- **move_up(self) -> None**
             Move the task up one spot in the the task list of the simulation
 
-- **to_bottom(self) -> 'None'**
+- **to_bottom(self) -> None**
             Move the task to the bottom of the task list of the simulation
 
-- **to_top(self) -> 'None'**
+- **to_top(self) -> None**
             Move the task to the top of the task list of the simulation
 
         ----------------------------------------------------------------------
@@ -320,8 +315,8 @@ Python Library Documentation: module mhi.pscad.simset in mhi.pscad
 - **__init__(**
             self,
             *,
-            _ctx: 'Optional[Context]' = None,
-            _ident: 'Optional[Dict[str, Any]]' = None
+            _ctx: Optional[Context] = None,
+            _ident: Optional[Dict[str, Any]] = None
         )
 - **Initialize self.  See help(type(self)) for accurate signature.**
 
@@ -337,11 +332,16 @@ Python Library Documentation: module mhi.pscad.simset in mhi.pscad
         __weakref__
             list of weak references to the object
 
+        ----------------------------------------------------------------------
+        Data and other attributes inherited from mhi.common.remote.Remotable:
+
+        __annotations__ = {}
+
 ### class SimsetTask(mhi.pscad.remote.Remotable)
 - **SimsetTask(**
             *,
-            _ctx: 'Optional[Context]' = None,
-            _ident: 'Optional[Dict[str, Any]]' = None
+            _ctx: Optional[Context] = None,
+            _ident: Optional[Dict[str, Any]] = None
         )
 
 - **Simulation Set Task (Abstract)**
@@ -357,16 +357,16 @@ Python Library Documentation: module mhi.pscad.simset in mhi.pscad
 - **__str__(self)**
 - **Return str(self).**
 
-- **move_down(self) -> 'None'** -> `None`
+- **move_down(self) -> None** -> `None`
             Move the task down one spot in the the task list of the simulation
 
-- **move_up(self) -> 'None'** -> `None`
+- **move_up(self) -> None** -> `None`
             Move the task up one spot in the the task list of the simulation
 
-- **to_bottom(self) -> 'None'** -> `None`
+- **to_bottom(self) -> None** -> `None`
             Move the task to the bottom of the task list of the simulation
 
-- **to_top(self) -> 'None'** -> `None`
+- **to_top(self) -> None** -> `None`
             Move the task to the top of the task list of the simulation
 
         ----------------------------------------------------------------------
@@ -377,11 +377,6 @@ Python Library Documentation: module mhi.pscad.simset in mhi.pscad
 
         simulation_set
             Simulation set the task is part of
-
-        ----------------------------------------------------------------------
-        Data and other attributes defined here:
-
-        __annotations__ = {}
 
         ----------------------------------------------------------------------
         Readonly properties inherited from mhi.pscad.remote.Remotable:
@@ -402,8 +397,8 @@ Python Library Documentation: module mhi.pscad.simset in mhi.pscad
 - **__init__(**
             self,
             *,
-            _ctx: 'Optional[Context]' = None,
-            _ident: 'Optional[Dict[str, Any]]' = None
+            _ctx: Optional[Context] = None,
+            _ident: Optional[Dict[str, Any]] = None
         )
 - **Initialize self.  See help(type(self)) for accurate signature.**
 
@@ -422,11 +417,16 @@ Python Library Documentation: module mhi.pscad.simset in mhi.pscad
         __weakref__
             list of weak references to the object
 
+        ----------------------------------------------------------------------
+        Data and other attributes inherited from mhi.common.remote.Remotable:
+
+        __annotations__ = {}
+
 ### class SimulationSet(mhi.pscad.remote.Remotable)
 - **SimulationSet(**
             *,
-            _ctx: 'Optional[Context]' = None,
-            _ident: 'Optional[Dict[str, Any]]' = None
+            _ctx: Optional[Context] = None,
+            _ident: Optional[Dict[str, Any]] = None
         )
 
         Simulation Set
@@ -444,7 +444,7 @@ Python Library Documentation: module mhi.pscad.simset in mhi.pscad
 - **__repr__(self)**
 - **Return repr(self).**
 
-- **add_external_task(self, filename: 'str', folder: 'Optional[str]' = None) -> 'ExternalTask'** -> `ExternalTask`
+- **add_external_task(self, filename: str, folder: Optional[str] = None) -> ExternalTask** -> `ExternalTask`
 - **Add an external task (executable) to the simulation set.** `@rmi` -> `ProjectTask`
 
             Parameters:
@@ -454,7 +454,7 @@ Python Library Documentation: module mhi.pscad.simset in mhi.pscad
             Returns:
                 ExternalTask: The external task
 
-- **add_task(self, task: 'Union[str, Project]') -> 'ProjectTask'** `@rmi` -> `ProjectTask`
+- **add_task(self, task: Union[str, Project]) -> ProjectTask** `@rmi` -> `ProjectTask`
             Add a project task to the simulation set.
 
             Parameters:
@@ -463,19 +463,19 @@ Python Library Documentation: module mhi.pscad.simset in mhi.pscad
             Returns:
                 ProjectTask: The project task
 
-- **add_tasks(self, *tasks: 'Union[str, Project]') -> 'None'** `@rmi` -> `None`
+- **add_tasks(self, *tasks: Union[str, Project]) -> None** `@rmi` -> `None`
 - **Add one or more tasks (projects) to the simulation set.** `@rmi` -> `List[ProjectTask]`
 
             Parameters:
 - ***tasks: The tasks (projects) to add to the simulation set.** `@rmi` -> `List[ProjectTask]`
 
-- **build(self) -> 'None'** -> `None`
+- **build(self) -> None** -> `None`
             Build all projects in the simulation set
 
-- **build_modified(self) -> 'None'** -> `None`
+- **build_modified(self) -> None** -> `None`
             Build any modified projects in the simulation set
 
-- **clean(self) -> 'None'** -> `None`
+- **clean(self) -> None** -> `None`
             Remove temporary files created during build/run
 
 - **clone(self)** `@rmi`
@@ -483,19 +483,19 @@ Python Library Documentation: module mhi.pscad.simset in mhi.pscad
 
 - **depends_on(self, name=None)** `@deprecated`
 
-- **list_tasks(self) -> 'List[str]'** -> `List[str]`
+- **list_tasks(self) -> List[str]** -> `List[str]`
             List task names included in the simulation set.
 
             Returns:
                 List[str]: The names of the tasks in the simulation set.
 
-- **move_down(self) -> 'None'** -> `None`
+- **move_down(self) -> None** -> `None`
             Move Simulation Set to up down position in list
 
-- **move_up(self) -> 'None'** -> `None`
+- **move_up(self) -> None** -> `None`
             Move Simulation Set to up one position in list
 
-- **name(self, new_name: 'Optional[str]' = None) -> 'str'** -> `str`
+- **name(self, new_name: Optional[str] = None) -> str** -> `str`
             Get or set the simulation set name.
 
             Parameters:
@@ -504,22 +504,22 @@ Python Library Documentation: module mhi.pscad.simset in mhi.pscad
             Returns:
                 The name of the simulation set
 
-- **parameters(self, parameters: 'Optional[Parameters]' = None, **kwargs) -> 'Optional[Parameters]'** -> `Optional[Parameters]`
+- **parameters(self, parameters: Optional[Parameters] = None, **kwargs) -> Optional[Parameters]** -> `Optional[Parameters]`
             Get/Set simulation set parameters
 
-- **remove_tasks(self, *tasks: 'Union[str, Project, ProjectTask, ExternalTask]') -> 'None'** `@rmi` -> `None`
+- **remove_tasks(self, *tasks: Union[str, Project, ProjectTask, ExternalTask]) -> None** `@rmi` -> `None`
 - **Remove one or more tasks (projects) from the simulation set.** `@rmi` -> `List[ProjectTask]`
 
             Parameters:
 - ***tasks: The tasks (projects) to remove from the simulation set.** `@rmi` -> `List[ProjectTask]`
 
-- **run(self, consumer=None) -> 'None'** -> `None`
+- **run(self, consumer=None) -> None** -> `None`
             Run this simulation set.
 
             Parameters:
 - **consumer: handler for events generated by the build/run (optional).** -> `None`
 
-- **task(self, name: 'str') -> 'ProjectTask'** `@rmi` -> `ProjectTask`
+- **task(self, name: str) -> ProjectTask** `@rmi` -> `ProjectTask`
             Retrieve an individual task in the simulation set.
 
             Parameters:
@@ -528,22 +528,22 @@ Python Library Documentation: module mhi.pscad.simset in mhi.pscad
             Returns:
                 ProjectTask: The identified task
 
-- **tasks(self) -> 'List[ProjectTask]'** `@rmi` -> `List[ProjectTask]`
+- **tasks(self) -> List[ProjectTask]** `@rmi` -> `List[ProjectTask]`
             List projects included in the simulation set.
 
             Returns:
                 List[ProjectTask]: The tasks included in the simulation set.
 
-- **to_bottom(self) -> 'None'** -> `None`
+- **to_bottom(self) -> None** -> `None`
             Move Simulation Set to end of list
 
-- **to_top(self) -> 'None'** -> `None`
+- **to_top(self) -> None** -> `None`
             Move Simulation Set to start of list
 
         ----------------------------------------------------------------------
         Static methods defined here:
 
-- **validate_name(name: 'str')** `@staticmethod`
+- **validate_name(name: str)** `@staticmethod`
             The ``name`` must conform to PSCAD naming convensions:
 
             * should start with a letter,
@@ -551,11 +551,6 @@ Python Library Documentation: module mhi.pscad.simset in mhi.pscad
             * cannot exceed 30 characters.
 
             Raises a ``ValueError`` is an invalid name is given.
-
-        ----------------------------------------------------------------------
-        Data and other attributes defined here:
-
-        __annotations__ = {}
 
         ----------------------------------------------------------------------
         Readonly properties inherited from mhi.pscad.remote.Remotable:
@@ -576,8 +571,8 @@ Python Library Documentation: module mhi.pscad.simset in mhi.pscad
 - **__init__(**
             self,
             *,
-            _ctx: 'Optional[Context]' = None,
-            _ident: 'Optional[Dict[str, Any]]' = None
+            _ctx: Optional[Context] = None,
+            _ident: Optional[Dict[str, Any]] = None
         )
 - **Initialize self.  See help(type(self)) for accurate signature.**
 
@@ -593,6 +588,11 @@ Python Library Documentation: module mhi.pscad.simset in mhi.pscad
         __weakref__
             list of weak references to the object
 
+        ----------------------------------------------------------------------
+        Data and other attributes inherited from mhi.common.remote.Remotable:
+
+        __annotations__ = {}
+
 ## DATA
     Dict = typing.Dict
         A generic version of dict.
@@ -606,35 +606,6 @@ Python Library Documentation: module mhi.pscad.simset in mhi.pscad
 
     Parameters = typing.Dict[str, typing.Any]
     TYPE_CHECKING = False
-    Union = typing.Union
-        Union type; Union[X, Y] means either X or Y.
-
-        On Python 3.10 and higher, the   operator
-        can also be used to denote unions;
-        X   Y means the same thing to the type checker as Union[X, Y].
-
-        To define a union, use e.g. Union[int, str]. Details:
-        - The arguments must be types and there must be at least one.
-        - None as an argument is a special case and is replaced by
-          type(None).
-        - Unions of unions are flattened, e.g.::
-
-            assert Union[Union[int, str], float] == Union[int, str, float]
-
-        - Unions of a single argument vanish, e.g.::
-
-            assert Union[int] == int  # The constructor actually returns int
-
-        - Redundant arguments are skipped, e.g.::
-
-            assert Union[int, str, int] == Union[int, str]
-
-        - When comparing unions, the argument order is ignored, e.g.::
-
-            assert Union[int, str] == Union[str, int]
-
-        - You cannot subclass or instantiate a union.
-        - You can use Optional[X] as a shorthand for Union[X, None].
 
 ## FILE
-    /home/lua/miniconda/lib/python3.13/site-packages/mhi/pscad/simset.py
+    c:\users\as0135\appdata\local\programs\python\python314\lib\site-packages\mhi\pscad\simset.py

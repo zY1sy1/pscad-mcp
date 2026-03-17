@@ -21,8 +21,8 @@ CLASSES
     class Button(Control)
      |  Button(
      |      *,
-     |      _ctx: 'Optional[Context]' = None,
-     |      _ident: 'Optional[Dict[str, Any]]' = None
+     |      _ctx: Optional[Context] = None,
+     |      _ident: Optional[Dict[str, Any]] = None
      |  )
      |
      |  A momentary contact control.
@@ -52,26 +52,21 @@ CLASSES
      |
      |  Methods defined here:
      |
-     |  click(self) -> 'None'
+     |  click(self) -> None
      |      Press and release the button
      |
-     |  press(self) -> 'None'
+     |  press(self) -> None
      |      Press the button
      |
-     |  release(self) -> 'None'
+     |  release(self) -> None
      |      Release the button
-     |
-     |  ----------------------------------------------------------------------
-     |  Data and other attributes defined here:
-     |
-     |  __annotations__ = {}
      |
      |  ----------------------------------------------------------------------
      |  Methods inherited from Control:
      |
-     |  __getitem__(self, key: 'str')
+     |  __getitem__(self, key: str)
      |
-     |  parameters(self, *, parameters: 'Optional[Parameters]' = None, **kwargs) -> 'Optional[Parameters]'
+     |  parameters(self, *, parameters: Optional[Parameters] = None, **kwargs) -> Optional[Parameters]
      |      Set or get the component's parameters.
      |
      |      Parameters:
@@ -82,7 +77,7 @@ CLASSES
      |          A dictionary of parameter values (if no parameters are being set),
      |          or None.
      |
-     |  range(self, parameter: 'str') -> 'ParameterRange'
+     |  range(self, parameter: str) -> ParameterRange
      |      Get legal values for a parameter
      |
      |      Parameters:
@@ -94,7 +89,7 @@ CLASSES
      |          * a ``Tuple[float, float]`` defining minimum & maximum values, or
      |          * an exception if the parameter does not have a defined range.
      |
-     |  reset(self) -> 'None'
+     |  reset(self) -> None
      |      Reset the control component
      |
      |  set_value(self, **kwargs)
@@ -117,10 +112,10 @@ CLASSES
      |  ----------------------------------------------------------------------
      |  Methods inherited from mhi.pscad.component.Component:
      |
-     |  flip(self) -> 'bool'
+     |  flip(self) -> bool
      |      Flip the component along the vertical axis
      |
-     |  is_module(self) -> 'bool'
+     |  is_module(self) -> bool
      |      Check to see if this component has its own canvas, with in turn,
      |      can contain additional components.
      |
@@ -132,16 +127,16 @@ CLASSES
      |          bool: ``True`` if the component has an internal canvas,
      |          ``False`` otherwise.
      |
-     |  mirror(self) -> 'bool'
+     |  mirror(self) -> bool
      |      Mirror the component along the horizontal axis
      |
-     |  rotate_180(self) -> 'bool'
+     |  rotate_180(self) -> bool
      |      Rotate the component 90 degrees to the right
      |
-     |  rotate_left(self) -> 'bool'
+     |  rotate_left(self) -> bool
      |      Rotate the component 90 degrees to the left (counter-clockwise)
      |
-     |  rotate_right(self) -> 'bool'
+     |  rotate_right(self) -> bool
      |      Rotate the component 90 degrees to the right (clockwise)
      |
      |  ----------------------------------------------------------------------
@@ -156,9 +151,9 @@ CLASSES
      |  __repr__(self)
      |      Return repr(self).
      |
-     |  __setitem__(self, key: 'str', value: 'Any') -> 'None'
+     |  __setitem__(self, key: str, value: Any) -> None
      |
-     |  add_to_layer(self, name: 'str') -> 'None'
+     |  add_to_layer(self, name: str) -> None
      |      Add this component to the given layer.
      |
      |      The layer must exist, but need not be enabled or visible.
@@ -166,7 +161,7 @@ CLASSES
      |      Parameters:
      |          name (str): The layer to add the component to.
      |
-     |  clone(self, x: 'int', y: 'int') -> 'Component'
+     |  clone(self, x: int, y: int) -> Component
      |      Copy this component and place the copy at the given location.
      |
      |      Parameters:
@@ -178,7 +173,7 @@ CLASSES
      |
      |  command(self, cmd_name)
      |
-     |  custom_state(self, state_name: 'str', state: 'str') -> 'None'
+     |  custom_state(self, state_name: str, state: str) -> None
      |      Set a custom layer state for this component.
      |
      |      The component must already be part of a layer, and that layer must
@@ -198,13 +193,13 @@ CLASSES
      |          For a three-phased voltage source for instance, the return value
      |          changed from ``'master', 'source3'`` to ``'master:source3'``
      |
-     |  disable(self) -> 'None'
+     |  disable(self) -> None
      |      Disable this component.
      |
      |      This component will be disabled regardless of the layer states.
      |      To re-enable this component use the :meth:`.enable` function.
      |
-     |  enable(self, enable: 'bool' = True) -> 'None'
+     |  enable(self, enable: bool = True) -> None
      |      Enable this component.
      |
      |      With no argument, or if given a `True` value, this will enable a
@@ -214,7 +209,7 @@ CLASSES
      |      Parameters:
      |          enable (bool): If set to `False`, disables the component (optional)
      |
-     |  export_parameters(self, csvfile: 'str') -> 'None'
+     |  export_parameters(self, csvfile: str) -> None
      |      Export component parameters to a CSV file
      |
      |      Write component parameters to a two-line CSV file.
@@ -225,7 +220,7 @@ CLASSES
      |
      |  get_parameters(self)
      |
-     |  import_parameters(self, csvfile: 'str') -> 'None'
+     |  import_parameters(self, csvfile: str) -> None
      |      Import component parameters from a CSV file
      |
      |      Read component parameters from a two-line CSV file,
@@ -233,12 +228,12 @@ CLASSES
      |      contains the parameter values.  The first column represents the
      |      component identifier and the parameter name must be blank.
      |
-     |  project(self) -> 'Project'
+     |  project(self) -> Project
      |      The project this component exists in
      |
      |      :type: Project
      |
-     |  remove_from_layer(self, name: 'str') -> 'None'
+     |  remove_from_layer(self, name: str) -> None
      |      Remove this component from the given layer.
      |
      |      The layer must exist, but need not be enabled or visible.
@@ -248,21 +243,21 @@ CLASSES
      |
      |  set_parameters(self, **parameters)
      |
-     |  to_back(self) -> 'bool'
+     |  to_back(self) -> bool
      |      Put at the start (back) of the Z-Order on the canvas.
      |
-     |  to_front(self) -> 'bool'
+     |  to_front(self) -> bool
      |      Put at the front (end) of the Z-Order on the canvas.
      |
-     |  to_next(self) -> 'bool'
+     |  to_next(self) -> bool
      |      Move the component one position forward in the Z-Order relative to the
      |      current Z-Order position.
      |
-     |  to_prev(self) -> 'bool'
+     |  to_prev(self) -> bool
      |      Move the component one position backward in the Z-Order relative to the current
      |      current Z-Order position.
      |
-     |  view_parameter_grid(self) -> 'bool'
+     |  view_parameter_grid(self) -> bool
      |      View the parameter grid for this component
      |
      |  ----------------------------------------------------------------------
@@ -310,8 +305,8 @@ CLASSES
      |  __init__(
      |      self,
      |      *,
-     |      _ctx: 'Optional[Context]' = None,
-     |      _ident: 'Optional[Dict[str, Any]]' = None
+     |      _ctx: Optional[Context] = None,
+     |      _ident: Optional[Dict[str, Any]] = None
      |  )
      |      Initialize self.  See help(type(self)) for accurate signature.
      |
@@ -328,15 +323,20 @@ CLASSES
      |      list of weak references to the object
      |
      |  ----------------------------------------------------------------------
+     |  Data and other attributes inherited from mhi.common.remote.Remotable:
+     |
+     |  __annotations__ = {}
+     |
+     |  ----------------------------------------------------------------------
      |  Methods inherited from mhi.pscad.component.MovableMixin:
      |
-     |  copy(self) -> 'bool'
+     |  copy(self) -> bool
      |      Copy this component to the clipboard.
      |
-     |  cut(self) -> 'bool'
+     |  cut(self) -> bool
      |      Cut this component to the clipboard
      |
-     |  delete(self) -> 'bool'
+     |  delete(self) -> bool
      |      Delete this component.
      |
      |  get_location(self)
@@ -385,8 +385,8 @@ CLASSES
     class Control(mhi.pscad.component.Component)
      |  Control(
      |      *,
-     |      _ctx: 'Optional[Context]' = None,
-     |      _ident: 'Optional[Dict[str, Any]]' = None
+     |      _ctx: Optional[Context] = None,
+     |      _ident: Optional[Dict[str, Any]] = None
      |  )
      |
      |  Input controls allow the user to make changes to a simulation before or
@@ -403,9 +403,9 @@ CLASSES
      |
      |  Methods defined here:
      |
-     |  __getitem__(self, key: 'str')
+     |  __getitem__(self, key: str)
      |
-     |  parameters(self, *, parameters: 'Optional[Parameters]' = None, **kwargs) -> 'Optional[Parameters]'
+     |  parameters(self, *, parameters: Optional[Parameters] = None, **kwargs) -> Optional[Parameters]
      |      Set or get the component's parameters.
      |
      |      Parameters:
@@ -416,7 +416,7 @@ CLASSES
      |          A dictionary of parameter values (if no parameters are being set),
      |          or None.
      |
-     |  range(self, parameter: 'str') -> 'ParameterRange'
+     |  range(self, parameter: str) -> ParameterRange
      |      Get legal values for a parameter
      |
      |      Parameters:
@@ -428,7 +428,7 @@ CLASSES
      |          * a ``Tuple[float, float]`` defining minimum & maximum values, or
      |          * an exception if the parameter does not have a defined range.
      |
-     |  reset(self) -> 'None'
+     |  reset(self) -> None
      |      Reset the control component
      |
      |  set_value(self, **kwargs)
@@ -449,17 +449,12 @@ CLASSES
      |      Position in Control Panel
      |
      |  ----------------------------------------------------------------------
-     |  Data and other attributes defined here:
-     |
-     |  __annotations__ = {}
-     |
-     |  ----------------------------------------------------------------------
      |  Methods inherited from mhi.pscad.component.Component:
      |
-     |  flip(self) -> 'bool'
+     |  flip(self) -> bool
      |      Flip the component along the vertical axis
      |
-     |  is_module(self) -> 'bool'
+     |  is_module(self) -> bool
      |      Check to see if this component has its own canvas, with in turn,
      |      can contain additional components.
      |
@@ -471,16 +466,16 @@ CLASSES
      |          bool: ``True`` if the component has an internal canvas,
      |          ``False`` otherwise.
      |
-     |  mirror(self) -> 'bool'
+     |  mirror(self) -> bool
      |      Mirror the component along the horizontal axis
      |
-     |  rotate_180(self) -> 'bool'
+     |  rotate_180(self) -> bool
      |      Rotate the component 90 degrees to the right
      |
-     |  rotate_left(self) -> 'bool'
+     |  rotate_left(self) -> bool
      |      Rotate the component 90 degrees to the left (counter-clockwise)
      |
-     |  rotate_right(self) -> 'bool'
+     |  rotate_right(self) -> bool
      |      Rotate the component 90 degrees to the right (clockwise)
      |
      |  ----------------------------------------------------------------------
@@ -495,9 +490,9 @@ CLASSES
      |  __repr__(self)
      |      Return repr(self).
      |
-     |  __setitem__(self, key: 'str', value: 'Any') -> 'None'
+     |  __setitem__(self, key: str, value: Any) -> None
      |
-     |  add_to_layer(self, name: 'str') -> 'None'
+     |  add_to_layer(self, name: str) -> None
      |      Add this component to the given layer.
      |
      |      The layer must exist, but need not be enabled or visible.
@@ -505,7 +500,7 @@ CLASSES
      |      Parameters:
      |          name (str): The layer to add the component to.
      |
-     |  clone(self, x: 'int', y: 'int') -> 'Component'
+     |  clone(self, x: int, y: int) -> Component
      |      Copy this component and place the copy at the given location.
      |
      |      Parameters:
@@ -517,7 +512,7 @@ CLASSES
      |
      |  command(self, cmd_name)
      |
-     |  custom_state(self, state_name: 'str', state: 'str') -> 'None'
+     |  custom_state(self, state_name: str, state: str) -> None
      |      Set a custom layer state for this component.
      |
      |      The component must already be part of a layer, and that layer must
@@ -537,13 +532,13 @@ CLASSES
      |          For a three-phased voltage source for instance, the return value
      |          changed from ``'master', 'source3'`` to ``'master:source3'``
      |
-     |  disable(self) -> 'None'
+     |  disable(self) -> None
      |      Disable this component.
      |
      |      This component will be disabled regardless of the layer states.
      |      To re-enable this component use the :meth:`.enable` function.
      |
-     |  enable(self, enable: 'bool' = True) -> 'None'
+     |  enable(self, enable: bool = True) -> None
      |      Enable this component.
      |
      |      With no argument, or if given a `True` value, this will enable a
@@ -553,7 +548,7 @@ CLASSES
      |      Parameters:
      |          enable (bool): If set to `False`, disables the component (optional)
      |
-     |  export_parameters(self, csvfile: 'str') -> 'None'
+     |  export_parameters(self, csvfile: str) -> None
      |      Export component parameters to a CSV file
      |
      |      Write component parameters to a two-line CSV file.
@@ -564,7 +559,7 @@ CLASSES
      |
      |  get_parameters(self)
      |
-     |  import_parameters(self, csvfile: 'str') -> 'None'
+     |  import_parameters(self, csvfile: str) -> None
      |      Import component parameters from a CSV file
      |
      |      Read component parameters from a two-line CSV file,
@@ -572,12 +567,12 @@ CLASSES
      |      contains the parameter values.  The first column represents the
      |      component identifier and the parameter name must be blank.
      |
-     |  project(self) -> 'Project'
+     |  project(self) -> Project
      |      The project this component exists in
      |
      |      :type: Project
      |
-     |  remove_from_layer(self, name: 'str') -> 'None'
+     |  remove_from_layer(self, name: str) -> None
      |      Remove this component from the given layer.
      |
      |      The layer must exist, but need not be enabled or visible.
@@ -587,21 +582,21 @@ CLASSES
      |
      |  set_parameters(self, **parameters)
      |
-     |  to_back(self) -> 'bool'
+     |  to_back(self) -> bool
      |      Put at the start (back) of the Z-Order on the canvas.
      |
-     |  to_front(self) -> 'bool'
+     |  to_front(self) -> bool
      |      Put at the front (end) of the Z-Order on the canvas.
      |
-     |  to_next(self) -> 'bool'
+     |  to_next(self) -> bool
      |      Move the component one position forward in the Z-Order relative to the
      |      current Z-Order position.
      |
-     |  to_prev(self) -> 'bool'
+     |  to_prev(self) -> bool
      |      Move the component one position backward in the Z-Order relative to the current
      |      current Z-Order position.
      |
-     |  view_parameter_grid(self) -> 'bool'
+     |  view_parameter_grid(self) -> bool
      |      View the parameter grid for this component
      |
      |  ----------------------------------------------------------------------
@@ -649,8 +644,8 @@ CLASSES
      |  __init__(
      |      self,
      |      *,
-     |      _ctx: 'Optional[Context]' = None,
-     |      _ident: 'Optional[Dict[str, Any]]' = None
+     |      _ctx: Optional[Context] = None,
+     |      _ident: Optional[Dict[str, Any]] = None
      |  )
      |      Initialize self.  See help(type(self)) for accurate signature.
      |
@@ -667,15 +662,20 @@ CLASSES
      |      list of weak references to the object
      |
      |  ----------------------------------------------------------------------
+     |  Data and other attributes inherited from mhi.common.remote.Remotable:
+     |
+     |  __annotations__ = {}
+     |
+     |  ----------------------------------------------------------------------
      |  Methods inherited from mhi.pscad.component.MovableMixin:
      |
-     |  copy(self) -> 'bool'
+     |  copy(self) -> bool
      |      Copy this component to the clipboard.
      |
-     |  cut(self) -> 'bool'
+     |  cut(self) -> bool
      |      Cut this component to the clipboard
      |
-     |  delete(self) -> 'bool'
+     |  delete(self) -> bool
      |      Delete this component.
      |
      |  get_location(self)
@@ -724,8 +724,8 @@ CLASSES
     class ControlFrame(mhi.pscad.graph.ZFrame)
      |  ControlFrame(
      |      *,
-     |      _ctx: 'Optional[Context]' = None,
-     |      _ident: 'Optional[Dict[str, Any]]' = None
+     |      _ctx: Optional[Context] = None,
+     |      _ident: Optional[Dict[str, Any]] = None
      |  )
      |
      |  A container for holding buttons, switches, and dials
@@ -742,7 +742,7 @@ CLASSES
      |
      |  Methods defined here:
      |
-     |  create_control(self, control_component: 'Component') -> 'Control'
+     |  create_control(self, control_component: Component) -> Control
      |      Create control in the control frame connected to the given control
      |      component.
      |
@@ -759,7 +759,7 @@ CLASSES
      |      Returns:
      |          Control: the created control
      |
-     |  create_controls(self, *control_components: 'Component') -> 'List[Control]'
+     |  create_controls(self, *control_components: Component) -> List[Control]
      |      Create several controls in the control frame connected to the given
      |      control components.
      |
@@ -776,24 +776,19 @@ CLASSES
      |      Returns:
      |          List[Control]: the created controls
      |
-     |  reset(self) -> 'None'
+     |  reset(self) -> None
      |      Reset all controls in the control frame
-     |
-     |  ----------------------------------------------------------------------
-     |  Data and other attributes defined here:
-     |
-     |  __annotations__ = {}
      |
      |  ----------------------------------------------------------------------
      |  Methods inherited from mhi.pscad.graph.ZFrame:
      |
-     |  minimize(self, flag: 'bool' = True) -> 'None'
+     |  minimize(self, flag: bool = True) -> None
      |      Minimize the frame.
      |
-     |  restore(self) -> 'None'
+     |  restore(self) -> None
      |      Restore the frame from its minimized state.
      |
-     |  toggle_minimize(self) -> 'None'
+     |  toggle_minimize(self) -> None
      |      Toggle minimized/restored state
      |
      |  ----------------------------------------------------------------------
@@ -805,14 +800,14 @@ CLASSES
      |  ----------------------------------------------------------------------
      |  Methods inherited from mhi.pscad.component.ZComponent:
      |
-     |  __getitem__(self, key: 'str') -> 'Any'
+     |  __getitem__(self, key: str) -> Any
      |
      |  __repr__(self)
      |      Return repr(self).
      |
-     |  __setitem__(self, key: 'str', value: 'Any') -> 'None'
+     |  __setitem__(self, key: str, value: Any) -> None
      |
-     |  add_to_layer(self, name: 'str') -> 'None'
+     |  add_to_layer(self, name: str) -> None
      |      Add this component to the given layer.
      |
      |      The layer must exist, but need not be enabled or visible.
@@ -820,7 +815,7 @@ CLASSES
      |      Parameters:
      |          name (str): The layer to add the component to.
      |
-     |  clone(self, x: 'int', y: 'int') -> 'Component'
+     |  clone(self, x: int, y: int) -> Component
      |      Copy this component and place the copy at the given location.
      |
      |      Parameters:
@@ -832,7 +827,7 @@ CLASSES
      |
      |  command(self, cmd_name)
      |
-     |  custom_state(self, state_name: 'str', state: 'str') -> 'None'
+     |  custom_state(self, state_name: str, state: str) -> None
      |      Set a custom layer state for this component.
      |
      |      The component must already be part of a layer, and that layer must
@@ -852,13 +847,13 @@ CLASSES
      |          For a three-phased voltage source for instance, the return value
      |          changed from ``'master', 'source3'`` to ``'master:source3'``
      |
-     |  disable(self) -> 'None'
+     |  disable(self) -> None
      |      Disable this component.
      |
      |      This component will be disabled regardless of the layer states.
      |      To re-enable this component use the :meth:`.enable` function.
      |
-     |  enable(self, enable: 'bool' = True) -> 'None'
+     |  enable(self, enable: bool = True) -> None
      |      Enable this component.
      |
      |      With no argument, or if given a `True` value, this will enable a
@@ -868,7 +863,7 @@ CLASSES
      |      Parameters:
      |          enable (bool): If set to `False`, disables the component (optional)
      |
-     |  export_parameters(self, csvfile: 'str') -> 'None'
+     |  export_parameters(self, csvfile: str) -> None
      |      Export component parameters to a CSV file
      |
      |      Write component parameters to a two-line CSV file.
@@ -879,7 +874,7 @@ CLASSES
      |
      |  get_parameters(self)
      |
-     |  import_parameters(self, csvfile: 'str') -> 'None'
+     |  import_parameters(self, csvfile: str) -> None
      |      Import component parameters from a CSV file
      |
      |      Read component parameters from a two-line CSV file,
@@ -887,7 +882,7 @@ CLASSES
      |      contains the parameter values.  The first column represents the
      |      component identifier and the parameter name must be blank.
      |
-     |  parameters(self, *, parameters: 'Optional[Parameters]' = None, **kwargs) -> 'Optional[Parameters]'
+     |  parameters(self, *, parameters: Optional[Parameters] = None, **kwargs) -> Optional[Parameters]
      |      Set or get the component's parameters.
      |
      |      Parameters:
@@ -898,12 +893,12 @@ CLASSES
      |          A dictionary of parameter values (if no parameters are being set),
      |          or None.
      |
-     |  project(self) -> 'Project'
+     |  project(self) -> Project
      |      The project this component exists in
      |
      |      :type: Project
      |
-     |  range(self, parameter: 'str') -> 'ParameterRange'
+     |  range(self, parameter: str) -> ParameterRange
      |      Get legal values for a parameter
      |
      |      Parameters:
@@ -915,7 +910,7 @@ CLASSES
      |          * a ``Tuple[float, float]`` defining minimum & maximum values, or
      |          * an exception if the parameter does not have a defined range.
      |
-     |  remove_from_layer(self, name: 'str') -> 'None'
+     |  remove_from_layer(self, name: str) -> None
      |      Remove this component from the given layer.
      |
      |      The layer must exist, but need not be enabled or visible.
@@ -925,21 +920,21 @@ CLASSES
      |
      |  set_parameters(self, **parameters)
      |
-     |  to_back(self) -> 'bool'
+     |  to_back(self) -> bool
      |      Put at the start (back) of the Z-Order on the canvas.
      |
-     |  to_front(self) -> 'bool'
+     |  to_front(self) -> bool
      |      Put at the front (end) of the Z-Order on the canvas.
      |
-     |  to_next(self) -> 'bool'
+     |  to_next(self) -> bool
      |      Move the component one position forward in the Z-Order relative to the
      |      current Z-Order position.
      |
-     |  to_prev(self) -> 'bool'
+     |  to_prev(self) -> bool
      |      Move the component one position backward in the Z-Order relative to the current
      |      current Z-Order position.
      |
-     |  view_parameter_grid(self) -> 'bool'
+     |  view_parameter_grid(self) -> bool
      |      View the parameter grid for this component
      |
      |  ----------------------------------------------------------------------
@@ -987,8 +982,8 @@ CLASSES
      |  __init__(
      |      self,
      |      *,
-     |      _ctx: 'Optional[Context]' = None,
-     |      _ident: 'Optional[Dict[str, Any]]' = None
+     |      _ctx: Optional[Context] = None,
+     |      _ident: Optional[Dict[str, Any]] = None
      |  )
      |      Initialize self.  See help(type(self)) for accurate signature.
      |
@@ -1005,15 +1000,20 @@ CLASSES
      |      list of weak references to the object
      |
      |  ----------------------------------------------------------------------
+     |  Data and other attributes inherited from mhi.common.remote.Remotable:
+     |
+     |  __annotations__ = {}
+     |
+     |  ----------------------------------------------------------------------
      |  Methods inherited from mhi.pscad.component.MovableMixin:
      |
-     |  copy(self) -> 'bool'
+     |  copy(self) -> bool
      |      Copy this component to the clipboard.
      |
-     |  cut(self) -> 'bool'
+     |  cut(self) -> bool
      |      Cut this component to the clipboard
      |
-     |  delete(self) -> 'bool'
+     |  delete(self) -> bool
      |      Delete this component.
      |
      |  get_location(self)
@@ -1062,9 +1062,9 @@ CLASSES
      |  ----------------------------------------------------------------------
      |  Methods inherited from mhi.pscad.component.SizeableMixin:
      |
-     |  get_size(self) -> 'Tuple[int, int]'
+     |  get_size(self) -> Tuple[int, int]
      |
-     |  set_size(self, width: 'int', height: 'int') -> 'None'
+     |  set_size(self, width: int, height: int) -> None
      |
      |  ----------------------------------------------------------------------
      |  Data descriptors inherited from mhi.pscad.component.SizeableMixin:
@@ -1075,8 +1075,8 @@ CLASSES
     class Selector(Control)
      |  Selector(
      |      *,
-     |      _ctx: 'Optional[Context]' = None,
-     |      _ident: 'Optional[Dict[str, Any]]' = None
+     |      _ctx: Optional[Context] = None,
+     |      _ident: Optional[Dict[str, Any]] = None
      |  )
      |
      |  A multi-state switch having between 3 and 10 states.  Also known as
@@ -1115,25 +1115,20 @@ CLASSES
      |
      |  Methods defined here:
      |
-     |  position(self, position: 'int') -> 'None'
+     |  position(self, position: int) -> None
      |      Set the selector to the given position
      |
      |      Parameters:
      |          position (int): Desired dial position (1 to NDP)
      |
-     |  value(self, position: 'int') -> 'None'
-     |
-     |  ----------------------------------------------------------------------
-     |  Data and other attributes defined here:
-     |
-     |  __annotations__ = {}
+     |  value(self, position: int) -> None
      |
      |  ----------------------------------------------------------------------
      |  Methods inherited from Control:
      |
-     |  __getitem__(self, key: 'str')
+     |  __getitem__(self, key: str)
      |
-     |  parameters(self, *, parameters: 'Optional[Parameters]' = None, **kwargs) -> 'Optional[Parameters]'
+     |  parameters(self, *, parameters: Optional[Parameters] = None, **kwargs) -> Optional[Parameters]
      |      Set or get the component's parameters.
      |
      |      Parameters:
@@ -1144,7 +1139,7 @@ CLASSES
      |          A dictionary of parameter values (if no parameters are being set),
      |          or None.
      |
-     |  range(self, parameter: 'str') -> 'ParameterRange'
+     |  range(self, parameter: str) -> ParameterRange
      |      Get legal values for a parameter
      |
      |      Parameters:
@@ -1156,7 +1151,7 @@ CLASSES
      |          * a ``Tuple[float, float]`` defining minimum & maximum values, or
      |          * an exception if the parameter does not have a defined range.
      |
-     |  reset(self) -> 'None'
+     |  reset(self) -> None
      |      Reset the control component
      |
      |  set_value(self, **kwargs)
@@ -1179,10 +1174,10 @@ CLASSES
      |  ----------------------------------------------------------------------
      |  Methods inherited from mhi.pscad.component.Component:
      |
-     |  flip(self) -> 'bool'
+     |  flip(self) -> bool
      |      Flip the component along the vertical axis
      |
-     |  is_module(self) -> 'bool'
+     |  is_module(self) -> bool
      |      Check to see if this component has its own canvas, with in turn,
      |      can contain additional components.
      |
@@ -1194,16 +1189,16 @@ CLASSES
      |          bool: ``True`` if the component has an internal canvas,
      |          ``False`` otherwise.
      |
-     |  mirror(self) -> 'bool'
+     |  mirror(self) -> bool
      |      Mirror the component along the horizontal axis
      |
-     |  rotate_180(self) -> 'bool'
+     |  rotate_180(self) -> bool
      |      Rotate the component 90 degrees to the right
      |
-     |  rotate_left(self) -> 'bool'
+     |  rotate_left(self) -> bool
      |      Rotate the component 90 degrees to the left (counter-clockwise)
      |
-     |  rotate_right(self) -> 'bool'
+     |  rotate_right(self) -> bool
      |      Rotate the component 90 degrees to the right (clockwise)
      |
      |  ----------------------------------------------------------------------
@@ -1218,9 +1213,9 @@ CLASSES
      |  __repr__(self)
      |      Return repr(self).
      |
-     |  __setitem__(self, key: 'str', value: 'Any') -> 'None'
+     |  __setitem__(self, key: str, value: Any) -> None
      |
-     |  add_to_layer(self, name: 'str') -> 'None'
+     |  add_to_layer(self, name: str) -> None
      |      Add this component to the given layer.
      |
      |      The layer must exist, but need not be enabled or visible.
@@ -1228,7 +1223,7 @@ CLASSES
      |      Parameters:
      |          name (str): The layer to add the component to.
      |
-     |  clone(self, x: 'int', y: 'int') -> 'Component'
+     |  clone(self, x: int, y: int) -> Component
      |      Copy this component and place the copy at the given location.
      |
      |      Parameters:
@@ -1240,7 +1235,7 @@ CLASSES
      |
      |  command(self, cmd_name)
      |
-     |  custom_state(self, state_name: 'str', state: 'str') -> 'None'
+     |  custom_state(self, state_name: str, state: str) -> None
      |      Set a custom layer state for this component.
      |
      |      The component must already be part of a layer, and that layer must
@@ -1260,13 +1255,13 @@ CLASSES
      |          For a three-phased voltage source for instance, the return value
      |          changed from ``'master', 'source3'`` to ``'master:source3'``
      |
-     |  disable(self) -> 'None'
+     |  disable(self) -> None
      |      Disable this component.
      |
      |      This component will be disabled regardless of the layer states.
      |      To re-enable this component use the :meth:`.enable` function.
      |
-     |  enable(self, enable: 'bool' = True) -> 'None'
+     |  enable(self, enable: bool = True) -> None
      |      Enable this component.
      |
      |      With no argument, or if given a `True` value, this will enable a
@@ -1276,7 +1271,7 @@ CLASSES
      |      Parameters:
      |          enable (bool): If set to `False`, disables the component (optional)
      |
-     |  export_parameters(self, csvfile: 'str') -> 'None'
+     |  export_parameters(self, csvfile: str) -> None
      |      Export component parameters to a CSV file
      |
      |      Write component parameters to a two-line CSV file.
@@ -1287,7 +1282,7 @@ CLASSES
      |
      |  get_parameters(self)
      |
-     |  import_parameters(self, csvfile: 'str') -> 'None'
+     |  import_parameters(self, csvfile: str) -> None
      |      Import component parameters from a CSV file
      |
      |      Read component parameters from a two-line CSV file,
@@ -1295,12 +1290,12 @@ CLASSES
      |      contains the parameter values.  The first column represents the
      |      component identifier and the parameter name must be blank.
      |
-     |  project(self) -> 'Project'
+     |  project(self) -> Project
      |      The project this component exists in
      |
      |      :type: Project
      |
-     |  remove_from_layer(self, name: 'str') -> 'None'
+     |  remove_from_layer(self, name: str) -> None
      |      Remove this component from the given layer.
      |
      |      The layer must exist, but need not be enabled or visible.
@@ -1310,21 +1305,21 @@ CLASSES
      |
      |  set_parameters(self, **parameters)
      |
-     |  to_back(self) -> 'bool'
+     |  to_back(self) -> bool
      |      Put at the start (back) of the Z-Order on the canvas.
      |
-     |  to_front(self) -> 'bool'
+     |  to_front(self) -> bool
      |      Put at the front (end) of the Z-Order on the canvas.
      |
-     |  to_next(self) -> 'bool'
+     |  to_next(self) -> bool
      |      Move the component one position forward in the Z-Order relative to the
      |      current Z-Order position.
      |
-     |  to_prev(self) -> 'bool'
+     |  to_prev(self) -> bool
      |      Move the component one position backward in the Z-Order relative to the current
      |      current Z-Order position.
      |
-     |  view_parameter_grid(self) -> 'bool'
+     |  view_parameter_grid(self) -> bool
      |      View the parameter grid for this component
      |
      |  ----------------------------------------------------------------------
@@ -1372,8 +1367,8 @@ CLASSES
      |  __init__(
      |      self,
      |      *,
-     |      _ctx: 'Optional[Context]' = None,
-     |      _ident: 'Optional[Dict[str, Any]]' = None
+     |      _ctx: Optional[Context] = None,
+     |      _ident: Optional[Dict[str, Any]] = None
      |  )
      |      Initialize self.  See help(type(self)) for accurate signature.
      |
@@ -1390,15 +1385,20 @@ CLASSES
      |      list of weak references to the object
      |
      |  ----------------------------------------------------------------------
+     |  Data and other attributes inherited from mhi.common.remote.Remotable:
+     |
+     |  __annotations__ = {}
+     |
+     |  ----------------------------------------------------------------------
      |  Methods inherited from mhi.pscad.component.MovableMixin:
      |
-     |  copy(self) -> 'bool'
+     |  copy(self) -> bool
      |      Copy this component to the clipboard.
      |
-     |  cut(self) -> 'bool'
+     |  cut(self) -> bool
      |      Cut this component to the clipboard
      |
-     |  delete(self) -> 'bool'
+     |  delete(self) -> bool
      |      Delete this component.
      |
      |  get_location(self)
@@ -1447,8 +1447,8 @@ CLASSES
     class Slider(Control)
      |  Slider(
      |      *,
-     |      _ctx: 'Optional[Context]' = None,
-     |      _ident: 'Optional[Dict[str, Any]]' = None
+     |      _ctx: Optional[Context] = None,
+     |      _ident: Optional[Dict[str, Any]] = None
      |  )
      |
      |  A variable input between minumum & maximum values.
@@ -1477,30 +1477,25 @@ CLASSES
      |
      |  Methods defined here:
      |
-     |  limits(self, lower: 'float', upper: 'float') -> 'None'
+     |  limits(self, lower: float, upper: float) -> None
      |      Set slider minumum and maximum limits
      |
      |      Parameters:
      |          lower (float): Lower limit for slider
      |          upper (float): Upper limit for slider
      |
-     |  value(self, value: 'float') -> 'None'
+     |  value(self, value: float) -> None
      |      Set the slider to the given value
      |
      |      Parameters:
      |          value (float): Slider position value
      |
      |  ----------------------------------------------------------------------
-     |  Data and other attributes defined here:
-     |
-     |  __annotations__ = {}
-     |
-     |  ----------------------------------------------------------------------
      |  Methods inherited from Control:
      |
-     |  __getitem__(self, key: 'str')
+     |  __getitem__(self, key: str)
      |
-     |  parameters(self, *, parameters: 'Optional[Parameters]' = None, **kwargs) -> 'Optional[Parameters]'
+     |  parameters(self, *, parameters: Optional[Parameters] = None, **kwargs) -> Optional[Parameters]
      |      Set or get the component's parameters.
      |
      |      Parameters:
@@ -1511,7 +1506,7 @@ CLASSES
      |          A dictionary of parameter values (if no parameters are being set),
      |          or None.
      |
-     |  range(self, parameter: 'str') -> 'ParameterRange'
+     |  range(self, parameter: str) -> ParameterRange
      |      Get legal values for a parameter
      |
      |      Parameters:
@@ -1523,7 +1518,7 @@ CLASSES
      |          * a ``Tuple[float, float]`` defining minimum & maximum values, or
      |          * an exception if the parameter does not have a defined range.
      |
-     |  reset(self) -> 'None'
+     |  reset(self) -> None
      |      Reset the control component
      |
      |  set_value(self, **kwargs)
@@ -1546,10 +1541,10 @@ CLASSES
      |  ----------------------------------------------------------------------
      |  Methods inherited from mhi.pscad.component.Component:
      |
-     |  flip(self) -> 'bool'
+     |  flip(self) -> bool
      |      Flip the component along the vertical axis
      |
-     |  is_module(self) -> 'bool'
+     |  is_module(self) -> bool
      |      Check to see if this component has its own canvas, with in turn,
      |      can contain additional components.
      |
@@ -1561,16 +1556,16 @@ CLASSES
      |          bool: ``True`` if the component has an internal canvas,
      |          ``False`` otherwise.
      |
-     |  mirror(self) -> 'bool'
+     |  mirror(self) -> bool
      |      Mirror the component along the horizontal axis
      |
-     |  rotate_180(self) -> 'bool'
+     |  rotate_180(self) -> bool
      |      Rotate the component 90 degrees to the right
      |
-     |  rotate_left(self) -> 'bool'
+     |  rotate_left(self) -> bool
      |      Rotate the component 90 degrees to the left (counter-clockwise)
      |
-     |  rotate_right(self) -> 'bool'
+     |  rotate_right(self) -> bool
      |      Rotate the component 90 degrees to the right (clockwise)
      |
      |  ----------------------------------------------------------------------
@@ -1585,9 +1580,9 @@ CLASSES
      |  __repr__(self)
      |      Return repr(self).
      |
-     |  __setitem__(self, key: 'str', value: 'Any') -> 'None'
+     |  __setitem__(self, key: str, value: Any) -> None
      |
-     |  add_to_layer(self, name: 'str') -> 'None'
+     |  add_to_layer(self, name: str) -> None
      |      Add this component to the given layer.
      |
      |      The layer must exist, but need not be enabled or visible.
@@ -1595,7 +1590,7 @@ CLASSES
      |      Parameters:
      |          name (str): The layer to add the component to.
      |
-     |  clone(self, x: 'int', y: 'int') -> 'Component'
+     |  clone(self, x: int, y: int) -> Component
      |      Copy this component and place the copy at the given location.
      |
      |      Parameters:
@@ -1607,7 +1602,7 @@ CLASSES
      |
      |  command(self, cmd_name)
      |
-     |  custom_state(self, state_name: 'str', state: 'str') -> 'None'
+     |  custom_state(self, state_name: str, state: str) -> None
      |      Set a custom layer state for this component.
      |
      |      The component must already be part of a layer, and that layer must
@@ -1627,13 +1622,13 @@ CLASSES
      |          For a three-phased voltage source for instance, the return value
      |          changed from ``'master', 'source3'`` to ``'master:source3'``
      |
-     |  disable(self) -> 'None'
+     |  disable(self) -> None
      |      Disable this component.
      |
      |      This component will be disabled regardless of the layer states.
      |      To re-enable this component use the :meth:`.enable` function.
      |
-     |  enable(self, enable: 'bool' = True) -> 'None'
+     |  enable(self, enable: bool = True) -> None
      |      Enable this component.
      |
      |      With no argument, or if given a `True` value, this will enable a
@@ -1643,7 +1638,7 @@ CLASSES
      |      Parameters:
      |          enable (bool): If set to `False`, disables the component (optional)
      |
-     |  export_parameters(self, csvfile: 'str') -> 'None'
+     |  export_parameters(self, csvfile: str) -> None
      |      Export component parameters to a CSV file
      |
      |      Write component parameters to a two-line CSV file.
@@ -1654,7 +1649,7 @@ CLASSES
      |
      |  get_parameters(self)
      |
-     |  import_parameters(self, csvfile: 'str') -> 'None'
+     |  import_parameters(self, csvfile: str) -> None
      |      Import component parameters from a CSV file
      |
      |      Read component parameters from a two-line CSV file,
@@ -1662,12 +1657,12 @@ CLASSES
      |      contains the parameter values.  The first column represents the
      |      component identifier and the parameter name must be blank.
      |
-     |  project(self) -> 'Project'
+     |  project(self) -> Project
      |      The project this component exists in
      |
      |      :type: Project
      |
-     |  remove_from_layer(self, name: 'str') -> 'None'
+     |  remove_from_layer(self, name: str) -> None
      |      Remove this component from the given layer.
      |
      |      The layer must exist, but need not be enabled or visible.
@@ -1677,21 +1672,21 @@ CLASSES
      |
      |  set_parameters(self, **parameters)
      |
-     |  to_back(self) -> 'bool'
+     |  to_back(self) -> bool
      |      Put at the start (back) of the Z-Order on the canvas.
      |
-     |  to_front(self) -> 'bool'
+     |  to_front(self) -> bool
      |      Put at the front (end) of the Z-Order on the canvas.
      |
-     |  to_next(self) -> 'bool'
+     |  to_next(self) -> bool
      |      Move the component one position forward in the Z-Order relative to the
      |      current Z-Order position.
      |
-     |  to_prev(self) -> 'bool'
+     |  to_prev(self) -> bool
      |      Move the component one position backward in the Z-Order relative to the current
      |      current Z-Order position.
      |
-     |  view_parameter_grid(self) -> 'bool'
+     |  view_parameter_grid(self) -> bool
      |      View the parameter grid for this component
      |
      |  ----------------------------------------------------------------------
@@ -1739,8 +1734,8 @@ CLASSES
      |  __init__(
      |      self,
      |      *,
-     |      _ctx: 'Optional[Context]' = None,
-     |      _ident: 'Optional[Dict[str, Any]]' = None
+     |      _ctx: Optional[Context] = None,
+     |      _ident: Optional[Dict[str, Any]] = None
      |  )
      |      Initialize self.  See help(type(self)) for accurate signature.
      |
@@ -1757,15 +1752,20 @@ CLASSES
      |      list of weak references to the object
      |
      |  ----------------------------------------------------------------------
+     |  Data and other attributes inherited from mhi.common.remote.Remotable:
+     |
+     |  __annotations__ = {}
+     |
+     |  ----------------------------------------------------------------------
      |  Methods inherited from mhi.pscad.component.MovableMixin:
      |
-     |  copy(self) -> 'bool'
+     |  copy(self) -> bool
      |      Copy this component to the clipboard.
      |
-     |  cut(self) -> 'bool'
+     |  cut(self) -> bool
      |      Cut this component to the clipboard
      |
-     |  delete(self) -> 'bool'
+     |  delete(self) -> bool
      |      Delete this component.
      |
      |  get_location(self)
@@ -1814,8 +1814,8 @@ CLASSES
     class Switch(Control)
      |  Switch(
      |      *,
-     |      _ctx: 'Optional[Context]' = None,
-     |      _ident: 'Optional[Dict[str, Any]]' = None
+     |      _ctx: Optional[Context] = None,
+     |      _ident: Optional[Dict[str, Any]] = None
      |  )
      |
      |  A switch will output one of two values, depending on the position
@@ -1846,31 +1846,26 @@ CLASSES
      |
      |  Methods defined here:
      |
-     |  off(self) -> 'None'
+     |  off(self) -> None
      |      Turn the switch to the Off state
      |
-     |  on(self) -> 'None'
+     |  on(self) -> None
      |      Turn the switch to the On state
      |
-     |  set_state(self, state: 'bool') -> 'None'
+     |  set_state(self, state: bool) -> None
      |      Set the switch to the indicated state
      |
      |      Parameters:
      |          state (bool): ``True`` = On, ``False`` = Off
      |
-     |  value(self, position: 'int') -> 'None'
-     |
-     |  ----------------------------------------------------------------------
-     |  Data and other attributes defined here:
-     |
-     |  __annotations__ = {}
+     |  value(self, position: int) -> None
      |
      |  ----------------------------------------------------------------------
      |  Methods inherited from Control:
      |
-     |  __getitem__(self, key: 'str')
+     |  __getitem__(self, key: str)
      |
-     |  parameters(self, *, parameters: 'Optional[Parameters]' = None, **kwargs) -> 'Optional[Parameters]'
+     |  parameters(self, *, parameters: Optional[Parameters] = None, **kwargs) -> Optional[Parameters]
      |      Set or get the component's parameters.
      |
      |      Parameters:
@@ -1881,7 +1876,7 @@ CLASSES
      |          A dictionary of parameter values (if no parameters are being set),
      |          or None.
      |
-     |  range(self, parameter: 'str') -> 'ParameterRange'
+     |  range(self, parameter: str) -> ParameterRange
      |      Get legal values for a parameter
      |
      |      Parameters:
@@ -1893,7 +1888,7 @@ CLASSES
      |          * a ``Tuple[float, float]`` defining minimum & maximum values, or
      |          * an exception if the parameter does not have a defined range.
      |
-     |  reset(self) -> 'None'
+     |  reset(self) -> None
      |      Reset the control component
      |
      |  set_value(self, **kwargs)
@@ -1916,10 +1911,10 @@ CLASSES
      |  ----------------------------------------------------------------------
      |  Methods inherited from mhi.pscad.component.Component:
      |
-     |  flip(self) -> 'bool'
+     |  flip(self) -> bool
      |      Flip the component along the vertical axis
      |
-     |  is_module(self) -> 'bool'
+     |  is_module(self) -> bool
      |      Check to see if this component has its own canvas, with in turn,
      |      can contain additional components.
      |
@@ -1931,16 +1926,16 @@ CLASSES
      |          bool: ``True`` if the component has an internal canvas,
      |          ``False`` otherwise.
      |
-     |  mirror(self) -> 'bool'
+     |  mirror(self) -> bool
      |      Mirror the component along the horizontal axis
      |
-     |  rotate_180(self) -> 'bool'
+     |  rotate_180(self) -> bool
      |      Rotate the component 90 degrees to the right
      |
-     |  rotate_left(self) -> 'bool'
+     |  rotate_left(self) -> bool
      |      Rotate the component 90 degrees to the left (counter-clockwise)
      |
-     |  rotate_right(self) -> 'bool'
+     |  rotate_right(self) -> bool
      |      Rotate the component 90 degrees to the right (clockwise)
      |
      |  ----------------------------------------------------------------------
@@ -1955,9 +1950,9 @@ CLASSES
      |  __repr__(self)
      |      Return repr(self).
      |
-     |  __setitem__(self, key: 'str', value: 'Any') -> 'None'
+     |  __setitem__(self, key: str, value: Any) -> None
      |
-     |  add_to_layer(self, name: 'str') -> 'None'
+     |  add_to_layer(self, name: str) -> None
      |      Add this component to the given layer.
      |
      |      The layer must exist, but need not be enabled or visible.
@@ -1965,7 +1960,7 @@ CLASSES
      |      Parameters:
      |          name (str): The layer to add the component to.
      |
-     |  clone(self, x: 'int', y: 'int') -> 'Component'
+     |  clone(self, x: int, y: int) -> Component
      |      Copy this component and place the copy at the given location.
      |
      |      Parameters:
@@ -1977,7 +1972,7 @@ CLASSES
      |
      |  command(self, cmd_name)
      |
-     |  custom_state(self, state_name: 'str', state: 'str') -> 'None'
+     |  custom_state(self, state_name: str, state: str) -> None
      |      Set a custom layer state for this component.
      |
      |      The component must already be part of a layer, and that layer must
@@ -1997,13 +1992,13 @@ CLASSES
      |          For a three-phased voltage source for instance, the return value
      |          changed from ``'master', 'source3'`` to ``'master:source3'``
      |
-     |  disable(self) -> 'None'
+     |  disable(self) -> None
      |      Disable this component.
      |
      |      This component will be disabled regardless of the layer states.
      |      To re-enable this component use the :meth:`.enable` function.
      |
-     |  enable(self, enable: 'bool' = True) -> 'None'
+     |  enable(self, enable: bool = True) -> None
      |      Enable this component.
      |
      |      With no argument, or if given a `True` value, this will enable a
@@ -2013,7 +2008,7 @@ CLASSES
      |      Parameters:
      |          enable (bool): If set to `False`, disables the component (optional)
      |
-     |  export_parameters(self, csvfile: 'str') -> 'None'
+     |  export_parameters(self, csvfile: str) -> None
      |      Export component parameters to a CSV file
      |
      |      Write component parameters to a two-line CSV file.
@@ -2024,7 +2019,7 @@ CLASSES
      |
      |  get_parameters(self)
      |
-     |  import_parameters(self, csvfile: 'str') -> 'None'
+     |  import_parameters(self, csvfile: str) -> None
      |      Import component parameters from a CSV file
      |
      |      Read component parameters from a two-line CSV file,
@@ -2032,12 +2027,12 @@ CLASSES
      |      contains the parameter values.  The first column represents the
      |      component identifier and the parameter name must be blank.
      |
-     |  project(self) -> 'Project'
+     |  project(self) -> Project
      |      The project this component exists in
      |
      |      :type: Project
      |
-     |  remove_from_layer(self, name: 'str') -> 'None'
+     |  remove_from_layer(self, name: str) -> None
      |      Remove this component from the given layer.
      |
      |      The layer must exist, but need not be enabled or visible.
@@ -2047,21 +2042,21 @@ CLASSES
      |
      |  set_parameters(self, **parameters)
      |
-     |  to_back(self) -> 'bool'
+     |  to_back(self) -> bool
      |      Put at the start (back) of the Z-Order on the canvas.
      |
-     |  to_front(self) -> 'bool'
+     |  to_front(self) -> bool
      |      Put at the front (end) of the Z-Order on the canvas.
      |
-     |  to_next(self) -> 'bool'
+     |  to_next(self) -> bool
      |      Move the component one position forward in the Z-Order relative to the
      |      current Z-Order position.
      |
-     |  to_prev(self) -> 'bool'
+     |  to_prev(self) -> bool
      |      Move the component one position backward in the Z-Order relative to the current
      |      current Z-Order position.
      |
-     |  view_parameter_grid(self) -> 'bool'
+     |  view_parameter_grid(self) -> bool
      |      View the parameter grid for this component
      |
      |  ----------------------------------------------------------------------
@@ -2109,8 +2104,8 @@ CLASSES
      |  __init__(
      |      self,
      |      *,
-     |      _ctx: 'Optional[Context]' = None,
-     |      _ident: 'Optional[Dict[str, Any]]' = None
+     |      _ctx: Optional[Context] = None,
+     |      _ident: Optional[Dict[str, Any]] = None
      |  )
      |      Initialize self.  See help(type(self)) for accurate signature.
      |
@@ -2127,15 +2122,20 @@ CLASSES
      |      list of weak references to the object
      |
      |  ----------------------------------------------------------------------
+     |  Data and other attributes inherited from mhi.common.remote.Remotable:
+     |
+     |  __annotations__ = {}
+     |
+     |  ----------------------------------------------------------------------
      |  Methods inherited from mhi.pscad.component.MovableMixin:
      |
-     |  copy(self) -> 'bool'
+     |  copy(self) -> bool
      |      Copy this component to the clipboard.
      |
-     |  cut(self) -> 'bool'
+     |  cut(self) -> bool
      |      Cut this component to the clipboard
      |
-     |  delete(self) -> 'bool'
+     |  delete(self) -> bool
      |      Delete this component.
      |
      |  get_location(self)
@@ -2192,5 +2192,5 @@ DATA
     TYPE_CHECKING = False
 
 FILE
-    /home/lua/miniconda/lib/python3.13/site-packages/mhi/pscad/control.py
+    c:\users\as0135\appdata\local\programs\python\python314\lib\site-packages\mhi\pscad\control.py
 

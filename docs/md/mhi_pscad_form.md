@@ -1,6 +1,6 @@
 # Module mhi.pscad.form
 
-*Source: /home/lua/miniconda/lib/python3.13/site-packages/mhi/pscad/form.py*
+*Source: C:\Users\AS0135\AppData\Local\Programs\Python\Python314\Lib\site-packages\mhi\pscad\form.py*
 
 Python Library Documentation: module mhi.pscad.form in mhi.pscad
 
@@ -60,13 +60,13 @@ Python Library Documentation: module mhi.pscad.form in mhi.pscad
         ----------------------------------------------------------------------
         Methods inherited from IntCodec:
 
-- **decode(self, value: 'str') -> 'Union[str, int]'**
+- **decode(self, value: str) -> Union[str, int]**
 - **Decode string to an integer (unless it is a variable identifier**
 
-- **encode(self, value) -> 'str'**
+- **encode(self, value) -> str**
             Encode integer to a string
 
-- **range(self) -> 'range'**
+- **range(self) -> range**
             Acceptable range of integer values
 
         ----------------------------------------------------------------------
@@ -91,7 +91,7 @@ Python Library Documentation: module mhi.pscad.form in mhi.pscad
 - **__repr__(self)**
 - **Return repr(self).**
 
-- **decode(self, value: 'str') -> 'bool'** -> `bool`
+- **decode(self, value: str) -> bool** -> `bool`
             Decode an internal format value into a more user-friendly format
 
             Parameters:
@@ -100,7 +100,7 @@ Python Library Documentation: module mhi.pscad.form in mhi.pscad
             Returns:
                 the decoded value
 
-- **encode(self, value) -> 'str'** -> `str`
+- **encode(self, value) -> str** -> `str`
             Encode a user-friendly value into an internal format
 
             Parameters:
@@ -113,11 +113,6 @@ Python Library Documentation: module mhi.pscad.form in mhi.pscad
             Returns the range of values that this codec will encode,
             as in, maybe passed to :meth:`.encode` and will
             be returned by :meth:`.decode`.
-
-        ----------------------------------------------------------------------
-        Data and other attributes defined here:
-
-        __annotations__ = {}
 
         ----------------------------------------------------------------------
         Data descriptors inherited from mhi.common.codec.Codec:
@@ -146,7 +141,7 @@ Python Library Documentation: module mhi.pscad.form in mhi.pscad
 - **__repr__(self)**
 - **Return repr(self).**
 
-- **decode(self, value: 'str') -> 'Union[ComplexValue, str]'** -> `Union[ComplexValue, str]`
+- **decode(self, value: str) -> Union[ComplexValue, str]** -> `Union[ComplexValue, str]`
             Decode an internal format value into a more user-friendly format
 
             Parameters:
@@ -155,7 +150,7 @@ Python Library Documentation: module mhi.pscad.form in mhi.pscad
             Returns:
                 the decoded value
 
-- **encode(self, value) -> 'str'** -> `str`
+- **encode(self, value) -> str** -> `str`
             Encode a user-friendly value into an internal format
 
             Parameters:
@@ -168,11 +163,6 @@ Python Library Documentation: module mhi.pscad.form in mhi.pscad
             Returns the range of values that this codec will encode,
             as in, maybe passed to :meth:`.encode` and will
             be returned by :meth:`.decode`.
-
-        ----------------------------------------------------------------------
-        Data and other attributes defined here:
-
-        __annotations__ = {}
 
         ----------------------------------------------------------------------
         Data descriptors inherited from mhi.common.codec.Codec:
@@ -193,22 +183,17 @@ Python Library Documentation: module mhi.pscad.form in mhi.pscad
 
         Methods defined here:
 
-- **decode(self, value: 'str') -> 'Any'** -> `Any`
+- **decode(self, value: str) -> Any** -> `Any`
             'Indentity' decoder; all values are returned unchanged.
 
-- **encode(self, value: 'Any') -> 'str'** -> `str`
+- **encode(self, value: Any) -> str** -> `str`
             Encode all values to strings for PSCAD.
 
             Booleans are encoded using lowercase.
 
-- **range(self) -> 'Any'** -> `Any`
+- **range(self) -> Any** -> `Any`
 - **Any value is accepted as input for encoding, and (theoretically)**
             returned by decoding.
-
-        ----------------------------------------------------------------------
-        Data and other attributes defined here:
-
-        __annotations__ = {}
 
         ----------------------------------------------------------------------
         Data descriptors inherited from mhi.common.codec.Codec:
@@ -309,7 +294,7 @@ Python Library Documentation: module mhi.pscad.form in mhi.pscad
 
             The dictionary keys are used to select the encoding method.
 
-- **range(self, key: 'str') -> 'Any'**
+- **range(self, key: str) -> Any**
             Valid input for a given parameter
 
         ----------------------------------------------------------------------
@@ -344,19 +329,14 @@ Python Library Documentation: module mhi.pscad.form in mhi.pscad
 - **__repr__(self)**
 - **Return repr(self).**
 
-- **decode(self, value: 'str') -> 'Union[str, int]'** -> `Union[str, int]`
+- **decode(self, value: str) -> Union[str, int]** -> `Union[str, int]`
 - **Decode string to an integer (unless it is a variable identifier**
 
-- **encode(self, value) -> 'str'** -> `str`
+- **encode(self, value) -> str** -> `str`
             Encode integer to a string
 
-- **range(self) -> 'range'** -> `range`
+- **range(self) -> range** -> `range`
             Acceptable range of integer values
-
-        ----------------------------------------------------------------------
-        Data and other attributes defined here:
-
-        __annotations__ = {}
 
         ----------------------------------------------------------------------
         Data descriptors inherited from mhi.common.codec.Codec:
@@ -368,7 +348,7 @@ Python Library Documentation: module mhi.pscad.form in mhi.pscad
             list of weak references to the object
 
 ### class IntSetCodec(mhi.common.codec.Codec)
-- **IntSetCodec(values: 'Sequence[int]')**
+- **IntSetCodec(values: Sequence[int])**
 
         Encode/Decode an integer within a range restricted to a finite set
 
@@ -379,25 +359,20 @@ Python Library Documentation: module mhi.pscad.form in mhi.pscad
 
         Methods defined here:
 
-- **__init__(self, values: 'Sequence[int]')**
+- **__init__(self, values: Sequence[int])**
 - **Initialize self.  See help(type(self)) for accurate signature.**
 
 - **__repr__(self)**
 - **Return repr(self).**
 
-- **decode(self, value: 'str') -> 'int'** -> `int`
+- **decode(self, value: str) -> int** -> `int`
             Decode string to an integer
 
-- **encode(self, value) -> 'str'** -> `str`
+- **encode(self, value) -> str** -> `str`
             Encode integer to a string
 
-- **range(self) -> 'Set[int]'** -> `Set[int]`
+- **range(self) -> Set[int]** -> `Set[int]`
             Acceptable range of integer values
-
-        ----------------------------------------------------------------------
-        Data and other attributes defined here:
-
-        __annotations__ = {}
 
         ----------------------------------------------------------------------
         Data descriptors inherited from mhi.common.codec.Codec:
@@ -435,7 +410,7 @@ Python Library Documentation: module mhi.pscad.form in mhi.pscad
 
             The dictionary keys are used to select the encoding method.
 
-- **range(self, key: 'str') -> 'Any'** -> `Any`
+- **range(self, key: str) -> Any** -> `Any`
             Valid input for a given parameter
 
         ----------------------------------------------------------------------
@@ -472,7 +447,7 @@ Python Library Documentation: module mhi.pscad.form in mhi.pscad
 - **__repr__(self)**
 - **Return repr(self).**
 
-- **decode(self, value: 'str') -> 'Union[Value, float, str]'** -> `Union[Value, float, str]`
+- **decode(self, value: str) -> Union[Value, float, str]** -> `Union[Value, float, str]`
             Decode an internal format value into a more user-friendly format
 
             Parameters:
@@ -481,7 +456,7 @@ Python Library Documentation: module mhi.pscad.form in mhi.pscad
             Returns:
                 the decoded value
 
-- **encode(self, value) -> 'str'** -> `str`
+- **encode(self, value) -> str** -> `str`
             Encode a user-friendly value into an internal format
 
             Parameters:
@@ -494,11 +469,6 @@ Python Library Documentation: module mhi.pscad.form in mhi.pscad
             Returns the range of values that this codec will encode,
             as in, maybe passed to :meth:`.encode` and will
             be returned by :meth:`.decode`.
-
-        ----------------------------------------------------------------------
-        Data and other attributes defined here:
-
-        __annotations__ = {}
 
         ----------------------------------------------------------------------
         Data descriptors inherited from mhi.common.codec.Codec:
@@ -522,19 +492,14 @@ Python Library Documentation: module mhi.pscad.form in mhi.pscad
 - **__repr__(self)**
 - **Return repr(self).**
 
-- **decode(self, value: 'str') -> 'str'** -> `str`
+- **decode(self, value: str) -> str** -> `str`
             Decode a string as a string
 
-- **encode(self, value) -> 'str'** -> `str`
+- **encode(self, value) -> str** -> `str`
             Encode a string as a string
 
-- **range(self) -> 'None'** -> `None`
+- **range(self) -> None** -> `None`
             No valid range
-
-        ----------------------------------------------------------------------
-        Data and other attributes defined here:
-
-        __annotations__ = {}
 
         ----------------------------------------------------------------------
         Data descriptors inherited from mhi.common.codec.Codec:
@@ -558,19 +523,14 @@ Python Library Documentation: module mhi.pscad.form in mhi.pscad
 - **__repr__(self)**
 - **Return repr(self).**
 
-- **decode(self, value: 'str') -> 'List[List[Union[int, float, str]]]'** -> `List[List[Union[int, float, str]]]`
+- **decode(self, value: str) -> List[List[Union[int, float, str]]]** -> `List[List[Union[int, float, str]]]`
             Decode a table from a string
 
-- **encode(self, value) -> 'str'** -> `str`
+- **encode(self, value) -> str** -> `str`
             Encode a table into a string
 
-- **range(self) -> 'None'** -> `None`
+- **range(self) -> None** -> `None`
             No valid range
-
-        ----------------------------------------------------------------------
-        Data and other attributes defined here:
-
-        __annotations__ = {}
 
         ----------------------------------------------------------------------
         Data descriptors inherited from mhi.common.codec.Codec:
@@ -582,7 +542,7 @@ Python Library Documentation: module mhi.pscad.form in mhi.pscad
             list of weak references to the object
 
 ## FUNCTIONS
-    cleanup_choices(choices: 'List[str]') -> 'Dict[str, str]'
+    cleanup_choices(choices: List[str]) -> Dict[str, str]
 
     warn(message, category=None, stacklevel=1, source=None, *,
          skip_file_prefixes=<unrepresentable>)
@@ -626,35 +586,5 @@ Python Library Documentation: module mhi.pscad.form in mhi.pscad
 
         To specify a variable-length tuple of homogeneous type, use Tuple[T, ...].
 
-    Union = typing.Union
-        Union type; Union[X, Y] means either X or Y.
-
-        On Python 3.10 and higher, the   operator
-        can also be used to denote unions;
-        X   Y means the same thing to the type checker as Union[X, Y].
-
-        To define a union, use e.g. Union[int, str]. Details:
-        - The arguments must be types and there must be at least one.
-        - None as an argument is a special case and is replaced by
-          type(None).
-        - Unions of unions are flattened, e.g.::
-
-            assert Union[Union[int, str], float] == Union[int, str, float]
-
-        - Unions of a single argument vanish, e.g.::
-
-            assert Union[int] == int  # The constructor actually returns int
-
-        - Redundant arguments are skipped, e.g.::
-
-            assert Union[int, str, int] == Union[int, str]
-
-        - When comparing unions, the argument order is ignored, e.g.::
-
-            assert Union[int, str] == Union[str, int]
-
-        - You cannot subclass or instantiate a union.
-        - You can use Optional[X] as a shorthand for Union[X, None].
-
 ## FILE
-    /home/lua/miniconda/lib/python3.13/site-packages/mhi/pscad/form.py
+    c:\users\as0135\appdata\local\programs\python\python314\lib\site-packages\mhi\pscad\form.py

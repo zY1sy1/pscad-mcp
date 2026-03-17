@@ -1,6 +1,6 @@
 # Module mhi.pscad.definition
 
-*Source: /home/lua/miniconda/lib/python3.13/site-packages/mhi/pscad/definition.py*
+*Source: C:\Users\AS0135\AppData\Local\Programs\Python\Python314\Lib\site-packages\mhi\pscad\definition.py*
 
 Python Library Documentation: module mhi.pscad.definition in mhi.pscad
 
@@ -21,8 +21,8 @@ Python Library Documentation: module mhi.pscad.definition in mhi.pscad
 ### class Definition(mhi.pscad.remote.Remotable)
 - **Definition(**
             *,
-            _ctx: 'Optional[Context]' = None,
-            _ident: 'Optional[Dict[str, Any]]' = None
+            _ctx: Optional[Context] = None,
+            _ident: Optional[Dict[str, Any]] = None
         )
 
         Component Definition
@@ -38,31 +38,31 @@ Python Library Documentation: module mhi.pscad.definition in mhi.pscad
 - **__repr__(self)**
 - **Return repr(self).**
 
-- **canvas(self) -> 'Canvas'** -> `Canvas`
+- **canvas(self) -> Canvas** -> `Canvas`
             Definition canvas
 
-- **compile(self) -> 'None'** -> `None`
+- **compile(self) -> None** -> `None`
             Compile this component definition page
 
-- **copy(self) -> 'None'** -> `None`
+- **copy(self) -> None** -> `None`
             Copy the definition to the clipboard.
 
         form_codec = <functools.cached_property object>
             The definition's parameter form codec
 
-- **graphics(self) -> 'GfxCanvas'** -> `GfxCanvas`
+- **graphics(self) -> GfxCanvas** -> `GfxCanvas`
             Get the :class:`graphics canvas <.GfxCanvas>`
 
             .. versionadded:: 2.2
 
-- **is_module(self) -> 'bool'** `@rmi` -> `bool`
+- **is_module(self) -> bool** `@rmi` -> `bool`
             Check to see if this component has its own canvas, with in turn,
             can contain additional components.
 
             Returns:
                 bool: True if the component has an internal canvas, False otherwise.
 
-- **navigate_to(self) -> 'Canvas'** `@rmi` -> `Canvas`
+- **navigate_to(self) -> Canvas** `@rmi` -> `Canvas`
             Attempt to navigate to the first instance if possible
 
             Returns:
@@ -71,12 +71,12 @@ Python Library Documentation: module mhi.pscad.definition in mhi.pscad
 - **parameters(** `@requires` -> `Optional[Dict[str, str]]`
             self,
             *,
-            name: 'Optional[str]' = None,
-            desc: 'Optional[str]' = None,
-            url: 'Optional[str]' = None,
-            group: 'Optional[str]' = None,
-            tags: 'Optional[str]' = None
-        ) -> 'Optional[Dict[str, str]]'
+            name: Optional[str] = None,
+            desc: Optional[str] = None,
+            url: Optional[str] = None,
+            group: Optional[str] = None,
+            tags: Optional[str] = None
+        ) -> Optional[Dict[str, str]]
             Set or get the definition's parameters.
 
             Parameters:
@@ -104,7 +104,7 @@ Python Library Documentation: module mhi.pscad.definition in mhi.pscad
 
             .. versionadded:: 2.2
 
-- **set_view(self, view: 'Union[str, View]') -> 'None'** -> `None`
+- **set_view(self, view: Union[str, View]) -> None** -> `None`
             Activate the appropriate definition editor tab
 
             Valid view tabs are one of the strings: "Schematic", "Graphic",
@@ -139,11 +139,6 @@ Python Library Documentation: module mhi.pscad.definition in mhi.pscad
 - **XML for the Definition (read-only)**
 
         ----------------------------------------------------------------------
-        Data and other attributes defined here:
-
-        __annotations__ = {}
-
-        ----------------------------------------------------------------------
         Readonly properties inherited from mhi.pscad.remote.Remotable:
 
         main
@@ -162,8 +157,8 @@ Python Library Documentation: module mhi.pscad.definition in mhi.pscad
 - **__init__(**
             self,
             *,
-            _ctx: 'Optional[Context]' = None,
-            _ident: 'Optional[Dict[str, Any]]' = None
+            _ctx: Optional[Context] = None,
+            _ident: Optional[Dict[str, Any]] = None
         )
 - **Initialize self.  See help(type(self)) for accurate signature.**
 
@@ -178,6 +173,11 @@ Python Library Documentation: module mhi.pscad.definition in mhi.pscad
 
         __weakref__
             list of weak references to the object
+
+        ----------------------------------------------------------------------
+        Data and other attributes inherited from mhi.common.remote.Remotable:
+
+        __annotations__ = {}
 
 ### class Scripts(collections.abc.MutableMapping)
 - **Scripts(defn)**
@@ -202,20 +202,20 @@ Python Library Documentation: module mhi.pscad.definition in mhi.pscad
 
         Methods defined here:
 
-- **__delitem__(self, section_name: 'str')**
+- **__delitem__(self, section_name: str)**
 
-- **__getitem__(self, section_name: 'str') -> 'str'** -> `str`
+- **__getitem__(self, section_name: str) -> str** -> `str`
 
 - **__init__(self, defn)**
 - **Initialize self.  See help(type(self)) for accurate signature.**
 
-- **__iter__(self) -> 'Iterable[str]'** -> `Iterable[str]`
+- **__iter__(self) -> Iterable[str]** -> `Iterable[str]`
 
-- **__len__(self) -> 'int'** -> `int`
+- **__len__(self) -> int** -> `int`
 
-- **__setitem__(self, section_name: 'str', text: 'str')**
+- **__setitem__(self, section_name: str, text: str)**
 
-- **keys(self) -> 'Tuple[str, ...]'** -> `Tuple[str, ...]`
+- **keys(self) -> Tuple[str, ...]** -> `Tuple[str, ...]`
             Defined script section names
 
         ----------------------------------------------------------------------
@@ -238,7 +238,7 @@ Python Library Documentation: module mhi.pscad.definition in mhi.pscad
 - **clear(self)**
 - **D.clear() -> None.  Remove all items from D.**
 
-- **pop(self, key, default=<object object at 0x70e84eef41b0>)**
+- **pop(self, key, default=<object object at 0x000001CBF3ED0200>)**
 - **D.pop(k[,d]) -> v, remove specified key and return the corresponding value.**
             If key is not found, d is returned if given, otherwise KeyError is raised.
 
@@ -321,35 +321,5 @@ Python Library Documentation: module mhi.pscad.definition in mhi.pscad
 
         To specify a variable-length tuple of homogeneous type, use Tuple[T, ...].
 
-    Union = typing.Union
-        Union type; Union[X, Y] means either X or Y.
-
-        On Python 3.10 and higher, the   operator
-        can also be used to denote unions;
-        X   Y means the same thing to the type checker as Union[X, Y].
-
-        To define a union, use e.g. Union[int, str]. Details:
-        - The arguments must be types and there must be at least one.
-        - None as an argument is a special case and is replaced by
-          type(None).
-        - Unions of unions are flattened, e.g.::
-
-            assert Union[Union[int, str], float] == Union[int, str, float]
-
-        - Unions of a single argument vanish, e.g.::
-
-            assert Union[int] == int  # The constructor actually returns int
-
-        - Redundant arguments are skipped, e.g.::
-
-            assert Union[int, str, int] == Union[int, str]
-
-        - When comparing unions, the argument order is ignored, e.g.::
-
-            assert Union[int, str] == Union[str, int]
-
-        - You cannot subclass or instantiate a union.
-        - You can use Optional[X] as a shorthand for Union[X, None].
-
 ## FILE
-    /home/lua/miniconda/lib/python3.13/site-packages/mhi/pscad/definition.py
+    c:\users\as0135\appdata\local\programs\python\python314\lib\site-packages\mhi\pscad\definition.py

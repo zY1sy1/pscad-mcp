@@ -41,8 +41,8 @@ CLASSES
     class ExternalTask(SimsetTask)
      |  ExternalTask(
      |      *,
-     |      _ctx: 'Optional[Context]' = None,
-     |      _ident: 'Optional[Dict[str, Any]]' = None
+     |      _ctx: Optional[Context] = None,
+     |      _ident: Optional[Dict[str, Any]] = None
      |  )
      |
      |  External Simulation Set Task
@@ -59,7 +59,7 @@ CLASSES
      |  __repr__(self)
      |      Return repr(self).
      |
-     |  parameters(self, parameters: 'Optional[Parameters]' = None, **kwargs) -> 'Optional[Parameters]'
+     |  parameters(self, parameters: Optional[Parameters] = None, **kwargs) -> Optional[Parameters]
      |      parameters(parameter=value, ...)
      |      Get/set External Task Settings
      |
@@ -74,13 +74,8 @@ CLASSES
      |         platform      Choice Platform: X86, X64
      |         ============= ====== ===========================================
      |
-     |  stop(self) -> 'None'
+     |  stop(self) -> None
      |      Unconditionally stop the external task
-     |
-     |  ----------------------------------------------------------------------
-     |  Data and other attributes defined here:
-     |
-     |  __annotations__ = {}
      |
      |  ----------------------------------------------------------------------
      |  Methods inherited from SimsetTask:
@@ -88,16 +83,16 @@ CLASSES
      |  __str__(self)
      |      Return str(self).
      |
-     |  move_down(self) -> 'None'
+     |  move_down(self) -> None
      |      Move the task down one spot in the the task list of the simulation
      |
-     |  move_up(self) -> 'None'
+     |  move_up(self) -> None
      |      Move the task up one spot in the the task list of the simulation
      |
-     |  to_bottom(self) -> 'None'
+     |  to_bottom(self) -> None
      |      Move the task to the bottom of the task list of the simulation
      |
-     |  to_top(self) -> 'None'
+     |  to_top(self) -> None
      |      Move the task to the top of the task list of the simulation
      |
      |  ----------------------------------------------------------------------
@@ -128,8 +123,8 @@ CLASSES
      |  __init__(
      |      self,
      |      *,
-     |      _ctx: 'Optional[Context]' = None,
-     |      _ident: 'Optional[Dict[str, Any]]' = None
+     |      _ctx: Optional[Context] = None,
+     |      _ident: Optional[Dict[str, Any]] = None
      |  )
      |      Initialize self.  See help(type(self)) for accurate signature.
      |
@@ -144,12 +139,17 @@ CLASSES
      |
      |  __weakref__
      |      list of weak references to the object
+     |
+     |  ----------------------------------------------------------------------
+     |  Data and other attributes inherited from mhi.common.remote.Remotable:
+     |
+     |  __annotations__ = {}
 
     class ProjectTask(SimsetTask)
      |  ProjectTask(
      |      *,
-     |      _ctx: 'Optional[Context]' = None,
-     |      _ident: 'Optional[Dict[str, Any]]' = None
+     |      _ctx: Optional[Context] = None,
+     |      _ident: Optional[Dict[str, Any]] = None
      |  )
      |
      |  Project Simulation Set Task
@@ -175,9 +175,9 @@ CLASSES
      |
      |  layers(
      |      self,
-     |      layer_states: 'Optional[Dict[str, Union[str, bool, None]]]' = None,
+     |      layer_states: Optional[Dict[str, Union[str, bool, None]]] = None,
      |      **kwargs
-     |  ) -> 'Dict[str, Union[str, bool, None]]'
+     |  ) -> Dict[str, Union[str, bool, None]]
      |      layers(layer_name=state, ...)
      |      Get / set layer overrides for this Simulation Task.
      |
@@ -208,10 +208,10 @@ CLASSES
      |          task.layers(region1=True, region2=False, region3="Special",
      |                      region4=None)
      |
-     |  namespace(self) -> 'str'
+     |  namespace(self) -> str
      |      Get the namespace of the task
      |
-     |  overrides(self, parameters: 'Optional[Parameters]' = None, **kwargs) -> 'Optional[Parameters]'
+     |  overrides(self, parameters: Optional[Parameters] = None, **kwargs) -> Optional[Parameters]
      |      overrides(parameter=value, ...)
      |      Get / set override parameters for this Simulation Task.
      |
@@ -243,7 +243,7 @@ CLASSES
      |      It is automatically set to ``"true"`` if a value other than ``None`` is given,
      |      and to ``"false"`` if the `None` value is given.
      |
-     |  parameters(self, parameters: 'Optional[Parameters]' = None, **kwargs) -> 'Optional[Parameters]'
+     |  parameters(self, parameters: Optional[Parameters] = None, **kwargs) -> Optional[Parameters]
      |      parameters(parameter=value, ...)
      |      Get/set simulation set task parameters
      |
@@ -266,26 +266,21 @@ CLASSES
      |      Get or set the volley count
      |
      |  ----------------------------------------------------------------------
-     |  Data and other attributes defined here:
-     |
-     |  __annotations__ = {}
-     |
-     |  ----------------------------------------------------------------------
      |  Methods inherited from SimsetTask:
      |
      |  __str__(self)
      |      Return str(self).
      |
-     |  move_down(self) -> 'None'
+     |  move_down(self) -> None
      |      Move the task down one spot in the the task list of the simulation
      |
-     |  move_up(self) -> 'None'
+     |  move_up(self) -> None
      |      Move the task up one spot in the the task list of the simulation
      |
-     |  to_bottom(self) -> 'None'
+     |  to_bottom(self) -> None
      |      Move the task to the bottom of the task list of the simulation
      |
-     |  to_top(self) -> 'None'
+     |  to_top(self) -> None
      |      Move the task to the top of the task list of the simulation
      |
      |  ----------------------------------------------------------------------
@@ -316,8 +311,8 @@ CLASSES
      |  __init__(
      |      self,
      |      *,
-     |      _ctx: 'Optional[Context]' = None,
-     |      _ident: 'Optional[Dict[str, Any]]' = None
+     |      _ctx: Optional[Context] = None,
+     |      _ident: Optional[Dict[str, Any]] = None
      |  )
      |      Initialize self.  See help(type(self)) for accurate signature.
      |
@@ -332,12 +327,17 @@ CLASSES
      |
      |  __weakref__
      |      list of weak references to the object
+     |
+     |  ----------------------------------------------------------------------
+     |  Data and other attributes inherited from mhi.common.remote.Remotable:
+     |
+     |  __annotations__ = {}
 
     class SimsetTask(mhi.pscad.remote.Remotable)
      |  SimsetTask(
      |      *,
-     |      _ctx: 'Optional[Context]' = None,
-     |      _ident: 'Optional[Dict[str, Any]]' = None
+     |      _ctx: Optional[Context] = None,
+     |      _ident: Optional[Dict[str, Any]] = None
      |  )
      |
      |  Simulation Set Task (Abstract)
@@ -353,16 +353,16 @@ CLASSES
      |  __str__(self)
      |      Return str(self).
      |
-     |  move_down(self) -> 'None'
+     |  move_down(self) -> None
      |      Move the task down one spot in the the task list of the simulation
      |
-     |  move_up(self) -> 'None'
+     |  move_up(self) -> None
      |      Move the task up one spot in the the task list of the simulation
      |
-     |  to_bottom(self) -> 'None'
+     |  to_bottom(self) -> None
      |      Move the task to the bottom of the task list of the simulation
      |
-     |  to_top(self) -> 'None'
+     |  to_top(self) -> None
      |      Move the task to the top of the task list of the simulation
      |
      |  ----------------------------------------------------------------------
@@ -373,11 +373,6 @@ CLASSES
      |
      |  simulation_set
      |      Simulation set the task is part of
-     |
-     |  ----------------------------------------------------------------------
-     |  Data and other attributes defined here:
-     |
-     |  __annotations__ = {}
      |
      |  ----------------------------------------------------------------------
      |  Readonly properties inherited from mhi.pscad.remote.Remotable:
@@ -398,8 +393,8 @@ CLASSES
      |  __init__(
      |      self,
      |      *,
-     |      _ctx: 'Optional[Context]' = None,
-     |      _ident: 'Optional[Dict[str, Any]]' = None
+     |      _ctx: Optional[Context] = None,
+     |      _ident: Optional[Dict[str, Any]] = None
      |  )
      |      Initialize self.  See help(type(self)) for accurate signature.
      |
@@ -417,12 +412,17 @@ CLASSES
      |
      |  __weakref__
      |      list of weak references to the object
+     |
+     |  ----------------------------------------------------------------------
+     |  Data and other attributes inherited from mhi.common.remote.Remotable:
+     |
+     |  __annotations__ = {}
 
     class SimulationSet(mhi.pscad.remote.Remotable)
      |  SimulationSet(
      |      *,
-     |      _ctx: 'Optional[Context]' = None,
-     |      _ident: 'Optional[Dict[str, Any]]' = None
+     |      _ctx: Optional[Context] = None,
+     |      _ident: Optional[Dict[str, Any]] = None
      |  )
      |
      |  Simulation Set
@@ -440,7 +440,7 @@ CLASSES
      |  __repr__(self)
      |      Return repr(self).
      |
-     |  add_external_task(self, filename: 'str', folder: 'Optional[str]' = None) -> 'ExternalTask'
+     |  add_external_task(self, filename: str, folder: Optional[str] = None) -> ExternalTask
      |      Add an external task (executable) to the simulation set.
      |
      |      Parameters:
@@ -450,7 +450,7 @@ CLASSES
      |      Returns:
      |          ExternalTask: The external task
      |
-     |  add_task(self, task: 'Union[str, Project]') -> 'ProjectTask'
+     |  add_task(self, task: Union[str, Project]) -> ProjectTask
      |      Add a project task to the simulation set.
      |
      |      Parameters:
@@ -459,19 +459,19 @@ CLASSES
      |      Returns:
      |          ProjectTask: The project task
      |
-     |  add_tasks(self, *tasks: 'Union[str, Project]') -> 'None'
+     |  add_tasks(self, *tasks: Union[str, Project]) -> None
      |      Add one or more tasks (projects) to the simulation set.
      |
      |      Parameters:
      |          *tasks: The tasks (projects) to add to the simulation set.
      |
-     |  build(self) -> 'None'
+     |  build(self) -> None
      |      Build all projects in the simulation set
      |
-     |  build_modified(self) -> 'None'
+     |  build_modified(self) -> None
      |      Build any modified projects in the simulation set
      |
-     |  clean(self) -> 'None'
+     |  clean(self) -> None
      |      Remove temporary files created during build/run
      |
      |  clone(self)
@@ -479,19 +479,19 @@ CLASSES
      |
      |  depends_on(self, name=None)
      |
-     |  list_tasks(self) -> 'List[str]'
+     |  list_tasks(self) -> List[str]
      |      List task names included in the simulation set.
      |
      |      Returns:
      |          List[str]: The names of the tasks in the simulation set.
      |
-     |  move_down(self) -> 'None'
+     |  move_down(self) -> None
      |      Move Simulation Set to up down position in list
      |
-     |  move_up(self) -> 'None'
+     |  move_up(self) -> None
      |      Move Simulation Set to up one position in list
      |
-     |  name(self, new_name: 'Optional[str]' = None) -> 'str'
+     |  name(self, new_name: Optional[str] = None) -> str
      |      Get or set the simulation set name.
      |
      |      Parameters:
@@ -500,22 +500,22 @@ CLASSES
      |      Returns:
      |          The name of the simulation set
      |
-     |  parameters(self, parameters: 'Optional[Parameters]' = None, **kwargs) -> 'Optional[Parameters]'
+     |  parameters(self, parameters: Optional[Parameters] = None, **kwargs) -> Optional[Parameters]
      |      Get/Set simulation set parameters
      |
-     |  remove_tasks(self, *tasks: 'Union[str, Project, ProjectTask, ExternalTask]') -> 'None'
+     |  remove_tasks(self, *tasks: Union[str, Project, ProjectTask, ExternalTask]) -> None
      |      Remove one or more tasks (projects) from the simulation set.
      |
      |      Parameters:
      |          *tasks: The tasks (projects) to remove from the simulation set.
      |
-     |  run(self, consumer=None) -> 'None'
+     |  run(self, consumer=None) -> None
      |      Run this simulation set.
      |
      |      Parameters:
      |          consumer: handler for events generated by the build/run (optional).
      |
-     |  task(self, name: 'str') -> 'ProjectTask'
+     |  task(self, name: str) -> ProjectTask
      |      Retrieve an individual task in the simulation set.
      |
      |      Parameters:
@@ -524,22 +524,22 @@ CLASSES
      |      Returns:
      |          ProjectTask: The identified task
      |
-     |  tasks(self) -> 'List[ProjectTask]'
+     |  tasks(self) -> List[ProjectTask]
      |      List projects included in the simulation set.
      |
      |      Returns:
      |          List[ProjectTask]: The tasks included in the simulation set.
      |
-     |  to_bottom(self) -> 'None'
+     |  to_bottom(self) -> None
      |      Move Simulation Set to end of list
      |
-     |  to_top(self) -> 'None'
+     |  to_top(self) -> None
      |      Move Simulation Set to start of list
      |
      |  ----------------------------------------------------------------------
      |  Static methods defined here:
      |
-     |  validate_name(name: 'str')
+     |  validate_name(name: str)
      |      The ``name`` must conform to PSCAD naming convensions:
      |
      |      * should start with a letter,
@@ -547,11 +547,6 @@ CLASSES
      |      * cannot exceed 30 characters.
      |
      |      Raises a ``ValueError`` is an invalid name is given.
-     |
-     |  ----------------------------------------------------------------------
-     |  Data and other attributes defined here:
-     |
-     |  __annotations__ = {}
      |
      |  ----------------------------------------------------------------------
      |  Readonly properties inherited from mhi.pscad.remote.Remotable:
@@ -572,8 +567,8 @@ CLASSES
      |  __init__(
      |      self,
      |      *,
-     |      _ctx: 'Optional[Context]' = None,
-     |      _ident: 'Optional[Dict[str, Any]]' = None
+     |      _ctx: Optional[Context] = None,
+     |      _ident: Optional[Dict[str, Any]] = None
      |  )
      |      Initialize self.  See help(type(self)) for accurate signature.
      |
@@ -588,6 +583,11 @@ CLASSES
      |
      |  __weakref__
      |      list of weak references to the object
+     |
+     |  ----------------------------------------------------------------------
+     |  Data and other attributes inherited from mhi.common.remote.Remotable:
+     |
+     |  __annotations__ = {}
 
 DATA
     Dict = typing.Dict
@@ -602,36 +602,7 @@ DATA
 
     Parameters = typing.Dict[str, typing.Any]
     TYPE_CHECKING = False
-    Union = typing.Union
-        Union type; Union[X, Y] means either X or Y.
-
-        On Python 3.10 and higher, the | operator
-        can also be used to denote unions;
-        X | Y means the same thing to the type checker as Union[X, Y].
-
-        To define a union, use e.g. Union[int, str]. Details:
-        - The arguments must be types and there must be at least one.
-        - None as an argument is a special case and is replaced by
-          type(None).
-        - Unions of unions are flattened, e.g.::
-
-            assert Union[Union[int, str], float] == Union[int, str, float]
-
-        - Unions of a single argument vanish, e.g.::
-
-            assert Union[int] == int  # The constructor actually returns int
-
-        - Redundant arguments are skipped, e.g.::
-
-            assert Union[int, str, int] == Union[int, str]
-
-        - When comparing unions, the argument order is ignored, e.g.::
-
-            assert Union[int, str] == Union[str, int]
-
-        - You cannot subclass or instantiate a union.
-        - You can use Optional[X] as a shorthand for Union[X, None].
 
 FILE
-    /home/lua/miniconda/lib/python3.13/site-packages/mhi/pscad/simset.py
+    c:\users\as0135\appdata\local\programs\python\python314\lib\site-packages\mhi\pscad\simset.py
 

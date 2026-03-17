@@ -1,6 +1,6 @@
 # Module mhi.pscad.canvas
 
-*Source: /home/lua/miniconda/lib/python3.13/site-packages/mhi/pscad/canvas.py*
+*Source: C:\Users\AS0135\AppData\Local\Programs\Python\Python314\Lib\site-packages\mhi\pscad\canvas.py*
 
 Python Library Documentation: module mhi.pscad.canvas in mhi.pscad
 
@@ -20,8 +20,8 @@ Python Library Documentation: module mhi.pscad.canvas in mhi.pscad
 ### class Canvas(mhi.pscad.remote.Remotable)
 - **Canvas(**
             *,
-            _ctx: 'Optional[Context]' = None,
-            _ident: 'Optional[Dict[str, Any]]' = None
+            _ctx: Optional[Context] = None,
+            _ident: Optional[Dict[str, Any]] = None
         )
 
         A canvas is a surface where components can be placed and arranged.
@@ -46,13 +46,13 @@ Python Library Documentation: module mhi.pscad.canvas in mhi.pscad
 
 - **add_component(** -> `Component`
             self,
-            library: 'str',
-            name: 'str',
-            x: 'int' = 1,
-            y: 'int' = 1,
-            orient: 'int' = 0,
+            library: str,
+            name: str,
+            x: int = 1,
+            y: int = 1,
+            orient: int = 0,
             **parameters
-        ) -> 'Component'
+        ) -> Component
             Create a new user component and add it to the canvas.
 
             Parameters:
@@ -67,7 +67,7 @@ Python Library Documentation: module mhi.pscad.canvas in mhi.pscad
             .. versionchanged:: 2.0
                 Added ``orient`` and ``**parameters``
 
-- **bounds(self, components: 'Sequence[Component]') -> 'List[Rect]'** `@requires` -> `List[Rect]`
+- **bounds(self, components: Sequence[Component]) -> List[Rect]** `@requires` -> `List[Rect]`
             Return a list of the bounds of the given components.
 
             Equivalent to ``[cmp.bounds for cmp in components]`` but without
@@ -78,12 +78,7 @@ Python Library Documentation: module mhi.pscad.canvas in mhi.pscad
 - **clear_selection(self)**
             Reset the selection so that no components are selected.
 
-- **closest_empty_rect(** `@requires` -> `Rect`
-            self,
-            w: 'int',
-            h: 'int',
-            point: 'Union[Tuple[int, int], Point]'
-        ) -> 'Rect'
+- **closest_empty_rect(self, w: int, h: int, point: Union[Tuple[int, int], Point]) -> Rect** `@requires` -> `Rect`
             Returns an empty rectangle with the size provided, closest to
             the given point.
 
@@ -104,7 +99,7 @@ Python Library Documentation: module mhi.pscad.canvas in mhi.pscad
 
             .. versionadded:: 2.9.6
 
-- **component(self, iid: 'int') -> 'Component'** `@rmi` -> `Component`
+- **component(self, iid: int) -> Component** `@rmi` -> `Component`
             Retrieve a component by ID.
 
             Parameters:
@@ -113,7 +108,7 @@ Python Library Documentation: module mhi.pscad.canvas in mhi.pscad
             .. versionadded:: 2.0
                 This command replaces all of the type specific versions.
 
-- **components(self) -> 'List[Component]'** -> `List[Component]`
+- **components(self) -> List[Component]** -> `List[Component]`
             Get a list of all components on the canvas.
 
 - **This is equivalent to calling ``Project.find_all()``,** -> `List[Component]`
@@ -124,7 +119,7 @@ Python Library Documentation: module mhi.pscad.canvas in mhi.pscad
 
             .. versionadded:: 2.0
 
-- **copy(self, *components: 'Component') -> 'bool'** -> `bool`
+- **copy(self, *components: Component) -> bool** -> `bool`
             Copy the given list of components, or currently selected components
             if no components are given, to the clipboard.
 
@@ -136,12 +131,12 @@ Python Library Documentation: module mhi.pscad.canvas in mhi.pscad
 
 - **create_component(** -> `Component`
             self,
-            defn: 'Union[str, Definition]',
-            x: 'int' = 1,
-            y: 'int' = 1,
-            orient: 'int' = 0,
+            defn: Union[str, Definition],
+            x: int = 1,
+            y: int = 1,
+            orient: int = 0,
             **parameters
-        ) -> 'Component'
+        ) -> Component
             Create a new component and add it to the canvas.
 
             Parameters:
@@ -159,7 +154,7 @@ Python Library Documentation: module mhi.pscad.canvas in mhi.pscad
             .. versionchanged:: 2.2
                 ``defn`` accepts a :class:`.Definition` or a string.
 
-- **cut(self, *components: 'Component') -> 'bool'** -> `bool`
+- **cut(self, *components: Component) -> bool** -> `bool`
             Cut the given list of components, or currently selected components
             if no components are given, to the clipboard.
 
@@ -169,7 +164,7 @@ Python Library Documentation: module mhi.pscad.canvas in mhi.pscad
             .. versionchanged:: 2.1
                 Added optional list of ``components``
 
-- **delete(self, *components: 'Component') -> 'bool'** -> `bool`
+- **delete(self, *components: Component) -> bool** -> `bool`
             Delete the given list of components, or currently selected components
             if no components are given.
 
@@ -179,7 +174,7 @@ Python Library Documentation: module mhi.pscad.canvas in mhi.pscad
             .. versionchanged:: 2.1
                 Added optional list of ``components``
 
-- **find(self, *names: 'str', layer: 'Optional[str]' = None, **params) -> 'Optional[Component]'** -> `Optional[Component]`
+- **find(self, *names: str, layer: Optional[str] = None, **params) -> Optional[Component]** -> `Optional[Component]`
 - **find( [[definition,] name,] [layer=name,] [key=value, ...])** -> `Optional[Component]`
 
 - **Find the (singular) component that matches the given criteria,**
@@ -187,7 +182,7 @@ Python Library Documentation: module mhi.pscad.canvas in mhi.pscad
             Raises an exception if more than one component matches
             the given criteria.
 
-- **find_all(self, *name: 'str', layer: 'Optional[str]' = None, **params) -> 'List[Component]'** -> `List[Component]`
+- **find_all(self, *name: str, layer: Optional[str] = None, **params) -> List[Component]** -> `List[Component]`
 - **find_all( [[definition,] name,] [layer=name,] [key=value, ...])** -> `List[Component]`
 
             Find all components that match the given criteria.
@@ -222,20 +217,20 @@ Python Library Documentation: module mhi.pscad.canvas in mhi.pscad
 - **c = find_all('Bus', BaseKV='138') # all Buses with BaseKV="138"** -> `List[Component]`
 - **c = find_all(BaseKV='138')        # all components with BaseKV="138"** -> `List[Component]`
 
-- **find_first(self, *names: 'str', layer: 'Optional[str]' = None, **params) -> 'Optional[Component]'** -> `Optional[Component]`
+- **find_first(self, *names: str, layer: Optional[str] = None, **params) -> Optional[Component]** -> `Optional[Component]`
 - **find_first( [[definition,] name,] [layer=name,] [key=value, ...])** -> `Optional[Component]`
 
             Find the first component that matches the given criteria,
             or ``None`` if no matching component can be found.
 
-- **flip(self, *components: 'Component') -> 'bool'** -> `bool`
+- **flip(self, *components: Component) -> bool** -> `bool`
             Flip the given list of components, or the currently selected
             components if no components are given, along the vertical axis.
 
             Parameters:
 - ***components (List[Component]): Components to be flipped (optional)** -> `List[Component]`
 
-- **get_empty_rects(self, w: 'int', h: 'int') -> 'List[Rect]'** `@requires` -> `List[Rect]`
+- **get_empty_rects(self, w: int, h: int) -> List[Rect]** `@requires` -> `List[Rect]`
             Returns empty rectangle spaces on the canvas.
 
             Parameters
@@ -255,28 +250,28 @@ Python Library Documentation: module mhi.pscad.canvas in mhi.pscad
 
 - **list_components(self)** `@deprecated`
 
-- **mirror(self, *components: 'Component') -> 'bool'** -> `bool`
+- **mirror(self, *components: Component) -> bool** -> `bool`
             Mirror the given list of components, or the currently selected
             components if no components are given, along the horizontal axis.
 
             Parameters:
 - ***components (List[Component]): Components to be mirrored (optional)** -> `List[Component]`
 
-- **names_in_use(self, defn: 'Optional[str]' = None, **params) -> 'Set[str]'** -> `Set[str]`
+- **names_in_use(self, defn: Optional[str] = None, **params) -> Set[str]** -> `Set[str]`
             Return the set of "Name" parameter values, for all components on the
             canvas that have a "Name" parameter.
 
             .. versionadded:: 3.0.0
 
-- **navigate_up(self) -> 'None'** -> `None`
+- **navigate_up(self) -> None** -> `None`
             Navigate to parent page
 
-- **parameter_range(self, parameter: 'str') -> 'ParameterRange'** -> `ParameterRange`
+- **parameter_range(self, parameter: str) -> ParameterRange** -> `ParameterRange`
             Get legal values for a setting
 
             .. versionadded:: 2.1
 
-- **parameters(self, parameters: 'Optional[Parameters]' = None, **kwargs) -> 'Optional[Parameters]'** -> `Optional[Parameters]`
+- **parameters(self, parameters: Optional[Parameters] = None, **kwargs) -> Optional[Parameters]** -> `Optional[Parameters]`
             Get or set canvas parameters
 
             .. table:: Canvas Parameters
@@ -301,35 +296,35 @@ Python Library Documentation: module mhi.pscad.canvas in mhi.pscad
 
             .. versionadded:: 2.1
 
-- **paste(self, mouse_x: 'int', mouse_y: 'int') -> 'bool'** -> `bool`
+- **paste(self, mouse_x: int, mouse_y: int) -> bool** -> `bool`
             Paste the contents of the clipboard into this canvas at the
             indicated mouse location.
 
             .. versionchanged:: 2.1
                 Added ``mouse_x`` and ``mouse_y``
 
-- **rotate_180(self, *components: 'Component') -> 'bool'** -> `bool`
+- **rotate_180(self, *components: Component) -> bool** -> `bool`
             Rotate the given list of components, or the currently selected
             components if no components are given, 180 degrees.
 
             Parameters:
 - ***components (List[Component]): Components to be rotated (optional)** -> `List[Component]`
 
-- **rotate_left(self, *components: 'Component') -> 'bool'** -> `bool`
+- **rotate_left(self, *components: Component) -> bool** -> `bool`
             Rotate the given list of components, or the currently selected
             components if no components are given, 90 degrees counter-clockwise.
 
             Parameters:
 - ***components (List[Component]): Components to be rotated (optional)** -> `List[Component]`
 
-- **rotate_right(self, *components: 'Component') -> 'bool'** -> `bool`
+- **rotate_right(self, *components: Component) -> bool** -> `bool`
             Rotate the given list of components, or the currently selected
             components if no components are given, 90 degrees clockwise.
 
             Parameters:
 - ***components (List[Component]): Components to be rotated (optional)** -> `List[Component]`
 
-- **select(self, *components: 'Component')**
+- **select(self, *components: Component)**
             Place specific components in the current selection.
 
             Parameters:
@@ -339,12 +334,12 @@ Python Library Documentation: module mhi.pscad.canvas in mhi.pscad
 
 - **select_components(**
             self,
-            x1: 'int',
-            y1: 'int',
-            x2: 'Optional[int]' = None,
-            y2: 'Optional[int]' = None,
-            width: 'Optional[int]' = None,
-            height: 'Optional[int]' = None
+            x1: int,
+            y1: int,
+            x2: Optional[int] = None,
+            y2: Optional[int] = None,
+            width: Optional[int] = None,
+            height: Optional[int] = None
         )
             Select components in a rectangular area.
 
@@ -363,7 +358,7 @@ Python Library Documentation: module mhi.pscad.canvas in mhi.pscad
 - **width (int): width of the selection region (optional)**
 - **height (int): height of the selection region (optional)**
 
-- **selection(self) -> 'List[Component]'** `@requires` -> `List[Component]`
+- **selection(self) -> List[Component]** `@requires` -> `List[Component]`
             Retrieve the components which are selected on the canvas.
 
             .. versionadded:: 2.3.2
@@ -387,11 +382,6 @@ Python Library Documentation: module mhi.pscad.canvas in mhi.pscad
             .. versionadded:: 2.9.6
 
         ----------------------------------------------------------------------
-        Data and other attributes defined here:
-
-        __annotations__ = {}
-
-        ----------------------------------------------------------------------
         Readonly properties inherited from mhi.pscad.remote.Remotable:
 
         main
@@ -410,8 +400,8 @@ Python Library Documentation: module mhi.pscad.canvas in mhi.pscad
 - **__init__(**
             self,
             *,
-            _ctx: 'Optional[Context]' = None,
-            _ident: 'Optional[Dict[str, Any]]' = None
+            _ctx: Optional[Context] = None,
+            _ident: Optional[Dict[str, Any]] = None
         )
 - **Initialize self.  See help(type(self)) for accurate signature.**
 
@@ -427,11 +417,16 @@ Python Library Documentation: module mhi.pscad.canvas in mhi.pscad
         __weakref__
             list of weak references to the object
 
+        ----------------------------------------------------------------------
+        Data and other attributes inherited from mhi.common.remote.Remotable:
+
+        __annotations__ = {}
+
 ### class UserCanvas(Canvas)
 - **UserCanvas(**
             *,
-            _ctx: 'Optional[Context]' = None,
-            _ident: 'Optional[Dict[str, Any]]' = None
+            _ctx: Optional[Context] = None,
+            _ident: Optional[Dict[str, Any]] = None
         )
 
         A user canvas is a surface where components can be placed and arranged.
@@ -457,7 +452,7 @@ Python Library Documentation: module mhi.pscad.canvas in mhi.pscad
 
 - **cable = user_cmp(self, iid)** `@deprecated`
 
-- **compose_wires(self, *wires: 'Wire') -> 'bool'** -> `bool`
+- **compose_wires(self, *wires: Wire) -> bool** -> `bool`
             Join connected wire segments into multisegment wires
 
 - **copy_as_bitmap(self)** `@deprecated`
@@ -468,11 +463,11 @@ Python Library Documentation: module mhi.pscad.canvas in mhi.pscad
 
 - **create_annotation(** -> `Component`
             self,
-            x: 'int' = 1,
-            y: 'int' = 1,
-            line1: 'Optional[str]' = None,
-            line2: 'Optional[str]' = None
-        ) -> 'Component'
+            x: int = 1,
+            y: int = 1,
+            line1: Optional[str] = None,
+            line2: Optional[str] = None
+        ) -> Component
             Create a two-line annotation component.
 
             Parameters:
@@ -487,7 +482,7 @@ Python Library Documentation: module mhi.pscad.canvas in mhi.pscad
             .. versionchanged:: 2.1
                 Added ``line1`` and ``line2`` parameters
 
-- **create_bookmark_link(self, bookmark: 'int', x: 'int' = 1, y: 'int' = 1) -> 'Component'** -> `Component`
+- **create_bookmark_link(self, bookmark: int, x: int = 1, y: int = 1) -> Component** -> `Component`
             Create a bookmark link, which can be used to navigate to a bookmarked
             location.
 
@@ -499,7 +494,7 @@ Python Library Documentation: module mhi.pscad.canvas in mhi.pscad
             Returns:
                 Component: the bookmark link component
 
-- **create_bus(self, *vertices: 'Tuple[int, int]') -> 'Bus'** -> `Bus`
+- **create_bus(self, *vertices: Tuple[int, int]) -> Bus** -> `Bus`
 - **create_bus( (x1,y1), (x2,y2), [... (xn,yn) ...])** -> `Bus`
             Create a new bus and add it to the canvas.
 
@@ -522,12 +517,12 @@ Python Library Documentation: module mhi.pscad.canvas in mhi.pscad
 
 - **create_connection(** -> `Optional[str]`
             self,
-            p1: 'AnyPoint',
-            p2: 'AnyPoint',
+            p1: AnyPoint,
+            p2: AnyPoint,
             *,
-            label: 'Optional[str]' = None,
-            electrical: 'Optional[bool]' = None
-        ) -> 'Optional[str]'
+            label: Optional[str] = None,
+            electrical: Optional[bool] = None
+        ) -> Optional[str]
             Creates a connection between two points. If ``label`` is not
 - **provided (default), the connection is made using wires; otherwise,**
             ``electrical`` must be set to True/False to create electrical/data
@@ -560,10 +555,10 @@ Python Library Documentation: module mhi.pscad.canvas in mhi.pscad
 
 - **create_control_frame(** -> `Tuple[ControlFrame, List[Control]]`
             self,
-            x: 'int' = 1,
-            y: 'int' = 1,
-            *control_components: 'Component'
-        ) -> 'Tuple[ControlFrame, List[Control]]'
+            x: int = 1,
+            y: int = 1,
+            *control_components: Component
+        ) -> Tuple[ControlFrame, List[Control]]
             Create a control frame
 
             Parameters:
@@ -575,12 +570,12 @@ Python Library Documentation: module mhi.pscad.canvas in mhi.pscad
 
 - **create_divider(** -> `Divider`
             self,
-            x: 'int' = 1,
-            y: 'int' = 1,
+            x: int = 1,
+            y: int = 1,
             *,
-            width: 'Optional[int]' = None,
-            height: 'Optional[int]' = None
-        ) -> 'Divider'
+            width: Optional[int] = None,
+            height: Optional[int] = None
+        ) -> Divider
             Create a divider component.
 
             Parameters:
@@ -595,7 +590,7 @@ Python Library Documentation: module mhi.pscad.canvas in mhi.pscad
             .. versionchanged:: 2.1
                 Added ``line1`` and ``line2`` parameters
 
-- **create_divider_box(self, x: 'int', y: 'int', width: 'int', height: 'int') -> 'Tuple[Divider, Divider, Divider, Divider]'** -> `Tuple[Divider, Divider, Divider, Divider]`
+- **create_divider_box(self, x: int, y: int, width: int, height: int) -> Tuple[Divider, Divider, Divider, Divider]** -> `Tuple[Divider, Divider, Divider, Divider]`
             Create a rectangular box using a divider for each side
 
             Parameters:
@@ -611,11 +606,11 @@ Python Library Documentation: module mhi.pscad.canvas in mhi.pscad
 
 - **create_file(** -> `Component`
             self,
-            x: 'int' = 1,
-            y: 'int' = 1,
-            name: 'Optional[str]' = None,
-            path: 'Optional[str]' = None
-        ) -> 'Component'
+            x: int = 1,
+            y: int = 1,
+            name: Optional[str] = None,
+            path: Optional[str] = None
+        ) -> Component
             Create a file link component
 
             Parameters:
@@ -629,7 +624,7 @@ Python Library Documentation: module mhi.pscad.canvas in mhi.pscad
 
             .. seealso:: :py:meth:`.Project.create_resource`
 
-- **create_graph(self, pgb: 'Optional[PGB]' = None, x: 'int' = 1, y: 'int' = 1) -> 'Tuple[GraphFrame, OverlayGraph, Optional[Curve]]'** -> `Tuple[GraphFrame, OverlayGraph, Optional[Curve]]`
+- **create_graph(self, pgb: Optional[PGB] = None, x: int = 1, y: int = 1) -> Tuple[GraphFrame, OverlayGraph, Optional[Curve]]** -> `Tuple[GraphFrame, OverlayGraph, Optional[Curve]]`
             Create an Graph Frame containing an Overlay Graph with a Signal
 
             Parameters:
@@ -640,7 +635,7 @@ Python Library Documentation: module mhi.pscad.canvas in mhi.pscad
             Returns:
                 Tuple[GraphFrame,OverlayGraph,Curve]: The new graph frame,             Overlay Graph, and Curve.
 
-- **create_graph_frame(self, x: 'int' = 1, y: 'int' = 1) -> 'GraphFrame'** -> `GraphFrame`
+- **create_graph_frame(self, x: int = 1, y: int = 1) -> GraphFrame** -> `GraphFrame`
             Create an empty Graph Frame
 
             Parameters:
@@ -650,7 +645,7 @@ Python Library Documentation: module mhi.pscad.canvas in mhi.pscad
             Returns:
                 GraphFrame: The graph frame
 
-- **create_group_box(self, x: 'int' = 1, y: 'int' = 1, name: 'Optional[str]' = None) -> 'GroupBox'** `@requires` -> `GroupBox`
+- **create_group_box(self, x: int = 1, y: int = 1, name: Optional[str] = None) -> GroupBox** `@requires` -> `GroupBox`
             Create a group box.
 
             Parameters:
@@ -665,11 +660,11 @@ Python Library Documentation: module mhi.pscad.canvas in mhi.pscad
 
 - **create_hyper_link(** -> `Component`
             self,
-            x: 'int' = 1,
-            y: 'int' = 1,
-            name: 'Optional[str]' = None,
-            hyperlink: 'Optional[str]' = None
-        ) -> 'Component'
+            x: int = 1,
+            y: int = 1,
+            name: Optional[str] = None,
+            hyperlink: Optional[str] = None
+        ) -> Component
             Create a hyper-link component
 
             Parameters:
@@ -681,7 +676,7 @@ Python Library Documentation: module mhi.pscad.canvas in mhi.pscad
             Returns:
                 Component: the hyper-link component
 
-- **create_oscilloscope(self, pgb: 'PGB', x: 'int' = 1, y: 'int' = 1) -> 'Oscilloscope'** -> `Oscilloscope`
+- **create_oscilloscope(self, pgb: PGB, x: int = 1, y: int = 1) -> Oscilloscope** -> `Oscilloscope`
             Create an oscilloscope from a PGB component
 
             Parameters:
@@ -694,11 +689,11 @@ Python Library Documentation: module mhi.pscad.canvas in mhi.pscad
 
 - **create_phasor_meter(** -> `PhasorMeter`
             self,
-            pgb: 'PGB',
-            x: 'int' = 1,
-            y: 'int' = 1,
-            angle: 'Optional[str]' = None
-        ) -> 'PhasorMeter'
+            pgb: PGB,
+            x: int = 1,
+            y: int = 1,
+            angle: Optional[str] = None
+        ) -> PhasorMeter
             Create a phasor meter from a PGB component
 
             Parameters:
@@ -710,7 +705,7 @@ Python Library Documentation: module mhi.pscad.canvas in mhi.pscad
             Returns:
                 PhasorMeter: the phasor meter component.
 
-- **create_poly_meter(self, pgb: 'Optional[PGB]' = None, x: 'int' = 1, y: 'int' = 1) -> 'PolyMeter'** -> `PolyMeter`
+- **create_poly_meter(self, pgb: Optional[PGB] = None, x: int = 1, y: int = 1) -> PolyMeter** -> `PolyMeter`
             Create a polymeter from a PGB component
 
             Parameters:
@@ -723,11 +718,11 @@ Python Library Documentation: module mhi.pscad.canvas in mhi.pscad
 
 - **create_polygraph(** -> `Tuple[GraphFrame, PolyGraph, Optional[Curve]]`
             self,
-            pgb: 'Optional[PGB]' = None,
-            x: 'int' = 1,
-            y: 'int' = 1,
-            digital: 'bool' = False
-        ) -> 'Tuple[GraphFrame, PolyGraph, Optional[Curve]]'
+            pgb: Optional[PGB] = None,
+            x: int = 1,
+            y: int = 1,
+            digital: bool = False
+        ) -> Tuple[GraphFrame, PolyGraph, Optional[Curve]]
             Create an Stacked PolyGraph with a Signal
 
             Parameters:
@@ -739,12 +734,7 @@ Python Library Documentation: module mhi.pscad.canvas in mhi.pscad
             Returns:
                 Tuple[GraphFrame,PolyGraph,Curve]: The new graph frame,             PolyGraph, and Curve.
 
-- **create_sticky_note(** -> `Sticky`
-            self,
-            x: 'int' = 1,
-            y: 'int' = 1,
-            text: 'Optional[str]' = None
-        ) -> 'Sticky'
+- **create_sticky_note(self, x: int = 1, y: int = 1, text: Optional[str] = None) -> Sticky** -> `Sticky`
             Create a sticky note.
 
             Parameters:
@@ -755,7 +745,7 @@ Python Library Documentation: module mhi.pscad.canvas in mhi.pscad
             Returns:
                 Sticky: The created sticky note.
 
-- **create_sticky_wire(self, *vertices: 'Tuple[int, int]') -> 'StickyWire'** -> `StickyWire`
+- **create_sticky_wire(self, *vertices: Tuple[int, int]) -> StickyWire** -> `StickyWire`
 - **create_sticky_wire( (x1,y1), (x2,y2), [... (xn,yn) ...])** -> `StickyWire`
             Create a sticky wire between two or more vertices.
 
@@ -769,7 +759,7 @@ Python Library Documentation: module mhi.pscad.canvas in mhi.pscad
             Returns:
                 StickyWire: The created sticky wire.
 
-- **create_wire(self, *vertices: 'Tuple[int, int]') -> 'Wire'** -> `Wire`
+- **create_wire(self, *vertices: Tuple[int, int]) -> Wire** -> `Wire`
 - **create_wire( (x1,y1), (x2,y2), [... (xn,yn) ...])** -> `Wire`
             Create a new wire and add it to the canvas.
 
@@ -791,7 +781,7 @@ Python Library Documentation: module mhi.pscad.canvas in mhi.pscad
             .. versionchanged:: 2.0
 - **Replaces ``UserCanvas.add_wire(...)``** `@deprecated`
 
-- **create_xy_plot(self, x: 'int' = 1, y: 'int' = 1, polar: 'bool' = False) -> 'PlotFrame'** -> `PlotFrame`
+- **create_xy_plot(self, x: int = 1, y: int = 1, polar: bool = False) -> PlotFrame** -> `PlotFrame`
             Create an XY PlotFrame
 
             Parameters:
@@ -804,12 +794,12 @@ Python Library Documentation: module mhi.pscad.canvas in mhi.pscad
 
 - **cut_controls(self, *controls)**
 
-- **decompose_wires(self, *wires: 'Wire') -> 'bool'** -> `bool`
+- **decompose_wires(self, *wires: Wire) -> bool** -> `bool`
             Split all of the segments of the wires into multiple simple wires
 
 - **graph_frame = user_cmp(self, iid)** `@deprecated`
 
-- **group(self, *components: 'Component') -> 'Component'** `@rmi` -> `Component`
+- **group(self, *components: Component) -> Component** `@rmi` -> `Component`
             Group the given list of components into one group component.
 
             Parameters:
@@ -820,7 +810,7 @@ Python Library Documentation: module mhi.pscad.canvas in mhi.pscad
 
 - **overlay_graph = _get_by_last_id(self, *iid)** `@deprecated`
 
-- **parameters(self, parameters: 'Optional[Parameters]' = None, **kwargs) -> 'Optional[Parameters]'** -> `Optional[Parameters]`
+- **parameters(self, parameters: Optional[Parameters] = None, **kwargs) -> Optional[Parameters]** -> `Optional[Parameters]`
             Get or set User Canvas parameters
 
             .. table:: User Canvas Settings
@@ -844,13 +834,13 @@ Python Library Documentation: module mhi.pscad.canvas in mhi.pscad
 
             .. versionadded:: 2.1
 
-- **paste_rename(self, mouse_x: 'int', mouse_y: 'int') -> 'bool'** -> `bool`
+- **paste_rename(self, mouse_x: int, mouse_y: int) -> bool** -> `bool`
             Paste the contents of the clipboard and rename all the components
             to unique names.  All references to the original name will be
 
             .. versionadded:: 2.0
 
-- **paste_transfer(self, mouse_x: 'int', mouse_y: 'int') -> 'bool'** -> `bool`
+- **paste_transfer(self, mouse_x: int, mouse_y: int) -> bool** -> `bool`
             Paste a component and its definition from the clipboard,
             so it can be used in this project.
 
@@ -877,11 +867,6 @@ Python Library Documentation: module mhi.pscad.canvas in mhi.pscad
             .. versionadded:: 3.0.9
 
         ----------------------------------------------------------------------
-        Data and other attributes defined here:
-
-        __annotations__ = {}
-
-        ----------------------------------------------------------------------
         Methods inherited from Canvas:
 
 - **__repr__(self)**
@@ -889,13 +874,13 @@ Python Library Documentation: module mhi.pscad.canvas in mhi.pscad
 
 - **add_component(**
             self,
-            library: 'str',
-            name: 'str',
-            x: 'int' = 1,
-            y: 'int' = 1,
-            orient: 'int' = 0,
+            library: str,
+            name: str,
+            x: int = 1,
+            y: int = 1,
+            orient: int = 0,
             **parameters
-        ) -> 'Component'
+        ) -> Component
             Create a new user component and add it to the canvas.
 
             Parameters:
@@ -910,7 +895,7 @@ Python Library Documentation: module mhi.pscad.canvas in mhi.pscad
             .. versionchanged:: 2.0
                 Added ``orient`` and ``**parameters``
 
-- **bounds(self, components: 'Sequence[Component]') -> 'List[Rect]'**
+- **bounds(self, components: Sequence[Component]) -> List[Rect]**
             Return a list of the bounds of the given components.
 
             Equivalent to ``[cmp.bounds for cmp in components]`` but without
@@ -921,12 +906,7 @@ Python Library Documentation: module mhi.pscad.canvas in mhi.pscad
 - **clear_selection(self)**
             Reset the selection so that no components are selected.
 
-- **closest_empty_rect(**
-            self,
-            w: 'int',
-            h: 'int',
-            point: 'Union[Tuple[int, int], Point]'
-        ) -> 'Rect'
+- **closest_empty_rect(self, w: int, h: int, point: Union[Tuple[int, int], Point]) -> Rect**
             Returns an empty rectangle with the size provided, closest to
             the given point.
 
@@ -947,7 +927,7 @@ Python Library Documentation: module mhi.pscad.canvas in mhi.pscad
 
             .. versionadded:: 2.9.6
 
-- **component(self, iid: 'int') -> 'Component'**
+- **component(self, iid: int) -> Component**
             Retrieve a component by ID.
 
             Parameters:
@@ -956,7 +936,7 @@ Python Library Documentation: module mhi.pscad.canvas in mhi.pscad
             .. versionadded:: 2.0
                 This command replaces all of the type specific versions.
 
-- **components(self) -> 'List[Component]'**
+- **components(self) -> List[Component]**
             Get a list of all components on the canvas.
 
 - **This is equivalent to calling ``Project.find_all()``,**
@@ -967,7 +947,7 @@ Python Library Documentation: module mhi.pscad.canvas in mhi.pscad
 
             .. versionadded:: 2.0
 
-- **copy(self, *components: 'Component') -> 'bool'**
+- **copy(self, *components: Component) -> bool**
             Copy the given list of components, or currently selected components
             if no components are given, to the clipboard.
 
@@ -979,12 +959,12 @@ Python Library Documentation: module mhi.pscad.canvas in mhi.pscad
 
 - **create_component(**
             self,
-            defn: 'Union[str, Definition]',
-            x: 'int' = 1,
-            y: 'int' = 1,
-            orient: 'int' = 0,
+            defn: Union[str, Definition],
+            x: int = 1,
+            y: int = 1,
+            orient: int = 0,
             **parameters
-        ) -> 'Component'
+        ) -> Component
             Create a new component and add it to the canvas.
 
             Parameters:
@@ -1002,7 +982,7 @@ Python Library Documentation: module mhi.pscad.canvas in mhi.pscad
             .. versionchanged:: 2.2
                 ``defn`` accepts a :class:`.Definition` or a string.
 
-- **cut(self, *components: 'Component') -> 'bool'**
+- **cut(self, *components: Component) -> bool**
             Cut the given list of components, or currently selected components
             if no components are given, to the clipboard.
 
@@ -1012,7 +992,7 @@ Python Library Documentation: module mhi.pscad.canvas in mhi.pscad
             .. versionchanged:: 2.1
                 Added optional list of ``components``
 
-- **delete(self, *components: 'Component') -> 'bool'**
+- **delete(self, *components: Component) -> bool**
             Delete the given list of components, or currently selected components
             if no components are given.
 
@@ -1022,7 +1002,7 @@ Python Library Documentation: module mhi.pscad.canvas in mhi.pscad
             .. versionchanged:: 2.1
                 Added optional list of ``components``
 
-- **find(self, *names: 'str', layer: 'Optional[str]' = None, **params) -> 'Optional[Component]'**
+- **find(self, *names: str, layer: Optional[str] = None, **params) -> Optional[Component]**
 - **find( [[definition,] name,] [layer=name,] [key=value, ...])**
 
 - **Find the (singular) component that matches the given criteria,**
@@ -1030,7 +1010,7 @@ Python Library Documentation: module mhi.pscad.canvas in mhi.pscad
             Raises an exception if more than one component matches
             the given criteria.
 
-- **find_all(self, *name: 'str', layer: 'Optional[str]' = None, **params) -> 'List[Component]'**
+- **find_all(self, *name: str, layer: Optional[str] = None, **params) -> List[Component]**
 - **find_all( [[definition,] name,] [layer=name,] [key=value, ...])**
 
             Find all components that match the given criteria.
@@ -1065,20 +1045,20 @@ Python Library Documentation: module mhi.pscad.canvas in mhi.pscad
 - **c = find_all('Bus', BaseKV='138') # all Buses with BaseKV="138"**
 - **c = find_all(BaseKV='138')        # all components with BaseKV="138"**
 
-- **find_first(self, *names: 'str', layer: 'Optional[str]' = None, **params) -> 'Optional[Component]'**
+- **find_first(self, *names: str, layer: Optional[str] = None, **params) -> Optional[Component]**
 - **find_first( [[definition,] name,] [layer=name,] [key=value, ...])**
 
             Find the first component that matches the given criteria,
             or ``None`` if no matching component can be found.
 
-- **flip(self, *components: 'Component') -> 'bool'**
+- **flip(self, *components: Component) -> bool**
             Flip the given list of components, or the currently selected
             components if no components are given, along the vertical axis.
 
             Parameters:
 - ***components (List[Component]): Components to be flipped (optional)**
 
-- **get_empty_rects(self, w: 'int', h: 'int') -> 'List[Rect]'**
+- **get_empty_rects(self, w: int, h: int) -> List[Rect]**
             Returns empty rectangle spaces on the canvas.
 
             Parameters
@@ -1098,56 +1078,56 @@ Python Library Documentation: module mhi.pscad.canvas in mhi.pscad
 
 - **list_components(self)**
 
-- **mirror(self, *components: 'Component') -> 'bool'**
+- **mirror(self, *components: Component) -> bool**
             Mirror the given list of components, or the currently selected
             components if no components are given, along the horizontal axis.
 
             Parameters:
 - ***components (List[Component]): Components to be mirrored (optional)**
 
-- **names_in_use(self, defn: 'Optional[str]' = None, **params) -> 'Set[str]'**
+- **names_in_use(self, defn: Optional[str] = None, **params) -> Set[str]**
             Return the set of "Name" parameter values, for all components on the
             canvas that have a "Name" parameter.
 
             .. versionadded:: 3.0.0
 
-- **navigate_up(self) -> 'None'**
+- **navigate_up(self) -> None**
             Navigate to parent page
 
-- **parameter_range(self, parameter: 'str') -> 'ParameterRange'**
+- **parameter_range(self, parameter: str) -> ParameterRange**
             Get legal values for a setting
 
             .. versionadded:: 2.1
 
-- **paste(self, mouse_x: 'int', mouse_y: 'int') -> 'bool'**
+- **paste(self, mouse_x: int, mouse_y: int) -> bool**
             Paste the contents of the clipboard into this canvas at the
             indicated mouse location.
 
             .. versionchanged:: 2.1
                 Added ``mouse_x`` and ``mouse_y``
 
-- **rotate_180(self, *components: 'Component') -> 'bool'**
+- **rotate_180(self, *components: Component) -> bool**
             Rotate the given list of components, or the currently selected
             components if no components are given, 180 degrees.
 
             Parameters:
 - ***components (List[Component]): Components to be rotated (optional)**
 
-- **rotate_left(self, *components: 'Component') -> 'bool'**
+- **rotate_left(self, *components: Component) -> bool**
             Rotate the given list of components, or the currently selected
             components if no components are given, 90 degrees counter-clockwise.
 
             Parameters:
 - ***components (List[Component]): Components to be rotated (optional)**
 
-- **rotate_right(self, *components: 'Component') -> 'bool'**
+- **rotate_right(self, *components: Component) -> bool**
             Rotate the given list of components, or the currently selected
             components if no components are given, 90 degrees clockwise.
 
             Parameters:
 - ***components (List[Component]): Components to be rotated (optional)**
 
-- **select(self, *components: 'Component')**
+- **select(self, *components: Component)**
             Place specific components in the current selection.
 
             Parameters:
@@ -1157,12 +1137,12 @@ Python Library Documentation: module mhi.pscad.canvas in mhi.pscad
 
 - **select_components(**
             self,
-            x1: 'int',
-            y1: 'int',
-            x2: 'Optional[int]' = None,
-            y2: 'Optional[int]' = None,
-            width: 'Optional[int]' = None,
-            height: 'Optional[int]' = None
+            x1: int,
+            y1: int,
+            x2: Optional[int] = None,
+            y2: Optional[int] = None,
+            width: Optional[int] = None,
+            height: Optional[int] = None
         )
             Select components in a rectangular area.
 
@@ -1181,7 +1161,7 @@ Python Library Documentation: module mhi.pscad.canvas in mhi.pscad
 - **width (int): width of the selection region (optional)**
 - **height (int): height of the selection region (optional)**
 
-- **selection(self) -> 'List[Component]'**
+- **selection(self) -> List[Component]**
             Retrieve the components which are selected on the canvas.
 
             .. versionadded:: 2.3.2
@@ -1223,8 +1203,8 @@ Python Library Documentation: module mhi.pscad.canvas in mhi.pscad
 - **__init__(**
             self,
             *,
-            _ctx: 'Optional[Context]' = None,
-            _ident: 'Optional[Dict[str, Any]]' = None
+            _ctx: Optional[Context] = None,
+            _ident: Optional[Dict[str, Any]] = None
         )
 - **Initialize self.  See help(type(self)) for accurate signature.**
 
@@ -1239,6 +1219,11 @@ Python Library Documentation: module mhi.pscad.canvas in mhi.pscad
 
         __weakref__
             list of weak references to the object
+
+        ----------------------------------------------------------------------
+        Data and other attributes inherited from mhi.common.remote.Remotable:
+
+        __annotations__ = {}
 
 ## FUNCTIONS
     warn(message, category=None, stacklevel=1, source=None, *,
@@ -1288,35 +1273,5 @@ Python Library Documentation: module mhi.pscad.canvas in mhi.pscad
 
         To specify a variable-length tuple of homogeneous type, use Tuple[T, ...].
 
-    Union = typing.Union
-        Union type; Union[X, Y] means either X or Y.
-
-        On Python 3.10 and higher, the   operator
-        can also be used to denote unions;
-        X   Y means the same thing to the type checker as Union[X, Y].
-
-        To define a union, use e.g. Union[int, str]. Details:
-        - The arguments must be types and there must be at least one.
-        - None as an argument is a special case and is replaced by
-          type(None).
-        - Unions of unions are flattened, e.g.::
-
-            assert Union[Union[int, str], float] == Union[int, str, float]
-
-        - Unions of a single argument vanish, e.g.::
-
-            assert Union[int] == int  # The constructor actually returns int
-
-        - Redundant arguments are skipped, e.g.::
-
-            assert Union[int, str, int] == Union[int, str]
-
-        - When comparing unions, the argument order is ignored, e.g.::
-
-            assert Union[int, str] == Union[str, int]
-
-        - You cannot subclass or instantiate a union.
-        - You can use Optional[X] as a shorthand for Union[X, None].
-
 ## FILE
-    /home/lua/miniconda/lib/python3.13/site-packages/mhi/pscad/canvas.py
+    c:\users\as0135\appdata\local\programs\python\python314\lib\site-packages\mhi\pscad\canvas.py

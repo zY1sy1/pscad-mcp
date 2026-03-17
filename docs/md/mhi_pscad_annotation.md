@@ -1,6 +1,6 @@
 # Module mhi.pscad.annotation
 
-*Source: /home/lua/miniconda/lib/python3.13/site-packages/mhi/pscad/annotation.py*
+*Source: C:\Users\AS0135\AppData\Local\Programs\Python\Python314\Lib\site-packages\mhi\pscad\annotation.py*
 
 Python Library Documentation: module mhi.pscad.annotation in mhi.pscad
 
@@ -28,8 +28,8 @@ Python Library Documentation: module mhi.pscad.annotation in mhi.pscad
 ### class Divider(mhi.pscad.component.Component)
 - **Divider(**
             *,
-            _ctx: 'Optional[Context]' = None,
-            _ident: 'Optional[Dict[str, Any]]' = None
+            _ctx: Optional[Context] = None,
+            _ident: Optional[Dict[str, Any]] = None
         )
 
         A variable length horizontal or vertical divider that can be added to
@@ -57,11 +57,7 @@ Python Library Documentation: module mhi.pscad.annotation in mhi.pscad
 
         Methods defined here:
 
-- **dashed(**
-            self,
-            weight: Union[str, int, float, NoneType] = None,
-            colour: Optional[str] = None
-        )
+- **dashed(self, weight: Weight = None, colour: Optional[str] = None)**
             Set the divider to a non-3D appearence, with a dashed line style.
             Optionally, change the line weight and colour.
 
@@ -69,11 +65,7 @@ Python Library Documentation: module mhi.pscad.annotation in mhi.pscad
 - **weight: the divider's line weight. (optional)**
 - **colour (str): The divider's line colour. (optional)**
 
-- **dot_dash(**
-            self,
-            weight: Union[str, int, float, NoneType] = None,
-            colour: Optional[str] = None
-        )
+- **dot_dash(self, weight: Weight = None, colour: Optional[str] = None)**
             Set the divider to a non-3D appearence, with a dot-dash line style.
             Optionally, change the line weight and colour.
 
@@ -81,11 +73,7 @@ Python Library Documentation: module mhi.pscad.annotation in mhi.pscad
 - **weight: the divider's line weight. (optional)**
 - **colour (str): The divider's line colour. (optional)**
 
-- **dotted(**
-            self,
-            weight: Union[str, int, float, NoneType] = None,
-            colour: Optional[str] = None
-        )
+- **dotted(self, weight: Weight = None, colour: Optional[str] = None)**
             Set the divider to a non-3D appearence, with a dotted line style.
             Optionally, change the line weight and colour.
 
@@ -96,7 +84,7 @@ Python Library Documentation: module mhi.pscad.annotation in mhi.pscad
 - **flat(** -> `None`
             self,
             style: Optional[str] = None,
-            weight: Union[str, int, float, NoneType] = None,
+            weight: Weight = None,
             colour: Optional[str] = None
         ) -> None
             Set the divider to a non-3D appearence.  Optionally,
@@ -122,11 +110,7 @@ Python Library Documentation: module mhi.pscad.annotation in mhi.pscad
             Parameters:
 - **colour (str): The divider's line colour. (optional)**
 
-- **solid(**
-            self,
-            weight: Union[str, int, float, NoneType] = None,
-            colour: Optional[str] = None
-        )
+- **solid(self, weight: Weight = None, colour: Optional[str] = None)**
             Set the divider to a non-3D appearence, with a solid line style.
             Optionally, change the line weight and colour.
 
@@ -141,17 +125,12 @@ Python Library Documentation: module mhi.pscad.annotation in mhi.pscad
 - **height (int): the height of the divider, in grid units.**
 
         ----------------------------------------------------------------------
-        Data and other attributes defined here:
-
-        __annotations__ = {}
-
-        ----------------------------------------------------------------------
         Methods inherited from mhi.pscad.component.Component:
 
-- **flip(self) -> 'bool'**
+- **flip(self) -> bool**
             Flip the component along the vertical axis
 
-- **is_module(self) -> 'bool'**
+- **is_module(self) -> bool**
             Check to see if this component has its own canvas, with in turn,
             can contain additional components.
 
@@ -163,16 +142,16 @@ Python Library Documentation: module mhi.pscad.annotation in mhi.pscad
                 bool: ``True`` if the component has an internal canvas,
                 ``False`` otherwise.
 
-- **mirror(self) -> 'bool'**
+- **mirror(self) -> bool**
             Mirror the component along the horizontal axis
 
-- **rotate_180(self) -> 'bool'**
+- **rotate_180(self) -> bool**
             Rotate the component 90 degrees to the right
 
-- **rotate_left(self) -> 'bool'**
+- **rotate_left(self) -> bool**
 - **Rotate the component 90 degrees to the left (counter-clockwise)**
 
-- **rotate_right(self) -> 'bool'**
+- **rotate_right(self) -> bool**
 - **Rotate the component 90 degrees to the right (clockwise)**
 
         ----------------------------------------------------------------------
@@ -184,14 +163,14 @@ Python Library Documentation: module mhi.pscad.annotation in mhi.pscad
         ----------------------------------------------------------------------
         Methods inherited from mhi.pscad.component.ZComponent:
 
-- **__getitem__(self, key: 'str') -> 'Any'**
+- **__getitem__(self, key: str) -> Any**
 
 - **__repr__(self)**
 - **Return repr(self).**
 
-- **__setitem__(self, key: 'str', value: 'Any') -> 'None'**
+- **__setitem__(self, key: str, value: Any) -> None**
 
-- **add_to_layer(self, name: 'str') -> 'None'**
+- **add_to_layer(self, name: str) -> None**
             Add this component to the given layer.
 
             The layer must exist, but need not be enabled or visible.
@@ -199,7 +178,7 @@ Python Library Documentation: module mhi.pscad.annotation in mhi.pscad
             Parameters:
 - **name (str): The layer to add the component to.**
 
-- **clone(self, x: 'int', y: 'int') -> 'Component'**
+- **clone(self, x: int, y: int) -> Component**
             Copy this component and place the copy at the given location.
 
             Parameters:
@@ -211,7 +190,7 @@ Python Library Documentation: module mhi.pscad.annotation in mhi.pscad
 
 - **command(self, cmd_name)**
 
-- **custom_state(self, state_name: 'str', state: 'str') -> 'None'**
+- **custom_state(self, state_name: str, state: str) -> None**
             Set a custom layer state for this component.
 
             The component must already be part of a layer, and that layer must
@@ -231,13 +210,13 @@ Python Library Documentation: module mhi.pscad.annotation in mhi.pscad
                 For a three-phased voltage source for instance, the return value
                 changed from ``'master', 'source3'`` to ``'master:source3'``
 
-- **disable(self) -> 'None'**
+- **disable(self) -> None**
             Disable this component.
 
             This component will be disabled regardless of the layer states.
             To re-enable this component use the :meth:`.enable` function.
 
-- **enable(self, enable: 'bool' = True) -> 'None'**
+- **enable(self, enable: bool = True) -> None**
             Enable this component.
 
             With no argument, or if given a `True` value, this will enable a
@@ -247,7 +226,7 @@ Python Library Documentation: module mhi.pscad.annotation in mhi.pscad
             Parameters:
 - **enable (bool): If set to `False`, disables the component (optional)**
 
-- **export_parameters(self, csvfile: 'str') -> 'None'**
+- **export_parameters(self, csvfile: str) -> None**
             Export component parameters to a CSV file
 
             Write component parameters to a two-line CSV file.
@@ -258,7 +237,7 @@ Python Library Documentation: module mhi.pscad.annotation in mhi.pscad
 
 - **get_parameters(self)**
 
-- **import_parameters(self, csvfile: 'str') -> 'None'**
+- **import_parameters(self, csvfile: str) -> None**
             Import component parameters from a CSV file
 
             Read component parameters from a two-line CSV file,
@@ -266,7 +245,7 @@ Python Library Documentation: module mhi.pscad.annotation in mhi.pscad
             contains the parameter values.  The first column represents the
             component identifier and the parameter name must be blank.
 
-- **parameters(self, *, parameters: 'Optional[Parameters]' = None, **kwargs) -> 'Optional[Parameters]'**
+- **parameters(self, *, parameters: Optional[Parameters] = None, **kwargs) -> Optional[Parameters]**
             Set or get the component's parameters.
 
             Parameters:
@@ -277,12 +256,12 @@ Python Library Documentation: module mhi.pscad.annotation in mhi.pscad
 - **A dictionary of parameter values (if no parameters are being set),**
                 or None.
 
-- **project(self) -> 'Project'**
+- **project(self) -> Project**
             The project this component exists in
 
             :type: Project
 
-- **range(self, parameter: 'str') -> 'ParameterRange'**
+- **range(self, parameter: str) -> ParameterRange**
             Get legal values for a parameter
 
             Parameters:
@@ -294,7 +273,7 @@ Python Library Documentation: module mhi.pscad.annotation in mhi.pscad
                 * a ``Tuple[float, float]`` defining minimum & maximum values, or
                 * an exception if the parameter does not have a defined range.
 
-- **remove_from_layer(self, name: 'str') -> 'None'**
+- **remove_from_layer(self, name: str) -> None**
             Remove this component from the given layer.
 
             The layer must exist, but need not be enabled or visible.
@@ -304,21 +283,21 @@ Python Library Documentation: module mhi.pscad.annotation in mhi.pscad
 
 - **set_parameters(self, **parameters)**
 
-- **to_back(self) -> 'bool'**
+- **to_back(self) -> bool**
 - **Put at the start (back) of the Z-Order on the canvas.**
 
-- **to_front(self) -> 'bool'**
+- **to_front(self) -> bool**
 - **Put at the front (end) of the Z-Order on the canvas.**
 
-- **to_next(self) -> 'bool'**
+- **to_next(self) -> bool**
             Move the component one position forward in the Z-Order relative to the
             current Z-Order position.
 
-- **to_prev(self) -> 'bool'**
+- **to_prev(self) -> bool**
             Move the component one position backward in the Z-Order relative to the current
             current Z-Order position.
 
-- **view_parameter_grid(self) -> 'bool'**
+- **view_parameter_grid(self) -> bool**
             View the parameter grid for this component
 
         ----------------------------------------------------------------------
@@ -366,8 +345,8 @@ Python Library Documentation: module mhi.pscad.annotation in mhi.pscad
 - **__init__(**
             self,
             *,
-            _ctx: 'Optional[Context]' = None,
-            _ident: 'Optional[Dict[str, Any]]' = None
+            _ctx: Optional[Context] = None,
+            _ident: Optional[Dict[str, Any]] = None
         )
 - **Initialize self.  See help(type(self)) for accurate signature.**
 
@@ -384,15 +363,20 @@ Python Library Documentation: module mhi.pscad.annotation in mhi.pscad
             list of weak references to the object
 
         ----------------------------------------------------------------------
+        Data and other attributes inherited from mhi.common.remote.Remotable:
+
+        __annotations__ = {}
+
+        ----------------------------------------------------------------------
         Methods inherited from mhi.pscad.component.MovableMixin:
 
-- **copy(self) -> 'bool'**
+- **copy(self) -> bool**
             Copy this component to the clipboard.
 
-- **cut(self) -> 'bool'**
+- **cut(self) -> bool**
             Cut this component to the clipboard
 
-- **delete(self) -> 'bool'**
+- **delete(self) -> bool**
             Delete this component.
 
 - **get_location(self)**
@@ -441,8 +425,8 @@ Python Library Documentation: module mhi.pscad.annotation in mhi.pscad
 ### class GroupBox(mhi.pscad.component.ZComponent, mhi.pscad.component.MovableMixin, mhi.pscad.component.SizeableMixin)
 - **GroupBox(**
             *,
-            _ctx: 'Optional[Context]' = None,
-            _ident: 'Optional[Dict[str, Any]]' = None
+            _ctx: Optional[Context] = None,
+            _ident: Optional[Dict[str, Any]] = None
         )
 
         A group box which may be placed on a user canvas, to visually show
@@ -475,21 +459,16 @@ Python Library Documentation: module mhi.pscad.annotation in mhi.pscad
             mhi.pscad.component.SizeableMixin
             builtins.object
 
-        Data and other attributes defined here:
-
-        __annotations__ = {}
-
-        ----------------------------------------------------------------------
         Methods inherited from mhi.pscad.component.ZComponent:
 
-- **__getitem__(self, key: 'str') -> 'Any'**
+- **__getitem__(self, key: str) -> Any**
 
 - **__repr__(self)**
 - **Return repr(self).**
 
-- **__setitem__(self, key: 'str', value: 'Any') -> 'None'**
+- **__setitem__(self, key: str, value: Any) -> None**
 
-- **add_to_layer(self, name: 'str') -> 'None'**
+- **add_to_layer(self, name: str) -> None**
             Add this component to the given layer.
 
             The layer must exist, but need not be enabled or visible.
@@ -497,7 +476,7 @@ Python Library Documentation: module mhi.pscad.annotation in mhi.pscad
             Parameters:
 - **name (str): The layer to add the component to.**
 
-- **clone(self, x: 'int', y: 'int') -> 'Component'**
+- **clone(self, x: int, y: int) -> Component**
             Copy this component and place the copy at the given location.
 
             Parameters:
@@ -509,7 +488,7 @@ Python Library Documentation: module mhi.pscad.annotation in mhi.pscad
 
 - **command(self, cmd_name)**
 
-- **custom_state(self, state_name: 'str', state: 'str') -> 'None'**
+- **custom_state(self, state_name: str, state: str) -> None**
             Set a custom layer state for this component.
 
             The component must already be part of a layer, and that layer must
@@ -529,13 +508,13 @@ Python Library Documentation: module mhi.pscad.annotation in mhi.pscad
                 For a three-phased voltage source for instance, the return value
                 changed from ``'master', 'source3'`` to ``'master:source3'``
 
-- **disable(self) -> 'None'**
+- **disable(self) -> None**
             Disable this component.
 
             This component will be disabled regardless of the layer states.
             To re-enable this component use the :meth:`.enable` function.
 
-- **enable(self, enable: 'bool' = True) -> 'None'**
+- **enable(self, enable: bool = True) -> None**
             Enable this component.
 
             With no argument, or if given a `True` value, this will enable a
@@ -545,7 +524,7 @@ Python Library Documentation: module mhi.pscad.annotation in mhi.pscad
             Parameters:
 - **enable (bool): If set to `False`, disables the component (optional)**
 
-- **export_parameters(self, csvfile: 'str') -> 'None'**
+- **export_parameters(self, csvfile: str) -> None**
             Export component parameters to a CSV file
 
             Write component parameters to a two-line CSV file.
@@ -556,7 +535,7 @@ Python Library Documentation: module mhi.pscad.annotation in mhi.pscad
 
 - **get_parameters(self)**
 
-- **import_parameters(self, csvfile: 'str') -> 'None'**
+- **import_parameters(self, csvfile: str) -> None**
             Import component parameters from a CSV file
 
             Read component parameters from a two-line CSV file,
@@ -564,7 +543,7 @@ Python Library Documentation: module mhi.pscad.annotation in mhi.pscad
             contains the parameter values.  The first column represents the
             component identifier and the parameter name must be blank.
 
-- **parameters(self, *, parameters: 'Optional[Parameters]' = None, **kwargs) -> 'Optional[Parameters]'**
+- **parameters(self, *, parameters: Optional[Parameters] = None, **kwargs) -> Optional[Parameters]**
             Set or get the component's parameters.
 
             Parameters:
@@ -575,12 +554,12 @@ Python Library Documentation: module mhi.pscad.annotation in mhi.pscad
 - **A dictionary of parameter values (if no parameters are being set),**
                 or None.
 
-- **project(self) -> 'Project'**
+- **project(self) -> Project**
             The project this component exists in
 
             :type: Project
 
-- **range(self, parameter: 'str') -> 'ParameterRange'**
+- **range(self, parameter: str) -> ParameterRange**
             Get legal values for a parameter
 
             Parameters:
@@ -592,7 +571,7 @@ Python Library Documentation: module mhi.pscad.annotation in mhi.pscad
                 * a ``Tuple[float, float]`` defining minimum & maximum values, or
                 * an exception if the parameter does not have a defined range.
 
-- **remove_from_layer(self, name: 'str') -> 'None'**
+- **remove_from_layer(self, name: str) -> None**
             Remove this component from the given layer.
 
             The layer must exist, but need not be enabled or visible.
@@ -602,21 +581,21 @@ Python Library Documentation: module mhi.pscad.annotation in mhi.pscad
 
 - **set_parameters(self, **parameters)**
 
-- **to_back(self) -> 'bool'**
+- **to_back(self) -> bool**
 - **Put at the start (back) of the Z-Order on the canvas.**
 
-- **to_front(self) -> 'bool'**
+- **to_front(self) -> bool**
 - **Put at the front (end) of the Z-Order on the canvas.**
 
-- **to_next(self) -> 'bool'**
+- **to_next(self) -> bool**
             Move the component one position forward in the Z-Order relative to the
             current Z-Order position.
 
-- **to_prev(self) -> 'bool'**
+- **to_prev(self) -> bool**
             Move the component one position backward in the Z-Order relative to the current
             current Z-Order position.
 
-- **view_parameter_grid(self) -> 'bool'**
+- **view_parameter_grid(self) -> bool**
             View the parameter grid for this component
 
         ----------------------------------------------------------------------
@@ -664,8 +643,8 @@ Python Library Documentation: module mhi.pscad.annotation in mhi.pscad
 - **__init__(**
             self,
             *,
-            _ctx: 'Optional[Context]' = None,
-            _ident: 'Optional[Dict[str, Any]]' = None
+            _ctx: Optional[Context] = None,
+            _ident: Optional[Dict[str, Any]] = None
         )
 - **Initialize self.  See help(type(self)) for accurate signature.**
 
@@ -682,15 +661,20 @@ Python Library Documentation: module mhi.pscad.annotation in mhi.pscad
             list of weak references to the object
 
         ----------------------------------------------------------------------
+        Data and other attributes inherited from mhi.common.remote.Remotable:
+
+        __annotations__ = {}
+
+        ----------------------------------------------------------------------
         Methods inherited from mhi.pscad.component.MovableMixin:
 
-- **copy(self) -> 'bool'**
+- **copy(self) -> bool**
             Copy this component to the clipboard.
 
-- **cut(self) -> 'bool'**
+- **cut(self) -> bool**
             Cut this component to the clipboard
 
-- **delete(self) -> 'bool'**
+- **delete(self) -> bool**
             Delete this component.
 
 - **get_location(self)**
@@ -739,9 +723,9 @@ Python Library Documentation: module mhi.pscad.annotation in mhi.pscad
         ----------------------------------------------------------------------
         Methods inherited from mhi.pscad.component.SizeableMixin:
 
-- **get_size(self) -> 'Tuple[int, int]'**
+- **get_size(self) -> Tuple[int, int]**
 
-- **set_size(self, width: 'int', height: 'int') -> 'None'**
+- **set_size(self, width: int, height: int) -> None**
 
         ----------------------------------------------------------------------
         Data descriptors inherited from mhi.pscad.component.SizeableMixin:
@@ -752,8 +736,8 @@ Python Library Documentation: module mhi.pscad.annotation in mhi.pscad
 ### class Sticky(mhi.pscad.component.ZComponent, mhi.pscad.component.MovableMixin, mhi.pscad.component.SizeableMixin)
 - **Sticky(**
             *,
-            _ctx: 'Optional[Context]' = None,
-            _ident: 'Optional[Dict[str, Any]]' = None
+            _ctx: Optional[Context] = None,
+            _ident: Optional[Dict[str, Any]] = None
         )
 
         A text note which may be placed on a user canvas, and which can have
@@ -783,12 +767,7 @@ Python Library Documentation: module mhi.pscad.annotation in mhi.pscad
 
         Methods defined here:
 
-- **arrows(** -> `str`
-            self,
-            *args: str,
-- **add: Union[int, str, Sequence[str]] = (),**
-- **remove: Union[int, str, Sequence[str]] = ()**
-        ) -> str
+- **arrows(self, *args: str, add: Directions = (), remove: Directions = ()) -> str** -> `str`
             Get or set the arrows on the Text Area.
 
             With no arguments, the current arrows are returned as a string.
@@ -827,21 +806,16 @@ Python Library Documentation: module mhi.pscad.annotation in mhi.pscad
             Text in the text area
 
         ----------------------------------------------------------------------
-        Data and other attributes defined here:
-
-        __annotations__ = {}
-
-        ----------------------------------------------------------------------
         Methods inherited from mhi.pscad.component.ZComponent:
 
-- **__getitem__(self, key: 'str') -> 'Any'**
+- **__getitem__(self, key: str) -> Any**
 
 - **__repr__(self)**
 - **Return repr(self).**
 
-- **__setitem__(self, key: 'str', value: 'Any') -> 'None'**
+- **__setitem__(self, key: str, value: Any) -> None**
 
-- **add_to_layer(self, name: 'str') -> 'None'**
+- **add_to_layer(self, name: str) -> None**
             Add this component to the given layer.
 
             The layer must exist, but need not be enabled or visible.
@@ -849,7 +823,7 @@ Python Library Documentation: module mhi.pscad.annotation in mhi.pscad
             Parameters:
 - **name (str): The layer to add the component to.**
 
-- **clone(self, x: 'int', y: 'int') -> 'Component'**
+- **clone(self, x: int, y: int) -> Component**
             Copy this component and place the copy at the given location.
 
             Parameters:
@@ -861,7 +835,7 @@ Python Library Documentation: module mhi.pscad.annotation in mhi.pscad
 
 - **command(self, cmd_name)**
 
-- **custom_state(self, state_name: 'str', state: 'str') -> 'None'**
+- **custom_state(self, state_name: str, state: str) -> None**
             Set a custom layer state for this component.
 
             The component must already be part of a layer, and that layer must
@@ -881,13 +855,13 @@ Python Library Documentation: module mhi.pscad.annotation in mhi.pscad
                 For a three-phased voltage source for instance, the return value
                 changed from ``'master', 'source3'`` to ``'master:source3'``
 
-- **disable(self) -> 'None'**
+- **disable(self) -> None**
             Disable this component.
 
             This component will be disabled regardless of the layer states.
             To re-enable this component use the :meth:`.enable` function.
 
-- **enable(self, enable: 'bool' = True) -> 'None'**
+- **enable(self, enable: bool = True) -> None**
             Enable this component.
 
             With no argument, or if given a `True` value, this will enable a
@@ -897,7 +871,7 @@ Python Library Documentation: module mhi.pscad.annotation in mhi.pscad
             Parameters:
 - **enable (bool): If set to `False`, disables the component (optional)**
 
-- **export_parameters(self, csvfile: 'str') -> 'None'**
+- **export_parameters(self, csvfile: str) -> None**
             Export component parameters to a CSV file
 
             Write component parameters to a two-line CSV file.
@@ -908,7 +882,7 @@ Python Library Documentation: module mhi.pscad.annotation in mhi.pscad
 
 - **get_parameters(self)**
 
-- **import_parameters(self, csvfile: 'str') -> 'None'**
+- **import_parameters(self, csvfile: str) -> None**
             Import component parameters from a CSV file
 
             Read component parameters from a two-line CSV file,
@@ -916,7 +890,7 @@ Python Library Documentation: module mhi.pscad.annotation in mhi.pscad
             contains the parameter values.  The first column represents the
             component identifier and the parameter name must be blank.
 
-- **parameters(self, *, parameters: 'Optional[Parameters]' = None, **kwargs) -> 'Optional[Parameters]'**
+- **parameters(self, *, parameters: Optional[Parameters] = None, **kwargs) -> Optional[Parameters]**
             Set or get the component's parameters.
 
             Parameters:
@@ -927,12 +901,12 @@ Python Library Documentation: module mhi.pscad.annotation in mhi.pscad
 - **A dictionary of parameter values (if no parameters are being set),**
                 or None.
 
-- **project(self) -> 'Project'**
+- **project(self) -> Project**
             The project this component exists in
 
             :type: Project
 
-- **range(self, parameter: 'str') -> 'ParameterRange'**
+- **range(self, parameter: str) -> ParameterRange**
             Get legal values for a parameter
 
             Parameters:
@@ -944,7 +918,7 @@ Python Library Documentation: module mhi.pscad.annotation in mhi.pscad
                 * a ``Tuple[float, float]`` defining minimum & maximum values, or
                 * an exception if the parameter does not have a defined range.
 
-- **remove_from_layer(self, name: 'str') -> 'None'**
+- **remove_from_layer(self, name: str) -> None**
             Remove this component from the given layer.
 
             The layer must exist, but need not be enabled or visible.
@@ -954,21 +928,21 @@ Python Library Documentation: module mhi.pscad.annotation in mhi.pscad
 
 - **set_parameters(self, **parameters)**
 
-- **to_back(self) -> 'bool'**
+- **to_back(self) -> bool**
 - **Put at the start (back) of the Z-Order on the canvas.**
 
-- **to_front(self) -> 'bool'**
+- **to_front(self) -> bool**
 - **Put at the front (end) of the Z-Order on the canvas.**
 
-- **to_next(self) -> 'bool'**
+- **to_next(self) -> bool**
             Move the component one position forward in the Z-Order relative to the
             current Z-Order position.
 
-- **to_prev(self) -> 'bool'**
+- **to_prev(self) -> bool**
             Move the component one position backward in the Z-Order relative to the current
             current Z-Order position.
 
-- **view_parameter_grid(self) -> 'bool'**
+- **view_parameter_grid(self) -> bool**
             View the parameter grid for this component
 
         ----------------------------------------------------------------------
@@ -1016,8 +990,8 @@ Python Library Documentation: module mhi.pscad.annotation in mhi.pscad
 - **__init__(**
             self,
             *,
-            _ctx: 'Optional[Context]' = None,
-            _ident: 'Optional[Dict[str, Any]]' = None
+            _ctx: Optional[Context] = None,
+            _ident: Optional[Dict[str, Any]] = None
         )
 - **Initialize self.  See help(type(self)) for accurate signature.**
 
@@ -1034,15 +1008,20 @@ Python Library Documentation: module mhi.pscad.annotation in mhi.pscad
             list of weak references to the object
 
         ----------------------------------------------------------------------
+        Data and other attributes inherited from mhi.common.remote.Remotable:
+
+        __annotations__ = {}
+
+        ----------------------------------------------------------------------
         Methods inherited from mhi.pscad.component.MovableMixin:
 
-- **copy(self) -> 'bool'**
+- **copy(self) -> bool**
             Copy this component to the clipboard.
 
-- **cut(self) -> 'bool'**
+- **cut(self) -> bool**
             Cut this component to the clipboard
 
-- **delete(self) -> 'bool'**
+- **delete(self) -> bool**
             Delete this component.
 
 - **get_location(self)**
@@ -1091,9 +1070,9 @@ Python Library Documentation: module mhi.pscad.annotation in mhi.pscad
         ----------------------------------------------------------------------
         Methods inherited from mhi.pscad.component.SizeableMixin:
 
-- **get_size(self) -> 'Tuple[int, int]'**
+- **get_size(self) -> Tuple[int, int]**
 
-- **set_size(self, width: 'int', height: 'int') -> 'None'**
+- **set_size(self, width: int, height: int) -> None**
 
         ----------------------------------------------------------------------
         Data descriptors inherited from mhi.pscad.component.SizeableMixin:
@@ -1102,7 +1081,7 @@ Python Library Documentation: module mhi.pscad.annotation in mhi.pscad
             Set/get width & height of a sizeable component
 
 ## DATA
-    Directions = typing.Union[int, str, typing.Sequence[str]]
+    Directions = int   str   typing.Sequence[str]
     LOG = <Logger mhi.pscad.annotation (INFO)>
     Optional = typing.Optional
         Optional[X] is equivalent to Union[X, None].
@@ -1110,37 +1089,7 @@ Python Library Documentation: module mhi.pscad.annotation in mhi.pscad
     Sequence = typing.Sequence
         A generic version of collections.abc.Sequence.
 
-    Union = typing.Union
-        Union type; Union[X, Y] means either X or Y.
-
-        On Python 3.10 and higher, the   operator
-        can also be used to denote unions;
-        X   Y means the same thing to the type checker as Union[X, Y].
-
-        To define a union, use e.g. Union[int, str]. Details:
-        - The arguments must be types and there must be at least one.
-        - None as an argument is a special case and is replaced by
-          type(None).
-        - Unions of unions are flattened, e.g.::
-
-            assert Union[Union[int, str], float] == Union[int, str, float]
-
-        - Unions of a single argument vanish, e.g.::
-
-            assert Union[int] == int  # The constructor actually returns int
-
-        - Redundant arguments are skipped, e.g.::
-
-            assert Union[int, str, int] == Union[int, str]
-
-        - When comparing unions, the argument order is ignored, e.g.::
-
-            assert Union[int, str] == Union[str, int]
-
-        - You cannot subclass or instantiate a union.
-        - You can use Optional[X] as a shorthand for Union[X, None].
-
-    Weight = typing.Union[str, int, float, NoneType]
+    Weight = str   int   float   None
 
 ## FILE
-    /home/lua/miniconda/lib/python3.13/site-packages/mhi/pscad/annotation.py
+    c:\users\as0135\appdata\local\programs\python\python314\lib\site-packages\mhi\pscad\annotation.py

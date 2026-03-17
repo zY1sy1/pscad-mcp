@@ -1,6 +1,6 @@
 # Module mhi.pscad.component
 
-*Source: /home/lua/miniconda/lib/python3.13/site-packages/mhi/pscad/component.py*
+*Source: C:\Users\AS0135\AppData\Local\Programs\Python\Python314\Lib\site-packages\mhi\pscad\component.py*
 
 Python Library Documentation: module mhi.pscad.component in mhi.pscad
 
@@ -31,8 +31,8 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
 ### class ACLine(Wire, ModuleMixin)
 - **ACLine(**
             *,
-            _ctx: 'Optional[Context]' = None,
-            _ident: 'Optional[Dict[str, Any]]' = None
+            _ctx: Optional[Context] = None,
+            _ident: Optional[Dict[str, Any]] = None
         )
 
 - **Travelling Wave Model lines (T-Line & Cables)**
@@ -53,13 +53,8 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
 - **__repr__(self)**
 - **Return repr(self).**
 
-- **compile(self) -> 'None'** -> `None`
+- **compile(self) -> None** -> `None`
             Solve the constants for this T-Line/Cable page
-
-        ----------------------------------------------------------------------
-        Data and other attributes defined here:
-
-        __annotations__ = {}
 
         ----------------------------------------------------------------------
         Methods inherited from Wire:
@@ -67,13 +62,13 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
 - **decompose(self)**
             Break the wire down into deperate wires
 
-- **endpoints(self) -> 'Tuple[Point, Point]'**
+- **endpoints(self) -> Tuple[Point, Point]**
             Get the end-points of the wire.  Internal vertices are not returned.
 
             Returns:
                 List[Point]: The wire's end-points
 
-- **vertices(self, *vertices: 'AnyPoint') -> 'List[Point]'**
+- **vertices(self, *vertices: AnyPoint) -> List[Point]**
 - **Wire.vertices([vertices])**
 
             Set or get the vertices of the wire
@@ -87,10 +82,10 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
         ----------------------------------------------------------------------
         Methods inherited from Component:
 
-- **flip(self) -> 'bool'**
+- **flip(self) -> bool**
             Flip the component along the vertical axis
 
-- **is_module(self) -> 'bool'**
+- **is_module(self) -> bool**
             Check to see if this component has its own canvas, with in turn,
             can contain additional components.
 
@@ -102,16 +97,16 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
                 bool: ``True`` if the component has an internal canvas,
                 ``False`` otherwise.
 
-- **mirror(self) -> 'bool'**
+- **mirror(self) -> bool**
             Mirror the component along the horizontal axis
 
-- **rotate_180(self) -> 'bool'**
+- **rotate_180(self) -> bool**
             Rotate the component 90 degrees to the right
 
-- **rotate_left(self) -> 'bool'**
+- **rotate_left(self) -> bool**
 - **Rotate the component 90 degrees to the left (counter-clockwise)**
 
-- **rotate_right(self) -> 'bool'**
+- **rotate_right(self) -> bool**
 - **Rotate the component 90 degrees to the right (clockwise)**
 
         ----------------------------------------------------------------------
@@ -123,7 +118,7 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
         ----------------------------------------------------------------------
         Methods inherited from ModuleMixin:
 
-- **canvas(self) -> 'Canvas'**
+- **canvas(self) -> Canvas**
             Get the module's canvas
 
             Returns:
@@ -138,11 +133,11 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
         ----------------------------------------------------------------------
         Methods inherited from ZComponent:
 
-- **__getitem__(self, key: 'str') -> 'Any'**
+- **__getitem__(self, key: str) -> Any**
 
-- **__setitem__(self, key: 'str', value: 'Any') -> 'None'**
+- **__setitem__(self, key: str, value: Any) -> None**
 
-- **add_to_layer(self, name: 'str') -> 'None'**
+- **add_to_layer(self, name: str) -> None**
             Add this component to the given layer.
 
             The layer must exist, but need not be enabled or visible.
@@ -150,7 +145,7 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
             Parameters:
 - **name (str): The layer to add the component to.**
 
-- **clone(self, x: 'int', y: 'int') -> 'Component'**
+- **clone(self, x: int, y: int) -> Component**
             Copy this component and place the copy at the given location.
 
             Parameters:
@@ -162,7 +157,7 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
 
 - **command(self, cmd_name)**
 
-- **custom_state(self, state_name: 'str', state: 'str') -> 'None'**
+- **custom_state(self, state_name: str, state: str) -> None**
             Set a custom layer state for this component.
 
             The component must already be part of a layer, and that layer must
@@ -182,13 +177,13 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
                 For a three-phased voltage source for instance, the return value
                 changed from ``'master', 'source3'`` to ``'master:source3'``
 
-- **disable(self) -> 'None'**
+- **disable(self) -> None**
             Disable this component.
 
             This component will be disabled regardless of the layer states.
             To re-enable this component use the :meth:`.enable` function.
 
-- **enable(self, enable: 'bool' = True) -> 'None'**
+- **enable(self, enable: bool = True) -> None**
             Enable this component.
 
             With no argument, or if given a `True` value, this will enable a
@@ -198,7 +193,7 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
             Parameters:
 - **enable (bool): If set to `False`, disables the component (optional)**
 
-- **export_parameters(self, csvfile: 'str') -> 'None'**
+- **export_parameters(self, csvfile: str) -> None**
             Export component parameters to a CSV file
 
             Write component parameters to a two-line CSV file.
@@ -209,7 +204,7 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
 
 - **get_parameters(self)**
 
-- **import_parameters(self, csvfile: 'str') -> 'None'**
+- **import_parameters(self, csvfile: str) -> None**
             Import component parameters from a CSV file
 
             Read component parameters from a two-line CSV file,
@@ -217,7 +212,7 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
             contains the parameter values.  The first column represents the
             component identifier and the parameter name must be blank.
 
-- **parameters(self, *, parameters: 'Optional[Parameters]' = None, **kwargs) -> 'Optional[Parameters]'**
+- **parameters(self, *, parameters: Optional[Parameters] = None, **kwargs) -> Optional[Parameters]**
             Set or get the component's parameters.
 
             Parameters:
@@ -228,12 +223,12 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
 - **A dictionary of parameter values (if no parameters are being set),**
                 or None.
 
-- **project(self) -> 'Project'**
+- **project(self) -> Project**
             The project this component exists in
 
             :type: Project
 
-- **range(self, parameter: 'str') -> 'ParameterRange'**
+- **range(self, parameter: str) -> ParameterRange**
             Get legal values for a parameter
 
             Parameters:
@@ -245,7 +240,7 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
                 * a ``Tuple[float, float]`` defining minimum & maximum values, or
                 * an exception if the parameter does not have a defined range.
 
-- **remove_from_layer(self, name: 'str') -> 'None'**
+- **remove_from_layer(self, name: str) -> None**
             Remove this component from the given layer.
 
             The layer must exist, but need not be enabled or visible.
@@ -255,21 +250,21 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
 
 - **set_parameters(self, **parameters)**
 
-- **to_back(self) -> 'bool'**
+- **to_back(self) -> bool**
 - **Put at the start (back) of the Z-Order on the canvas.**
 
-- **to_front(self) -> 'bool'**
+- **to_front(self) -> bool**
 - **Put at the front (end) of the Z-Order on the canvas.**
 
-- **to_next(self) -> 'bool'**
+- **to_next(self) -> bool**
             Move the component one position forward in the Z-Order relative to the
             current Z-Order position.
 
-- **to_prev(self) -> 'bool'**
+- **to_prev(self) -> bool**
             Move the component one position backward in the Z-Order relative to the current
             current Z-Order position.
 
-- **view_parameter_grid(self) -> 'bool'**
+- **view_parameter_grid(self) -> bool**
             View the parameter grid for this component
 
         ----------------------------------------------------------------------
@@ -317,8 +312,8 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
 - **__init__(**
             self,
             *,
-            _ctx: 'Optional[Context]' = None,
-            _ident: 'Optional[Dict[str, Any]]' = None
+            _ctx: Optional[Context] = None,
+            _ident: Optional[Dict[str, Any]] = None
         )
 - **Initialize self.  See help(type(self)) for accurate signature.**
 
@@ -335,15 +330,20 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
             list of weak references to the object
 
         ----------------------------------------------------------------------
+        Data and other attributes inherited from mhi.common.remote.Remotable:
+
+        __annotations__ = {}
+
+        ----------------------------------------------------------------------
         Methods inherited from MovableMixin:
 
-- **copy(self) -> 'bool'**
+- **copy(self) -> bool**
             Copy this component to the clipboard.
 
-- **cut(self) -> 'bool'**
+- **cut(self) -> bool**
             Cut this component to the clipboard
 
-- **delete(self) -> 'bool'**
+- **delete(self) -> bool**
             Delete this component.
 
 - **get_location(self)**
@@ -390,11 +390,7 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
             cached value will be returned.
 
 ### class Bus(Wire)
-- **Bus(**
-            *,
-            _ctx: 'Optional[Context]' = None,
-            _ident: 'Optional[Dict[str, Any]]' = None
-        )
+- **Bus(*, _ctx: Optional[Context] = None, _ident: Optional[Dict[str, Any]] = None)**
 
         Bus Component
 
@@ -433,23 +429,18 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
 - **Return repr(self).**
 
         ----------------------------------------------------------------------
-        Data and other attributes defined here:
-
-        __annotations__ = {}
-
-        ----------------------------------------------------------------------
         Methods inherited from Wire:
 
 - **decompose(self)**
             Break the wire down into deperate wires
 
-- **endpoints(self) -> 'Tuple[Point, Point]'**
+- **endpoints(self) -> Tuple[Point, Point]**
             Get the end-points of the wire.  Internal vertices are not returned.
 
             Returns:
                 List[Point]: The wire's end-points
 
-- **vertices(self, *vertices: 'AnyPoint') -> 'List[Point]'**
+- **vertices(self, *vertices: AnyPoint) -> List[Point]**
 - **Wire.vertices([vertices])**
 
             Set or get the vertices of the wire
@@ -463,10 +454,10 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
         ----------------------------------------------------------------------
         Methods inherited from Component:
 
-- **flip(self) -> 'bool'**
+- **flip(self) -> bool**
             Flip the component along the vertical axis
 
-- **is_module(self) -> 'bool'**
+- **is_module(self) -> bool**
             Check to see if this component has its own canvas, with in turn,
             can contain additional components.
 
@@ -478,16 +469,16 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
                 bool: ``True`` if the component has an internal canvas,
                 ``False`` otherwise.
 
-- **mirror(self) -> 'bool'**
+- **mirror(self) -> bool**
             Mirror the component along the horizontal axis
 
-- **rotate_180(self) -> 'bool'**
+- **rotate_180(self) -> bool**
             Rotate the component 90 degrees to the right
 
-- **rotate_left(self) -> 'bool'**
+- **rotate_left(self) -> bool**
 - **Rotate the component 90 degrees to the left (counter-clockwise)**
 
-- **rotate_right(self) -> 'bool'**
+- **rotate_right(self) -> bool**
 - **Rotate the component 90 degrees to the right (clockwise)**
 
         ----------------------------------------------------------------------
@@ -499,11 +490,11 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
         ----------------------------------------------------------------------
         Methods inherited from ZComponent:
 
-- **__getitem__(self, key: 'str') -> 'Any'**
+- **__getitem__(self, key: str) -> Any**
 
-- **__setitem__(self, key: 'str', value: 'Any') -> 'None'**
+- **__setitem__(self, key: str, value: Any) -> None**
 
-- **add_to_layer(self, name: 'str') -> 'None'**
+- **add_to_layer(self, name: str) -> None**
             Add this component to the given layer.
 
             The layer must exist, but need not be enabled or visible.
@@ -511,7 +502,7 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
             Parameters:
 - **name (str): The layer to add the component to.**
 
-- **clone(self, x: 'int', y: 'int') -> 'Component'**
+- **clone(self, x: int, y: int) -> Component**
             Copy this component and place the copy at the given location.
 
             Parameters:
@@ -523,7 +514,7 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
 
 - **command(self, cmd_name)**
 
-- **custom_state(self, state_name: 'str', state: 'str') -> 'None'**
+- **custom_state(self, state_name: str, state: str) -> None**
             Set a custom layer state for this component.
 
             The component must already be part of a layer, and that layer must
@@ -543,13 +534,13 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
                 For a three-phased voltage source for instance, the return value
                 changed from ``'master', 'source3'`` to ``'master:source3'``
 
-- **disable(self) -> 'None'**
+- **disable(self) -> None**
             Disable this component.
 
             This component will be disabled regardless of the layer states.
             To re-enable this component use the :meth:`.enable` function.
 
-- **enable(self, enable: 'bool' = True) -> 'None'**
+- **enable(self, enable: bool = True) -> None**
             Enable this component.
 
             With no argument, or if given a `True` value, this will enable a
@@ -559,7 +550,7 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
             Parameters:
 - **enable (bool): If set to `False`, disables the component (optional)**
 
-- **export_parameters(self, csvfile: 'str') -> 'None'**
+- **export_parameters(self, csvfile: str) -> None**
             Export component parameters to a CSV file
 
             Write component parameters to a two-line CSV file.
@@ -570,7 +561,7 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
 
 - **get_parameters(self)**
 
-- **import_parameters(self, csvfile: 'str') -> 'None'**
+- **import_parameters(self, csvfile: str) -> None**
             Import component parameters from a CSV file
 
             Read component parameters from a two-line CSV file,
@@ -578,7 +569,7 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
             contains the parameter values.  The first column represents the
             component identifier and the parameter name must be blank.
 
-- **parameters(self, *, parameters: 'Optional[Parameters]' = None, **kwargs) -> 'Optional[Parameters]'**
+- **parameters(self, *, parameters: Optional[Parameters] = None, **kwargs) -> Optional[Parameters]**
             Set or get the component's parameters.
 
             Parameters:
@@ -589,12 +580,12 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
 - **A dictionary of parameter values (if no parameters are being set),**
                 or None.
 
-- **project(self) -> 'Project'**
+- **project(self) -> Project**
             The project this component exists in
 
             :type: Project
 
-- **range(self, parameter: 'str') -> 'ParameterRange'**
+- **range(self, parameter: str) -> ParameterRange**
             Get legal values for a parameter
 
             Parameters:
@@ -606,7 +597,7 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
                 * a ``Tuple[float, float]`` defining minimum & maximum values, or
                 * an exception if the parameter does not have a defined range.
 
-- **remove_from_layer(self, name: 'str') -> 'None'**
+- **remove_from_layer(self, name: str) -> None**
             Remove this component from the given layer.
 
             The layer must exist, but need not be enabled or visible.
@@ -616,21 +607,21 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
 
 - **set_parameters(self, **parameters)**
 
-- **to_back(self) -> 'bool'**
+- **to_back(self) -> bool**
 - **Put at the start (back) of the Z-Order on the canvas.**
 
-- **to_front(self) -> 'bool'**
+- **to_front(self) -> bool**
 - **Put at the front (end) of the Z-Order on the canvas.**
 
-- **to_next(self) -> 'bool'**
+- **to_next(self) -> bool**
             Move the component one position forward in the Z-Order relative to the
             current Z-Order position.
 
-- **to_prev(self) -> 'bool'**
+- **to_prev(self) -> bool**
             Move the component one position backward in the Z-Order relative to the current
             current Z-Order position.
 
-- **view_parameter_grid(self) -> 'bool'**
+- **view_parameter_grid(self) -> bool**
             View the parameter grid for this component
 
         ----------------------------------------------------------------------
@@ -678,8 +669,8 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
 - **__init__(**
             self,
             *,
-            _ctx: 'Optional[Context]' = None,
-            _ident: 'Optional[Dict[str, Any]]' = None
+            _ctx: Optional[Context] = None,
+            _ident: Optional[Dict[str, Any]] = None
         )
 - **Initialize self.  See help(type(self)) for accurate signature.**
 
@@ -696,15 +687,20 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
             list of weak references to the object
 
         ----------------------------------------------------------------------
+        Data and other attributes inherited from mhi.common.remote.Remotable:
+
+        __annotations__ = {}
+
+        ----------------------------------------------------------------------
         Methods inherited from MovableMixin:
 
-- **copy(self) -> 'bool'**
+- **copy(self) -> bool**
             Copy this component to the clipboard.
 
-- **cut(self) -> 'bool'**
+- **cut(self) -> bool**
             Cut this component to the clipboard
 
-- **delete(self) -> 'bool'**
+- **delete(self) -> bool**
             Delete this component.
 
 - **get_location(self)**
@@ -753,8 +749,8 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
 ### class Cable(ACLine)
 - **Cable(**
             *,
-            _ctx: 'Optional[Context]' = None,
-            _ident: 'Optional[Dict[str, Any]]' = None
+            _ctx: Optional[Context] = None,
+            _ident: Optional[Dict[str, Any]] = None
         )
 
         Cable Component
@@ -781,17 +777,12 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
             MovableMixin
             builtins.object
 
-        Data and other attributes defined here:
-
-        __annotations__ = {}
-
-        ----------------------------------------------------------------------
         Methods inherited from ACLine:
 
 - **__repr__(self)**
 - **Return repr(self).**
 
-- **compile(self) -> 'None'**
+- **compile(self) -> None**
             Solve the constants for this T-Line/Cable page
 
         ----------------------------------------------------------------------
@@ -800,13 +791,13 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
 - **decompose(self)**
             Break the wire down into deperate wires
 
-- **endpoints(self) -> 'Tuple[Point, Point]'**
+- **endpoints(self) -> Tuple[Point, Point]**
             Get the end-points of the wire.  Internal vertices are not returned.
 
             Returns:
                 List[Point]: The wire's end-points
 
-- **vertices(self, *vertices: 'AnyPoint') -> 'List[Point]'**
+- **vertices(self, *vertices: AnyPoint) -> List[Point]**
 - **Wire.vertices([vertices])**
 
             Set or get the vertices of the wire
@@ -820,10 +811,10 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
         ----------------------------------------------------------------------
         Methods inherited from Component:
 
-- **flip(self) -> 'bool'**
+- **flip(self) -> bool**
             Flip the component along the vertical axis
 
-- **is_module(self) -> 'bool'**
+- **is_module(self) -> bool**
             Check to see if this component has its own canvas, with in turn,
             can contain additional components.
 
@@ -835,16 +826,16 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
                 bool: ``True`` if the component has an internal canvas,
                 ``False`` otherwise.
 
-- **mirror(self) -> 'bool'**
+- **mirror(self) -> bool**
             Mirror the component along the horizontal axis
 
-- **rotate_180(self) -> 'bool'**
+- **rotate_180(self) -> bool**
             Rotate the component 90 degrees to the right
 
-- **rotate_left(self) -> 'bool'**
+- **rotate_left(self) -> bool**
 - **Rotate the component 90 degrees to the left (counter-clockwise)**
 
-- **rotate_right(self) -> 'bool'**
+- **rotate_right(self) -> bool**
 - **Rotate the component 90 degrees to the right (clockwise)**
 
         ----------------------------------------------------------------------
@@ -856,7 +847,7 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
         ----------------------------------------------------------------------
         Methods inherited from ModuleMixin:
 
-- **canvas(self) -> 'Canvas'**
+- **canvas(self) -> Canvas**
             Get the module's canvas
 
             Returns:
@@ -871,11 +862,11 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
         ----------------------------------------------------------------------
         Methods inherited from ZComponent:
 
-- **__getitem__(self, key: 'str') -> 'Any'**
+- **__getitem__(self, key: str) -> Any**
 
-- **__setitem__(self, key: 'str', value: 'Any') -> 'None'**
+- **__setitem__(self, key: str, value: Any) -> None**
 
-- **add_to_layer(self, name: 'str') -> 'None'**
+- **add_to_layer(self, name: str) -> None**
             Add this component to the given layer.
 
             The layer must exist, but need not be enabled or visible.
@@ -883,7 +874,7 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
             Parameters:
 - **name (str): The layer to add the component to.**
 
-- **clone(self, x: 'int', y: 'int') -> 'Component'**
+- **clone(self, x: int, y: int) -> Component**
             Copy this component and place the copy at the given location.
 
             Parameters:
@@ -895,7 +886,7 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
 
 - **command(self, cmd_name)**
 
-- **custom_state(self, state_name: 'str', state: 'str') -> 'None'**
+- **custom_state(self, state_name: str, state: str) -> None**
             Set a custom layer state for this component.
 
             The component must already be part of a layer, and that layer must
@@ -915,13 +906,13 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
                 For a three-phased voltage source for instance, the return value
                 changed from ``'master', 'source3'`` to ``'master:source3'``
 
-- **disable(self) -> 'None'**
+- **disable(self) -> None**
             Disable this component.
 
             This component will be disabled regardless of the layer states.
             To re-enable this component use the :meth:`.enable` function.
 
-- **enable(self, enable: 'bool' = True) -> 'None'**
+- **enable(self, enable: bool = True) -> None**
             Enable this component.
 
             With no argument, or if given a `True` value, this will enable a
@@ -931,7 +922,7 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
             Parameters:
 - **enable (bool): If set to `False`, disables the component (optional)**
 
-- **export_parameters(self, csvfile: 'str') -> 'None'**
+- **export_parameters(self, csvfile: str) -> None**
             Export component parameters to a CSV file
 
             Write component parameters to a two-line CSV file.
@@ -942,7 +933,7 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
 
 - **get_parameters(self)**
 
-- **import_parameters(self, csvfile: 'str') -> 'None'**
+- **import_parameters(self, csvfile: str) -> None**
             Import component parameters from a CSV file
 
             Read component parameters from a two-line CSV file,
@@ -950,7 +941,7 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
             contains the parameter values.  The first column represents the
             component identifier and the parameter name must be blank.
 
-- **parameters(self, *, parameters: 'Optional[Parameters]' = None, **kwargs) -> 'Optional[Parameters]'**
+- **parameters(self, *, parameters: Optional[Parameters] = None, **kwargs) -> Optional[Parameters]**
             Set or get the component's parameters.
 
             Parameters:
@@ -961,12 +952,12 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
 - **A dictionary of parameter values (if no parameters are being set),**
                 or None.
 
-- **project(self) -> 'Project'**
+- **project(self) -> Project**
             The project this component exists in
 
             :type: Project
 
-- **range(self, parameter: 'str') -> 'ParameterRange'**
+- **range(self, parameter: str) -> ParameterRange**
             Get legal values for a parameter
 
             Parameters:
@@ -978,7 +969,7 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
                 * a ``Tuple[float, float]`` defining minimum & maximum values, or
                 * an exception if the parameter does not have a defined range.
 
-- **remove_from_layer(self, name: 'str') -> 'None'**
+- **remove_from_layer(self, name: str) -> None**
             Remove this component from the given layer.
 
             The layer must exist, but need not be enabled or visible.
@@ -988,21 +979,21 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
 
 - **set_parameters(self, **parameters)**
 
-- **to_back(self) -> 'bool'**
+- **to_back(self) -> bool**
 - **Put at the start (back) of the Z-Order on the canvas.**
 
-- **to_front(self) -> 'bool'**
+- **to_front(self) -> bool**
 - **Put at the front (end) of the Z-Order on the canvas.**
 
-- **to_next(self) -> 'bool'**
+- **to_next(self) -> bool**
             Move the component one position forward in the Z-Order relative to the
             current Z-Order position.
 
-- **to_prev(self) -> 'bool'**
+- **to_prev(self) -> bool**
             Move the component one position backward in the Z-Order relative to the current
             current Z-Order position.
 
-- **view_parameter_grid(self) -> 'bool'**
+- **view_parameter_grid(self) -> bool**
             View the parameter grid for this component
 
         ----------------------------------------------------------------------
@@ -1050,8 +1041,8 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
 - **__init__(**
             self,
             *,
-            _ctx: 'Optional[Context]' = None,
-            _ident: 'Optional[Dict[str, Any]]' = None
+            _ctx: Optional[Context] = None,
+            _ident: Optional[Dict[str, Any]] = None
         )
 - **Initialize self.  See help(type(self)) for accurate signature.**
 
@@ -1068,15 +1059,20 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
             list of weak references to the object
 
         ----------------------------------------------------------------------
+        Data and other attributes inherited from mhi.common.remote.Remotable:
+
+        __annotations__ = {}
+
+        ----------------------------------------------------------------------
         Methods inherited from MovableMixin:
 
-- **copy(self) -> 'bool'**
+- **copy(self) -> bool**
             Copy this component to the clipboard.
 
-- **cut(self) -> 'bool'**
+- **cut(self) -> bool**
             Cut this component to the clipboard
 
-- **delete(self) -> 'bool'**
+- **delete(self) -> bool**
             Delete this component.
 
 - **get_location(self)**
@@ -1125,8 +1121,8 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
 ### class Component(ZComponent, MovableMixin)
 - **Component(**
             *,
-            _ctx: 'Optional[Context]' = None,
-            _ident: 'Optional[Dict[str, Any]]' = None
+            _ctx: Optional[Context] = None,
+            _ident: Optional[Dict[str, Any]] = None
         )
 
         Components which can be moved & rotated on a Canvas.
@@ -1142,10 +1138,10 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
 
         Methods defined here:
 
-- **flip(self) -> 'bool'** -> `bool`
+- **flip(self) -> bool** -> `bool`
             Flip the component along the vertical axis
 
-- **is_module(self) -> 'bool'** `@rmi` -> `bool`
+- **is_module(self) -> bool** `@rmi` -> `bool`
             Check to see if this component has its own canvas, with in turn,
             can contain additional components.
 
@@ -1157,16 +1153,16 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
                 bool: ``True`` if the component has an internal canvas,
                 ``False`` otherwise.
 
-- **mirror(self) -> 'bool'** -> `bool`
+- **mirror(self) -> bool** -> `bool`
             Mirror the component along the horizontal axis
 
-- **rotate_180(self) -> 'bool'** -> `bool`
+- **rotate_180(self) -> bool** -> `bool`
             Rotate the component 90 degrees to the right
 
-- **rotate_left(self) -> 'bool'** -> `bool`
+- **rotate_left(self) -> bool** -> `bool`
 - **Rotate the component 90 degrees to the left (counter-clockwise)**
 
-- **rotate_right(self) -> 'bool'** -> `bool`
+- **rotate_right(self) -> bool** -> `bool`
 - **Rotate the component 90 degrees to the right (clockwise)**
 
         ----------------------------------------------------------------------
@@ -1176,21 +1172,16 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
             Set/get orientation of an orientable component
 
         ----------------------------------------------------------------------
-        Data and other attributes defined here:
-
-        __annotations__ = {}
-
-        ----------------------------------------------------------------------
         Methods inherited from ZComponent:
 
-- **__getitem__(self, key: 'str') -> 'Any'**
+- **__getitem__(self, key: str) -> Any**
 
 - **__repr__(self)**
 - **Return repr(self).**
 
-- **__setitem__(self, key: 'str', value: 'Any') -> 'None'**
+- **__setitem__(self, key: str, value: Any) -> None**
 
-- **add_to_layer(self, name: 'str') -> 'None'**
+- **add_to_layer(self, name: str) -> None**
             Add this component to the given layer.
 
             The layer must exist, but need not be enabled or visible.
@@ -1198,7 +1189,7 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
             Parameters:
 - **name (str): The layer to add the component to.**
 
-- **clone(self, x: 'int', y: 'int') -> 'Component'**
+- **clone(self, x: int, y: int) -> Component**
             Copy this component and place the copy at the given location.
 
             Parameters:
@@ -1210,7 +1201,7 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
 
 - **command(self, cmd_name)**
 
-- **custom_state(self, state_name: 'str', state: 'str') -> 'None'**
+- **custom_state(self, state_name: str, state: str) -> None**
             Set a custom layer state for this component.
 
             The component must already be part of a layer, and that layer must
@@ -1230,13 +1221,13 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
                 For a three-phased voltage source for instance, the return value
                 changed from ``'master', 'source3'`` to ``'master:source3'``
 
-- **disable(self) -> 'None'**
+- **disable(self) -> None**
             Disable this component.
 
             This component will be disabled regardless of the layer states.
             To re-enable this component use the :meth:`.enable` function.
 
-- **enable(self, enable: 'bool' = True) -> 'None'**
+- **enable(self, enable: bool = True) -> None**
             Enable this component.
 
             With no argument, or if given a `True` value, this will enable a
@@ -1246,7 +1237,7 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
             Parameters:
 - **enable (bool): If set to `False`, disables the component (optional)**
 
-- **export_parameters(self, csvfile: 'str') -> 'None'**
+- **export_parameters(self, csvfile: str) -> None**
             Export component parameters to a CSV file
 
             Write component parameters to a two-line CSV file.
@@ -1257,7 +1248,7 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
 
 - **get_parameters(self)**
 
-- **import_parameters(self, csvfile: 'str') -> 'None'**
+- **import_parameters(self, csvfile: str) -> None**
             Import component parameters from a CSV file
 
             Read component parameters from a two-line CSV file,
@@ -1265,7 +1256,7 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
             contains the parameter values.  The first column represents the
             component identifier and the parameter name must be blank.
 
-- **parameters(self, *, parameters: 'Optional[Parameters]' = None, **kwargs) -> 'Optional[Parameters]'**
+- **parameters(self, *, parameters: Optional[Parameters] = None, **kwargs) -> Optional[Parameters]**
             Set or get the component's parameters.
 
             Parameters:
@@ -1276,12 +1267,12 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
 - **A dictionary of parameter values (if no parameters are being set),**
                 or None.
 
-- **project(self) -> 'Project'**
+- **project(self) -> Project**
             The project this component exists in
 
             :type: Project
 
-- **range(self, parameter: 'str') -> 'ParameterRange'**
+- **range(self, parameter: str) -> ParameterRange**
             Get legal values for a parameter
 
             Parameters:
@@ -1293,7 +1284,7 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
                 * a ``Tuple[float, float]`` defining minimum & maximum values, or
                 * an exception if the parameter does not have a defined range.
 
-- **remove_from_layer(self, name: 'str') -> 'None'**
+- **remove_from_layer(self, name: str) -> None**
             Remove this component from the given layer.
 
             The layer must exist, but need not be enabled or visible.
@@ -1303,21 +1294,21 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
 
 - **set_parameters(self, **parameters)**
 
-- **to_back(self) -> 'bool'**
+- **to_back(self) -> bool**
 - **Put at the start (back) of the Z-Order on the canvas.**
 
-- **to_front(self) -> 'bool'**
+- **to_front(self) -> bool**
 - **Put at the front (end) of the Z-Order on the canvas.**
 
-- **to_next(self) -> 'bool'**
+- **to_next(self) -> bool**
             Move the component one position forward in the Z-Order relative to the
             current Z-Order position.
 
-- **to_prev(self) -> 'bool'**
+- **to_prev(self) -> bool**
             Move the component one position backward in the Z-Order relative to the current
             current Z-Order position.
 
-- **view_parameter_grid(self) -> 'bool'**
+- **view_parameter_grid(self) -> bool**
             View the parameter grid for this component
 
         ----------------------------------------------------------------------
@@ -1365,8 +1356,8 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
 - **__init__(**
             self,
             *,
-            _ctx: 'Optional[Context]' = None,
-            _ident: 'Optional[Dict[str, Any]]' = None
+            _ctx: Optional[Context] = None,
+            _ident: Optional[Dict[str, Any]] = None
         )
 - **Initialize self.  See help(type(self)) for accurate signature.**
 
@@ -1383,15 +1374,20 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
             list of weak references to the object
 
         ----------------------------------------------------------------------
+        Data and other attributes inherited from mhi.common.remote.Remotable:
+
+        __annotations__ = {}
+
+        ----------------------------------------------------------------------
         Methods inherited from MovableMixin:
 
-- **copy(self) -> 'bool'**
+- **copy(self) -> bool**
             Copy this component to the clipboard.
 
-- **cut(self) -> 'bool'**
+- **cut(self) -> bool**
             Cut this component to the clipboard
 
-- **delete(self) -> 'bool'**
+- **delete(self) -> bool**
             Delete this component.
 
 - **get_location(self)**
@@ -1440,8 +1436,8 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
 ### class ModuleMixin(ZComponent)
 - **ModuleMixin(**
             *,
-            _ctx: 'Optional[Context]' = None,
-            _ident: 'Optional[Dict[str, Any]]' = None
+            _ctx: Optional[Context] = None,
+            _ident: Optional[Dict[str, Any]] = None
         )
 
 - **Modules (Components containing a canvas with more components)**
@@ -1455,7 +1451,7 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
 
         Methods defined here:
 
-- **canvas(self) -> 'Canvas'** -> `Canvas`
+- **canvas(self) -> Canvas** -> `Canvas`
             Get the module's canvas
 
             Returns:
@@ -1468,21 +1464,16 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
             Retrieve module definition
 
         ----------------------------------------------------------------------
-        Data and other attributes defined here:
-
-        __annotations__ = {}
-
-        ----------------------------------------------------------------------
         Methods inherited from ZComponent:
 
-- **__getitem__(self, key: 'str') -> 'Any'**
+- **__getitem__(self, key: str) -> Any**
 
 - **__repr__(self)**
 - **Return repr(self).**
 
-- **__setitem__(self, key: 'str', value: 'Any') -> 'None'**
+- **__setitem__(self, key: str, value: Any) -> None**
 
-- **add_to_layer(self, name: 'str') -> 'None'**
+- **add_to_layer(self, name: str) -> None**
             Add this component to the given layer.
 
             The layer must exist, but need not be enabled or visible.
@@ -1490,7 +1481,7 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
             Parameters:
 - **name (str): The layer to add the component to.**
 
-- **clone(self, x: 'int', y: 'int') -> 'Component'**
+- **clone(self, x: int, y: int) -> Component**
             Copy this component and place the copy at the given location.
 
             Parameters:
@@ -1502,7 +1493,7 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
 
 - **command(self, cmd_name)**
 
-- **custom_state(self, state_name: 'str', state: 'str') -> 'None'**
+- **custom_state(self, state_name: str, state: str) -> None**
             Set a custom layer state for this component.
 
             The component must already be part of a layer, and that layer must
@@ -1522,13 +1513,13 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
                 For a three-phased voltage source for instance, the return value
                 changed from ``'master', 'source3'`` to ``'master:source3'``
 
-- **disable(self) -> 'None'**
+- **disable(self) -> None**
             Disable this component.
 
             This component will be disabled regardless of the layer states.
             To re-enable this component use the :meth:`.enable` function.
 
-- **enable(self, enable: 'bool' = True) -> 'None'**
+- **enable(self, enable: bool = True) -> None**
             Enable this component.
 
             With no argument, or if given a `True` value, this will enable a
@@ -1538,7 +1529,7 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
             Parameters:
 - **enable (bool): If set to `False`, disables the component (optional)**
 
-- **export_parameters(self, csvfile: 'str') -> 'None'**
+- **export_parameters(self, csvfile: str) -> None**
             Export component parameters to a CSV file
 
             Write component parameters to a two-line CSV file.
@@ -1549,7 +1540,7 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
 
 - **get_parameters(self)**
 
-- **import_parameters(self, csvfile: 'str') -> 'None'**
+- **import_parameters(self, csvfile: str) -> None**
             Import component parameters from a CSV file
 
             Read component parameters from a two-line CSV file,
@@ -1557,7 +1548,7 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
             contains the parameter values.  The first column represents the
             component identifier and the parameter name must be blank.
 
-- **parameters(self, *, parameters: 'Optional[Parameters]' = None, **kwargs) -> 'Optional[Parameters]'**
+- **parameters(self, *, parameters: Optional[Parameters] = None, **kwargs) -> Optional[Parameters]**
             Set or get the component's parameters.
 
             Parameters:
@@ -1568,12 +1559,12 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
 - **A dictionary of parameter values (if no parameters are being set),**
                 or None.
 
-- **project(self) -> 'Project'**
+- **project(self) -> Project**
             The project this component exists in
 
             :type: Project
 
-- **range(self, parameter: 'str') -> 'ParameterRange'**
+- **range(self, parameter: str) -> ParameterRange**
             Get legal values for a parameter
 
             Parameters:
@@ -1585,7 +1576,7 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
                 * a ``Tuple[float, float]`` defining minimum & maximum values, or
                 * an exception if the parameter does not have a defined range.
 
-- **remove_from_layer(self, name: 'str') -> 'None'**
+- **remove_from_layer(self, name: str) -> None**
             Remove this component from the given layer.
 
             The layer must exist, but need not be enabled or visible.
@@ -1595,21 +1586,21 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
 
 - **set_parameters(self, **parameters)**
 
-- **to_back(self) -> 'bool'**
+- **to_back(self) -> bool**
 - **Put at the start (back) of the Z-Order on the canvas.**
 
-- **to_front(self) -> 'bool'**
+- **to_front(self) -> bool**
 - **Put at the front (end) of the Z-Order on the canvas.**
 
-- **to_next(self) -> 'bool'**
+- **to_next(self) -> bool**
             Move the component one position forward in the Z-Order relative to the
             current Z-Order position.
 
-- **to_prev(self) -> 'bool'**
+- **to_prev(self) -> bool**
             Move the component one position backward in the Z-Order relative to the current
             current Z-Order position.
 
-- **view_parameter_grid(self) -> 'bool'**
+- **view_parameter_grid(self) -> bool**
             View the parameter grid for this component
 
         ----------------------------------------------------------------------
@@ -1657,8 +1648,8 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
 - **__init__(**
             self,
             *,
-            _ctx: 'Optional[Context]' = None,
-            _ident: 'Optional[Dict[str, Any]]' = None
+            _ctx: Optional[Context] = None,
+            _ident: Optional[Dict[str, Any]] = None
         )
 - **Initialize self.  See help(type(self)) for accurate signature.**
 
@@ -1674,18 +1665,23 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
         __weakref__
             list of weak references to the object
 
+        ----------------------------------------------------------------------
+        Data and other attributes inherited from mhi.common.remote.Remotable:
+
+        __annotations__ = {}
+
 ### class MovableMixin(builtins.object)
         Things that may be moved
 
         Methods defined here:
 
-- **copy(self) -> 'bool'** -> `bool`
+- **copy(self) -> bool** -> `bool`
             Copy this component to the clipboard.
 
-- **cut(self) -> 'bool'** -> `bool`
+- **cut(self) -> bool** -> `bool`
             Cut this component to the clipboard
 
-- **delete(self) -> 'bool'** -> `bool`
+- **delete(self) -> bool** -> `bool`
             Delete this component.
 
 - **get_location(self)** `@deprecated`
@@ -1737,19 +1733,14 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
             5.0 seconds, and if retrieved again within that time the
             cached value will be returned.
 
-        ----------------------------------------------------------------------
-        Data and other attributes defined here:
-
-        __annotations__ = {}
-
 ### class SizeableMixin(builtins.object)
         Things that can be resized
 
         Methods defined here:
 
-- **get_size(self) -> 'Tuple[int, int]'** `@deprecated` -> `Tuple[int, int]`
+- **get_size(self) -> Tuple[int, int]** `@deprecated` -> `Tuple[int, int]`
 
-- **set_size(self, width: 'int', height: 'int') -> 'None'** `@deprecated` -> `None`
+- **set_size(self, width: int, height: int) -> None** `@deprecated` -> `None`
 
         ----------------------------------------------------------------------
         Data descriptors defined here:
@@ -1763,16 +1754,11 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
         size
             Set/get width & height of a sizeable component
 
-        ----------------------------------------------------------------------
-        Data and other attributes defined here:
-
-        __annotations__ = {}
-
 ### class StickyWire(Wire)
 - **StickyWire(**
             *,
-            _ctx: 'Optional[Context]' = None,
-            _ident: 'Optional[Dict[str, Any]]' = None
+            _ctx: Optional[Context] = None,
+            _ident: Optional[Dict[str, Any]] = None
         )
 
         A "Sticky Wire" is an electrical wire or control signal,
@@ -1794,11 +1780,6 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
             MovableMixin
             builtins.object
 
-        Data and other attributes defined here:
-
-        __annotations__ = {}
-
-        ----------------------------------------------------------------------
         Methods inherited from Wire:
 
 - **__repr__(self)**
@@ -1807,13 +1788,13 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
 - **decompose(self)**
             Break the wire down into deperate wires
 
-- **endpoints(self) -> 'Tuple[Point, Point]'**
+- **endpoints(self) -> Tuple[Point, Point]**
             Get the end-points of the wire.  Internal vertices are not returned.
 
             Returns:
                 List[Point]: The wire's end-points
 
-- **vertices(self, *vertices: 'AnyPoint') -> 'List[Point]'**
+- **vertices(self, *vertices: AnyPoint) -> List[Point]**
 - **Wire.vertices([vertices])**
 
             Set or get the vertices of the wire
@@ -1827,10 +1808,10 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
         ----------------------------------------------------------------------
         Methods inherited from Component:
 
-- **flip(self) -> 'bool'**
+- **flip(self) -> bool**
             Flip the component along the vertical axis
 
-- **is_module(self) -> 'bool'**
+- **is_module(self) -> bool**
             Check to see if this component has its own canvas, with in turn,
             can contain additional components.
 
@@ -1842,16 +1823,16 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
                 bool: ``True`` if the component has an internal canvas,
                 ``False`` otherwise.
 
-- **mirror(self) -> 'bool'**
+- **mirror(self) -> bool**
             Mirror the component along the horizontal axis
 
-- **rotate_180(self) -> 'bool'**
+- **rotate_180(self) -> bool**
             Rotate the component 90 degrees to the right
 
-- **rotate_left(self) -> 'bool'**
+- **rotate_left(self) -> bool**
 - **Rotate the component 90 degrees to the left (counter-clockwise)**
 
-- **rotate_right(self) -> 'bool'**
+- **rotate_right(self) -> bool**
 - **Rotate the component 90 degrees to the right (clockwise)**
 
         ----------------------------------------------------------------------
@@ -1863,11 +1844,11 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
         ----------------------------------------------------------------------
         Methods inherited from ZComponent:
 
-- **__getitem__(self, key: 'str') -> 'Any'**
+- **__getitem__(self, key: str) -> Any**
 
-- **__setitem__(self, key: 'str', value: 'Any') -> 'None'**
+- **__setitem__(self, key: str, value: Any) -> None**
 
-- **add_to_layer(self, name: 'str') -> 'None'**
+- **add_to_layer(self, name: str) -> None**
             Add this component to the given layer.
 
             The layer must exist, but need not be enabled or visible.
@@ -1875,7 +1856,7 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
             Parameters:
 - **name (str): The layer to add the component to.**
 
-- **clone(self, x: 'int', y: 'int') -> 'Component'**
+- **clone(self, x: int, y: int) -> Component**
             Copy this component and place the copy at the given location.
 
             Parameters:
@@ -1887,7 +1868,7 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
 
 - **command(self, cmd_name)**
 
-- **custom_state(self, state_name: 'str', state: 'str') -> 'None'**
+- **custom_state(self, state_name: str, state: str) -> None**
             Set a custom layer state for this component.
 
             The component must already be part of a layer, and that layer must
@@ -1907,13 +1888,13 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
                 For a three-phased voltage source for instance, the return value
                 changed from ``'master', 'source3'`` to ``'master:source3'``
 
-- **disable(self) -> 'None'**
+- **disable(self) -> None**
             Disable this component.
 
             This component will be disabled regardless of the layer states.
             To re-enable this component use the :meth:`.enable` function.
 
-- **enable(self, enable: 'bool' = True) -> 'None'**
+- **enable(self, enable: bool = True) -> None**
             Enable this component.
 
             With no argument, or if given a `True` value, this will enable a
@@ -1923,7 +1904,7 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
             Parameters:
 - **enable (bool): If set to `False`, disables the component (optional)**
 
-- **export_parameters(self, csvfile: 'str') -> 'None'**
+- **export_parameters(self, csvfile: str) -> None**
             Export component parameters to a CSV file
 
             Write component parameters to a two-line CSV file.
@@ -1934,7 +1915,7 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
 
 - **get_parameters(self)**
 
-- **import_parameters(self, csvfile: 'str') -> 'None'**
+- **import_parameters(self, csvfile: str) -> None**
             Import component parameters from a CSV file
 
             Read component parameters from a two-line CSV file,
@@ -1942,7 +1923,7 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
             contains the parameter values.  The first column represents the
             component identifier and the parameter name must be blank.
 
-- **parameters(self, *, parameters: 'Optional[Parameters]' = None, **kwargs) -> 'Optional[Parameters]'**
+- **parameters(self, *, parameters: Optional[Parameters] = None, **kwargs) -> Optional[Parameters]**
             Set or get the component's parameters.
 
             Parameters:
@@ -1953,12 +1934,12 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
 - **A dictionary of parameter values (if no parameters are being set),**
                 or None.
 
-- **project(self) -> 'Project'**
+- **project(self) -> Project**
             The project this component exists in
 
             :type: Project
 
-- **range(self, parameter: 'str') -> 'ParameterRange'**
+- **range(self, parameter: str) -> ParameterRange**
             Get legal values for a parameter
 
             Parameters:
@@ -1970,7 +1951,7 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
                 * a ``Tuple[float, float]`` defining minimum & maximum values, or
                 * an exception if the parameter does not have a defined range.
 
-- **remove_from_layer(self, name: 'str') -> 'None'**
+- **remove_from_layer(self, name: str) -> None**
             Remove this component from the given layer.
 
             The layer must exist, but need not be enabled or visible.
@@ -1980,21 +1961,21 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
 
 - **set_parameters(self, **parameters)**
 
-- **to_back(self) -> 'bool'**
+- **to_back(self) -> bool**
 - **Put at the start (back) of the Z-Order on the canvas.**
 
-- **to_front(self) -> 'bool'**
+- **to_front(self) -> bool**
 - **Put at the front (end) of the Z-Order on the canvas.**
 
-- **to_next(self) -> 'bool'**
+- **to_next(self) -> bool**
             Move the component one position forward in the Z-Order relative to the
             current Z-Order position.
 
-- **to_prev(self) -> 'bool'**
+- **to_prev(self) -> bool**
             Move the component one position backward in the Z-Order relative to the current
             current Z-Order position.
 
-- **view_parameter_grid(self) -> 'bool'**
+- **view_parameter_grid(self) -> bool**
             View the parameter grid for this component
 
         ----------------------------------------------------------------------
@@ -2042,8 +2023,8 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
 - **__init__(**
             self,
             *,
-            _ctx: 'Optional[Context]' = None,
-            _ident: 'Optional[Dict[str, Any]]' = None
+            _ctx: Optional[Context] = None,
+            _ident: Optional[Dict[str, Any]] = None
         )
 - **Initialize self.  See help(type(self)) for accurate signature.**
 
@@ -2060,15 +2041,20 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
             list of weak references to the object
 
         ----------------------------------------------------------------------
+        Data and other attributes inherited from mhi.common.remote.Remotable:
+
+        __annotations__ = {}
+
+        ----------------------------------------------------------------------
         Methods inherited from MovableMixin:
 
-- **copy(self) -> 'bool'**
+- **copy(self) -> bool**
             Copy this component to the clipboard.
 
-- **cut(self) -> 'bool'**
+- **cut(self) -> bool**
             Cut this component to the clipboard
 
-- **delete(self) -> 'bool'**
+- **delete(self) -> bool**
             Delete this component.
 
 - **get_location(self)**
@@ -2117,8 +2103,8 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
 ### class TLine(ACLine)
 - **TLine(**
             *,
-            _ctx: 'Optional[Context]' = None,
-            _ident: 'Optional[Dict[str, Any]]' = None
+            _ctx: Optional[Context] = None,
+            _ident: Optional[Dict[str, Any]] = None
         )
 
         Transmission Line Component
@@ -2145,17 +2131,12 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
             MovableMixin
             builtins.object
 
-        Data and other attributes defined here:
-
-        __annotations__ = {}
-
-        ----------------------------------------------------------------------
         Methods inherited from ACLine:
 
 - **__repr__(self)**
 - **Return repr(self).**
 
-- **compile(self) -> 'None'**
+- **compile(self) -> None**
             Solve the constants for this T-Line/Cable page
 
         ----------------------------------------------------------------------
@@ -2164,13 +2145,13 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
 - **decompose(self)**
             Break the wire down into deperate wires
 
-- **endpoints(self) -> 'Tuple[Point, Point]'**
+- **endpoints(self) -> Tuple[Point, Point]**
             Get the end-points of the wire.  Internal vertices are not returned.
 
             Returns:
                 List[Point]: The wire's end-points
 
-- **vertices(self, *vertices: 'AnyPoint') -> 'List[Point]'**
+- **vertices(self, *vertices: AnyPoint) -> List[Point]**
 - **Wire.vertices([vertices])**
 
             Set or get the vertices of the wire
@@ -2184,10 +2165,10 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
         ----------------------------------------------------------------------
         Methods inherited from Component:
 
-- **flip(self) -> 'bool'**
+- **flip(self) -> bool**
             Flip the component along the vertical axis
 
-- **is_module(self) -> 'bool'**
+- **is_module(self) -> bool**
             Check to see if this component has its own canvas, with in turn,
             can contain additional components.
 
@@ -2199,16 +2180,16 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
                 bool: ``True`` if the component has an internal canvas,
                 ``False`` otherwise.
 
-- **mirror(self) -> 'bool'**
+- **mirror(self) -> bool**
             Mirror the component along the horizontal axis
 
-- **rotate_180(self) -> 'bool'**
+- **rotate_180(self) -> bool**
             Rotate the component 90 degrees to the right
 
-- **rotate_left(self) -> 'bool'**
+- **rotate_left(self) -> bool**
 - **Rotate the component 90 degrees to the left (counter-clockwise)**
 
-- **rotate_right(self) -> 'bool'**
+- **rotate_right(self) -> bool**
 - **Rotate the component 90 degrees to the right (clockwise)**
 
         ----------------------------------------------------------------------
@@ -2220,7 +2201,7 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
         ----------------------------------------------------------------------
         Methods inherited from ModuleMixin:
 
-- **canvas(self) -> 'Canvas'**
+- **canvas(self) -> Canvas**
             Get the module's canvas
 
             Returns:
@@ -2235,11 +2216,11 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
         ----------------------------------------------------------------------
         Methods inherited from ZComponent:
 
-- **__getitem__(self, key: 'str') -> 'Any'**
+- **__getitem__(self, key: str) -> Any**
 
-- **__setitem__(self, key: 'str', value: 'Any') -> 'None'**
+- **__setitem__(self, key: str, value: Any) -> None**
 
-- **add_to_layer(self, name: 'str') -> 'None'**
+- **add_to_layer(self, name: str) -> None**
             Add this component to the given layer.
 
             The layer must exist, but need not be enabled or visible.
@@ -2247,7 +2228,7 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
             Parameters:
 - **name (str): The layer to add the component to.**
 
-- **clone(self, x: 'int', y: 'int') -> 'Component'**
+- **clone(self, x: int, y: int) -> Component**
             Copy this component and place the copy at the given location.
 
             Parameters:
@@ -2259,7 +2240,7 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
 
 - **command(self, cmd_name)**
 
-- **custom_state(self, state_name: 'str', state: 'str') -> 'None'**
+- **custom_state(self, state_name: str, state: str) -> None**
             Set a custom layer state for this component.
 
             The component must already be part of a layer, and that layer must
@@ -2279,13 +2260,13 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
                 For a three-phased voltage source for instance, the return value
                 changed from ``'master', 'source3'`` to ``'master:source3'``
 
-- **disable(self) -> 'None'**
+- **disable(self) -> None**
             Disable this component.
 
             This component will be disabled regardless of the layer states.
             To re-enable this component use the :meth:`.enable` function.
 
-- **enable(self, enable: 'bool' = True) -> 'None'**
+- **enable(self, enable: bool = True) -> None**
             Enable this component.
 
             With no argument, or if given a `True` value, this will enable a
@@ -2295,7 +2276,7 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
             Parameters:
 - **enable (bool): If set to `False`, disables the component (optional)**
 
-- **export_parameters(self, csvfile: 'str') -> 'None'**
+- **export_parameters(self, csvfile: str) -> None**
             Export component parameters to a CSV file
 
             Write component parameters to a two-line CSV file.
@@ -2306,7 +2287,7 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
 
 - **get_parameters(self)**
 
-- **import_parameters(self, csvfile: 'str') -> 'None'**
+- **import_parameters(self, csvfile: str) -> None**
             Import component parameters from a CSV file
 
             Read component parameters from a two-line CSV file,
@@ -2314,7 +2295,7 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
             contains the parameter values.  The first column represents the
             component identifier and the parameter name must be blank.
 
-- **parameters(self, *, parameters: 'Optional[Parameters]' = None, **kwargs) -> 'Optional[Parameters]'**
+- **parameters(self, *, parameters: Optional[Parameters] = None, **kwargs) -> Optional[Parameters]**
             Set or get the component's parameters.
 
             Parameters:
@@ -2325,12 +2306,12 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
 - **A dictionary of parameter values (if no parameters are being set),**
                 or None.
 
-- **project(self) -> 'Project'**
+- **project(self) -> Project**
             The project this component exists in
 
             :type: Project
 
-- **range(self, parameter: 'str') -> 'ParameterRange'**
+- **range(self, parameter: str) -> ParameterRange**
             Get legal values for a parameter
 
             Parameters:
@@ -2342,7 +2323,7 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
                 * a ``Tuple[float, float]`` defining minimum & maximum values, or
                 * an exception if the parameter does not have a defined range.
 
-- **remove_from_layer(self, name: 'str') -> 'None'**
+- **remove_from_layer(self, name: str) -> None**
             Remove this component from the given layer.
 
             The layer must exist, but need not be enabled or visible.
@@ -2352,21 +2333,21 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
 
 - **set_parameters(self, **parameters)**
 
-- **to_back(self) -> 'bool'**
+- **to_back(self) -> bool**
 - **Put at the start (back) of the Z-Order on the canvas.**
 
-- **to_front(self) -> 'bool'**
+- **to_front(self) -> bool**
 - **Put at the front (end) of the Z-Order on the canvas.**
 
-- **to_next(self) -> 'bool'**
+- **to_next(self) -> bool**
             Move the component one position forward in the Z-Order relative to the
             current Z-Order position.
 
-- **to_prev(self) -> 'bool'**
+- **to_prev(self) -> bool**
             Move the component one position backward in the Z-Order relative to the current
             current Z-Order position.
 
-- **view_parameter_grid(self) -> 'bool'**
+- **view_parameter_grid(self) -> bool**
             View the parameter grid for this component
 
         ----------------------------------------------------------------------
@@ -2414,8 +2395,8 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
 - **__init__(**
             self,
             *,
-            _ctx: 'Optional[Context]' = None,
-            _ident: 'Optional[Dict[str, Any]]' = None
+            _ctx: Optional[Context] = None,
+            _ident: Optional[Dict[str, Any]] = None
         )
 - **Initialize self.  See help(type(self)) for accurate signature.**
 
@@ -2432,15 +2413,20 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
             list of weak references to the object
 
         ----------------------------------------------------------------------
+        Data and other attributes inherited from mhi.common.remote.Remotable:
+
+        __annotations__ = {}
+
+        ----------------------------------------------------------------------
         Methods inherited from MovableMixin:
 
-- **copy(self) -> 'bool'**
+- **copy(self) -> bool**
             Copy this component to the clipboard.
 
-- **cut(self) -> 'bool'**
+- **cut(self) -> bool**
             Cut this component to the clipboard
 
-- **delete(self) -> 'bool'**
+- **delete(self) -> bool**
             Delete this component.
 
 - **get_location(self)**
@@ -2489,8 +2475,8 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
 ### class UserCmp(Component, ModuleMixin)
 - **UserCmp(**
             *,
-            _ctx: 'Optional[Context]' = None,
-            _ident: 'Optional[Dict[str, Any]]' = None
+            _ctx: Optional[Context] = None,
+            _ident: Optional[Dict[str, Any]] = None
         )
 
 - **Non-builtin components (a.k.a User Components)**
@@ -2512,29 +2498,29 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
 
 - **blackbox(** -> `Component`
             self,
-            x: 'Optional[int]' = None,
-            y: 'Optional[int]' = None,
-            sub_prefix: 'Optional[str]' = None,
-            instance_data: 'Optional[bool]' = None
-        ) -> 'Component'
+            x: Optional[int] = None,
+            y: Optional[int] = None,
+            sub_prefix: Optional[str] = None,
+            instance_data: Optional[bool] = None
+        ) -> Component
             Convert this component page into a blackboxed module
 
             .. versionchanged:: 2.7
                 Added ``x``, ``y``, ``sub_prefix`` & ``instance_data`` parameters.
 
-- **blackbox_defn(self) -> 'Definition'** `@requires` -> `Definition`
+- **blackbox_defn(self) -> Definition** `@requires` -> `Definition`
             Convert this component page into a blackboxed module definition
 
             .. versionadded:: 2.7
 
-- **compile(self) -> 'None'** -> `None`
+- **compile(self) -> None** -> `None`
             Compile this component page
 
 - **copy_transfer(self)** `@deprecated`
 
 - **get_definition(self)** `@deprecated`
 
-- **get_parameters(self, scenario: 'Optional[str]' = None) -> 'Parameters'** `@deprecated` -> `Parameters`
+- **get_parameters(self, scenario: Optional[str] = None) -> Parameters** `@deprecated` -> `Parameters`
             Get the component's parameters.
 
             The parameters contained in the component are determined by the
@@ -2548,16 +2534,16 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
 
 - **get_port_location(self, name)** `@deprecated`
 
-- **navigate_in(self) -> 'Canvas'** -> `Canvas`
+- **navigate_in(self) -> Canvas** -> `Canvas`
             Navigate into a page module or definition
 
 - **parameters(** -> `Optional[Parameters]`
             self,
-            scenario: 'Optional[str]' = None,
+            scenario: Optional[str] = None,
             *,
-            parameters: 'Optional[Parameters]' = None,
+            parameters: Optional[Parameters] = None,
             **kwargs
-        ) -> 'Optional[Parameters]'
+        ) -> Optional[Parameters]
             Set or get the component's parameters.
 
             Parameters:
@@ -2569,7 +2555,7 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
 - **A dictionary of parameter values (if no parameters are being set),**
                 or None.
 
-- **port(self, name: 'str') -> 'Optional[Port]'** -> `Optional[Port]`
+- **port(self, name: str) -> Optional[Port]** -> `Optional[Port]`
             Based on the location of this component, taking into account any
             any rotation and/or mirroring, return the location and type of the
             named component port.
@@ -2577,13 +2563,13 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
             Returns:
                 tuple: The x, y location, name, dimension and type of the port.
 
-- **ports(self) -> 'Dict[str, Port]'** -> `Dict[str, Port]`
+- **ports(self) -> Dict[str, Port]** -> `Dict[str, Port]`
             Retrieve the active ports of a component.
 
             Returns:
                 Dict[str, Port]: A dictionary of ports, by port name.
 
-- **set_parameters(self, scenario: 'Optional[str]' = None, **kwargs) -> 'None'** `@deprecated` -> `None`
+- **set_parameters(self, scenario: Optional[str] = None, **kwargs) -> None** `@deprecated` -> `None`
 - **set_parameters([scenario], name=value [, ...])** `@deprecated` -> `None`
             Set the component's parameters.
 
@@ -2613,10 +2599,10 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
         ----------------------------------------------------------------------
         Methods inherited from Component:
 
-- **flip(self) -> 'bool'**
+- **flip(self) -> bool**
             Flip the component along the vertical axis
 
-- **is_module(self) -> 'bool'**
+- **is_module(self) -> bool**
             Check to see if this component has its own canvas, with in turn,
             can contain additional components.
 
@@ -2628,16 +2614,16 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
                 bool: ``True`` if the component has an internal canvas,
                 ``False`` otherwise.
 
-- **mirror(self) -> 'bool'**
+- **mirror(self) -> bool**
             Mirror the component along the horizontal axis
 
-- **rotate_180(self) -> 'bool'**
+- **rotate_180(self) -> bool**
             Rotate the component 90 degrees to the right
 
-- **rotate_left(self) -> 'bool'**
+- **rotate_left(self) -> bool**
 - **Rotate the component 90 degrees to the left (counter-clockwise)**
 
-- **rotate_right(self) -> 'bool'**
+- **rotate_right(self) -> bool**
 - **Rotate the component 90 degrees to the right (clockwise)**
 
         ----------------------------------------------------------------------
@@ -2649,7 +2635,7 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
         ----------------------------------------------------------------------
         Methods inherited from ModuleMixin:
 
-- **canvas(self) -> 'Canvas'**
+- **canvas(self) -> Canvas**
             Get the module's canvas
 
             Returns:
@@ -2658,11 +2644,11 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
         ----------------------------------------------------------------------
         Methods inherited from ZComponent:
 
-- **__getitem__(self, key: 'str') -> 'Any'**
+- **__getitem__(self, key: str) -> Any**
 
-- **__setitem__(self, key: 'str', value: 'Any') -> 'None'**
+- **__setitem__(self, key: str, value: Any) -> None**
 
-- **add_to_layer(self, name: 'str') -> 'None'**
+- **add_to_layer(self, name: str) -> None**
             Add this component to the given layer.
 
             The layer must exist, but need not be enabled or visible.
@@ -2670,7 +2656,7 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
             Parameters:
 - **name (str): The layer to add the component to.**
 
-- **clone(self, x: 'int', y: 'int') -> 'Component'**
+- **clone(self, x: int, y: int) -> Component**
             Copy this component and place the copy at the given location.
 
             Parameters:
@@ -2682,7 +2668,7 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
 
 - **command(self, cmd_name)**
 
-- **custom_state(self, state_name: 'str', state: 'str') -> 'None'**
+- **custom_state(self, state_name: str, state: str) -> None**
             Set a custom layer state for this component.
 
             The component must already be part of a layer, and that layer must
@@ -2702,13 +2688,13 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
                 For a three-phased voltage source for instance, the return value
                 changed from ``'master', 'source3'`` to ``'master:source3'``
 
-- **disable(self) -> 'None'**
+- **disable(self) -> None**
             Disable this component.
 
             This component will be disabled regardless of the layer states.
             To re-enable this component use the :meth:`.enable` function.
 
-- **enable(self, enable: 'bool' = True) -> 'None'**
+- **enable(self, enable: bool = True) -> None**
             Enable this component.
 
             With no argument, or if given a `True` value, this will enable a
@@ -2718,7 +2704,7 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
             Parameters:
 - **enable (bool): If set to `False`, disables the component (optional)**
 
-- **export_parameters(self, csvfile: 'str') -> 'None'**
+- **export_parameters(self, csvfile: str) -> None**
             Export component parameters to a CSV file
 
             Write component parameters to a two-line CSV file.
@@ -2727,7 +2713,7 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
             The first column contains the component identifier and the
             parameter name will be blank.
 
-- **import_parameters(self, csvfile: 'str') -> 'None'**
+- **import_parameters(self, csvfile: str) -> None**
             Import component parameters from a CSV file
 
             Read component parameters from a two-line CSV file,
@@ -2735,12 +2721,12 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
             contains the parameter values.  The first column represents the
             component identifier and the parameter name must be blank.
 
-- **project(self) -> 'Project'**
+- **project(self) -> Project**
             The project this component exists in
 
             :type: Project
 
-- **range(self, parameter: 'str') -> 'ParameterRange'**
+- **range(self, parameter: str) -> ParameterRange**
             Get legal values for a parameter
 
             Parameters:
@@ -2752,7 +2738,7 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
                 * a ``Tuple[float, float]`` defining minimum & maximum values, or
                 * an exception if the parameter does not have a defined range.
 
-- **remove_from_layer(self, name: 'str') -> 'None'**
+- **remove_from_layer(self, name: str) -> None**
             Remove this component from the given layer.
 
             The layer must exist, but need not be enabled or visible.
@@ -2760,21 +2746,21 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
             Parameters:
 - **name (str): The layer to remove the component from.**
 
-- **to_back(self) -> 'bool'**
+- **to_back(self) -> bool**
 - **Put at the start (back) of the Z-Order on the canvas.**
 
-- **to_front(self) -> 'bool'**
+- **to_front(self) -> bool**
 - **Put at the front (end) of the Z-Order on the canvas.**
 
-- **to_next(self) -> 'bool'**
+- **to_next(self) -> bool**
             Move the component one position forward in the Z-Order relative to the
             current Z-Order position.
 
-- **to_prev(self) -> 'bool'**
+- **to_prev(self) -> bool**
             Move the component one position backward in the Z-Order relative to the current
             current Z-Order position.
 
-- **view_parameter_grid(self) -> 'bool'**
+- **view_parameter_grid(self) -> bool**
             View the parameter grid for this component
 
         ----------------------------------------------------------------------
@@ -2822,8 +2808,8 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
 - **__init__(**
             self,
             *,
-            _ctx: 'Optional[Context]' = None,
-            _ident: 'Optional[Dict[str, Any]]' = None
+            _ctx: Optional[Context] = None,
+            _ident: Optional[Dict[str, Any]] = None
         )
 - **Initialize self.  See help(type(self)) for accurate signature.**
 
@@ -2842,13 +2828,13 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
         ----------------------------------------------------------------------
         Methods inherited from MovableMixin:
 
-- **copy(self) -> 'bool'**
+- **copy(self) -> bool**
             Copy this component to the clipboard.
 
-- **cut(self) -> 'bool'**
+- **cut(self) -> bool**
             Cut this component to the clipboard
 
-- **delete(self) -> 'bool'**
+- **delete(self) -> bool**
             Delete this component.
 
 - **get_location(self)**
@@ -2895,11 +2881,7 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
             cached value will be returned.
 
 ### class Wire(Component)
-- **Wire(**
-            *,
-            _ctx: 'Optional[Context]' = None,
-            _ident: 'Optional[Dict[str, Any]]' = None
-        )
+- **Wire(*, _ctx: Optional[Context] = None, _ident: Optional[Dict[str, Any]] = None)**
 
         An electrical wire or control signal.
 
@@ -2925,13 +2907,13 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
 - **decompose(self)**
             Break the wire down into deperate wires
 
-- **endpoints(self) -> 'Tuple[Point, Point]'** -> `Tuple[Point, Point]`
+- **endpoints(self) -> Tuple[Point, Point]** -> `Tuple[Point, Point]`
             Get the end-points of the wire.  Internal vertices are not returned.
 
             Returns:
                 List[Point]: The wire's end-points
 
-- **vertices(self, *vertices: 'AnyPoint') -> 'List[Point]'** -> `List[Point]`
+- **vertices(self, *vertices: AnyPoint) -> List[Point]** -> `List[Point]`
 - **Wire.vertices([vertices])** -> `List[Point]`
 
             Set or get the vertices of the wire
@@ -2943,17 +2925,12 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
 - **List[x,y]: A list of (x,y) coordinates.**
 
         ----------------------------------------------------------------------
-        Data and other attributes defined here:
-
-        __annotations__ = {}
-
-        ----------------------------------------------------------------------
         Methods inherited from Component:
 
-- **flip(self) -> 'bool'**
+- **flip(self) -> bool**
             Flip the component along the vertical axis
 
-- **is_module(self) -> 'bool'**
+- **is_module(self) -> bool**
             Check to see if this component has its own canvas, with in turn,
             can contain additional components.
 
@@ -2965,16 +2942,16 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
                 bool: ``True`` if the component has an internal canvas,
                 ``False`` otherwise.
 
-- **mirror(self) -> 'bool'**
+- **mirror(self) -> bool**
             Mirror the component along the horizontal axis
 
-- **rotate_180(self) -> 'bool'**
+- **rotate_180(self) -> bool**
             Rotate the component 90 degrees to the right
 
-- **rotate_left(self) -> 'bool'**
+- **rotate_left(self) -> bool**
 - **Rotate the component 90 degrees to the left (counter-clockwise)**
 
-- **rotate_right(self) -> 'bool'**
+- **rotate_right(self) -> bool**
 - **Rotate the component 90 degrees to the right (clockwise)**
 
         ----------------------------------------------------------------------
@@ -2986,11 +2963,11 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
         ----------------------------------------------------------------------
         Methods inherited from ZComponent:
 
-- **__getitem__(self, key: 'str') -> 'Any'**
+- **__getitem__(self, key: str) -> Any**
 
-- **__setitem__(self, key: 'str', value: 'Any') -> 'None'**
+- **__setitem__(self, key: str, value: Any) -> None**
 
-- **add_to_layer(self, name: 'str') -> 'None'**
+- **add_to_layer(self, name: str) -> None**
             Add this component to the given layer.
 
             The layer must exist, but need not be enabled or visible.
@@ -2998,7 +2975,7 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
             Parameters:
 - **name (str): The layer to add the component to.**
 
-- **clone(self, x: 'int', y: 'int') -> 'Component'**
+- **clone(self, x: int, y: int) -> Component**
             Copy this component and place the copy at the given location.
 
             Parameters:
@@ -3010,7 +2987,7 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
 
 - **command(self, cmd_name)**
 
-- **custom_state(self, state_name: 'str', state: 'str') -> 'None'**
+- **custom_state(self, state_name: str, state: str) -> None**
             Set a custom layer state for this component.
 
             The component must already be part of a layer, and that layer must
@@ -3030,13 +3007,13 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
                 For a three-phased voltage source for instance, the return value
                 changed from ``'master', 'source3'`` to ``'master:source3'``
 
-- **disable(self) -> 'None'**
+- **disable(self) -> None**
             Disable this component.
 
             This component will be disabled regardless of the layer states.
             To re-enable this component use the :meth:`.enable` function.
 
-- **enable(self, enable: 'bool' = True) -> 'None'**
+- **enable(self, enable: bool = True) -> None**
             Enable this component.
 
             With no argument, or if given a `True` value, this will enable a
@@ -3046,7 +3023,7 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
             Parameters:
 - **enable (bool): If set to `False`, disables the component (optional)**
 
-- **export_parameters(self, csvfile: 'str') -> 'None'**
+- **export_parameters(self, csvfile: str) -> None**
             Export component parameters to a CSV file
 
             Write component parameters to a two-line CSV file.
@@ -3057,7 +3034,7 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
 
 - **get_parameters(self)**
 
-- **import_parameters(self, csvfile: 'str') -> 'None'**
+- **import_parameters(self, csvfile: str) -> None**
             Import component parameters from a CSV file
 
             Read component parameters from a two-line CSV file,
@@ -3065,7 +3042,7 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
             contains the parameter values.  The first column represents the
             component identifier and the parameter name must be blank.
 
-- **parameters(self, *, parameters: 'Optional[Parameters]' = None, **kwargs) -> 'Optional[Parameters]'**
+- **parameters(self, *, parameters: Optional[Parameters] = None, **kwargs) -> Optional[Parameters]**
             Set or get the component's parameters.
 
             Parameters:
@@ -3076,12 +3053,12 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
 - **A dictionary of parameter values (if no parameters are being set),**
                 or None.
 
-- **project(self) -> 'Project'**
+- **project(self) -> Project**
             The project this component exists in
 
             :type: Project
 
-- **range(self, parameter: 'str') -> 'ParameterRange'**
+- **range(self, parameter: str) -> ParameterRange**
             Get legal values for a parameter
 
             Parameters:
@@ -3093,7 +3070,7 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
                 * a ``Tuple[float, float]`` defining minimum & maximum values, or
                 * an exception if the parameter does not have a defined range.
 
-- **remove_from_layer(self, name: 'str') -> 'None'**
+- **remove_from_layer(self, name: str) -> None**
             Remove this component from the given layer.
 
             The layer must exist, but need not be enabled or visible.
@@ -3103,21 +3080,21 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
 
 - **set_parameters(self, **parameters)**
 
-- **to_back(self) -> 'bool'**
+- **to_back(self) -> bool**
 - **Put at the start (back) of the Z-Order on the canvas.**
 
-- **to_front(self) -> 'bool'**
+- **to_front(self) -> bool**
 - **Put at the front (end) of the Z-Order on the canvas.**
 
-- **to_next(self) -> 'bool'**
+- **to_next(self) -> bool**
             Move the component one position forward in the Z-Order relative to the
             current Z-Order position.
 
-- **to_prev(self) -> 'bool'**
+- **to_prev(self) -> bool**
             Move the component one position backward in the Z-Order relative to the current
             current Z-Order position.
 
-- **view_parameter_grid(self) -> 'bool'**
+- **view_parameter_grid(self) -> bool**
             View the parameter grid for this component
 
         ----------------------------------------------------------------------
@@ -3165,8 +3142,8 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
 - **__init__(**
             self,
             *,
-            _ctx: 'Optional[Context]' = None,
-            _ident: 'Optional[Dict[str, Any]]' = None
+            _ctx: Optional[Context] = None,
+            _ident: Optional[Dict[str, Any]] = None
         )
 - **Initialize self.  See help(type(self)) for accurate signature.**
 
@@ -3183,15 +3160,20 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
             list of weak references to the object
 
         ----------------------------------------------------------------------
+        Data and other attributes inherited from mhi.common.remote.Remotable:
+
+        __annotations__ = {}
+
+        ----------------------------------------------------------------------
         Methods inherited from MovableMixin:
 
-- **copy(self) -> 'bool'**
+- **copy(self) -> bool**
             Copy this component to the clipboard.
 
-- **cut(self) -> 'bool'**
+- **cut(self) -> bool**
             Cut this component to the clipboard
 
-- **delete(self) -> 'bool'**
+- **delete(self) -> bool**
             Delete this component.
 
 - **get_location(self)**
@@ -3240,8 +3222,8 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
 ### class ZComponent(mhi.pscad.remote.Remotable)
 - **ZComponent(**
             *,
-            _ctx: 'Optional[Context]' = None,
-            _ident: 'Optional[Dict[str, Any]]' = None
+            _ctx: Optional[Context] = None,
+            _ident: Optional[Dict[str, Any]] = None
         )
 
         All ZSLibrary components
@@ -3254,14 +3236,14 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
 
         Methods defined here:
 
-- **__getitem__(self, key: 'str') -> 'Any'** -> `Any`
+- **__getitem__(self, key: str) -> Any** -> `Any`
 
 - **__repr__(self)**
 - **Return repr(self).**
 
-- **__setitem__(self, key: 'str', value: 'Any') -> 'None'** -> `None`
+- **__setitem__(self, key: str, value: Any) -> None** -> `None`
 
-- **add_to_layer(self, name: 'str') -> 'None'** -> `None`
+- **add_to_layer(self, name: str) -> None** -> `None`
             Add this component to the given layer.
 
             The layer must exist, but need not be enabled or visible.
@@ -3269,7 +3251,7 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
             Parameters:
 - **name (str): The layer to add the component to.**
 
-- **clone(self, x: 'int', y: 'int') -> 'Component'** -> `Component`
+- **clone(self, x: int, y: int) -> Component** -> `Component`
             Copy this component and place the copy at the given location.
 
             Parameters:
@@ -3281,7 +3263,7 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
 
 - **command(self, cmd_name)**
 
-- **custom_state(self, state_name: 'str', state: 'str') -> 'None'** -> `None`
+- **custom_state(self, state_name: str, state: str) -> None** -> `None`
             Set a custom layer state for this component.
 
             The component must already be part of a layer, and that layer must
@@ -3301,13 +3283,13 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
                 For a three-phased voltage source for instance, the return value
                 changed from ``'master', 'source3'`` to ``'master:source3'``
 
-- **disable(self) -> 'None'** -> `None`
+- **disable(self) -> None** -> `None`
             Disable this component.
 
             This component will be disabled regardless of the layer states.
             To re-enable this component use the :meth:`.enable` function.
 
-- **enable(self, enable: 'bool' = True) -> 'None'** -> `None`
+- **enable(self, enable: bool = True) -> None** -> `None`
             Enable this component.
 
             With no argument, or if given a `True` value, this will enable a
@@ -3317,7 +3299,7 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
             Parameters:
 - **enable (bool): If set to `False`, disables the component (optional)** -> `None`
 
-- **export_parameters(self, csvfile: 'str') -> 'None'** -> `None`
+- **export_parameters(self, csvfile: str) -> None** -> `None`
             Export component parameters to a CSV file
 
             Write component parameters to a two-line CSV file.
@@ -3328,7 +3310,7 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
 
 - **get_parameters(self)** `@deprecated`
 
-- **import_parameters(self, csvfile: 'str') -> 'None'** -> `None`
+- **import_parameters(self, csvfile: str) -> None** -> `None`
             Import component parameters from a CSV file
 
             Read component parameters from a two-line CSV file,
@@ -3336,7 +3318,7 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
             contains the parameter values.  The first column represents the
             component identifier and the parameter name must be blank.
 
-- **parameters(self, *, parameters: 'Optional[Parameters]' = None, **kwargs) -> 'Optional[Parameters]'** -> `Optional[Parameters]`
+- **parameters(self, *, parameters: Optional[Parameters] = None, **kwargs) -> Optional[Parameters]** -> `Optional[Parameters]`
             Set or get the component's parameters.
 
             Parameters:
@@ -3347,12 +3329,12 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
 - **A dictionary of parameter values (if no parameters are being set),**
                 or None.
 
-- **project(self) -> 'Project'** -> `Project`
+- **project(self) -> Project** -> `Project`
             The project this component exists in
 
             :type: Project
 
-- **range(self, parameter: 'str') -> 'ParameterRange'** -> `ParameterRange`
+- **range(self, parameter: str) -> ParameterRange** -> `ParameterRange`
             Get legal values for a parameter
 
             Parameters:
@@ -3364,7 +3346,7 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
                 * a ``Tuple[float, float]`` defining minimum & maximum values, or
                 * an exception if the parameter does not have a defined range.
 
-- **remove_from_layer(self, name: 'str') -> 'None'** -> `None`
+- **remove_from_layer(self, name: str) -> None** -> `None`
             Remove this component from the given layer.
 
             The layer must exist, but need not be enabled or visible.
@@ -3374,21 +3356,21 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
 
 - **set_parameters(self, **parameters)** `@deprecated`
 
-- **to_back(self) -> 'bool'** -> `bool`
+- **to_back(self) -> bool** -> `bool`
 - **Put at the start (back) of the Z-Order on the canvas.**
 
-- **to_front(self) -> 'bool'** -> `bool`
+- **to_front(self) -> bool** -> `bool`
 - **Put at the front (end) of the Z-Order on the canvas.**
 
-- **to_next(self) -> 'bool'** -> `bool`
+- **to_next(self) -> bool** -> `bool`
             Move the component one position forward in the Z-Order relative to the
             current Z-Order position.
 
-- **to_prev(self) -> 'bool'** -> `bool`
+- **to_prev(self) -> bool** -> `bool`
             Move the component one position backward in the Z-Order relative to the current
             current Z-Order position.
 
-- **view_parameter_grid(self) -> 'bool'** -> `bool`
+- **view_parameter_grid(self) -> bool** -> `bool`
             View the parameter grid for this component
 
         ----------------------------------------------------------------------
@@ -3418,11 +3400,6 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
             The layer the component is on
 
         ----------------------------------------------------------------------
-        Data and other attributes defined here:
-
-        __annotations__ = {}
-
-        ----------------------------------------------------------------------
         Readonly properties inherited from mhi.pscad.remote.Remotable:
 
         main
@@ -3441,8 +3418,8 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
 - **__init__(**
             self,
             *,
-            _ctx: 'Optional[Context]' = None,
-            _ident: 'Optional[Dict[str, Any]]' = None
+            _ctx: Optional[Context] = None,
+            _ident: Optional[Dict[str, Any]] = None
         )
 - **Initialize self.  See help(type(self)) for accurate signature.**
 
@@ -3458,8 +3435,13 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
         __weakref__
             list of weak references to the object
 
+        ----------------------------------------------------------------------
+        Data and other attributes inherited from mhi.common.remote.Remotable:
+
+        __annotations__ = {}
+
 ## DATA
-    AnyPoint = typing.Union[mhi.pscad.types.Point, mhi.pscad.types.Port, t...
+    AnyPoint = mhi.pscad.types.Point   mhi.pscad.types.Port   typing.Tuple...
     Dict = typing.Dict
         A generic version of dict.
 
@@ -3471,7 +3453,7 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
         Optional[X] is equivalent to Union[X, None].
 
     PGB = mhi.pscad.component.PGB
-    ParameterRange = typing.Union[typing.Tuple, typing.Set, range, NoneTyp...
+    ParameterRange = typing.Tuple   typing.Set   range   None
     Parameters = typing.Dict[str, typing.Any]
     RES_ID = {'GRAPHS_COPYDATA_ALL': 901, 'GRAPHS_COPYDATA_VIS': 900, 'GRA...
     TYPE_CHECKING = False
@@ -3487,4 +3469,4 @@ Python Library Documentation: module mhi.pscad.component in mhi.pscad
         To specify a variable-length tuple of homogeneous type, use Tuple[T, ...].
 
 ## FILE
-    /home/lua/miniconda/lib/python3.13/site-packages/mhi/pscad/component.py
+    c:\users\as0135\appdata\local\programs\python\python314\lib\site-packages\mhi\pscad\component.py

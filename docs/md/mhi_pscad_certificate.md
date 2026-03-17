@@ -1,6 +1,6 @@
 # Module mhi.pscad.certificate
 
-*Source: /home/lua/miniconda/lib/python3.13/site-packages/mhi/pscad/certificate.py*
+*Source: C:\Users\AS0135\AppData\Local\Programs\Python\Python314\Lib\site-packages\mhi\pscad\certificate.py*
 
 Python Library Documentation: module mhi.pscad.certificate in mhi.pscad
 
@@ -94,13 +94,13 @@ Python Library Documentation: module mhi.pscad.certificate in mhi.pscad
 - **__str__(self)**
 - **Return str(self).**
 
-- **account(self) -> 'str'** -> `str`
+- **account(self) -> str** -> `str`
             Returns the 'Account Name' for the Certificate
 
-- **available(self) -> 'int'** -> `int`
+- **available(self) -> int** -> `int`
             Returns the # of available Certificates
 
-- **cost(self) -> 'float'** -> `float`
+- **cost(self) -> float** -> `float`
             The certificate cost may be used by the license selection logic to
             determine which license to acquire from the set of all licenses which
             meet the list of requested features.  The 'cheapest' license would be
@@ -109,24 +109,20 @@ Python Library Documentation: module mhi.pscad.certificate in mhi.pscad
             This function returns a cost using a default heuristic.  The method may
             be overridden by setting the class member `Certificate.COST`.
 
-- **feature(self, key: 'Union[str, int]') -> 'Optional[Feature]'** -> `Optional[Feature]`
+- **feature(self, key: Union[str, int]) -> Optional[Feature]** -> `Optional[Feature]`
             Returns a `Feature` associated with the Certificate.  The feature may
 - **be specified by name (such as "Freq Dep Network Equivalent") or by** -> `str`
 - **an integer id (such as 17).** -> `int`
 
-- **features(self) -> 'List[Feature]'** -> `List[Feature]`
+- **features(self) -> List[Feature]** -> `List[Feature]`
             Returns the list of all features associated with the Certificate.
             Note: This even includes Features where no instances of that feature
             are owned.
 
-- **id(self) -> 'int'** -> `int`
+- **id(self) -> int** -> `int`
             Returns the ID of the Certificate
 
-- **meet(** -> `bool`
-            self,
-            key: 'Union[str, int]',
-            req: 'Union[str, int, bool, Tuple[int, int]]'
-        ) -> 'bool'
+- **meet(self, key: Union[str, int], req: Union[str, int, bool, Tuple[int, int]]) -> bool** -> `bool`
             Tests if the certificate meets the given requirement.
 
             Parameters:
@@ -143,7 +139,7 @@ Python Library Documentation: module mhi.pscad.certificate in mhi.pscad
                 # Does `cert` disallow black boxing?
 - **cert.meet("Blackboxing", False)** -> `bool`
 
-- **meets(self, requirements: 'List[Union[str, int, Tuple[Union[str, int], int]]]') -> 'bool'** -> `bool`
+- **meets(self, requirements: List[Union[str, int, Tuple[Union[str, int], int]]]) -> bool** -> `bool`
             Tests if the certificate meets the given list of requirements.
 
             Parameters:
@@ -159,16 +155,16 @@ Python Library Documentation: module mhi.pscad.certificate in mhi.pscad
                 # Does `cert` allow black boxing and 20 or more EMTDC instances?
 - **cert.meets(["Blackboxing", ("EMTDC Instances", 20)])** -> `bool`
 
-- **name(self) -> 'str'** -> `str`
+- **name(self) -> str** -> `str`
             Returns the 'Product Name' for the Certificate
 
-- **total(self) -> 'int'** -> `int`
+- **total(self) -> int** -> `int`
             Returns the total # of Certificates
 
         ----------------------------------------------------------------------
         Static methods defined here:
 
-- **COST = _default_cost(certificate) -> 'float'** `@staticmethod` -> `float`
+- **COST = _default_cost(certificate) -> float** `@staticmethod` -> `float`
             The cost of a certificate is calculated as the sum of the cost of the
 - **individual features, plus an additional premium for 'rare' (small values**
 - **for cert.total()) certificates.** -> `int`
@@ -243,7 +239,7 @@ Python Library Documentation: module mhi.pscad.certificate in mhi.pscad
 - **__str__(self)**
 - **Return str(self).**
 
-- **cost(self) -> 'float'** -> `float`
+- **cost(self) -> float** -> `float`
             Computes the 'cost' of a feature.
 
             `Feature.COSTS` is a dictionary, indexed by feature name, of tuples
@@ -259,13 +255,13 @@ Python Library Documentation: module mhi.pscad.certificate in mhi.pscad
             The fixed and variable costs specified here are arbitrary, and may be
             changed to alter the license selection.
 
-- **id(self) -> 'int'** -> `int`
+- **id(self) -> int** -> `int`
             Returns the Feature's ID.
 
-- **name(self) -> 'str'** -> `str`
+- **name(self) -> str** -> `str`
             Returns the Feature's name.
 
-- **value(self) -> 'Optional[int]'** -> `Optional[int]`
+- **value(self) -> Optional[int]** -> `Optional[int]`
             Returns the Feature's value.
 
         ----------------------------------------------------------------------
@@ -304,35 +300,5 @@ Python Library Documentation: module mhi.pscad.certificate in mhi.pscad
 
         To specify a variable-length tuple of homogeneous type, use Tuple[T, ...].
 
-    Union = typing.Union
-        Union type; Union[X, Y] means either X or Y.
-
-        On Python 3.10 and higher, the   operator
-        can also be used to denote unions;
-        X   Y means the same thing to the type checker as Union[X, Y].
-
-        To define a union, use e.g. Union[int, str]. Details:
-        - The arguments must be types and there must be at least one.
-        - None as an argument is a special case and is replaced by
-          type(None).
-        - Unions of unions are flattened, e.g.::
-
-            assert Union[Union[int, str], float] == Union[int, str, float]
-
-        - Unions of a single argument vanish, e.g.::
-
-            assert Union[int] == int  # The constructor actually returns int
-
-        - Redundant arguments are skipped, e.g.::
-
-            assert Union[int, str, int] == Union[int, str]
-
-        - When comparing unions, the argument order is ignored, e.g.::
-
-            assert Union[int, str] == Union[str, int]
-
-        - You cannot subclass or instantiate a union.
-        - You can use Optional[X] as a shorthand for Union[X, None].
-
 ## FILE
-    /home/lua/miniconda/lib/python3.13/site-packages/mhi/pscad/certificate.py
+    c:\users\as0135\appdata\local\programs\python\python314\lib\site-packages\mhi\pscad\certificate.py

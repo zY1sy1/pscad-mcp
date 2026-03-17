@@ -1,6 +1,6 @@
 # Module mhi.pscad.remote
 
-*Source: /home/lua/miniconda/lib/python3.13/site-packages/mhi/pscad/remote.py*
+*Source: C:\Users\AS0135\AppData\Local\Programs\Python\Python314\Lib\site-packages\mhi\pscad\remote.py*
 
 Python Library Documentation: module mhi.pscad.remote in mhi.pscad
 
@@ -16,8 +16,8 @@ Python Library Documentation: module mhi.pscad.remote in mhi.pscad
 ### class Remotable(mhi.common.remote.Remotable)
 - **Remotable(**
             *,
-            _ctx: 'Optional[Context]' = None,
-            _ident: 'Optional[Dict[str, Any]]' = None
+            _ctx: Optional[Context] = None,
+            _ident: Optional[Dict[str, Any]] = None
         )
 
         The Remote Proxy
@@ -34,11 +34,6 @@ Python Library Documentation: module mhi.pscad.remote in mhi.pscad
             ``Remotable`` object.
 
         ----------------------------------------------------------------------
-        Data and other attributes defined here:
-
-        __annotations__ = {}
-
-        ----------------------------------------------------------------------
         Methods inherited from mhi.common.remote.Remotable:
 
 - **__eq__(self, other)**
@@ -50,8 +45,8 @@ Python Library Documentation: module mhi.pscad.remote in mhi.pscad
 - **__init__(**
             self,
             *,
-            _ctx: 'Optional[Context]' = None,
-            _ident: 'Optional[Dict[str, Any]]' = None
+            _ctx: Optional[Context] = None,
+            _ident: Optional[Dict[str, Any]] = None
         )
 - **Initialize self.  See help(type(self)) for accurate signature.**
 
@@ -69,6 +64,11 @@ Python Library Documentation: module mhi.pscad.remote in mhi.pscad
 
         __weakref__
             list of weak references to the object
+
+        ----------------------------------------------------------------------
+        Data and other attributes inherited from mhi.common.remote.Remotable:
+
+        __annotations__ = {}
 
 ### class rmi_property(builtins.property)
 - **rmi_property(fget=None, fset=None, doc=None, name=None, requires=None)**
@@ -121,9 +121,6 @@ Python Library Documentation: module mhi.pscad.remote in mhi.pscad
         ----------------------------------------------------------------------
         Methods inherited from builtins.property:
 
-- **__getattribute__(self, name, /)**
-- **Return getattr(self, name).**
-
 - **deleter(self, object, /)**
             Descriptor to obtain a copy of the property with a different deleter.
 
@@ -154,7 +151,7 @@ Python Library Documentation: module mhi.pscad.remote in mhi.pscad
     deprecated(message='This method is deprecated')
         Flag a method as deprecated
 
-    requires(version: 'str')
+    requires(version: str)
         Requires a specific application version
 
         Ensures the appropriate remote application version before attempting to
@@ -175,4 +172,4 @@ Python Library Documentation: module mhi.pscad.remote in mhi.pscad
     __all__ = ('Remotable', 'rmi', 'rmi_property', 'deprecated', 'requires...
 
 ## FILE
-    /home/lua/miniconda/lib/python3.13/site-packages/mhi/pscad/remote.py
+    c:\users\as0135\appdata\local\programs\python\python314\lib\site-packages\mhi\pscad\remote.py

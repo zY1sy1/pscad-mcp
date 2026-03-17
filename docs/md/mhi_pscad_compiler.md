@@ -1,6 +1,6 @@
 # Module mhi.pscad.compiler
 
-*Source: /home/lua/miniconda/lib/python3.13/site-packages/mhi/pscad/compiler.py*
+*Source: C:\Users\AS0135\AppData\Local\Programs\Python\Python314\Lib\site-packages\mhi\pscad\compiler.py*
 
 Python Library Documentation: module mhi.pscad.compiler in mhi.pscad
 
@@ -14,34 +14,29 @@ Python Library Documentation: module mhi.pscad.compiler in mhi.pscad
         CompilerConfiguration
 
 ### class CompilerCodecs(builtins.object)
-- **CompilerCodecs(pscad: 'Optional[PSCAD]')**
+- **CompilerCodecs(pscad: Optional[PSCAD])**
 
         Compiler Configuration Coder/Decoder
 
         Methods defined here:
 
-- **decode_all(self, params: 'Parameters') -> 'Parameters'** -> `Parameters`
+- **decode_all(self, params: Parameters) -> Parameters** -> `Parameters`
             Decode known external compiler parameters to human-readable string
 
-- **encode_all(** -> `Parameters`
-            self,
-            params: 'Parameters',
-            *,
-            current: 'Optional[Parameters]' = None
-        ) -> 'Parameters'
+- **encode_all(self, params: Parameters, *, current: Optional[Parameters] = None) -> Parameters** -> `Parameters`
             Encode compiler parameters from human-readable strings to
             the internal codes used by PSCAD.
 
             If not all compiler parameters are given, the current parameters
             may be used to ensure a proper configuration is used.
 
-- **encodes(self, params: 'Parameters') -> 'bool'** -> `bool`
+- **encodes(self, params: Parameters) -> bool** -> `bool`
             Determine if any compiler parameters are present
 
             This may be used to determine if compiler configuration encoding
             is necessary.
 
-- **missing_params(self, _params: 'Parameters') -> 'bool'** -> `bool`
+- **missing_params(self, _params: Parameters) -> bool** -> `bool`
             Determine if a complete set of compiler parameters is present.
 
             This should be used to determine if the current settings need to
@@ -50,7 +45,7 @@ Python Library Documentation: module mhi.pscad.compiler in mhi.pscad
         ----------------------------------------------------------------------
         Static methods defined here:
 
-- **__new__(cls, pscad: 'Optional[PSCAD]')**
+- **__new__(cls, pscad: Optional[PSCAD])**
 - **Create and return a new object.  See help(type) for accurate signature.**
 
         ----------------------------------------------------------------------
@@ -80,11 +75,7 @@ Python Library Documentation: module mhi.pscad.compiler in mhi.pscad
         __annotations__ = {'_codec': 'Dict[str, FuzzyCodec]'}
 
 ### class CompilerConfiguration(builtins.tuple)
-- **CompilerConfiguration(**
-- **fortran_version: ForwardRef('str'),**
-- **c_version: ForwardRef('str'),**
-- **matlab_version: ForwardRef('str')**
-        )
+- **CompilerConfiguration(fortran_version: str, c_version: str, matlab_version: str)**
 
         A PSCAD Compiler Configuration
 
@@ -118,12 +109,7 @@ Python Library Documentation: module mhi.pscad.compiler in mhi.pscad
         ----------------------------------------------------------------------
         Static methods defined here:
 
-- **__new__(**
-            _cls,
-- **fortran_version: ForwardRef('str'),**
-- **c_version: ForwardRef('str'),**
-- **matlab_version: ForwardRef('str')**
-        ) from namedtuple_CompilerConfiguration.CompilerConfiguration
+- **__new__(_cls, fortran_version: str, c_version: str, matlab_version: str) from namedtuple_CompilerConfiguration.CompilerConfiguration**
 - **Create new instance of CompilerConfiguration(fortran_version, c_version, matlab_version)**
 
         ----------------------------------------------------------------------
@@ -141,8 +127,6 @@ Python Library Documentation: module mhi.pscad.compiler in mhi.pscad
         ----------------------------------------------------------------------
         Data and other attributes defined here:
 
-- **__annotations__ = {'c_version': ForwardRef('str'), 'fortran_version': ...**
-
 - **__match_args__ = ('fortran_version', 'c_version', 'matlab_version')**
 
 - **__orig_bases__ = (<function NamedTuple>,)**
@@ -157,4 +141,4 @@ Python Library Documentation: module mhi.pscad.compiler in mhi.pscad
     __all__ = ('CompilerConfiguration', 'CompilerCodecs')
 
 ## FILE
-    /home/lua/miniconda/lib/python3.13/site-packages/mhi/pscad/compiler.py
+    c:\users\as0135\appdata\local\programs\python\python314\lib\site-packages\mhi\pscad\compiler.py

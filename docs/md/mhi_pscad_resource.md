@@ -1,6 +1,6 @@
 # Module mhi.pscad.resource
 
-*Source: /home/lua/miniconda/lib/python3.13/site-packages/mhi/pscad/resource.py*
+*Source: C:\Users\AS0135\AppData\Local\Programs\Python\Python314\Lib\site-packages\mhi\pscad\resource.py*
 
 Python Library Documentation: module mhi.pscad.resource in mhi.pscad
 
@@ -14,4 +14,4 @@ Python Library Documentation: module mhi.pscad.resource in mhi.pscad
     RES_ID = {'GRAPHS_COPYDATA_ALL': 901, 'GRAPHS_COPYDATA_VIS': 900, 'GRA...
 
 ## FILE
-    /home/lua/miniconda/lib/python3.13/site-packages/mhi/pscad/resource.py
+    c:\users\as0135\appdata\local\programs\python\python314\lib\site-packages\mhi\pscad\resource.py

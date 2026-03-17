@@ -106,9 +106,6 @@ CLASSES
      |  __ge__(self, value, /)
      |      Return self>=value.
      |
-     |  __getattribute__(self, name, /)
-     |      Return getattr(self, name).
-     |
      |  __getnewargs__(self, /)
      |
      |  __gt__(self, value, /)
@@ -180,7 +177,7 @@ CLASSES
      |  __ror__(self, value, /)
      |      Return value|self.
      |
-     |  __round__(self, ndigits=<unrepresentable>, /)
+     |  __round__(self, ndigits=None, /)
      |      Rounding an Integral returns itself.
      |
      |      Rounding with an ndigits argument also returns an integer.
@@ -312,9 +309,6 @@ CLASSES
      |
      |  __dir__(self)
      |      Returns public methods and other interesting attributes.
-     |
-     |  __init__(self, *args, **kwds)
-     |      Initialize self.  See help(type(self)) for accurate signature.
      |
      |  __reduce_ex__(self, proto)
      |      Helper for pickle.
@@ -492,9 +486,6 @@ CLASSES
      |  __ge__(self, value, /)
      |      Return self>=value.
      |
-     |  __getattribute__(self, name, /)
-     |      Return getattr(self, name).
-     |
      |  __getnewargs__(self, /)
      |
      |  __gt__(self, value, /)
@@ -566,7 +557,7 @@ CLASSES
      |  __ror__(self, value, /)
      |      Return value|self.
      |
-     |  __round__(self, ndigits=<unrepresentable>, /)
+     |  __round__(self, ndigits=None, /)
      |      Rounding an Integral returns itself.
      |
      |      Rounding with an ndigits argument also returns an integer.
@@ -698,9 +689,6 @@ CLASSES
      |
      |  __dir__(self)
      |      Returns public methods and other interesting attributes.
-     |
-     |  __init__(self, *args, **kwds)
-     |      Initialize self.  See help(type(self)) for accurate signature.
      |
      |  __reduce_ex__(self, proto)
      |      Helper for pickle.
@@ -838,9 +826,6 @@ CLASSES
      |  __ge__(self, value, /)
      |      Return self>=value.
      |
-     |  __getattribute__(self, name, /)
-     |      Return getattr(self, name).
-     |
      |  __getnewargs__(self, /)
      |
      |  __gt__(self, value, /)
@@ -912,7 +897,7 @@ CLASSES
      |  __ror__(self, value, /)
      |      Return value|self.
      |
-     |  __round__(self, ndigits=<unrepresentable>, /)
+     |  __round__(self, ndigits=None, /)
      |      Rounding an Integral returns itself.
      |
      |      Rounding with an ndigits argument also returns an integer.
@@ -1044,9 +1029,6 @@ CLASSES
      |
      |  __dir__(self)
      |      Returns public methods and other interesting attributes.
-     |
-     |  __init__(self, *args, **kwds)
-     |      Initialize self.  See help(type(self)) for accurate signature.
      |
      |  __reduce_ex__(self, proto)
      |      Helper for pickle.
@@ -1278,9 +1260,6 @@ CLASSES
      |  __ge__(self, value, /)
      |      Return self>=value.
      |
-     |  __getattribute__(self, name, /)
-     |      Return getattr(self, name).
-     |
      |  __getnewargs__(self, /)
      |
      |  __gt__(self, value, /)
@@ -1352,7 +1331,7 @@ CLASSES
      |  __ror__(self, value, /)
      |      Return value|self.
      |
-     |  __round__(self, ndigits=<unrepresentable>, /)
+     |  __round__(self, ndigits=None, /)
      |      Rounding an Integral returns itself.
      |
      |      Rounding with an ndigits argument also returns an integer.
@@ -1484,9 +1463,6 @@ CLASSES
      |
      |  __dir__(self)
      |      Returns public methods and other interesting attributes.
-     |
-     |  __init__(self, *args, **kwds)
-     |      Initialize self.  See help(type(self)) for accurate signature.
      |
      |  __reduce_ex__(self, proto)
      |      Helper for pickle.
@@ -1606,9 +1582,6 @@ CLASSES
      |  __ge__(self, value, /)
      |      Return self>=value.
      |
-     |  __getattribute__(self, name, /)
-     |      Return getattr(self, name).
-     |
      |  __getnewargs__(self, /)
      |
      |  __gt__(self, value, /)
@@ -1680,7 +1653,7 @@ CLASSES
      |  __ror__(self, value, /)
      |      Return value|self.
      |
-     |  __round__(self, ndigits=<unrepresentable>, /)
+     |  __round__(self, ndigits=None, /)
      |      Rounding an Integral returns itself.
      |
      |      Rounding with an ndigits argument also returns an integer.
@@ -1812,9 +1785,6 @@ CLASSES
      |
      |  __dir__(self)
      |      Returns public methods and other interesting attributes.
-     |
-     |  __init__(self, *args, **kwds)
-     |      Initialize self.  See help(type(self)) for accurate signature.
      |
      |  __reduce_ex__(self, proto)
      |      Helper for pickle.
@@ -1944,8 +1914,6 @@ CLASSES
      |  ----------------------------------------------------------------------
      |  Data and other attributes defined here:
      |
-     |  __annotations__ = {'classid': <class 'str'>, 'group': <class 'int'>, '...
-     |
      |  __match_args__ = ('text', 'label', 'status', 'scope', 'name', 'link', ...
      |
      |  __orig_bases__ = (<function NamedTuple>,)
@@ -1968,9 +1936,6 @@ CLASSES
      |
      |  __ge__(self, value, /)
      |      Return self>=value.
-     |
-     |  __getattribute__(self, name, /)
-     |      Return getattr(self, name).
      |
      |  __getitem__(self, key, /)
      |      Return self[key].
@@ -2095,9 +2060,6 @@ CLASSES
      |  __ge__(self, value, /)
      |      Return self>=value.
      |
-     |  __getattribute__(self, name, /)
-     |      Return getattr(self, name).
-     |
      |  __getnewargs__(self, /)
      |
      |  __gt__(self, value, /)
@@ -2169,7 +2131,7 @@ CLASSES
      |  __ror__(self, value, /)
      |      Return value|self.
      |
-     |  __round__(self, ndigits=<unrepresentable>, /)
+     |  __round__(self, ndigits=None, /)
      |      Rounding an Integral returns itself.
      |
      |      Rounding with an ndigits argument also returns an integer.
@@ -2302,9 +2264,6 @@ CLASSES
      |  __dir__(self)
      |      Returns public methods and other interesting attributes.
      |
-     |  __init__(self, *args, **kwds)
-     |      Initialize self.  See help(type(self)) for accurate signature.
-     |
      |  __reduce_ex__(self, proto)
      |      Helper for pickle.
      |
@@ -2347,7 +2306,7 @@ CLASSES
      |      is a read-only view of the internal mapping.
 
     class Point(builtins.tuple)
-     |  Point(x: ForwardRef('int'), y: ForwardRef('int'))
+     |  Point(x: int, y: int)
      |
      |  Point class that supports Euclidean distance calculation.
      |
@@ -2374,7 +2333,7 @@ CLASSES
      |
      |  Methods defined here:
      |
-     |  __add__(self, other) -> 'Point'
+     |  __add__(self, other) -> Point
      |      Return self+value.
      |
      |  __getnewargs__(self) from collections.Point
@@ -2385,7 +2344,7 @@ CLASSES
      |  __repr__(self) from collections.Point
      |      Return a nicely formatted representation string
      |
-     |  __sub__(self, other) -> 'Point'
+     |  __sub__(self, other) -> Point
      |
      |  _asdict(self) from collections.Point
      |      Return a new dict which maps field names to their values.
@@ -2393,7 +2352,7 @@ CLASSES
      |  _replace(self, /, **kwds) from collections.Point
      |      Return a new Point object replacing specified fields with new values
      |
-     |  distance(self, other: "Union[Tuple[int, int], 'Point']") -> 'float'
+     |  distance(self, other: Union[Tuple[int, int], 'Point']) -> float
      |      Measures the Euclidean distance to a given point.
      |
      |      Parameters
@@ -2425,7 +2384,7 @@ CLASSES
      |  ----------------------------------------------------------------------
      |  Static methods defined here:
      |
-     |  __new__(_cls, x: ForwardRef('int'), y: ForwardRef('int')) from namedtuple_Point.Point
+     |  __new__(_cls, x: int, y: int) from namedtuple_Point.Point
      |      Create new instance of Point(x, y)
      |
      |  ----------------------------------------------------------------------
@@ -2439,8 +2398,6 @@ CLASSES
      |
      |  ----------------------------------------------------------------------
      |  Data and other attributes defined here:
-     |
-     |  __annotations__ = {'x': ForwardRef('int'), 'y': ForwardRef('int')}
      |
      |  __match_args__ = ('x', 'y')
      |
@@ -2461,9 +2418,6 @@ CLASSES
      |
      |  __ge__(self, value, /)
      |      Return self>=value.
-     |
-     |  __getattribute__(self, name, /)
-     |      Return getattr(self, name).
      |
      |  __getitem__(self, key, /)
      |      Return self[key].
@@ -2511,13 +2465,13 @@ CLASSES
 
     class Port(builtins.tuple)
      |  Port(
-     |      x: ForwardRef('int'),
-     |      y: ForwardRef('int'),
-     |      name: ForwardRef('str'),
-     |      dim: ForwardRef('int'),
-     |      type: ForwardRef('NodeType'),
-     |      electrical: ForwardRef('Electrical'),
-     |      signal: ForwardRef('Signal')
+     |      x: int,
+     |      y: int,
+     |      name: str,
+     |      dim: int,
+     |      type: NodeType,
+     |      electrical: Electrical,
+     |      signal: Signal
      |  )
      |
      |  A named Port (input, output, or electrical connection) for a Component
@@ -2554,13 +2508,13 @@ CLASSES
      |
      |  __new__(
      |      _cls,
-     |      x: ForwardRef('int'),
-     |      y: ForwardRef('int'),
-     |      name: ForwardRef('str'),
-     |      dim: ForwardRef('int'),
-     |      type: ForwardRef('NodeType'),
-     |      electrical: ForwardRef('Electrical'),
-     |      signal: ForwardRef('Signal')
+     |      x: int,
+     |      y: int,
+     |      name: str,
+     |      dim: int,
+     |      type: NodeType,
+     |      electrical: Electrical,
+     |      signal: Signal
      |  ) from namedtuple_Port.Port
      |      Create new instance of Port(x, y, name, dim, type, electrical, signal)
      |
@@ -2599,8 +2553,6 @@ CLASSES
      |  ----------------------------------------------------------------------
      |  Data and other attributes defined here:
      |
-     |  __annotations__ = {'dim': ForwardRef('int'), 'electrical': ForwardRef(...
-     |
      |  __match_args__ = ('x', 'y', 'name', 'dim', 'type', 'electrical', 'sign...
      |
      |  __orig_bases__ = (<function NamedTuple>,)
@@ -2623,9 +2575,6 @@ CLASSES
      |
      |  __ge__(self, value, /)
      |      Return self>=value.
-     |
-     |  __getattribute__(self, name, /)
-     |      Return getattr(self, name).
      |
      |  __getitem__(self, key, /)
      |      Return self[key].
@@ -2744,9 +2693,6 @@ CLASSES
      |  __ge__(self, value, /)
      |      Return self>=value.
      |
-     |  __getattribute__(self, name, /)
-     |      Return getattr(self, name).
-     |
      |  __getnewargs__(self, /)
      |
      |  __gt__(self, value, /)
@@ -2818,7 +2764,7 @@ CLASSES
      |  __ror__(self, value, /)
      |      Return value|self.
      |
-     |  __round__(self, ndigits=<unrepresentable>, /)
+     |  __round__(self, ndigits=None, /)
      |      Rounding an Integral returns itself.
      |
      |      Rounding with an ndigits argument also returns an integer.
@@ -2951,9 +2897,6 @@ CLASSES
      |  __dir__(self)
      |      Returns public methods and other interesting attributes.
      |
-     |  __init__(self, *args, **kwds)
-     |      Initialize self.  See help(type(self)) for accurate signature.
-     |
      |  __reduce_ex__(self, proto)
      |      Helper for pickle.
      |
@@ -2996,12 +2939,7 @@ CLASSES
      |      is a read-only view of the internal mapping.
 
     class Rect(builtins.tuple)
-     |  Rect(
-     |      left: ForwardRef('int'),
-     |      top: ForwardRef('int'),
-     |      right: ForwardRef('int'),
-     |      bottom: ForwardRef('int')
-     |  )
+     |  Rect(left: int, top: int, right: int, bottom: int)
      |
      |  A class to represent rectangles on the canvas that supports mid-point
      |  calculation.
@@ -3043,7 +2981,7 @@ CLASSES
      |  _make(iterable) from collections.Rect
      |      Make a new Rect object from a sequence or iterable
      |
-     |  from_mid(mid_point: 'Union[Tuple[int, int], Point]', w: 'int', h: 'int') -> 'Rect'
+     |  from_mid(mid_point: Union[Tuple[int, int], Point], w: int, h: int) -> Rect
      |          Initializes a rectangle given mid-point, width and height.
      |          For even ``w`` and/or ``h``, mid-point would not be exactly at the
      |          centre but closer to top left corner.
@@ -3057,13 +2995,7 @@ CLASSES
      |  ----------------------------------------------------------------------
      |  Static methods defined here:
      |
-     |  __new__(
-     |      _cls,
-     |      left: ForwardRef('int'),
-     |      top: ForwardRef('int'),
-     |      right: ForwardRef('int'),
-     |      bottom: ForwardRef('int')
-     |  ) from namedtuple_Rect.Rect
+     |  __new__(_cls, left: int, top: int, right: int, bottom: int) from namedtuple_Rect.Rect
      |      Create new instance of Rect(left, top, right, bottom)
      |
      |  ----------------------------------------------------------------------
@@ -3097,8 +3029,6 @@ CLASSES
      |  ----------------------------------------------------------------------
      |  Data and other attributes defined here:
      |
-     |  __annotations__ = {'bottom': ForwardRef('int'), 'left': ForwardRef('in...
-     |
      |  __match_args__ = ('left', 'top', 'right', 'bottom')
      |
      |  __orig_bases__ = (<function NamedTuple>,)
@@ -3121,9 +3051,6 @@ CLASSES
      |
      |  __ge__(self, value, /)
      |      Return self>=value.
-     |
-     |  __getattribute__(self, name, /)
-     |      Return getattr(self, name).
      |
      |  __getitem__(self, key, /)
      |      Return self[key].
@@ -3250,9 +3177,6 @@ CLASSES
      |  __ge__(self, value, /)
      |      Return self>=value.
      |
-     |  __getattribute__(self, name, /)
-     |      Return getattr(self, name).
-     |
      |  __getnewargs__(self, /)
      |
      |  __gt__(self, value, /)
@@ -3324,7 +3248,7 @@ CLASSES
      |  __ror__(self, value, /)
      |      Return value|self.
      |
-     |  __round__(self, ndigits=<unrepresentable>, /)
+     |  __round__(self, ndigits=None, /)
      |      Rounding an Integral returns itself.
      |
      |      Rounding with an ndigits argument also returns an integer.
@@ -3456,9 +3380,6 @@ CLASSES
      |
      |  __dir__(self)
      |      Returns public methods and other interesting attributes.
-     |
-     |  __init__(self, *args, **kwds)
-     |      Initialize self.  See help(type(self)) for accurate signature.
      |
      |  __reduce_ex__(self, proto)
      |      Helper for pickle.
@@ -3582,9 +3503,6 @@ CLASSES
      |  __ge__(self, value, /)
      |      Return self>=value.
      |
-     |  __getattribute__(self, name, /)
-     |      Return getattr(self, name).
-     |
      |  __getnewargs__(self, /)
      |
      |  __gt__(self, value, /)
@@ -3656,7 +3574,7 @@ CLASSES
      |  __ror__(self, value, /)
      |      Return value|self.
      |
-     |  __round__(self, ndigits=<unrepresentable>, /)
+     |  __round__(self, ndigits=None, /)
      |      Rounding an Integral returns itself.
      |
      |      Rounding with an ndigits argument also returns an integer.
@@ -3789,9 +3707,6 @@ CLASSES
      |  __dir__(self)
      |      Returns public methods and other interesting attributes.
      |
-     |  __init__(self, *args, **kwds)
-     |      Initialize self.  See help(type(self)) for accurate signature.
-     |
      |  __reduce_ex__(self, proto)
      |      Helper for pickle.
      |
@@ -3834,7 +3749,7 @@ CLASSES
      |      is a read-only view of the internal mapping.
 
     class Size(builtins.tuple)
-     |  Size(width: ForwardRef('int'), height: ForwardRef('int'))
+     |  Size(width: int, height: int)
      |
      |  A class to represent rectangular size (width & height).
      |
@@ -3870,7 +3785,7 @@ CLASSES
      |  ----------------------------------------------------------------------
      |  Static methods defined here:
      |
-     |  __new__(_cls, width: ForwardRef('int'), height: ForwardRef('int')) from namedtuple_Size.Size
+     |  __new__(_cls, width: int, height: int) from namedtuple_Size.Size
      |      Create new instance of Size(width, height)
      |
      |  ----------------------------------------------------------------------
@@ -3884,8 +3799,6 @@ CLASSES
      |
      |  ----------------------------------------------------------------------
      |  Data and other attributes defined here:
-     |
-     |  __annotations__ = {'height': ForwardRef('int'), 'width': ForwardRef('i...
      |
      |  __match_args__ = ('width', 'height')
      |
@@ -3909,9 +3822,6 @@ CLASSES
      |
      |  __ge__(self, value, /)
      |      Return self>=value.
-     |
-     |  __getattribute__(self, name, /)
-     |      Return getattr(self, name).
      |
      |  __getitem__(self, key, /)
      |      Return self[key].
@@ -4038,9 +3948,6 @@ CLASSES
      |  __ge__(self, value, /)
      |      Return self>=value.
      |
-     |  __getattribute__(self, name, /)
-     |      Return getattr(self, name).
-     |
      |  __getnewargs__(self, /)
      |
      |  __gt__(self, value, /)
@@ -4112,7 +4019,7 @@ CLASSES
      |  __ror__(self, value, /)
      |      Return value|self.
      |
-     |  __round__(self, ndigits=<unrepresentable>, /)
+     |  __round__(self, ndigits=None, /)
      |      Rounding an Integral returns itself.
      |
      |      Rounding with an ndigits argument also returns an integer.
@@ -4245,9 +4152,6 @@ CLASSES
      |  __dir__(self)
      |      Returns public methods and other interesting attributes.
      |
-     |  __init__(self, *args, **kwds)
-     |      Initialize self.  See help(type(self)) for accurate signature.
-     |
      |  __reduce_ex__(self, proto)
      |      Helper for pickle.
      |
@@ -4294,13 +4198,13 @@ FUNCTIONS
         Return the square root of x.
 
 DATA
-    AnyPoint = typing.Union[mhi.pscad.types.Point, mhi.pscad.types.Port, t...
+    AnyPoint = mhi.pscad.types.Point | mhi.pscad.types.Port | typing.Tuple...
     BUILTIN_COMPONENTS = frozenset({'BookmarkCmp', 'Bus', 'Button', 'Cable...
     BUILTIN_COMPONENT_ALIAS = {'Bookmark': 'BookmarkCmp', 'StickyWire': 'W...
     Dict = typing.Dict
         A generic version of dict.
 
-    ParameterRange = typing.Union[typing.Tuple, typing.Set, range, NoneTyp...
+    ParameterRange = typing.Tuple | typing.Set | range | None
     Parameters = typing.Dict[str, typing.Any]
     Set = typing.Set
         A generic version of set.
@@ -4316,36 +4220,6 @@ DATA
 
         To specify a variable-length tuple of homogeneous type, use Tuple[T, ...].
 
-    Union = typing.Union
-        Union type; Union[X, Y] means either X or Y.
-
-        On Python 3.10 and higher, the | operator
-        can also be used to denote unions;
-        X | Y means the same thing to the type checker as Union[X, Y].
-
-        To define a union, use e.g. Union[int, str]. Details:
-        - The arguments must be types and there must be at least one.
-        - None as an argument is a special case and is replaced by
-          type(None).
-        - Unions of unions are flattened, e.g.::
-
-            assert Union[Union[int, str], float] == Union[int, str, float]
-
-        - Unions of a single argument vanish, e.g.::
-
-            assert Union[int] == int  # The constructor actually returns int
-
-        - Redundant arguments are skipped, e.g.::
-
-            assert Union[int, str, int] == Union[int, str]
-
-        - When comparing unions, the argument order is ignored, e.g.::
-
-            assert Union[int, str] == Union[str, int]
-
-        - You cannot subclass or instantiate a union.
-        - You can use Optional[X] as a shorthand for Union[X, None].
-
 FILE
-    /home/lua/miniconda/lib/python3.13/site-packages/mhi/pscad/types.py
+    c:\users\as0135\appdata\local\programs\python\python314\lib\site-packages\mhi\pscad\types.py
 

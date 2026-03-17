@@ -1,6 +1,6 @@
 # Module mhi.pscad.parameter_grid
 
-*Source: /home/lua/miniconda/lib/python3.13/site-packages/mhi/pscad/parameter_grid.py*
+*Source: C:\Users\AS0135\AppData\Local\Programs\Python\Python314\Lib\site-packages\mhi\pscad\parameter_grid.py*
 
 Python Library Documentation: module mhi.pscad.parameter_grid in mhi.pscad
 
@@ -35,10 +35,7 @@ Python Library Documentation: module mhi.pscad.parameter_grid in mhi.pscad
 - **filename (str): Filename of the CSV file to write.**
 - **folder (str): Directory where the CSV file will be stored (optional)**
 
-- **view(** -> `None`
-            self,
-            subject: Union[mhi.pscad.component.Component, mhi.pscad.definition.Definition, mhi.pscad.project.Project]
-        ) -> None
+- **view(self, subject: Union[Component, Definition, Project]) -> None** -> `None`
             Load subject into the parameter grid.
 
             The property grid is able to view and modify several components at
@@ -64,7 +61,7 @@ Python Library Documentation: module mhi.pscad.parameter_grid in mhi.pscad
             This allows for viewing / editing multiple simulation sets in the
             workspace at once.
 
-- **view_simulation_task_layers(self, scope: Union[mhi.pscad.project.Project, str]) -> None** -> `None`
+- **view_simulation_task_layers(self, scope: Union[Project, str]) -> None** -> `None`
             Load simulation tasks' layers configurations into the property grid.
 
             This allows for viewing / editing multiple sets of layers
@@ -105,35 +102,5 @@ Python Library Documentation: module mhi.pscad.parameter_grid in mhi.pscad
     Optional = typing.Optional
         Optional[X] is equivalent to Union[X, None].
 
-    Union = typing.Union
-        Union type; Union[X, Y] means either X or Y.
-
-        On Python 3.10 and higher, the   operator
-        can also be used to denote unions;
-        X   Y means the same thing to the type checker as Union[X, Y].
-
-        To define a union, use e.g. Union[int, str]. Details:
-        - The arguments must be types and there must be at least one.
-        - None as an argument is a special case and is replaced by
-          type(None).
-        - Unions of unions are flattened, e.g.::
-
-            assert Union[Union[int, str], float] == Union[int, str, float]
-
-        - Unions of a single argument vanish, e.g.::
-
-            assert Union[int] == int  # The constructor actually returns int
-
-        - Redundant arguments are skipped, e.g.::
-
-            assert Union[int, str, int] == Union[int, str]
-
-        - When comparing unions, the argument order is ignored, e.g.::
-
-            assert Union[int, str] == Union[str, int]
-
-        - You cannot subclass or instantiate a union.
-        - You can use Optional[X] as a shorthand for Union[X, None].
-
 ## FILE
-    /home/lua/miniconda/lib/python3.13/site-packages/mhi/pscad/parameter_grid.py
+    c:\users\as0135\appdata\local\programs\python\python314\lib\site-packages\mhi\pscad\parameter_grid.py

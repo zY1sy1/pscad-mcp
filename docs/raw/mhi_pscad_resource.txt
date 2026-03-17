@@ -10,5 +10,5 @@ DATA
     RES_ID = {'GRAPHS_COPYDATA_ALL': 901, 'GRAPHS_COPYDATA_VIS': 900, 'GRA...
 
 FILE
-    /home/lua/miniconda/lib/python3.13/site-packages/mhi/pscad/resource.py
+    c:\users\as0135\appdata\local\programs\python\python314\lib\site-packages\mhi\pscad\resource.py
 

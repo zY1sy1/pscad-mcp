@@ -1,6 +1,6 @@
 # Module mhi.pscad.project
 
-*Source: /home/lua/miniconda/lib/python3.13/site-packages/mhi/pscad/project.py*
+*Source: C:\Users\AS0135\AppData\Local\Programs\Python\Python314\Lib\site-packages\mhi\pscad\project.py*
 
 Python Library Documentation: module mhi.pscad.project in mhi.pscad
 
@@ -16,7 +16,7 @@ Python Library Documentation: module mhi.pscad.project in mhi.pscad
         Resource
 
 ### class GlobalSubstitution(builtins.object)
-- **GlobalSubstitution(project: 'Project')**
+- **GlobalSubstitution(project: Project)**
 
         Management for a project's global substitutions and sets of global
         substitutions.
@@ -29,7 +29,7 @@ Python Library Documentation: module mhi.pscad.project in mhi.pscad
 
 - **__getitem__(self, set_name)**
 
-- **__init__(self, project: 'Project')**
+- **__init__(self, project: Project)**
 - **Initialize self.  See help(type(self)) for accurate signature.**
 
 - **__iter__(self)**
@@ -38,7 +38,7 @@ Python Library Documentation: module mhi.pscad.project in mhi.pscad
 
 - **__setitem__(self, set_name, values)**
 
-- **append_all_sets(self, filename: 'str') -> 'None'** `@requires` -> `None`
+- **append_all_sets(self, filename: str) -> None** `@requires` -> `None`
             Load global substitution sets from a CSV file, creating new sets when
             a set name already exists.
 
@@ -47,7 +47,7 @@ Python Library Documentation: module mhi.pscad.project in mhi.pscad
 
             .. versionadded:: 2.8.1
 
-- **append_set(self, filename: 'str', set_name: 'Optional[str]' = None) -> 'None'** `@requires` -> `None`
+- **append_set(self, filename: str, set_name: Optional[str] = None) -> None** `@requires` -> `None`
             Load global substitution set from a CSV file, without clear old values
 
             Parameters:
@@ -56,19 +56,19 @@ Python Library Documentation: module mhi.pscad.project in mhi.pscad
 
             .. versionadded:: 2.8.1
 
-- **create(self, *val_names: 'str') -> 'None'** -> `None`
+- **create(self, *val_names: str) -> None** -> `None`
             Creates 1 or more named global substitution variables.
 
             Parameters:
 - ***val_names (str): One or more new variable names**
 
-- **create_sets(self, *set_names: 'str') -> 'None'** -> `None`
+- **create_sets(self, *set_names: str) -> None** -> `None`
             Creates 1 or more named global substitution sets
 
             Parameters:
 - ***set_names (str): One or more names for the new sets**
 
-- **load_all_sets(self, filename: 'str') -> 'None'** `@requires` -> `None`
+- **load_all_sets(self, filename: str) -> None** `@requires` -> `None`
             Load all global substitution sets from a CSV file, replacing all
             current values.
 
@@ -77,7 +77,7 @@ Python Library Documentation: module mhi.pscad.project in mhi.pscad
 
             .. versionadded:: 2.8.1
 
-- **load_set(self, filename: 'str', set_name: 'Optional[str]' = None) -> 'None'** `@requires` -> `None`
+- **load_set(self, filename: str, set_name: Optional[str] = None) -> None** `@requires` -> `None`
             Load global substitution set from a CSV file, replacing current values
 
             Parameters:
@@ -86,33 +86,33 @@ Python Library Documentation: module mhi.pscad.project in mhi.pscad
 
             .. versionadded:: 2.8.1
 
-- **remove(self, *val_names: 'str') -> 'None'** -> `None`
+- **remove(self, *val_names: str) -> None** -> `None`
             Removes 1 or more named global substitution variables
 
             Parameters:
 - ***val_names (str): One or more names of variables to be deleted**
 
-- **remove_sets(self, *set_names: 'str') -> 'None'** -> `None`
+- **remove_sets(self, *set_names: str) -> None** -> `None`
             Removes 1 or more named global substitution sets
 
             Parameters:
 - ***set_names (str): One or more names of sets to be deleted**
 
-- **rename(self, old_name: 'str', new_name: 'str') -> 'bool'** -> `bool`
+- **rename(self, old_name: str, new_name: str) -> bool** -> `bool`
             Rename a global substitution variable
 
             Parameters:
 - **old_name (str): Current name of the substitution variable**
 - **new_name (str): Desired name of the substitution variable**
 
-- **rename_set(self, old_name: 'str', new_name: 'str') -> 'bool'** -> `bool`
+- **rename_set(self, old_name: str, new_name: str) -> bool** -> `bool`
             Rename a global substitution set
 
             Parameters:
 - **old_name (str): Current name of the substitution set**
 - **new_name (str): Desired name of the substitution set**
 
-- **save_all_sets(self, filename: 'str') -> 'None'** `@requires` -> `None`
+- **save_all_sets(self, filename: str) -> None** `@requires` -> `None`
             Save all global substitution sets to a CSV file.
 
             Parameters:
@@ -120,7 +120,7 @@ Python Library Documentation: module mhi.pscad.project in mhi.pscad
 
             .. versionadded:: 2.8.1
 
-- **save_set(self, filename: 'str', set_name: 'Optional[str]' = None) -> 'None'** `@requires` -> `None`
+- **save_set(self, filename: str, set_name: Optional[str] = None) -> None** `@requires` -> `None`
             Save global substitution set to a CSV file.
 
             Parameters:
@@ -163,8 +163,8 @@ Python Library Documentation: module mhi.pscad.project in mhi.pscad
 ### class Layer(mhi.pscad.remote.Remotable)
 - **Layer(**
             *,
-            _ctx: 'Optional[Context]' = None,
-            _ident: 'Optional[Dict[str, Any]]' = None
+            _ctx: Optional[Context] = None,
+            _ident: Optional[Dict[str, Any]] = None
         )
 
         Project Component Layer
@@ -177,22 +177,22 @@ Python Library Documentation: module mhi.pscad.project in mhi.pscad
 
         Methods defined here:
 
-- **add(self, *components: 'Component')**
+- **add(self, *components: Component)**
             Add one or more components to this layer
 
-- **add_state(self, new_name: 'str') -> 'None'** -> `None`
+- **add_state(self, new_name: str) -> None** -> `None`
             Create a new custom configuration name for list layer
 
             Parameters:
 - **new_name (str): Name of the new configuration to create.**
 
-- **move_down(self, delta: 'int' = 1) -> 'None'** -> `None`
+- **move_down(self, delta: int = 1) -> None** -> `None`
             Move the layer down the list by 1
 
-- **move_up(self, delta: 'int' = 1) -> 'None'** -> `None`
+- **move_up(self, delta: int = 1) -> None** -> `None`
             Move the layer up the list by 1
 
-- **parameters(self, parameters: 'Optional[Parameters]' = None, **kwargs) -> 'Optional[Parameters]'** -> `Optional[Parameters]`
+- **parameters(self, parameters: Optional[Parameters] = None, **kwargs) -> Optional[Parameters]** -> `Optional[Parameters]`
             Get or set layer parameters
 
             Parameters:
@@ -214,13 +214,13 @@ Python Library Documentation: module mhi.pscad.project in mhi.pscad
                highlight_opacity int   Highlight Opacity
                ================= ===== ============================================
 
-- **remove_state(self, state_name: 'str') -> 'None'** -> `None`
+- **remove_state(self, state_name: str) -> None** -> `None`
             Remove an existing custom state from this layer
 
             Parameters:
 - **state_name (str): The name of the custom configuration state to remove.**
 
-- **rename_state(self, old_name: 'str', new_name: 'str') -> 'None'** -> `None`
+- **rename_state(self, old_name: str, new_name: str) -> None** -> `None`
             Rename an existing custom state in this layer
 
             Parameters:
@@ -229,10 +229,10 @@ Python Library Documentation: module mhi.pscad.project in mhi.pscad
 
 - **set_custom_state(** -> `None`
             self,
-            state_name: 'str',
-            component: 'Component',
-            component_state: 'str'
-        ) -> 'None'
+            state_name: str,
+            component: Component,
+            component_state: str
+        ) -> None
             Set the state of a component when the layer is set to the state name provided.
 
             Parameters:
@@ -240,10 +240,10 @@ Python Library Documentation: module mhi.pscad.project in mhi.pscad
 - **component  (Component): The component to set the state to**
 - **component_state (str): One of the strings ('Enabled', 'Disabled', 'Invisible')                 for the state of the provided component when the provided state is set.**
 
-- **to_bottom(self) -> 'None'** -> `None`
+- **to_bottom(self) -> None** -> `None`
             Move the layer to bottom of list
 
-- **to_top(self) -> 'None'** -> `None`
+- **to_top(self) -> None** -> `None`
             Move the layer to top of list
 
         ----------------------------------------------------------------------
@@ -265,11 +265,6 @@ Python Library Documentation: module mhi.pscad.project in mhi.pscad
             The current state of this layer
 
         ----------------------------------------------------------------------
-        Data and other attributes defined here:
-
-        __annotations__ = {}
-
-        ----------------------------------------------------------------------
         Readonly properties inherited from mhi.pscad.remote.Remotable:
 
         main
@@ -288,8 +283,8 @@ Python Library Documentation: module mhi.pscad.project in mhi.pscad
 - **__init__(**
             self,
             *,
-            _ctx: 'Optional[Context]' = None,
-            _ident: 'Optional[Dict[str, Any]]' = None
+            _ctx: Optional[Context] = None,
+            _ident: Optional[Dict[str, Any]] = None
         )
 - **Initialize self.  See help(type(self)) for accurate signature.**
 
@@ -308,11 +303,16 @@ Python Library Documentation: module mhi.pscad.project in mhi.pscad
         __weakref__
             list of weak references to the object
 
+        ----------------------------------------------------------------------
+        Data and other attributes inherited from mhi.common.remote.Remotable:
+
+        __annotations__ = {}
+
 ### class Project(mhi.pscad.remote.Remotable)
 - **Project(**
             *,
-            _ctx: 'Optional[Context]' = None,
-            _ident: 'Optional[Dict[str, Any]]' = None
+            _ctx: Optional[Context] = None,
+            _ident: Optional[Dict[str, Any]] = None
         )
 
         PSCAD Project
@@ -331,31 +331,25 @@ Python Library Documentation: module mhi.pscad.project in mhi.pscad
 - **__str__(self)**
 - **Return str(self).**
 
-- **bookmark(** `@deprecated`
-            self,
-            name: 'str',
-            mouse_x: 'int',
-            mouse_y: 'int',
-            *callstack: 'Component'
-        )
+- **bookmark(self, name: str, mouse_x: int, mouse_y: int, *callstack: Component)** `@deprecated`
             .. versionremoved:: 3.1.1
 
-- **branch_search(self, subsystem_id: 'int' = 0, node_id: 'int' = 0) -> 'Tuple[Component, ...]'** `@requires` -> `Tuple[Component, ...]`
+- **branch_search(self, subsystem_id: int = 0, node_id: int = 0) -> Tuple[Component, ...]** `@requires` -> `Tuple[Component, ...]`
             Perform a 'Branch Search' in this project
 
             Project must be compiled for the search to return useful results.
 
             .. versionadded:: 2.9.6
 
-- **build(self) -> 'None'** -> `None`
+- **build(self) -> None** -> `None`
             Clean & Build this project, and any dependencies
 
-- **build_modified(self) -> 'None'** -> `None`
+- **build_modified(self) -> None** -> `None`
             Build this project, and any dependencies
 
 - **button = _component_by_ids(self, defn, *iid)** `@deprecated`
 
-- **canvas(self, name: 'str') -> 'Canvas'** -> `Canvas`
+- **canvas(self, name: str) -> Canvas** -> `Canvas`
             Retrieve the drawing canvas of a component definition.
 
             Only T-Lines, Cables, and module-type user components have a canvas.
@@ -373,7 +367,7 @@ Python Library Documentation: module mhi.pscad.project in mhi.pscad
             .. versionchanged:: 2.0
 - **Was ``Project.user_canvas(name)``** `@deprecated`
 
-- **clean(self) -> 'None'** `@rmi` -> `None`
+- **clean(self) -> None** `@rmi` -> `None`
             Clean the project
 
 - **compile_library(self)** `@requires` `@rmi`
@@ -382,7 +376,7 @@ Python Library Documentation: module mhi.pscad.project in mhi.pscad
 
             .. versionadded:: 2.8
 
-- **component(self, iid: 'int') -> 'Component'** `@rmi` -> `Component`
+- **component(self, iid: int) -> Component** `@rmi` -> `Component`
             Retrieve a component by ID.
 
             Parameters:
@@ -391,7 +385,7 @@ Python Library Documentation: module mhi.pscad.project in mhi.pscad
             .. versionadded:: 2.0
                 This command replaces all of the type specific versions.
 
-- **consolidate(self, folder: 'str') -> 'None'** -> `None`
+- **consolidate(self, folder: str) -> None** -> `None`
             Moves all files need for this project to the folder, renaming paths
             as needed.
 
@@ -399,18 +393,18 @@ Python Library Documentation: module mhi.pscad.project in mhi.pscad
 
 - **create_bookmark(** -> `int`
             self,
-            name: 'str',
-            mouse_x: 'int',
-            mouse_y: 'int',
-            *callstack: 'Component'
-        ) -> 'int'
+            name: str,
+            mouse_x: int,
+            mouse_y: int,
+            *callstack: Component
+        ) -> int
             Create a bookmark to a particular location of particular instance of
             a component in a call stack.
 
             .. versionadded:: 3.1.1
 - **Renamed from `Project.bookmark(name, mouse_x, mouse_y, callstack)`** `@deprecated`
 
-- **create_definition(self, xml: 'Union[str, ET.Element]') -> 'Definition'** -> `Definition`
+- **create_definition(self, xml: Union[str, ET.Element]) -> Definition** -> `Definition`
             Add a new definition to the project
 
             Parameters:
@@ -419,20 +413,20 @@ Python Library Documentation: module mhi.pscad.project in mhi.pscad
             Returns:
                 The newly created :class:`.Definition`
 
-- **create_layer(self, name: 'str', state: 'str' = 'Enabled') -> 'Layer'** -> `Layer`
+- **create_layer(self, name: str, state: str = 'Enabled') -> Layer** -> `Layer`
             Create a new layer
 
             Parameters:
 - **name (str): Name of the layer to create.** `@property` -> `str`
 - **state (str): Initial state of layer (optional, default='Enabled')**
 
-- **create_resource(self, path: 'str') -> 'Resource'** -> `Resource`
+- **create_resource(self, path: str) -> Resource** -> `Resource`
             Add a new resource to the Project's resource folder
 
             Parameter:
 - **path (str): Pathname of the resource**
 
-- **current_canvas(self) -> 'Canvas'** `@requires` -> `Canvas`
+- **current_canvas(self) -> Canvas** `@requires` -> `Canvas`
             Retrieve the currently focuses canvas of the project.
 
             Returns:
@@ -440,7 +434,7 @@ Python Library Documentation: module mhi.pscad.project in mhi.pscad
 
             .. versionadded:: 2.3.2
 
-- **definition(self, name: 'str') -> 'Definition'** -> `Definition`
+- **definition(self, name: str) -> Definition** -> `Definition`
             Retrieve the given named definition from the project.
 
             Parameters:
@@ -452,7 +446,7 @@ Python Library Documentation: module mhi.pscad.project in mhi.pscad
             .. versionchanged:: 2.0
 - **Was ``ProjectCommands.get_definition()``** `@deprecated`
 
-- **definitions(self) -> 'List[str]'** `@rmi` -> `List[str]`
+- **definitions(self) -> List[str]** `@rmi` -> `List[str]`
             Retrieve a list of all definitions contained in the project.
 
             Returns:
@@ -461,45 +455,45 @@ Python Library Documentation: module mhi.pscad.project in mhi.pscad
             .. versionchanged:: 2.0
 - **Was ``ProjectCommands.list_definitions()``** `@deprecated`
 
-- **delete_definition(self, name: 'str') -> 'None'** -> `None`
+- **delete_definition(self, name: str) -> None** -> `None`
             Delete the given named :class:`.Definition`.
 
             Parameters:
 - **name (str): The name of the definition to delete.** `@property` -> `str`
 
-- **delete_definition_instances(self, name: 'str') -> 'None'** -> `None`
+- **delete_definition_instances(self, name: str) -> None** -> `None`
             Delete the given named :class:`.Definition`, along with all instances
             of the that definition.
 
             Parameters:
 - **name (str): The name of the :class:`.Definition` whose definition                and instances are to be deleted.** `@property` -> `str`
 
-- **delete_layer(self, name: 'str') -> 'None'** -> `None`
+- **delete_layer(self, name: str) -> None** -> `None`
             Delete an existing layer
 
             Parameters:
 - **name (str): Name of the layer to delete.** `@property` -> `str`
 
-- **delete_layers(self, *names: 'str') -> 'None'** -> `None`
+- **delete_layers(self, *names: str) -> None** -> `None`
             Delete existing layers
 
             Parameters:
 - ***names (str): Name of the layer to delete.**
 
-- **delete_scenario(self, name: 'str') -> 'None'** -> `None`
+- **delete_scenario(self, name: str) -> None** -> `None`
             Delete the named scenario.
 
             Parameters:
 - **name (str): Name of scenario to delete.** `@property` -> `str`
 
-- **export_parameter_grid(self, filename: 'str', folder: 'Optional[str]' = None) -> 'None'** -> `None`
+- **export_parameter_grid(self, filename: str, folder: Optional[str] = None) -> None** -> `None`
             Export parameters to a CSV file.
 
             Parameters:
 - **filename (str): Filename of the CSV file to write.** `@rmi_property` -> `str`
 - **folder (str): Directory where the CSV file will be stored (optional)**
 
-- **find(self, *names: 'str', layer: 'Optional[str]' = None, **params) -> 'Optional[Component]'** -> `Optional[Component]`
+- **find(self, *names: str, layer: Optional[str] = None, **params) -> Optional[Component]** -> `Optional[Component]`
 - **find( [[definition,] name,] [layer=name,] [key=value, ...])** -> `Optional[Component]`
 
 - **Find the (singular) component that matches the given criteria,**
@@ -509,7 +503,7 @@ Python Library Documentation: module mhi.pscad.project in mhi.pscad
 
             .. versionadded:: 2.0
 
-- **find_all(self, *name: 'str', layer: 'Optional[str]' = None, **params) -> 'List[Component]'** -> `List[Component]`
+- **find_all(self, *name: str, layer: Optional[str] = None, **params) -> List[Component]** -> `List[Component]`
 - **find_all( [[definition,] name,] [layer=name,] [key=value, ...])** -> `List[Component]`
 
             Find all components that match the given criteria.
@@ -545,7 +539,7 @@ Python Library Documentation: module mhi.pscad.project in mhi.pscad
 
             .. versionadded:: 2.0
 
-- **find_first(self, *names: 'str', layer: 'Optional[str]' = None, **params) -> 'Optional[Component]'** -> `Optional[Component]`
+- **find_first(self, *names: str, layer: Optional[str] = None, **params) -> Optional[Component]** -> `Optional[Component]`
 - **find_first( [[definition,] name,] [layer=name,] [key=value, ...])** -> `Optional[Component]`
 
             Find the first component that matches the given criteria,
@@ -553,7 +547,7 @@ Python Library Documentation: module mhi.pscad.project in mhi.pscad
 
             .. versionadded:: 2.0
 
-- **focus(self) -> 'None'** `@rmi` -> `None`
+- **focus(self) -> None** `@rmi` -> `None`
             Switch PSCAD's focus to this project.
 
 - **get_definition(self, name)** `@deprecated`
@@ -593,30 +587,30 @@ Python Library Documentation: module mhi.pscad.project in mhi.pscad
 
 - **graph_frame = _component_by_id(self, defn, iid)** `@deprecated`
 
-- **import_parameter_grid(self, filename: 'str', folder: 'Optional[str]' = None) -> 'None'** -> `None`
+- **import_parameter_grid(self, filename: str, folder: Optional[str] = None) -> None** -> `None`
             Import parameters from a CSV file.
 
             Parameters:
 - **filename (str): Filename of the CSV file to read.** `@rmi_property` -> `str`
 - **folder (str): Directory to read the CSV file from (optional)**
 
-- **is_dirty(self) -> 'bool'** -> `bool`
+- **is_dirty(self) -> bool** -> `bool`
             Check if the project contains unsaved changes
 
             Returns:
                 `True`, if unsaved changes exist, `False` otherwise.
 
-- **layer(self, name: 'str') -> 'Layer'** `@rmi` -> `Layer`
+- **layer(self, name: str) -> Layer** `@rmi` -> `Layer`
             Fetch the given layer
 
             .. versionadded:: 2.0
 
-- **layer_states(self, name: 'str') -> 'List[str]'** `@rmi` -> `List[str]`
+- **layer_states(self, name: str) -> List[str]** `@rmi` -> `List[str]`
             Fetch all valid states for the given layer
 
             .. versionadded:: 2.0
 
-- **layers(self) -> 'Dict[str, str]'** `@rmi` -> `Dict[str, str]`
+- **layers(self) -> Dict[str, str]** `@rmi` -> `Dict[str, str]`
             Fetch the state of all of the layers
 
             .. versionadded:: 2.0
@@ -627,7 +621,7 @@ Python Library Documentation: module mhi.pscad.project in mhi.pscad
 
 - **list_scenarios(self)** `@deprecated`
 
-- **merge_layers(self, dest: 'str', *names: 'str')**
+- **merge_layers(self, dest: str, *names: str)**
             Merge the list of layers into a layer with the name provided.
 
             Parameters:
@@ -637,7 +631,7 @@ Python Library Documentation: module mhi.pscad.project in mhi.pscad
             Returns:
                 Layer: The destination layer
 
-- **messages(self) -> 'List[Message]'** -> `List[Message]`
+- **messages(self) -> List[Message]** -> `List[Message]`
             Retrieve the load/build messages
 
             Returns:
@@ -663,33 +657,33 @@ Python Library Documentation: module mhi.pscad.project in mhi.pscad
 - **for msg in vdiv.messages():** -> `List[Message]`
 - **print(msg.text)**
 
-- **move_layers_down(self, *names: 'str', delta: 'int' = 1)**
+- **move_layers_down(self, *names: str, delta: int = 1)**
             Move the list of layers down the list by 1
 
-- **move_layers_up(self, *names: 'str', delta: 'int' = 1)**
+- **move_layers_up(self, *names: str, delta: int = 1)**
             Move the list of layers up the list by 1
 
-- **names_in_use(self, defn: 'Optional[str]' = None, **params) -> 'Set[str]'** -> `Set[str]`
+- **names_in_use(self, defn: Optional[str] = None, **params) -> Set[str]** -> `Set[str]`
             Return the set of "Name" parameter values, for all components on the
             canvas that have a "Name" parameter.
 
-- **navigate_to(self, *components: 'Component')**
+- **navigate_to(self, *components: Component)**
             Navigate to a particular instance of component in a call stack
 
 - **node_search(** `@requires` -> `Tuple[Component, ...]`
             self,
-            subsystem_id: 'int',
-            node_id: 'int',
-            look_in: 'LookIn',
-            global_flag: 'bool'
-        ) -> 'Tuple[Component, ...]'
+            subsystem_id: int,
+            node_id: int,
+            look_in: LookIn,
+            global_flag: bool
+        ) -> Tuple[Component, ...]
             Perform a 'Node Search' with this project
 
             Project must be compiled for the search to return useful results.
 
             .. versionadded:: 2.9.6
 
-- **output(self) -> 'str'** `@rmi` -> `str`
+- **output(self) -> str** `@rmi` -> `str`
 - **Retrieve the output (run messages) for the project** `@rmi` -> `str`
 
             Returns:
@@ -707,7 +701,7 @@ Python Library Documentation: module mhi.pscad.project in mhi.pscad
 
 - **overlay_graph = _component_by_ids(self, defn, *iid)** `@deprecated`
 
-- **parameter_range(self, parameter: 'str') -> 'ParameterRange'** -> `ParameterRange`
+- **parameter_range(self, parameter: str) -> ParameterRange** -> `ParameterRange`
             Get legal values for a parameter
 
             Example::
@@ -717,7 +711,7 @@ Python Library Documentation: module mhi.pscad.project in mhi.pscad
 
             .. versionadded:: 2.0
 
-- **parameters(self, parameters: 'Optional[Parameters]' = None, **kwargs) -> 'Optional[Parameters]'** -> `Optional[Parameters]`
+- **parameters(self, parameters: Optional[Parameters] = None, **kwargs) -> Optional[Parameters]** -> `Optional[Parameters]`
             Get or set project parameters
 
             Parameters:
@@ -748,24 +742,24 @@ Python Library Documentation: module mhi.pscad.project in mhi.pscad
                 Mruns             int    Number of multiple runs
                 ================= ====== ===========================================
 
-- **paste_definitions(self) -> 'None'** `@requires` -> `None`
+- **paste_definitions(self) -> None** `@requires` -> `None`
             Paste definitions from the clipboard into this project.
 
             .. versionadded:: 2.9
 
-- **paste_definitions_with_dependents(self) -> 'None'** `@requires` -> `None`
+- **paste_definitions_with_dependents(self) -> None** `@requires` -> `None`
             Paste definitions and their dependents from the clipboard
             into this project.
 
             .. versionadded:: 2.9
 
-- **pause(self) -> 'None'** -> `None`
+- **pause(self) -> None** -> `None`
             Pause the currently running projects.
 
             Note:
                 All projects being run will be paused, not just this project.
 
-- **reload(self) -> 'None'** -> `None`
+- **reload(self) -> None** -> `None`
             Reload this project.
 
             The project is unloaded, without saving any unsaved modifications,
@@ -775,21 +769,21 @@ Python Library Documentation: module mhi.pscad.project in mhi.pscad
 
             .. versionadded:: 2.0
 
-- **remap_definitions(self, old: 'Project', new: 'Project', *definitions: 'str') -> 'None'** `@requires` -> `None`
+- **remap_definitions(self, old: Project, new: Project, *definitions: str) -> None** `@requires` -> `None`
             Remap definitions from one namespace to another namespace.
 
             .. versionadded:: 3.0.2
 
-- **remove_resource(self, resource: 'Resource')** `@rmi`
+- **remove_resource(self, resource: Resource)** `@rmi`
             Remove a resource
 
-- **resource(self, path: 'str') -> 'Resource'** `@rmi` -> `Resource`
+- **resource(self, path: str) -> Resource** `@rmi` -> `Resource`
             Find a resource by path
 
-- **resources(self) -> 'List[Resource]'** `@rmi` -> `List[Resource]`
+- **resources(self) -> List[Resource]** `@rmi` -> `List[Resource]`
             Fetch list of all resources in project
 
-- **run(self, consumer=None) -> 'None'** -> `None`
+- **run(self, consumer=None) -> None** -> `None`
             Build and run this project.
 
             Parameters:
@@ -798,7 +792,7 @@ Python Library Documentation: module mhi.pscad.project in mhi.pscad
             Note:
                 A library cannot be run; only a case can be run.
 
-- **run_status(self) -> 'Tuple[Optional[str], Optional[int]]'** `@rmi` -> `Tuple[Optional[str], Optional[int]]`
+- **run_status(self) -> Tuple[Optional[str], Optional[int]]** `@rmi` -> `Tuple[Optional[str], Optional[int]]`
             Get the run status of the project
 
             Returns:
@@ -808,15 +802,15 @@ Python Library Documentation: module mhi.pscad.project in mhi.pscad
             .. versionchanged:: 2.0
 - **Was ``ProjectCommands.get_run_status()``** `@deprecated`
 
-- **save(self) -> 'None'** -> `None`
+- **save(self) -> None** -> `None`
             Save changes made to this project
 
 - **save_as(** -> `Project`
             self,
-            filename: 'Union[str, PureWindowsPath]',
-            ver46: 'bool' = False,
-            folder: 'Optional[Union[str, PureWindowsPath]]' = None
-        ) -> 'Project'
+            filename: Union[str, PureWindowsPath],
+            ver46: bool = False,
+            folder: Optional[Union[str, PureWindowsPath]] = None
+        ) -> Project
             Save this project under a new name.
 
             The project will be saved using the appropriate extension depending
@@ -844,18 +838,18 @@ Python Library Documentation: module mhi.pscad.project in mhi.pscad
             .. versionchanged:: 2.7.2
                 Added ``folder`` parameter; returns the new project object.
 
-- **save_as_scenario(self, name: 'str') -> 'None'** -> `None`
+- **save_as_scenario(self, name: str) -> None** -> `None`
             Save the current configuration under the given scenario name.
 
             Parameters:
 - **name (str): Name of scenario to create or overwrite.** `@property` -> `str`
 
-- **save_scenario(self) -> 'None'** -> `None`
+- **save_scenario(self) -> None** -> `None`
             Save the current scenario.
 
             .. versionadded:: 2.0
 
-- **scenario(self, name: 'Optional[str]' = None) -> 'str'** `@rmi` -> `str`
+- **scenario(self, name: Optional[str] = None) -> str** `@rmi` -> `str`
             Get or set the current scenario.
 
             Parameters:
@@ -864,7 +858,7 @@ Python Library Documentation: module mhi.pscad.project in mhi.pscad
             Returns:
 - **str: The name of the (now) current scenario.**
 
-- **scenarios(self) -> 'List[str]'** `@rmi` -> `List[str]`
+- **scenarios(self) -> List[str]** `@rmi` -> `List[str]`
             List the scenarios which exist in the project.
 
             Returns:
@@ -882,7 +876,7 @@ Python Library Documentation: module mhi.pscad.project in mhi.pscad
 - **name (str): Name of the layer to alter.** `@property` -> `str`
 - **state (str): "Enabled", "Disabled", "Invisible" or a custom state.**
 
-- **set_layer_state(self, name: 'str', state: 'str') -> 'None'** -> `None`
+- **set_layer_state(self, name: str, state: str) -> None** -> `None`
             Set the state of a layer
 
             Parameters:
@@ -896,18 +890,18 @@ Python Library Documentation: module mhi.pscad.project in mhi.pscad
 
 - **slider = _component_by_ids(self, defn, *iid)** `@deprecated`
 
-- **start(self) -> 'None'** -> `None`
+- **start(self) -> None** -> `None`
             Start the current project running.
 
             Note:
                 Returns immediately.
 
-- **stop(self) -> 'None'** `@rmi` -> `None`
+- **stop(self) -> None** `@rmi` -> `None`
             Terminate a running execution of this project.
 
 - **switch = _component_by_ids(self, defn, *iid)** `@deprecated`
 
-- **unload(self) -> 'None'** -> `None`
+- **unload(self) -> None** -> `None`
             Unload this project.
 
             The project is unloaded.
@@ -922,7 +916,7 @@ Python Library Documentation: module mhi.pscad.project in mhi.pscad
         ----------------------------------------------------------------------
         Static methods defined here:
 
-- **validate_name(name) -> 'None'** `@staticmethod` -> `None`
+- **validate_name(name) -> None** `@staticmethod` -> `None`
             The ``name`` must conform to PSCAD naming convensions:
 
             * it must start with a letter,
@@ -978,8 +972,8 @@ Python Library Documentation: module mhi.pscad.project in mhi.pscad
 - **__init__(**
             self,
             *,
-            _ctx: 'Optional[Context]' = None,
-            _ident: 'Optional[Dict[str, Any]]' = None
+            _ctx: Optional[Context] = None,
+            _ident: Optional[Dict[str, Any]] = None
         )
 - **Initialize self.  See help(type(self)) for accurate signature.**
 
@@ -998,8 +992,8 @@ Python Library Documentation: module mhi.pscad.project in mhi.pscad
 ### class Resource(mhi.pscad.remote.Remotable)
 - **Resource(**
             *,
-            _ctx: 'Optional[Context]' = None,
-            _ident: 'Optional[Dict[str, Any]]' = None
+            _ctx: Optional[Context] = None,
+            _ident: Optional[Dict[str, Any]] = None
         )
 
         Project Resource
@@ -1012,10 +1006,10 @@ Python Library Documentation: module mhi.pscad.project in mhi.pscad
 
         Methods defined here:
 
-- **__repr__(self) -> 'str'** -> `str`
+- **__repr__(self) -> str** -> `str`
 - **Return repr(self).**
 
-- **parameters(self, parameters: 'Optional[Parameters]' = None, **kwargs) -> 'Optional[Parameters]'** -> `Optional[Parameters]`
+- **parameters(self, parameters: Optional[Parameters] = None, **kwargs) -> Optional[Parameters]** -> `Optional[Parameters]`
             Get/Set Resource parameters
 
         ----------------------------------------------------------------------
@@ -1037,11 +1031,6 @@ Python Library Documentation: module mhi.pscad.project in mhi.pscad
 - **The project this resource belongs to (read-only)**
 
         ----------------------------------------------------------------------
-        Data and other attributes defined here:
-
-        __annotations__ = {}
-
-        ----------------------------------------------------------------------
         Readonly properties inherited from mhi.pscad.remote.Remotable:
 
         main
@@ -1060,8 +1049,8 @@ Python Library Documentation: module mhi.pscad.project in mhi.pscad
 - **__init__(**
             self,
             *,
-            _ctx: 'Optional[Context]' = None,
-            _ident: 'Optional[Dict[str, Any]]' = None
+            _ctx: Optional[Context] = None,
+            _ident: Optional[Dict[str, Any]] = None
         )
 - **Initialize self.  See help(type(self)) for accurate signature.**
 
@@ -1077,6 +1066,11 @@ Python Library Documentation: module mhi.pscad.project in mhi.pscad
         __weakref__
             list of weak references to the object
 
+        ----------------------------------------------------------------------
+        Data and other attributes inherited from mhi.common.remote.Remotable:
+
+        __annotations__ = {}
+
 ## DATA
     DefaultDict = typing.DefaultDict
         A generic version of collections.defaultdict.
@@ -1091,7 +1085,7 @@ Python Library Documentation: module mhi.pscad.project in mhi.pscad
     Optional = typing.Optional
         Optional[X] is equivalent to Union[X, None].
 
-    ParameterRange = typing.Union[typing.Tuple, typing.Set, range, NoneTyp...
+    ParameterRange = typing.Tuple   typing.Set   range   None
     Parameters = typing.Dict[str, typing.Any]
     Set = typing.Set
         A generic version of set.
@@ -1108,35 +1102,5 @@ Python Library Documentation: module mhi.pscad.project in mhi.pscad
 
         To specify a variable-length tuple of homogeneous type, use Tuple[T, ...].
 
-    Union = typing.Union
-        Union type; Union[X, Y] means either X or Y.
-
-        On Python 3.10 and higher, the   operator
-        can also be used to denote unions;
-        X   Y means the same thing to the type checker as Union[X, Y].
-
-        To define a union, use e.g. Union[int, str]. Details:
-        - The arguments must be types and there must be at least one.
-        - None as an argument is a special case and is replaced by
-          type(None).
-        - Unions of unions are flattened, e.g.::
-
-            assert Union[Union[int, str], float] == Union[int, str, float]
-
-        - Unions of a single argument vanish, e.g.::
-
-            assert Union[int] == int  # The constructor actually returns int
-
-        - Redundant arguments are skipped, e.g.::
-
-            assert Union[int, str, int] == Union[int, str]
-
-        - When comparing unions, the argument order is ignored, e.g.::
-
-            assert Union[int, str] == Union[str, int]
-
-        - You cannot subclass or instantiate a union.
-        - You can use Optional[X] as a shorthand for Union[X, None].
-
 ## FILE
-    /home/lua/miniconda/lib/python3.13/site-packages/mhi/pscad/project.py
+    c:\users\as0135\appdata\local\programs\python\python314\lib\site-packages\mhi\pscad\project.py
