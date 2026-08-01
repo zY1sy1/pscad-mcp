@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from html import unescape
 import math
 import os
 from pathlib import Path
@@ -74,8 +75,10 @@ def response_payload(response: Any) -> dict[str, Any]:
         for index, (key, value) in enumerate(response.attrib.items())
         if index < _MAX_ATTRIBUTES and isinstance(key, str) and isinstance(value, str)
     }
-    payload = {"tag": _bounded_text(response.tag) if isinstance(response.tag, str) else ""}
-    payload.update(attributes)
+    payload = {
+        "tag": _bounded_text(response.tag) if isinstance(response.tag, str) else "",
+        "attributes": attributes,
+    }
     children = []
     for child in list(response)[:_MAX_CHILDREN]:
         child_payload: dict[str, str] = {
@@ -231,14 +234,7 @@ def _attribute_value(tag_text: str, name: str) -> str | None:
     )
     if match is None:
         return None
-    return (
-        match.group(2)
-        .replace("&quot;", '"')
-        .replace("&apos;", "'")
-        .replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("&amp;", "&")
-    )
+    return unescape(match.group(2))
 
 
 def _replace_name_attribute(tag_text: str, new_name: str) -> str:
@@ -250,9 +246,32 @@ def _replace_name_attribute(tag_text: str, new_name: str) -> str:
     return tag_text[: match.start()] + match.group("prefix") + quote + escaped + quote + tag_text[match.end() :]
 
 
-def _document_encoding(data: bytes) -> str:
+@dataclass(frozen=True)
+class _DocumentEncoding:
+    codec: str
+    bom: bytes = b""
+
+
+def _document_encoding(data: bytes) -> _DocumentEncoding:
+    for bom, codec in (
+        (b"\xff\xfe\x00\x00", "utf-32-le"),
+        (b"\x00\x00\xfe\xff", "utf-32-be"),
+        (b"\xef\xbb\xbf", "utf-8"),
+        (b"\xff\xfe", "utf-16-le"),
+        (b"\xfe\xff", "utf-16-be"),
+    ):
+        if data.startswith(bom):
+            return _DocumentEncoding(codec, bom)
+    for signature, codec in (
+        (b"\x00\x00\x00<", "utf-32-be"),
+        (b"<\x00\x00\x00", "utf-32-le"),
+        (b"\x00<\x00?", "utf-16-be"),
+        (b"<\x00?\x00", "utf-16-le"),
+    ):
+        if data.startswith(signature):
+            return _DocumentEncoding(codec)
     match = _XML_ENCODING.search(data[:512])
-    return match.group(1).decode("ascii") if match else "utf-8"
+    return _DocumentEncoding(match.group(1).decode("ascii") if match else "utf-8")
 
 
 def rewrite_project_identity(
@@ -276,7 +295,7 @@ def rewrite_project_identity(
         raise ValueError("Source and destination PSCAD project kinds differ.")
 
     encoding = _document_encoding(original)
-    text = original.decode(encoding)
+    text = original[len(encoding.bom) :].decode(encoding.codec)
     root_tag: _XmlTag | None = None
     replacements: list[tuple[int, int, str]] = []
     depth = 0
@@ -306,7 +325,7 @@ def rewrite_project_identity(
     rewritten = text
     for start, end, replacement in reversed(replacements):
         rewritten = rewritten[:start] + replacement + rewritten[end:]
-    rewritten_bytes = rewritten.encode(encoding)
+    rewritten_bytes = encoding.bom + rewritten.encode(encoding.codec)
     rewritten_root = ET.fromstring(rewritten_bytes)
     if rewritten_root.tag != expected_root or rewritten_root.get("name") != new_name:
         raise ValueError("Rewritten project XML failed identity validation.")

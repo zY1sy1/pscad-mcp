@@ -54,10 +54,26 @@ class TestLegacyResponses(unittest.TestCase):
         payload = response_payload(response)
 
         self.assertEqual(payload["tag"], "response")
-        self.assertEqual(payload["success"], "false")
+        self.assertEqual(payload["attributes"]["success"], "false")
         self.assertLess(len(payload["children"][0]["text"]), 1_000)
         json.dumps(payload)
         self.assertEqual(response_payload(object())["type"], "object")
+
+    def test_response_payload_attributes_cannot_overwrite_structural_keys(self):
+        response = ET.fromstring(
+            '<response tag="wrong" children="wrong" attributes="wrong" success="false">'
+            "<message>denied</message></response>"
+        )
+
+        payload = response_payload(response)
+
+        self.assertEqual(payload["tag"], "response")
+        self.assertEqual(payload["children"][0]["tag"], "message")
+        self.assertEqual(
+            payload["attributes"],
+            {"tag": "wrong", "children": "wrong", "attributes": "wrong", "success": "false"},
+        )
+        json.dumps(payload)
 
 
 class TestProjectIdentityRewrite(unittest.TestCase):
@@ -98,6 +114,58 @@ class TestProjectIdentityRewrite(unittest.TestCase):
             root = ET.parse(path).getroot()
             self.assertEqual(root.get("name"), "new")
             self.assertEqual(root.find("output").get("name"), "new")
+
+    def test_rewrite_preserves_utf16_bom_and_crlf_bytes(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            folder = Path(temporary)
+            source = folder / "old.pscx"
+            destination = folder / "new.pscx"
+            source_text = (
+                '<?xml version="1.0" encoding="UTF-16"?>\r\n'
+                '<project name="old" Target="EMTDC">\r\n'
+                '  <output name="old" />\r\n'
+                '  <param value="old must remain" />\r\n'
+                "</project>\r\n"
+            )
+            source_bytes = source_text.encode("utf-16")
+            source.write_bytes(source_bytes)
+
+            rewrite_project_identity(source, destination, "new")
+
+            self.assertEqual(
+                destination.read_bytes(),
+                source_text.replace('name="old"', 'name="new"').encode("utf-16"),
+            )
+            self.assertTrue(destination.read_bytes().startswith(b"\xff\xfe"))
+            self.assertEqual(source.read_bytes(), source_bytes)
+
+    def test_rewrite_preserves_library_bytes_and_rewrites_all_matching_output_entities(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            folder = Path(temporary)
+            source = folder / "old.pslx"
+            destination = folder / "new.pslx"
+            source_text = (
+                "<?xml version='1.0' encoding='UTF-8'?>\r\n"
+                "<project name='旧名' Target='Library'>\r\n"
+                "  <output name='&#26087;&#21517;' />\r\n"
+                "  <output name='旧名' />\r\n"
+                "  <param value='旧名 must remain' />\r\n"
+                "</project>\r\n"
+            )
+            source_bytes = source_text.encode("utf-8")
+            source.write_bytes(source_bytes)
+
+            rewrite_project_identity(source, destination, "新名")
+
+            expected = source_text.replace("name='旧名'", "name='新名'").replace(
+                "name='&#26087;&#21517;'", "name='新名'"
+            ).encode("utf-8")
+            self.assertEqual(destination.read_bytes(), expected)
+            root = ET.parse(destination).getroot()
+            self.assertEqual(root.get("name"), "新名")
+            self.assertEqual([output.get("name") for output in root.findall("output")], ["新名", "新名"])
+            self.assertEqual(root.find("param").get("value"), "旧名 must remain")
+            self.assertEqual(source.read_bytes(), source_bytes)
 
     def test_rewrite_rejects_kind_suffix_mismatch_without_damaging_destination(self):
         with tempfile.TemporaryDirectory() as temporary:
