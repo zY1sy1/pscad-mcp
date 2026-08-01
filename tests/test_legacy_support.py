@@ -54,12 +54,12 @@ class TestLegacyResponses(unittest.TestCase):
         payload = response_payload(response)
 
         self.assertEqual(payload["tag"], "response")
-        self.assertEqual(payload["attributes"]["success"], "false")
+        self.assertEqual(payload["success"], "false")
         self.assertLess(len(payload["children"][0]["text"]), 1_000)
         json.dumps(payload)
         self.assertEqual(response_payload(object())["type"], "object")
 
-    def test_response_payload_attributes_cannot_overwrite_structural_keys(self):
+    def test_response_payload_flattens_non_reserved_attributes_without_spoofing_structure(self):
         response = ET.fromstring(
             '<response tag="wrong" children="wrong" attributes="wrong" success="false">'
             "<message>denied</message></response>"
@@ -69,9 +69,10 @@ class TestLegacyResponses(unittest.TestCase):
 
         self.assertEqual(payload["tag"], "response")
         self.assertEqual(payload["children"][0]["tag"], "message")
+        self.assertEqual(payload["success"], "false")
         self.assertEqual(
-            payload["attributes"],
-            {"tag": "wrong", "children": "wrong", "attributes": "wrong", "success": "false"},
+            payload["reserved_attributes"],
+            {"tag": "wrong", "children": "wrong", "attributes": "wrong"},
         )
         json.dumps(payload)
 
@@ -138,6 +139,56 @@ class TestProjectIdentityRewrite(unittest.TestCase):
             )
             self.assertTrue(destination.read_bytes().startswith(b"\xff\xfe"))
             self.assertEqual(source.read_bytes(), source_bytes)
+
+    def test_rewrite_preserves_utf16_and_utf32_bom_and_byte_order(self):
+        encodings = (
+            ("utf-16-le", b"\xff\xfe", "UTF-16"),
+            ("utf-16-be", b"\xfe\xff", "UTF-16"),
+            ("utf-32-le", b"\xff\xfe\x00\x00", "UTF-32"),
+            ("utf-32-be", b"\x00\x00\xfe\xff", "UTF-32"),
+        )
+        for codec, bom, declared in encodings:
+            for include_bom in (True, False):
+                with self.subTest(codec=codec, include_bom=include_bom):
+                    with tempfile.TemporaryDirectory() as temporary:
+                        folder = Path(temporary)
+                        source = folder / "old.pscx"
+                        destination = folder / "new.pscx"
+                        source_text = (
+                            f'<?xml version="1.0" encoding="{declared}"?>\r\n'
+                            '<project name="old" Target="EMTDC">\r\n'
+                            '  <output name="old" />\r\n'
+                            "</project>\r\n"
+                        )
+                        source_bytes = (bom if include_bom else b"") + source_text.encode(codec)
+                        source.write_bytes(source_bytes)
+
+                        rewrite_project_identity(source, destination, "new")
+
+                        self.assertEqual(
+                            destination.read_bytes(),
+                            (bom if include_bom else b"")
+                            + source_text.replace('name="old"', 'name="new"').encode(codec),
+                        )
+                        self.assertEqual(source.read_bytes(), source_bytes)
+
+    def test_rewrite_changes_only_unqualified_output_name_attribute(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            folder = Path(temporary)
+            source = folder / "old.pscx"
+            destination = folder / "new.pscx"
+            source.write_text(
+                '<project xmlns:x="urn:test" name="old" Target="EMTDC">'
+                '<output x:name="old" name="old" />'
+                '</project>',
+                encoding="utf-8",
+            )
+
+            rewrite_project_identity(source, destination, "new")
+
+            output = ET.parse(destination).getroot().find("output")
+            self.assertEqual(output.get("name"), "new")
+            self.assertEqual(output.get("{urn:test}name"), "old")
 
     def test_rewrite_preserves_library_bytes_and_rewrites_all_matching_output_entities(self):
         with tempfile.TemporaryDirectory() as temporary:

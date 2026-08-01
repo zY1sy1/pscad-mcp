@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from html import unescape
 import math
 import os
 from pathlib import Path
@@ -24,13 +23,14 @@ _MAX_DEPTH = 4
 _KIND_BY_SUFFIX = {".pscx": "case", ".pslx": "library"}
 _KIND_BY_TARGET = {"emtdc": "case", "case": "case", "library": "library"}
 _NAME_ATTRIBUTE = re.compile(
-    r"(?P<prefix>\bname\s*=\s*)(?P<quote>[\"'])(?P<value>.*?)(?P=quote)",
+    r"(?P<prefix>(?<![:\w.-])name\s*=\s*)(?P<quote>[\"'])(?P<value>.*?)(?P=quote)",
     re.DOTALL,
 )
 _XML_ENCODING = re.compile(
     br"<\?xml[^>]*\bencoding\s*=\s*['\"]([^'\"]+)['\"]",
     re.IGNORECASE,
 )
+_RESERVED_RESPONSE_KEYS = {"tag", "children", "attributes", "reserved_attributes"}
 
 
 def _bounded_text(value: str, limit: int = _MAX_TEXT) -> str:
@@ -75,10 +75,15 @@ def response_payload(response: Any) -> dict[str, Any]:
         for index, (key, value) in enumerate(response.attrib.items())
         if index < _MAX_ATTRIBUTES and isinstance(key, str) and isinstance(value, str)
     }
-    payload = {
-        "tag": _bounded_text(response.tag) if isinstance(response.tag, str) else "",
-        "attributes": attributes,
+    payload = {"tag": _bounded_text(response.tag) if isinstance(response.tag, str) else ""}
+    reserved_attributes = {
+        key: value for key, value in attributes.items() if key in _RESERVED_RESPONSE_KEYS
     }
+    payload.update(
+        {key: value for key, value in attributes.items() if key not in _RESERVED_RESPONSE_KEYS}
+    )
+    if reserved_attributes:
+        payload["reserved_attributes"] = reserved_attributes
     children = []
     for child in list(response)[:_MAX_CHILDREN]:
         child_payload: dict[str, str] = {
@@ -228,15 +233,6 @@ def _xml_tags(text: str) -> Iterator[_XmlTag]:
         yield _XmlTag(start, end + 1, raw, name, closing, content.endswith("/"))
 
 
-def _attribute_value(tag_text: str, name: str) -> str | None:
-    match = re.search(
-        rf"\b{re.escape(name)}\s*=\s*([\"'])(.*?)\1", tag_text, re.DOTALL
-    )
-    if match is None:
-        return None
-    return unescape(match.group(2))
-
-
 def _replace_name_attribute(tag_text: str, new_name: str) -> str:
     match = _NAME_ATTRIBUTE.search(tag_text)
     if match is None:
@@ -285,7 +281,9 @@ def rewrite_project_identity(
     source_path = Path(source)
     destination_path = Path(destination)
     original = source_path.read_bytes()
-    root = ET.fromstring(original)
+    encoding = _document_encoding(original)
+    text = original[len(encoding.bom) :].decode(encoding.codec)
+    root = ET.fromstring(text)
     if root.tag != expected_root:
         raise ValueError(
             f"Expected root <{expected_root}> but found <{root.tag}>."
@@ -294,14 +292,19 @@ def rewrite_project_identity(
     if project_kind(root, destination_path.suffix) != source_kind:
         raise ValueError("Source and destination PSCAD project kinds differ.")
 
-    encoding = _document_encoding(original)
-    text = original[len(encoding.bom) :].decode(encoding.codec)
     root_tag: _XmlTag | None = None
     replacements: list[tuple[int, int, str]] = []
     depth = 0
     old_name = root.get("name")
     if old_name is None:
         raise ValueError("Project root has no name attribute.")
+    original_outputs = [child for child in root if child.tag == "output"]
+    matching_output_indices = {
+        index
+        for index, output in enumerate(original_outputs)
+        if output.get("name") == old_name
+    }
+    direct_output_index = 0
     for tag in _xml_tags(text):
         if tag.closing:
             depth -= 1
@@ -315,8 +318,10 @@ def rewrite_project_identity(
             if tag.self_closing:
                 depth = 0
             continue
-        if depth == 1 and tag.name == "output" and _attribute_value(tag.text, "name") == old_name:
-            replacements.append((tag.start, tag.end, _replace_name_attribute(tag.text, new_name)))
+        if depth == 1 and tag.name == "output":
+            if direct_output_index in matching_output_indices:
+                replacements.append((tag.start, tag.end, _replace_name_attribute(tag.text, new_name)))
+            direct_output_index += 1
         if not tag.self_closing:
             depth += 1
     if root_tag is None:
@@ -326,9 +331,16 @@ def rewrite_project_identity(
     for start, end, replacement in reversed(replacements):
         rewritten = rewritten[:start] + replacement + rewritten[end:]
     rewritten_bytes = encoding.bom + rewritten.encode(encoding.codec)
-    rewritten_root = ET.fromstring(rewritten_bytes)
+    rewritten_root = ET.fromstring(rewritten)
     if rewritten_root.tag != expected_root or rewritten_root.get("name") != new_name:
         raise ValueError("Rewritten project XML failed identity validation.")
+    rewritten_outputs = [child for child in rewritten_root if child.tag == "output"]
+    if any(
+        index >= len(rewritten_outputs)
+        or rewritten_outputs[index].get("name") != new_name
+        for index in matching_output_indices
+    ):
+        raise ValueError("Rewritten project output identity validation failed.")
 
     temp_path: Path | None = None
     try:
