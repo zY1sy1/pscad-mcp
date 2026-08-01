@@ -1,6 +1,8 @@
-# PSCAD MCP for GitHub Copilot CLI
+# PSCAD MCP for Codex and GitHub Copilot CLI
 
-`pscad-mcp` is a Model Context Protocol (MCP) server that lets GitHub Copilot CLI control PSCAD through the `mhi.pscad` automation API.
+`pscad-mcp` is a Windows Model Context Protocol (MCP) server for PSCAD automation. It uses `mhrc.automation` for PSCAD 4.6.x and `mhi.pscad` for PSCAD 5.x behind one stable 53-tool service contract.
+
+中文安装、配置、安全和验收说明：[docs/zh-CN/README.md](docs/zh-CN/README.md)
 
 The server is designed for Windows-based power-system workflows where you want Copilot to do more than explain code: it can connect to a live PSCAD session, open projects, edit parameters, build cases, run simulations, inspect outputs, and manipulate the canvas.
 
@@ -37,8 +39,23 @@ For full PSCAD automation you need:
 - Windows
 - Python 3.10+
 - PSCAD installed
-- the PSCAD Python packages, typically installed through the optional `windows` extras in this repo
-- GitHub Copilot CLI
+- the matching PSCAD Python automation package
+- an MCP client such as Codex or GitHub Copilot CLI
+
+The current implementation targets `mcp>=1.29,<2`, official
+`mhrc-automation` 1.2.x for PSCAD 4.6.x, `mhi-pscad` 3.1.x for PSCAD 5.x,
+and `mhi-psout` 1.3.x. The `mcp` upper bound is intentional because this
+repository uses the FastMCP 1.x import path.
+
+For safer file handling, set `PSCAD_MCP_WORKSPACE` to the directory that
+contains the projects and output files you want the server to access:
+
+```powershell
+$env:PSCAD_MCP_WORKSPACE = "D:\PSCAD-Workspace"
+```
+
+When this variable is set, project and result paths outside the workspace are
+rejected. Destructive or overwrite-capable tools also require `confirm=true`.
 
 You can still run tests and documentation-related tasks without PSCAD installed.
 
@@ -64,18 +81,21 @@ copilot
 
 If needed, sign in from inside the CLI using `/login`.
 
-## Install this MCP server
+## Install this MCP server on D:
 
 From the repository root:
 
 ```powershell
-py -3 -m pip install -e ".[windows]"
+py -3 -m venv D:\pscad-mcp\.venv
+& D:\pscad-mcp\.venv\Scripts\python.exe -m pip install -e "D:\pscad-mcp[windows]"
 ```
 
-If `python` is available on your machine, this is equivalent:
+For PSCAD 4.6.x, install the licensed Automation Library wheel supplied with
+your PSCAD installation or by the vendor; it is not redistributed by this
+repository:
 
 ```powershell
-python -m pip install -e ".[windows]"
+& D:\pscad-mcp\.venv\Scripts\python.exe -m pip install "D:\path\to\mhrc_automation-1.2.4-py3-none-any.whl"
 ```
 
 For non-Windows development tasks such as tests or documentation work, install base dependencies only:
@@ -140,6 +160,26 @@ If you prefer editing the config file yourself, add an entry like this:
 
 Replace the `command` path with the interpreter from the environment where `pscad-mcp` is installed.
 
+### Codex configuration
+
+Add this to `%USERPROFILE%\.codex\config.toml`, then start a new Codex task:
+
+```toml
+[mcp_servers.pscad]
+command = 'D:\pscad-mcp\.venv\Scripts\python.exe'
+args = ['-m', 'pscad_mcp.main']
+startup_timeout_sec = 120
+tool_timeout_sec = 600
+
+[mcp_servers.pscad.env]
+PSCAD_MCP_BACKEND = 'legacy'
+PSCAD_MCP_VERSION = '4.6.2'
+PSCAD_MCP_X64 = 'true'
+PSCAD_MCP_WORKSPACE = 'D:\PSCAD-Workspace'
+```
+
+Use `PSCAD_MCP_BACKEND='modern'` and an installed 5.x version for PSCAD 5.x.
+
 ## First prompts to try in Copilot CLI
 
 Once the server is registered, open `copilot` in this repository and try prompts like:
@@ -188,13 +228,31 @@ py -3 -m unittest discover tests
 
 Tests mock the PSCAD layer, so they can run without PSCAD installed.
 
+Licensed PSCAD 4.6.2 acceptance is opt-in and works only on timestamped copies:
+
+```powershell
+& .\scripts\run_legacy_acceptance.ps1 `
+  -Workspace 'D:\PSCAD-Workspace\acceptance' `
+  -Version '4.6.2' -X64
+```
+
+The runner refuses to start while another PSCAD process is open and never
+broadly terminates PSCAD processes. PSCAD 4.6.2 has been exercised on a real
+licensed installation; PSCAD 5.x remains contract-tested until a real 5.x
+installation is available for end-to-end acceptance.
+
 ## Project structure
 
 ```text
 pscad_mcp\
   core\
+    backend\
+      legacy.py
+      modern.py
+      selector.py
     connection_manager.py
     executor.py
+    service.py
   tools\
     app_tools.py
     project_tools.py
@@ -214,7 +272,8 @@ docs\
 
 Two implementation details matter for reliability:
 
-- `PSCADConnectionManager` tracks the live PSCAD handle and checks process health before reuse.
+- `PscadService` is the only entry point used by MCP tools; it centralizes safety, confirmation, and JSON normalization.
+- `LegacyBackend` and `ModernBackend` keep vendor objects behind the backend boundary.
 - `RobustExecutor` serializes PSCAD calls through a single-worker executor with a timeout guard to reduce hangs from COM/RMI operations.
 
 Those guardrails are important because PSCAD automation is effectively single-threaded and can become unstable if calls are issued concurrently.

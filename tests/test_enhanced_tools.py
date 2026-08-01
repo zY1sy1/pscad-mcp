@@ -24,7 +24,7 @@ class TestEnhancedPSCADTools(unittest.IsolatedAsyncioTestCase):
         # Configure the hierarchy
         self.mock_pscad.project.return_value = self.mock_project
         self.mock_project.component.return_value = self.mock_component
-        self.mock_project.simulation_set.return_value = self.mock_sim_set
+        self.mock_pscad.simulation_set.return_value = self.mock_sim_set
         
         # Patch the connection manager to return our mock pscad
         self.conn_patcher = patch('pscad_mcp.tools.project_tools.pscad_manager')
@@ -48,17 +48,22 @@ class TestEnhancedPSCADTools(unittest.IsolatedAsyncioTestCase):
 
     async def test_get_component_parameters(self):
         """Test retrieving parameters from a mock component."""
-        self.mock_component.parameters.return_value = {"KV": 138.0, "Name": "Bus1"}
+        self.mock_manager.service.get_component_parameters = AsyncMock(
+            return_value={"KV": 138.0, "Name": "Bus1"}
+        )
         
         result = await get_component_parameters("TestProj", 101)
         
         self.assertEqual(result["KV"], 138.0)
-        self.mock_project.component.assert_called_with(101)
+        self.mock_manager.service.get_component_parameters.assert_awaited_once_with(
+            "TestProj", 101
+        )
 
     async def test_validate_parameters_success(self):
         """Test parameter validation against a mock range."""
-        # Mock the range() method found in enriched docs
-        self.mock_component.range.return_value = (0.0, 200.0)
+        self.mock_manager.service.validate_component_parameters = AsyncMock(
+            return_value={"KV": {"valid": True, "range": "(0.0, 200.0)"}}
+        )
         
         params_to_test = {"KV": 138.0}
         result = await validate_component_parameters("TestProj", 101, params_to_test)
@@ -68,7 +73,11 @@ class TestEnhancedPSCADTools(unittest.IsolatedAsyncioTestCase):
 
     async def test_validate_parameters_error(self):
         """Test validation behavior when a parameter doesn't exist."""
-        self.mock_component.range.side_effect = Exception("No range defined")
+        self.mock_manager.service.validate_component_parameters = AsyncMock(
+            return_value={
+                "InvalidParam": {"valid": False, "error": "No range defined"}
+            }
+        )
         
         params_to_test = {"InvalidParam": 1.0}
         result = await validate_component_parameters("TestProj", 101, params_to_test)
@@ -78,9 +87,9 @@ class TestEnhancedPSCADTools(unittest.IsolatedAsyncioTestCase):
 
     async def test_list_simulation_sets(self):
         """Test listing simulation sets."""
-        set1 = MagicMock()
-        set1.name = "Batch1"
-        self.mock_project.simulation_sets.return_value = [set1]
+        self.mock_simset_manager.service.list_simulation_sets = AsyncMock(
+            return_value=["Batch1"]
+        )
         
         result = await list_simulation_sets("TestProj")
         
@@ -89,19 +98,28 @@ class TestEnhancedPSCADTools(unittest.IsolatedAsyncioTestCase):
 
     async def test_run_simulation_set(self):
         """Test triggering a simulation set run."""
+        self.mock_simset_manager.service.run_simulation_set = AsyncMock(
+            return_value="Simulation set 'Batch1' started."
+        )
         result = await run_simulation_set("TestProj", "Batch1")
         
         self.assertIn("started", result)
-        self.mock_sim_set.run.assert_called_once()
+        self.mock_simset_manager.service.run_simulation_set.assert_awaited_once_with(
+            "TestProj", "Batch1"
+        )
 
     async def test_get_project_settings(self):
         """Test retrieving project settings."""
-        self.mock_project.settings.return_value = {"Duration": "0.5", "TimeStep": "50"}
+        self.mock_manager.service.get_project_settings = AsyncMock(
+            return_value={"Duration": "0.5", "TimeStep": "50"}
+        )
         
         result = await get_project_settings("TestProj")
         
         self.assertEqual(result["Duration"], "0.5")
-        self.mock_project.settings.assert_called_once()
+        self.mock_manager.service.get_project_settings.assert_awaited_once_with(
+            "TestProj"
+        )
 
 if __name__ == '__main__':
     unittest.main()

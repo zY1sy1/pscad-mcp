@@ -2,12 +2,10 @@ from typing import List, Dict, Any, Optional
 import os
 from mcp.server.fastmcp import FastMCP
 from ..core.connection_manager import pscad_manager
-from ..core.executor import robust_executor
 from ..utils.doc_manager import doc_manager
-try:
-    import mhi.pscad
-except ImportError:
-    mhi = None  # type: ignore
+from ..core.path_policy import PathPolicy
+
+path_policy = PathPolicy()
 
 async def get_local_pscad() -> str:
     """Attach to a running local PSCAD instance or launch a new one."""
@@ -16,15 +14,12 @@ async def get_local_pscad() -> str:
 async def get_pscad_status() -> Dict[str, Any]:
     """Get detailed health and status of the PSCAD instance."""
     try:
-        pscad = pscad_manager.pscad
-        return {
-            "connected": True,
-            "version": pscad.version,
-            "busy": pscad.is_busy(),
-            "workspace": str(pscad.workspace_path)
-        }
+        return await pscad_manager.get_status()
     except Exception as e:
-        return {"connected": False, "error": str(e)}
+        return {
+            "connected": False,
+            **pscad_manager.error_payload(e, "get_pscad_status"),
+        }
 
 async def sync_documentation() -> List[str]:
     """Synchronize AI reference files with the currently installed library version."""
@@ -50,9 +45,17 @@ async def read_documentation(module_name: str) -> str:
     if not normalized_name.endswith(".md"):
         normalized_name += ".md"
         
-    filepath = os.path.join(doc_manager.md_dir, normalized_name)
+    try:
+        filepath = path_policy.resolve_child(
+            doc_manager.md_dir,
+            normalized_name,
+            suffixes={".md"},
+            must_exist=True,
+        )
+    except (FileNotFoundError, ValueError):
+        filepath = None
     
-    if not os.path.exists(filepath):
+    if filepath is None:
         return f"Error: Documentation for '{module_name}' not found. Available modules: {', '.join(await list_documentation())}"
         
     with open(filepath, "r", encoding="utf-8") as f:
@@ -60,18 +63,14 @@ async def read_documentation(module_name: str) -> str:
 
 async def repair_connection() -> str:
     """Force-reset the connection to PSCAD."""
-    pscad_manager.disconnect()
-    return await pscad_manager.attach_local()
+    return await pscad_manager.repair_connection()
 
-async def quit_pscad() -> str:
+async def quit_pscad(confirm: bool = False) -> Any:
     """Terminate the PSCAD application."""
     try:
-        pscad = pscad_manager.pscad
-        await robust_executor.run_safe(pscad.quit)
-        pscad_manager.disconnect()
-        return "PSCAD terminated."
+        return await pscad_manager.quit_pscad(confirm=confirm)
     except Exception as e:
-        return f"Error during quit: {str(e)}"
+        return pscad_manager.error_payload(e, "quit_pscad")
 
 def register_app_tools(mcp: FastMCP):
     """Register core application lifecycle and sync tools."""

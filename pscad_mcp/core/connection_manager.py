@@ -1,69 +1,142 @@
-import psutil
 import logging
+import importlib
+import os
 from typing import Optional, Any
 from .executor import robust_executor
-
-try:
-    import mhi.pscad
-except ImportError:
-    mhi = None  # type: ignore
+from .pscad_adapter import PscadAdapter
+from .backend.legacy import LegacyBackend
+from .backend.modern import ModernBackend
+from .backend.selector import select_backend
+from .service import PscadService
 
 logger = logging.getLogger("pscad-mcp.connection")
+
+
+def _optional_import(module_name: str) -> Any:
+    try:
+        return importlib.import_module(module_name)
+    except ImportError:
+        return None
+
+
+async def _default_backend_factory() -> Any:
+    legacy_module = _optional_import("mhrc.automation")
+    modern_module = _optional_import("mhi.pscad")
+
+    legacy_installations = []
+    if legacy_module is not None:
+        try:
+            legacy_installations = await robust_executor.run_safe(
+                lambda: legacy_module.controller().get_paramlist_names("pscad")
+            )
+        except Exception as exc:
+            logger.warning("Legacy PSCAD discovery failed: %s", exc)
+
+    modern_installations = []
+    if modern_module is not None:
+        try:
+            modern_installations = await robust_executor.run_safe(
+                modern_module.versions
+            )
+        except Exception as exc:
+            logger.warning("Modern PSCAD discovery failed: %s", exc)
+
+    choice = select_backend(
+        os.environ,
+        legacy_versions=lambda: legacy_installations,
+        modern_versions=lambda: modern_installations,
+    )
+    if choice.backend == "legacy":
+        return LegacyBackend(
+            robust_executor,
+            version=choice.version,
+            x64=choice.x64,
+            automation_module=legacy_module if legacy_module is not None else False,
+            legacy_wheel=os.getenv("PSCAD_MCP_LEGACY_WHEEL"),
+        )
+    return ModernBackend(
+        robust_executor,
+        version=choice.version,
+        x64=choice.x64,
+        pscad_module=modern_module,
+        timeout=int(os.getenv("PSCAD_MCP_LAUNCH_TIMEOUT", "30")),
+    )
 
 class PSCADConnectionManager:
     """
     Singleton Manager for PSCAD lifecycle and connection health.
     """
     _instance: Optional['PSCADConnectionManager'] = None
-    _pscad: Optional[Any] = None
+    _adapter: Optional[PscadAdapter] = None
+    _service: Optional[PscadService] = None
 
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super(PSCADConnectionManager, cls).__new__(cls)
+            cls._instance._adapter = PscadAdapter(robust_executor)
+            cls._instance._service = PscadService(
+                _default_backend_factory,
+                executor=robust_executor,
+            )
         return cls._instance
-
-    @property
-    def pscad(self):
-        """Get a safe, verified PSCAD instance."""
-        if self._pscad is None:
-            raise RuntimeError("PSCAD not connected. Use get_local_pscad or launch_pscad first.")
-        
-        # OS-level check
-        if not self.is_process_running():
-            self._pscad = None
-            raise RuntimeError("PSCAD process (PSCAD.exe) is not running on the system.")
-            
-        # Heartbeat check
-        try:
-            if not self._pscad.is_alive():
-                self._pscad = None
-                raise RuntimeError("Connection to PSCAD lost.")
-            self._pscad.is_busy() # RMI check
-        except Exception as e:
-            self._pscad = None
-            raise RuntimeError(f"PSCAD is unresponsive: {str(e)}")
-            
-        return self._pscad
-
-    def is_process_running(self) -> bool:
-        """Check if PSCAD.exe is in the system process table."""
-        for proc in psutil.process_iter(['name']):
-            if proc.info['name'] and 'pscad' in proc.info['name'].lower():
-                return True
-        return False
 
     async def attach_local(self) -> str:
         """Robustly attach to any local PSCAD instance or launch a new one."""
         try:
-            self._pscad = await robust_executor.run_safe(mhi.pscad.application)
-            return f"Successfully attached to PSCAD {self._pscad.version} (Local)."
+            result = await self.service.attach_local()
+            backend = self.service.backend
+            backend_adapter = getattr(backend, "adapter", None)
+            if backend_adapter is not None:
+                self._adapter = backend_adapter
+            return result
         except Exception as e:
             logger.error(f"Attach failed: {str(e)}")
             raise RuntimeError(f"Failed to attach to PSCAD: {str(e)}")
 
     def disconnect(self):
-        """Reset the internal handle."""
-        self._pscad = None
+        """Clear temporary raw-proxy compatibility state."""
+        self._adapter.disconnect()
+        robust_executor.reset()
+
+    @property
+    def service(self) -> PscadService:
+        if self._service is None:
+            raise RuntimeError("PSCAD service is not initialized.")
+        return self._service
+
+    async def get_status(self) -> dict:
+        return await self.service.status()
+
+    async def repair_connection(self) -> str:
+        result = await self.service.repair_connection()
+        return result
+
+    async def quit_pscad(self, *, confirm: bool = False) -> str:
+        result = await self.service.quit_pscad(confirm=confirm)
+        return result
+
+    @staticmethod
+    def error_payload(error: Exception, operation: str) -> dict:
+        return PscadService.error_payload(error, operation)
+
+    @property
+    def adapter(self) -> PscadAdapter:
+        if self._adapter is None:
+            raise RuntimeError("PSCAD adapter is not initialized.")
+        return self._adapter
+
+    @property
+    def connection_info(self) -> dict:
+        selected = self.adapter.selected_installation
+        return {
+            "owns_process": self.adapter.owns_process,
+            "selected_version": selected[0] if selected else None,
+            "x64": selected[1] if selected else None,
+        }
+
+    async def heartbeat(self) -> dict:
+        status = await self.get_status()
+        return {"alive": status["alive"], "busy": status["busy"]}
 
 # Global singleton
 pscad_manager = PSCADConnectionManager()

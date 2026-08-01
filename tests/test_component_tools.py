@@ -1,133 +1,113 @@
 import unittest
-from unittest.mock import MagicMock, patch, AsyncMock
-from collections import namedtuple
+from unittest.mock import AsyncMock, patch
 
+from pscad_mcp.core.service import ConfirmationRequired
 from pscad_mcp.tools.component_tools import (
-    get_component_location, set_component_location, rotate_component,
-    mirror_component, clone_component, get_component_ports,
-    get_component_port, enable_component, disable_component, delete_component,
+    clone_component,
+    delete_component,
+    disable_component,
+    enable_component,
+    get_component_location,
+    get_component_port,
+    get_component_ports,
+    mirror_component,
+    rotate_component,
+    set_component_location,
 )
-
-Port = namedtuple("Port", ["x", "y", "name", "dim", "type"])
 
 
 class TestComponentTools(unittest.IsolatedAsyncioTestCase):
-
     def setUp(self):
-        self.mock_pscad = MagicMock()
-        self.mock_project = MagicMock()
-        self.mock_component = MagicMock()
-        self.mock_component.id = 42
-        self.mock_component.name = "V1"
-        self.mock_component.defn_name = "master:source3"
-        self.mock_component.location = (10, 5)
-
-        self.patcher_manager = patch("pscad_mcp.tools.component_tools.pscad_manager")
-        self.patcher_executor = patch("pscad_mcp.tools.component_tools.robust_executor")
-        self.mock_manager = self.patcher_manager.start()
-        self.mock_executor = self.patcher_executor.start()
-
-        self.mock_manager.pscad = self.mock_pscad
-        self.mock_pscad.project.return_value = self.mock_project
-        self.mock_project.component.return_value = self.mock_component
-
-        self.mock_executor.run_safe = AsyncMock(
-            side_effect=lambda f, *args, **kwargs: f(*args, **{k: v for k, v in kwargs.items() if k != "timeout"})
-        )
+        self.manager_patch = patch("pscad_mcp.tools.component_tools.pscad_manager")
+        self.manager = self.manager_patch.start()
+        self.service = self.manager.service
 
     def tearDown(self):
-        self.patcher_manager.stop()
-        self.patcher_executor.stop()
+        self.manager_patch.stop()
 
-    async def test_get_component_location(self):
-        self.mock_component.get_location.return_value = (10, 5)
-        result = await get_component_location("proj", 42)
-        self.assertEqual(result["x"], 10)
-        self.assertEqual(result["y"], 5)
-        self.assertEqual(result["id"], 42)
+    async def test_location_tools_route_to_service(self):
+        self.service.get_component_location = AsyncMock(
+            return_value={"id": 42, "x": 10, "y": 5}
+        )
+        self.service.set_component_location = AsyncMock(return_value="moved")
 
-    async def test_set_component_location(self):
-        result = await set_component_location("proj", 42, 20, 15)
-        self.assertIn("moved", result)
-        self.mock_component.set_location.assert_called_once_with(20, 15)
+        self.assertEqual((await get_component_location("proj", 42))["x"], 10)
+        self.assertEqual(await set_component_location("proj", 42, 20, 15), "moved")
+        self.service.set_component_location.assert_awaited_once_with(
+            "proj", 42, 20, 15
+        )
 
-    async def test_rotate_component_right(self):
-        result = await rotate_component("proj", 42, "right")
-        self.assertIn("rotated", result)
-        self.mock_component.rotate_right.assert_called_once()
+    async def test_rotation_values_route_unchanged(self):
+        self.service.rotate_component = AsyncMock(return_value="rotated")
+        for direction in ("right", "left", "180"):
+            self.assertEqual(
+                await rotate_component("proj", 42, direction), "rotated"
+            )
+        self.assertEqual(self.service.rotate_component.await_count, 3)
 
-    async def test_rotate_component_left(self):
-        await rotate_component("proj", 42, "left")
-        self.mock_component.rotate_left.assert_called_once()
+    async def test_mirror_values_route_unchanged(self):
+        self.service.mirror_component = AsyncMock(return_value="mirrored")
+        for axis in ("horizontal", "vertical"):
+            self.assertEqual(
+                await mirror_component("proj", 42, axis), "mirrored"
+            )
+        self.assertEqual(self.service.mirror_component.await_count, 2)
 
-    async def test_rotate_component_180(self):
-        await rotate_component("proj", 42, "180")
-        self.mock_component.rotate_180.assert_called_once()
+    async def test_clone_and_ports_return_normalized_service_values(self):
+        self.service.clone_component = AsyncMock(
+            return_value={
+                "id": 99,
+                "name": "V1_copy",
+                "definition": "master:source3",
+                "location": {"x": 30, "y": 10},
+            }
+        )
+        self.service.get_component_ports = AsyncMock(
+            return_value={
+                "A": {"name": "A", "x": 12, "y": 5, "dim": 1, "type": "DATA"}
+            }
+        )
+        self.service.get_component_port = AsyncMock(
+            return_value={"name": "A", "x": 12, "y": 5, "dim": 1, "type": "DATA"}
+        )
 
-    async def test_rotate_component_invalid(self):
-        with self.assertRaises(ValueError):
-            await rotate_component("proj", 42, "upside_down")
+        self.assertEqual((await clone_component("proj", 42, 30, 10))["id"], 99)
+        self.assertIn("A", await get_component_ports("proj", 42))
+        self.assertEqual((await get_component_port("proj", 42, "A"))["name"], "A")
 
-    async def test_mirror_horizontal(self):
-        result = await mirror_component("proj", 42, "horizontal")
-        self.assertIn("mirrored", result)
-        self.mock_component.mirror.assert_called_once()
+    async def test_enable_and_disable_route_boolean_state(self):
+        self.service.set_component_enabled = AsyncMock(
+            side_effect=["enabled", "disabled"]
+        )
 
-    async def test_mirror_vertical(self):
-        await mirror_component("proj", 42, "vertical")
-        self.mock_component.flip.assert_called_once()
+        self.assertEqual(await enable_component("proj", 42), "enabled")
+        self.assertEqual(await disable_component("proj", 42), "disabled")
+        self.assertEqual(
+            self.service.set_component_enabled.await_args_list[0].args,
+            ("proj", 42, True),
+        )
+        self.assertEqual(
+            self.service.set_component_enabled.await_args_list[1].args,
+            ("proj", 42, False),
+        )
 
-    async def test_mirror_invalid(self):
-        with self.assertRaises(ValueError):
-            await mirror_component("proj", 42, "diagonal")
+    async def test_delete_passes_explicit_confirmation(self):
+        self.service.delete_component = AsyncMock(return_value="deleted")
 
-    async def test_clone_component(self):
-        new_comp = MagicMock()
-        new_comp.id = 99
-        new_comp.name = "V1_copy"
-        new_comp.defn_name = "master:source3"
-        new_comp.location = (30, 10)
-        self.mock_component.clone.return_value = new_comp
-        result = await clone_component("proj", 42, 30, 10)
-        self.assertEqual(result["id"], 99)
-        self.mock_component.clone.assert_called_once_with(30, 10)
+        self.assertEqual(
+            await delete_component("proj", 42, confirm=True), "deleted"
+        )
+        self.service.delete_component.assert_awaited_once_with(
+            "proj", 42, confirm=True
+        )
 
-    async def test_get_component_ports(self):
-        port_a = Port(x=12, y=5, name="A", dim=1, type="ELECTRICAL")
-        port_b = Port(x=12, y=9, name="B", dim=1, type="ELECTRICAL")
-        self.mock_component.ports.return_value = {"A": port_a, "B": port_b}
-        result = await get_component_ports("proj", 42)
-        self.assertIn("A", result)
-        self.assertEqual(result["A"]["x"], 12)
-        self.assertEqual(result["B"]["y"], 9)
-        self.assertEqual(result["A"]["type"], "ELECTRICAL")
+    async def test_delete_without_confirmation_propagates_safety_error(self):
+        self.service.delete_component = AsyncMock(
+            side_effect=ConfirmationRequired("delete_component")
+        )
 
-    async def test_get_component_port(self):
-        port = Port(x=12, y=5, name="A", dim=1, type="DATA")
-        self.mock_component.port.return_value = port
-        result = await get_component_port("proj", 42, "A")
-        self.assertEqual(result["x"], 12)
-        self.assertEqual(result["name"], "A")
-
-    async def test_get_component_port_not_found(self):
-        self.mock_component.port.return_value = None
-        with self.assertRaises(ValueError):
-            await get_component_port("proj", 42, "BadPort")
-
-    async def test_enable_component(self):
-        result = await enable_component("proj", 42)
-        self.assertIn("enabled", result)
-        self.mock_component.enable.assert_called_once()
-
-    async def test_disable_component(self):
-        result = await disable_component("proj", 42)
-        self.assertIn("disabled", result)
-        self.mock_component.disable.assert_called_once()
-
-    async def test_delete_component(self):
-        result = await delete_component("proj", 42)
-        self.assertIn("deleted", result)
-        self.mock_component.delete.assert_called_once()
+        with self.assertRaises(ConfirmationRequired):
+            await delete_component("proj", 42)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,433 @@
+import copy
+import tempfile
+from pathlib import Path
+import unittest
+from types import SimpleNamespace
+import xml.etree.ElementTree as ET
+
+from pscad_mcp.core.backend.legacy import LegacyBackend
+from pscad_mcp.core.backend.modern import ModernBackend
+from pscad_mcp.core.backend.base import BackendError
+from tests.backend_fakes import (
+    FakeLegacyAutomation,
+    FakeModernPscad,
+    ImmediateExecutor,
+)
+
+
+class StatefulComponent:
+    def __init__(self, component_id=7, *, legacy=False, canvas=None):
+        self.id = component_id
+        self._id = (str(component_id),)
+        self.name = "V1"
+        self.defn_name = "master:source3"
+        self.location = (10, 5)
+        self.values = {"Name": "V1", "Gain": 5, "enabled": True}
+        self.orientation = 0
+        self.mirrored = False
+        self.flipped = False
+        self.deleted = False
+        self.canvas = canvas
+        self.legacy = legacy
+        self.port_names = ["A", "B"]
+        self.port_map = {
+            "A": SimpleNamespace(name="A", x=9, y=5, dim=1, type="electrical"),
+            "B": SimpleNamespace(name="B", x=11, y=5, dim=1, type="electrical"),
+        }
+
+    def get_definition(self):
+        return SimpleNamespace(scoped_name=self.defn_name)
+
+    def get_location(self): return self.location
+    def set_location(self, x, y): self.location = (x, y)
+    def get_parameters(self): return dict(self.values)
+    def set_parameters(self, **kwargs): self.values.update(kwargs)
+    def parameters(self, parameters=None):
+        if parameters is not None: self.values.update(parameters)
+        return dict(self.values)
+    def range(self, name): return (0, 10)
+
+    def rotate_right(self): self.orientation = (self.orientation + 90) % 360
+    def rotate_left(self): self.orientation = (self.orientation - 90) % 360
+    def rotate_180(self): self.orientation = (self.orientation + 180) % 360
+    def mirror(self): self.mirrored = not self.mirrored
+    def flip(self): self.flipped = not self.flipped
+    def _generic(self, command):
+        {
+            "IDM_ROTATERIGHT": self.rotate_right,
+            "IDM_ROTATELEFT": self.rotate_left,
+            "IDM_ROTATE180": self.rotate_180,
+            "IDM_MIRROR": self.mirror,
+            "IDM_FLIP": self.flip,
+        }[command]()
+
+    def clone(self, x, y):
+        clone = copy.copy(self)
+        clone.id = max(c.id for c in self.canvas.components) + 1
+        clone._id = (str(clone.id),)
+        clone.name = "V1_copy"
+        clone.location = (x, y)
+        clone.deleted = False
+        self.canvas.components.append(clone)
+        return clone
+
+    def copy(self): self.canvas.clipboard = self
+    def delete(self):
+        self.deleted = True
+        if self.canvas is not None:
+            self.canvas.components = [c for c in self.canvas.components if c is not self]
+    def ports(self): return dict(self.port_map)
+    def port(self, name): return self.port_map.get(name)
+    def get_port_location(self, name):
+        port = self.port_map.get(name)
+        return (port.x, port.y) if port else None
+    def enable(self): self.values["enabled"] = True
+    def disable(self): self.values["enabled"] = False
+
+
+class StatefulCanvas:
+    def __init__(self, legacy=False):
+        self.components = []
+        self.clipboard = None
+        self.legacy = legacy
+        self.components.append(StatefulComponent(legacy=legacy, canvas=self))
+
+    def find_all(self, *names, **params):
+        result = list(self.components)
+        if names:
+            definition = names[0]
+            if ":" in definition:
+                result = [c for c in result if c.defn_name == definition]
+            elif len(names) == 1:
+                result = [c for c in result if c.name == definition]
+        if len(names) > 1:
+            result = [c for c in result if c.name == names[1]]
+        return result
+
+    def paste(self):
+        clone = copy.copy(self.clipboard)
+        clone.id = max(c.id for c in self.components) + 1
+        clone._id = (str(clone.id),)
+        clone.name = "V1_copy"
+        clone.canvas = self
+        clone.deleted = False
+        self.components.append(clone)
+
+    def add_component(self, library, name, x=0, y=0):
+        clone = StatefulComponent(
+            max(component.id for component in self.components) + 1,
+            legacy=self.legacy,
+            canvas=self,
+        )
+        clone.defn_name = f"{library}:{name}"
+        clone.location = (x, y)
+        self.components.append(clone)
+        return clone
+
+
+class LegacyWire:
+    """Canvas object returned by legacy find_all(), but not a user component."""
+
+    def __init__(self, object_id=99):
+        self.id = object_id
+        self._id = (str(object_id),)
+
+    def get_location(self):
+        return (0, 0)
+
+
+class LegacyComponentProject:
+    def __init__(self): self.main = StatefulCanvas(legacy=True)
+    def user_canvas(self, name): return self.main
+
+
+class ModernComponentProject:
+    def __init__(self): self.main = StatefulCanvas()
+    def component(self, component_id):
+        return next(c for c in self.main.components if c.id == component_id)
+    def find_all(self, definition=None, name=None):
+        return [
+            c for c in self.main.components
+            if (definition is None or c.defn_name == definition)
+            and (name is None or c.name == name)
+        ]
+
+
+class ComponentApp:
+    def __init__(self, project, modern=False):
+        self.project_proxy = project
+        self.version = "5.0.2" if modern else "4.6.2"
+    def project(self, name): return self.project_proxy
+    def is_alive(self): return True
+    def is_busy(self): return False
+    def licensed(self): return True
+    def quit(self): pass
+
+
+class TestBackendComponentContracts(unittest.IsolatedAsyncioTestCase):
+    async def make_backends(self):
+        legacy_project = LegacyComponentProject()
+        modern_project = ModernComponentProject()
+        legacy = LegacyBackend(
+            ImmediateExecutor(), version="4.6.2", x64=True,
+            automation_module=FakeLegacyAutomation(ComponentApp(legacy_project)),
+        )
+        modern = ModernBackend(
+            ImmediateExecutor(), version="5.0.2", x64=True,
+            pscad_module=FakeModernPscad(ComponentApp(modern_project, modern=True)),
+            psout_module=False,
+        )
+        await legacy.attach()
+        await modern.attach()
+        return [(legacy, legacy_project.main), (modern, modern_project.main)]
+
+    async def test_find_and_parameter_contracts_match(self):
+        for backend, _canvas in await self.make_backends():
+            with self.subTest(backend=backend.name):
+                found = await backend.find_components("case", "Main", "master:source3", None)
+                self.assertEqual(found[0].id, 7)
+                self.assertEqual(found[0].definition, "master:source3")
+                self.assertEqual(found[0].location, {"x": 10, "y": 5})
+                self.assertEqual((await backend.get_component_parameters("case", 7))["Gain"], 5)
+                await backend.set_component_parameters("case", 7, {"Gain": 8})
+                self.assertEqual((await backend.get_component_parameters("case", 7))["Gain"], 8)
+                self.assertEqual(await backend.component_parameter_range("case", 7, "Gain"), (0, 10))
+
+    async def test_legacy_find_components_skips_non_component_canvas_objects(self):
+        project = LegacyComponentProject()
+        project.main.components.append(LegacyWire())
+        backend = LegacyBackend(
+            ImmediateExecutor(), version="4.6.2", x64=True,
+            automation_module=FakeLegacyAutomation(ComponentApp(project)),
+        )
+        await backend.attach()
+
+        found = await backend.find_components("case", "Main", None, None)
+
+        self.assertEqual([component.id for component in found], [7])
+
+    async def test_location_rotation_and_mirror_contracts_match(self):
+        for backend, canvas in await self.make_backends():
+            with self.subTest(backend=backend.name):
+                await backend.set_component_location("case", 7, (20, 15))
+                self.assertEqual(await backend.get_component_location("case", 7), (20, 15))
+                await backend.rotate_component("case", 7, "right")
+                await backend.mirror_component("case", 7, "horizontal")
+                self.assertEqual(canvas.components[0].orientation, 90)
+                self.assertTrue(canvas.components[0].mirrored)
+
+    async def test_clone_ports_enable_and_delete_contracts_match(self):
+        for backend, canvas in await self.make_backends():
+            with self.subTest(backend=backend.name):
+                clone = await backend.clone_component("case", 7, (30, 10))
+                self.assertNotEqual(clone.id, 7)
+                self.assertEqual(clone.location, {"x": 30, "y": 10})
+                ports = await backend.get_component_ports("case", 7)
+                self.assertEqual([port.name for port in ports], ["A", "B"])
+                await backend.set_component_enabled("case", 7, False)
+                self.assertFalse((await backend.get_component_parameters("case", 7))["enabled"])
+                await backend.delete_component("case", clone.id)
+                self.assertNotIn(clone.id, [c.id for c in canvas.components])
+
+    async def test_legacy_clone_does_not_depend_on_clipboard_selection(self):
+        project = LegacyComponentProject()
+        project.main.paste = lambda: project.main.components.append(
+            LegacyWire(99)
+        )
+        backend = LegacyBackend(
+            ImmediateExecutor(), version="4.6.2", x64=True,
+            automation_module=FakeLegacyAutomation(ComponentApp(project)),
+        )
+        await backend.attach()
+
+        clone = await backend.clone_component("case", 7, (30, 10))
+
+        self.assertEqual(clone.definition, "master:source3")
+        self.assertEqual(clone.location, {"x": 30, "y": 10})
+        self.assertEqual(
+            await backend.get_component_parameters("case", clone.id),
+            {"Name": "V1", "Gain": 5, "enabled": True},
+        )
+
+    async def test_legacy_uses_library_xml_when_proxy_omits_port_and_range_metadata(self):
+        project = LegacyComponentProject()
+        component = project.main.components[0]
+        component.port_names = []
+        component.ports = None
+        component.range = None
+        library = """<project><Definition name="source3"><form><parameter
+            name="Gain" type="Real" min="0" max="10" /></form><svg>
+            <port name="A" x="0" y="0" dim="1" type="Real" />
+            <port name="B" x="10" y="0" dim="1" type="Real" />
+            </svg></Definition></project>"""
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "master.pslx"
+            path.write_text(library, encoding="utf-8")
+            backend = LegacyBackend(
+                ImmediateExecutor(), version="4.6.2", x64=True,
+                automation_module=FakeLegacyAutomation(ComponentApp(project)),
+                definition_paths={"master": path},
+            )
+            await backend.attach()
+
+            ports = await backend.get_component_ports("case", 7)
+            legal_range = await backend.component_parameter_range(
+                "case", 7, "Gain"
+            )
+
+        self.assertEqual([port.name for port in ports], ["A", "B"])
+        self.assertEqual(legal_range, (0, 10))
+
+    async def test_legacy_uses_live_canvas_transform_when_port_command_fails(self):
+        project = LegacyComponentProject()
+        component = project.main.components[0]
+        component.location = (378, 342)
+        component.port_names = ["A", "B"]
+        component.get_port_location = lambda _name: None
+        project.main.list_components = lambda: ET.fromstring(
+            '<response><components><User id="7" /></components></response>'
+        )
+        library = """<project><Definition name="source3"><svg>
+            <port name="A" x="0" y="0" dim="1" type="Natural" />
+            <port name="B" x="36" y="0" dim="1" type="Natural" />
+            </svg></Definition></project>"""
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "master.pslx"
+            path.write_text(library, encoding="utf-8")
+            case_path = Path(temporary) / "case.pscx"
+            case_path.write_text(
+                '<project><User id="7" x="378" y="342" orient="3" />'
+                '</project>',
+                encoding="utf-8",
+            )
+            backend = LegacyBackend(
+                ImmediateExecutor(), version="4.6.2", x64=True,
+                automation_module=FakeLegacyAutomation(ComponentApp(project)),
+                definition_paths={"master": path, "case": case_path},
+            )
+            await backend.attach()
+
+            ports = await backend.get_component_ports("case", 7)
+
+        self.assertEqual(
+            [(port.name, port.x, port.y) for port in ports],
+            [("A", 378, 342), ("B", 378, 306)],
+        )
+
+    async def test_legacy_tracks_orientation_for_unsaved_created_component_ports(self):
+        project = LegacyComponentProject()
+        library = """<project><Definition name="source3"><svg>
+            <port name="A" x="0" y="0" dim="1" type="Natural" />
+            <port name="B" x="36" y="0" dim="1" type="Natural" />
+            </svg></Definition></project>"""
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "master.pslx"
+            path.write_text(library, encoding="utf-8")
+            backend = LegacyBackend(
+                ImmediateExecutor(), version="4.6.2", x64=True,
+                automation_module=FakeLegacyAutomation(ComponentApp(project)),
+                definition_paths={"master": path},
+            )
+            await backend.attach()
+            created = await backend.add_component(
+                "case", "Main", "master", "source3", (30, 40), 3, {}
+            )
+            component = project.main.components[-1]
+            component.get_port_location = lambda _name: None
+            project.main.list_components = lambda: ET.fromstring(
+                f'<response><components><User id="{created.id}" />'
+                f'</components></response>'
+            )
+
+            ports = await backend.get_component_ports(
+                "case", created.id
+            )
+
+        self.assertEqual(
+            [(port.name, port.x, port.y) for port in ports],
+            [("A", 30, 40), ("B", 30, 4)],
+        )
+
+    async def test_legacy_updates_cached_orientation_after_rotation(self):
+        project = LegacyComponentProject()
+        library = """<project><Definition name="source3"><svg>
+            <port name="A" x="0" y="0" dim="1" type="Natural" />
+            <port name="B" x="36" y="0" dim="1" type="Natural" />
+            </svg></Definition></project>"""
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "master.pslx"
+            path.write_text(library, encoding="utf-8")
+            backend = LegacyBackend(
+                ImmediateExecutor(), version="4.6.2", x64=True,
+                automation_module=FakeLegacyAutomation(ComponentApp(project)),
+                definition_paths={"master": path},
+            )
+            await backend.attach()
+            created = await backend.add_component(
+                "case", "Main", "master", "source3", (30, 40), 0, {}
+            )
+            component = project.main.components[-1]
+            component.get_port_location = lambda _name: None
+            project.main.list_components = lambda: ET.fromstring(
+                f'<response><components><User id="{created.id}" />'
+                f'</components></response>'
+            )
+
+            await backend.rotate_component("case", created.id, "right")
+            ports = await backend.get_component_ports("case", created.id)
+
+        self.assertEqual(
+            [(port.name, port.x, port.y) for port in ports],
+            [("A", 30, 40), ("B", 30, 76)],
+        )
+
+    async def test_legacy_reports_malformed_definition_file_as_backend_error(self):
+        project = LegacyComponentProject()
+        component = project.main.components[0]
+        component.port_names = []
+        component.ports = None
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "master.pslx"
+            path.write_text("<project>", encoding="utf-8")
+            backend = LegacyBackend(
+                ImmediateExecutor(), version="4.6.2", x64=True,
+                automation_module=FakeLegacyAutomation(ComponentApp(project)),
+                definition_paths={"master": path},
+            )
+            await backend.attach()
+
+            with self.assertRaises(BackendError) as raised:
+                await backend.get_component_ports("case", 7)
+
+        self.assertEqual(
+            raised.exception.code, "DEFINITION_METADATA_UNAVAILABLE"
+        )
+
+    async def test_legacy_discovers_master_library_after_controller_import(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            installation = Path(temporary) / "PSCAD46"
+            executable = installation / "bin" / "win64" / "pscad.exe"
+            executable.parent.mkdir(parents=True)
+            executable.touch()
+            master_library = installation / "master.pslx"
+            master_library.write_text("<project />", encoding="utf-8")
+
+            class Controller:
+                def get_param(self, product, display_name):
+                    self.request = (product, display_name)
+                    return str(executable)
+
+            automation = FakeLegacyAutomation(ComponentApp(LegacyComponentProject()))
+            automation.controller = SimpleNamespace(Controller=Controller)
+            backend = LegacyBackend(
+                ImmediateExecutor(), version="4.6.2", x64=True,
+                automation_module=automation,
+            )
+
+            discovered = await backend._discover_master_library()
+
+        self.assertEqual(discovered, master_library)
+
+
+if __name__ == "__main__":
+    unittest.main()

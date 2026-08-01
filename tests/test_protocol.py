@@ -1,7 +1,7 @@
 import asyncio
 import unittest
 import json
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 from pscad_mcp.tools.project_tools import list_projects, run_project
 from pscad_mcp.core.connection_manager import pscad_manager
 
@@ -12,20 +12,21 @@ class TestProtocolIntegrity(unittest.IsolatedAsyncioTestCase):
     """
 
     async def asyncSetUp(self):
-        self.mock_pscad = MagicMock()
-        pscad_manager._pscad = self.mock_pscad
-        self.os_patch = patch('pscad_mcp.core.connection_manager.PSCADConnectionManager.is_process_running', return_value=True)
-        self.os_patch.start()
+        self.original_service = pscad_manager._service
+        self.mock_service = MagicMock()
+        pscad_manager._service = self.mock_service
 
     async def asyncTearDown(self):
-        self.os_patch.stop()
+        pscad_manager._service = self.original_service
 
     async def test_tool_json_serializable(self):
         """
         Verify that tool outputs can be converted to JSON.
         Failure here breaks the AI client connection.
         """
-        self.mock_pscad.projects.return_value = [{"name": "prj", "type": "Case"}]
+        self.mock_service.list_projects = AsyncMock(
+            return_value=[{"name": "prj", "type": "Case"}]
+        )
         result = await list_projects()
         try:
             json.dumps(result)
@@ -38,7 +39,7 @@ class TestProtocolIntegrity(unittest.IsolatedAsyncioTestCase):
         Verify that no internal code prints directly to stdout.
         This would corrupt the MCP JSON-RPC stream.
         """
-        self.mock_pscad.project.return_value = MagicMock()
+        self.mock_service.run_project = AsyncMock(return_value="started")
         await run_project(project_name="test")
         
         # Check if stdout.write was called (excluding possible logging which should go to stderr)

@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "pscad-mcp"
 version = "0.1.0"
-description = "An MCP server for PSCAD automation, designed for GitHub Copilot CLI."
+description = "A dual-backend MCP server for PSCAD 4.6.x and 5.x automation."
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
@@ -13,14 +13,14 @@ authors = [
     {name = "LL0pez20", email = "luansantos@poli.ufrj.br"}
 ]
 dependencies = [
-    "mcp",
+    "mcp>=1.29,<2",
     "psutil"
 ]
 
 [project.optional-dependencies]
 windows = [
-    "mhi-pscad",
-    "mhi-psout"
+    "mhi-pscad>=3.1,<4",
+    "mhi-psout>=1.3,<2"
 ]
 
 [project.scripts]
