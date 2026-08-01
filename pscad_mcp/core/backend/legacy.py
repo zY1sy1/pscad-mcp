@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+import math
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Mapping
 import xml.etree.ElementTree as ET
@@ -247,12 +249,99 @@ class LegacyBackend:
         values = await self.executor.run_safe(method)
         return [str(value) for value in values]
 
+    @staticmethod
+    def _settings_values_match(expected: Any, actual: Any) -> bool:
+        if isinstance(expected, bool) or isinstance(actual, bool):
+            return type(expected) is type(actual) and expected == actual
+        if expected == actual:
+            return True
+
+        def numeric_value(value: Any) -> Decimal | None:
+            if not isinstance(value, (int, float, str)):
+                return None
+            try:
+                number = Decimal(str(value))
+            except (InvalidOperation, ValueError):
+                return None
+            return number if number.is_finite() else None
+
+        expected_number = numeric_value(expected)
+        actual_number = numeric_value(actual)
+        return (
+            expected_number is not None
+            and actual_number is not None
+            and expected_number == actual_number
+        )
+
+    @staticmethod
+    def _json_safe_setting_value(value: Any) -> Any:
+        if value is None or isinstance(value, (str, int, bool)):
+            return value
+        if isinstance(value, float):
+            return value if math.isfinite(value) else str(value)
+        if isinstance(value, Mapping):
+            return {
+                str(key): LegacyBackend._json_safe_setting_value(item)
+                for key, item in value.items()
+            }
+        if isinstance(value, (list, tuple)):
+            return [LegacyBackend._json_safe_setting_value(item) for item in value]
+        return str(value)
+
     async def get_settings(self, project_name: str) -> dict[str, Any]:
-        values = await self.executor.run_safe(self._require_app().settings)
-        return dict(values) if hasattr(values, "items") else {"value": str(values)}
+        project = await self._project(project_name)
+        values = await self.executor.run_safe(project.parameters)
+        if not isinstance(values, Mapping):
+            raise BackendError(
+                "UNEXPECTED_RESPONSE",
+                "Project parameters did not return a mapping.",
+                self.name,
+                "get_project_settings",
+                {"project": project_name},
+            )
+        return dict(values)
 
     async def set_settings(self, project_name: str, settings: Any) -> None:
-        await self.executor.run_safe(self._require_app().settings, dict(settings))
+        project = await self._project(project_name)
+        requested = dict(settings)
+        accepted = await self.executor.run_safe(project.set_parameters, requested)
+        if accepted is not True:
+            raise BackendError(
+                "INVALID_PARAMETER",
+                "PSCAD did not accept the requested project parameters.",
+                self.name,
+                "set_project_settings",
+                {
+                    "project": project_name,
+                    "keys": sorted(str(key) for key in requested),
+                },
+            )
+        actual_values = await self.executor.run_safe(project.parameters)
+        if not isinstance(actual_values, Mapping):
+            raise BackendError(
+                "UNEXPECTED_RESPONSE",
+                "Project parameters did not return a mapping after update.",
+                self.name,
+                "set_project_settings",
+                {"project": project_name},
+            )
+        mismatches = {
+            str(key): {
+                "expected": self._json_safe_setting_value(expected),
+                "actual": self._json_safe_setting_value(actual_values.get(key)),
+            }
+            for key, expected in requested.items()
+            if key not in actual_values
+            or not self._settings_values_match(expected, actual_values[key])
+        }
+        if mismatches:
+            raise BackendError(
+                "POSTCONDITION_FAILED",
+                "Project parameters could not be verified after update.",
+                self.name,
+                "set_project_settings",
+                {"project": project_name, "mismatches": mismatches},
+            )
 
     async def project_output(self, project_name: str) -> str:
         project = await self._project(project_name)

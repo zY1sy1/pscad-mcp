@@ -1,5 +1,7 @@
+import json
 import unittest
 
+from pscad_mcp.core.backend.base import BackendError
 from pscad_mcp.core.backend.legacy import LegacyBackend
 from pscad_mcp.core.backend.modern import ModernBackend
 from tests.backend_fakes import (
@@ -16,6 +18,8 @@ class FakeProject:
         self.description = "Example"
         self.filename = f"{name}.pscx"
         self.calls = []
+        self.settings_data = {"time_duration": "0.5", "time_step": "50 [us]"}
+        self.accept_settings = True
 
     def save(self): self.calls.append(("save",))
     def save_as(self, *args, **kwargs): self.calls.append(("save_as", args, kwargs))
@@ -28,6 +32,13 @@ class FakeProject:
     def list_definitions(self): return ["source", "ground"]
     def output(self): return "modern output"
     def messages(self): return [("legacy output", "build", "normal", self.name, "", 0, 0)]
+    def parameters(self): return dict(self.settings_data)
+    def set_parameters(self, values):
+        self.calls.append(("set_parameters", dict(values)))
+        if not self.accept_settings:
+            return False
+        self.settings_data.update(values)
+        return True
 
 
 class FakeSimulationSet:
@@ -59,6 +70,7 @@ class FakeLegacyApp:
         self.simsets = {"set1": FakeSimulationSet()}
         self.loaded = []
         self.settings_data = {"fortran_version": "GFortran"}
+        self.settings_calls = []
         self.workspace_proxy = FakeWorkspace(self)
         self.built_all = False
 
@@ -72,6 +84,7 @@ class FakeLegacyApp:
     def build_all(self): self.built_all = True
     def settings(self, settings=None, **kwargs):
         updates = dict(settings or {}, **kwargs)
+        self.settings_calls.append(dict(updates))
         if updates: self.settings_data.update(updates)
         return dict(self.settings_data)
     def simulation_set(self, name): return self.simsets[name]
@@ -145,6 +158,126 @@ class TestBackendProjectContracts(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual((await backend.get_settings("case"))["fortran_version"], "Intel")
                 self.assertEqual(len(await backend.project_definitions("case")), 2)
                 self.assertIn("output", await backend.project_output("case"))
+
+    async def test_legacy_get_settings_uses_selected_project_not_application(self):
+        legacy, app = (await self.make_backends())[0]
+        project = app.project_map["case"]
+        project.settings_data = {"time_duration": "1.0"}
+        app.settings_data = {"application_only": "wrong scope"}
+
+        self.assertEqual(await legacy.get_settings("case"), {"time_duration": "1.0"})
+        self.assertEqual(app.settings_calls, [])
+
+    async def test_legacy_get_settings_honors_project_name(self):
+        legacy, app = (await self.make_backends())[0]
+        app.project_map["other"] = FakeProject("other")
+        app.project_map["other"].settings_data = {"time_duration": "2.0"}
+
+        self.assertEqual(await legacy.get_settings("other"), {"time_duration": "2.0"})
+        self.assertEqual(app.settings_calls, [])
+
+    async def test_legacy_get_settings_rejects_non_mapping_response(self):
+        legacy, app = (await self.make_backends())[0]
+        app.project_map["case"].parameters = lambda: object()
+
+        with self.assertRaises(BackendError) as raised:
+            await legacy.get_settings("case")
+
+        self.assertEqual(raised.exception.code, "UNEXPECTED_RESPONSE")
+        self.assertEqual(raised.exception.operation, "get_project_settings")
+
+    async def test_legacy_set_settings_uses_project_proxy_not_application(self):
+        legacy, app = (await self.make_backends())[0]
+        project = app.project_map["case"]
+
+        await legacy.set_settings("case", {"time_duration": "1.0"})
+
+        self.assertEqual(project.calls, [("set_parameters", {"time_duration": "1.0"})])
+        self.assertEqual(project.settings_data["time_duration"], "1.0")
+        self.assertEqual(app.settings_calls, [])
+
+    async def test_legacy_set_settings_rejects_unaccepted_project_parameters(self):
+        legacy, app = (await self.make_backends())[0]
+        app.project_map["case"].accept_settings = False
+
+        with self.assertRaises(BackendError) as raised:
+            await legacy.set_settings("case", {"z": 1, "a": 2})
+
+        self.assertEqual(raised.exception.code, "INVALID_PARAMETER")
+        self.assertEqual(raised.exception.operation, "set_project_settings")
+        self.assertEqual(
+            raised.exception.details,
+            {"project": "case", "keys": ["a", "z"]},
+        )
+
+    async def test_legacy_set_settings_rejects_postcondition_mismatch(self):
+        legacy, app = (await self.make_backends())[0]
+        project = app.project_map["case"]
+
+        def accept_without_updating(_values):
+            return True
+
+        project.set_parameters = accept_without_updating
+        with self.assertRaises(BackendError) as raised:
+            await legacy.set_settings("case", {"time_duration": "1.0"})
+
+        self.assertEqual(raised.exception.code, "POSTCONDITION_FAILED")
+        self.assertEqual(raised.exception.operation, "set_project_settings")
+        self.assertEqual(
+            raised.exception.details,
+            {
+                "project": "case",
+                "mismatches": {
+                    "time_duration": {"expected": "1.0", "actual": "0.5"},
+                },
+            },
+        )
+
+    async def test_legacy_set_settings_accepts_equivalent_numeric_values(self):
+        legacy, app = (await self.make_backends())[0]
+        project = app.project_map["case"]
+
+        def normalize_numeric(_values):
+            project.settings_data["time_duration"] = "0.5"
+            return True
+
+        project.set_parameters = normalize_numeric
+        await legacy.set_settings("case", {"time_duration": 0.5})
+
+        self.assertEqual(project.settings_data["time_duration"], "0.5")
+        self.assertEqual(app.settings_calls, [])
+
+    async def test_legacy_set_settings_does_not_equate_boolean_and_number(self):
+        legacy, app = (await self.make_backends())[0]
+        project = app.project_map["case"]
+
+        def normalize_to_number(_values):
+            project.settings_data["enabled"] = 1
+            return True
+
+        project.set_parameters = normalize_to_number
+        with self.assertRaises(BackendError) as raised:
+            await legacy.set_settings("case", {"enabled": True})
+
+        self.assertEqual(raised.exception.code, "POSTCONDITION_FAILED")
+        self.assertEqual(
+            raised.exception.details["mismatches"]["enabled"],
+            {"expected": True, "actual": 1},
+        )
+
+    async def test_legacy_set_settings_uses_json_safe_mismatch_details(self):
+        legacy, app = (await self.make_backends())[0]
+        project = app.project_map["case"]
+
+        def write_nan(_values):
+            project.settings_data["time_duration"] = float("nan")
+            return True
+
+        project.set_parameters = write_nan
+        with self.assertRaises(BackendError) as raised:
+            await legacy.set_settings("case", {"time_duration": "1.0"})
+
+        json.dumps(raised.exception.details, allow_nan=False)
 
     async def test_simulation_set_operations_match(self):
         for backend, app in await self.make_backends():
