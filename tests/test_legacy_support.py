@@ -116,6 +116,26 @@ class TestProjectIdentityRewrite(unittest.TestCase):
             self.assertEqual(root.get("name"), "new")
             self.assertEqual(root.find("output").get("name"), "new")
 
+    def test_rewrite_same_name_preserves_source_bytes_and_same_path(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            folder = Path(temporary)
+            source = folder / "old.pscx"
+            destination = folder / "copy.pscx"
+            source_bytes = (
+                "<?xml version='1.0' encoding='UTF-8'?>\r\n"
+                "<project name='old' Target='EMTDC'>\r\n"
+                "  <output note=\"embedded name='junk' must remain\" name='old' />\r\n"
+                "</project>\r\n"
+            ).encode("utf-8")
+            source.write_bytes(source_bytes)
+
+            rewrite_project_identity(source, destination, "old")
+
+            self.assertEqual(destination.read_bytes(), source_bytes)
+            self.assertEqual(source.read_bytes(), source_bytes)
+            rewrite_project_identity(source, source, "old")
+            self.assertEqual(source.read_bytes(), source_bytes)
+
     def test_rewrite_preserves_utf16_bom_and_crlf_bytes(self):
         with tempfile.TemporaryDirectory() as temporary:
             folder = Path(temporary)

@@ -270,6 +270,27 @@ def _document_encoding(data: bytes) -> _DocumentEncoding:
     return _DocumentEncoding(match.group(1).decode("ascii") if match else "utf-8")
 
 
+def _replace_atomically(destination_path: Path, data: bytes) -> None:
+    temp_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="wb",
+            prefix=f".{destination_path.name}.",
+            suffix=".tmp",
+            dir=destination_path.parent,
+            delete=False,
+        ) as temporary:
+            temp_path = Path(temporary.name)
+            temporary.write(data)
+            temporary.flush()
+            os.fsync(temporary.fileno())
+        os.replace(temp_path, destination_path)
+        temp_path = None
+    finally:
+        if temp_path is not None:
+            temp_path.unlink(missing_ok=True)
+
+
 def rewrite_project_identity(
     source: str | Path,
     destination: str | Path,
@@ -291,13 +312,17 @@ def rewrite_project_identity(
     source_kind = project_kind(root, source_path.suffix)
     if project_kind(root, destination_path.suffix) != source_kind:
         raise ValueError("Source and destination PSCAD project kinds differ.")
+    old_name = root.get("name")
+    if old_name is None:
+        raise ValueError("Project root has no name attribute.")
+    if new_name == old_name:
+        if source_path.resolve() != destination_path.resolve():
+            _replace_atomically(destination_path, original)
+        return
 
     root_tag: _XmlTag | None = None
     replacements: list[tuple[int, int, str]] = []
     depth = 0
-    old_name = root.get("name")
-    if old_name is None:
-        raise ValueError("Project root has no name attribute.")
     original_outputs = [child for child in root if child.tag == "output"]
     matching_output_indices = {
         index
@@ -342,21 +367,4 @@ def rewrite_project_identity(
     ):
         raise ValueError("Rewritten project output identity validation failed.")
 
-    temp_path: Path | None = None
-    try:
-        with tempfile.NamedTemporaryFile(
-            mode="wb",
-            prefix=f".{destination_path.name}.",
-            suffix=".tmp",
-            dir=destination_path.parent,
-            delete=False,
-        ) as temporary:
-            temp_path = Path(temporary.name)
-            temporary.write(rewritten_bytes)
-            temporary.flush()
-            os.fsync(temporary.fileno())
-        os.replace(temp_path, destination_path)
-        temp_path = None
-    finally:
-        if temp_path is not None:
-            temp_path.unlink(missing_ok=True)
+    _replace_atomically(destination_path, rewritten_bytes)
