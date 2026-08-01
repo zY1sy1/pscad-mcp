@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 import xml.etree.ElementTree as ET
 
 from pscad_mcp.core.backend.base import BackendError
@@ -28,6 +29,7 @@ class TestLegacyResponses(unittest.TestCase):
         for response in (
             ET.fromstring('<response success="false"><message>denied</message></response>'),
             ET.fromstring("<response />"),
+            None,
             object(),
         ):
             with self.subTest(response_type=type(response).__name__):
@@ -113,6 +115,46 @@ class TestProjectIdentityRewrite(unittest.TestCase):
 
             self.assertEqual(destination.read_text(encoding="utf-8"), "do not replace")
             self.assertEqual(list(folder.glob(".case.pscx.*.tmp")), [])
+
+    def test_rewrite_removes_temp_file_when_replacement_fails(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            folder = Path(temporary)
+            source = folder / "old.pscx"
+            destination = folder / "new.pscx"
+            source.write_text(
+                '<project name="old" Target="EMTDC"><output name="old" /></project>',
+                encoding="utf-8",
+            )
+            destination.write_text("do not replace", encoding="utf-8")
+
+            with patch(
+                "pscad_mcp.core.backend.legacy_support.os.replace",
+                side_effect=OSError("replace failed"),
+            ):
+                with self.assertRaises(OSError):
+                    rewrite_project_identity(source, destination, "new")
+
+            self.assertEqual(destination.read_text(encoding="utf-8"), "do not replace")
+            self.assertEqual(list(folder.glob(".new.pscx.*.tmp")), [])
+
+    def test_rewrite_rejects_malformed_xml_and_wrong_root_without_damaging_destination(self):
+        for source_text in (
+            '<project name="old" Target="EMTDC"><output name="old">',
+            '<library name="old" Target="EMTDC"><output name="old" /></library>',
+        ):
+            with self.subTest(source_text=source_text):
+                with tempfile.TemporaryDirectory() as temporary:
+                    folder = Path(temporary)
+                    source = folder / "old.pscx"
+                    destination = folder / "new.pscx"
+                    source.write_text(source_text, encoding="utf-8")
+                    destination.write_text("do not replace", encoding="utf-8")
+
+                    with self.assertRaises((ET.ParseError, ValueError)):
+                        rewrite_project_identity(source, destination, "new")
+
+                    self.assertEqual(destination.read_text(encoding="utf-8"), "do not replace")
+                    self.assertEqual(list(folder.glob(".new.pscx.*.tmp")), [])
 
 
 class TestProjectKindAndGeometry(unittest.TestCase):
