@@ -31,6 +31,7 @@ class LegacyBackend:
     SETTING_DETAIL_MAX_ENTRIES = 2
     SETTING_DETAIL_MAX_MISMATCHES = 4
     SETTING_DETAIL_MAX_SERIALIZED_CHARS = 4096
+    SETTING_DETAIL_MAX_INTEGER_BITS = 4096
 
     def __init__(
         self,
@@ -268,6 +269,12 @@ class LegacyBackend:
         def numeric_value(value: Any) -> Decimal | None:
             if not isinstance(value, (int, float, Decimal, str)):
                 return None
+            if (
+                isinstance(value, int)
+                and not isinstance(value, bool)
+                and value.bit_length() > LegacyBackend.SETTING_DETAIL_MAX_INTEGER_BITS
+            ):
+                return None
             try:
                 number = value if isinstance(value, Decimal) else Decimal(str(value))
             except (InvalidOperation, ValueError):
@@ -293,6 +300,22 @@ class LegacyBackend:
         return cls._bounded_setting_text(type(value).__name__)
 
     @classmethod
+    def _oversized_integer_metadata(cls, value: int) -> dict[str, Any]:
+        return {
+            "type": "int",
+            "bit_length": value.bit_length(),
+            "sign": "negative" if value < 0 else "positive",
+        }
+
+    @classmethod
+    def _is_oversized_integer(cls, value: Any) -> bool:
+        return (
+            isinstance(value, int)
+            and not isinstance(value, bool)
+            and value.bit_length() > cls.SETTING_DETAIL_MAX_INTEGER_BITS
+        )
+
+    @classmethod
     def _setting_detail_key(cls, key: Any) -> str:
         if isinstance(key, str):
             return cls._bounded_setting_text(key)
@@ -301,6 +324,13 @@ class LegacyBackend:
         if isinstance(key, bool):
             return "true" if key else "false"
         if isinstance(key, int):
+            if cls._is_oversized_integer(key):
+                metadata = cls._oversized_integer_metadata(key)
+                return cls._bounded_setting_text(
+                    "<int bit_length={bit_length} sign={sign}>".format(
+                        **metadata
+                    )
+                )
             return cls._bounded_setting_text(str(key))
         if isinstance(key, float):
             return cls._bounded_setting_text(str(key))
@@ -328,12 +358,16 @@ class LegacyBackend:
 
     @classmethod
     def _setting_detail_value(cls, value: Any, depth: int = 0) -> Any:
-        if value is None or isinstance(value, (str, int, bool)):
+        if value is None or isinstance(value, (str, bool)):
             return (
                 cls._bounded_setting_text(value)
                 if isinstance(value, str)
                 else value
             )
+        if isinstance(value, int):
+            if cls._is_oversized_integer(value):
+                return cls._oversized_integer_metadata(value)
+            return value
         if isinstance(value, float):
             return value if math.isfinite(value) else str(value)
         if isinstance(value, Decimal):
@@ -411,20 +445,37 @@ class LegacyBackend:
                 },
             )
         project = await self._project(project_name)
-        requested = dict(settings)
+        try:
+            requested = dict(settings)
+        except Exception:
+            raise BackendError(
+                "INVALID_PARAMETER",
+                "Project settings mapping could not be copied.",
+                self.name,
+                "set_project_settings",
+                {
+                    "project": self._setting_detail_value(project_name),
+                    "reason": "settings mapping could not be copied",
+                    "settings_type": self._setting_type_name(settings),
+                },
+            ) from None
         accepted = await self.executor.run_safe(project.set_parameters, requested)
         if accepted is not True:
+            key_count = len(requested)
+            keys = sorted(self._setting_detail_key(key) for key in requested)
+            details = {
+                "project": self._setting_detail_value(project_name),
+                "keys": keys[: self.SETTING_DETAIL_MAX_ENTRIES],
+            }
+            if key_count > self.SETTING_DETAIL_MAX_ENTRIES:
+                details["total_key_count"] = key_count
+                details["keys_truncated"] = True
             raise BackendError(
                 "INVALID_PARAMETER",
                 "PSCAD did not accept the requested project parameters.",
                 self.name,
                 "set_project_settings",
-                {
-                    "project": self._setting_detail_value(project_name),
-                    "keys": sorted(
-                        self._setting_detail_key(key) for key in requested
-                    ),
-                },
+                details,
             )
         values = await self.executor.run_safe(project.parameters)
         actual_values = self._settings_mapping(

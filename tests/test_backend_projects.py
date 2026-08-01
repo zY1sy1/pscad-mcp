@@ -1,5 +1,6 @@
 import json
 import unittest
+from collections.abc import Mapping
 from decimal import Decimal
 
 from pscad_mcp.core.backend.base import BackendError
@@ -62,6 +63,17 @@ class InvalidItemsProxy:
 class RaisingItemsProxy:
     def items(self):
         raise RuntimeError("vendor mapping failed")
+
+
+class BrokenMapping(Mapping):
+    def __getitem__(self, _key):
+        raise KeyError
+
+    def __iter__(self):
+        raise RuntimeError("mapping iteration failed")
+
+    def __len__(self):
+        return 1
 
 
 class HostileProxy:
@@ -304,6 +316,25 @@ class TestBackendProjectContracts(unittest.IsolatedAsyncioTestCase):
                 )
                 json.dumps(raised.exception.details, allow_nan=False)
 
+    async def test_legacy_set_settings_wraps_broken_mapping_copy(self):
+        legacy, _app = (await self.make_backends())[0]
+
+        with self.assertRaises(BackendError) as raised:
+            await legacy.set_settings("case", BrokenMapping())
+
+        self.assertEqual(raised.exception.code, "INVALID_PARAMETER")
+        self.assertEqual(raised.exception.operation, "set_project_settings")
+        self.assertEqual(
+            raised.exception.details,
+            {
+                "project": "case",
+                "reason": "settings mapping could not be copied",
+                "settings_type": "BrokenMapping",
+            },
+        )
+        self.assertIsNone(raised.exception.__cause__)
+        json.dumps(raised.exception.details, allow_nan=False)
+
     async def test_legacy_set_settings_rejects_postcondition_mismatch(self):
         legacy, app = (await self.make_backends())[0]
         project = app.project_map["case"]
@@ -455,6 +486,51 @@ class TestBackendProjectContracts(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             raised.exception.details["mismatch_count"], len(requested)
         )
+
+    async def test_legacy_set_settings_bounds_vendor_rejection_keys(self):
+        legacy, app = (await self.make_backends())[0]
+        app.project_map["case"].accept_settings = False
+        requested = {f"parameter_{index:05d}": index for index in range(10_000)}
+
+        with self.assertRaises(BackendError) as raised:
+            await legacy.set_settings("case", requested)
+
+        self.assertEqual(raised.exception.code, "INVALID_PARAMETER")
+        self.assertEqual(
+            len(raised.exception.details["keys"]),
+            LegacyBackend.SETTING_DETAIL_MAX_ENTRIES,
+        )
+        self.assertEqual(raised.exception.details["total_key_count"], len(requested))
+        self.assertTrue(raised.exception.details["keys_truncated"])
+        self.assertLessEqual(
+            len(json.dumps(raised.exception.details, allow_nan=False)),
+            LegacyBackend.SETTING_DETAIL_MAX_SERIALIZED_CHARS,
+        )
+
+    async def test_legacy_set_settings_bounds_oversized_integer_keys_and_values(self):
+        legacy, app = (await self.make_backends())[0]
+        project = app.project_map["case"]
+        oversized_integer = 1 << 20_000
+        project.settings_data = {oversized_integer: 0}
+        project.set_parameters = lambda _values: True
+
+        with self.assertRaises(BackendError) as raised:
+            await legacy.set_settings(
+                "case", {oversized_integer: oversized_integer}
+            )
+
+        self.assertEqual(raised.exception.code, "POSTCONDITION_FAILED")
+        mismatch = next(iter(raised.exception.details["mismatches"].values()))
+        self.assertEqual(
+            mismatch["expected"],
+            {
+                "type": "int",
+                "bit_length": oversized_integer.bit_length(),
+                "sign": "positive",
+            },
+        )
+        self.assertIn("bit_length", next(iter(raised.exception.details["mismatches"])))
+        json.dumps(raised.exception.details, allow_nan=False)
 
     async def test_simulation_set_operations_match(self):
         for backend, app in await self.make_backends():
