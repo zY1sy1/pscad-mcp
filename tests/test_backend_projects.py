@@ -1,5 +1,6 @@
 import json
 import unittest
+from decimal import Decimal
 
 from pscad_mcp.core.backend.base import BackendError
 from pscad_mcp.core.backend.legacy import LegacyBackend
@@ -39,6 +40,36 @@ class FakeProject:
             return False
         self.settings_data.update(values)
         return True
+
+
+class ItemsProxy:
+    def __init__(self, values):
+        self.values = values
+
+    def items(self):
+        return self.values.items()
+
+
+class InvalidItemsProxy:
+    def __init__(self):
+        self.items_called = False
+
+    def items(self):
+        self.items_called = True
+        return ["not a key-value pair"]
+
+
+class RaisingItemsProxy:
+    def items(self):
+        raise RuntimeError("vendor mapping failed")
+
+
+class HostileProxy:
+    def __str__(self):
+        raise AssertionError("diagnostics must not stringify vendor proxies")
+
+    def __repr__(self):
+        raise AssertionError("diagnostics must not repr vendor proxies")
 
 
 class FakeSimulationSet:
@@ -186,6 +217,39 @@ class TestBackendProjectContracts(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(raised.exception.code, "UNEXPECTED_RESPONSE")
         self.assertEqual(raised.exception.operation, "get_project_settings")
 
+    async def test_legacy_get_settings_accepts_mapping_like_items_proxy(self):
+        legacy, app = (await self.make_backends())[0]
+        app.project_map["case"].parameters = lambda: ItemsProxy(
+            {"time_duration": "1.0"}
+        )
+
+        settings = await legacy.get_settings("case")
+
+        self.assertEqual(settings, {"time_duration": "1.0"})
+        self.assertIsInstance(settings, dict)
+
+    async def test_legacy_get_settings_wraps_invalid_items_proxy_response(self):
+        legacy, app = (await self.make_backends())[0]
+        proxy = InvalidItemsProxy()
+        app.project_map["case"].parameters = lambda: proxy
+
+        with self.assertRaises(BackendError) as raised:
+            await legacy.get_settings("case")
+
+        self.assertEqual(raised.exception.code, "UNEXPECTED_RESPONSE")
+        self.assertEqual(raised.exception.operation, "get_project_settings")
+        self.assertTrue(proxy.items_called)
+
+    async def test_legacy_get_settings_wraps_raising_items_proxy_response(self):
+        legacy, app = (await self.make_backends())[0]
+        app.project_map["case"].parameters = lambda: RaisingItemsProxy()
+
+        with self.assertRaises(BackendError) as raised:
+            await legacy.get_settings("case")
+
+        self.assertEqual(raised.exception.code, "UNEXPECTED_RESPONSE")
+        self.assertEqual(raised.exception.operation, "get_project_settings")
+
     async def test_legacy_set_settings_uses_project_proxy_not_application(self):
         legacy, app = (await self.make_backends())[0]
         project = app.project_map["case"]
@@ -194,6 +258,16 @@ class TestBackendProjectContracts(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(project.calls, [("set_parameters", {"time_duration": "1.0"})])
         self.assertEqual(project.settings_data["time_duration"], "1.0")
+        self.assertEqual(app.settings_calls, [])
+
+    async def test_legacy_set_settings_accepts_mapping_like_readback(self):
+        legacy, app = (await self.make_backends())[0]
+        project = app.project_map["case"]
+        project.set_parameters = lambda _values: True
+        project.parameters = lambda: ItemsProxy({"time_duration": "1.0"})
+
+        await legacy.set_settings("case", {"time_duration": "1.0"})
+
         self.assertEqual(app.settings_calls, [])
 
     async def test_legacy_set_settings_rejects_unaccepted_project_parameters(self):
@@ -209,6 +283,26 @@ class TestBackendProjectContracts(unittest.IsolatedAsyncioTestCase):
             raised.exception.details,
             {"project": "case", "keys": ["a", "z"]},
         )
+
+    async def test_legacy_set_settings_rejects_non_mapping_input(self):
+        legacy, _app = (await self.make_backends())[0]
+
+        for invalid_settings in ([('time_duration', '1.0')], "invalid", 1):
+            with self.subTest(settings_type=type(invalid_settings).__name__):
+                with self.assertRaises(BackendError) as raised:
+                    await legacy.set_settings("case", invalid_settings)
+
+                self.assertEqual(raised.exception.code, "INVALID_PARAMETER")
+                self.assertEqual(raised.exception.operation, "set_project_settings")
+                self.assertEqual(
+                    raised.exception.details,
+                    {
+                        "project": "case",
+                        "reason": "settings must be a mapping",
+                        "settings_type": type(invalid_settings).__name__,
+                    },
+                )
+                json.dumps(raised.exception.details, allow_nan=False)
 
     async def test_legacy_set_settings_rejects_postcondition_mismatch(self):
         legacy, app = (await self.make_backends())[0]
@@ -247,6 +341,28 @@ class TestBackendProjectContracts(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(project.settings_data["time_duration"], "0.5")
         self.assertEqual(app.settings_calls, [])
 
+    async def test_legacy_settings_numeric_comparison_handles_decimals_and_boundaries(self):
+        self.assertTrue(
+            LegacyBackend._settings_values_match(Decimal("0.1"), "0.1")
+        )
+        self.assertTrue(
+            LegacyBackend._settings_values_match("1e-1", Decimal("0.1"))
+        )
+        self.assertFalse(
+            LegacyBackend._settings_values_match(Decimal("NaN"), "NaN")
+        )
+        self.assertFalse(
+            LegacyBackend._settings_values_match(Decimal("Infinity"), "Infinity")
+        )
+        self.assertFalse(LegacyBackend._settings_values_match(True, 1))
+        self.assertFalse(LegacyBackend._settings_values_match(0, False))
+        self.assertTrue(
+            LegacyBackend._settings_values_match(["50 [us]"], ["50 [us]"])
+        )
+        self.assertTrue(
+            LegacyBackend._settings_values_match({"mode": "fixed"}, {"mode": "fixed"})
+        )
+
     async def test_legacy_set_settings_does_not_equate_boolean_and_number(self):
         legacy, app = (await self.make_backends())[0]
         project = app.project_map["case"]
@@ -278,6 +394,67 @@ class TestBackendProjectContracts(unittest.IsolatedAsyncioTestCase):
             await legacy.set_settings("case", {"time_duration": "1.0"})
 
         json.dumps(raised.exception.details, allow_nan=False)
+
+    async def test_legacy_set_settings_bounds_hostile_proxy_diagnostics(self):
+        legacy, app = (await self.make_backends())[0]
+        project = app.project_map["case"]
+        hostile_key = HostileProxy()
+        project.settings_data = {
+            hostile_key: {
+                "x" * 1_000: [[HostileProxy() for _ in range(100)] for _ in range(100)],
+                "x" * 1_000 + "different": [HostileProxy() for _ in range(100)],
+            }
+        }
+        project.set_parameters = lambda _values: True
+
+        with self.assertRaises(BackendError) as raised:
+            await legacy.set_settings(
+                "case", {hostile_key: "updated", 10 ** 1_000: "missing"}
+            )
+
+        self.assertEqual(raised.exception.code, "POSTCONDITION_FAILED")
+        encoded = json.dumps(raised.exception.details, allow_nan=False)
+        self.assertLessEqual(
+            len(encoded), LegacyBackend.SETTING_DETAIL_MAX_SERIALIZED_CHARS
+        )
+        self.assertIn("HostileProxy", encoded)
+
+        def detail_keys(value):
+            if isinstance(value, dict):
+                yield from value
+                for item in value.values():
+                    yield from detail_keys(item)
+            elif isinstance(value, list):
+                for item in value:
+                    yield from detail_keys(item)
+
+        self.assertTrue(
+            all(
+                len(key) <= LegacyBackend.SETTING_DETAIL_TEXT_LIMIT
+                for key in detail_keys(json.loads(encoded))
+            )
+        )
+
+    async def test_legacy_set_settings_bounds_mismatch_count(self):
+        legacy, app = (await self.make_backends())[0]
+        project = app.project_map["case"]
+        project.settings_data = {}
+        project.set_parameters = lambda _values: True
+        requested = {
+            f"parameter_{index}": index
+            for index in range(LegacyBackend.SETTING_DETAIL_MAX_MISMATCHES + 2)
+        }
+
+        with self.assertRaises(BackendError) as raised:
+            await legacy.set_settings("case", requested)
+
+        self.assertEqual(
+            len(raised.exception.details["mismatches"]),
+            LegacyBackend.SETTING_DETAIL_MAX_MISMATCHES,
+        )
+        self.assertEqual(
+            raised.exception.details["mismatch_count"], len(requested)
+        )
 
     async def test_simulation_set_operations_match(self):
         for backend, app in await self.make_backends():

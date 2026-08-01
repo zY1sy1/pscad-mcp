@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import importlib
 import math
+from collections.abc import Mapping as MappingABC
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Mapping
@@ -25,6 +26,11 @@ from .base import (
 class LegacyBackend:
     name = "legacy"
     _canvas_grid = 18
+    SETTING_DETAIL_TEXT_LIMIT = 64
+    SETTING_DETAIL_MAX_DEPTH = 2
+    SETTING_DETAIL_MAX_ENTRIES = 2
+    SETTING_DETAIL_MAX_MISMATCHES = 4
+    SETTING_DETAIL_MAX_SERIALIZED_CHARS = 4096
 
     def __init__(
         self,
@@ -253,14 +259,17 @@ class LegacyBackend:
     def _settings_values_match(expected: Any, actual: Any) -> bool:
         if isinstance(expected, bool) or isinstance(actual, bool):
             return type(expected) is type(actual) and expected == actual
-        if expected == actual:
-            return True
+        try:
+            if expected == actual:
+                return True
+        except Exception:
+            pass
 
         def numeric_value(value: Any) -> Decimal | None:
-            if not isinstance(value, (int, float, str)):
+            if not isinstance(value, (int, float, Decimal, str)):
                 return None
             try:
-                number = Decimal(str(value))
+                number = value if isinstance(value, Decimal) else Decimal(str(value))
             except (InvalidOperation, ValueError):
                 return None
             return number if number.is_finite() else None
@@ -273,35 +282,134 @@ class LegacyBackend:
             and expected_number == actual_number
         )
 
-    @staticmethod
-    def _json_safe_setting_value(value: Any) -> Any:
-        if value is None or isinstance(value, (str, int, bool)):
+    @classmethod
+    def _bounded_setting_text(cls, value: str) -> str:
+        if len(value) <= cls.SETTING_DETAIL_TEXT_LIMIT:
             return value
+        return value[: cls.SETTING_DETAIL_TEXT_LIMIT - 3] + "..."
+
+    @classmethod
+    def _setting_type_name(cls, value: Any) -> str:
+        return cls._bounded_setting_text(type(value).__name__)
+
+    @classmethod
+    def _setting_detail_key(cls, key: Any) -> str:
+        if isinstance(key, str):
+            return cls._bounded_setting_text(key)
+        if key is None:
+            return "null"
+        if isinstance(key, bool):
+            return "true" if key else "false"
+        if isinstance(key, int):
+            return cls._bounded_setting_text(str(key))
+        if isinstance(key, float):
+            return cls._bounded_setting_text(str(key))
+        if isinstance(key, Decimal):
+            return cls._bounded_setting_text(str(key))
+        return cls._bounded_setting_text(f"<{cls._setting_type_name(key)}>")
+
+    @classmethod
+    def _unique_setting_detail_key(
+        cls, details: Mapping[Any, Any], key: Any, index: int
+    ) -> str:
+        detail_key = cls._setting_detail_key(key)
+        if detail_key not in details:
+            return detail_key
+        suffix_index = index
+        while True:
+            suffix = f"_{suffix_index}"
+            candidate = (
+                detail_key[: cls.SETTING_DETAIL_TEXT_LIMIT - len(suffix)]
+                + suffix
+            )
+            if candidate not in details:
+                return candidate
+            suffix_index += 1
+
+    @classmethod
+    def _setting_detail_value(cls, value: Any, depth: int = 0) -> Any:
+        if value is None or isinstance(value, (str, int, bool)):
+            return (
+                cls._bounded_setting_text(value)
+                if isinstance(value, str)
+                else value
+            )
         if isinstance(value, float):
             return value if math.isfinite(value) else str(value)
-        if isinstance(value, Mapping):
-            return {
-                str(key): LegacyBackend._json_safe_setting_value(item)
-                for key, item in value.items()
-            }
+        if isinstance(value, Decimal):
+            return cls._bounded_setting_text(str(value))
+        if depth >= cls.SETTING_DETAIL_MAX_DEPTH:
+            return {"type": cls._setting_type_name(value), "truncated": "depth"}
+        if isinstance(value, MappingABC):
+            try:
+                details = {}
+                for index, (key, item) in enumerate(value.items()):
+                    if index >= cls.SETTING_DETAIL_MAX_ENTRIES:
+                        details["__truncated__"] = {"truncated": "entries"}
+                        break
+                    detail_key = cls._unique_setting_detail_key(
+                        details, key, index
+                    )
+                    details[detail_key] = cls._setting_detail_value(
+                        item, depth + 1
+                    )
+                return details
+            except Exception:
+                return {
+                    "type": cls._setting_type_name(value),
+                    "truncated": "unreadable_mapping",
+                }
         if isinstance(value, (list, tuple)):
-            return [LegacyBackend._json_safe_setting_value(item) for item in value]
-        return str(value)
+            details = [
+                cls._setting_detail_value(item, depth + 1)
+                for item in value[: cls.SETTING_DETAIL_MAX_ENTRIES]
+            ]
+            if len(value) > cls.SETTING_DETAIL_MAX_ENTRIES:
+                details.append({"truncated": "entries"})
+            return details
+        return {"type": cls._setting_type_name(value)}
+
+    @classmethod
+    def _settings_mapping(
+        cls, values: Any, project_name: str, operation: str
+    ) -> dict[Any, Any]:
+        try:
+            if isinstance(values, MappingABC):
+                return dict(values)
+            items = getattr(values, "items", None)
+            if callable(items):
+                return dict(items())
+        except Exception:
+            pass
+        raise BackendError(
+            "UNEXPECTED_RESPONSE",
+            "Project parameters did not return a usable mapping.",
+            cls.name,
+            operation,
+            {
+                "project": cls._setting_detail_value(project_name),
+                "response_type": cls._setting_type_name(values),
+            },
+        )
 
     async def get_settings(self, project_name: str) -> dict[str, Any]:
         project = await self._project(project_name)
         values = await self.executor.run_safe(project.parameters)
-        if not isinstance(values, Mapping):
-            raise BackendError(
-                "UNEXPECTED_RESPONSE",
-                "Project parameters did not return a mapping.",
-                self.name,
-                "get_project_settings",
-                {"project": project_name},
-            )
-        return dict(values)
+        return self._settings_mapping(values, project_name, "get_project_settings")
 
     async def set_settings(self, project_name: str, settings: Any) -> None:
+        if not isinstance(settings, MappingABC):
+            raise BackendError(
+                "INVALID_PARAMETER",
+                "Project settings must be a mapping.",
+                self.name,
+                "set_project_settings",
+                {
+                    "project": self._setting_detail_value(project_name),
+                    "reason": "settings must be a mapping",
+                    "settings_type": self._setting_type_name(settings),
+                },
+            )
         project = await self._project(project_name)
         requested = dict(settings)
         accepted = await self.executor.run_safe(project.set_parameters, requested)
@@ -312,35 +420,46 @@ class LegacyBackend:
                 self.name,
                 "set_project_settings",
                 {
-                    "project": project_name,
-                    "keys": sorted(str(key) for key in requested),
+                    "project": self._setting_detail_value(project_name),
+                    "keys": sorted(
+                        self._setting_detail_key(key) for key in requested
+                    ),
                 },
             )
-        actual_values = await self.executor.run_safe(project.parameters)
-        if not isinstance(actual_values, Mapping):
-            raise BackendError(
-                "UNEXPECTED_RESPONSE",
-                "Project parameters did not return a mapping after update.",
-                self.name,
-                "set_project_settings",
-                {"project": project_name},
+        values = await self.executor.run_safe(project.parameters)
+        actual_values = self._settings_mapping(
+            values, project_name, "set_project_settings"
+        )
+        mismatches = {}
+        mismatch_count = 0
+        for key, expected in requested.items():
+            if key in actual_values and self._settings_values_match(
+                expected, actual_values[key]
+            ):
+                continue
+            mismatch_count += 1
+            if len(mismatches) >= self.SETTING_DETAIL_MAX_MISMATCHES:
+                continue
+            detail_key = self._unique_setting_detail_key(
+                mismatches, key, mismatch_count
             )
-        mismatches = {
-            str(key): {
-                "expected": self._json_safe_setting_value(expected),
-                "actual": self._json_safe_setting_value(actual_values.get(key)),
+            mismatches[detail_key] = {
+                "expected": self._setting_detail_value(expected),
+                "actual": self._setting_detail_value(actual_values.get(key)),
             }
-            for key, expected in requested.items()
-            if key not in actual_values
-            or not self._settings_values_match(expected, actual_values[key])
-        }
         if mismatches:
+            details = {
+                "project": self._setting_detail_value(project_name),
+                "mismatches": mismatches,
+            }
+            if mismatch_count > self.SETTING_DETAIL_MAX_MISMATCHES:
+                details["mismatch_count"] = mismatch_count
             raise BackendError(
                 "POSTCONDITION_FAILED",
                 "Project parameters could not be verified after update.",
                 self.name,
                 "set_project_settings",
-                {"project": project_name, "mismatches": mismatches},
+                details,
             )
 
     async def project_output(self, project_name: str) -> str:
