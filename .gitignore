@@ -65,3 +65,6 @@ venv.bak/
 *.swo
 .DS_Store
 
+# Local Git worktrees
+.worktrees/
+
