@@ -5,8 +5,12 @@ from __future__ import annotations
 import asyncio
 import importlib
 import math
+import os
+import shutil
+import tempfile
 from collections.abc import Mapping as MappingABC
 from decimal import Decimal, InvalidOperation
+from importlib.resources import as_file, files
 from pathlib import Path
 from typing import Any, Mapping
 import xml.etree.ElementTree as ET
@@ -21,6 +25,7 @@ from .base import (
     ProjectInfo,
     RunState,
 )
+from . import legacy_support
 
 
 class LegacyBackend:
@@ -187,24 +192,198 @@ class LegacyBackend:
         values = await self.executor.run_safe(self._require_app().list_projects)
         return [self._project_info(value) for value in values]
 
+    @staticmethod
+    def _project_destination(filename: str, folder: str | None) -> Path:
+        path = Path(folder) / filename if folder else Path(filename)
+        return path.resolve()
+
+    @staticmethod
+    def _require_project_suffix(destination: Path, kind: str) -> None:
+        expected_suffix = ".pscx" if kind == "case" else ".pslx"
+        if destination.suffix.casefold() != expected_suffix:
+            raise ValueError(
+                f"{kind} projects require a {expected_suffix} destination."
+            )
+
+    @staticmethod
+    def _loaded_project_kind(project: Any, source: Path | None) -> str:
+        project_type = str(getattr(project, "type", "")).casefold()
+        if project_type == "case":
+            return "case"
+        if project_type == "library":
+            return "library"
+
+        known_path = source
+        if known_path is None:
+            filename = getattr(project, "filename", None)
+            known_path = Path(str(filename)) if filename else None
+        if known_path is not None:
+            marker = ET.Element("project")
+            try:
+                return legacy_support.project_kind(marker, known_path.suffix)
+            except ValueError:
+                pass
+        raise BackendError(
+            "CAPABILITY_UNAVAILABLE",
+            "The PSCAD 4.6.2 project kind could not be determined.",
+            "legacy",
+            "save_project_as",
+            {"project_type": project_type},
+        )
+
+    @staticmethod
+    def _temporary_path(destination: Path, suffix: str) -> Path:
+        descriptor, temporary = tempfile.mkstemp(
+            prefix=f".{destination.name}.",
+            suffix=suffix,
+            dir=destination.parent,
+        )
+        os.close(descriptor)
+        return Path(temporary)
+
+    @classmethod
+    def _backup_destination(cls, destination: Path) -> Path | None:
+        if not destination.exists():
+            return None
+        backup = cls._temporary_path(destination, ".bak")
+        try:
+            shutil.copyfile(destination, backup)
+        except BaseException:
+            backup.unlink(missing_ok=True)
+            raise
+        return backup
+
+    @staticmethod
+    def _restore_destination(
+        destination: Path, backup: Path | None
+    ) -> None:
+        if backup is None:
+            destination.unlink(missing_ok=True)
+        else:
+            os.replace(backup, destination)
+
+    @staticmethod
+    def _validate_rewritten_project(
+        destination: Path, kind: str, expected_name: str
+    ) -> None:
+        root = ET.parse(destination).getroot()
+        if root.tag != "project":
+            raise ValueError(
+                f"Expected root <project> but found <{root.tag}>."
+            )
+        actual_kind = legacy_support.project_kind(root, destination.suffix)
+        if actual_kind != kind:
+            raise ValueError(
+                f"Expected a {kind} project but found {actual_kind}."
+            )
+        if root.get("name") != expected_name:
+            raise ValueError("Rewritten project root identity is invalid.")
+        if any(
+            output.get("name") != expected_name
+            for output in root.findall("./output")
+        ):
+            raise ValueError("Rewritten project output identity is invalid.")
+
+    async def _load_and_verify_project(
+        self, destination: Path, kind: str, operation: str
+    ) -> ProjectInfo:
+        await self.executor.run_safe(
+            self._require_app().load, str(destination)
+        )
+        expected_name = destination.stem
+        expected_type = "Case" if kind == "case" else "Library"
+        projects = await self.list_projects()
+        match = next(
+            (item for item in projects if item.name == expected_name), None
+        )
+        if match is None or match.type.casefold() != expected_type.casefold():
+            raise BackendError(
+                "POSTCONDITION_FAILED",
+                "PSCAD did not load the expected project.",
+                self.name,
+                operation,
+                {
+                    "path": str(destination),
+                    "expected_name": expected_name,
+                    "expected_type": expected_type,
+                },
+            )
+        return match
+
+    async def _copy_rewrite_load_verify(
+        self,
+        source: Path,
+        destination: Path,
+        kind: str,
+        operation: str,
+    ) -> ProjectInfo:
+        temporary: Path | None = self._temporary_path(
+            destination, destination.suffix
+        )
+        backup: Path | None = None
+        replaced = False
+        try:
+            shutil.copyfile(source, temporary)
+            legacy_support.rewrite_project_identity(
+                temporary, temporary, destination.stem
+            )
+            self._validate_rewritten_project(
+                temporary, kind, destination.stem
+            )
+
+            backup = self._backup_destination(destination)
+            os.replace(temporary, destination)
+            temporary = None
+            replaced = True
+
+            info = await self._load_and_verify_project(
+                destination, kind, operation
+            )
+            if backup is not None:
+                backup.unlink(missing_ok=True)
+                backup = None
+            self.definition_paths[info.name] = destination
+            return info
+        except BaseException:
+            if replaced:
+                if backup is not None:
+                    recovery_backup = backup
+                    backup = None
+                    self._restore_destination(
+                        destination, recovery_backup
+                    )
+                else:
+                    self._restore_destination(destination, None)
+            raise
+        finally:
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
+            if backup is not None:
+                backup.unlink(missing_ok=True)
+
     async def create_project(
         self, kind: str, filename: str, folder: str | None
     ) -> ProjectInfo:
         if kind not in {"case", "library"}:
             raise ValueError("kind must be case or library.")
-        workspace = await self.executor.run_safe(self._require_app().workspace)
-        name = Path(filename).stem
-        path = folder or str(Path(filename).parent)
-        if path in {"", "."}:
-            raise ValueError("A destination folder is required for PSCAD 4.6.")
-        project = await self.executor.run_safe(
-            workspace.create_project,
-            1 if kind == "case" else 2,
-            name,
-            path,
+        destination = self._project_destination(filename, folder)
+        self._require_project_suffix(destination, kind)
+        template_name = (
+            "empty_case.pscx" if kind == "case" else "empty_library.pslx"
         )
-        self.definition_paths[name] = Path(path).resolve() / filename
-        return self._project_info(project, "Case" if kind == "case" else "Library")
+        template = (
+            files("pscad_mcp")
+            .joinpath("assets")
+            .joinpath("templates")
+            .joinpath(template_name)
+        )
+        with as_file(template) as template_path:
+            return await self._copy_rewrite_load_verify(
+                template_path,
+                destination,
+                kind,
+                "create_project",
+            )
 
     async def save_project(self, project_name: str) -> None:
         project = await self._project(project_name)
@@ -214,9 +393,72 @@ class LegacyBackend:
         self, project_name: str, filename: str, folder: str | None
     ) -> None:
         project = await self._project(project_name)
-        destination = str(Path(folder) / filename) if folder else filename
-        await self.executor.run_safe(project.save_as, destination)
-        self.definition_paths[Path(filename).stem] = Path(destination).resolve()
+        source = self.definition_paths.get(project_name)
+        kind = self._loaded_project_kind(project, source)
+        destination = self._project_destination(filename, folder)
+        self._require_project_suffix(destination, kind)
+        native_backup = self._backup_destination(destination)
+        native_info: ProjectInfo | None = None
+        try:
+            response = await self.executor.run_safe(
+                project.save_as, str(destination)
+            )
+
+            if response is not None:
+                try:
+                    legacy_support.require_success(
+                        response,
+                        "save_project_as",
+                        {
+                            "project": project_name,
+                            "destination": str(destination),
+                        },
+                    )
+                except BackendError as error:
+                    if error.code != "PSCAD_COMMAND_FAILED":
+                        raise
+                else:
+                    if destination.is_file():
+                        self._validate_rewritten_project(
+                            destination, kind, destination.stem
+                        )
+                        native_info = await self._load_and_verify_project(
+                            destination, kind, "save_project_as"
+                        )
+        except BaseException:
+            self._restore_destination(destination, native_backup)
+            native_backup = None
+            raise
+
+        if native_info is not None:
+            if native_backup is not None:
+                native_backup.unlink(missing_ok=True)
+            self.definition_paths[native_info.name] = destination
+            return
+
+        self._restore_destination(destination, native_backup)
+        native_backup = None
+
+        await self.save_project(project_name)
+        source = self.definition_paths.get(project_name)
+        if source is None or not source.is_file():
+            raise BackendError(
+                "CAPABILITY_UNAVAILABLE",
+                "The source project file is unavailable for the PSCAD 4.6.2 "
+                "save-as fallback.",
+                self.name,
+                "save_project_as",
+                {
+                    "project": project_name,
+                    "destination": str(destination),
+                },
+            )
+        await self._copy_rewrite_load_verify(
+            source,
+            destination,
+            kind,
+            "save_project_as",
+        )
 
     async def build_project(self, project_name: str) -> None:
         project = await self._project(project_name)

@@ -1,10 +1,16 @@
 import json
+import os
+import tempfile
 import unittest
+import xml.etree.ElementTree as ET
 from collections.abc import Mapping
 from decimal import Decimal
+from pathlib import Path
+from unittest.mock import patch
 
 from pscad_mcp.core.backend.base import BackendError
 from pscad_mcp.core.backend.legacy import LegacyBackend
+from pscad_mcp.core.backend.legacy_support import project_kind
 from pscad_mcp.core.backend.modern import ModernBackend
 from tests.backend_fakes import (
     FakeLegacyAutomation,
@@ -13,18 +19,50 @@ from tests.backend_fakes import (
 )
 
 
+def write_project_file(
+    path: Path, name: str, kind: str, *, include_output: bool = True
+) -> None:
+    root = ET.Element(
+        "project",
+        {"name": name, "Target": "EMTDC" if kind == "case" else "Library"},
+    )
+    if include_output:
+        ET.SubElement(root, "output", {"name": name})
+    ET.ElementTree(root).write(path, encoding="utf-8", xml_declaration=True)
+
+
 class FakeProject:
-    def __init__(self, name="case", kind="Case"):
+    def __init__(self, name="case", kind="Case", definition_path=None):
         self.name = name
         self.type = kind
         self.description = "Example"
         self.filename = f"{name}.pscx"
+        self.definition_path = Path(definition_path) if definition_path else None
         self.calls = []
         self.settings_data = {"time_duration": "0.5", "time_step": "50 [us]"}
         self.accept_settings = True
+        self.native_save_as_response = ET.Element("response", {"success": "true"})
+        self.native_save_as_writes = True
+        self.native_save_as_payload = None
 
     def save(self): self.calls.append(("save",))
-    def save_as(self, *args, **kwargs): self.calls.append(("save_as", args, kwargs))
+    def save_as(self, *args, **kwargs):
+        self.calls.append(("save_as", args, kwargs))
+        if args and self.native_save_as_writes:
+            destination = Path(args[0])
+            if self.native_save_as_payload is not None:
+                destination.write_bytes(self.native_save_as_payload)
+            elif self.definition_path is not None:
+                root = ET.parse(self.definition_path).getroot()
+                old_name = root.get("name")
+                root.set("name", destination.stem)
+                for output in root.findall("./output"):
+                    if output.get("name") == old_name:
+                        output.set("name", destination.stem)
+                ET.ElementTree(root).write(
+                    destination, encoding="utf-8", xml_declaration=True
+                )
+        return self.native_save_as_response
     def build(self): self.calls.append(("build",))
     def run(self): self.calls.append(("run",))
     def pause(self): self.calls.append(("pause",))
@@ -116,10 +154,29 @@ class FakeLegacyApp:
         self.settings_calls = []
         self.workspace_proxy = FakeWorkspace(self)
         self.built_all = False
+        self.fail_load_names = set()
+        self.hidden_load_names = set()
+        self.loaded_type_overrides = {}
 
     def is_alive(self): return True
     def licensed(self): return True
-    def load(self, *filenames): self.loaded.extend(filenames)
+    def load(self, *filenames):
+        for filename in filenames:
+            self.loaded.append(filename)
+            path = Path(filename)
+            root = ET.parse(path).getroot()
+            if root.tag != "project" or not root.get("name"):
+                raise ValueError("Fake PSCAD accepts only a named <project> XML root.")
+            name = root.get("name")
+            kind = project_kind(root, path.suffix)
+            if name in self.fail_load_names:
+                raise RuntimeError(f"PSCAD refused to load {name}")
+            if name in self.hidden_load_names:
+                continue
+            loaded_type = self.loaded_type_overrides.get(
+                name, "Case" if kind == "case" else "Library"
+            )
+            self.project_map[name] = FakeProject(name, loaded_type, path)
     def list_projects(self):
         return [{"name": p.name, "type": p.type, "description": p.description} for p in self.project_map.values()]
     def project(self, name): return self.project_map[name]
@@ -152,6 +209,362 @@ class FakeModernApp(FakeLegacyApp):
     def simulation_sets(self): return list(self.simsets)
 
 
+class TestLegacyProjectFiles(unittest.IsolatedAsyncioTestCase):
+    async def make_backend(self):
+        app = FakeLegacyApp()
+        backend = LegacyBackend(
+            ImmediateExecutor(),
+            version="4.6.2",
+            x64=True,
+            automation_module=FakeLegacyAutomation(app),
+        )
+        await backend.attach()
+        return backend, app
+
+    async def load_source(self, backend, app, folder: str, kind: str = "case"):
+        suffix = ".pscx" if kind == "case" else ".pslx"
+        source = Path(folder) / f"source{suffix}"
+        write_project_file(source, "source", kind)
+        await backend.load_projects([str(source)])
+        return source, app.project_map["source"]
+
+    def assert_project_identity(
+        self, destination: Path, expected_name: str, *, require_output: bool
+    ) -> None:
+        root = ET.parse(destination).getroot()
+        self.assertEqual(root.tag, "project")
+        self.assertEqual(root.get("name"), expected_name)
+        outputs = root.findall("./output")
+        if require_output:
+            self.assertTrue(outputs)
+        self.assertTrue(
+            all(output.get("name") == expected_name for output in outputs)
+        )
+
+    async def test_legacy_creates_case_from_verified_template(self):
+        with tempfile.TemporaryDirectory() as folder:
+            backend, app = await self.make_backend()
+            destination = Path(folder) / "created_case.pscx"
+
+            self.assertFalse(destination.exists())
+            self.assertNotIn("created_case", backend.definition_paths)
+            info = await backend.create_project(
+                "case", destination.name, str(destination.parent)
+            )
+
+            self.assertTrue(destination.is_file())
+            self.assert_project_identity(
+                destination, "created_case", require_output=False
+            )
+            self.assertEqual((info.name, info.type), ("created_case", "Case"))
+            self.assertIn("created_case", app.project_map)
+            self.assertEqual(
+                backend.definition_paths["created_case"], destination.resolve()
+            )
+
+    async def test_legacy_creates_library_from_verified_template(self):
+        with tempfile.TemporaryDirectory() as folder:
+            backend, app = await self.make_backend()
+            destination = Path(folder) / "created_library.pslx"
+
+            self.assertFalse(destination.exists())
+            self.assertNotIn("created_library", backend.definition_paths)
+            info = await backend.create_project(
+                "library", destination.name, str(destination.parent)
+            )
+
+            self.assertTrue(destination.is_file())
+            self.assert_project_identity(
+                destination, "created_library", require_output=False
+            )
+            self.assertEqual(
+                (info.name, info.type), ("created_library", "Library")
+            )
+            self.assertIn("created_library", app.project_map)
+            self.assertEqual(
+                backend.definition_paths["created_library"],
+                destination.resolve(),
+            )
+
+    async def test_legacy_create_cleans_owned_file_and_restores_existing_on_load_failure(self):
+        for preexisting in (False, True):
+            with self.subTest(preexisting=preexisting):
+                with tempfile.TemporaryDirectory() as folder:
+                    backend, app = await self.make_backend()
+                    destination = Path(folder) / "rejected.pscx"
+                    original = None
+                    if preexisting:
+                        write_project_file(destination, "original", "case")
+                        original = destination.read_bytes()
+                    app.fail_load_names.add("rejected")
+
+                    with self.assertRaises(RuntimeError):
+                        await backend.create_project(
+                            "case", destination.name, str(destination.parent)
+                        )
+
+                    self.assertNotIn("rejected", backend.definition_paths)
+                    if preexisting:
+                        self.assertEqual(destination.read_bytes(), original)
+                    else:
+                        self.assertFalse(destination.exists())
+
+    async def test_legacy_create_parses_rewritten_temp_before_atomic_replace(self):
+        with tempfile.TemporaryDirectory() as folder:
+            backend, _app = await self.make_backend()
+            destination = Path(folder) / "protected.pscx"
+            write_project_file(destination, "original", "case")
+            original = destination.read_bytes()
+
+            def write_malformed(_source, temporary, _new_name, **_kwargs):
+                Path(temporary).write_text("<project", encoding="utf-8")
+
+            with patch(
+                "pscad_mcp.core.backend.legacy_support.rewrite_project_identity",
+                side_effect=write_malformed,
+            ):
+                with self.assertRaises(ET.ParseError):
+                    await backend.create_project(
+                        "case", destination.name, str(destination.parent)
+                    )
+
+            self.assertEqual(destination.read_bytes(), original)
+            self.assertNotIn("protected", backend.definition_paths)
+
+    async def test_legacy_create_keeps_backup_when_restore_fails(self):
+        with tempfile.TemporaryDirectory() as folder:
+            backend, app = await self.make_backend()
+            destination = Path(folder) / "unverified.pscx"
+            write_project_file(destination, "original", "case")
+            original = destination.read_bytes()
+            app.hidden_load_names.add("unverified")
+            original_replace = os.replace
+
+            def fail_restore(source_path, destination_path):
+                source = Path(source_path)
+                if (
+                    source.suffix == ".bak"
+                    and Path(destination_path).resolve() == destination.resolve()
+                ):
+                    raise PermissionError("restore blocked")
+                return original_replace(source_path, destination_path)
+
+            with patch("os.replace", side_effect=fail_restore):
+                with self.assertRaises(PermissionError):
+                    await backend.create_project(
+                        "case", destination.name, str(destination.parent)
+                    )
+
+            backups = list(destination.parent.glob(f".{destination.name}.*.bak"))
+            self.assertEqual(len(backups), 1)
+            self.assertEqual(backups[0].read_bytes(), original)
+            self.assertNotIn("unverified", backend.definition_paths)
+
+    async def test_legacy_create_rejects_kind_suffix_mismatch_without_touching_destination(self):
+        with tempfile.TemporaryDirectory() as folder:
+            backend, _app = await self.make_backend()
+            destination = Path(folder) / "protected.pslx"
+            write_project_file(destination, "original", "library")
+            original = destination.read_bytes()
+
+            with self.assertRaises(ValueError):
+                await backend.create_project(
+                    "case", destination.name, str(destination.parent)
+                )
+
+            self.assertEqual(destination.read_bytes(), original)
+            self.assertEqual(backend.definition_paths, {})
+
+    async def test_legacy_save_as_accepts_only_verified_native_success(self):
+        with tempfile.TemporaryDirectory() as folder:
+            backend, app = await self.make_backend()
+            _source, project = await self.load_source(backend, app, folder)
+            destination = Path(folder) / "native_copy.pscx"
+            project.native_save_as_response = ET.Element(
+                "response", {"success": "true"}
+            )
+
+            await backend.save_project_as(
+                "source", destination.name, str(destination.parent)
+            )
+
+            self.assertTrue(destination.is_file())
+            self.assert_project_identity(
+                destination, "native_copy", require_output=True
+            )
+            self.assertIn("native_copy", app.project_map)
+            self.assertEqual(
+                backend.definition_paths["native_copy"], destination.resolve()
+            )
+            self.assertNotIn(("save",), project.calls)
+
+    async def test_legacy_save_as_false_response_uses_verified_atomic_fallback(self):
+        with tempfile.TemporaryDirectory() as folder:
+            backend, app = await self.make_backend()
+            source, project = await self.load_source(backend, app, folder)
+            source_original = source.read_bytes()
+            destination = Path(folder) / "fallback_copy.pscx"
+            write_project_file(destination, "previous", "case")
+            project.native_save_as_response = ET.Element(
+                "response", {"success": "false"}
+            )
+            project.native_save_as_writes = False
+            original_replace = os.replace
+            replacement_observations = []
+
+            def observe_replace(source_path, destination_path):
+                if Path(destination_path).resolve() == destination.resolve():
+                    replacement_observations.append(destination.exists())
+                return original_replace(source_path, destination_path)
+
+            with patch("os.replace", side_effect=observe_replace):
+                await backend.save_project_as(
+                    "source", destination.name, str(destination.parent)
+                )
+
+            self.assertTrue(destination.is_file())
+            self.assert_project_identity(
+                destination, "fallback_copy", require_output=True
+            )
+            self.assertTrue(replacement_observations)
+            self.assertTrue(all(replacement_observations))
+            self.assertEqual(source.read_bytes(), source_original)
+            self.assertIn(("save",), project.calls)
+            self.assertIn("fallback_copy", app.project_map)
+            self.assertEqual(
+                backend.definition_paths["fallback_copy"], destination.resolve()
+            )
+
+    async def test_legacy_save_as_fallback_cleans_owned_file_and_restores_existing_on_verification_failure(self):
+        for preexisting in (False, True):
+            with self.subTest(preexisting=preexisting):
+                with tempfile.TemporaryDirectory() as folder:
+                    backend, app = await self.make_backend()
+                    _source, project = await self.load_source(
+                        backend, app, folder
+                    )
+                    destination = Path(folder) / "unverified.pscx"
+                    original = None
+                    if preexisting:
+                        write_project_file(destination, "original", "case")
+                        original = destination.read_bytes()
+                    project.native_save_as_response = ET.Element(
+                        "response", {"success": "false"}
+                    )
+                    project.native_save_as_payload = b"<project"
+                    app.hidden_load_names.add("unverified")
+
+                    with self.assertRaises(BackendError) as raised:
+                        await backend.save_project_as(
+                            "source", destination.name, str(destination.parent)
+                        )
+
+                    self.assertEqual(
+                        raised.exception.code, "POSTCONDITION_FAILED"
+                    )
+                    self.assertEqual(
+                        raised.exception.details,
+                        {
+                            "path": str(destination.resolve()),
+                            "expected_name": "unverified",
+                            "expected_type": "Case",
+                        },
+                    )
+                    self.assertNotIn("unverified", backend.definition_paths)
+                    if preexisting:
+                        self.assertEqual(destination.read_bytes(), original)
+                    else:
+                        self.assertFalse(destination.exists())
+
+    async def test_legacy_save_as_uses_fallback_for_unusable_or_incomplete_native_result(self):
+        responses = (
+            None,
+            object(),
+            ET.Element("response", {"success": "true"}),
+        )
+        for response in responses:
+            with self.subTest(response_type=type(response).__name__):
+                with tempfile.TemporaryDirectory() as folder:
+                    backend, app = await self.make_backend()
+                    _source, project = await self.load_source(
+                        backend, app, folder
+                    )
+                    destination = Path(folder) / "fallback.pscx"
+                    project.native_save_as_response = response
+                    project.native_save_as_writes = False
+
+                    await backend.save_project_as(
+                        "source", destination.name, str(destination.parent)
+                    )
+
+                    self.assertTrue(destination.is_file())
+                    self.assert_project_identity(
+                        destination, "fallback", require_output=True
+                    )
+                    self.assertIn(("save",), project.calls)
+                    self.assertEqual(
+                        backend.definition_paths["fallback"],
+                        destination.resolve(),
+                    )
+
+    async def test_legacy_save_as_does_not_fallback_after_native_parse_error(self):
+        with tempfile.TemporaryDirectory() as folder:
+            backend, app = await self.make_backend()
+            _source, project = await self.load_source(backend, app, folder)
+            destination = Path(folder) / "malformed.pscx"
+            project.native_save_as_response = ET.Element(
+                "response", {"success": "true"}
+            )
+            project.native_save_as_payload = b"<project"
+
+            with self.assertRaises(ET.ParseError):
+                await backend.save_project_as(
+                    "source", destination.name, str(destination.parent)
+                )
+
+            self.assertNotIn(("save",), project.calls)
+            self.assertNotIn("malformed", backend.definition_paths)
+
+    async def test_legacy_save_as_rejects_stale_native_output_identity(self):
+        with tempfile.TemporaryDirectory() as folder:
+            backend, app = await self.make_backend()
+            _source, project = await self.load_source(backend, app, folder)
+            destination = Path(folder) / "native_copy.pscx"
+            project.native_save_as_response = ET.Element(
+                "response", {"success": "true"}
+            )
+            project.native_save_as_payload = (
+                b'<project name="native_copy" Target="EMTDC">'
+                b'<output name="source" /></project>'
+            )
+
+            with self.assertRaises(ValueError):
+                await backend.save_project_as(
+                    "source", destination.name, str(destination.parent)
+                )
+
+            self.assertFalse(destination.exists())
+            self.assertNotIn(("save",), project.calls)
+            self.assertNotIn("native_copy", backend.definition_paths)
+
+    async def test_legacy_save_as_rejects_kind_suffix_mismatch_before_native_call(self):
+        with tempfile.TemporaryDirectory() as folder:
+            backend, app = await self.make_backend()
+            _source, project = await self.load_source(backend, app, folder)
+            destination = Path(folder) / "wrong.pslx"
+
+            with self.assertRaises(ValueError):
+                await backend.save_project_as(
+                    "source", destination.name, str(destination.parent)
+                )
+
+            self.assertFalse(destination.exists())
+            self.assertFalse(
+                any(call[0] == "save_as" for call in project.calls)
+            )
+            self.assertNotIn("wrong", backend.definition_paths)
+
+
 class TestBackendProjectContracts(unittest.IsolatedAsyncioTestCase):
     async def make_backends(self):
         legacy_app = FakeLegacyApp()
@@ -169,38 +582,54 @@ class TestBackendProjectContracts(unittest.IsolatedAsyncioTestCase):
         return [(legacy, legacy_app), (modern, modern_app)]
 
     async def test_project_lifecycle_and_normalization_match(self):
-        for backend, app in await self.make_backends():
-            with self.subTest(backend=backend.name):
-                await backend.load_projects([r"D:\work\case.pscx"])
-                projects = await backend.list_projects()
-                await backend.run_project("case")
-                await backend.pause_project("case")
-                await backend.stop_project("case")
-                state = await backend.project_run_state("case")
-                await backend.save_project("case")
-                await backend.save_project_as("case", "copy.pscx", r"D:\work")
-                await backend.build_project("case")
-                await backend.build_all_projects()
+        with tempfile.TemporaryDirectory() as folder:
+            source = Path(folder) / "case.pscx"
+            write_project_file(source, "case", "case")
+            for backend, app in await self.make_backends():
+                with self.subTest(backend=backend.name):
+                    await backend.load_projects([str(source)])
+                    projects = await backend.list_projects()
+                    await backend.run_project("case")
+                    await backend.pause_project("case")
+                    await backend.stop_project("case")
+                    state = await backend.project_run_state("case")
+                    await backend.save_project("case")
+                    await backend.save_project_as("case", "copy.pscx", folder)
+                    await backend.build_project("case")
+                    await backend.build_all_projects()
 
-                self.assertEqual(projects[0].name, "case")
-                self.assertEqual(projects[0].type, "Case")
-                self.assertEqual(state.status, "running")
-                self.assertEqual(state.progress, 50.0)
-                self.assertEqual(app.loaded, [r"D:\work\case.pscx"])
-                self.assertTrue(app.built_all)
+                    self.assertEqual(projects[0].name, "case")
+                    self.assertEqual(projects[0].type, "Case")
+                    self.assertEqual(state.status, "running")
+                    self.assertEqual(state.progress, 50.0)
+                    expected_loads = [str(source)]
+                    if backend.name == "legacy":
+                        expected_loads.append(str(Path(folder) / "copy.pscx"))
+                    self.assertEqual(app.loaded, expected_loads)
+                    self.assertTrue(app.built_all)
 
     async def test_create_definitions_settings_and_output_match(self):
-        for backend, _app in await self.make_backends():
-            with self.subTest(backend=backend.name):
-                case = await backend.create_project("case", "new.pscx", r"D:\work")
-                library = await backend.create_project("library", "lib.pslx", r"D:\work")
-                await backend.set_settings("case", {"fortran_version": "Intel"})
+        with tempfile.TemporaryDirectory() as folder:
+            for backend, _app in await self.make_backends():
+                with self.subTest(backend=backend.name):
+                    case = await backend.create_project("case", "new.pscx", folder)
+                    library = await backend.create_project(
+                        "library", "lib.pslx", folder
+                    )
+                    await backend.set_settings(
+                        "case", {"fortran_version": "Intel"}
+                    )
 
-                self.assertEqual(case.name, "new")
-                self.assertEqual(library.type, "Library")
-                self.assertEqual((await backend.get_settings("case"))["fortran_version"], "Intel")
-                self.assertEqual(len(await backend.project_definitions("case")), 2)
-                self.assertIn("output", await backend.project_output("case"))
+                    self.assertEqual(case.name, "new")
+                    self.assertEqual(library.type, "Library")
+                    self.assertEqual(
+                        (await backend.get_settings("case"))["fortran_version"],
+                        "Intel",
+                    )
+                    self.assertEqual(
+                        len(await backend.project_definitions("case")), 2
+                    )
+                    self.assertIn("output", await backend.project_output("case"))
 
     async def test_legacy_get_settings_uses_selected_project_not_application(self):
         legacy, app = (await self.make_backends())[0]
