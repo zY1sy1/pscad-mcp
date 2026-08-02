@@ -14,7 +14,7 @@ from collections.abc import Mapping as MappingABC
 from decimal import Decimal, InvalidOperation
 from importlib.resources import as_file, files
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 import xml.etree.ElementTree as ET
 
 from ..definition_metadata import DefinitionMetadata, read_definition_metadata
@@ -1728,17 +1728,168 @@ class LegacyBackend:
         return False
 
     async def delete_component(self, project_name: str, component_id: int) -> None:
-        _canvas, component = await self._component_proxy(project_name, component_id)
-        await self.executor.run_safe(component.delete)
-        remaining = await self.find_components(project_name, "Main", None, None)
-        if component_id in {item.id for item in remaining}:
-            raise BackendError(
-                "POSTCONDITION_FAILED",
-                f"Component {component_id} still exists after deletion.",
-                self.name,
-                "delete_component",
+        await self.delete_components(project_name, [component_id])
+
+    async def delete_components(
+        self, project_name: str, component_ids: Sequence[int]
+    ) -> None:
+        unique_ids = list(dict.fromkeys(int(value) for value in component_ids))
+        if not unique_ids:
+            raise ValueError("component_ids must not be empty.")
+        canvas = await self._canvas(project_name, "Main")
+
+        targets = []
+        for component_id in unique_ids:
+            _target_canvas, component = await self._component_proxy(
+                project_name, component_id
             )
-        self._component_orientations.pop((project_name, component_id), None)
+            targets.append(component)
+
+        target_ports = {
+            (port.x, port.y)
+            for component_id in unique_ids
+            for port in await self.get_component_ports(
+                project_name, component_id
+            )
+        }
+        objects = list(await self.executor.run_safe(canvas.find_all))
+        wires = []
+        seen_wire_ids = set()
+        for value in objects:
+            if type(value).__name__ != "WireOrthogonal":
+                continue
+            vertices = list(
+                await self.executor.run_safe(
+                    lambda item=value: item.vertices
+                )
+            )
+            endpoints = (
+                {tuple(vertices[0]), tuple(vertices[-1])}
+                if vertices
+                else set()
+            )
+            if not endpoints.intersection(target_ports):
+                continue
+            wire_id = self._component_id(value)
+            if wire_id in seen_wire_ids:
+                continue
+            seen_wire_ids.add(wire_id)
+            wires.append(value)
+
+        await self._execute_deletion_plan(
+            project_name, canvas, targets, wires
+        )
+
+    async def _canvas_object_ids(self, canvas: Any) -> set[int]:
+        response = await self.executor.run_safe(canvas.list_components)
+        if not isinstance(response, ET.Element):
+            raise BackendError(
+                "UNEXPECTED_RESPONSE",
+                "PSCAD did not return component XML after deletion.",
+                self.name,
+                "delete_components",
+            )
+        if response.get("success") is not None:
+            legacy_support.require_success(
+                response, "delete_components", {}
+            )
+        identifiers = set()
+        for node in response.iter():
+            raw_id = node.get("id")
+            if raw_id is None:
+                continue
+            try:
+                identifiers.add(int(raw_id))
+            except ValueError:
+                continue
+        return identifiers
+
+    async def _execute_deletion_plan(
+        self,
+        project_name: str,
+        canvas: Any,
+        targets: Sequence[Any],
+        wires: Sequence[Any],
+    ) -> None:
+        target_ids = [self._component_id(value) for value in targets]
+        wire_ids = [self._component_id(value) for value in wires]
+        completed_target_ids = []
+        completed_wire_ids = []
+
+        async def delete(value: Any, object_id: int, operation: str) -> None:
+            response = await self.executor.run_safe(value.delete)
+            if response is not None:
+                legacy_support.require_success(
+                    response,
+                    operation,
+                    {"project": project_name, "object_id": object_id},
+                )
+
+        mutation_error: Exception | None = None
+        try:
+            for wire, wire_id in zip(wires, wire_ids):
+                await delete(wire, wire_id, "delete_wire")
+                completed_wire_ids.append(wire_id)
+            for component, component_id in zip(targets, target_ids):
+                await delete(
+                    component, component_id, "delete_component"
+                )
+                completed_target_ids.append(component_id)
+        except Exception as error:
+            mutation_error = error
+
+        try:
+            remaining_ids = await self._canvas_object_ids(canvas)
+        except Exception as verification_error:
+            remaining_ids = None
+            if mutation_error is None:
+                mutation_error = verification_error
+
+        if remaining_ids is None:
+            deleted_component_ids = completed_target_ids
+            deleted_wire_ids = completed_wire_ids
+            remaining_component_ids = [
+                value for value in target_ids if value not in completed_target_ids
+            ]
+            remaining_wire_ids = [
+                value for value in wire_ids if value not in completed_wire_ids
+            ]
+        else:
+            deleted_component_ids = [
+                value for value in target_ids if value not in remaining_ids
+            ]
+            deleted_wire_ids = [
+                value for value in wire_ids if value not in remaining_ids
+            ]
+            remaining_component_ids = [
+                value for value in target_ids if value in remaining_ids
+            ]
+            remaining_wire_ids = [
+                value for value in wire_ids if value in remaining_ids
+            ]
+
+        if (
+            mutation_error is not None
+            or remaining_component_ids
+            or remaining_wire_ids
+        ):
+            raise BackendError(
+                "PARTIAL_COMPLETION",
+                "The component deletion plan did not complete.",
+                self.name,
+                "delete_components",
+                {
+                    "deleted_component_ids": deleted_component_ids,
+                    "deleted_wire_ids": deleted_wire_ids,
+                    "remaining_component_ids": remaining_component_ids,
+                    "remaining_wire_ids": remaining_wire_ids,
+                },
+            ) from mutation_error
+
+        for component_id in target_ids:
+            self._component_orientations.pop(
+                (project_name, component_id), None
+            )
 
     async def add_component(
         self,

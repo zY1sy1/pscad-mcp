@@ -405,7 +405,7 @@ class PscadService:
     ) -> str:
         if not confirm:
             raise ConfirmationRequired("delete_component")
-        await self.backend.delete_component(project_name, component_id)
+        await self.backend.delete_components(project_name, [component_id])
         return f"Component {component_id} deleted."
 
     async def delete_components(
@@ -417,13 +417,10 @@ class PscadService:
     ) -> str:
         if not confirm:
             raise ConfirmationRequired("delete_components")
-        unique_ids = list(dict.fromkeys(component_ids))
+        unique_ids = list(dict.fromkeys(int(value) for value in component_ids))
         if not unique_ids:
             raise ValueError("component_ids must not be empty.")
-        for component_id in unique_ids:
-            await self.backend.get_component_location(project_name, component_id)
-        for component_id in unique_ids:
-            await self.backend.delete_component(project_name, component_id)
+        await self.backend.delete_components(project_name, unique_ids)
         return f"Deleted {len(unique_ids)} component(s)."
 
     async def add_canvas_component(

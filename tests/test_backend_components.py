@@ -42,6 +42,8 @@ class StatefulComponent:
         }
         self.apply_layer_changes = True
         self.parameter_writes = []
+        self.delete_error = None
+        self.apply_delete = True
 
     def get_definition(self):
         return SimpleNamespace(scoped_name=self.defn_name)
@@ -85,8 +87,12 @@ class StatefulComponent:
 
     def copy(self): self.canvas.clipboard = self
     def delete(self):
-        self.deleted = True
         if self.canvas is not None:
+            self.canvas.events.append(("component", self.id))
+        if self.delete_error is not None:
+            raise self.delete_error
+        self.deleted = True
+        if self.canvas is not None and self.apply_delete:
             self.canvas.components = [c for c in self.canvas.components if c is not self]
     def ports(self): return dict(self.port_map)
     def port(self, name): return self.port_map.get(name)
@@ -119,6 +125,7 @@ class StatefulComponent:
 class StatefulCanvas:
     def __init__(self, legacy=False):
         self.components = []
+        self.events = []
         self.clipboard = None
         self.legacy = legacy
         self.components.append(StatefulComponent(legacy=legacy, canvas=self))
@@ -168,6 +175,12 @@ class StatefulCanvas:
                         "layer": ";".join(component.layers),
                     },
                 )
+            elif type(component).__name__ == "WireOrthogonal":
+                ET.SubElement(
+                    components,
+                    "WireOrthogonal",
+                    {"id": str(component.id)},
+                )
         return root
 
 
@@ -180,6 +193,27 @@ class LegacyWire:
 
     def get_location(self):
         return (0, 0)
+
+
+class WireOrthogonal:
+    def __init__(self, object_id, vertices, canvas):
+        self.id = object_id
+        self._id = (str(object_id),)
+        self.vertices = list(vertices)
+        self.canvas = canvas
+        self.deleted = False
+        self.delete_error = None
+        self.apply_delete = True
+
+    def delete(self):
+        self.canvas.events.append(("wire", self.id))
+        if self.delete_error is not None:
+            raise self.delete_error
+        self.deleted = True
+        if self.apply_delete:
+            self.canvas.components = [
+                item for item in self.canvas.components if item is not self
+            ]
 
 
 class LegacyComponentProject:
@@ -440,6 +474,133 @@ class TestBackendComponentContracts(unittest.IsolatedAsyncioTestCase):
                     )
                 await backend.delete_component("case", clone.id)
                 self.assertNotIn(clone.id, [c.id for c in canvas.components])
+
+    async def test_legacy_batch_delete_prevalidates_all_targets(self):
+        backend, project, component = await self.make_legacy_backend()
+        wire = WireOrthogonal(100, [(9, 5), (30, 5)], project.main)
+        project.main.components.append(wire)
+
+        with self.assertRaises(BackendError):
+            await backend.delete_components("case", [7, 999])
+
+        self.assertEqual(project.main.events, [])
+        self.assertFalse(component.deleted)
+        self.assertFalse(wire.deleted)
+
+    async def test_modern_batch_delete_prevalidates_all_targets(self):
+        modern_project = ModernComponentProject()
+        first = modern_project.main.components[0]
+        modern = ModernBackend(
+            ImmediateExecutor(),
+            version="5.0.2",
+            x64=True,
+            pscad_module=FakeModernPscad(
+                ComponentApp(modern_project, modern=True)
+            ),
+            psout_module=False,
+        )
+        await modern.attach()
+
+        with self.assertRaisesRegex(RuntimeError, "StopIteration"):
+            await modern.delete_components("case", [7, 999])
+
+        self.assertEqual(modern_project.main.events, [])
+        self.assertFalse(first.deleted)
+
+    async def test_legacy_batch_delete_without_connections_succeeds(self):
+        backend, project, first = await self.make_legacy_backend()
+        second = StatefulComponent(8, legacy=True, canvas=project.main)
+        second.port_map = {
+            "A": SimpleNamespace(name="A", x=30, y=5, dim=1, type="electrical"),
+            "B": SimpleNamespace(name="B", x=32, y=5, dim=1, type="electrical"),
+        }
+        unrelated = WireOrthogonal(100, [(50, 5), (70, 5)], project.main)
+        project.main.components.extend([second, unrelated])
+
+        await backend.delete_components("case", [7, 8])
+
+        self.assertEqual(
+            project.main.events,
+            [("component", 7), ("component", 8)],
+        )
+        self.assertTrue(first.deleted)
+        self.assertTrue(second.deleted)
+        self.assertFalse(unrelated.deleted)
+
+    async def test_legacy_batch_delete_matches_only_wire_endpoints_and_orders_wire_first(self):
+        backend, project, component = await self.make_legacy_backend()
+        connected = WireOrthogonal(100, [(9, 5), (30, 5)], project.main)
+        intermediate = WireOrthogonal(
+            101, [(0, 0), (9, 5), (40, 0)], project.main
+        )
+        unrelated = WireOrthogonal(102, [(0, 0), (40, 0)], project.main)
+        project.main.components.extend([connected, intermediate, unrelated])
+
+        await backend.delete_components("case", [7])
+
+        self.assertEqual(
+            project.main.events,
+            [("wire", 100), ("component", 7)],
+        )
+        self.assertTrue(component.deleted)
+        self.assertTrue(connected.deleted)
+        self.assertFalse(intermediate.deleted)
+        self.assertFalse(unrelated.deleted)
+
+    async def test_legacy_batch_delete_deletes_shared_wire_once(self):
+        backend, project, first = await self.make_legacy_backend()
+        second = StatefulComponent(8, legacy=True, canvas=project.main)
+        second.port_map = {
+            "A": SimpleNamespace(name="A", x=30, y=5, dim=1, type="electrical"),
+            "B": SimpleNamespace(name="B", x=32, y=5, dim=1, type="electrical"),
+        }
+        project.main.components.append(second)
+        shared = WireOrthogonal(100, [(11, 5), (30, 5)], project.main)
+        project.main.components.append(shared)
+
+        await backend.delete_components("case", [7, 8, 7])
+
+        self.assertEqual(
+            project.main.events,
+            [("wire", 100), ("component", 7), ("component", 8)],
+        )
+        self.assertTrue(first.deleted)
+        self.assertTrue(second.deleted)
+
+    async def test_legacy_batch_delete_reports_partial_completion(self):
+        backend, project, component = await self.make_legacy_backend()
+        wire = WireOrthogonal(100, [(9, 5), (30, 5)], project.main)
+        project.main.components.append(wire)
+        component.delete_error = RuntimeError("component delete failed")
+
+        with self.assertRaises(BackendError) as raised:
+            await backend.delete_components("case", [7])
+
+        self.assertEqual(raised.exception.code, "PARTIAL_COMPLETION")
+        self.assertEqual(
+            raised.exception.details,
+            {
+                "deleted_component_ids": [],
+                "deleted_wire_ids": [100],
+                "remaining_component_ids": [7],
+                "remaining_wire_ids": [],
+            },
+        )
+
+    async def test_legacy_batch_delete_verifies_planned_wire_ids(self):
+        backend, project, _component = await self.make_legacy_backend()
+        wire = WireOrthogonal(100, [(9, 5), (30, 5)], project.main)
+        wire.apply_delete = False
+        project.main.components.append(wire)
+
+        with self.assertRaises(BackendError) as raised:
+            await backend.delete_components("case", [7])
+
+        self.assertEqual(raised.exception.code, "PARTIAL_COMPLETION")
+        self.assertEqual(raised.exception.details["deleted_wire_ids"], [])
+        self.assertEqual(raised.exception.details["deleted_component_ids"], [7])
+        self.assertEqual(raised.exception.details["remaining_wire_ids"], [100])
+        self.assertEqual(raised.exception.details["remaining_component_ids"], [])
 
     async def test_legacy_clone_does_not_depend_on_clipboard_selection(self):
         project = LegacyComponentProject()
