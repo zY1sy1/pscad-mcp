@@ -151,6 +151,19 @@ class TestLegacyTemplates(unittest.TestCase):
                     f"{expected_name}:Main",
                 )
 
+    def test_templates_do_not_embed_machine_identity_or_revision_time(self):
+        for filename, _, _ in TEMPLATES:
+            with self.subTest(filename=filename):
+                _, root = self._load_template(filename)
+                settings = {
+                    node.get("name"): node.get("value")
+                    for node in root.findall("./paramlist[@name='Settings']/param")
+                }
+                self.assertEqual(settings.get("creator"), "0,0")
+                self.assertEqual(settings.get("revisor"), "0,0")
+                self.assertNotIn("335", settings.get("creator", ""))
+                self.assertNotIn("335", settings.get("revisor", ""))
+
 
 if __name__ == "__main__":
     unittest.main()

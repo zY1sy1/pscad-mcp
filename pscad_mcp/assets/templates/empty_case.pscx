@@ -1,6 +1,6 @@
 <project name="empty_case" version="4.6.2" schema="" Target="EMTDC">
   <paramlist name="Settings">
-    <param name="creator" value="335,1785587677" />
+    <param name="creator" value="0,0" />
     <param name="time_duration" value="0.5" />
     <param name="time_step" value="50" />
     <param name="sample_step" value="250" />
@@ -21,7 +21,7 @@
     <param name="Warn" value="0" />
     <param name="Check" value="0" />
     <param name="description" value="" />
-    <param name="revisor" value="335, 1785587713" />
+    <param name="revisor" value="0,0" />
   </paramlist>
   <paramlist name="Libs" />
   <Layers />
