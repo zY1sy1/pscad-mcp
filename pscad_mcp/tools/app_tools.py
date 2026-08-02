@@ -19,6 +19,7 @@ async def get_pscad_status() -> Dict[str, Any]:
     except Exception as e:
         return {
             "connected": False,
+            "executor": pscad_manager.service.executor_status(),
             **pscad_manager.error_payload(e, "get_pscad_status"),
         }
 

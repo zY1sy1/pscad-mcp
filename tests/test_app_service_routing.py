@@ -39,6 +39,29 @@ class TestApplicationToolServiceRouting(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, expected)
         manager.get_status.assert_awaited_once_with()
 
+    async def test_status_failure_includes_executor_diagnostics(self):
+        diagnostics = {
+            "healthy": False,
+            "last_operation": "is_alive",
+            "last_error": "ExecutorTimeoutError: timed out",
+            "last_timeout_seconds": 30,
+        }
+        with patch("pscad_mcp.tools.app_tools.pscad_manager") as manager:
+            manager.get_status = AsyncMock(side_effect=RuntimeError("offline"))
+            manager.service.executor_status.return_value = diagnostics
+            manager.error_payload.return_value = {
+                "error": {
+                    "code": "INTERNAL_ERROR",
+                    "message": "offline",
+                }
+            }
+
+            result = await get_pscad_status()
+
+        self.assertFalse(result["connected"])
+        self.assertEqual(result["executor"], diagnostics)
+        self.assertEqual(result["error"]["code"], "INTERNAL_ERROR")
+
     async def test_repair_routes_to_manager_service(self):
         with patch("pscad_mcp.tools.app_tools.pscad_manager") as manager:
             manager.repair_connection = AsyncMock(return_value="repaired")

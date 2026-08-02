@@ -6,7 +6,7 @@
 - PSCAD 5.x：`mhi.pscad` 3.1.x，当前完成契约测试，但由于本机没有 PSCAD 5.x，不能声称端到端真实验收通过；
 - 结果文件：`mhi.psout` 1.3.x。
 
-Legacy PSCAD 4.6.2 后端只支持启动新的 Automation 实例，不能附加到用户已打开的 GUI。`repair_connection` 仅在后端确认该进程属于 MCP 时退出旧实例；非自有连接只会断开，不会终止外部进程。
+Legacy PSCAD 4.6.2 后端只支持启动新的 Automation 实例，不能附加到用户已打开的 GUI。`repair_connection` 使用连接时缓存的进程归属：自有实例会先正常退出，非自有连接只会断开，不会终止外部进程。
 
 ## PSCAD 4.6.2 已验证行为与限制
 
@@ -100,6 +100,7 @@ PSCAD_MCP_WORKSPACE = 'D:\PSCAD-Workspace'
 - 批量删除会先校验所有 ID，再开始删除，避免只删一半；
 - 所有 PSCAD COM/RMI 操作由单线程执行器串行处理，超时后必须修复连接；
 - MCP 工具不再暴露原始 PSCAD 代理，不能绕过服务层的安全检查；
+- 所有工具错误统一返回 `code`、`details`、`retryable` 和 `suggested_action`，不会在 MCP 边界丢失后端诊断；
 - 真实验收只复制公共示例到 `D:\PSCAD-Workspace\acceptance` 的时间戳目录，不修改原始示例；
 - 验收发现已有 PSCAD 进程时会拒绝运行，也不会用通配方式强制结束其他 PSCAD 进程。
 
@@ -140,7 +141,8 @@ git status --short --branch
 
 - `DEPENDENCY_MISSING`：确认 4.6.x 的官方 `mhrc.automation` wheel 安装在本项目虚拟环境；
 - 找不到指定版本：检查 `PSCAD_MCP_VERSION`、`PSCAD_MCP_X64` 与本机实际安装是否一致；
-- MCP 能启动但工具超时：先用 `repair_connection`，不要并行向 PSCAD 发多条变更命令；
+- MCP 能启动但工具超时：先查看 `get_pscad_status.executor` 中的 `healthy`、`last_operation`、`last_error` 和 `last_timeout_seconds`，再调用 `repair_connection`；不要并行向 PSCAD 发多条变更命令；
+- `REPAIR_CLEANUP_FAILED`：MCP 自己启动的 PSCAD 在执行器重建后仍无法正常退出。修复流程不会继续启动第二个实例；请手动关闭该 PSCAD 进程，再调用 `repair_connection`；
 - 路径被拒绝：把工程复制到 `D:\PSCAD-Workspace` 下，或调整工作区根目录后重启 MCP；
 - 删除、覆盖或退出被拒绝：确认目标无误后，重新调用并传入 `confirm=true`；
 - Codex 看不到新配置：保存 `config.toml` 后新建任务或重启 Codex。

@@ -63,6 +63,24 @@ The server currently exposes tool groups for:
 
 The implementation is modular, with each tool family registered from its own module in `pscad_mcp\tools`.
 
+## Errors and connection recovery
+
+Every MCP tool returns failures in one stable `error` object containing
+`code`, `message`, `backend`, `operation`, `details`, `retryable`, and
+`suggested_action`. This preserves backend diagnostics such as
+`PARTIAL_COMPLETION` and `POSTCONDITION_FAILED` instead of reducing them to an
+unstructured MCP execution error.
+
+`get_pscad_status` also returns an `executor` object with `healthy`,
+`last_operation`, `last_error`, and `last_timeout_seconds`. After a timeout,
+call `repair_connection` before retrying the failed operation. Recovery uses
+the backend's cached process ownership and never terminates a process reported
+as external.
+
+If an owned PSCAD 4.6.x instance cannot be closed after the executor is reset,
+repair returns `REPAIR_CLEANUP_FAILED` and does not launch a second instance.
+Close that PSCAD process manually, then call `repair_connection` again.
+
 ## Requirements
 
 For full PSCAD automation you need:

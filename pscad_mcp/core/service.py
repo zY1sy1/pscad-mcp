@@ -156,6 +156,10 @@ class PscadService:
             f"PSCAD {info.version} ({architecture})."
         )
 
+    def executor_status(self) -> dict[str, Any]:
+        """Return a bounded snapshot of the shared COM executor."""
+        return dict(self.executor.snapshot())
+
     async def status(self) -> dict[str, Any]:
         if self._backend is None:
             return {
@@ -168,11 +172,13 @@ class PscadService:
                 "busy": False,
                 "licensed": None,
                 "owns_process": False,
+                "executor": self.executor_status(),
             }
         info: BackendInfo = await self._backend.heartbeat()
         payload = asdict(info)
         payload["connected"] = bool(info.alive)
         payload["selected_version"] = info.version
+        payload["executor"] = self.executor_status()
         return payload
 
     async def disconnect(self) -> None:

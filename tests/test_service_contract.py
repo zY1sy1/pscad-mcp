@@ -114,6 +114,15 @@ class TestPscadService(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(status["connected"])
         self.assertEqual(status["backend"], "legacy")
         self.assertEqual(status["selected_version"], "4.6.2")
+        self.assertEqual(
+            status["executor"],
+            {
+                "healthy": True,
+                "last_operation": None,
+                "last_error": None,
+                "last_timeout_seconds": None,
+            },
+        )
         json.dumps(status)
 
     async def test_status_before_attach_does_not_create_backend(self):
@@ -127,6 +136,15 @@ class TestPscadService(unittest.IsolatedAsyncioTestCase):
 
         self.assertFalse(status["connected"])
         self.assertEqual(created, [])
+        self.assertEqual(
+            status["executor"],
+            {
+                "healthy": True,
+                "last_operation": None,
+                "last_error": None,
+                "last_timeout_seconds": None,
+            },
+        )
 
     async def test_quit_requires_confirmation(self):
         backend = FakeLifecycleBackend()
