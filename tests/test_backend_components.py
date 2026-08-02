@@ -902,6 +902,38 @@ class TestBackendComponentContracts(unittest.IsolatedAsyncioTestCase):
             [("A", 378, 342), ("B", 378, 306)],
         )
 
+    async def test_legacy_prefers_static_port_metadata(self):
+        project = LegacyComponentProject()
+        component = project.main.components[0]
+
+        def unexpected_vendor_lookup(_name):
+            raise AssertionError("static port metadata should be preferred")
+
+        component.get_port_location = unexpected_vendor_lookup
+        project.main.list_components = lambda: ET.fromstring(
+            '<response><components><User id="7" orient="0" /></components></response>'
+        )
+        library = """<project><Definition name="source3"><svg>
+            <port name="A" x="0" y="0" dim="1" type="Natural" />
+            <port name="B" x="36" y="0" dim="1" type="Natural" />
+            </svg></Definition></project>"""
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "master.pslx"
+            path.write_text(library, encoding="utf-8")
+            backend = LegacyBackend(
+                ImmediateExecutor(), version="4.6.2", x64=True,
+                automation_module=FakeLegacyAutomation(ComponentApp(project)),
+                definition_paths={"master": path},
+            )
+            await backend.attach()
+
+            ports = await backend.get_component_ports("case", 7)
+
+        self.assertEqual(
+            [(port.name, port.x, port.y) for port in ports],
+            [("A", 10, 5), ("B", 46, 5)],
+        )
+
     async def test_legacy_tracks_orientation_for_unsaved_created_component_ports(self):
         project = LegacyComponentProject()
         library = """<project><Definition name="source3"><svg>

@@ -167,6 +167,25 @@ class LegacyBackend:
         app = self._app
         if app is not None:
             await self.executor.run_safe(app.quit)
+            is_alive = getattr(app, "is_alive", None)
+            if callable(is_alive):
+                try:
+                    alive = bool(await self.executor.run_safe(is_alive))
+                except Exception as error:
+                    raise BackendError(
+                        "SHUTDOWN_UNVERIFIED",
+                        "PSCAD quit returned, but shutdown could not be verified.",
+                        self.name,
+                        "quit",
+                    ) from error
+                if alive:
+                    raise BackendError(
+                        "SHUTDOWN_UNVERIFIED",
+                        "PSCAD quit returned, but the application is still alive.",
+                        self.name,
+                        "quit",
+                        {"owns_process": self.owns_process},
+                    )
         await self.disconnect()
 
     def _require_app(self) -> Any:
@@ -1405,33 +1424,31 @@ class LegacyBackend:
                 item.name: item for item in definition_metadata.ports
             }
             port_names = list(static_ports)
+        else:
+            try:
+                definition_metadata = await self._definition_metadata(component)
+            except BackendError:
+                definition_metadata = DefinitionMetadata((), {})
+            static_ports = {
+                item.name: item for item in definition_metadata.ports
+            }
         result = []
         for port_name in port_names:
-            location_method = getattr(component, "get_port_location", None)
-            location = (
-                await self.executor.run_safe(location_method, port_name)
-                if location_method is not None
-                else None
-            )
+            static_port = static_ports.get(port_name)
+            location = None
+            if static_port is not None:
+                location = await self._legacy_static_port_location(
+                    project_name,
+                    canvas,
+                    component,
+                    static_port.x,
+                    static_port.y,
+                )
             if location is None:
-                if not static_ports:
-                    try:
-                        definition_metadata = await self._definition_metadata(
-                            component
-                        )
-                    except BackendError:
-                        definition_metadata = DefinitionMetadata((), {})
-                    static_ports = {
-                        item.name: item for item in definition_metadata.ports
-                    }
-                static_port = static_ports.get(port_name)
-                if static_port is not None:
-                    location = await self._legacy_static_port_location(
-                        project_name,
-                        canvas,
-                        component,
-                        static_port.x,
-                        static_port.y,
+                location_method = getattr(component, "get_port_location", None)
+                if location_method is not None:
+                    location = await self.executor.run_safe(
+                        location_method, port_name
                     )
             if location is None:
                 continue
