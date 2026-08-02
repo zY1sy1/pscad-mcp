@@ -8,7 +8,21 @@ param(
 
 $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
-$python = Join-Path $repoRoot ".venv\Scripts\python.exe"
+$virtualEnvironment = Join-Path $repoRoot ".venv"
+$python = Join-Path $virtualEnvironment "Scripts\python.exe"
+if (-not (Test-Path -LiteralPath $python -PathType Leaf)) {
+    $commonGitDirectory = (& git -C $repoRoot rev-parse --git-common-dir).Trim()
+    if ($LASTEXITCODE -eq 0) {
+        if (-not [System.IO.Path]::IsPathRooted($commonGitDirectory)) {
+            $commonGitDirectory = Join-Path $repoRoot $commonGitDirectory
+        }
+        $commonRepository = Split-Path -Parent (
+            [System.IO.Path]::GetFullPath($commonGitDirectory)
+        )
+        $virtualEnvironment = Join-Path $commonRepository ".venv"
+        $python = Join-Path $virtualEnvironment "Scripts\python.exe"
+    }
+}
 $prepare = Join-Path $PSScriptRoot "prepare_acceptance_workspace.ps1"
 
 if (-not (Test-Path -LiteralPath $python -PathType Leaf)) {
@@ -38,7 +52,8 @@ $readOnlyProject = New-AcceptanceProject "read-only"
 $mutationProject = New-AcceptanceProject "mutation"
 $buildProject = New-AcceptanceProject "build"
 $simulationProject = New-AcceptanceProject "simulation"
-$resultFile = Get-ChildItem -LiteralPath (Join-Path $repoRoot ".venv") `
+$reliabilityProject = New-AcceptanceProject "reliability-source"
+$resultFile = Get-ChildItem -LiteralPath $virtualEnvironment `
     -Recurse -File -Filter '*.psout' | Select-Object -First 1
 if ($null -eq $resultFile) {
     throw "No .psout acceptance sample was found under the D-drive virtual environment."
@@ -52,6 +67,8 @@ $environmentNames = @(
     "PSCAD_MCP_ACCEPTANCE_MUTATION_PROJECT",
     "PSCAD_MCP_ACCEPTANCE_BUILD_PROJECT",
     "PSCAD_MCP_ACCEPTANCE_SIMULATION_PROJECT",
+    "PSCAD_MCP_ACCEPTANCE_RELIABILITY_PROJECT",
+    "PSCAD_MCP_ACCEPTANCE_WORKSPACE",
     "PSCAD_MCP_ACCEPTANCE_RESULT_FILE"
 )
 
@@ -64,6 +81,8 @@ try {
     $env:PSCAD_MCP_ACCEPTANCE_MUTATION_PROJECT = $mutationProject
     $env:PSCAD_MCP_ACCEPTANCE_BUILD_PROJECT = $buildProject
     $env:PSCAD_MCP_ACCEPTANCE_SIMULATION_PROJECT = $simulationProject
+    $env:PSCAD_MCP_ACCEPTANCE_RELIABILITY_PROJECT = $reliabilityProject
+    $env:PSCAD_MCP_ACCEPTANCE_WORKSPACE = $Workspace
     $env:PSCAD_MCP_ACCEPTANCE_RESULT_FILE = $resultFile.FullName
 
     Write-Output "ACCEPTANCE_WORKSPACE=$Workspace"
@@ -71,11 +90,13 @@ try {
     Write-Output "MUTATION_PROJECT=$mutationProject"
     Write-Output "BUILD_PROJECT=$buildProject"
     Write-Output "SIMULATION_PROJECT=$simulationProject"
+    Write-Output "RELIABILITY_PROJECT=$reliabilityProject"
     Write-Output "RESULT_FILE=$($resultFile.FullName)"
 
     Push-Location $repoRoot
     try {
-        & $python -m unittest tests.test_legacy_acceptance -v
+        & $python -m unittest tests.test_legacy_acceptance `
+            tests.test_legacy_reliability_acceptance -v
         if ($LASTEXITCODE -ne 0) {
             $acceptanceFailure = "Legacy acceptance failed with exit code $LASTEXITCODE."
         }
@@ -94,6 +115,7 @@ if ($remaining.Count -gt 0) {
     $summary = ($remaining | ForEach-Object { "$($_.Id):$($_.ProcessName):$($_.Path)" }) -join ', '
     throw "Acceptance left PSCAD processes running; they were not terminated automatically: $summary"
 }
+Write-Output "ACCEPTANCE_FINAL_PROCESS_COUNT=0"
 
 if ($null -ne $acceptanceFailure) {
     throw $acceptanceFailure

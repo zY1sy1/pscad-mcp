@@ -8,11 +8,15 @@ already open, so teardown can safely verify only the processes launched here.
 from __future__ import annotations
 
 import asyncio
+from contextlib import contextmanager, redirect_stdout
+from datetime import datetime
+import hashlib
 import io
 import os
 from pathlib import Path
+import shutil
 import unittest
-from contextlib import redirect_stdout
+from typing import Any, Callable
 
 import psutil
 
@@ -32,11 +36,15 @@ def _pscad_processes() -> dict[int, str | None]:
     return result
 
 
-@unittest.skipUnless(
-    ACCEPTANCE_ENABLED,
-    "Set PSCAD_MCP_ACCEPTANCE=1 to run licensed PSCAD 4.6.x acceptance.",
-)
-class TestLegacyAcceptance(unittest.IsolatedAsyncioTestCase):
+class LegacyAcceptanceCase(unittest.IsolatedAsyncioTestCase):
+    def _new_backend(self) -> LegacyBackend:
+        return LegacyBackend(
+            robust_executor,
+            version=os.getenv("PSCAD_MCP_ACCEPTANCE_VERSION", "4.6.2"),
+            x64=os.getenv("PSCAD_MCP_ACCEPTANCE_X64", "true").casefold()
+            in {"1", "true", "yes", "on"},
+        )
+
     async def asyncSetUp(self) -> None:
         self.before_processes = _pscad_processes()
         self.assertEqual(
@@ -44,49 +52,81 @@ class TestLegacyAcceptance(unittest.IsolatedAsyncioTestCase):
             {},
             "Acceptance refuses to attach while an unrelated PSCAD process is open.",
         )
-        self.backend = LegacyBackend(
-            robust_executor,
-            version=os.getenv("PSCAD_MCP_ACCEPTANCE_VERSION", "4.6.2"),
-            x64=os.getenv("PSCAD_MCP_ACCEPTANCE_X64", "true").casefold()
-            in {"1", "true", "yes", "on"},
-        )
-        info = await self.backend.attach()
+        self.owned_processes: dict[int, str | None] = {}
+        self.backend = self._new_backend()
+        await self._attach_and_record(self.backend)
+        self.launched_processes = dict(self.owned_processes)
+
+    async def _attach_and_record(self, backend: LegacyBackend) -> None:
+        before = _pscad_processes()
+        info = await backend.attach()
         self.assertTrue(info.alive)
         self.assertTrue(info.licensed)
         self.assertTrue(info.owns_process)
-        self.launched_processes = {
+        launched = {
             pid: executable
             for pid, executable in _pscad_processes().items()
-            if pid not in self.before_processes
+            if pid not in before
         }
         self.assertTrue(
-            self.launched_processes,
+            launched,
             "The backend reported ownership but no new PSCAD PID was detected.",
         )
-        for pid, executable in self.launched_processes.items():
+        self.owned_processes.update(launched)
+        for pid, executable in launched.items():
             print(f"ACCEPTANCE_PID={pid};EXE={executable}", flush=True)
 
     async def asyncTearDown(self) -> None:
+        teardown_error: BaseException | None = None
         if getattr(self, "backend", None) is not None:
             try:
                 if self.backend.owns_process:
                     await self.backend.quit()
+            except BaseException as error:
+                teardown_error = error
             finally:
-                await self.backend.disconnect()
-        launched = getattr(self, "launched_processes", {})
-        for _ in range(40):
-            if not any(psutil.pid_exists(pid) for pid in launched):
-                break
-            await asyncio.sleep(0.25)
+                try:
+                    await self.backend.disconnect()
+                except BaseException as error:
+                    if teardown_error is None:
+                        teardown_error = error
+
+        await self._wait_for_pids_to_exit(
+            set(getattr(self, "owned_processes", {})), timeout=10.0
+        )
         remaining = {
             pid: executable
-            for pid, executable in launched.items()
+            for pid, executable in getattr(self, "owned_processes", {}).items()
             if psutil.pid_exists(pid)
         }
         self.assertEqual(
             remaining,
             {},
             f"Acceptance-owned PSCAD process did not exit: {remaining}",
+        )
+        if teardown_error is not None:
+            raise teardown_error
+
+    async def _wait_until(
+        self,
+        predicate: Callable[[], Any],
+        *,
+        timeout: float,
+        message: str,
+    ) -> None:
+        deadline = asyncio.get_running_loop().time() + timeout
+        while not predicate():
+            if asyncio.get_running_loop().time() >= deadline:
+                self.fail(message)
+            await asyncio.sleep(0.25)
+
+    async def _wait_for_pids_to_exit(
+        self, pids: set[int], *, timeout: float
+    ) -> None:
+        await self._wait_until(
+            lambda: not any(psutil.pid_exists(pid) for pid in pids),
+            timeout=timeout,
+            message=f"PSCAD PIDs did not exit within {timeout}s: {sorted(pids)}",
         )
 
     def _project_path(self, variable: str) -> Path:
@@ -98,13 +138,82 @@ class TestLegacyAcceptance(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(path.suffix.casefold(), ".pscx")
         return path
 
-    async def _load_project(self, variable: str) -> str:
-        path = self._project_path(variable)
+    def _evidence_directory(self, label: str) -> Path:
+        raw_workspace = os.getenv("PSCAD_MCP_ACCEPTANCE_WORKSPACE")
+        if not raw_workspace:
+            self.skipTest("PSCAD_MCP_ACCEPTANCE_WORKSPACE is not configured.")
+        workspace = Path(raw_workspace).resolve()
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+        directory = workspace / f"codex-{stamp}-{label}"
+        directory.mkdir(parents=True, exist_ok=False)
+        print(f"ACCEPTANCE_EVIDENCE={directory}", flush=True)
+        return directory
+
+    def _timestamped_project_copy(
+        self,
+        label: str,
+        variable: str = "PSCAD_MCP_ACCEPTANCE_RELIABILITY_PROJECT",
+    ) -> Path:
+        source = self._project_path(variable)
+        directory = self._evidence_directory(label)
+        destination = directory / source.name
+        shutil.copy2(source, destination)
+        print(
+            f"ACCEPTANCE_SOURCE_COPY={destination};SHA256={self._sha256(destination)}",
+            flush=True,
+        )
+        return destination
+
+    @staticmethod
+    def _sha256(path: Path) -> str:
+        digest = hashlib.sha256()
+        with path.open("rb") as stream:
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest().upper()
+
+    @staticmethod
+    def _xml_root(path: Path):
+        import xml.etree.ElementTree as ET
+
+        return ET.parse(path).getroot()
+
+    @staticmethod
+    def _xml_node_by_id(root: Any, object_id: int):
+        expected = str(object_id)
+        return next(
+            (node for node in root.iter() if node.get("id") == expected),
+            None,
+        )
+
+    @contextmanager
+    def _captured_stdout(self):
+        captured = io.StringIO()
+        with redirect_stdout(captured):
+            yield captured
+
+    async def _load_path(self, path: Path) -> str:
         await self.backend.load_projects([str(path)])
         project_name = path.stem
         names = {item.name for item in await self.backend.list_projects()}
         self.assertIn(project_name, names)
         return project_name
+
+    async def _load_project(self, variable: str) -> str:
+        return await self._load_path(self._project_path(variable))
+
+    async def _restart_backend(self) -> None:
+        previous = self.backend
+        previous_pids = {
+            pid for pid in self.owned_processes if psutil.pid_exists(pid)
+        }
+        if previous.owns_process:
+            await previous.quit()
+        await previous.disconnect()
+        await self._wait_for_pids_to_exit(previous_pids, timeout=10.0)
+        robust_executor.reset()
+        self.backend = self._new_backend()
+        await self._attach_and_record(self.backend)
 
     async def _wait_for_terminal_state(
         self, project_name: str, timeout: float
@@ -119,9 +228,17 @@ class TestLegacyAcceptance(unittest.IsolatedAsyncioTestCase):
                 return state
             if asyncio.get_running_loop().time() >= deadline:
                 self.fail(
-                    f"Simulation did not finish within {timeout}s; states={observed[-20:]}"
+                    f"Simulation did not finish within {timeout}s; "
+                    f"states={observed[-20:]}"
                 )
             await asyncio.sleep(0.25)
+
+
+@unittest.skipUnless(
+    ACCEPTANCE_ENABLED,
+    "Set PSCAD_MCP_ACCEPTANCE=1 to run licensed PSCAD 4.6.x acceptance.",
+)
+class TestLegacyAcceptance(LegacyAcceptanceCase):
 
     async def test_01_read_only(self) -> None:
         project_name = await self._load_project(

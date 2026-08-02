@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import xml.etree.ElementTree as ET
 
 from pscad_mcp.core.backend.legacy import LegacyBackend
+from pscad_mcp.core.backend.legacy_support import Rect
 from pscad_mcp.core.backend.modern import ModernBackend
 from pscad_mcp.core.backend.base import BackendError
 from tests.backend_fakes import (
@@ -196,10 +197,12 @@ class LegacyWire:
 
 
 class WireOrthogonal:
-    def __init__(self, object_id, vertices, canvas):
+    def __init__(self, object_id, vertices, canvas, *, location=None):
         self.id = object_id
         self._id = (str(object_id),)
         self.vertices = list(vertices)
+        if location is not None:
+            self.location = location
         self.canvas = canvas
         self.deleted = False
         self.delete_error = None
@@ -547,6 +550,140 @@ class TestBackendComponentContracts(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(intermediate.deleted)
         self.assertFalse(unrelated.deleted)
 
+    async def test_legacy_batch_delete_translates_relative_wire_vertices(self):
+        backend, project, component = await self.make_legacy_backend()
+        connected = WireOrthogonal(
+            100,
+            [(0, 0), (21, 0)],
+            project.main,
+            location=(9, 5),
+        )
+        project.main.components.append(connected)
+
+        await backend.delete_components("case", [7])
+
+        self.assertEqual(
+            project.main.events,
+            [("wire", 100), ("component", 7)],
+        )
+        self.assertTrue(component.deleted)
+        self.assertTrue(connected.deleted)
+
+    async def test_legacy_batch_delete_uses_canvas_selection_when_available(self):
+        backend, project, component = await self.make_legacy_backend()
+        component.apply_delete = False
+        unrelated = StatefulComponent(8, legacy=True, canvas=project.main)
+        unrelated.location = (90, 90)
+        project.main.components.append(unrelated)
+        selected = []
+
+        def select_components(x1, y1, x2, y2):
+            left, right = sorted((x1, x2))
+            bottom, top = sorted((y1, y2))
+            selected[:] = [
+                item
+                for item in project.main.components
+                if isinstance(item, StatefulComponent)
+                and left <= item.location[0] <= right
+                and bottom <= item.location[1] <= top
+            ]
+            return ET.Element("response", {"success": "true"})
+
+        def delete_selection(command):
+            self.assertEqual(command, "IDM_DELETE")
+            for item in list(selected):
+                item.apply_delete = True
+                item.delete()
+            return ET.Element("response", {"success": "true"})
+
+        project.main.select_components = select_components
+        project.main._generic = delete_selection
+
+        await backend.delete_components("case", [7])
+
+        self.assertTrue(component.deleted)
+        self.assertFalse(unrelated.deleted)
+        self.assertIn(unrelated, project.main.components)
+
+    def test_legacy_selection_bounds_use_pscad_y_coordinate_order(self):
+        self.assertEqual(
+            LegacyBackend._selection_bounds(
+                [(10, 5), (20, 15)], padding=2
+            ),
+            (8, 17, 22, 3),
+        )
+
+    async def test_legacy_canvas_selection_deletes_connected_batch_once(self):
+        backend, project, first = await self.make_legacy_backend()
+        first.apply_delete = False
+        second = StatefulComponent(8, legacy=True, canvas=project.main)
+        second.location = (30, 5)
+        second.port_map = {
+            "A": SimpleNamespace(name="A", x=30, y=5, dim=1, type="electrical"),
+            "B": SimpleNamespace(name="B", x=32, y=5, dim=1, type="electrical"),
+        }
+        second.apply_delete = False
+        unrelated = StatefulComponent(9, legacy=True, canvas=project.main)
+        unrelated.location = (90, 90)
+        wire = WireOrthogonal(100, [(11, 5), (30, 5)], project.main)
+        project.main.components.extend([second, unrelated, wire])
+        selected = []
+        delete_calls = []
+
+        def select_components(x1, y1, x2, y2):
+            left, right = sorted((x1, x2))
+            bottom, top = sorted((y1, y2))
+            selected[:] = [
+                item
+                for item in project.main.components
+                if isinstance(item, StatefulComponent)
+                and left <= item.location[0] <= right
+                and bottom <= item.location[1] <= top
+            ]
+            return ET.Element("response", {"success": "true"})
+
+        def delete_selection(command):
+            delete_calls.append(command)
+            for item in list(selected):
+                item.apply_delete = True
+                item.delete()
+            if first in selected and second in selected:
+                wire.delete()
+            return ET.Element("response", {"success": "true"})
+
+        project.main.select_components = select_components
+        project.main._generic = delete_selection
+
+        await backend.delete_components("case", [7, 8])
+
+        self.assertEqual(delete_calls, ["IDM_DELETE"])
+        self.assertTrue(first.deleted)
+        self.assertTrue(second.deleted)
+        self.assertTrue(wire.deleted)
+        self.assertFalse(unrelated.deleted)
+
+    async def test_legacy_canvas_selection_rejects_conflicting_object_before_delete(self):
+        backend, project, target = await self.make_legacy_backend()
+        conflict = StatefulComponent(8, legacy=True, canvas=project.main)
+        conflict.location = (20, 5)
+        project.main.components.append(conflict)
+        delete_calls = []
+        project.main.select_components = lambda *_args: ET.Element(
+            "response", {"success": "true"}
+        )
+        project.main._generic = lambda command: delete_calls.append(command)
+
+        with self.assertRaises(BackendError) as raised:
+            await backend.delete_components("case", [7])
+
+        self.assertEqual(raised.exception.code, "CAPABILITY_UNAVAILABLE")
+        self.assertEqual(
+            raised.exception.details["conflicting_object_ids"], [8]
+        )
+        self.assertEqual(delete_calls, [])
+        self.assertFalse(target.deleted)
+        self.assertFalse(conflict.deleted)
+
     async def test_legacy_batch_delete_deletes_shared_wire_once(self):
         backend, project, first = await self.make_legacy_backend()
         second = StatefulComponent(8, legacy=True, canvas=project.main)
@@ -800,6 +937,48 @@ class TestBackendComponentContracts(unittest.IsolatedAsyncioTestCase):
             discovered = await backend._discover_master_library()
 
         self.assertEqual(discovered, master_library)
+
+    async def test_legacy_occupied_rectangles_enrich_sparse_canvas_xml_from_project_file(self):
+        project = LegacyComponentProject()
+        project.main.components[0].location = (999, 999)
+        with tempfile.TemporaryDirectory() as temporary:
+            case_path = Path(temporary) / "case.pscx"
+            case_path.write_text(
+                '<project><definitions><Definition name="Main"><schematic>'
+                '<User id="7" x="0" y="450" w="40" h="30" />'
+                '<User id="999" x="0" y="0" w="500" h="500" />'
+                '</schematic></Definition></definitions></project>',
+                encoding="utf-8",
+            )
+            backend, _project, _component = await self.make_legacy_backend(
+                project, definition_paths={"case": case_path}
+            )
+
+            rectangles = await backend._occupied_rectangles(
+                "case", "Main", project.main
+            )
+
+        self.assertEqual(rectangles, [Rect(0, 450, 40, 30)])
+
+    async def test_legacy_occupied_rectangles_uses_live_location_when_saved_xml_lacks_id(self):
+        project = LegacyComponentProject()
+        project.main.components[0].location = (270, 288)
+        with tempfile.TemporaryDirectory() as temporary:
+            case_path = Path(temporary) / "case.pscx"
+            case_path.write_text(
+                '<project><definitions><Definition name="Main">'
+                '<schematic /></Definition></definitions></project>',
+                encoding="utf-8",
+            )
+            backend, _project, _component = await self.make_legacy_backend(
+                project, definition_paths={"case": case_path}
+            )
+
+            rectangles = await backend._occupied_rectangles(
+                "case", "Main", project.main
+            )
+
+        self.assertEqual(rectangles, [Rect(270, 288, 36, 36)])
 
 
 if __name__ == "__main__":

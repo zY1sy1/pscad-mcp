@@ -342,6 +342,12 @@ class TestLegacyProjectFiles(unittest.IsolatedAsyncioTestCase):
             self.assert_project_identity(
                 destination, "created_case", require_output=False
             )
+            self.assertNotIn(
+                "empty_case:", destination.read_text(encoding="utf-8")
+            )
+            self.assertIn(
+                "created_case:Main", destination.read_text(encoding="utf-8")
+            )
             self.assertEqual((info.name, info.type), ("created_case", "Case"))
             self.assertIn("created_case", app.project_map)
             self.assertEqual(
@@ -362,6 +368,13 @@ class TestLegacyProjectFiles(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(destination.is_file())
             self.assert_project_identity(
                 destination, "created_library", require_output=False
+            )
+            self.assertNotIn(
+                "empty_library:", destination.read_text(encoding="utf-8")
+            )
+            self.assertIn(
+                "created_library:Main",
+                destination.read_text(encoding="utf-8"),
             )
             self.assertEqual(
                 (info.name, info.type), ("created_library", "Library")
@@ -406,7 +419,7 @@ class TestLegacyProjectFiles(unittest.IsolatedAsyncioTestCase):
                 Path(temporary).write_text("<project", encoding="utf-8")
 
             with patch(
-                "pscad_mcp.core.backend.legacy_support.rewrite_project_identity",
+                "pscad_mcp.core.backend.legacy_support.rewrite_template_identity",
                 side_effect=write_malformed,
             ):
                 with self.assertRaises(ET.ParseError):
@@ -488,6 +501,15 @@ class TestLegacyProjectFiles(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as folder:
             backend, app = await self.make_backend()
             source, project = await self.load_source(backend, app, folder)
+            source.write_text(
+                '<project name="source" Target="EMTDC">'
+                '<output name="source" />'
+                '<User defn="source:Main" />'
+                '<call name="source:Station" />'
+                '<param value="source must remain" />'
+                '</project>',
+                encoding="utf-8",
+            )
             source_original = source.read_bytes()
             destination = Path(folder) / "fallback_copy.pscx"
             write_project_file(destination, "previous", "case")
@@ -515,6 +537,12 @@ class TestLegacyProjectFiles(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(replacement_observations)
             self.assertTrue(all(replacement_observations))
             self.assertEqual(source.read_bytes(), source_original)
+            destination_text = destination.read_text(encoding="utf-8")
+            self.assertNotIn("source:Main", destination_text)
+            self.assertNotIn("source:Station", destination_text)
+            self.assertIn("fallback_copy:Main", destination_text)
+            self.assertIn("fallback_copy:Station", destination_text)
+            self.assertIn("source must remain", destination_text)
             self.assertIn(("save",), project.calls)
             self.assertIn("fallback_copy", app.project_map)
             self.assertEqual(

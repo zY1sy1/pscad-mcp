@@ -340,7 +340,7 @@ class LegacyBackend:
         replaced = False
         try:
             shutil.copyfile(source, temporary)
-            legacy_support.rewrite_project_identity(
+            legacy_support.rewrite_template_identity(
                 temporary, temporary, destination.stem
             )
             self._validate_rewritten_project(
@@ -1745,12 +1745,23 @@ class LegacyBackend:
             )
             targets.append(component)
 
-        target_ports = {
-            (port.x, port.y)
-            for component_id in unique_ids
-            for port in await self.get_component_ports(
+        ports_by_component = {
+            component_id: await self.get_component_ports(
                 project_name, component_id
             )
+            for component_id in unique_ids
+        }
+        target_ports = {
+            (port.x, port.y)
+            for ports in ports_by_component.values()
+            for port in ports
+        }
+        selection_bounds = {
+            component_id: self._selection_bounds(
+                [(port.x, port.y) for port in ports],
+                padding=self._canvas_grid * 2,
+            )
+            for component_id, ports in ports_by_component.items()
         }
         objects = list(await self.executor.run_safe(canvas.find_all))
         wires = []
@@ -1758,11 +1769,7 @@ class LegacyBackend:
         for value in objects:
             if type(value).__name__ != "WireOrthogonal":
                 continue
-            vertices = list(
-                await self.executor.run_safe(
-                    lambda item=value: item.vertices
-                )
-            )
+            vertices = await self._absolute_wire_vertices(value)
             endpoints = (
                 {tuple(vertices[0]), tuple(vertices[-1])}
                 if vertices
@@ -1775,10 +1782,102 @@ class LegacyBackend:
                 continue
             seen_wire_ids.add(wire_id)
             wires.append(value)
+            selection_bounds[wire_id] = self._selection_bounds(
+                vertices, padding=self._canvas_grid
+            )
 
         await self._execute_deletion_plan(
-            project_name, canvas, targets, wires
+            project_name,
+            canvas,
+            targets,
+            wires,
+            selection_bounds,
         )
+
+    async def _absolute_wire_vertices(
+        self, wire: Any
+    ) -> list[tuple[int, int]]:
+        vertices = [
+            (int(point[0]), int(point[1]))
+            for point in await self.executor.run_safe(
+                lambda item=wire: item.vertices
+            )
+        ]
+        try:
+            location = await self.executor.run_safe(
+                lambda item=wire: item.location
+            )
+        except (AttributeError, BackendError):
+            location = None
+        if location is None:
+            return vertices
+        origin_x, origin_y = int(location[0]), int(location[1])
+        return [
+            (origin_x + x, origin_y + y)
+            for x, y in vertices
+        ]
+
+    @staticmethod
+    def _selection_bounds(
+        points: Sequence[tuple[int, int]], *, padding: int
+    ) -> tuple[int, int, int, int]:
+        if not points:
+            raise ValueError("selection points must not be empty.")
+        x_values = [int(point[0]) for point in points]
+        y_values = [int(point[1]) for point in points]
+        return (
+            min(x_values) - padding,
+            max(y_values) + padding,
+            max(x_values) + padding,
+            min(y_values) - padding,
+        )
+
+    @staticmethod
+    def _merged_selection_bounds(
+        bounds: Sequence[tuple[int, int, int, int]],
+    ) -> tuple[int, int, int, int]:
+        if not bounds:
+            raise ValueError("selection bounds must not be empty.")
+        return (
+            min(value[0] for value in bounds),
+            max(value[1] for value in bounds),
+            max(value[2] for value in bounds),
+            min(value[3] for value in bounds),
+        )
+
+    async def _selection_conflicts(
+        self,
+        canvas: Any,
+        bounds: tuple[int, int, int, int],
+        target_ids: Sequence[int],
+    ) -> list[int]:
+        left, top, right, bottom = bounds
+        target_id_set = set(target_ids)
+        conflicts = []
+        for value in list(await self.executor.run_safe(canvas.find_all)):
+            if type(value).__name__ == "WireOrthogonal":
+                continue
+            object_id = self._component_id(value)
+            if object_id in target_id_set:
+                continue
+            location_method = getattr(value, "get_location", None)
+            try:
+                if location_method is not None:
+                    location = await self.executor.run_safe(
+                        location_method
+                    )
+                else:
+                    location = await self.executor.run_safe(
+                        lambda item=value: item.location
+                    )
+            except Exception:
+                continue
+            if location is None:
+                continue
+            x, y = int(location[0]), int(location[1])
+            if left <= x <= right and bottom <= y <= top:
+                conflicts.append(object_id)
+        return sorted(set(conflicts))
 
     async def _canvas_object_ids(self, canvas: Any) -> set[int]:
         response = await self.executor.run_safe(canvas.list_components)
@@ -1810,11 +1909,40 @@ class LegacyBackend:
         canvas: Any,
         targets: Sequence[Any],
         wires: Sequence[Any],
+        selection_bounds: Mapping[int, tuple[int, int, int, int]],
     ) -> None:
         target_ids = [self._component_id(value) for value in targets]
         wire_ids = [self._component_id(value) for value in wires]
         completed_target_ids = []
         completed_wire_ids = []
+
+        select_components = getattr(canvas, "select_components", None)
+        generic = getattr(canvas, "_generic", None)
+        use_canvas_selection = (
+            select_components is not None
+            and generic is not None
+            and all(value in selection_bounds for value in target_ids)
+        )
+        combined_bounds = None
+        if use_canvas_selection:
+            combined_bounds = self._merged_selection_bounds(
+                [selection_bounds[value] for value in target_ids]
+            )
+            conflicts = await self._selection_conflicts(
+                canvas, combined_bounds, target_ids
+            )
+            if conflicts:
+                raise BackendError(
+                    "CAPABILITY_UNAVAILABLE",
+                    "PSCAD 4.6.2 cannot safely select the requested batch "
+                    "without including other canvas objects.",
+                    self.name,
+                    "delete_components",
+                    {
+                        "project": project_name,
+                        "conflicting_object_ids": conflicts,
+                    },
+                )
 
         async def delete(value: Any, object_id: int, operation: str) -> None:
             response = await self.executor.run_safe(value.delete)
@@ -1827,14 +1955,34 @@ class LegacyBackend:
 
         mutation_error: Exception | None = None
         try:
-            for wire, wire_id in zip(wires, wire_ids):
-                await delete(wire, wire_id, "delete_wire")
-                completed_wire_ids.append(wire_id)
-            for component, component_id in zip(targets, target_ids):
-                await delete(
-                    component, component_id, "delete_component"
+            if use_canvas_selection and combined_bounds is not None:
+                response = await self.executor.run_safe(
+                    select_components, *combined_bounds
                 )
-                completed_target_ids.append(component_id)
+                legacy_support.require_success(
+                    response,
+                    "select_delete_batch",
+                    {"project": project_name, "component_ids": target_ids},
+                )
+                response = await self.executor.run_safe(
+                    generic, "IDM_DELETE"
+                )
+                legacy_support.require_success(
+                    response,
+                    "delete_batch",
+                    {"project": project_name, "component_ids": target_ids},
+                )
+                completed_wire_ids.extend(wire_ids)
+                completed_target_ids.extend(target_ids)
+            else:
+                for wire, wire_id in zip(wires, wire_ids):
+                    await delete(wire, wire_id, "delete_wire")
+                    completed_wire_ids.append(wire_id)
+                for component, component_id in zip(targets, target_ids):
+                    await delete(
+                        component, component_id, "delete_component"
+                    )
+                    completed_target_ids.append(component_id)
         except Exception as error:
             mutation_error = error
 
@@ -2277,7 +2425,9 @@ class LegacyBackend:
         ):
             add_candidate(candidate)
 
-        occupied = await self._occupied_rectangles(canvas)
+        occupied = await self._occupied_rectangles(
+            project_name, canvas_name, canvas
+        )
         if not any(
             all(
                 not rectangle.intersects(candidate, margin=self._canvas_grid)
@@ -2292,7 +2442,9 @@ class LegacyBackend:
                 "find_empty_space",
             )
 
-        refreshed = await self._occupied_rectangles(canvas)
+        refreshed = await self._occupied_rectangles(
+            project_name, canvas_name, canvas
+        )
         for candidate in candidates:
             if all(
                 not rectangle.intersects(candidate, margin=self._canvas_grid)
@@ -2312,7 +2464,7 @@ class LegacyBackend:
         )
 
     async def _occupied_rectangles(
-        self, canvas: Any
+        self, project_name: str, canvas_name: str, canvas: Any
     ) -> list[legacy_support.Rect]:
         response = await self.executor.run_safe(canvas.list_components)
         if not isinstance(response, ET.Element):
@@ -2326,15 +2478,90 @@ class LegacyBackend:
             legacy_support.require_success(
                 response, "find_empty_space", {}
             )
+        nodes = list(response.findall("components/*"))
+        saved_rectangles = await asyncio.to_thread(
+            self._saved_canvas_rectangles, project_name, canvas_name
+        )
+        sparse_ids = {
+            int(node.get("id"))
+            for node in nodes
+            if node.get("id", "").isdigit()
+            and any(node.get(key) is None for key in ("x", "y", "w", "h"))
+        }
+        live_locations: dict[int, tuple[int, int]] = {}
+        if sparse_ids:
+            objects = list(await self.executor.run_safe(canvas.find_all))
+            for proxy in objects:
+                object_id = self._component_id(proxy)
+                if object_id not in sparse_ids:
+                    continue
+                location_method = getattr(proxy, "get_location", None)
+                try:
+                    if location_method is not None:
+                        location = await self.executor.run_safe(
+                            location_method
+                        )
+                    else:
+                        location = await self.executor.run_safe(
+                            lambda item=proxy: item.location
+                        )
+                except Exception:
+                    continue
+                if location is not None and len(location) >= 2:
+                    live_locations[object_id] = (
+                        int(location[0]),
+                        int(location[1]),
+                    )
+
         rectangles = []
         try:
-            for node in response.findall("components/*"):
+            for node in nodes:
+                raw_id = node.get("id")
+                object_id = int(raw_id) if raw_id is not None else None
+                saved = saved_rectangles.get(object_id)
+                live = live_locations.get(object_id)
+                raw_x = node.get("x")
+                raw_y = node.get("y")
+                raw_width = node.get("w")
+                raw_height = node.get("h")
+                x = (
+                    int(raw_x)
+                    if raw_x is not None
+                    else saved.x
+                    if saved is not None
+                    else live[0]
+                    if live is not None
+                    else 0
+                )
+                y = (
+                    int(raw_y)
+                    if raw_y is not None
+                    else saved.y
+                    if saved is not None
+                    else live[1]
+                    if live is not None
+                    else 0
+                )
+                rectangle_width = (
+                    int(raw_width)
+                    if raw_width is not None
+                    else saved.width
+                    if saved is not None
+                    else 36
+                )
+                rectangle_height = (
+                    int(raw_height)
+                    if raw_height is not None
+                    else saved.height
+                    if saved is not None
+                    else 36
+                )
                 rectangles.append(
                     legacy_support.Rect(
-                        int(node.get("x", "0")),
-                        int(node.get("y", "0")),
-                        max(int(node.get("w", "36")), 1),
-                        max(int(node.get("h", "36")), 1),
+                        x,
+                        y,
+                        max(rectangle_width, 1),
+                        max(rectangle_height, 1),
                     )
                 )
         except (TypeError, ValueError) as error:
@@ -2344,4 +2571,54 @@ class LegacyBackend:
                 self.name,
                 "find_empty_space",
             ) from error
+        return rectangles
+
+    def _saved_canvas_rectangles(
+        self, project_name: str, canvas_name: str
+    ) -> dict[int, legacy_support.Rect]:
+        path = self.definition_paths.get(project_name)
+        if path is None or not path.is_file():
+            return {}
+        try:
+            root = ET.parse(path).getroot()
+        except (OSError, ET.ParseError):
+            return {}
+
+        definition = next(
+            (
+                node
+                for node in root.iter()
+                if str(node.tag).split("}")[-1] == "Definition"
+                and node.get("name") == canvas_name
+            ),
+            None,
+        )
+        if definition is None:
+            return {}
+        schematic = next(
+            (
+                child
+                for child in definition
+                if str(child.tag).split("}")[-1] == "schematic"
+            ),
+            None,
+        )
+        if schematic is None:
+            return {}
+
+        rectangles: dict[int, legacy_support.Rect] = {}
+        for node in schematic:
+            raw_id = node.get("id")
+            if raw_id is None:
+                continue
+            try:
+                object_id = int(raw_id)
+                rectangles[object_id] = legacy_support.Rect(
+                    int(node.get("x", "0")),
+                    int(node.get("y", "0")),
+                    max(int(node.get("w", "36")), 1),
+                    max(int(node.get("h", "36")), 1),
+                )
+            except ValueError:
+                continue
         return rectangles

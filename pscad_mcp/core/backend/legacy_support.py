@@ -26,6 +26,10 @@ _NAME_ATTRIBUTE = re.compile(
     r"(?P<prefix>(?<![:\w.-])name\s*=\s*)(?P<quote>[\"'])(?P<value>.*?)(?P=quote)",
     re.DOTALL,
 )
+_ATTRIBUTE = re.compile(
+    r"(?P<prefix>\s[\w:.-]+\s*=\s*)(?P<quote>[\"'])(?P<value>.*?)(?P=quote)",
+    re.DOTALL,
+)
 _XML_ENCODING = re.compile(
     br"<\?xml[^>]*\bencoding\s*=\s*['\"]([^'\"]+)['\"]",
     re.IGNORECASE,
@@ -242,6 +246,28 @@ def _replace_name_attribute(tag_text: str, new_name: str) -> str:
     return tag_text[: match.start()] + match.group("prefix") + quote + escaped + quote + tag_text[match.end() :]
 
 
+def _replace_self_namespace_attributes(
+    tag_text: str, old_name: str, new_name: str
+) -> str:
+    qualified_reference = re.compile(
+        rf"{re.escape(old_name)}:[^\s,;]+\Z"
+    )
+
+    def replace(match: re.Match[str]) -> str:
+        value = match.group("value")
+        if qualified_reference.fullmatch(value) is None:
+            return match.group(0)
+        quote = match.group("quote")
+        local_name = value[len(old_name) + 1 :]
+        rewritten = escape(
+            f"{new_name}:{local_name}",
+            {quote: "&quot;" if quote == '"' else "&apos;"},
+        )
+        return match.group("prefix") + quote + rewritten + quote
+
+    return _ATTRIBUTE.sub(replace, tag_text)
+
+
 @dataclass(frozen=True)
 class _DocumentEncoding:
     codec: str
@@ -299,6 +325,40 @@ def rewrite_project_identity(
     expected_root: str = "project",
 ) -> None:
     """Atomically copy a project while editing only its identity attributes."""
+    _rewrite_project_identity(
+        source,
+        destination,
+        new_name,
+        expected_root=expected_root,
+        rewrite_self_namespace=False,
+    )
+
+
+def rewrite_template_identity(
+    source: str | Path,
+    destination: str | Path,
+    new_name: str,
+    *,
+    expected_root: str = "project",
+) -> None:
+    """Rewrite project identity and exact template self-namespace references."""
+    _rewrite_project_identity(
+        source,
+        destination,
+        new_name,
+        expected_root=expected_root,
+        rewrite_self_namespace=True,
+    )
+
+
+def _rewrite_project_identity(
+    source: str | Path,
+    destination: str | Path,
+    new_name: str,
+    *,
+    expected_root: str,
+    rewrite_self_namespace: bool,
+) -> None:
     source_path = Path(source)
     destination_path = Path(destination)
     original = source_path.read_bytes()
@@ -347,6 +407,12 @@ def rewrite_project_identity(
             if direct_output_index in matching_output_indices:
                 replacements.append((tag.start, tag.end, _replace_name_attribute(tag.text, new_name)))
             direct_output_index += 1
+        elif rewrite_self_namespace:
+            rewritten_tag = _replace_self_namespace_attributes(
+                tag.text, old_name, new_name
+            )
+            if rewritten_tag != tag.text:
+                replacements.append((tag.start, tag.end, rewritten_tag))
         if not tag.self_closing:
             depth += 1
     if root_tag is None:

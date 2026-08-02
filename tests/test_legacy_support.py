@@ -13,6 +13,7 @@ from pscad_mcp.core.backend.legacy_support import (
     require_success,
     response_payload,
     rewrite_project_identity,
+    rewrite_template_identity,
     snap_to_grid,
 )
 
@@ -78,6 +79,37 @@ class TestLegacyResponses(unittest.TestCase):
 
 
 class TestProjectIdentityRewrite(unittest.TestCase):
+    def test_template_rewrite_updates_exact_self_namespace_references(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            folder = Path(temporary)
+            source = folder / "old.pscx"
+            destination = folder / "new.pscx"
+            source_text = (
+                '<project name="old" Target="EMTDC">'
+                '<output name="old" />'
+                '<User name="old:Main" defn="old:Main" />'
+                '<call name="old:Station" />'
+                '<param value="old must remain" />'
+                '<param value="prefix old:Main must remain" />'
+                '</project>'
+            )
+            source.write_text(source_text, encoding="utf-8")
+
+            rewrite_template_identity(source, destination, "new")
+
+            root = ET.parse(destination).getroot()
+            self.assertEqual(root.get("name"), "new")
+            self.assertEqual(root.find("output").get("name"), "new")
+            self.assertEqual(root.find("User").get("name"), "new:Main")
+            self.assertEqual(root.find("User").get("defn"), "new:Main")
+            self.assertEqual(root.find("call").get("name"), "new:Station")
+            self.assertEqual(root.findall("param")[0].get("value"), "old must remain")
+            self.assertEqual(
+                root.findall("param")[1].get("value"),
+                "prefix old:Main must remain",
+            )
+            self.assertEqual(source.read_text(encoding="utf-8"), source_text)
+
     def test_rewrite_changes_only_project_and_project_level_output_identity(self):
         with tempfile.TemporaryDirectory() as temporary:
             folder = Path(temporary)

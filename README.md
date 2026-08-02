@@ -22,6 +22,31 @@ instance and does not attach to an already-open GUI. `repair_connection` quits
 that instance only when the backend reports that the MCP server owns it;
 otherwise it disconnects without terminating the external process.
 
+### Verified PSCAD 4.6.2 behavior and limits
+
+- Blank case and library creation uses bundled PSCAD-saved templates. Creation
+  and save-as rewrite the project identity and exact self-namespace references,
+  then require PSCAD to load the expected name and type. Save-as falls back to
+  save plus an atomic copy when the native command does not produce a verified
+  target; the operated source may therefore be saved before copying.
+- Project settings read and write the selected project's parameters. They do
+  not mutate application-global settings.
+- Run is non-blocking. PSCAD 4.6.2 pause and stop remain application-wide
+  commands, even though the tools accept a project name.
+- The shipped PSCAD 4.6.2 Automation Library rejects `create-layer` and
+  `add-to-layer`, including membership in an existing valid layer. Component
+  disable therefore returns `PSCAD_COMMAND_FAILED` instead of claiming a state
+  change; dedicated disabled-layer membership is not available on this tested
+  installation.
+- Connected batch deletion prevalidates targets, translates relative wire
+  vertices, checks for conflicting objects in the required selection area,
+  executes one native canvas deletion, and verifies that planned IDs vanished.
+  It returns `CAPABILITY_UNAVAILABLE` before mutation when a safe selection
+  cannot be formed.
+- Empty-space search uses the 18-unit PSCAD grid and collision margin. Sparse
+  live canvas XML is enriched from the saved project XML and live locations;
+  a conservative 36-by-36 rectangle is used only when neither has dimensions.
+
 ## Tool coverage
 
 The server currently exposes tool groups for:
@@ -242,7 +267,9 @@ Licensed PSCAD 4.6.2 acceptance is opt-in and works only on timestamped copies:
 ```
 
 The runner refuses to start while another PSCAD process is open and never
-broadly terminates PSCAD processes. PSCAD 4.6.2 has been exercised on a real
+broadly terminates PSCAD processes. It runs the six original acceptance tests
+plus eight reliability tests, records owned PIDs and evidence directories, and
+requires all owned processes to exit. PSCAD 4.6.2 has been exercised on a real
 licensed installation; PSCAD 5.x remains contract-tested until a real 5.x
 installation is available for end-to-end acceptance.
 
