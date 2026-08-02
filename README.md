@@ -10,12 +10,17 @@ The server is designed for Windows-based power-system workflows where you want C
 
 PSCAD automation is powerful, but the raw API is not especially friendly for conversational workflows. This project packages that API into structured MCP tools so Copilot CLI can:
 
-- attach to an existing PSCAD session or launch one
+- launch a new PSCAD 4.6.x automation instance, or attach/launch through the modern backend
 - inspect projects, simulation status, and output messages
 - update project settings and component parameters
 - create, place, wire, move, and delete components on the canvas
 - run builds, simulation sets, and output file reads
 - read synced PSCAD API documentation when it needs extra context
+
+The legacy PSCAD 4.6.2 backend is launch-only: it starts a new automation
+instance and does not attach to an already-open GUI. `repair_connection` quits
+that instance only when the backend reports that the MCP server owns it;
+otherwise it disconnects without terminating the external process.
 
 ## Tool coverage
 

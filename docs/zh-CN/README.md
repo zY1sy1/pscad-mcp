@@ -6,6 +6,8 @@
 - PSCAD 5.x：`mhi.pscad` 3.1.x，当前完成契约测试，但由于本机没有 PSCAD 5.x，不能声称端到端真实验收通过；
 - 结果文件：`mhi.psout` 1.3.x。
 
+Legacy PSCAD 4.6.2 后端只支持启动新的 Automation 实例，不能附加到用户已打开的 GUI。`repair_connection` 仅在后端确认该进程属于 MCP 时退出旧实例；非自有连接只会断开，不会终止外部进程。
+
 ## 功能范围
 
 服务器固定注册 53 个工具，分为以下七组：

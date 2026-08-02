@@ -58,8 +58,19 @@ class PscadService:
 
     async def attach_local(self) -> str:
         backend = await self._select_backend()
-        info = await backend.attach()
+        try:
+            info = await backend.attach()
+        except BaseException:
+            if self._backend is backend:
+                self._backend = None
+            raise
         architecture = "x64" if info.x64 else "x86"
+        if info.backend == "legacy":
+            return (
+                "Successfully launched a new PSCAD automation instance using "
+                f"legacy backend for PSCAD {info.version} ({architecture}); legacy "
+                "automation does not attach to an already-open GUI."
+            )
         return (
             f"Successfully attached using {info.backend} backend to "
             f"PSCAD {info.version} ({architecture})."
@@ -90,7 +101,14 @@ class PscadService:
         self._backend = None
 
     async def repair_connection(self) -> str:
-        await self.disconnect()
+        current = self._backend
+        if current is not None:
+            info = await current.heartbeat()
+            if info.owns_process:
+                await current.quit()
+            else:
+                await current.disconnect()
+            self._backend = None
         self.executor.reset()
         return await self.attach_local()
 
