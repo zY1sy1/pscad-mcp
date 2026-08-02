@@ -8,9 +8,11 @@ already open, so teardown can safely verify only the processes launched here.
 from __future__ import annotations
 
 import asyncio
+import io
 import os
 from pathlib import Path
 import unittest
+from contextlib import redirect_stdout
 
 import psutil
 
@@ -103,6 +105,23 @@ class TestLegacyAcceptance(unittest.IsolatedAsyncioTestCase):
         names = {item.name for item in await self.backend.list_projects()}
         self.assertIn(project_name, names)
         return project_name
+
+    async def _wait_for_terminal_state(
+        self, project_name: str, timeout: float
+    ):
+        deadline = asyncio.get_running_loop().time() + timeout
+        terminal = {"completed", "stopped", "failed", "idle"}
+        observed = []
+        while True:
+            state = await self.backend.project_run_state(project_name)
+            observed.append(state.status)
+            if state.status.casefold() in terminal:
+                return state
+            if asyncio.get_running_loop().time() >= deadline:
+                self.fail(
+                    f"Simulation did not finish within {timeout}s; states={observed[-20:]}"
+                )
+            await asyncio.sleep(0.25)
 
     async def test_01_read_only(self) -> None:
         project_name = await self._load_project(
@@ -216,12 +235,40 @@ class TestLegacyAcceptance(unittest.IsolatedAsyncioTestCase):
         project_name = await self._load_project(
             "PSCAD_MCP_ACCEPTANCE_SIMULATION_PROJECT"
         )
-        await asyncio.wait_for(self.backend.run_project(project_name), 360)
+        await asyncio.wait_for(self.backend.run_project(project_name), 10)
+        state = await self._wait_for_terminal_state(project_name, 360)
+        self.assertNotEqual(state.status, "failed")
         output = await self.backend.project_output(project_name)
         self.assertIsInstance(output, str)
         self.assertIn("Solve Time", output)
         print(
             f"ACCEPTANCE_GROUP=simulation-output;PASS;output_chars={len(output)}",
+            flush=True,
+        )
+
+    async def test_05_run_pause_status_stop(self) -> None:
+        project_name = await self._load_project(
+            "PSCAD_MCP_ACCEPTANCE_SIMULATION_PROJECT"
+        )
+        await asyncio.wait_for(self.backend.run_project(project_name), 10)
+        started = await asyncio.wait_for(
+            self.backend.project_run_state(project_name), 10
+        )
+        captured = io.StringIO()
+        with redirect_stdout(captured):
+            await asyncio.wait_for(
+                self.backend.pause_project(project_name), 10
+            )
+        self.assertEqual(captured.getvalue(), "")
+        paused = await asyncio.wait_for(
+            self.backend.project_run_state(project_name), 10
+        )
+        await asyncio.wait_for(self.backend.stop_project(project_name), 10)
+        stopped = await self._wait_for_terminal_state(project_name, 30)
+        self.assertIn(stopped.status, {"completed", "stopped", "idle"})
+        print(
+            "ACCEPTANCE_GROUP=run-control;PASS;"
+            f"started={started.status};paused={paused.status};stopped={stopped.status}",
             flush=True,
         )
 

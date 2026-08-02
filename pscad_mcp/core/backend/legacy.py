@@ -8,6 +8,7 @@ import math
 import os
 import shutil
 import tempfile
+import time
 from collections.abc import Mapping as MappingABC
 from decimal import Decimal, InvalidOperation
 from importlib.resources import as_file, files
@@ -28,9 +29,14 @@ from .base import (
 from . import legacy_support
 
 
+_RUN_STATE_MISSING = object()
+
+
 class LegacyBackend:
     name = "legacy"
     _canvas_grid = 18
+    RUN_STATUS_TIMEOUT = 5.0
+    RUN_START_GRACE = 5.0
     SETTING_DETAIL_TEXT_LIMIT = 64
     SETTING_DETAIL_MAX_DEPTH = 2
     SETTING_DETAIL_MAX_ENTRIES = 2
@@ -69,6 +75,9 @@ class LegacyBackend:
             for name, path in (definition_paths or {}).items()
         }
         self._component_orientations: dict[tuple[str, int], int] = {}
+        self._running_projects: set[str] = set()
+        self._run_activity_seen: set[str] = set()
+        self._run_submitted_at: dict[str, float] = {}
         self.result_adapter = PscadAdapter(
             executor,
             pscad_module=False,
@@ -146,6 +155,9 @@ class LegacyBackend:
         self._app = None
         self.owns_process = False
         self._component_orientations.clear()
+        self._running_projects.clear()
+        self._run_activity_seen.clear()
+        self._run_submitted_at.clear()
 
     async def quit(self) -> None:
         app = self._app
@@ -472,23 +484,329 @@ class LegacyBackend:
 
     async def run_project(self, project_name: str) -> None:
         project = await self._project(project_name)
-        await self.executor.run_safe(project.run, timeout=300.0)
+
+        def start() -> None:
+            command = project.command("run")
+            command.execute(False)
+
+        await self.executor.run_safe(start)
+        self._running_projects.add(project_name)
+        self._run_activity_seen.discard(project_name)
+        self._run_submitted_at[project_name] = time.monotonic()
 
     async def pause_project(self, project_name: str) -> None:
-        project = await self._project(project_name)
-        await self.executor.run_safe(project.pause)
+        await self._run_control_command(
+            "ID_RIBBON_HOME_RUN_PAUSE", "pause_project"
+        )
 
     async def stop_project(self, project_name: str) -> None:
-        project = await self._project(project_name)
-        await self.executor.run_safe(project.stop)
+        await self._run_control_command(
+            "ID_RIBBON_HOME_RUN_STOP", "stop_project"
+        )
+        self._running_projects.clear()
+        self._run_activity_seen.clear()
+        self._run_submitted_at.clear()
+
+    async def _run_control_command(
+        self, command_id: str, operation: str
+    ) -> None:
+        app = self._require_app()
+        command = await self.executor.run_safe(app._command_id_cmd, command_id)
+        response = await self.executor.run_safe(command.execute)
+        legacy_support.require_success(
+            response,
+            operation,
+            {"scope": "all-running-projects"},
+        )
+
+    @staticmethod
+    def _resolve_run_status_future(
+        future: asyncio.Future[Any], payload: tuple[Any, tuple[Any, ...], dict[str, Any]]
+    ) -> None:
+        if not future.done():
+            future.set_result(payload)
+
+    @staticmethod
+    def _normalized_run_status(value: Any) -> str | None:
+        if not isinstance(value, str) or not value.strip():
+            return None
+        raw = value.strip().casefold()
+        aliases = {
+            "build": "building",
+            "building": "building",
+            "run": "running",
+            "running": "running",
+            "pause": "paused",
+            "paused": "paused",
+            "complete": "completed",
+            "completed": "completed",
+            "done": "completed",
+            "stop": "stopped",
+            "stopped": "stopped",
+            "fail": "failed",
+            "failed": "failed",
+            "error": "failed",
+            "idle": "idle",
+            "ready": "idle",
+        }
+        return aliases.get(raw, raw)
+
+    @staticmethod
+    def _run_progress(value: Any) -> float | None:
+        if value is None or value == "":
+            return None
+        if isinstance(value, bool):
+            raise ValueError("Run progress cannot be boolean.")
+        progress = float(value)
+        if not math.isfinite(progress):
+            raise ValueError("Run progress must be finite.")
+        return progress
+
+    @classmethod
+    def _raise_failed_run_status_response(cls, value: Any) -> None:
+        if isinstance(value, ET.Element):
+            for node in value.iter():
+                success = node.get("success")
+                if success is not None and success.casefold() != "true":
+                    legacy_support.require_success(
+                        node,
+                        "get_run_status",
+                        {"response_scope": "callback"},
+                    )
+            return
+        if not isinstance(value, MappingABC):
+            return
+        try:
+            lowered = {str(key).casefold(): item for key, item in value.items()}
+        except Exception:
+            return
+        success = lowered.get("success")
+        has_failed_success = success is not None and (
+            success is not True
+            and (not isinstance(success, str) or success.casefold() != "true")
+        )
+        error = None
+        for key in ("error", "exception", "failure"):
+            if key not in lowered:
+                continue
+            candidate = lowered[key]
+            if candidate is None or candidate is False:
+                continue
+            if isinstance(candidate, str) and not candidate:
+                continue
+            error = candidate
+            break
+        if not has_failed_success and error is None:
+            return
+        raise BackendError(
+            "PSCAD_COMMAND_FAILED",
+            "PSCAD 4.6.2 command 'get_run_status' failed.",
+            cls.name,
+            "get_run_status",
+            {"response": legacy_support.response_payload(value)},
+        )
+
+    @classmethod
+    def _run_state_values(
+        cls, value: Any, depth: int = 0
+    ) -> tuple[Any, Any]:
+        missing = _RUN_STATE_MISSING
+        if depth >= 4:
+            return missing, missing
+        if isinstance(value, ET.Element):
+            status: Any = missing
+            progress: Any = missing
+            status_keys = {"status", "state", "run-status", "run_status", "runstate"}
+            progress_keys = {"progress", "percent", "percentage", "completion"}
+            legacy_flags: dict[str, bool] = {}
+            for node in value.iter():
+                tag = str(node.tag).split("}")[-1].casefold()
+                attributes = {
+                    str(key).casefold(): item for key, item in node.attrib.items()
+                }
+                if tag in {"build", "run"} and "value" in attributes:
+                    flag = str(attributes["value"]).casefold()
+                    if flag in {"true", "false"}:
+                        legacy_flags[tag] = flag == "true"
+                if status is missing:
+                    for key in status_keys:
+                        if key in attributes:
+                            status = attributes[key]
+                            break
+                    if status is missing and "status" in tag:
+                        status = attributes.get("value", node.text)
+                if progress is missing:
+                    for key in progress_keys:
+                        if key in attributes:
+                            progress = attributes[key]
+                            break
+                    if progress is missing and tag in progress_keys:
+                        progress = attributes.get("value", node.text)
+                if status is not missing and progress is not missing:
+                    break
+            if status is missing and {"build", "run"} <= legacy_flags.keys():
+                if legacy_flags["run"]:
+                    status = "running"
+                elif legacy_flags["build"]:
+                    status = "building"
+                else:
+                    status = "idle"
+            return status, progress
+
+        if isinstance(value, MappingABC):
+            try:
+                lowered = {
+                    str(key).casefold(): item for key, item in value.items()
+                }
+            except Exception:
+                return missing, missing
+            status = next(
+                (
+                    lowered[key]
+                    for key in ("status", "state", "run-status", "run_status", "runstate")
+                    if key in lowered
+                ),
+                missing,
+            )
+            progress = next(
+                (
+                    lowered[key]
+                    for key in ("progress", "percent", "percentage", "completion")
+                    if key in lowered
+                ),
+                missing,
+            )
+            if status is not missing:
+                return status, progress
+            for index, item in enumerate(lowered.values()):
+                if index >= 16:
+                    break
+                nested_status, nested_progress = cls._run_state_values(
+                    item, depth + 1
+                )
+                if nested_status is not missing:
+                    return nested_status, nested_progress
+            return missing, missing
+
+        if isinstance(value, (tuple, list)):
+            if value and isinstance(value[0], str):
+                return value[0], value[1] if len(value) > 1 else missing
+            for item in value[:16]:
+                status, progress = cls._run_state_values(item, depth + 1)
+                if status is not missing:
+                    return status, progress
+        return missing, missing
+
+    @classmethod
+    def _parse_run_state(
+        cls,
+        response: Any,
+        callback_args: tuple[Any, ...],
+        callback_kwargs: dict[str, Any],
+    ) -> RunState:
+        candidates = (response, callback_args, callback_kwargs)
+        for candidate in candidates:
+            cls._raise_failed_run_status_response(candidate)
+
+        missing = _RUN_STATE_MISSING
+        status: Any = missing
+        progress: Any = missing
+        for candidate in candidates:
+            candidate_status, candidate_progress = cls._run_state_values(candidate)
+            if status is missing and candidate_status is not missing:
+                status = candidate_status
+            if progress is missing and candidate_progress is not missing:
+                progress = candidate_progress
+            if status is not missing and progress is not missing:
+                break
+
+        normalized = cls._normalized_run_status(status)
+        try:
+            normalized_progress = (
+                None if progress is missing else cls._run_progress(progress)
+            )
+        except (TypeError, ValueError, OverflowError) as error:
+            raise BackendError(
+                "UNEXPECTED_RESPONSE",
+                "PSCAD returned an invalid run progress value.",
+                cls.name,
+                "get_run_status",
+                {"response": legacy_support.response_payload(response)},
+            ) from error
+        if normalized is None:
+            raise BackendError(
+                "UNEXPECTED_RESPONSE",
+                "PSCAD did not return a recognizable run status.",
+                cls.name,
+                "get_run_status",
+                {"response": legacy_support.response_payload(response)},
+            )
+        return RunState(normalized, normalized_progress)
 
     async def project_run_state(self, project_name: str) -> RunState:
         project = await self._project(project_name)
-        run_status = getattr(project, "run_status", None)
-        if run_status is None:
-            return RunState("unknown", None)
-        status, progress = await self.executor.run_safe(run_status)
-        return RunState(str(status), float(progress) if progress is not None else None)
+        loop = asyncio.get_running_loop()
+        future: asyncio.Future[
+            tuple[Any, tuple[Any, ...], dict[str, Any]]
+        ] = loop.create_future()
+
+        def receive(
+            response: Any,
+            *callback_args: Any,
+            **callback_kwargs: Any,
+        ) -> None:
+            payload = (response, callback_args, callback_kwargs)
+            loop.call_soon_threadsafe(
+                self._resolve_run_status_future, future, payload
+            )
+
+        app = self._require_app()
+
+        def request_and_pump() -> None:
+            project.get_run_status(receive)
+            # Legacy post_command() has no background receiver. A synchronous,
+            # read-only command drives its socket dispatcher and invokes receive.
+            app.list_projects()
+
+        await self.executor.run_safe(request_and_pump)
+        try:
+            response, callback_args, callback_kwargs = await asyncio.wait_for(
+                future, self.RUN_STATUS_TIMEOUT
+            )
+        except asyncio.TimeoutError as error:
+            raise BackendError(
+                "PSCAD_COMMAND_TIMEOUT",
+                "PSCAD did not return run status within 5 seconds.",
+                self.name,
+                "get_run_status",
+                {"project": project_name},
+            ) from error
+
+        state = self._parse_run_state(
+            response, callback_args, callback_kwargs
+        )
+        if (
+            state.status == "idle"
+            and project_name in self._running_projects
+            and project_name not in self._run_activity_seen
+            and time.monotonic()
+            - self._run_submitted_at.get(project_name, 0.0)
+            < self.RUN_START_GRACE
+        ):
+            return RunState("starting", state.progress)
+        if state.status in {"building", "running", "paused"}:
+            self._run_activity_seen.add(project_name)
+        if state.status.casefold() in {
+            "complete",
+            "completed",
+            "stopped",
+            "failed",
+            "idle",
+        }:
+            self._running_projects.discard(project_name)
+            self._run_activity_seen.discard(project_name)
+            self._run_submitted_at.pop(project_name, None)
+        return state
 
     async def project_definitions(self, project_name: str) -> list[str]:
         project = await self._project(project_name)

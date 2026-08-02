@@ -1,14 +1,18 @@
+import asyncio
 import json
+import io
 import os
 import tempfile
+import threading
 import unittest
 import xml.etree.ElementTree as ET
 from collections.abc import Mapping
+from contextlib import redirect_stdout
 from decimal import Decimal
 from pathlib import Path
 from unittest.mock import patch
 
-from pscad_mcp.core.backend.base import BackendError
+from pscad_mcp.core.backend.base import BackendError, RunState
 from pscad_mcp.core.backend.legacy import LegacyBackend
 from pscad_mcp.core.backend.legacy_support import project_kind
 from pscad_mcp.core.backend.modern import ModernBackend
@@ -44,6 +48,14 @@ class FakeProject:
         self.native_save_as_response = ET.Element("response", {"success": "true"})
         self.native_save_as_writes = True
         self.native_save_as_payload = None
+        self.run_command = FakeCommand(self, "run")
+        self.run_status_response = ("running", 50.0)
+        self.run_status_args = ()
+        self.run_status_kwargs = {}
+        self.run_status_callback_enabled = True
+        self.run_status_callback_threaded = False
+        self.run_status_requires_pump = False
+        self._pending_run_status_callback = None
 
     def save(self): self.calls.append(("save",))
     def save_as(self, *args, **kwargs):
@@ -68,6 +80,43 @@ class FakeProject:
     def pause(self): self.calls.append(("pause",))
     def stop(self): self.calls.append(("stop",))
     def run_status(self): return ("running", 50.0)
+    def command(self, name):
+        self.calls.append(("command", name))
+        if name != "run":
+            raise KeyError(name)
+        return self.run_command
+    def get_run_status(self, callback):
+        self.calls.append(("get_run_status",))
+        if not self.run_status_callback_enabled:
+            return None
+        if self.run_status_requires_pump:
+            self._pending_run_status_callback = callback
+            return None
+
+        self._send_run_status(callback)
+        return None
+
+    def _send_run_status(self, callback):
+
+        def send():
+            callback(
+                self.run_status_response,
+                *self.run_status_args,
+                **self.run_status_kwargs,
+            )
+
+        if self.run_status_callback_threaded:
+            thread = threading.Thread(target=send)
+            thread.start()
+            thread.join()
+        else:
+            send()
+
+    def pump_run_status(self):
+        callback = self._pending_run_status_callback
+        self._pending_run_status_callback = None
+        if callback is not None:
+            self._send_run_status(callback)
     def definitions(self): return ["master:source", "master:ground"]
     def list_definitions(self): return ["source", "ground"]
     def output(self): return "modern output"
@@ -79,6 +128,25 @@ class FakeProject:
             return False
         self.settings_data.update(values)
         return True
+
+
+class FakeCommand:
+    def __init__(self, owner, name, response=None):
+        self.owner = owner
+        self.name = name
+        self.response = (
+            response
+            if response is not None
+            else ET.Element("response", {"success": "true"})
+        )
+        self.execute_args = []
+
+    def execute(self, wait_for_response=True):
+        self.execute_args.append(wait_for_response)
+        calls = getattr(self.owner, "calls", None)
+        if calls is not None:
+            calls.append(("execute", self.name, wait_for_response))
+        return self.response if wait_for_response else None
 
 
 class ItemsProxy:
@@ -157,6 +225,15 @@ class FakeLegacyApp:
         self.fail_load_names = set()
         self.hidden_load_names = set()
         self.loaded_type_overrides = {}
+        self.command_calls = []
+        self.command_responses = {
+            "ID_RIBBON_HOME_RUN_PAUSE": ET.Element(
+                "response", {"success": "true"}
+            ),
+            "ID_RIBBON_HOME_RUN_STOP": ET.Element(
+                "response", {"success": "true"}
+            ),
+        }
 
     def is_alive(self): return True
     def licensed(self): return True
@@ -178,6 +255,8 @@ class FakeLegacyApp:
             )
             self.project_map[name] = FakeProject(name, loaded_type, path)
     def list_projects(self):
+        for project in self.project_map.values():
+            project.pump_run_status()
         return [{"name": p.name, "type": p.type, "description": p.description} for p in self.project_map.values()]
     def project(self, name): return self.project_map[name]
     def workspace(self): return self.workspace_proxy
@@ -188,6 +267,13 @@ class FakeLegacyApp:
         if updates: self.settings_data.update(updates)
         return dict(self.settings_data)
     def simulation_set(self, name): return self.simsets[name]
+    def _command_id_cmd(self, command_id):
+        self.command_calls.append(command_id)
+        return FakeCommand(
+            self,
+            command_id,
+            self.command_responses[command_id],
+        )
     def quit(self): pass
 
 
@@ -563,6 +649,202 @@ class TestLegacyProjectFiles(unittest.IsolatedAsyncioTestCase):
                 any(call[0] == "save_as" for call in project.calls)
             )
             self.assertNotIn("wrong", backend.definition_paths)
+
+
+class TestLegacyRunControl(unittest.IsolatedAsyncioTestCase):
+    async def make_backend(self):
+        app = FakeLegacyApp()
+        backend = LegacyBackend(
+            ImmediateExecutor(),
+            version="4.6.2",
+            x64=True,
+            automation_module=FakeLegacyAutomation(app),
+        )
+        await backend.attach()
+        return backend, app, app.project_map["case"]
+
+    async def test_run_uses_nonblocking_command_and_allows_immediate_status(self):
+        backend, _app, project = await self.make_backend()
+        project.run_status_response = {"status": "running", "progress": 12}
+
+        await asyncio.wait_for(backend.run_project("case"), 0.1)
+        state = await asyncio.wait_for(backend.project_run_state("case"), 0.1)
+
+        self.assertEqual(project.run_command.execute_args, [False])
+        self.assertNotIn(("run",), project.calls)
+        self.assertEqual(state, RunState("running", 12.0))
+        self.assertIn("case", backend._running_projects)
+
+    async def test_status_maps_xml_tuple_and_dict_callback_payloads(self):
+        backend, _app, project = await self.make_backend()
+        xml_response = ET.fromstring(
+            '<messages><response success="true" sequence-id="7">'
+            '<run-status status="Run" percent="37" />'
+            "</response></messages>"
+        )
+        cases = (
+            (xml_response, (), {}, RunState("running", 37.0)),
+            (("Build", None), (), {}, RunState("building", None)),
+            ({"state": "Paused", "percentage": "64.5"}, (), {}, RunState("paused", 64.5)),
+            (object(), ("Stopped", 100), {}, RunState("stopped", 100.0)),
+            (object(), (), {"status": "Idle", "progress": None}, RunState("idle", None)),
+        )
+
+        for response, args, kwargs, expected in cases:
+            with self.subTest(expected=expected):
+                project.run_status_response = response
+                project.run_status_args = args
+                project.run_status_kwargs = kwargs
+                project.run_status_callback_threaded = expected.status == "paused"
+                self.assertEqual(
+                    await backend.project_run_state("case"),
+                    expected,
+                )
+
+    async def test_status_maps_real_legacy_build_run_transition(self):
+        backend, _app, project = await self.make_backend()
+        await backend.run_project("case")
+
+        def response(build: bool, run: bool):
+            return ET.fromstring(
+                '<commandresponse success="true">'
+                f'<build value="{str(build).lower()}" />'
+                f'<run value="{str(run).lower()}" />'
+                "</commandresponse>"
+            )
+
+        project.run_status_response = response(False, False)
+        self.assertEqual(
+            await backend.project_run_state("case"),
+            RunState("starting", None),
+        )
+        project.run_status_response = response(True, False)
+        self.assertEqual(
+            await backend.project_run_state("case"),
+            RunState("building", None),
+        )
+        project.run_status_response = response(False, True)
+        self.assertEqual(
+            await backend.project_run_state("case"),
+            RunState("running", None),
+        )
+        project.run_status_response = response(False, False)
+        self.assertEqual(
+            await backend.project_run_state("case"),
+            RunState("idle", None),
+        )
+        self.assertNotIn("case", backend._running_projects)
+
+    async def test_status_does_not_remain_starting_after_grace_period(self):
+        backend, _app, project = await self.make_backend()
+        await backend.run_project("case")
+        project.run_status_response = ET.fromstring(
+            '<commandresponse success="true">'
+            '<build value="false" /><run value="false" />'
+            "</commandresponse>"
+        )
+
+        with patch.object(LegacyBackend, "RUN_START_GRACE", 0, create=True):
+            state = await backend.project_run_state("case")
+
+        self.assertEqual(state, RunState("idle", None))
+        self.assertNotIn("case", backend._running_projects)
+
+    async def test_status_timeout_is_bounded(self):
+        backend, _app, project = await self.make_backend()
+        project.run_status_callback_enabled = False
+
+        with patch.object(LegacyBackend, "RUN_STATUS_TIMEOUT", 0.01, create=True):
+            with self.assertRaises(BackendError) as raised:
+                await backend.project_run_state("case")
+
+        self.assertEqual(raised.exception.code, "PSCAD_COMMAND_TIMEOUT")
+        self.assertEqual(raised.exception.operation, "get_run_status")
+
+    async def test_status_pumps_legacy_socket_after_posting_callback(self):
+        backend, _app, project = await self.make_backend()
+        project.run_status_requires_pump = True
+        project.run_status_response = {"status": "running", "progress": 23}
+
+        with patch.object(LegacyBackend, "RUN_STATUS_TIMEOUT", 0.1):
+            state = await backend.project_run_state("case")
+
+        self.assertEqual(state, RunState("running", 23.0))
+
+    async def test_status_rejects_failed_or_unreadable_callback_payload(self):
+        backend, _app, project = await self.make_backend()
+        failures = (
+            ET.fromstring(
+                '<messages><response success="false" sequence-id="9" /></messages>'
+            ),
+            {"error": "status unavailable"},
+        )
+        for response in failures:
+            with self.subTest(response_type=type(response).__name__):
+                project.run_status_response = response
+                with self.assertRaises(BackendError) as raised:
+                    await backend.project_run_state("case")
+                self.assertEqual(raised.exception.code, "PSCAD_COMMAND_FAILED")
+
+        project.run_status_response = object()
+        with self.assertRaises(BackendError) as raised:
+            await backend.project_run_state("case")
+        self.assertEqual(raised.exception.code, "UNEXPECTED_RESPONSE")
+
+    async def test_status_bounds_cyclic_and_unhashable_error_payloads(self):
+        backend, _app, project = await self.make_backend()
+        project.run_status_response = {"error": ["status unavailable"]}
+        with self.assertRaises(BackendError) as raised:
+            await backend.project_run_state("case")
+        self.assertEqual(raised.exception.code, "PSCAD_COMMAND_FAILED")
+
+        cyclic = {}
+        cyclic["nested"] = cyclic
+        project.run_status_response = cyclic
+        with self.assertRaises(BackendError) as raised:
+            await backend.project_run_state("case")
+        self.assertEqual(raised.exception.code, "UNEXPECTED_RESPONSE")
+
+    async def test_terminal_status_clears_running_project_tracking(self):
+        backend, _app, project = await self.make_backend()
+        await backend.run_project("case")
+        self.assertIn("case", backend._running_projects)
+        project.run_status_response = {"status": "Completed", "progress": 100}
+
+        state = await backend.project_run_state("case")
+
+        self.assertEqual(state, RunState("completed", 100.0))
+        self.assertNotIn("case", backend._running_projects)
+        await backend.disconnect()
+        self.assertEqual(backend._running_projects, set())
+
+    async def test_pause_and_stop_use_validated_application_commands(self):
+        backend, app, _project = await self.make_backend()
+        output = io.StringIO()
+
+        with redirect_stdout(output):
+            await backend.pause_project("case")
+        await backend.stop_project("case")
+
+        self.assertEqual(output.getvalue(), "")
+        self.assertEqual(
+            app.command_calls,
+            ["ID_RIBBON_HOME_RUN_PAUSE", "ID_RIBBON_HOME_RUN_STOP"],
+        )
+
+    async def test_pause_and_stop_reject_failed_command_responses(self):
+        for operation, command_id in (
+            ("pause_project", "ID_RIBBON_HOME_RUN_PAUSE"),
+            ("stop_project", "ID_RIBBON_HOME_RUN_STOP"),
+        ):
+            with self.subTest(operation=operation):
+                backend, app, _project = await self.make_backend()
+                app.command_responses[command_id] = ET.Element(
+                    "response", {"success": "false"}
+                )
+                with self.assertRaises(BackendError) as raised:
+                    await getattr(backend, operation)("case")
+                self.assertEqual(raised.exception.code, "PSCAD_COMMAND_FAILED")
 
 
 class TestBackendProjectContracts(unittest.IsolatedAsyncioTestCase):
