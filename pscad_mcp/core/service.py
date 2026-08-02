@@ -8,12 +8,67 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable
 
 from .backend.base import BackendError, BackendInfo
-from .executor import robust_executor
+from .executor import (
+    ExecutorTimeoutError,
+    ExecutorUnhealthyError,
+    robust_executor,
+)
 from .path_policy import PathPolicy
 
 
 BackendFactory = Callable[[], Any | Awaitable[Any]]
 _ERROR_TEXT_LIMIT = 512
+_DEFAULT_ERROR_GUIDANCE = (
+    False,
+    "Inspect get_pscad_status and server logs before retrying.",
+)
+_ERROR_GUIDANCE: dict[str, tuple[bool, str]] = {
+    "CAPABILITY_UNAVAILABLE": (
+        False,
+        "Use a supported PSCAD 4.6 operation or adjust the requested workflow.",
+    ),
+    "CONFIRMATION_REQUIRED": (
+        False,
+        "Review the destructive operation, then call it again with confirm=true.",
+    ),
+    "DEPENDENCY_MISSING": (
+        False,
+        "Install the required PSCAD 4.6 Automation Library dependency.",
+    ),
+    "EXECUTOR_UNHEALTHY": (
+        True,
+        "Call repair_connection before retrying the operation.",
+    ),
+    "INTERNAL_ERROR": _DEFAULT_ERROR_GUIDANCE,
+    "NOT_CONNECTED": (
+        True,
+        "Call get_local_pscad or repair_connection before retrying.",
+    ),
+    "NOT_FOUND": (
+        False,
+        "Check names and list the current PSCAD objects.",
+    ),
+    "PARTIAL_COMPLETION": (
+        False,
+        "Inspect details and the current PSCAD state before retrying.",
+    ),
+    "POSTCONDITION_FAILED": (
+        False,
+        "Inspect details and verify the PSCAD project state before retrying.",
+    ),
+    "PSCAD_COMMAND_FAILED": (
+        False,
+        "Inspect error details and PSCAD project output before retrying.",
+    ),
+    "REPAIR_CLEANUP_FAILED": (
+        False,
+        "Close the owned PSCAD process manually, then call repair_connection.",
+    ),
+    "TIMEOUT": (
+        True,
+        "Call get_pscad_status, then repair_connection before retrying.",
+    ),
+}
 
 
 def _bounded_error_text(error: BaseException) -> str:
@@ -21,6 +76,23 @@ def _bounded_error_text(error: BaseException) -> str:
     if len(value) <= _ERROR_TEXT_LIMIT:
         return value
     return value[: _ERROR_TEXT_LIMIT - 3] + "..."
+
+
+def _bounded_message(error: BaseException) -> str:
+    value = str(error)
+    if len(value) <= _ERROR_TEXT_LIMIT:
+        return value
+    return value[: _ERROR_TEXT_LIMIT - 3] + "..."
+
+
+def _with_error_guidance(payload: dict[str, Any]) -> dict[str, Any]:
+    retryable, suggested_action = _ERROR_GUIDANCE.get(
+        str(payload.get("code")),
+        _DEFAULT_ERROR_GUIDANCE,
+    )
+    payload["retryable"] = retryable
+    payload["suggested_action"] = suggested_action
+    return payload
 
 
 class ConfirmationRequired(BackendError):
@@ -687,13 +759,22 @@ class PscadService:
     @staticmethod
     def error_payload(error: Exception, operation: str) -> dict[str, Any]:
         if isinstance(error, BackendError):
-            return {"error": error.to_dict()}
+            return {"error": _with_error_guidance(error.to_dict())}
+        if isinstance(error, ExecutorTimeoutError):
+            code = "TIMEOUT"
+            backend = "executor"
+        elif isinstance(error, ExecutorUnhealthyError):
+            code = "EXECUTOR_UNHEALTHY"
+            backend = "executor"
+        else:
+            code = "INTERNAL_ERROR"
+            backend = "service"
         return {
-            "error": {
-                "code": "INTERNAL_ERROR",
-                "message": str(error),
-                "backend": "service",
+            "error": _with_error_guidance({
+                "code": code,
+                "message": _bounded_message(error),
+                "backend": backend,
                 "operation": operation,
                 "details": {},
-            }
+            })
         }

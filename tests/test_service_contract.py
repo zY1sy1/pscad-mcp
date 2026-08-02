@@ -2,6 +2,10 @@ import json
 import unittest
 
 from pscad_mcp.core.backend.base import BackendError, BackendInfo
+from pscad_mcp.core.executor import (
+    ExecutorTimeoutError,
+    ExecutorUnhealthyError,
+)
 from pscad_mcp.core.service import ConfirmationRequired, PscadService
 from tests.backend_fakes import ImmediateExecutor
 
@@ -391,6 +395,54 @@ class TestPscadService(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(payload["error"]["code"], "NOT_FOUND")
         self.assertEqual(payload["error"]["details"], {"name": "case"})
+        self.assertFalse(payload["error"]["retryable"])
+        self.assertEqual(
+            payload["error"]["suggested_action"],
+            "Check names and list the current PSCAD objects.",
+        )
+
+    def test_error_payload_classifies_executor_failures(self):
+        timeout = PscadService.error_payload(
+            ExecutorTimeoutError("timed out"),
+            "run_project",
+        )["error"]
+        unhealthy = PscadService.error_payload(
+            ExecutorUnhealthyError("reset required"),
+            "run_project",
+        )["error"]
+
+        self.assertEqual(timeout["code"], "TIMEOUT")
+        self.assertEqual(timeout["backend"], "executor")
+        self.assertTrue(timeout["retryable"])
+        self.assertIn("repair_connection", timeout["suggested_action"])
+        self.assertEqual(unhealthy["code"], "EXECUTOR_UNHEALTHY")
+        self.assertTrue(unhealthy["retryable"])
+
+    def test_error_payload_requires_inspection_after_partial_completion(self):
+        error = BackendError(
+            "PARTIAL_COMPLETION",
+            "some objects were deleted",
+            "legacy",
+            "delete_components",
+            {"deleted_component_ids": [7]},
+        )
+
+        payload = PscadService.error_payload(error, "fallback")["error"]
+
+        self.assertFalse(payload["retryable"])
+        self.assertIn("Inspect details", payload["suggested_action"])
+
+    def test_error_payload_normalizes_unknown_exception_without_traceback(self):
+        payload = PscadService.error_payload(
+            ValueError("invalid value"),
+            "set_project_settings",
+        )["error"]
+
+        self.assertEqual(payload["code"], "INTERNAL_ERROR")
+        self.assertEqual(payload["message"], "invalid value")
+        self.assertFalse(payload["retryable"])
+        self.assertIn("server logs", payload["suggested_action"])
+        self.assertNotIn("traceback", payload)
 
 
 if __name__ == "__main__":
