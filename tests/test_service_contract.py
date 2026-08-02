@@ -18,6 +18,7 @@ class FakeLifecycleBackend:
         attach_error=None,
         disconnect_error=None,
         quit_error=None,
+        heartbeat_error=None,
     ):
         self.name = name
         self.version = version
@@ -28,6 +29,7 @@ class FakeLifecycleBackend:
         self.attach_error = attach_error
         self.disconnect_error = disconnect_error
         self.quit_error = quit_error
+        self.heartbeat_error = heartbeat_error
         self.attached = False
         self.disconnect_count = 0
         self.quit_count = 0
@@ -51,6 +53,8 @@ class FakeLifecycleBackend:
         return self.info()
 
     async def heartbeat(self):
+        if self.heartbeat_error is not None:
+            raise self.heartbeat_error
         return self.info()
 
     async def disconnect(self):
@@ -198,6 +202,116 @@ class TestPscadService(unittest.IsolatedAsyncioTestCase):
                 ("reset", "executor"),
                 ("factory", "backend-2"),
                 ("attach", "backend-2"),
+            ],
+        )
+
+    async def test_repair_unhealthy_owned_process_resets_before_cleanup(self):
+        events = []
+        executor = RecordingExecutor(events)
+        backends = []
+
+        def factory():
+            label = f"backend-{len(backends) + 1}"
+            events.append(("factory", label))
+            backend = FakeLifecycleBackend(
+                owns_process=True,
+                events=events,
+                label=label,
+                heartbeat_error=AssertionError("repair must not call heartbeat"),
+            )
+            backends.append(backend)
+            return backend
+
+        service = PscadService(factory, executor=executor)
+        await service.attach_local()
+        events.clear()
+        executor.healthy = False
+
+        result = await service.repair_connection()
+
+        self.assertEqual(
+            events,
+            [
+                ("reset", "executor"),
+                ("quit", "backend-1"),
+                ("reset", "executor"),
+                ("factory", "backend-2"),
+                ("attach", "backend-2"),
+            ],
+        )
+        self.assertEqual(len(backends), 2)
+        self.assertIn("4.6.2", result)
+
+    async def test_repair_unhealthy_external_process_disconnects_without_heartbeat(self):
+        events = []
+        executor = RecordingExecutor(events)
+        backends = []
+
+        def factory():
+            label = f"backend-{len(backends) + 1}"
+            events.append(("factory", label))
+            backend = FakeLifecycleBackend(
+                owns_process=False,
+                events=events,
+                label=label,
+                heartbeat_error=AssertionError("repair must not call heartbeat"),
+            )
+            backends.append(backend)
+            return backend
+
+        service = PscadService(factory, executor=executor)
+        await service.attach_local()
+        events.clear()
+        executor.healthy = False
+
+        await service.repair_connection()
+
+        self.assertEqual(
+            events,
+            [
+                ("disconnect", "backend-1"),
+                ("reset", "executor"),
+                ("factory", "backend-2"),
+                ("attach", "backend-2"),
+            ],
+        )
+        self.assertEqual(backends[0].quit_count, 0)
+
+    async def test_repair_unhealthy_owned_cleanup_failure_does_not_reattach(self):
+        events = []
+        executor = RecordingExecutor(events)
+        cleanup_failure = RuntimeError("cleanup failed")
+        backend = FakeLifecycleBackend(
+            owns_process=True,
+            events=events,
+            label="backend-1",
+            quit_error=cleanup_failure,
+            heartbeat_error=AssertionError("repair must not call heartbeat"),
+        )
+        created = []
+        service = PscadService(
+            lambda: created.append(FakeLifecycleBackend()),
+            executor=executor,
+        )
+        service._backend = backend
+        backend.attached = True
+        executor.healthy = False
+
+        with self.assertRaises(BackendError) as raised:
+            await service.repair_connection()
+
+        self.assertEqual(raised.exception.code, "REPAIR_CLEANUP_FAILED")
+        self.assertEqual(raised.exception.backend, "legacy")
+        self.assertIsNone(service._backend)
+        self.assertTrue(executor.healthy)
+        self.assertEqual(created, [])
+        self.assertEqual(
+            events,
+            [
+                ("reset", "executor"),
+                ("quit", "backend-1"),
+                ("disconnect", "backend-1"),
+                ("reset", "executor"),
             ],
         )
 

@@ -2,13 +2,26 @@ class ImmediateExecutor:
     def __init__(self):
         self.healthy = True
         self.reset_count = 0
+        self.last_operation = None
+        self.last_error = None
+        self.last_timeout_seconds = None
 
     async def run_safe(self, func, *args, timeout=None, **kwargs):
         return func(*args, **kwargs)
 
     def reset(self):
         self.healthy = True
+        self.last_error = None
+        self.last_timeout_seconds = None
         self.reset_count += 1
+
+    def snapshot(self):
+        return {
+            "healthy": self.healthy,
+            "last_operation": self.last_operation,
+            "last_error": self.last_error,
+            "last_timeout_seconds": self.last_timeout_seconds,
+        }
 
 
 class FakeApplication:

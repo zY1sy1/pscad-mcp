@@ -13,6 +13,14 @@ from .path_policy import PathPolicy
 
 
 BackendFactory = Callable[[], Any | Awaitable[Any]]
+_ERROR_TEXT_LIMIT = 512
+
+
+def _bounded_error_text(error: BaseException) -> str:
+    value = f"{type(error).__name__}: {error}"
+    if len(value) <= _ERROR_TEXT_LIMIT:
+        return value
+    return value[: _ERROR_TEXT_LIMIT - 3] + "..."
 
 
 class ConfirmationRequired(BackendError):
@@ -103,9 +111,38 @@ class PscadService:
     async def repair_connection(self) -> str:
         current = self._backend
         if current is not None:
-            info = await current.heartbeat()
-            if info.owns_process:
-                await current.quit()
+            owns_process = bool(getattr(current, "owns_process", False))
+            executor_was_unhealthy = not bool(
+                getattr(self.executor, "healthy", True)
+            )
+            if owns_process:
+                if executor_was_unhealthy:
+                    self.executor.reset()
+                try:
+                    await current.quit()
+                except Exception as cleanup_error:
+                    if not executor_was_unhealthy:
+                        raise
+                    details = {
+                        "cleanup_error": _bounded_error_text(cleanup_error),
+                    }
+                    try:
+                        await current.disconnect()
+                    except Exception as disconnect_error:
+                        details["disconnect_error"] = _bounded_error_text(
+                            disconnect_error
+                        )
+                    self._backend = None
+                    self.executor.reset()
+                    raise BackendError(
+                        "REPAIR_CLEANUP_FAILED",
+                        "The owned PSCAD process could not be closed after an "
+                        "executor timeout. Close it manually, then call "
+                        "repair_connection again.",
+                        str(getattr(current, "name", "legacy")),
+                        "repair_connection",
+                        details,
+                    ) from cleanup_error
             else:
                 await current.disconnect()
             self._backend = None
