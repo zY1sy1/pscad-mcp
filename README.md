@@ -26,9 +26,10 @@ otherwise it disconnects without terminating the external process.
 
 - Blank case and library creation uses bundled PSCAD-saved templates. Creation
   and save-as rewrite the project identity and exact self-namespace references,
-  then require PSCAD to load the expected name and type. Save-as falls back to
-  save plus an atomic copy when the native command does not produce a verified
-  target; the operated source may therefore be saved before copying.
+  then require PSCAD to load the expected name and type. New save-as targets
+  try the native command and fall back to save plus an atomic copy when it does
+  not produce a verified target. Existing targets always use the atomic-copy
+  path; the operated source may therefore be saved before copying.
 - Project settings read and write the selected project's parameters. They do
   not mutate application-global settings.
 - Run is non-blocking. PSCAD 4.6.2 pause and stop remain application-wide

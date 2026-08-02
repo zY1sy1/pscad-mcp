@@ -497,6 +497,28 @@ class TestLegacyProjectFiles(unittest.IsolatedAsyncioTestCase):
             )
             self.assertNotIn(("save",), project.calls)
 
+    async def test_legacy_save_as_existing_destination_uses_atomic_fallback(self):
+        with tempfile.TemporaryDirectory() as folder:
+            backend, app = await self.make_backend()
+            _source, project = await self.load_source(backend, app, folder)
+            destination = Path(folder) / "existing_copy.pscx"
+            write_project_file(destination, "previous", "case")
+            project.native_save_as_response = ET.Element(
+                "response", {"success": "true"}
+            )
+
+            await backend.save_project_as(
+                "source", destination.name, str(destination.parent)
+            )
+
+            self.assertFalse(
+                any(call[0] == "save_as" for call in project.calls)
+            )
+            self.assertIn(("save",), project.calls)
+            self.assert_project_identity(
+                destination, "existing_copy", require_output=True
+            )
+
     async def test_legacy_save_as_false_response_uses_verified_atomic_fallback(self):
         with tempfile.TemporaryDirectory() as folder:
             backend, app = await self.make_backend()

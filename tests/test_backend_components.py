@@ -605,6 +605,84 @@ class TestBackendComponentContracts(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(unrelated.deleted)
         self.assertIn(unrelated, project.main.components)
 
+    async def test_legacy_canvas_selection_deletes_component_without_ports(self):
+        backend, project, component = await self.make_legacy_backend()
+        component.port_map = {}
+        component.apply_delete = False
+        selected = []
+
+        def select_components(x1, y1, x2, y2):
+            left, right = sorted((x1, x2))
+            bottom, top = sorted((y1, y2))
+            selected[:] = [
+                item
+                for item in project.main.components
+                if isinstance(item, StatefulComponent)
+                and left <= item.location[0] <= right
+                and bottom <= item.location[1] <= top
+            ]
+            return ET.Element("response", {"success": "true"})
+
+        def delete_selection(_command):
+            for item in list(selected):
+                item.apply_delete = True
+                item.delete()
+            return ET.Element("response", {"success": "true"})
+
+        project.main.select_components = select_components
+        project.main._generic = delete_selection
+
+        await backend.delete_components("case", [component.id])
+
+        self.assertTrue(component.deleted)
+
+    async def test_legacy_canvas_selection_rejects_unlocatable_conflict(self):
+        backend, project, target = await self.make_legacy_backend()
+        target.apply_delete = False
+        conflict = StatefulComponent(8, legacy=True, canvas=project.main)
+        conflict.location = (20, 5)
+
+        def location_unavailable():
+            raise RuntimeError("location unavailable")
+
+        conflict.get_location = location_unavailable
+        project.main.components.append(conflict)
+        selected = []
+        delete_calls = []
+
+        def select_components(x1, y1, x2, y2):
+            left, right = sorted((x1, x2))
+            bottom, top = sorted((y1, y2))
+            selected[:] = [
+                item
+                for item in project.main.components
+                if isinstance(item, StatefulComponent)
+                and left <= item.location[0] <= right
+                and bottom <= item.location[1] <= top
+            ]
+            return ET.Element("response", {"success": "true"})
+
+        def delete_selection(command):
+            delete_calls.append(command)
+            for item in list(selected):
+                item.apply_delete = True
+                item.delete()
+            return ET.Element("response", {"success": "true"})
+
+        project.main.select_components = select_components
+        project.main._generic = delete_selection
+
+        with self.assertRaises(BackendError) as raised:
+            await backend.delete_components("case", [target.id])
+
+        self.assertEqual(raised.exception.code, "CAPABILITY_UNAVAILABLE")
+        self.assertEqual(
+            raised.exception.details["conflicting_object_ids"], [8]
+        )
+        self.assertEqual(delete_calls, [])
+        self.assertFalse(target.deleted)
+        self.assertFalse(conflict.deleted)
+
     def test_legacy_selection_bounds_use_pscad_y_coordinate_order(self):
         self.assertEqual(
             LegacyBackend._selection_bounds(
@@ -979,6 +1057,27 @@ class TestBackendComponentContracts(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertEqual(rectangles, [Rect(270, 288, 36, 36)])
+
+    async def test_legacy_occupied_rectangles_merges_partial_saved_geometry(self):
+        project = LegacyComponentProject()
+        project.main.components[0].location = (270, 288)
+        with tempfile.TemporaryDirectory() as temporary:
+            case_path = Path(temporary) / "case.pscx"
+            case_path.write_text(
+                '<project><definitions><Definition name="Main"><schematic>'
+                '<User id="7" x="450" w="40" />'
+                '</schematic></Definition></definitions></project>',
+                encoding="utf-8",
+            )
+            backend, _project, _component = await self.make_legacy_backend(
+                project, definition_paths={"case": case_path}
+            )
+
+            rectangles = await backend._occupied_rectangles(
+                "case", "Main", project.main
+            )
+
+        self.assertEqual(rectangles, [Rect(450, 288, 40, 36)])
 
 
 if __name__ == "__main__":

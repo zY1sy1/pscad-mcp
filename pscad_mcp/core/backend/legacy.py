@@ -413,47 +413,45 @@ class LegacyBackend:
         kind = self._loaded_project_kind(project, source)
         destination = self._project_destination(filename, folder)
         self._require_project_suffix(destination, kind)
-        native_backup = self._backup_destination(destination)
         native_info: ProjectInfo | None = None
-        try:
-            response = await self.executor.run_safe(
-                project.save_as, str(destination)
-            )
+        tried_native = not destination.exists()
+        if tried_native:
+            try:
+                response = await self.executor.run_safe(
+                    project.save_as, str(destination)
+                )
 
-            if response is not None:
-                try:
-                    legacy_support.require_success(
-                        response,
-                        "save_project_as",
-                        {
-                            "project": project_name,
-                            "destination": str(destination),
-                        },
-                    )
-                except BackendError as error:
-                    if error.code != "PSCAD_COMMAND_FAILED":
-                        raise
-                else:
-                    if destination.is_file():
-                        self._validate_rewritten_project(
-                            destination, kind, destination.stem
+                if response is not None:
+                    try:
+                        legacy_support.require_success(
+                            response,
+                            "save_project_as",
+                            {
+                                "project": project_name,
+                                "destination": str(destination),
+                            },
                         )
-                        native_info = await self._load_and_verify_project(
-                            destination, kind, "save_project_as"
-                        )
-        except BaseException:
-            self._restore_destination(destination, native_backup)
-            native_backup = None
-            raise
+                    except BackendError as error:
+                        if error.code != "PSCAD_COMMAND_FAILED":
+                            raise
+                    else:
+                        if destination.is_file():
+                            self._validate_rewritten_project(
+                                destination, kind, destination.stem
+                            )
+                            native_info = await self._load_and_verify_project(
+                                destination, kind, "save_project_as"
+                            )
+            except BaseException:
+                self._restore_destination(destination, None)
+                raise
 
         if native_info is not None:
-            if native_backup is not None:
-                native_backup.unlink(missing_ok=True)
             self.definition_paths[native_info.name] = destination
             return
 
-        self._restore_destination(destination, native_backup)
-        native_backup = None
+        if tried_native:
+            self._restore_destination(destination, None)
 
         await self.save_project(project_name)
         source = self.definition_paths.get(project_name)
@@ -1756,13 +1754,28 @@ class LegacyBackend:
             for ports in ports_by_component.values()
             for port in ports
         }
-        selection_bounds = {
-            component_id: self._selection_bounds(
-                [(port.x, port.y) for port in ports],
-                padding=self._canvas_grid * 2,
-            )
-            for component_id, ports in ports_by_component.items()
-        }
+        selection_bounds = {}
+        for component_id, component in zip(unique_ids, targets):
+            points = [
+                (port.x, port.y)
+                for port in ports_by_component[component_id]
+            ]
+            location_method = getattr(component, "get_location", None)
+            try:
+                if location_method is not None:
+                    location = await self.executor.run_safe(location_method)
+                else:
+                    location = await self.executor.run_safe(
+                        lambda item=component: item.location
+                    )
+            except Exception:
+                location = None
+            if location is not None:
+                points.append((int(location[0]), int(location[1])))
+            if points:
+                selection_bounds[component_id] = self._selection_bounds(
+                    points, padding=self._canvas_grid * 2
+                )
         objects = list(await self.executor.run_safe(canvas.find_all))
         wires = []
         seen_wire_ids = set()
@@ -1847,6 +1860,7 @@ class LegacyBackend:
 
     async def _selection_conflicts(
         self,
+        project_name: str,
         canvas: Any,
         bounds: tuple[int, int, int, int],
         target_ids: Sequence[int],
@@ -1857,7 +1871,20 @@ class LegacyBackend:
         for value in list(await self.executor.run_safe(canvas.find_all)):
             if type(value).__name__ == "WireOrthogonal":
                 continue
-            object_id = self._component_id(value)
+            try:
+                object_id = self._component_id(value)
+            except (TypeError, ValueError) as error:
+                raise BackendError(
+                    "CAPABILITY_UNAVAILABLE",
+                    "PSCAD 4.6.2 returned an unidentified object inside "
+                    "the candidate deletion selection.",
+                    self.name,
+                    "delete_components",
+                    {
+                        "project": project_name,
+                        "target_component_ids": sorted(target_id_set),
+                    },
+                ) from error
             if object_id in target_id_set:
                 continue
             location_method = getattr(value, "get_location", None)
@@ -1871,8 +1898,10 @@ class LegacyBackend:
                         lambda item=value: item.location
                     )
             except Exception:
+                conflicts.append(object_id)
                 continue
             if location is None:
+                conflicts.append(object_id)
                 continue
             x, y = int(location[0]), int(location[1])
             if left <= x <= right and bottom <= y <= top:
@@ -1929,7 +1958,7 @@ class LegacyBackend:
                 [selection_bounds[value] for value in target_ids]
             )
             conflicts = await self._selection_conflicts(
-                canvas, combined_bounds, target_ids
+                project_name, canvas, combined_bounds, target_ids
             )
             if conflicts:
                 raise BackendError(
@@ -2527,8 +2556,8 @@ class LegacyBackend:
                 x = (
                     int(raw_x)
                     if raw_x is not None
-                    else saved.x
-                    if saved is not None
+                    else saved.get("x")
+                    if saved is not None and saved.get("x") is not None
                     else live[0]
                     if live is not None
                     else 0
@@ -2536,8 +2565,8 @@ class LegacyBackend:
                 y = (
                     int(raw_y)
                     if raw_y is not None
-                    else saved.y
-                    if saved is not None
+                    else saved.get("y")
+                    if saved is not None and saved.get("y") is not None
                     else live[1]
                     if live is not None
                     else 0
@@ -2545,15 +2574,15 @@ class LegacyBackend:
                 rectangle_width = (
                     int(raw_width)
                     if raw_width is not None
-                    else saved.width
-                    if saved is not None
+                    else saved.get("w")
+                    if saved is not None and saved.get("w") is not None
                     else 36
                 )
                 rectangle_height = (
                     int(raw_height)
                     if raw_height is not None
-                    else saved.height
-                    if saved is not None
+                    else saved.get("h")
+                    if saved is not None and saved.get("h") is not None
                     else 36
                 )
                 rectangles.append(
@@ -2575,7 +2604,7 @@ class LegacyBackend:
 
     def _saved_canvas_rectangles(
         self, project_name: str, canvas_name: str
-    ) -> dict[int, legacy_support.Rect]:
+    ) -> dict[int, dict[str, int]]:
         path = self.definition_paths.get(project_name)
         if path is None or not path.is_file():
             return {}
@@ -2606,19 +2635,24 @@ class LegacyBackend:
         if schematic is None:
             return {}
 
-        rectangles: dict[int, legacy_support.Rect] = {}
+        rectangles: dict[int, dict[str, int]] = {}
         for node in schematic:
             raw_id = node.get("id")
             if raw_id is None:
                 continue
             try:
                 object_id = int(raw_id)
-                rectangles[object_id] = legacy_support.Rect(
-                    int(node.get("x", "0")),
-                    int(node.get("y", "0")),
-                    max(int(node.get("w", "36")), 1),
-                    max(int(node.get("h", "36")), 1),
-                )
             except ValueError:
                 continue
+            geometry = {}
+            for attribute in ("x", "y", "w", "h"):
+                raw_value = node.get(attribute)
+                if raw_value is None:
+                    continue
+                try:
+                    geometry[attribute] = int(raw_value)
+                except ValueError:
+                    continue
+            if geometry:
+                rectangles[object_id] = geometry
         return rectangles
