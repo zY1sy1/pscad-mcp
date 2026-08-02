@@ -67,7 +67,7 @@ async def repair_connection() -> str:
     """Force-reset the connection to PSCAD."""
     return await pscad_manager.repair_connection()
 
-async def quit_pscad(confirm: bool = False) -> Any:
+async def quit_pscad(confirm: bool = False) -> str | dict[str, Any]:
     """Terminate the PSCAD application."""
     try:
         return await pscad_manager.quit_pscad(confirm=confirm)

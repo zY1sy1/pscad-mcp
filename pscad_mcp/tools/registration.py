@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from functools import wraps
-from typing import Any, ParamSpec, TypeVar
+import inspect
+from typing import Any, ParamSpec, TypeVar, Union
 
 from mcp.server.fastmcp import FastMCP
 
@@ -28,4 +29,14 @@ def register_tool(
         except Exception as error:
             return pscad_manager.error_payload(error, function.__name__)
 
+    signature = inspect.signature(function)
+    return_annotation = signature.return_annotation
+    if return_annotation is inspect.Signature.empty:
+        return_annotation = Any
+    error_aware_return = Union[return_annotation, dict[str, Any]]
+    guarded.__signature__ = signature.replace(
+        return_annotation=error_aware_return
+    )
+    guarded.__annotations__ = dict(function.__annotations__)
+    guarded.__annotations__["return"] = error_aware_return
     mcp.tool()(guarded)

@@ -49,12 +49,16 @@ class TestProtocolIntegrity(unittest.IsolatedAsyncioTestCase):
         result = await create_server()._tool_manager.call_tool(
             "run_project",
             {"project_name": "missing"},
+            convert_result=True,
         )
 
-        self.assertEqual(result["error"]["code"], "NOT_FOUND")
-        self.assertEqual(result["error"]["backend"], "legacy")
+        content, structured = result
+        payload = structured["result"]["error"]
+        self.assertTrue(content)
+        self.assertEqual(payload["code"], "NOT_FOUND")
+        self.assertEqual(payload["backend"], "legacy")
         self.assertEqual(
-            result["error"]["details"],
+            payload["details"],
             {"project_name": "missing"},
         )
 
@@ -66,10 +70,30 @@ class TestProtocolIntegrity(unittest.IsolatedAsyncioTestCase):
         result = await create_server()._tool_manager.call_tool(
             "run_project",
             {"project_name": "bad"},
+            convert_result=True,
         )
 
-        self.assertEqual(result["error"]["code"], "INTERNAL_ERROR")
-        self.assertFalse(result["error"]["retryable"])
+        _, structured = result
+        payload = structured["result"]["error"]
+        self.assertEqual(payload["code"], "INTERNAL_ERROR")
+        self.assertFalse(payload["retryable"])
+
+    async def test_fastmcp_success_keeps_typed_structured_output(self):
+        self.mock_service.run_project = AsyncMock(return_value="started")
+        server = create_server()
+
+        _, structured = await server._tool_manager.call_tool(
+            "run_project",
+            {"project_name": "case"},
+            convert_result=True,
+        )
+
+        tool = server._tool_manager._tools["run_project"]
+        self.assertEqual(structured["result"], "started")
+        self.assertEqual(
+            tool.parameters["properties"]["project_name"]["type"],
+            "string",
+        )
 
     async def test_direct_tool_calls_still_raise_backend_errors(self):
         error = BackendError(
