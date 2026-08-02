@@ -2,6 +2,7 @@ from typing import List, Dict, Any, Optional
 from mcp.server.fastmcp import FastMCP
 from ..core.connection_manager import pscad_manager
 from ..core.executor import robust_executor
+from .registration import register_tool
 
 async def load_projects(filenames: List[str]) -> str:
     """Load projects or workspace into PSCAD."""
@@ -84,15 +85,15 @@ def _value_in_range(value: Any, legal_range: Any) -> bool:
 
 def register_project_tools(mcp: FastMCP):
     """Register tools for managing projects and components."""
-    mcp.tool()(load_projects)
-    mcp.tool()(list_projects)
-    mcp.tool()(run_project)
-    mcp.tool()(get_run_status)
-    mcp.tool()(find_components)
-    mcp.tool()(get_component_parameters)
-    mcp.tool()(set_component_parameters)
-    mcp.tool()(validate_component_parameters)
-    mcp.tool()(pause_simulation)
-    mcp.tool()(stop_simulation)
-    mcp.tool()(get_project_settings)
-    mcp.tool()(set_project_settings)
+    register_tool(mcp, load_projects)
+    register_tool(mcp, list_projects)
+    register_tool(mcp, run_project)
+    register_tool(mcp, get_run_status)
+    register_tool(mcp, find_components)
+    register_tool(mcp, get_component_parameters)
+    register_tool(mcp, set_component_parameters)
+    register_tool(mcp, validate_component_parameters)
+    register_tool(mcp, pause_simulation)
+    register_tool(mcp, stop_simulation)
+    register_tool(mcp, get_project_settings)
+    register_tool(mcp, set_project_settings)
