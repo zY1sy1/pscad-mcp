@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Sequence
 
 from ..pscad_adapter import PscadAdapter
 from ..pscad_config import _version_key
@@ -378,8 +378,20 @@ class ModernBackend:
         await self.adapter.call(component, "enable" if enabled else "disable")
 
     async def delete_component(self, project_name: str, component_id: int) -> None:
-        component = await self._component(project_name, component_id)
-        await self.adapter.call(component, "delete")
+        await self.delete_components(project_name, [component_id])
+
+    async def delete_components(
+        self, project_name: str, component_ids: Sequence[int]
+    ) -> None:
+        unique_ids = list(dict.fromkeys(int(value) for value in component_ids))
+        if not unique_ids:
+            raise ValueError("component_ids must not be empty.")
+        components = [
+            await self._component(project_name, component_id)
+            for component_id in unique_ids
+        ]
+        for component in components:
+            await self.adapter.call(component, "delete")
 
     async def add_component(
         self,

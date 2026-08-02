@@ -7,10 +7,27 @@ from tests.backend_fakes import ImmediateExecutor
 
 
 class FakeLifecycleBackend:
-    def __init__(self, name="legacy", version="4.6.2"):
+    def __init__(
+        self,
+        name="legacy",
+        version="4.6.2",
+        *,
+        owns_process=True,
+        events=None,
+        label="backend",
+        attach_error=None,
+        disconnect_error=None,
+        quit_error=None,
+    ):
         self.name = name
         self.version = version
         self.x64 = True
+        self.owns_process = owns_process
+        self.events = events if events is not None else []
+        self.label = label
+        self.attach_error = attach_error
+        self.disconnect_error = disconnect_error
+        self.quit_error = quit_error
         self.attached = False
         self.disconnect_count = 0
         self.quit_count = 0
@@ -23,10 +40,13 @@ class FakeLifecycleBackend:
             self.attached,
             False,
             True if self.attached else None,
-            self.attached,
+            self.owns_process,
         )
 
     async def attach(self):
+        self.events.append(("attach", self.label))
+        if self.attach_error is not None:
+            raise self.attach_error
         self.attached = True
         return self.info()
 
@@ -34,12 +54,28 @@ class FakeLifecycleBackend:
         return self.info()
 
     async def disconnect(self):
+        self.events.append(("disconnect", self.label))
+        if self.disconnect_error is not None:
+            raise self.disconnect_error
         self.disconnect_count += 1
         self.attached = False
 
     async def quit(self):
+        self.events.append(("quit", self.label))
+        if self.quit_error is not None:
+            raise self.quit_error
         self.quit_count += 1
         self.attached = False
+
+
+class RecordingExecutor(ImmediateExecutor):
+    def __init__(self, events):
+        super().__init__()
+        self.events = events
+
+    def reset(self):
+        self.events.append(("reset", "executor"))
+        super().reset()
 
 
 class TestPscadService(unittest.IsolatedAsyncioTestCase):
@@ -94,24 +130,143 @@ class TestPscadService(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(backend.quit_count, 0)
 
-    async def test_repair_disconnects_resets_and_selects_fresh_backend(self):
-        executor = ImmediateExecutor()
+    async def test_repair_quits_owned_process_before_reset_and_fresh_attach(self):
+        events = []
+        executor = RecordingExecutor(events)
         backends = []
 
         def factory():
-            backend = FakeLifecycleBackend()
+            label = f"backend-{len(backends) + 1}"
+            events.append(("factory", label))
+            backend = FakeLifecycleBackend(
+                owns_process=True,
+                events=events,
+                label=label,
+            )
             backends.append(backend)
             return backend
 
         service = PscadService(factory, executor=executor)
         await service.attach_local()
+        events.clear()
 
         result = await service.repair_connection()
 
         self.assertEqual(len(backends), 2)
-        self.assertEqual(backends[0].disconnect_count, 1)
+        self.assertEqual(backends[0].quit_count, 1)
+        self.assertEqual(backends[0].disconnect_count, 0)
         self.assertEqual(executor.reset_count, 1)
+        self.assertEqual(
+            events,
+            [
+                ("quit", "backend-1"),
+                ("reset", "executor"),
+                ("factory", "backend-2"),
+                ("attach", "backend-2"),
+            ],
+        )
         self.assertIn("4.6.2", result)
+
+    async def test_repair_disconnects_non_owned_process_before_fresh_attach(self):
+        events = []
+        executor = RecordingExecutor(events)
+        backends = []
+
+        def factory():
+            label = f"backend-{len(backends) + 1}"
+            events.append(("factory", label))
+            backend = FakeLifecycleBackend(
+                owns_process=False,
+                events=events,
+                label=label,
+            )
+            backends.append(backend)
+            return backend
+
+        service = PscadService(factory, executor=executor)
+        await service.attach_local()
+        events.clear()
+
+        await service.repair_connection()
+
+        self.assertEqual(backends[0].disconnect_count, 1)
+        self.assertEqual(backends[0].quit_count, 0)
+        self.assertEqual(
+            events,
+            [
+                ("disconnect", "backend-1"),
+                ("reset", "executor"),
+                ("factory", "backend-2"),
+                ("attach", "backend-2"),
+            ],
+        )
+
+    async def test_repair_shutdown_failure_preserves_original_backend(self):
+        for owns_process in (True, False):
+            with self.subTest(owns_process=owns_process):
+                failure = BackendError(
+                    "SHUTDOWN_FAILED",
+                    "shutdown failed",
+                    "legacy",
+                    "repair_connection",
+                )
+                backend = FakeLifecycleBackend(
+                    owns_process=owns_process,
+                    quit_error=failure if owns_process else None,
+                    disconnect_error=None if owns_process else failure,
+                )
+                created = [backend]
+                executor = ImmediateExecutor()
+                service = PscadService(
+                    lambda: created.append(FakeLifecycleBackend()),
+                    executor=executor,
+                )
+                service._backend = backend
+                backend.attached = True
+
+                with self.assertRaises(BackendError) as raised:
+                    await service.repair_connection()
+
+                self.assertIs(raised.exception, failure)
+                self.assertIs(service._backend, backend)
+                self.assertEqual(executor.reset_count, 0)
+                self.assertEqual(len(created), 1)
+
+    async def test_repair_fresh_attach_failure_clears_failed_candidate(self):
+        failure = BackendError(
+            "ATTACH_FAILED",
+            "attach failed",
+            "legacy",
+            "attach",
+        )
+        first = FakeLifecycleBackend(owns_process=False, label="backend-1")
+        second = FakeLifecycleBackend(
+            owns_process=True,
+            label="backend-2",
+            attach_error=failure,
+        )
+        backends = [first, second]
+        service = PscadService(
+            lambda: backends.pop(0),
+            executor=ImmediateExecutor(),
+        )
+        await service.attach_local()
+
+        with self.assertRaises(BackendError) as raised:
+            await service.repair_connection()
+
+        self.assertIs(raised.exception, failure)
+        self.assertIsNone(service._backend)
+        self.assertEqual(service.executor.reset_count, 1)
+
+    async def test_legacy_attach_wording_describes_launch_only_behavior(self):
+        backend = FakeLifecycleBackend(name="legacy", version="4.6.2")
+        service = PscadService(lambda: backend, executor=ImmediateExecutor())
+
+        result = await service.attach_local()
+
+        self.assertIn("launched a new PSCAD automation instance", result)
+        self.assertIn("does not attach to an already-open GUI", result)
 
     def test_error_payload_preserves_backend_details(self):
         error = BackendError(

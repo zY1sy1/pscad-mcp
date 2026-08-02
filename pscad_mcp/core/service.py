@@ -58,8 +58,19 @@ class PscadService:
 
     async def attach_local(self) -> str:
         backend = await self._select_backend()
-        info = await backend.attach()
+        try:
+            info = await backend.attach()
+        except BaseException:
+            if self._backend is backend:
+                self._backend = None
+            raise
         architecture = "x64" if info.x64 else "x86"
+        if info.backend == "legacy":
+            return (
+                "Successfully launched a new PSCAD automation instance using "
+                f"legacy backend for PSCAD {info.version} ({architecture}); legacy "
+                "automation does not attach to an already-open GUI."
+            )
         return (
             f"Successfully attached using {info.backend} backend to "
             f"PSCAD {info.version} ({architecture})."
@@ -90,7 +101,14 @@ class PscadService:
         self._backend = None
 
     async def repair_connection(self) -> str:
-        await self.disconnect()
+        current = self._backend
+        if current is not None:
+            info = await current.heartbeat()
+            if info.owns_process:
+                await current.quit()
+            else:
+                await current.disconnect()
+            self._backend = None
         self.executor.reset()
         return await self.attach_local()
 
@@ -405,7 +423,7 @@ class PscadService:
     ) -> str:
         if not confirm:
             raise ConfirmationRequired("delete_component")
-        await self.backend.delete_component(project_name, component_id)
+        await self.backend.delete_components(project_name, [component_id])
         return f"Component {component_id} deleted."
 
     async def delete_components(
@@ -417,13 +435,10 @@ class PscadService:
     ) -> str:
         if not confirm:
             raise ConfirmationRequired("delete_components")
-        unique_ids = list(dict.fromkeys(component_ids))
+        unique_ids = list(dict.fromkeys(int(value) for value in component_ids))
         if not unique_ids:
             raise ValueError("component_ids must not be empty.")
-        for component_id in unique_ids:
-            await self.backend.get_component_location(project_name, component_id)
-        for component_id in unique_ids:
-            await self.backend.delete_component(project_name, component_id)
+        await self.backend.delete_components(project_name, unique_ids)
         return f"Deleted {len(unique_ids)} component(s)."
 
     async def add_canvas_component(

@@ -2,7 +2,9 @@ import unittest
 import xml.etree.ElementTree as ET
 from types import SimpleNamespace
 
+from pscad_mcp.core.backend.base import BackendError
 from pscad_mcp.core.backend.legacy import LegacyBackend
+from pscad_mcp.core.backend.legacy_support import Rect
 from pscad_mcp.core.backend.modern import ModernBackend
 from tests.backend_fakes import (
     FakeLegacyAutomation,
@@ -182,6 +184,8 @@ class CanvasState:
             node = ET.SubElement(components, tag)
             node.set("id", str(item.id))
             node.set("classid", class_id)
+            node.set("x", str(item.location[0]))
+            node.set("y", str(item.location[1]))
         response = ET.Element("response")
         response.append(components)
         return response
@@ -204,6 +208,38 @@ class CanvasState:
 
     def component(self, object_id):
         return next(item for item in self.items if item.id == int(object_id))
+
+
+class RectangleCanvas(CanvasState):
+    def __init__(self, snapshots, closest=None):
+        super().__init__(modern=False)
+        self.snapshots = [list(snapshot) for snapshot in snapshots]
+        self.list_calls = 0
+        self.closest_result = closest
+        if closest is None:
+            self.closest_empty_rect = None
+
+    def closest_empty_rect(self, width, height, point):
+        return self.closest_result
+
+    def list_components(self):
+        index = min(self.list_calls, len(self.snapshots) - 1)
+        self.list_calls += 1
+        response = ET.Element("response", {"success": "true"})
+        components = ET.SubElement(response, "components")
+        for object_id, attributes in enumerate(self.snapshots[index], start=1):
+            ET.SubElement(
+                components,
+                "User",
+                {
+                    "id": str(object_id),
+                    **{
+                        key: str(value)
+                        for key, value in attributes.items()
+                    },
+                },
+            )
+        return response
 
 
 class SnappingLegacyCanvas(CanvasState):
@@ -247,6 +283,18 @@ class CanvasApp:
 
 
 class TestBackendCanvasContracts(unittest.IsolatedAsyncioTestCase):
+    async def make_legacy_backend(self, canvas):
+        project = CanvasProject(canvas)
+        app = CanvasApp(project, modern=False)
+        backend = LegacyBackend(
+            ImmediateExecutor(),
+            version="4.6.2",
+            x64=True,
+            automation_module=FakeLegacyAutomation(app),
+        )
+        await backend.attach()
+        return backend
+
     async def make_backends(self):
         result = []
         for modern in (False, True):
@@ -333,7 +381,84 @@ class TestBackendCanvasContracts(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(graph["id"], 101)
                 self.assertEqual(control["control_ids"], [])
                 self.assertEqual(len(listed), 2)
-                self.assertEqual(empty, {"x": 11, "y": 11, "width": 4, "height": 5})
+                if backend.name == "legacy":
+                    self.assertEqual(empty["x"] % 18, 0)
+                    self.assertEqual(empty["y"] % 18, 0)
+                    self.assertEqual((empty["width"], empty["height"]), (4, 5))
+                else:
+                    self.assertEqual(
+                        empty,
+                        {"x": 11, "y": 11, "width": 4, "height": 5},
+                    )
+
+    async def test_legacy_empty_space_rejects_xml_rectangle_and_margin_overlap(self):
+        occupied = [{"x": 18, "y": 18, "w": 36, "h": 36}]
+        canvas = RectangleCanvas(
+            [occupied, occupied],
+            SimpleNamespace(x=36, y=36, width=18, height=18),
+        )
+        backend = await self.make_legacy_backend(canvas)
+
+        result = await backend.find_empty_space("case", "Main", 18, 18, (36, 36))
+
+        self.assertEqual(result, {"x": 72, "y": 0, "width": 18, "height": 18})
+        self.assertEqual(canvas.find_all(), [])
+        self.assertEqual(canvas.list_calls, 2)
+
+    async def test_legacy_empty_space_prefers_clear_snapped_vendor_candidate(self):
+        canvas = RectangleCanvas(
+            [[], []],
+            SimpleNamespace(x=91, y=55, width=18, height=18),
+        )
+        backend = await self.make_legacy_backend(canvas)
+
+        result = await backend.find_empty_space("case", "Main", 18, 18, (0, 0))
+
+        self.assertEqual(result, {"x": 90, "y": 54, "width": 18, "height": 18})
+
+    async def test_legacy_empty_space_uses_conservative_missing_dimensions(self):
+        occupied = [{"x": 0, "y": 0}]
+        canvas = RectangleCanvas([occupied, occupied])
+        backend = await self.make_legacy_backend(canvas)
+
+        result = await backend.find_empty_space("case", "Main", 18, 18, (36, 0))
+
+        self.assertEqual(result, {"x": 54, "y": -18, "width": 18, "height": 18})
+
+    async def test_legacy_empty_space_is_grid_aligned_and_deterministic(self):
+        occupied = [{"x": 18, "y": 18, "w": 18, "h": 18}]
+        canvas = RectangleCanvas([occupied])
+        backend = await self.make_legacy_backend(canvas)
+
+        first = await backend.find_empty_space("case", "Main", 18, 18, (19, 20))
+        second = await backend.find_empty_space("case", "Main", 18, 18, (19, 20))
+
+        self.assertEqual(first, second)
+        self.assertEqual(first, {"x": -18, "y": -18, "width": 18, "height": 18})
+        self.assertEqual(first["x"] % 18, 0)
+        self.assertEqual(first["y"] % 18, 0)
+
+    async def test_legacy_empty_space_rechecks_after_second_canvas_read(self):
+        newly_occupied = [{"x": 18, "y": 18, "w": 18, "h": 18}]
+        canvas = RectangleCanvas([[], newly_occupied])
+        backend = await self.make_legacy_backend(canvas)
+
+        result = await backend.find_empty_space("case", "Main", 18, 18, (18, 18))
+
+        returned = Rect(result["x"], result["y"], result["width"], result["height"])
+        self.assertFalse(Rect(18, 18, 18, 18).intersects(returned, margin=18))
+        self.assertEqual(result, {"x": -18, "y": -18, "width": 18, "height": 18})
+        self.assertEqual(canvas.list_calls, 2)
+
+    async def test_legacy_empty_space_raises_when_search_bound_is_occupied(self):
+        occupied = [{"x": -2000, "y": -2000, "w": 4000, "h": 4000}]
+        canvas = RectangleCanvas([occupied, occupied])
+        backend = await self.make_legacy_backend(canvas)
+
+        with self.assertRaises(BackendError) as raised:
+            await backend.find_empty_space("case", "Main", 18, 18, (0, 0))
+
+        self.assertEqual(raised.exception.code, "NO_EMPTY_SPACE")
 
 
 if __name__ == "__main__":

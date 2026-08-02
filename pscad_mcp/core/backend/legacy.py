@@ -4,8 +4,17 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+import math
+import os
+import re
+import shutil
+import tempfile
+import time
+from collections.abc import Mapping as MappingABC
+from decimal import Decimal, InvalidOperation
+from importlib.resources import as_file, files
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 import xml.etree.ElementTree as ET
 
 from ..definition_metadata import DefinitionMetadata, read_definition_metadata
@@ -18,11 +27,24 @@ from .base import (
     ProjectInfo,
     RunState,
 )
+from . import legacy_support
+
+
+_RUN_STATE_MISSING = object()
 
 
 class LegacyBackend:
     name = "legacy"
     _canvas_grid = 18
+    _disabled_layer = "PSCAD_MCP_DISABLED"
+    RUN_STATUS_TIMEOUT = 5.0
+    RUN_START_GRACE = 5.0
+    SETTING_DETAIL_TEXT_LIMIT = 64
+    SETTING_DETAIL_MAX_DEPTH = 2
+    SETTING_DETAIL_MAX_ENTRIES = 2
+    SETTING_DETAIL_MAX_MISMATCHES = 4
+    SETTING_DETAIL_MAX_SERIALIZED_CHARS = 4096
+    SETTING_DETAIL_MAX_INTEGER_BITS = 4096
 
     def __init__(
         self,
@@ -55,6 +77,10 @@ class LegacyBackend:
             for name, path in (definition_paths or {}).items()
         }
         self._component_orientations: dict[tuple[str, int], int] = {}
+        self._running_projects: set[str] = set()
+        self._run_activity_seen: set[str] = set()
+        self._run_submitted_at: dict[str, float] = {}
+        self._known_managed_layers: set[tuple[str, str]] = set()
         self.result_adapter = PscadAdapter(
             executor,
             pscad_module=False,
@@ -132,6 +158,10 @@ class LegacyBackend:
         self._app = None
         self.owns_process = False
         self._component_orientations.clear()
+        self._running_projects.clear()
+        self._run_activity_seen.clear()
+        self._run_submitted_at.clear()
+        self._known_managed_layers.clear()
 
     async def quit(self) -> None:
         app = self._app
@@ -178,24 +208,198 @@ class LegacyBackend:
         values = await self.executor.run_safe(self._require_app().list_projects)
         return [self._project_info(value) for value in values]
 
+    @staticmethod
+    def _project_destination(filename: str, folder: str | None) -> Path:
+        path = Path(folder) / filename if folder else Path(filename)
+        return path.resolve()
+
+    @staticmethod
+    def _require_project_suffix(destination: Path, kind: str) -> None:
+        expected_suffix = ".pscx" if kind == "case" else ".pslx"
+        if destination.suffix.casefold() != expected_suffix:
+            raise ValueError(
+                f"{kind} projects require a {expected_suffix} destination."
+            )
+
+    @staticmethod
+    def _loaded_project_kind(project: Any, source: Path | None) -> str:
+        project_type = str(getattr(project, "type", "")).casefold()
+        if project_type == "case":
+            return "case"
+        if project_type == "library":
+            return "library"
+
+        known_path = source
+        if known_path is None:
+            filename = getattr(project, "filename", None)
+            known_path = Path(str(filename)) if filename else None
+        if known_path is not None:
+            marker = ET.Element("project")
+            try:
+                return legacy_support.project_kind(marker, known_path.suffix)
+            except ValueError:
+                pass
+        raise BackendError(
+            "CAPABILITY_UNAVAILABLE",
+            "The PSCAD 4.6.2 project kind could not be determined.",
+            "legacy",
+            "save_project_as",
+            {"project_type": project_type},
+        )
+
+    @staticmethod
+    def _temporary_path(destination: Path, suffix: str) -> Path:
+        descriptor, temporary = tempfile.mkstemp(
+            prefix=f".{destination.name}.",
+            suffix=suffix,
+            dir=destination.parent,
+        )
+        os.close(descriptor)
+        return Path(temporary)
+
+    @classmethod
+    def _backup_destination(cls, destination: Path) -> Path | None:
+        if not destination.exists():
+            return None
+        backup = cls._temporary_path(destination, ".bak")
+        try:
+            shutil.copyfile(destination, backup)
+        except BaseException:
+            backup.unlink(missing_ok=True)
+            raise
+        return backup
+
+    @staticmethod
+    def _restore_destination(
+        destination: Path, backup: Path | None
+    ) -> None:
+        if backup is None:
+            destination.unlink(missing_ok=True)
+        else:
+            os.replace(backup, destination)
+
+    @staticmethod
+    def _validate_rewritten_project(
+        destination: Path, kind: str, expected_name: str
+    ) -> None:
+        root = ET.parse(destination).getroot()
+        if root.tag != "project":
+            raise ValueError(
+                f"Expected root <project> but found <{root.tag}>."
+            )
+        actual_kind = legacy_support.project_kind(root, destination.suffix)
+        if actual_kind != kind:
+            raise ValueError(
+                f"Expected a {kind} project but found {actual_kind}."
+            )
+        if root.get("name") != expected_name:
+            raise ValueError("Rewritten project root identity is invalid.")
+        if any(
+            output.get("name") != expected_name
+            for output in root.findall("./output")
+        ):
+            raise ValueError("Rewritten project output identity is invalid.")
+
+    async def _load_and_verify_project(
+        self, destination: Path, kind: str, operation: str
+    ) -> ProjectInfo:
+        await self.executor.run_safe(
+            self._require_app().load, str(destination)
+        )
+        expected_name = destination.stem
+        expected_type = "Case" if kind == "case" else "Library"
+        projects = await self.list_projects()
+        match = next(
+            (item for item in projects if item.name == expected_name), None
+        )
+        if match is None or match.type.casefold() != expected_type.casefold():
+            raise BackendError(
+                "POSTCONDITION_FAILED",
+                "PSCAD did not load the expected project.",
+                self.name,
+                operation,
+                {
+                    "path": str(destination),
+                    "expected_name": expected_name,
+                    "expected_type": expected_type,
+                },
+            )
+        return match
+
+    async def _copy_rewrite_load_verify(
+        self,
+        source: Path,
+        destination: Path,
+        kind: str,
+        operation: str,
+    ) -> ProjectInfo:
+        temporary: Path | None = self._temporary_path(
+            destination, destination.suffix
+        )
+        backup: Path | None = None
+        replaced = False
+        try:
+            shutil.copyfile(source, temporary)
+            legacy_support.rewrite_template_identity(
+                temporary, temporary, destination.stem
+            )
+            self._validate_rewritten_project(
+                temporary, kind, destination.stem
+            )
+
+            backup = self._backup_destination(destination)
+            os.replace(temporary, destination)
+            temporary = None
+            replaced = True
+
+            info = await self._load_and_verify_project(
+                destination, kind, operation
+            )
+            if backup is not None:
+                backup.unlink(missing_ok=True)
+                backup = None
+            self.definition_paths[info.name] = destination
+            return info
+        except BaseException:
+            if replaced:
+                if backup is not None:
+                    recovery_backup = backup
+                    backup = None
+                    self._restore_destination(
+                        destination, recovery_backup
+                    )
+                else:
+                    self._restore_destination(destination, None)
+            raise
+        finally:
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
+            if backup is not None:
+                backup.unlink(missing_ok=True)
+
     async def create_project(
         self, kind: str, filename: str, folder: str | None
     ) -> ProjectInfo:
         if kind not in {"case", "library"}:
             raise ValueError("kind must be case or library.")
-        workspace = await self.executor.run_safe(self._require_app().workspace)
-        name = Path(filename).stem
-        path = folder or str(Path(filename).parent)
-        if path in {"", "."}:
-            raise ValueError("A destination folder is required for PSCAD 4.6.")
-        project = await self.executor.run_safe(
-            workspace.create_project,
-            1 if kind == "case" else 2,
-            name,
-            path,
+        destination = self._project_destination(filename, folder)
+        self._require_project_suffix(destination, kind)
+        template_name = (
+            "empty_case.pscx" if kind == "case" else "empty_library.pslx"
         )
-        self.definition_paths[name] = Path(path).resolve() / filename
-        return self._project_info(project, "Case" if kind == "case" else "Library")
+        template = (
+            files("pscad_mcp")
+            .joinpath("assets")
+            .joinpath("templates")
+            .joinpath(template_name)
+        )
+        with as_file(template) as template_path:
+            return await self._copy_rewrite_load_verify(
+                template_path,
+                destination,
+                kind,
+                "create_project",
+            )
 
     async def save_project(self, project_name: str) -> None:
         project = await self._project(project_name)
@@ -205,9 +409,70 @@ class LegacyBackend:
         self, project_name: str, filename: str, folder: str | None
     ) -> None:
         project = await self._project(project_name)
-        destination = str(Path(folder) / filename) if folder else filename
-        await self.executor.run_safe(project.save_as, destination)
-        self.definition_paths[Path(filename).stem] = Path(destination).resolve()
+        source = self.definition_paths.get(project_name)
+        kind = self._loaded_project_kind(project, source)
+        destination = self._project_destination(filename, folder)
+        self._require_project_suffix(destination, kind)
+        native_info: ProjectInfo | None = None
+        tried_native = not destination.exists()
+        if tried_native:
+            try:
+                response = await self.executor.run_safe(
+                    project.save_as, str(destination)
+                )
+
+                if response is not None:
+                    try:
+                        legacy_support.require_success(
+                            response,
+                            "save_project_as",
+                            {
+                                "project": project_name,
+                                "destination": str(destination),
+                            },
+                        )
+                    except BackendError as error:
+                        if error.code != "PSCAD_COMMAND_FAILED":
+                            raise
+                    else:
+                        if destination.is_file():
+                            self._validate_rewritten_project(
+                                destination, kind, destination.stem
+                            )
+                            native_info = await self._load_and_verify_project(
+                                destination, kind, "save_project_as"
+                            )
+            except BaseException:
+                self._restore_destination(destination, None)
+                raise
+
+        if native_info is not None:
+            self.definition_paths[native_info.name] = destination
+            return
+
+        if tried_native:
+            self._restore_destination(destination, None)
+
+        await self.save_project(project_name)
+        source = self.definition_paths.get(project_name)
+        if source is None or not source.is_file():
+            raise BackendError(
+                "CAPABILITY_UNAVAILABLE",
+                "The source project file is unavailable for the PSCAD 4.6.2 "
+                "save-as fallback.",
+                self.name,
+                "save_project_as",
+                {
+                    "project": project_name,
+                    "destination": str(destination),
+                },
+            )
+        await self._copy_rewrite_load_verify(
+            source,
+            destination,
+            kind,
+            "save_project_as",
+        )
 
     async def build_project(self, project_name: str) -> None:
         project = await self._project(project_name)
@@ -221,23 +486,329 @@ class LegacyBackend:
 
     async def run_project(self, project_name: str) -> None:
         project = await self._project(project_name)
-        await self.executor.run_safe(project.run, timeout=300.0)
+
+        def start() -> None:
+            command = project.command("run")
+            command.execute(False)
+
+        await self.executor.run_safe(start)
+        self._running_projects.add(project_name)
+        self._run_activity_seen.discard(project_name)
+        self._run_submitted_at[project_name] = time.monotonic()
 
     async def pause_project(self, project_name: str) -> None:
-        project = await self._project(project_name)
-        await self.executor.run_safe(project.pause)
+        await self._run_control_command(
+            "ID_RIBBON_HOME_RUN_PAUSE", "pause_project"
+        )
 
     async def stop_project(self, project_name: str) -> None:
-        project = await self._project(project_name)
-        await self.executor.run_safe(project.stop)
+        await self._run_control_command(
+            "ID_RIBBON_HOME_RUN_STOP", "stop_project"
+        )
+        self._running_projects.clear()
+        self._run_activity_seen.clear()
+        self._run_submitted_at.clear()
+
+    async def _run_control_command(
+        self, command_id: str, operation: str
+    ) -> None:
+        app = self._require_app()
+        command = await self.executor.run_safe(app._command_id_cmd, command_id)
+        response = await self.executor.run_safe(command.execute)
+        legacy_support.require_success(
+            response,
+            operation,
+            {"scope": "all-running-projects"},
+        )
+
+    @staticmethod
+    def _resolve_run_status_future(
+        future: asyncio.Future[Any], payload: tuple[Any, tuple[Any, ...], dict[str, Any]]
+    ) -> None:
+        if not future.done():
+            future.set_result(payload)
+
+    @staticmethod
+    def _normalized_run_status(value: Any) -> str | None:
+        if not isinstance(value, str) or not value.strip():
+            return None
+        raw = value.strip().casefold()
+        aliases = {
+            "build": "building",
+            "building": "building",
+            "run": "running",
+            "running": "running",
+            "pause": "paused",
+            "paused": "paused",
+            "complete": "completed",
+            "completed": "completed",
+            "done": "completed",
+            "stop": "stopped",
+            "stopped": "stopped",
+            "fail": "failed",
+            "failed": "failed",
+            "error": "failed",
+            "idle": "idle",
+            "ready": "idle",
+        }
+        return aliases.get(raw, raw)
+
+    @staticmethod
+    def _run_progress(value: Any) -> float | None:
+        if value is None or value == "":
+            return None
+        if isinstance(value, bool):
+            raise ValueError("Run progress cannot be boolean.")
+        progress = float(value)
+        if not math.isfinite(progress):
+            raise ValueError("Run progress must be finite.")
+        return progress
+
+    @classmethod
+    def _raise_failed_run_status_response(cls, value: Any) -> None:
+        if isinstance(value, ET.Element):
+            for node in value.iter():
+                success = node.get("success")
+                if success is not None and success.casefold() != "true":
+                    legacy_support.require_success(
+                        node,
+                        "get_run_status",
+                        {"response_scope": "callback"},
+                    )
+            return
+        if not isinstance(value, MappingABC):
+            return
+        try:
+            lowered = {str(key).casefold(): item for key, item in value.items()}
+        except Exception:
+            return
+        success = lowered.get("success")
+        has_failed_success = success is not None and (
+            success is not True
+            and (not isinstance(success, str) or success.casefold() != "true")
+        )
+        error = None
+        for key in ("error", "exception", "failure"):
+            if key not in lowered:
+                continue
+            candidate = lowered[key]
+            if candidate is None or candidate is False:
+                continue
+            if isinstance(candidate, str) and not candidate:
+                continue
+            error = candidate
+            break
+        if not has_failed_success and error is None:
+            return
+        raise BackendError(
+            "PSCAD_COMMAND_FAILED",
+            "PSCAD 4.6.2 command 'get_run_status' failed.",
+            cls.name,
+            "get_run_status",
+            {"response": legacy_support.response_payload(value)},
+        )
+
+    @classmethod
+    def _run_state_values(
+        cls, value: Any, depth: int = 0
+    ) -> tuple[Any, Any]:
+        missing = _RUN_STATE_MISSING
+        if depth >= 4:
+            return missing, missing
+        if isinstance(value, ET.Element):
+            status: Any = missing
+            progress: Any = missing
+            status_keys = {"status", "state", "run-status", "run_status", "runstate"}
+            progress_keys = {"progress", "percent", "percentage", "completion"}
+            legacy_flags: dict[str, bool] = {}
+            for node in value.iter():
+                tag = str(node.tag).split("}")[-1].casefold()
+                attributes = {
+                    str(key).casefold(): item for key, item in node.attrib.items()
+                }
+                if tag in {"build", "run"} and "value" in attributes:
+                    flag = str(attributes["value"]).casefold()
+                    if flag in {"true", "false"}:
+                        legacy_flags[tag] = flag == "true"
+                if status is missing:
+                    for key in status_keys:
+                        if key in attributes:
+                            status = attributes[key]
+                            break
+                    if status is missing and "status" in tag:
+                        status = attributes.get("value", node.text)
+                if progress is missing:
+                    for key in progress_keys:
+                        if key in attributes:
+                            progress = attributes[key]
+                            break
+                    if progress is missing and tag in progress_keys:
+                        progress = attributes.get("value", node.text)
+                if status is not missing and progress is not missing:
+                    break
+            if status is missing and {"build", "run"} <= legacy_flags.keys():
+                if legacy_flags["run"]:
+                    status = "running"
+                elif legacy_flags["build"]:
+                    status = "building"
+                else:
+                    status = "idle"
+            return status, progress
+
+        if isinstance(value, MappingABC):
+            try:
+                lowered = {
+                    str(key).casefold(): item for key, item in value.items()
+                }
+            except Exception:
+                return missing, missing
+            status = next(
+                (
+                    lowered[key]
+                    for key in ("status", "state", "run-status", "run_status", "runstate")
+                    if key in lowered
+                ),
+                missing,
+            )
+            progress = next(
+                (
+                    lowered[key]
+                    for key in ("progress", "percent", "percentage", "completion")
+                    if key in lowered
+                ),
+                missing,
+            )
+            if status is not missing:
+                return status, progress
+            for index, item in enumerate(lowered.values()):
+                if index >= 16:
+                    break
+                nested_status, nested_progress = cls._run_state_values(
+                    item, depth + 1
+                )
+                if nested_status is not missing:
+                    return nested_status, nested_progress
+            return missing, missing
+
+        if isinstance(value, (tuple, list)):
+            if value and isinstance(value[0], str):
+                return value[0], value[1] if len(value) > 1 else missing
+            for item in value[:16]:
+                status, progress = cls._run_state_values(item, depth + 1)
+                if status is not missing:
+                    return status, progress
+        return missing, missing
+
+    @classmethod
+    def _parse_run_state(
+        cls,
+        response: Any,
+        callback_args: tuple[Any, ...],
+        callback_kwargs: dict[str, Any],
+    ) -> RunState:
+        candidates = (response, callback_args, callback_kwargs)
+        for candidate in candidates:
+            cls._raise_failed_run_status_response(candidate)
+
+        missing = _RUN_STATE_MISSING
+        status: Any = missing
+        progress: Any = missing
+        for candidate in candidates:
+            candidate_status, candidate_progress = cls._run_state_values(candidate)
+            if status is missing and candidate_status is not missing:
+                status = candidate_status
+            if progress is missing and candidate_progress is not missing:
+                progress = candidate_progress
+            if status is not missing and progress is not missing:
+                break
+
+        normalized = cls._normalized_run_status(status)
+        try:
+            normalized_progress = (
+                None if progress is missing else cls._run_progress(progress)
+            )
+        except (TypeError, ValueError, OverflowError) as error:
+            raise BackendError(
+                "UNEXPECTED_RESPONSE",
+                "PSCAD returned an invalid run progress value.",
+                cls.name,
+                "get_run_status",
+                {"response": legacy_support.response_payload(response)},
+            ) from error
+        if normalized is None:
+            raise BackendError(
+                "UNEXPECTED_RESPONSE",
+                "PSCAD did not return a recognizable run status.",
+                cls.name,
+                "get_run_status",
+                {"response": legacy_support.response_payload(response)},
+            )
+        return RunState(normalized, normalized_progress)
 
     async def project_run_state(self, project_name: str) -> RunState:
         project = await self._project(project_name)
-        run_status = getattr(project, "run_status", None)
-        if run_status is None:
-            return RunState("unknown", None)
-        status, progress = await self.executor.run_safe(run_status)
-        return RunState(str(status), float(progress) if progress is not None else None)
+        loop = asyncio.get_running_loop()
+        future: asyncio.Future[
+            tuple[Any, tuple[Any, ...], dict[str, Any]]
+        ] = loop.create_future()
+
+        def receive(
+            response: Any,
+            *callback_args: Any,
+            **callback_kwargs: Any,
+        ) -> None:
+            payload = (response, callback_args, callback_kwargs)
+            loop.call_soon_threadsafe(
+                self._resolve_run_status_future, future, payload
+            )
+
+        app = self._require_app()
+
+        def request_and_pump() -> None:
+            project.get_run_status(receive)
+            # Legacy post_command() has no background receiver. A synchronous,
+            # read-only command drives its socket dispatcher and invokes receive.
+            app.list_projects()
+
+        await self.executor.run_safe(request_and_pump)
+        try:
+            response, callback_args, callback_kwargs = await asyncio.wait_for(
+                future, self.RUN_STATUS_TIMEOUT
+            )
+        except asyncio.TimeoutError as error:
+            raise BackendError(
+                "PSCAD_COMMAND_TIMEOUT",
+                "PSCAD did not return run status within 5 seconds.",
+                self.name,
+                "get_run_status",
+                {"project": project_name},
+            ) from error
+
+        state = self._parse_run_state(
+            response, callback_args, callback_kwargs
+        )
+        if (
+            state.status == "idle"
+            and project_name in self._running_projects
+            and project_name not in self._run_activity_seen
+            and time.monotonic()
+            - self._run_submitted_at.get(project_name, 0.0)
+            < self.RUN_START_GRACE
+        ):
+            return RunState("starting", state.progress)
+        if state.status in {"building", "running", "paused"}:
+            self._run_activity_seen.add(project_name)
+        if state.status.casefold() in {
+            "complete",
+            "completed",
+            "stopped",
+            "failed",
+            "idle",
+        }:
+            self._running_projects.discard(project_name)
+            self._run_activity_seen.discard(project_name)
+            self._run_submitted_at.pop(project_name, None)
+        return state
 
     async def project_definitions(self, project_name: str) -> list[str]:
         project = await self._project(project_name)
@@ -247,12 +818,262 @@ class LegacyBackend:
         values = await self.executor.run_safe(method)
         return [str(value) for value in values]
 
+    @staticmethod
+    def _settings_values_match(expected: Any, actual: Any) -> bool:
+        if isinstance(expected, bool) or isinstance(actual, bool):
+            return type(expected) is type(actual) and expected == actual
+        try:
+            if expected == actual:
+                return True
+        except Exception:
+            pass
+
+        def numeric_value(value: Any) -> Decimal | None:
+            if not isinstance(value, (int, float, Decimal, str)):
+                return None
+            if (
+                isinstance(value, int)
+                and not isinstance(value, bool)
+                and value.bit_length() > LegacyBackend.SETTING_DETAIL_MAX_INTEGER_BITS
+            ):
+                return None
+            try:
+                number = value if isinstance(value, Decimal) else Decimal(str(value))
+            except (InvalidOperation, ValueError):
+                return None
+            return number if number.is_finite() else None
+
+        expected_number = numeric_value(expected)
+        actual_number = numeric_value(actual)
+        return (
+            expected_number is not None
+            and actual_number is not None
+            and expected_number == actual_number
+        )
+
+    @classmethod
+    def _bounded_setting_text(cls, value: str) -> str:
+        if len(value) <= cls.SETTING_DETAIL_TEXT_LIMIT:
+            return value
+        return value[: cls.SETTING_DETAIL_TEXT_LIMIT - 3] + "..."
+
+    @classmethod
+    def _setting_type_name(cls, value: Any) -> str:
+        return cls._bounded_setting_text(type(value).__name__)
+
+    @classmethod
+    def _oversized_integer_metadata(cls, value: int) -> dict[str, Any]:
+        return {
+            "type": "int",
+            "bit_length": value.bit_length(),
+            "sign": "negative" if value < 0 else "positive",
+        }
+
+    @classmethod
+    def _is_oversized_integer(cls, value: Any) -> bool:
+        return (
+            isinstance(value, int)
+            and not isinstance(value, bool)
+            and value.bit_length() > cls.SETTING_DETAIL_MAX_INTEGER_BITS
+        )
+
+    @classmethod
+    def _setting_detail_key(cls, key: Any) -> str:
+        if isinstance(key, str):
+            return cls._bounded_setting_text(key)
+        if key is None:
+            return "null"
+        if isinstance(key, bool):
+            return "true" if key else "false"
+        if isinstance(key, int):
+            if cls._is_oversized_integer(key):
+                metadata = cls._oversized_integer_metadata(key)
+                return cls._bounded_setting_text(
+                    "<int bit_length={bit_length} sign={sign}>".format(
+                        **metadata
+                    )
+                )
+            return cls._bounded_setting_text(str(key))
+        if isinstance(key, float):
+            return cls._bounded_setting_text(str(key))
+        if isinstance(key, Decimal):
+            return cls._bounded_setting_text(str(key))
+        return cls._bounded_setting_text(f"<{cls._setting_type_name(key)}>")
+
+    @classmethod
+    def _unique_setting_detail_key(
+        cls, details: Mapping[Any, Any], key: Any, index: int
+    ) -> str:
+        detail_key = cls._setting_detail_key(key)
+        if detail_key not in details:
+            return detail_key
+        suffix_index = index
+        while True:
+            suffix = f"_{suffix_index}"
+            candidate = (
+                detail_key[: cls.SETTING_DETAIL_TEXT_LIMIT - len(suffix)]
+                + suffix
+            )
+            if candidate not in details:
+                return candidate
+            suffix_index += 1
+
+    @classmethod
+    def _setting_detail_value(cls, value: Any, depth: int = 0) -> Any:
+        if value is None or isinstance(value, (str, bool)):
+            return (
+                cls._bounded_setting_text(value)
+                if isinstance(value, str)
+                else value
+            )
+        if isinstance(value, int):
+            if cls._is_oversized_integer(value):
+                return cls._oversized_integer_metadata(value)
+            return value
+        if isinstance(value, float):
+            return value if math.isfinite(value) else str(value)
+        if isinstance(value, Decimal):
+            return cls._bounded_setting_text(str(value))
+        if depth >= cls.SETTING_DETAIL_MAX_DEPTH:
+            return {"type": cls._setting_type_name(value), "truncated": "depth"}
+        if isinstance(value, MappingABC):
+            try:
+                details = {}
+                for index, (key, item) in enumerate(value.items()):
+                    if index >= cls.SETTING_DETAIL_MAX_ENTRIES:
+                        details["__truncated__"] = {"truncated": "entries"}
+                        break
+                    detail_key = cls._unique_setting_detail_key(
+                        details, key, index
+                    )
+                    details[detail_key] = cls._setting_detail_value(
+                        item, depth + 1
+                    )
+                return details
+            except Exception:
+                return {
+                    "type": cls._setting_type_name(value),
+                    "truncated": "unreadable_mapping",
+                }
+        if isinstance(value, (list, tuple)):
+            details = [
+                cls._setting_detail_value(item, depth + 1)
+                for item in value[: cls.SETTING_DETAIL_MAX_ENTRIES]
+            ]
+            if len(value) > cls.SETTING_DETAIL_MAX_ENTRIES:
+                details.append({"truncated": "entries"})
+            return details
+        return {"type": cls._setting_type_name(value)}
+
+    @classmethod
+    def _settings_mapping(
+        cls, values: Any, project_name: str, operation: str
+    ) -> dict[Any, Any]:
+        try:
+            if isinstance(values, MappingABC):
+                return dict(values)
+            items = getattr(values, "items", None)
+            if callable(items):
+                return dict(items())
+        except Exception:
+            pass
+        raise BackendError(
+            "UNEXPECTED_RESPONSE",
+            "Project parameters did not return a usable mapping.",
+            cls.name,
+            operation,
+            {
+                "project": cls._setting_detail_value(project_name),
+                "response_type": cls._setting_type_name(values),
+            },
+        )
+
     async def get_settings(self, project_name: str) -> dict[str, Any]:
-        values = await self.executor.run_safe(self._require_app().settings)
-        return dict(values) if hasattr(values, "items") else {"value": str(values)}
+        project = await self._project(project_name)
+        values = await self.executor.run_safe(project.parameters)
+        return self._settings_mapping(values, project_name, "get_project_settings")
 
     async def set_settings(self, project_name: str, settings: Any) -> None:
-        await self.executor.run_safe(self._require_app().settings, dict(settings))
+        if not isinstance(settings, MappingABC):
+            raise BackendError(
+                "INVALID_PARAMETER",
+                "Project settings must be a mapping.",
+                self.name,
+                "set_project_settings",
+                {
+                    "project": self._setting_detail_value(project_name),
+                    "reason": "settings must be a mapping",
+                    "settings_type": self._setting_type_name(settings),
+                },
+            )
+        project = await self._project(project_name)
+        try:
+            requested = dict(settings)
+        except Exception:
+            raise BackendError(
+                "INVALID_PARAMETER",
+                "Project settings mapping could not be copied.",
+                self.name,
+                "set_project_settings",
+                {
+                    "project": self._setting_detail_value(project_name),
+                    "reason": "settings mapping could not be copied",
+                    "settings_type": self._setting_type_name(settings),
+                },
+            ) from None
+        accepted = await self.executor.run_safe(project.set_parameters, requested)
+        if accepted is not True:
+            key_count = len(requested)
+            keys = sorted(self._setting_detail_key(key) for key in requested)
+            details = {
+                "project": self._setting_detail_value(project_name),
+                "keys": keys[: self.SETTING_DETAIL_MAX_ENTRIES],
+            }
+            if key_count > self.SETTING_DETAIL_MAX_ENTRIES:
+                details["total_key_count"] = key_count
+                details["keys_truncated"] = True
+            raise BackendError(
+                "INVALID_PARAMETER",
+                "PSCAD did not accept the requested project parameters.",
+                self.name,
+                "set_project_settings",
+                details,
+            )
+        values = await self.executor.run_safe(project.parameters)
+        actual_values = self._settings_mapping(
+            values, project_name, "set_project_settings"
+        )
+        mismatches = {}
+        mismatch_count = 0
+        for key, expected in requested.items():
+            if key in actual_values and self._settings_values_match(
+                expected, actual_values[key]
+            ):
+                continue
+            mismatch_count += 1
+            if len(mismatches) >= self.SETTING_DETAIL_MAX_MISMATCHES:
+                continue
+            detail_key = self._unique_setting_detail_key(
+                mismatches, key, mismatch_count
+            )
+            mismatches[detail_key] = {
+                "expected": self._setting_detail_value(expected),
+                "actual": self._setting_detail_value(actual_values.get(key)),
+            }
+        if mismatches:
+            details = {
+                "project": self._setting_detail_value(project_name),
+                "mismatches": mismatches,
+            }
+            if mismatch_count > self.SETTING_DETAIL_MAX_MISMATCHES:
+                details["mismatch_count"] = mismatch_count
+            raise BackendError(
+                "POSTCONDITION_FAILED",
+                "Project parameters could not be verified after update.",
+                self.name,
+                "set_project_settings",
+                details,
+            )
 
     async def project_output(self, project_name: str) -> str:
         project = await self._project(project_name)
@@ -777,33 +1598,475 @@ class LegacyBackend:
     async def set_component_enabled(
         self, project_name: str, component_id: int, enabled: bool
     ) -> None:
-        _canvas, component = await self._component_proxy(project_name, component_id)
-        method = getattr(component, "enable" if enabled else "disable", None)
-        if method is not None:
-            await self.executor.run_safe(method)
+        canvas, component = await self._component_proxy(
+            project_name, component_id
+        )
+        project = await self._project(project_name)
+        before = await self._component_layers(canvas, component_id)
+        details = {"project": project_name, "component_id": component_id}
+
+        if enabled:
+            if self._disabled_layer in before:
+                response = await self.executor.run_safe(
+                    component.remove_from_layer, self._disabled_layer
+                )
+                legacy_support.require_success(
+                    response, "enable_component", details
+                )
         else:
-            await self.executor.run_safe(component.set_parameters, enabled=enabled)
-        parameters = await self.get_component_parameters(project_name, component_id)
-        if "enabled" in parameters and bool(parameters["enabled"]) is not enabled:
+            layer_is_known = (
+                self._disabled_layer in before
+                or await self._layer_is_known(
+                    project_name, self._disabled_layer
+                )
+            )
+            if not layer_is_known:
+                response = await self.executor.run_safe(
+                    project.create_layer, self._disabled_layer
+                )
+                legacy_support.require_success(
+                    response, "disable_component", details
+                )
+                self._known_managed_layers.add(
+                    (project_name, self._disabled_layer)
+                )
+            response = await self.executor.run_safe(
+                project.set_layer, self._disabled_layer, "disabled"
+            )
+            legacy_support.require_success(
+                response, "disable_component", details
+            )
+            if self._disabled_layer not in before:
+                response = await self.executor.run_safe(
+                    component.add_to_layer, self._disabled_layer
+                )
+                legacy_support.require_success(
+                    response, "disable_component", details
+                )
+
+        after = await self._component_layers(canvas, component_id)
+        has_disabled_layer = self._disabled_layer in after
+        if has_disabled_layer is enabled:
             raise BackendError(
                 "POSTCONDITION_FAILED",
-                "Component enabled state could not be verified.",
+                "Component layer state did not change as requested.",
                 self.name,
                 "set_component_enabled",
+                {
+                    "project": project_name,
+                    "component_id": component_id,
+                    "layers": sorted(after),
+                },
             )
 
-    async def delete_component(self, project_name: str, component_id: int) -> None:
-        _canvas, component = await self._component_proxy(project_name, component_id)
-        await self.executor.run_safe(component.delete)
-        remaining = await self.find_components(project_name, "Main", None, None)
-        if component_id in {item.id for item in remaining}:
+    @staticmethod
+    def _layer_names(value: str | None) -> set[str]:
+        if not isinstance(value, str):
+            return set()
+        return {
+            name
+            for name in re.split(r"[;,\s]+", value)
+            if name
+        }
+
+    async def _component_layers(
+        self, canvas: Any, component_id: int
+    ) -> set[str]:
+        response = await self.executor.run_safe(canvas.list_components)
+        if not isinstance(response, ET.Element):
             raise BackendError(
-                "POSTCONDITION_FAILED",
-                f"Component {component_id} still exists after deletion.",
+                "UNEXPECTED_RESPONSE",
+                "PSCAD did not return component XML for layer verification.",
                 self.name,
-                "delete_component",
+                "set_component_enabled",
+                {"component_id": component_id},
             )
-        self._component_orientations.pop((project_name, component_id), None)
+        if response.get("success") is not None:
+            legacy_support.require_success(
+                response,
+                "set_component_enabled",
+                {"component_id": component_id},
+            )
+        expected_id = str(component_id)
+        for node in response.iter():
+            if node.get("id") != expected_id:
+                continue
+            return self._layer_names(
+                node.get("layer") or node.get("layers")
+            )
+        raise BackendError(
+            "POSTCONDITION_FAILED",
+            "PSCAD did not list the component for layer verification.",
+            self.name,
+            "set_component_enabled",
+            {"component_id": component_id},
+        )
+
+    async def _layer_is_known(
+        self, project_name: str, layer_name: str
+    ) -> bool:
+        if (project_name, layer_name) in self._known_managed_layers:
+            return True
+        path = self.definition_paths.get(project_name)
+        if path is None or not path.is_file():
+            return False
+        try:
+            root = ET.parse(path).getroot()
+        except (OSError, ET.ParseError):
+            return False
+        for node in root.iter():
+            tag = str(node.tag).split("}")[-1].casefold()
+            if tag == "layer" and node.get("name") == layer_name:
+                return True
+            layers = self._layer_names(
+                node.get("layer") or node.get("layers")
+            )
+            if layer_name in layers:
+                return True
+        return False
+
+    async def delete_component(self, project_name: str, component_id: int) -> None:
+        await self.delete_components(project_name, [component_id])
+
+    async def delete_components(
+        self, project_name: str, component_ids: Sequence[int]
+    ) -> None:
+        unique_ids = list(dict.fromkeys(int(value) for value in component_ids))
+        if not unique_ids:
+            raise ValueError("component_ids must not be empty.")
+        canvas = await self._canvas(project_name, "Main")
+
+        targets = []
+        for component_id in unique_ids:
+            _target_canvas, component = await self._component_proxy(
+                project_name, component_id
+            )
+            targets.append(component)
+
+        ports_by_component = {
+            component_id: await self.get_component_ports(
+                project_name, component_id
+            )
+            for component_id in unique_ids
+        }
+        target_ports = {
+            (port.x, port.y)
+            for ports in ports_by_component.values()
+            for port in ports
+        }
+        selection_bounds = {}
+        for component_id, component in zip(unique_ids, targets):
+            points = [
+                (port.x, port.y)
+                for port in ports_by_component[component_id]
+            ]
+            location_method = getattr(component, "get_location", None)
+            try:
+                if location_method is not None:
+                    location = await self.executor.run_safe(location_method)
+                else:
+                    location = await self.executor.run_safe(
+                        lambda item=component: item.location
+                    )
+            except Exception:
+                location = None
+            if location is not None:
+                points.append((int(location[0]), int(location[1])))
+            if points:
+                selection_bounds[component_id] = self._selection_bounds(
+                    points, padding=self._canvas_grid * 2
+                )
+        objects = list(await self.executor.run_safe(canvas.find_all))
+        wires = []
+        seen_wire_ids = set()
+        for value in objects:
+            if type(value).__name__ != "WireOrthogonal":
+                continue
+            vertices = await self._absolute_wire_vertices(value)
+            endpoints = (
+                {tuple(vertices[0]), tuple(vertices[-1])}
+                if vertices
+                else set()
+            )
+            if not endpoints.intersection(target_ports):
+                continue
+            wire_id = self._component_id(value)
+            if wire_id in seen_wire_ids:
+                continue
+            seen_wire_ids.add(wire_id)
+            wires.append(value)
+            selection_bounds[wire_id] = self._selection_bounds(
+                vertices, padding=self._canvas_grid
+            )
+
+        await self._execute_deletion_plan(
+            project_name,
+            canvas,
+            targets,
+            wires,
+            selection_bounds,
+        )
+
+    async def _absolute_wire_vertices(
+        self, wire: Any
+    ) -> list[tuple[int, int]]:
+        vertices = [
+            (int(point[0]), int(point[1]))
+            for point in await self.executor.run_safe(
+                lambda item=wire: item.vertices
+            )
+        ]
+        try:
+            location = await self.executor.run_safe(
+                lambda item=wire: item.location
+            )
+        except (AttributeError, BackendError):
+            location = None
+        if location is None:
+            return vertices
+        origin_x, origin_y = int(location[0]), int(location[1])
+        return [
+            (origin_x + x, origin_y + y)
+            for x, y in vertices
+        ]
+
+    @staticmethod
+    def _selection_bounds(
+        points: Sequence[tuple[int, int]], *, padding: int
+    ) -> tuple[int, int, int, int]:
+        if not points:
+            raise ValueError("selection points must not be empty.")
+        x_values = [int(point[0]) for point in points]
+        y_values = [int(point[1]) for point in points]
+        return (
+            min(x_values) - padding,
+            max(y_values) + padding,
+            max(x_values) + padding,
+            min(y_values) - padding,
+        )
+
+    @staticmethod
+    def _merged_selection_bounds(
+        bounds: Sequence[tuple[int, int, int, int]],
+    ) -> tuple[int, int, int, int]:
+        if not bounds:
+            raise ValueError("selection bounds must not be empty.")
+        return (
+            min(value[0] for value in bounds),
+            max(value[1] for value in bounds),
+            max(value[2] for value in bounds),
+            min(value[3] for value in bounds),
+        )
+
+    async def _selection_conflicts(
+        self,
+        project_name: str,
+        canvas: Any,
+        bounds: tuple[int, int, int, int],
+        target_ids: Sequence[int],
+    ) -> list[int]:
+        left, top, right, bottom = bounds
+        target_id_set = set(target_ids)
+        conflicts = []
+        for value in list(await self.executor.run_safe(canvas.find_all)):
+            if type(value).__name__ == "WireOrthogonal":
+                continue
+            try:
+                object_id = self._component_id(value)
+            except (TypeError, ValueError) as error:
+                raise BackendError(
+                    "CAPABILITY_UNAVAILABLE",
+                    "PSCAD 4.6.2 returned an unidentified object inside "
+                    "the candidate deletion selection.",
+                    self.name,
+                    "delete_components",
+                    {
+                        "project": project_name,
+                        "target_component_ids": sorted(target_id_set),
+                    },
+                ) from error
+            if object_id in target_id_set:
+                continue
+            location_method = getattr(value, "get_location", None)
+            try:
+                if location_method is not None:
+                    location = await self.executor.run_safe(
+                        location_method
+                    )
+                else:
+                    location = await self.executor.run_safe(
+                        lambda item=value: item.location
+                    )
+            except Exception:
+                conflicts.append(object_id)
+                continue
+            if location is None:
+                conflicts.append(object_id)
+                continue
+            x, y = int(location[0]), int(location[1])
+            if left <= x <= right and bottom <= y <= top:
+                conflicts.append(object_id)
+        return sorted(set(conflicts))
+
+    async def _canvas_object_ids(self, canvas: Any) -> set[int]:
+        response = await self.executor.run_safe(canvas.list_components)
+        if not isinstance(response, ET.Element):
+            raise BackendError(
+                "UNEXPECTED_RESPONSE",
+                "PSCAD did not return component XML after deletion.",
+                self.name,
+                "delete_components",
+            )
+        if response.get("success") is not None:
+            legacy_support.require_success(
+                response, "delete_components", {}
+            )
+        identifiers = set()
+        for node in response.iter():
+            raw_id = node.get("id")
+            if raw_id is None:
+                continue
+            try:
+                identifiers.add(int(raw_id))
+            except ValueError:
+                continue
+        return identifiers
+
+    async def _execute_deletion_plan(
+        self,
+        project_name: str,
+        canvas: Any,
+        targets: Sequence[Any],
+        wires: Sequence[Any],
+        selection_bounds: Mapping[int, tuple[int, int, int, int]],
+    ) -> None:
+        target_ids = [self._component_id(value) for value in targets]
+        wire_ids = [self._component_id(value) for value in wires]
+        completed_target_ids = []
+        completed_wire_ids = []
+
+        select_components = getattr(canvas, "select_components", None)
+        generic = getattr(canvas, "_generic", None)
+        use_canvas_selection = (
+            select_components is not None
+            and generic is not None
+            and all(value in selection_bounds for value in target_ids)
+        )
+        combined_bounds = None
+        if use_canvas_selection:
+            combined_bounds = self._merged_selection_bounds(
+                [selection_bounds[value] for value in target_ids]
+            )
+            conflicts = await self._selection_conflicts(
+                project_name, canvas, combined_bounds, target_ids
+            )
+            if conflicts:
+                raise BackendError(
+                    "CAPABILITY_UNAVAILABLE",
+                    "PSCAD 4.6.2 cannot safely select the requested batch "
+                    "without including other canvas objects.",
+                    self.name,
+                    "delete_components",
+                    {
+                        "project": project_name,
+                        "conflicting_object_ids": conflicts,
+                    },
+                )
+
+        async def delete(value: Any, object_id: int, operation: str) -> None:
+            response = await self.executor.run_safe(value.delete)
+            if response is not None:
+                legacy_support.require_success(
+                    response,
+                    operation,
+                    {"project": project_name, "object_id": object_id},
+                )
+
+        mutation_error: Exception | None = None
+        try:
+            if use_canvas_selection and combined_bounds is not None:
+                response = await self.executor.run_safe(
+                    select_components, *combined_bounds
+                )
+                legacy_support.require_success(
+                    response,
+                    "select_delete_batch",
+                    {"project": project_name, "component_ids": target_ids},
+                )
+                response = await self.executor.run_safe(
+                    generic, "IDM_DELETE"
+                )
+                legacy_support.require_success(
+                    response,
+                    "delete_batch",
+                    {"project": project_name, "component_ids": target_ids},
+                )
+                completed_wire_ids.extend(wire_ids)
+                completed_target_ids.extend(target_ids)
+            else:
+                for wire, wire_id in zip(wires, wire_ids):
+                    await delete(wire, wire_id, "delete_wire")
+                    completed_wire_ids.append(wire_id)
+                for component, component_id in zip(targets, target_ids):
+                    await delete(
+                        component, component_id, "delete_component"
+                    )
+                    completed_target_ids.append(component_id)
+        except Exception as error:
+            mutation_error = error
+
+        try:
+            remaining_ids = await self._canvas_object_ids(canvas)
+        except Exception as verification_error:
+            remaining_ids = None
+            if mutation_error is None:
+                mutation_error = verification_error
+
+        if remaining_ids is None:
+            deleted_component_ids = completed_target_ids
+            deleted_wire_ids = completed_wire_ids
+            remaining_component_ids = [
+                value for value in target_ids if value not in completed_target_ids
+            ]
+            remaining_wire_ids = [
+                value for value in wire_ids if value not in completed_wire_ids
+            ]
+        else:
+            deleted_component_ids = [
+                value for value in target_ids if value not in remaining_ids
+            ]
+            deleted_wire_ids = [
+                value for value in wire_ids if value not in remaining_ids
+            ]
+            remaining_component_ids = [
+                value for value in target_ids if value in remaining_ids
+            ]
+            remaining_wire_ids = [
+                value for value in wire_ids if value in remaining_ids
+            ]
+
+        if (
+            mutation_error is not None
+            or remaining_component_ids
+            or remaining_wire_ids
+        ):
+            raise BackendError(
+                "PARTIAL_COMPLETION",
+                "The component deletion plan did not complete.",
+                self.name,
+                "delete_components",
+                {
+                    "deleted_component_ids": deleted_component_ids,
+                    "deleted_wire_ids": deleted_wire_ids,
+                    "remaining_component_ids": remaining_component_ids,
+                    "remaining_wire_ids": remaining_wire_ids,
+                },
+            ) from mutation_error
+
+        for component_id in target_ids:
+            self._component_orientations.pop(
+                (project_name, component_id), None
+            )
 
     async def add_component(
         self,
@@ -1157,32 +2420,70 @@ class LegacyBackend:
         if width <= 0 or height <= 0:
             raise ValueError("width and height must be positive.")
         canvas = await self._canvas(project_name, canvas_name)
+        candidates = []
+        seen = set()
+
+        def add_candidate(rectangle: legacy_support.Rect) -> None:
+            if rectangle not in seen:
+                seen.add(rectangle)
+                candidates.append(rectangle)
+
         method = getattr(canvas, "closest_empty_rect", None)
         if method is not None:
             rectangle = await self.executor.run_safe(
                 method, width, height, near
             )
-            return {
-                "x": int(rectangle.x),
-                "y": int(rectangle.y),
-                "width": int(rectangle.width),
-                "height": int(rectangle.height),
-            }
-        occupied = {
-            tuple(item["location"])
-            for item in await self.list_canvas_components(
-                project_name, canvas_name
+            add_candidate(
+                legacy_support.Rect(
+                    legacy_support.snap_to_grid(
+                        int(rectangle.x), self._canvas_grid
+                    ),
+                    legacy_support.snap_to_grid(
+                        int(rectangle.y), self._canvas_grid
+                    ),
+                    width,
+                    height,
+                )
             )
-            if item["location"] is not None
-        }
-        for offset in range(0, 1001, 6):
-            candidate = near[0] + offset, near[1] + offset
-            if candidate not in occupied:
+        for candidate in legacy_support.candidate_rectangles(
+            near,
+            width,
+            height,
+            grid=self._canvas_grid,
+            rings=100,
+        ):
+            add_candidate(candidate)
+
+        occupied = await self._occupied_rectangles(
+            project_name, canvas_name, canvas
+        )
+        if not any(
+            all(
+                not rectangle.intersects(candidate, margin=self._canvas_grid)
+                for rectangle in occupied
+            )
+            for candidate in candidates
+        ):
+            raise BackendError(
+                "NO_EMPTY_SPACE",
+                "No empty canvas location was found within the search bound.",
+                self.name,
+                "find_empty_space",
+            )
+
+        refreshed = await self._occupied_rectangles(
+            project_name, canvas_name, canvas
+        )
+        for candidate in candidates:
+            if all(
+                not rectangle.intersects(candidate, margin=self._canvas_grid)
+                for rectangle in refreshed
+            ):
                 return {
-                    "x": candidate[0],
-                    "y": candidate[1],
-                    "width": width,
-                    "height": height,
+                    "x": candidate.x,
+                    "y": candidate.y,
+                    "width": candidate.width,
+                    "height": candidate.height,
                 }
         raise BackendError(
             "NO_EMPTY_SPACE",
@@ -1190,3 +2491,168 @@ class LegacyBackend:
             self.name,
             "find_empty_space",
         )
+
+    async def _occupied_rectangles(
+        self, project_name: str, canvas_name: str, canvas: Any
+    ) -> list[legacy_support.Rect]:
+        response = await self.executor.run_safe(canvas.list_components)
+        if not isinstance(response, ET.Element):
+            raise BackendError(
+                "UNEXPECTED_RESPONSE",
+                "PSCAD did not return canvas XML for empty-space search.",
+                self.name,
+                "find_empty_space",
+            )
+        if response.get("success") is not None:
+            legacy_support.require_success(
+                response, "find_empty_space", {}
+            )
+        nodes = list(response.findall("components/*"))
+        saved_rectangles = await asyncio.to_thread(
+            self._saved_canvas_rectangles, project_name, canvas_name
+        )
+        sparse_ids = {
+            int(node.get("id"))
+            for node in nodes
+            if node.get("id", "").isdigit()
+            and any(node.get(key) is None for key in ("x", "y", "w", "h"))
+        }
+        live_locations: dict[int, tuple[int, int]] = {}
+        if sparse_ids:
+            objects = list(await self.executor.run_safe(canvas.find_all))
+            for proxy in objects:
+                object_id = self._component_id(proxy)
+                if object_id not in sparse_ids:
+                    continue
+                location_method = getattr(proxy, "get_location", None)
+                try:
+                    if location_method is not None:
+                        location = await self.executor.run_safe(
+                            location_method
+                        )
+                    else:
+                        location = await self.executor.run_safe(
+                            lambda item=proxy: item.location
+                        )
+                except Exception:
+                    continue
+                if location is not None and len(location) >= 2:
+                    live_locations[object_id] = (
+                        int(location[0]),
+                        int(location[1]),
+                    )
+
+        rectangles = []
+        try:
+            for node in nodes:
+                raw_id = node.get("id")
+                object_id = int(raw_id) if raw_id is not None else None
+                saved = saved_rectangles.get(object_id)
+                live = live_locations.get(object_id)
+                raw_x = node.get("x")
+                raw_y = node.get("y")
+                raw_width = node.get("w")
+                raw_height = node.get("h")
+                x = (
+                    int(raw_x)
+                    if raw_x is not None
+                    else saved.get("x")
+                    if saved is not None and saved.get("x") is not None
+                    else live[0]
+                    if live is not None
+                    else 0
+                )
+                y = (
+                    int(raw_y)
+                    if raw_y is not None
+                    else saved.get("y")
+                    if saved is not None and saved.get("y") is not None
+                    else live[1]
+                    if live is not None
+                    else 0
+                )
+                rectangle_width = (
+                    int(raw_width)
+                    if raw_width is not None
+                    else saved.get("w")
+                    if saved is not None and saved.get("w") is not None
+                    else 36
+                )
+                rectangle_height = (
+                    int(raw_height)
+                    if raw_height is not None
+                    else saved.get("h")
+                    if saved is not None and saved.get("h") is not None
+                    else 36
+                )
+                rectangles.append(
+                    legacy_support.Rect(
+                        x,
+                        y,
+                        max(rectangle_width, 1),
+                        max(rectangle_height, 1),
+                    )
+                )
+        except (TypeError, ValueError) as error:
+            raise BackendError(
+                "UNEXPECTED_RESPONSE",
+                "PSCAD returned invalid canvas rectangle metadata.",
+                self.name,
+                "find_empty_space",
+            ) from error
+        return rectangles
+
+    def _saved_canvas_rectangles(
+        self, project_name: str, canvas_name: str
+    ) -> dict[int, dict[str, int]]:
+        path = self.definition_paths.get(project_name)
+        if path is None or not path.is_file():
+            return {}
+        try:
+            root = ET.parse(path).getroot()
+        except (OSError, ET.ParseError):
+            return {}
+
+        definition = next(
+            (
+                node
+                for node in root.iter()
+                if str(node.tag).split("}")[-1] == "Definition"
+                and node.get("name") == canvas_name
+            ),
+            None,
+        )
+        if definition is None:
+            return {}
+        schematic = next(
+            (
+                child
+                for child in definition
+                if str(child.tag).split("}")[-1] == "schematic"
+            ),
+            None,
+        )
+        if schematic is None:
+            return {}
+
+        rectangles: dict[int, dict[str, int]] = {}
+        for node in schematic:
+            raw_id = node.get("id")
+            if raw_id is None:
+                continue
+            try:
+                object_id = int(raw_id)
+            except ValueError:
+                continue
+            geometry = {}
+            for attribute in ("x", "y", "w", "h"):
+                raw_value = node.get(attribute)
+                if raw_value is None:
+                    continue
+                try:
+                    geometry[attribute] = int(raw_value)
+                except ValueError:
+                    continue
+            if geometry:
+                rectangles[object_id] = geometry
+        return rectangles

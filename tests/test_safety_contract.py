@@ -17,18 +17,28 @@ class TestSafetyContract(unittest.IsolatedAsyncioTestCase):
 
     async def test_batch_delete_validates_all_ids_before_first_delete(self):
         backend = AsyncMock()
-        backend.get_component_location.side_effect = [
-            (1, 1),
-            RuntimeError("missing"),
-        ]
+        backend.delete_components.side_effect = RuntimeError("missing")
         service = PscadService(lambda: backend, executor=ImmediateExecutor())
         service._backend = backend
 
         with self.assertRaisesRegex(RuntimeError, "missing"):
             await service.delete_components(
-                "case", [1, 2], confirm=True
+                "case", [1, 2, 1], confirm=True
             )
 
+        backend.delete_components.assert_awaited_once_with("case", [1, 2])
+        backend.delete_component.assert_not_awaited()
+        backend.get_component_location.assert_not_awaited()
+
+    async def test_single_delete_uses_aggregate_backend_operation(self):
+        backend = AsyncMock()
+        service = PscadService(lambda: backend, executor=ImmediateExecutor())
+        service._backend = backend
+
+        result = await service.delete_component("case", 7, confirm=True)
+
+        self.assertEqual(result, "Component 7 deleted.")
+        backend.delete_components.assert_awaited_once_with("case", [7])
         backend.delete_component.assert_not_awaited()
 
     async def test_destructive_service_operations_require_confirmation(self):

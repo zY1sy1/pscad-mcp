@@ -10,12 +10,43 @@ The server is designed for Windows-based power-system workflows where you want C
 
 PSCAD automation is powerful, but the raw API is not especially friendly for conversational workflows. This project packages that API into structured MCP tools so Copilot CLI can:
 
-- attach to an existing PSCAD session or launch one
+- launch a new PSCAD 4.6.x automation instance, or attach/launch through the modern backend
 - inspect projects, simulation status, and output messages
 - update project settings and component parameters
 - create, place, wire, move, and delete components on the canvas
 - run builds, simulation sets, and output file reads
 - read synced PSCAD API documentation when it needs extra context
+
+The legacy PSCAD 4.6.2 backend is launch-only: it starts a new automation
+instance and does not attach to an already-open GUI. `repair_connection` quits
+that instance only when the backend reports that the MCP server owns it;
+otherwise it disconnects without terminating the external process.
+
+### Verified PSCAD 4.6.2 behavior and limits
+
+- Blank case and library creation uses bundled PSCAD-saved templates. Creation
+  and save-as rewrite the project identity and exact self-namespace references,
+  then require PSCAD to load the expected name and type. New save-as targets
+  try the native command and fall back to save plus an atomic copy when it does
+  not produce a verified target. Existing targets always use the atomic-copy
+  path; the operated source may therefore be saved before copying.
+- Project settings read and write the selected project's parameters. They do
+  not mutate application-global settings.
+- Run is non-blocking. PSCAD 4.6.2 pause and stop remain application-wide
+  commands, even though the tools accept a project name.
+- The shipped PSCAD 4.6.2 Automation Library rejects `create-layer` and
+  `add-to-layer`, including membership in an existing valid layer. Component
+  disable therefore returns `PSCAD_COMMAND_FAILED` instead of claiming a state
+  change; dedicated disabled-layer membership is not available on this tested
+  installation.
+- Connected batch deletion prevalidates targets, translates relative wire
+  vertices, checks for conflicting objects in the required selection area,
+  executes one native canvas deletion, and verifies that planned IDs vanished.
+  It returns `CAPABILITY_UNAVAILABLE` before mutation when a safe selection
+  cannot be formed.
+- Empty-space search uses the 18-unit PSCAD grid and collision margin. Sparse
+  live canvas XML is enriched from the saved project XML and live locations;
+  a conservative 36-by-36 rectangle is used only when neither has dimensions.
 
 ## Tool coverage
 
@@ -237,7 +268,9 @@ Licensed PSCAD 4.6.2 acceptance is opt-in and works only on timestamped copies:
 ```
 
 The runner refuses to start while another PSCAD process is open and never
-broadly terminates PSCAD processes. PSCAD 4.6.2 has been exercised on a real
+broadly terminates PSCAD processes. It runs the six original acceptance tests
+plus eight reliability tests, records owned PIDs and evidence directories, and
+requires all owned processes to exit. PSCAD 4.6.2 has been exercised on a real
 licensed installation; PSCAD 5.x remains contract-tested until a real 5.x
 installation is available for end-to-end acceptance.
 
