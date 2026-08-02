@@ -2243,32 +2243,66 @@ class LegacyBackend:
         if width <= 0 or height <= 0:
             raise ValueError("width and height must be positive.")
         canvas = await self._canvas(project_name, canvas_name)
+        candidates = []
+        seen = set()
+
+        def add_candidate(rectangle: legacy_support.Rect) -> None:
+            if rectangle not in seen:
+                seen.add(rectangle)
+                candidates.append(rectangle)
+
         method = getattr(canvas, "closest_empty_rect", None)
         if method is not None:
             rectangle = await self.executor.run_safe(
                 method, width, height, near
             )
-            return {
-                "x": int(rectangle.x),
-                "y": int(rectangle.y),
-                "width": int(rectangle.width),
-                "height": int(rectangle.height),
-            }
-        occupied = {
-            tuple(item["location"])
-            for item in await self.list_canvas_components(
-                project_name, canvas_name
+            add_candidate(
+                legacy_support.Rect(
+                    legacy_support.snap_to_grid(
+                        int(rectangle.x), self._canvas_grid
+                    ),
+                    legacy_support.snap_to_grid(
+                        int(rectangle.y), self._canvas_grid
+                    ),
+                    width,
+                    height,
+                )
             )
-            if item["location"] is not None
-        }
-        for offset in range(0, 1001, 6):
-            candidate = near[0] + offset, near[1] + offset
-            if candidate not in occupied:
+        for candidate in legacy_support.candidate_rectangles(
+            near,
+            width,
+            height,
+            grid=self._canvas_grid,
+            rings=100,
+        ):
+            add_candidate(candidate)
+
+        occupied = await self._occupied_rectangles(canvas)
+        if not any(
+            all(
+                not rectangle.intersects(candidate, margin=self._canvas_grid)
+                for rectangle in occupied
+            )
+            for candidate in candidates
+        ):
+            raise BackendError(
+                "NO_EMPTY_SPACE",
+                "No empty canvas location was found within the search bound.",
+                self.name,
+                "find_empty_space",
+            )
+
+        refreshed = await self._occupied_rectangles(canvas)
+        for candidate in candidates:
+            if all(
+                not rectangle.intersects(candidate, margin=self._canvas_grid)
+                for rectangle in refreshed
+            ):
                 return {
-                    "x": candidate[0],
-                    "y": candidate[1],
-                    "width": width,
-                    "height": height,
+                    "x": candidate.x,
+                    "y": candidate.y,
+                    "width": candidate.width,
+                    "height": candidate.height,
                 }
         raise BackendError(
             "NO_EMPTY_SPACE",
@@ -2276,3 +2310,38 @@ class LegacyBackend:
             self.name,
             "find_empty_space",
         )
+
+    async def _occupied_rectangles(
+        self, canvas: Any
+    ) -> list[legacy_support.Rect]:
+        response = await self.executor.run_safe(canvas.list_components)
+        if not isinstance(response, ET.Element):
+            raise BackendError(
+                "UNEXPECTED_RESPONSE",
+                "PSCAD did not return canvas XML for empty-space search.",
+                self.name,
+                "find_empty_space",
+            )
+        if response.get("success") is not None:
+            legacy_support.require_success(
+                response, "find_empty_space", {}
+            )
+        rectangles = []
+        try:
+            for node in response.findall("components/*"):
+                rectangles.append(
+                    legacy_support.Rect(
+                        int(node.get("x", "0")),
+                        int(node.get("y", "0")),
+                        max(int(node.get("w", "36")), 1),
+                        max(int(node.get("h", "36")), 1),
+                    )
+                )
+        except (TypeError, ValueError) as error:
+            raise BackendError(
+                "UNEXPECTED_RESPONSE",
+                "PSCAD returned invalid canvas rectangle metadata.",
+                self.name,
+                "find_empty_space",
+            ) from error
+        return rectangles
