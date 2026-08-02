@@ -6,6 +6,7 @@ from .executor import robust_executor
 from .pscad_adapter import PscadAdapter
 from .backend.legacy import LegacyBackend
 from .backend.modern import ModernBackend
+from .backend.base import BackendError
 from .backend.selector import select_backend
 from .service import PscadService
 
@@ -89,9 +90,13 @@ class PSCADConnectionManager:
             if backend_adapter is not None:
                 self._adapter = backend_adapter
             return result
-        except Exception as e:
-            logger.error(f"Attach failed: {str(e)}")
-            raise RuntimeError(f"Failed to attach to PSCAD: {str(e)}")
+        except BackendError:
+            raise
+        except Exception as error:
+            logger.exception("Attach failed.")
+            raise RuntimeError(
+                f"Failed to attach to PSCAD: {error}"
+            ) from error
 
     def disconnect(self):
         """Clear temporary raw-proxy compatibility state."""
