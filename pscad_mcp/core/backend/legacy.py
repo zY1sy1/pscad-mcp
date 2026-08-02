@@ -6,6 +6,7 @@ import asyncio
 import importlib
 import math
 import os
+import re
 import shutil
 import tempfile
 import time
@@ -35,6 +36,7 @@ _RUN_STATE_MISSING = object()
 class LegacyBackend:
     name = "legacy"
     _canvas_grid = 18
+    _disabled_layer = "PSCAD_MCP_DISABLED"
     RUN_STATUS_TIMEOUT = 5.0
     RUN_START_GRACE = 5.0
     SETTING_DETAIL_TEXT_LIMIT = 64
@@ -78,6 +80,7 @@ class LegacyBackend:
         self._running_projects: set[str] = set()
         self._run_activity_seen: set[str] = set()
         self._run_submitted_at: dict[str, float] = {}
+        self._known_managed_layers: set[tuple[str, str]] = set()
         self.result_adapter = PscadAdapter(
             executor,
             pscad_module=False,
@@ -158,6 +161,7 @@ class LegacyBackend:
         self._running_projects.clear()
         self._run_activity_seen.clear()
         self._run_submitted_at.clear()
+        self._known_managed_layers.clear()
 
     async def quit(self) -> None:
         app = self._app
@@ -1596,20 +1600,132 @@ class LegacyBackend:
     async def set_component_enabled(
         self, project_name: str, component_id: int, enabled: bool
     ) -> None:
-        _canvas, component = await self._component_proxy(project_name, component_id)
-        method = getattr(component, "enable" if enabled else "disable", None)
-        if method is not None:
-            await self.executor.run_safe(method)
+        canvas, component = await self._component_proxy(
+            project_name, component_id
+        )
+        project = await self._project(project_name)
+        before = await self._component_layers(canvas, component_id)
+        details = {"project": project_name, "component_id": component_id}
+
+        if enabled:
+            if self._disabled_layer in before:
+                response = await self.executor.run_safe(
+                    component.remove_from_layer, self._disabled_layer
+                )
+                legacy_support.require_success(
+                    response, "enable_component", details
+                )
         else:
-            await self.executor.run_safe(component.set_parameters, enabled=enabled)
-        parameters = await self.get_component_parameters(project_name, component_id)
-        if "enabled" in parameters and bool(parameters["enabled"]) is not enabled:
+            layer_is_known = (
+                self._disabled_layer in before
+                or await self._layer_is_known(
+                    project_name, self._disabled_layer
+                )
+            )
+            if not layer_is_known:
+                response = await self.executor.run_safe(
+                    project.create_layer, self._disabled_layer
+                )
+                legacy_support.require_success(
+                    response, "disable_component", details
+                )
+                self._known_managed_layers.add(
+                    (project_name, self._disabled_layer)
+                )
+            response = await self.executor.run_safe(
+                project.set_layer, self._disabled_layer, "disabled"
+            )
+            legacy_support.require_success(
+                response, "disable_component", details
+            )
+            if self._disabled_layer not in before:
+                response = await self.executor.run_safe(
+                    component.add_to_layer, self._disabled_layer
+                )
+                legacy_support.require_success(
+                    response, "disable_component", details
+                )
+
+        after = await self._component_layers(canvas, component_id)
+        has_disabled_layer = self._disabled_layer in after
+        if has_disabled_layer is enabled:
             raise BackendError(
                 "POSTCONDITION_FAILED",
-                "Component enabled state could not be verified.",
+                "Component layer state did not change as requested.",
                 self.name,
                 "set_component_enabled",
+                {
+                    "project": project_name,
+                    "component_id": component_id,
+                    "layers": sorted(after),
+                },
             )
+
+    @staticmethod
+    def _layer_names(value: str | None) -> set[str]:
+        if not isinstance(value, str):
+            return set()
+        return {
+            name
+            for name in re.split(r"[;,\s]+", value)
+            if name
+        }
+
+    async def _component_layers(
+        self, canvas: Any, component_id: int
+    ) -> set[str]:
+        response = await self.executor.run_safe(canvas.list_components)
+        if not isinstance(response, ET.Element):
+            raise BackendError(
+                "UNEXPECTED_RESPONSE",
+                "PSCAD did not return component XML for layer verification.",
+                self.name,
+                "set_component_enabled",
+                {"component_id": component_id},
+            )
+        if response.get("success") is not None:
+            legacy_support.require_success(
+                response,
+                "set_component_enabled",
+                {"component_id": component_id},
+            )
+        expected_id = str(component_id)
+        for node in response.iter():
+            if node.get("id") != expected_id:
+                continue
+            return self._layer_names(
+                node.get("layer") or node.get("layers")
+            )
+        raise BackendError(
+            "POSTCONDITION_FAILED",
+            "PSCAD did not list the component for layer verification.",
+            self.name,
+            "set_component_enabled",
+            {"component_id": component_id},
+        )
+
+    async def _layer_is_known(
+        self, project_name: str, layer_name: str
+    ) -> bool:
+        if (project_name, layer_name) in self._known_managed_layers:
+            return True
+        path = self.definition_paths.get(project_name)
+        if path is None or not path.is_file():
+            return False
+        try:
+            root = ET.parse(path).getroot()
+        except (OSError, ET.ParseError):
+            return False
+        for node in root.iter():
+            tag = str(node.tag).split("}")[-1].casefold()
+            if tag == "layer" and node.get("name") == layer_name:
+                return True
+            layers = self._layer_names(
+                node.get("layer") or node.get("layers")
+            )
+            if layer_name in layers:
+                return True
+        return False
 
     async def delete_component(self, project_name: str, component_id: int) -> None:
         _canvas, component = await self._component_proxy(project_name, component_id)

@@ -34,6 +34,14 @@ class StatefulComponent:
             "A": SimpleNamespace(name="A", x=9, y=5, dim=1, type="electrical"),
             "B": SimpleNamespace(name="B", x=11, y=5, dim=1, type="electrical"),
         }
+        self.layers = ["USER_LAYER"]
+        self.layer_calls = []
+        self.layer_responses = {
+            "add": ET.Element("response", {"success": "true"}),
+            "remove": ET.Element("response", {"success": "true"}),
+        }
+        self.apply_layer_changes = True
+        self.parameter_writes = []
 
     def get_definition(self):
         return SimpleNamespace(scoped_name=self.defn_name)
@@ -41,9 +49,13 @@ class StatefulComponent:
     def get_location(self): return self.location
     def set_location(self, x, y): self.location = (x, y)
     def get_parameters(self): return dict(self.values)
-    def set_parameters(self, **kwargs): self.values.update(kwargs)
+    def set_parameters(self, **kwargs):
+        self.parameter_writes.append(dict(kwargs))
+        self.values.update(kwargs)
     def parameters(self, parameters=None):
-        if parameters is not None: self.values.update(parameters)
+        if parameters is not None:
+            self.parameter_writes.append(dict(parameters))
+            self.values.update(parameters)
         return dict(self.values)
     def range(self, name): return (0, 10)
 
@@ -83,6 +95,25 @@ class StatefulComponent:
         return (port.x, port.y) if port else None
     def enable(self): self.values["enabled"] = True
     def disable(self): self.values["enabled"] = False
+    def add_to_layer(self, name):
+        self.layer_calls.append(("add", name))
+        response = self.layer_responses["add"]
+        if (
+            self.apply_layer_changes
+            and response.get("success", "").casefold() == "true"
+            and name not in self.layers
+        ):
+            self.layers.append(name)
+        return response
+    def remove_from_layer(self, name):
+        self.layer_calls.append(("remove", name))
+        response = self.layer_responses["remove"]
+        if (
+            self.apply_layer_changes
+            and response.get("success", "").casefold() == "true"
+        ):
+            self.layers = [layer for layer in self.layers if layer != name]
+        return response
 
 
 class StatefulCanvas:
@@ -124,6 +155,21 @@ class StatefulCanvas:
         self.components.append(clone)
         return clone
 
+    def list_components(self):
+        root = ET.Element("response", {"success": "true"})
+        components = ET.SubElement(root, "components")
+        for component in self.components:
+            if isinstance(component, StatefulComponent):
+                ET.SubElement(
+                    components,
+                    "User",
+                    {
+                        "id": str(component.id),
+                        "layer": ";".join(component.layers),
+                    },
+                )
+        return root
+
 
 class LegacyWire:
     """Canvas object returned by legacy find_all(), but not a user component."""
@@ -137,8 +183,35 @@ class LegacyWire:
 
 
 class LegacyComponentProject:
-    def __init__(self): self.main = StatefulCanvas(legacy=True)
+    def __init__(self):
+        self.main = StatefulCanvas(legacy=True)
+        self.layers = {}
+        self.layer_calls = []
+        self.layer_responses = {
+            "create": ET.Element("response", {"success": "true"}),
+            "set": ET.Element("response", {"success": "true"}),
+        }
+        self.apply_layer_changes = True
     def user_canvas(self, name): return self.main
+    def create_layer(self, name):
+        self.layer_calls.append(("create", name))
+        response = self.layer_responses["create"]
+        if (
+            self.apply_layer_changes
+            and response.get("success", "").casefold() == "true"
+        ):
+            self.layers.setdefault(name, "enabled")
+        return response
+    def set_layer(self, name, state):
+        self.layer_calls.append(("set", name, state))
+        response = self.layer_responses["set"]
+        if (
+            self.apply_layer_changes
+            and response.get("success", "").casefold() == "true"
+            and name in self.layers
+        ):
+            self.layers[name] = state
+        return response
 
 
 class ModernComponentProject:
@@ -165,6 +238,18 @@ class ComponentApp:
 
 
 class TestBackendComponentContracts(unittest.IsolatedAsyncioTestCase):
+    async def make_legacy_backend(self, project=None, definition_paths=None):
+        project = project or LegacyComponentProject()
+        backend = LegacyBackend(
+            ImmediateExecutor(),
+            version="4.6.2",
+            x64=True,
+            automation_module=FakeLegacyAutomation(ComponentApp(project)),
+            definition_paths=definition_paths,
+        )
+        await backend.attach()
+        return backend, project, project.main.components[0]
+
     async def make_backends(self):
         legacy_project = LegacyComponentProject()
         modern_project = ModernComponentProject()
@@ -206,6 +291,125 @@ class TestBackendComponentContracts(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual([component.id for component in found], [7])
 
+    async def test_legacy_disable_creates_and_verifies_dedicated_layer(self):
+        backend, project, component = await self.make_legacy_backend()
+
+        await backend.set_component_enabled("case", 7, False)
+
+        self.assertEqual(
+            project.layer_calls,
+            [
+                ("create", "PSCAD_MCP_DISABLED"),
+                ("set", "PSCAD_MCP_DISABLED", "disabled"),
+            ],
+        )
+        self.assertEqual(
+            component.layer_calls,
+            [("add", "PSCAD_MCP_DISABLED")],
+        )
+        self.assertEqual(
+            component.layers,
+            ["USER_LAYER", "PSCAD_MCP_DISABLED"],
+        )
+        self.assertEqual(component.parameter_writes, [])
+        self.assertTrue(component.values["enabled"])
+
+    async def test_legacy_disable_is_idempotent_and_enable_preserves_other_layers(self):
+        backend, project, component = await self.make_legacy_backend()
+
+        await backend.set_component_enabled("case", 7, False)
+        await backend.set_component_enabled("case", 7, False)
+        await backend.set_component_enabled("case", 7, True)
+
+        self.assertEqual(
+            [call for call in project.layer_calls if call[0] == "create"],
+            [("create", "PSCAD_MCP_DISABLED")],
+        )
+        self.assertEqual(
+            component.layer_calls,
+            [
+                ("add", "PSCAD_MCP_DISABLED"),
+                ("remove", "PSCAD_MCP_DISABLED"),
+            ],
+        )
+        self.assertEqual(component.layers, ["USER_LAYER"])
+        self.assertEqual(component.parameter_writes, [])
+
+        await backend.disconnect()
+        self.assertEqual(backend._known_managed_layers, set())
+
+    async def test_legacy_layer_mutations_reject_failed_responses(self):
+        cases = ("create", "set", "add", "remove")
+        for failing_command in cases:
+            with self.subTest(failing_command=failing_command):
+                backend, project, component = await self.make_legacy_backend()
+                if failing_command == "remove":
+                    component.layers.append("PSCAD_MCP_DISABLED")
+                    project.layers["PSCAD_MCP_DISABLED"] = "disabled"
+                    component.layer_responses["remove"] = ET.Element(
+                        "response", {"success": "false"}
+                    )
+                    enabled = True
+                else:
+                    enabled = False
+                    if failing_command in {"create", "set"}:
+                        project.layer_responses[failing_command] = ET.Element(
+                            "response", {"success": "false"}
+                        )
+                    else:
+                        component.layer_responses["add"] = ET.Element(
+                            "response", {"success": "false"}
+                        )
+
+                with self.assertRaises(BackendError) as raised:
+                    await backend.set_component_enabled(
+                        "case", 7, enabled
+                    )
+
+                self.assertEqual(raised.exception.code, "PSCAD_COMMAND_FAILED")
+                if failing_command == "create":
+                    self.assertNotIn(
+                        ("case", "PSCAD_MCP_DISABLED"),
+                        backend._known_managed_layers,
+                    )
+
+    async def test_legacy_layer_success_requires_membership_postcondition(self):
+        for enabled in (False, True):
+            with self.subTest(enabled=enabled):
+                backend, project, component = await self.make_legacy_backend()
+                if enabled:
+                    component.layers.append("PSCAD_MCP_DISABLED")
+                    project.layers["PSCAD_MCP_DISABLED"] = "disabled"
+                component.apply_layer_changes = False
+
+                with self.assertRaises(BackendError) as raised:
+                    await backend.set_component_enabled("case", 7, enabled)
+
+                self.assertEqual(raised.exception.code, "POSTCONDITION_FAILED")
+                self.assertEqual(
+                    raised.exception.operation, "set_component_enabled"
+                )
+
+    async def test_legacy_recognizes_managed_layer_from_project_xml(self):
+        project = LegacyComponentProject()
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "case.pscx"
+            path.write_text(
+                '<project><User id="99" '
+                'layer="OTHER, PSCAD_MCP_DISABLED EXTRA" /></project>',
+                encoding="utf-8",
+            )
+            backend, project, component = await self.make_legacy_backend(
+                project, {"case": path}
+            )
+
+            await backend.set_component_enabled("case", 7, False)
+
+        self.assertNotIn(
+            ("create", "PSCAD_MCP_DISABLED"), project.layer_calls
+        )
+        self.assertIn("PSCAD_MCP_DISABLED", component.layers)
+
     async def test_location_rotation_and_mirror_contracts_match(self):
         for backend, canvas in await self.make_backends():
             with self.subTest(backend=backend.name):
@@ -225,7 +429,15 @@ class TestBackendComponentContracts(unittest.IsolatedAsyncioTestCase):
                 ports = await backend.get_component_ports("case", 7)
                 self.assertEqual([port.name for port in ports], ["A", "B"])
                 await backend.set_component_enabled("case", 7, False)
-                self.assertFalse((await backend.get_component_parameters("case", 7))["enabled"])
+                if backend.name == "legacy":
+                    self.assertIn("PSCAD_MCP_DISABLED", canvas.components[0].layers)
+                    self.assertTrue(
+                        (await backend.get_component_parameters("case", 7))["enabled"]
+                    )
+                else:
+                    self.assertFalse(
+                        (await backend.get_component_parameters("case", 7))["enabled"]
+                    )
                 await backend.delete_component("case", clone.id)
                 self.assertNotIn(clone.id, [c.id for c in canvas.components])
 
