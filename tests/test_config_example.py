@@ -1,5 +1,8 @@
 from pathlib import Path
-import tomllib
+try:
+    import tomllib
+except ModuleNotFoundError:
+    import tomli as tomllib
 
 
 def test_codex_config_template_is_portable():
