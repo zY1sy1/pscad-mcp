@@ -12,7 +12,7 @@ All notable changes to this project are documented here.
 
 ### Added
 
-- Seven simulation-set tools for workspace-level create, inspect, task
+- Seven simulation set tools for workspace-level create, inspect, task
   listing, task removal, parameter reads, parameter writes, and set removal.
 - A stable 60-tool MCP inventory with backend contract coverage.
 - Portable Codex configuration template and Windows installation guidance.
