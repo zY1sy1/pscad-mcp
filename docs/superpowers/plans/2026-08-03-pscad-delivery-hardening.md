@@ -341,4 +341,3 @@ git ls-remote --heads origin codex/pscad-delivery-hardening
 \`\`\`
 
 Use the GitHub connector to read the created PR and confirm it is open and draft.
-
