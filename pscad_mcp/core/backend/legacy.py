@@ -26,6 +26,8 @@ from .base import (
     PortInfo,
     ProjectInfo,
     RunState,
+    SimulationSetInfo,
+    SimulationTaskInfo,
 )
 from . import legacy_support
 
@@ -45,6 +47,7 @@ class LegacyBackend:
     SETTING_DETAIL_MAX_MISMATCHES = 4
     SETTING_DETAIL_MAX_SERIALIZED_CHARS = 4096
     SETTING_DETAIL_MAX_INTEGER_BITS = 4096
+    _TASK_PARAMETER_ORDER = ("controlgroup", "volley", "affinity")
 
     def __init__(
         self,
@@ -1107,19 +1110,253 @@ class LegacyBackend:
         names = await self.executor.run_safe(workspace.list_simulation_sets)
         return [str(name) for name in names]
 
-    async def run_simulation_set(self, project_name: str, set_name: str) -> None:
-        simset = await self.executor.run_safe(
-            self._require_app().simulation_set, set_name
+    async def _workspace(self) -> Any:
+        return await self.executor.run_safe(self._require_app().workspace)
+
+    async def _legacy_simulation_set(self, set_name: str) -> Any:
+        if set_name not in await self.list_simulation_sets(""):
+            raise BackendError(
+                "NOT_FOUND",
+                f"Simulation set '{set_name}' was not found.",
+                self.name,
+                "simulation_set",
+                {"sim_set_name": set_name},
+            )
+        workspace = await self._workspace()
+        method = getattr(workspace, "simulation_set", None)
+        if method is None:
+            method = self._require_app().simulation_set
+        return await self.executor.run_safe(method, set_name)
+
+    async def create_simulation_set(self, set_name: str) -> SimulationSetInfo:
+        if set_name in await self.list_simulation_sets(""):
+            raise BackendError(
+                "ALREADY_EXISTS",
+                f"Simulation set '{set_name}' already exists.",
+                self.name,
+                "create_simulation_set",
+                {"sim_set_name": set_name},
+            )
+        workspace = await self._workspace()
+        response = await self.executor.run_safe(
+            workspace.create_simulation_set, set_name
         )
+        legacy_support.require_success(
+            response, "create_simulation_set", {"sim_set_name": set_name}
+        )
+        if set_name not in await self.list_simulation_sets(""):
+            raise BackendError(
+                "POSTCONDITION_FAILED",
+                "Created simulation set was not found after the command.",
+                self.name,
+                "create_simulation_set",
+                {"sim_set_name": set_name},
+            )
+        return await self.get_simulation_set_details(set_name)
+
+    async def remove_simulation_set(self, set_name: str) -> None:
+        if set_name not in await self.list_simulation_sets(""):
+            raise BackendError(
+                "NOT_FOUND",
+                f"Simulation set '{set_name}' was not found.",
+                self.name,
+                "remove_simulation_set",
+                {"sim_set_name": set_name},
+            )
+        workspace = await self._workspace()
+        response = await self.executor.run_safe(
+            workspace.remove_simulation_set, set_name
+        )
+        legacy_support.require_success(
+            response, "remove_simulation_set", {"sim_set_name": set_name}
+        )
+        if set_name in await self.list_simulation_sets(""):
+            raise BackendError(
+                "POSTCONDITION_FAILED",
+                "Removed simulation set is still present.",
+                self.name,
+                "remove_simulation_set",
+                {"sim_set_name": set_name},
+            )
+
+    async def list_simulation_set_tasks(self, set_name: str) -> list[str]:
+        simset = await self._legacy_simulation_set(set_name)
+        values = await self.executor.run_safe(simset.list_tasks)
+        result = []
+        for value in values:
+            name = getattr(value, "name", value)
+            if callable(name):
+                name = await self.executor.run_safe(name)
+            result.append(str(name))
+        return result
+
+    async def get_simulation_set_details(self, set_name: str) -> SimulationSetInfo:
+        simset = await self._legacy_simulation_set(set_name)
+        tasks = tuple(await self.list_simulation_set_tasks(set_name))
+        dependency_method = getattr(simset, "depends_on", None)
+        dependency = (
+            await self.executor.run_safe(dependency_method)
+            if dependency_method is not None
+            else None
+        )
+        dependency = None if dependency in (None, "", "None") else str(dependency)
+        return SimulationSetInfo(set_name, dependency, tasks)
+
+    async def get_simulation_task_parameters(
+        self, set_name: str, task_name: str
+    ) -> SimulationTaskInfo:
+        simset = await self._legacy_simulation_set(set_name)
+        if task_name not in await self.list_simulation_set_tasks(set_name):
+            raise BackendError(
+                "NOT_FOUND",
+                f"Simulation task '{task_name}' was not found.",
+                self.name,
+                "get_simulation_task_parameters",
+                {"sim_set_name": set_name, "task_name": task_name},
+            )
+        task = await self.executor.run_safe(simset.task, task_name)
+        values: dict[str, Any] = {}
+        for key in ("namespace", "controlgroup", "volley", "affinity"):
+            method = getattr(task, key, None)
+            values[key] = (
+                await self.executor.run_safe(method) if method is not None else None
+            )
+        return SimulationTaskInfo(
+            task_name,
+            None if values["namespace"] is None else str(values["namespace"]),
+            None if values["controlgroup"] is None else str(values["controlgroup"]),
+            None if values["volley"] is None else int(values["volley"]),
+            None if values["affinity"] is None else int(values["affinity"]),
+        )
+
+    async def run_simulation_set(self, project_name: str, set_name: str) -> None:
+        simset = await self._legacy_simulation_set(set_name)
         await self.executor.run_safe(simset.run, timeout=300.0)
 
     async def add_task_to_set(
         self, project_name: str, set_name: str, task_project_name: str
     ) -> None:
-        simset = await self.executor.run_safe(
-            self._require_app().simulation_set, set_name
+        simset = await self._legacy_simulation_set(set_name)
+        response = await self.executor.run_safe(simset.add_tasks, task_project_name)
+        legacy_support.require_success(
+            response,
+            "add_task_to_set",
+            {"sim_set_name": set_name, "task_project_name": task_project_name},
         )
-        await self.executor.run_safe(simset.add_tasks, task_project_name)
+        if task_project_name not in await self.list_simulation_set_tasks(set_name):
+            raise BackendError(
+                "POSTCONDITION_FAILED",
+                "Added simulation task was not found after the command.",
+                self.name,
+                "add_task_to_set",
+                {"sim_set_name": set_name, "task_project_name": task_project_name},
+            )
+
+    async def remove_tasks_from_set(
+        self, set_name: str, task_names: Sequence[str]
+    ) -> None:
+        simset = await self._legacy_simulation_set(set_name)
+        before = await self.list_simulation_set_tasks(set_name)
+        missing = [name for name in task_names if name not in before]
+        if missing:
+            raise BackendError(
+                "NOT_FOUND",
+                "One or more simulation tasks were not found.",
+                self.name,
+                "remove_tasks_from_set",
+                {"sim_set_name": set_name, "missing": missing},
+            )
+        response = await self.executor.run_safe(simset.remove_tasks, *task_names)
+        legacy_support.require_success(
+            response,
+            "remove_tasks_from_set",
+            {"sim_set_name": set_name, "task_names": list(task_names)},
+        )
+        remaining = set(await self.list_simulation_set_tasks(set_name))
+        unexpected = [name for name in task_names if name in remaining]
+        if unexpected:
+            raise BackendError(
+                "POSTCONDITION_FAILED",
+                "Removed simulation tasks are still present.",
+                self.name,
+                "remove_tasks_from_set",
+                {"sim_set_name": set_name, "remaining": unexpected},
+            )
+
+    async def set_simulation_task_parameters(
+        self, set_name: str, task_name: str, parameters: Mapping[str, Any]
+    ) -> SimulationTaskInfo:
+        original_record = await self.get_simulation_task_parameters(set_name, task_name)
+        unsupported = [key for key in parameters if key not in self._TASK_PARAMETER_ORDER]
+        if unsupported:
+            raise BackendError(
+                "INVALID_ARGUMENT",
+                "Unsupported simulation task parameters.",
+                self.name,
+                "set_simulation_task_parameters",
+                {"unsupported": unsupported},
+            )
+        original = {key: getattr(original_record, key) for key in parameters}
+        simset = await self._legacy_simulation_set(set_name)
+        task = await self.executor.run_safe(simset.task, task_name)
+        applied: list[str] = []
+        try:
+            for key in self._TASK_PARAMETER_ORDER:
+                if key not in parameters:
+                    continue
+                method = getattr(task, key, None)
+                if method is None:
+                    raise BackendError(
+                        "CAPABILITY_UNAVAILABLE",
+                        f"Simulation task parameter '{key}' is unavailable.",
+                        self.name,
+                        "set_simulation_task_parameters",
+                        {"unsupported": [key]},
+                    )
+                await self.executor.run_safe(method, parameters[key])
+                applied.append(key)
+            observed = await self.get_simulation_task_parameters(set_name, task_name)
+            mismatches = {
+                key: getattr(observed, key)
+                for key, expected in parameters.items()
+                if getattr(observed, key) != expected
+            }
+            if mismatches:
+                raise BackendError(
+                    "POSTCONDITION_FAILED",
+                    "Simulation task parameter read-back differed.",
+                    self.name,
+                    "set_simulation_task_parameters",
+                    {"expected": dict(parameters), "observed": mismatches},
+                )
+            return observed
+        except Exception as operation_error:
+            restore_errors: dict[str, str] = {}
+            for key in reversed(applied):
+                try:
+                    await self.executor.run_safe(getattr(task, key), original[key])
+                except Exception as restore_error:
+                    restore_errors[key] = type(restore_error).__name__
+            final = await self.get_simulation_task_parameters(set_name, task_name)
+            unrestored = {
+                key: getattr(final, key)
+                for key, value in original.items()
+                if getattr(final, key) != value
+            }
+            if restore_errors or unrestored:
+                raise BackendError(
+                    "PARTIAL_COMPLETION",
+                    "Simulation task parameters could not be restored.",
+                    self.name,
+                    "set_simulation_task_parameters",
+                    {
+                        "requested": dict(parameters),
+                        "original": original,
+                        "observed": {key: getattr(final, key) for key in original},
+                        "restore_errors": restore_errors,
+                    },
+                ) from operation_error
+            raise
 
     async def read_output_file(
         self, file_path: str, max_samples: int

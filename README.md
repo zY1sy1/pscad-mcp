@@ -1,6 +1,6 @@
 # PSCAD MCP for Codex and GitHub Copilot CLI
 
-`pscad-mcp` is a Windows Model Context Protocol (MCP) server for PSCAD automation. It uses `mhrc.automation` for PSCAD 4.6.x and `mhi.pscad` for PSCAD 5.x behind one stable 53-tool service contract.
+`pscad-mcp` is a Windows Model Context Protocol (MCP) server for PSCAD automation. It uses `mhrc.automation` for PSCAD 4.6.x and `mhi.pscad` for PSCAD 5.x behind one stable 60-tool service contract.
 
 中文安装、配置、安全和验收说明：[docs/zh-CN/README.md](docs/zh-CN/README.md)
 
@@ -62,6 +62,16 @@ The server currently exposes tool groups for:
 - simulation output capture and file parsing
 
 The implementation is modular, with each tool family registered from its own module in `pscad_mcp\tools`.
+
+Simulation sets are workspace-level resources rather than project-owned
+resources. The original `project_name` arguments on `list_simulation_sets`,
+`run_simulation_set`, and `add_task_to_set` remain for compatibility only.
+The complete workflow includes `create_simulation_set`,
+`remove_simulation_set`, `list_simulation_set_tasks`,
+`remove_tasks_from_set`, `get_simulation_task_parameters`,
+`set_simulation_task_parameters`, and `get_simulation_set_details`.
+Destructive removals require `confirm=true`; PSCAD 4.6.2 task writes support
+only `controlgroup`, `volley`, and `affinity`, with `namespace` read-only.
 
 ## Errors and connection recovery
 
@@ -287,7 +297,7 @@ Licensed PSCAD 4.6.2 acceptance is opt-in and works only on timestamped copies:
 
 The runner refuses to start while another PSCAD process is open and never
 broadly terminates PSCAD processes. It runs the six original acceptance tests
-plus eight reliability tests, records owned PIDs and evidence directories, and
+plus nine reliability tests, records owned PIDs and evidence directories, and
 requires all owned processes to exit. PSCAD 4.6.2 has been exercised on a real
 licensed installation; PSCAD 5.x remains contract-tested until a real 5.x
 installation is available for end-to-end acceptance.

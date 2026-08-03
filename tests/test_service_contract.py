@@ -1,7 +1,13 @@
 import json
 import unittest
 
-from pscad_mcp.core.backend.base import BackendError, BackendInfo
+from pscad_mcp.core.backend.base import (
+    BackendError,
+    BackendInfo,
+    ProjectInfo,
+    SimulationSetInfo,
+    SimulationTaskInfo,
+)
 from pscad_mcp.core.executor import (
     ExecutorTimeoutError,
     ExecutorUnhealthyError,
@@ -76,6 +82,56 @@ class FakeLifecycleBackend:
         self.attached = False
 
 
+class FakeSimulationBackend:
+    name = "legacy"
+
+    def __init__(self):
+        self.calls = []
+
+    async def create_simulation_set(self, name):
+        self.calls.append(("create", name))
+        return SimulationSetInfo(name, None, ())
+
+    async def remove_simulation_set(self, name):
+        self.calls.append(("remove", name))
+
+    async def list_simulation_set_tasks(self, name):
+        self.calls.append(("tasks", name))
+        return ["case"]
+
+    async def remove_tasks_from_set(self, name, task_names):
+        self.calls.append(("remove_tasks", name, list(task_names)))
+
+    async def get_simulation_task_parameters(self, set_name, task_name):
+        self.calls.append(("get_task", set_name, task_name))
+        return SimulationTaskInfo(task_name, task_name, "", 1, 1)
+
+    async def set_simulation_task_parameters(self, set_name, task_name, parameters):
+        self.calls.append(("set_task", set_name, task_name, dict(parameters)))
+        current = SimulationTaskInfo(task_name, task_name, "", 1, 1)
+        return SimulationTaskInfo(
+            task_name,
+            current.namespace,
+            parameters.get("controlgroup", current.controlgroup),
+            parameters.get("volley", current.volley),
+            parameters.get("affinity", current.affinity),
+        )
+
+    async def get_simulation_set_details(self, name):
+        self.calls.append(("details", name))
+        return SimulationSetInfo(name, None, ("case",))
+
+    async def run_simulation_set(self, project_name, set_name):
+        self.calls.append(("run", project_name, set_name))
+
+    async def add_task_to_set(self, project_name, set_name, task_name):
+        self.calls.append(("add", project_name, set_name, task_name))
+
+    async def list_projects(self):
+        self.calls.append(("projects",))
+        return [ProjectInfo("case", "Case", "")]
+
+
 class RecordingExecutor(ImmediateExecutor):
     def __init__(self, events):
         super().__init__()
@@ -86,7 +142,103 @@ class RecordingExecutor(ImmediateExecutor):
         super().reset()
 
 
+def service_with_backend(backend):
+    service = PscadService(lambda: backend, executor=ImmediateExecutor())
+    service._backend = backend
+    return service
+
+
 class TestPscadService(unittest.IsolatedAsyncioTestCase):
+    async def test_remove_tasks_requires_confirmation_before_backend_call(self):
+        backend = FakeSimulationBackend()
+        service = service_with_backend(backend)
+        with self.assertRaises(ConfirmationRequired):
+            await service.remove_tasks_from_set("Batch1", ["case"])
+        self.assertEqual(backend.calls, [])
+
+    async def test_remove_tasks_deduplicates_before_backend_call(self):
+        backend = FakeSimulationBackend()
+        service = service_with_backend(backend)
+        result = await service.remove_tasks_from_set(
+            "Batch1", ["case", "case"], confirm=True
+        )
+        self.assertEqual(result, {"removed": ["case"]})
+        self.assertEqual(backend.calls, [("remove_tasks", "Batch1", ["case"])])
+
+    async def test_task_parameters_reject_bool_as_integer(self):
+        service = service_with_backend(FakeSimulationBackend())
+        with self.assertRaises(BackendError) as raised:
+            await service.set_simulation_task_parameters(
+                "Batch1", "case", {"volley": True}
+            )
+        self.assertEqual(raised.exception.code, "INVALID_ARGUMENT")
+
+    async def test_task_parameters_reject_values_below_one(self):
+        service = service_with_backend(FakeSimulationBackend())
+        with self.assertRaises(BackendError) as raised:
+            await service.set_simulation_task_parameters(
+                "Batch1", "case", {"affinity": 0}
+            )
+        self.assertEqual(raised.exception.code, "INVALID_ARGUMENT")
+
+    async def test_task_parameters_reject_read_only_and_unknown_fields(self):
+        service = service_with_backend(FakeSimulationBackend())
+        for values in ({"namespace": "other"}, {"unknown": 1}):
+            with self.subTest(values=values):
+                with self.assertRaises(BackendError) as raised:
+                    await service.set_simulation_task_parameters(
+                        "Batch1", "case", values
+                    )
+                self.assertEqual(raised.exception.code, "INVALID_ARGUMENT")
+
+    async def test_simulation_set_results_are_normalized(self):
+        backend = FakeSimulationBackend()
+        service = service_with_backend(backend)
+        self.assertEqual(
+            await service.create_simulation_set("Batch1"),
+            {"name": "Batch1", "depends_on": None, "tasks": ()},
+        )
+        self.assertEqual(
+            await service.get_simulation_task_parameters("Batch1", "case"),
+            {
+                "name": "case",
+                "namespace": "case",
+                "controlgroup": "",
+                "volley": 1,
+                "affinity": 1,
+            },
+        )
+
+    async def test_simulation_set_names_must_be_non_empty(self):
+        service = service_with_backend(FakeSimulationBackend())
+        with self.assertRaises(BackendError) as raised:
+            await service.create_simulation_set(" ")
+        self.assertEqual(raised.exception.code, "INVALID_ARGUMENT")
+
+    async def test_run_simulation_set_verifies_set_before_backend_run(self):
+        backend = FakeSimulationBackend()
+        service = service_with_backend(backend)
+        await service.run_simulation_set("compat", "Batch1")
+        self.assertEqual(
+            backend.calls[:2],
+            [("details", "Batch1"), ("run", "compat", "Batch1")],
+        )
+
+    async def test_add_task_rejects_unloaded_project(self):
+        backend = FakeSimulationBackend()
+        backend.list_projects = lambda: None
+
+        async def no_projects():
+            backend.calls.append(("projects",))
+            return []
+
+        backend.list_projects = no_projects
+        service = service_with_backend(backend)
+        with self.assertRaises(BackendError) as raised:
+            await service.add_task_to_set("compat", "Batch1", "missing")
+        self.assertEqual(raised.exception.code, "NOT_FOUND")
+        self.assertNotIn(("add", "compat", "Batch1", "missing"), backend.calls)
+
     async def test_backend_is_selected_lazily(self):
         created = []
 

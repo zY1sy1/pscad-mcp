@@ -12,7 +12,12 @@ from decimal import Decimal
 from pathlib import Path
 from unittest.mock import patch
 
-from pscad_mcp.core.backend.base import BackendError, RunState
+from pscad_mcp.core.backend.base import (
+    BackendError,
+    RunState,
+    SimulationSetInfo,
+    SimulationTaskInfo,
+)
 from pscad_mcp.core.backend.legacy import LegacyBackend
 from pscad_mcp.core.backend.legacy_support import project_kind
 from pscad_mcp.core.backend.modern import ModernBackend
@@ -190,13 +195,81 @@ class HostileProxy:
         raise AssertionError("diagnostics must not repr vendor proxies")
 
 
+def xml_response(success=True):
+    return ET.Element("commandresponse", {"success": "true" if success else "false"})
+
+
+class FakeTasks(dict):
+    def __eq__(self, other):
+        if isinstance(other, list):
+            return list(self) == other
+        return super().__eq__(other)
+
+
+class FakeSimulationTask:
+    def __init__(self, name, *, modern=False):
+        self.name = name
+        self.modern = modern
+        self.values = {"namespace": name, "controlgroup": "", "volley": 1, "affinity": 1}
+        if modern:
+            self.values.pop("controlgroup")
+        self.fail_on = set()
+        self.fail_restore_on = set()
+        self.original = dict(self.values)
+
+    def namespace(self): return self.values["namespace"]
+
+    def _set(self, key, value):
+        if key in self.fail_on or (value == self.original[key] and key in self.fail_restore_on):
+            raise RuntimeError(f"failed {key}")
+        self.values[key] = value
+
+    def controlgroup(self, value=None):
+        if self.modern:
+            raise AttributeError("controlgroup unavailable")
+        if value is not None: self._set("controlgroup", value)
+        return self.values["controlgroup"]
+
+    def volley(self, value=None):
+        if value is not None: self._set("volley", value)
+        return self.values["volley"]
+
+    def affinity(self, value=None):
+        if value is not None: self._set("affinity", value)
+        return self.values["affinity"]
+
+    def parameters(self, **updates):
+        if not self.modern:
+            raise AttributeError("parameters unavailable")
+        if updates:
+            for key, value in updates.items():
+                self._set(key, value)
+            return None
+        return dict(self.values)
+
+
 class FakeSimulationSet:
-    def __init__(self):
+    def __init__(self, name="set1", *, modern=False):
+        self.set_name = name
+        self.modern = modern
         self.ran = False
-        self.tasks = []
+        self.tasks = FakeTasks()
+        self.add_response = xml_response()
+        self.remove_response = xml_response()
 
     def run(self): self.ran = True
-    def add_tasks(self, *names): self.tasks.extend(names)
+    def name(self): return self.set_name
+    def depends_on(self): return "None"
+    def list_tasks(self): return list(self.tasks)
+    def task(self, name): return self.tasks[name]
+    def add_tasks(self, *names):
+        for name in names:
+            self.tasks[name] = FakeSimulationTask(name, modern=self.modern)
+        return self.add_response
+    def remove_tasks(self, *names):
+        for name in names:
+            self.tasks.pop(name, None)
+        return self.remove_response
 
 
 class FakeWorkspace:
@@ -211,12 +284,21 @@ class FakeWorkspace:
         return project
 
     def list_simulation_sets(self): return list(self.app.simsets)
+    def simulation_set(self, name): return self.app.simsets[name]
+    def create_simulation_set(self, name):
+        self.app.simsets[name] = FakeSimulationSet(name)
+        return self.app.create_set_response
+    def remove_simulation_set(self, name):
+        self.app.simsets.pop(name, None)
+        return self.app.remove_set_response
 
 
 class FakeLegacyApp:
     def __init__(self):
         self.project_map = {"case": FakeProject()}
         self.simsets = {"set1": FakeSimulationSet()}
+        self.create_set_response = xml_response()
+        self.remove_set_response = xml_response()
         self.loaded = []
         self.settings_data = {"fortran_version": "GFortran"}
         self.settings_calls = []
@@ -281,6 +363,10 @@ class FakeModernApp(FakeLegacyApp):
     version = "5.0.2"
     workspace_path = r"D:\PSCAD-Workspace"
 
+    def __init__(self):
+        super().__init__()
+        self.simsets = {"set1": FakeSimulationSet(modern=True)}
+
     def is_busy(self): return False
     def projects(self): return self.list_projects()
     def create_case(self, filename, folder=None):
@@ -293,6 +379,12 @@ class FakeModernApp(FakeLegacyApp):
         self.project_map[name] = project
         return project
     def simulation_sets(self): return list(self.simsets)
+    def create_simulation_set(self, name):
+        self.simsets[name] = FakeSimulationSet(name, modern=True)
+        return self.create_set_response
+    def remove_simulation_set(self, name):
+        self.simsets.pop(name, None)
+        return self.remove_set_response
 
 
 class TestLegacyProjectFiles(unittest.IsolatedAsyncioTestCase):
@@ -913,6 +1005,12 @@ class TestBackendProjectContracts(unittest.IsolatedAsyncioTestCase):
         await modern.attach()
         return [(legacy, legacy_app), (modern, modern_app)]
 
+    async def legacy_with_task(self, set_name="Batch1", task_name="case"):
+        backend, app = (await self.make_backends())[0]
+        app.simsets[set_name] = FakeSimulationSet(set_name)
+        app.simsets[set_name].tasks[task_name] = FakeSimulationTask(task_name)
+        return backend, app
+
     async def test_project_lifecycle_and_normalization_match(self):
         with tempfile.TemporaryDirectory() as folder:
             source = Path(folder) / "case.pscx"
@@ -1302,6 +1400,76 @@ class TestBackendProjectContracts(unittest.IsolatedAsyncioTestCase):
 
                 self.assertTrue(app.simsets["set1"].ran)
                 self.assertEqual(app.simsets["set1"].tasks, ["case"])
+
+    async def test_legacy_simulation_set_crud_and_task_reads(self):
+        backend, app = (await self.make_backends())[0]
+
+        created = await backend.create_simulation_set("Batch1")
+        self.assertEqual(created, SimulationSetInfo("Batch1", None, ()))
+
+        await backend.add_task_to_set("ignored", "Batch1", "case")
+        self.assertEqual(await backend.list_simulation_set_tasks("Batch1"), ["case"])
+        self.assertEqual(
+            await backend.get_simulation_task_parameters("Batch1", "case"),
+            SimulationTaskInfo("case", "case", "", 1, 1),
+        )
+        details = await backend.get_simulation_set_details("Batch1")
+        self.assertEqual(details.tasks, ("case",))
+
+        await backend.remove_tasks_from_set("Batch1", ["case"])
+        await backend.remove_simulation_set("Batch1")
+        self.assertNotIn("Batch1", app.simsets)
+
+    async def test_modern_simulation_set_crud_and_task_reads(self):
+        backend, app = (await self.make_backends())[1]
+        created = await backend.create_simulation_set("Batch1")
+        self.assertEqual(created, SimulationSetInfo("Batch1", None, ()))
+        await backend.add_task_to_set("ignored", "Batch1", "case")
+        self.assertEqual(await backend.list_simulation_set_tasks("Batch1"), ["case"])
+        task = await backend.get_simulation_task_parameters("Batch1", "case")
+        self.assertIsNone(task.controlgroup)
+        self.assertEqual((task.volley, task.affinity), (1, 1))
+        updated = await backend.set_simulation_task_parameters(
+            "Batch1", "case", {"volley": 2, "affinity": 3}
+        )
+        self.assertEqual((updated.volley, updated.affinity), (2, 3))
+        with self.assertRaises(BackendError) as raised:
+            await backend.set_simulation_task_parameters(
+                "Batch1", "case", {"controlgroup": "A"}
+            )
+        self.assertEqual(raised.exception.code, "CAPABILITY_UNAVAILABLE")
+        await backend.remove_tasks_from_set("Batch1", ["case"])
+        await backend.remove_simulation_set("Batch1")
+        self.assertNotIn("Batch1", app.simsets)
+
+    async def test_legacy_task_parameter_update_reads_back(self):
+        backend, _app = await self.legacy_with_task()
+        result = await backend.set_simulation_task_parameters(
+            "Batch1", "case", {"volley": 2, "affinity": 3}
+        )
+        self.assertEqual((result.volley, result.affinity), (2, 3))
+
+    async def test_legacy_task_parameter_failure_restores_original_values(self):
+        backend, app = await self.legacy_with_task()
+        task = app.simsets["Batch1"].tasks["case"]
+        task.fail_on.add("affinity")
+        with self.assertRaises(RuntimeError):
+            await backend.set_simulation_task_parameters(
+                "Batch1", "case", {"volley": 2, "affinity": 3}
+            )
+        self.assertEqual(task.values["volley"], 1)
+
+    async def test_legacy_task_parameter_failed_restore_is_partial_completion(self):
+        backend, app = await self.legacy_with_task()
+        task = app.simsets["Batch1"].tasks["case"]
+        task.fail_on.add("affinity")
+        task.fail_restore_on.add("volley")
+        with self.assertRaises(BackendError) as raised:
+            await backend.set_simulation_task_parameters(
+                "Batch1", "case", {"volley": 2, "affinity": 3}
+            )
+        self.assertEqual(raised.exception.code, "PARTIAL_COMPLETION")
+        self.assertEqual(raised.exception.details["observed"]["volley"], 2)
 
 
 if __name__ == "__main__":

@@ -19,6 +19,10 @@ EXPECTED_TOOLS = {
     "pause_simulation", "stop_simulation", "get_project_settings",
     "set_project_settings", "get_project_output", "read_output_file",
     "list_simulation_sets", "run_simulation_set", "add_task_to_set",
+    "create_simulation_set", "remove_simulation_set",
+    "list_simulation_set_tasks", "remove_tasks_from_set",
+    "get_simulation_task_parameters", "set_simulation_task_parameters",
+    "get_simulation_set_details",
     "create_case", "create_library", "save_project", "save_project_as",
     "build_project", "build_all_projects", "get_project_definitions",
     "add_component", "create_component", "create_wire", "create_bus",
@@ -32,12 +36,12 @@ EXPECTED_TOOLS = {
 
 
 class TestToolBackendMatrix(unittest.TestCase):
-    def test_exact_53_tool_registration(self):
+    def test_exact_60_tool_registration(self):
         names = {
             tool.name for tool in create_server()._tool_manager.list_tools()
         }
         self.assertEqual(names, EXPECTED_TOOLS)
-        self.assertEqual(len(names), 53)
+        self.assertEqual(len(names), 60)
 
     def test_both_backends_implement_complete_protocol(self):
         legacy = LegacyBackend(
@@ -62,6 +66,17 @@ class TestToolBackendMatrix(unittest.TestCase):
 
     def test_connection_manager_does_not_expose_raw_pscad_proxy(self):
         self.assertFalse(hasattr(PSCADConnectionManager, "pscad"))
+
+    def test_documentation_describes_simulation_set_management(self):
+        root = Path(__file__).parents[1]
+        english = (root / "README.md").read_text(encoding="utf-8")
+        chinese = (root / "docs" / "zh-CN" / "README.md").read_text(encoding="utf-8")
+        for text in (english, chinese):
+            self.assertIn("60", text)
+            self.assertIn("create_simulation_set", text)
+            self.assertIn("remove_tasks_from_set", text)
+        self.assertIn("workspace-level", english)
+        self.assertIn("工作区级", chinese)
 
 
 if __name__ == "__main__":

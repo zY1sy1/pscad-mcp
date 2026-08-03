@@ -1,6 +1,6 @@
 # PSCAD MCP 中文使用与验收说明
 
-本项目把 PSCAD 自动化封装为 53 个 MCP 工具，可供 Codex、GitHub Copilot CLI 等支持 stdio MCP 的客户端调用。项目采用双后端：
+本项目把 PSCAD 自动化封装为 60 个 MCP 工具，可供 Codex、GitHub Copilot CLI 等支持 stdio MCP 的客户端调用。项目采用双后端：
 
 - PSCAD 4.6.x：`mhrc.automation`，当前已在本机 PSCAD 4.6.2 x64 许可环境做真实验收；
 - PSCAD 5.x：`mhi.pscad` 3.1.x，当前完成契约测试，但由于本机没有 PSCAD 5.x，不能声称端到端真实验收通过；
@@ -19,12 +19,12 @@ Legacy PSCAD 4.6.2 后端只支持启动新的 Automation 实例，不能附加�
 
 ## 功能范围
 
-服务器固定注册 53 个工具，分为以下七组：
+服务器固定注册 60 个工具，分为以下七组：
 
 - 应用与文档 7 个：连接、状态、修复、退出、文档同步/列出/读取；
 - 工程与参数 12 个：加载、列出、运行、暂停、停止、运行状态、元件查询、参数读取/写入/校验、工程设置读取/写入；
 - 输出 2 个：工程消息和 `.psout`/`.out` 结果读取；
-- 仿真集 3 个：列出、运行、添加任务；
+- 仿真集 10 个：列出、创建、删除、详情、任务列表、运行、添加任务、移除任务、任务参数读取、任务参数写入；仿真集是工作区级资源，不属于单个工程；
 - 创建、保存与构建 7 个：新建算例/库、保存、另存、构建、全部构建、定义列表；
 - 画布 12 个：元件、导线、母线、连接、端口连接、注释、图框、控制框、对象列表、空位搜索、批量删除；
 - 元件操作 10 个：位置、旋转、镜像、克隆、端口、启用/禁用、删除。
@@ -94,6 +94,14 @@ PSCAD_MCP_WORKSPACE = 'D:\PSCAD-Workspace'
 
 ## 安全边界
 
+仿真集管理工具包括 `create_simulation_set`、`remove_simulation_set`、
+`list_simulation_set_tasks`、`remove_tasks_from_set`、
+`get_simulation_task_parameters`、`set_simulation_task_parameters` 和
+`get_simulation_set_details`。删除仿真集或移除任务必须显式传入
+`confirm=true`。旧的 `project_name` 参数仅为兼容保留，不用于限定工作区级
+仿真集。PSCAD 4.6.2 可写任务字段只有 `controlgroup`、`volley` 和
+`affinity`；`namespace` 只读。
+
 - 设置 `PSCAD_MCP_WORKSPACE` 后，工作区外的工程和结果路径会被拒绝；
 - 支持的工程/结果后缀采用允许列表，不接受任意文件；
 - 退出 PSCAD、删除元件、覆盖保存等操作需要显式 `confirm=true`；
@@ -122,7 +130,7 @@ Set-Location D:\pscad-mcp
   -Version '4.6.2' -X64
 ```
 
-脚本运行 6 个原有实机测试和 8 个可靠性测试，每个变更场景使用独立的时间戳副本。覆盖只读、画布变更、构建、仿真与消息、运行控制、PSOUT，以及模板新建/重载、另存回退、工程设置、图层能力限制、连接删除、18 网格碰撞搜索和自有进程修复。脚本会打印副本路径、证据目录、启动的 PSCAD PID 和最终 `ACCEPTANCE_COMPLETE=PASS`；任何自有残留进程都会导致验收失败，但脚本不会强制关闭未确认的进程。
+脚本运行 6 个原有实机测试和 9 个可靠性测试，每个变更场景使用独立的时间戳副本。覆盖只读、画布变更、构建、仿真与消息、运行控制、PSOUT，以及模板新建/重载、另存回退、工程设置、图层能力限制、连接删除、18 网格碰撞搜索、自有进程修复和仿真集生命周期。脚本会打印副本路径、证据目录、启动的 PSCAD PID 和最终 `ACCEPTANCE_COMPLETE=PASS`；任何自有残留进程都会导致验收失败，但脚本不会强制关闭未确认的进程。
 
 完整终验还应执行：
 
@@ -135,7 +143,7 @@ git diff --check
 git status --short --branch
 ```
 
-工具数量应输出 `53 53`。真实 PSCAD 5.x 必须在安装并运行对应版本后另做相同级别验收。
+工具数量应输出 `60 60`。真实 PSCAD 5.x 必须在安装并运行对应版本后另做相同级别验收。
 
 ## 常见故障
 

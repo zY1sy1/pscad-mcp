@@ -10,7 +10,17 @@ from pscad_mcp.tools.project_tools import (
     validate_component_parameters,
     get_project_settings
 )
-from pscad_mcp.tools.simset_tools import list_simulation_sets, run_simulation_set
+from pscad_mcp.tools.simset_tools import (
+    create_simulation_set,
+    get_simulation_set_details,
+    get_simulation_task_parameters,
+    list_simulation_set_tasks,
+    list_simulation_sets,
+    remove_simulation_set,
+    remove_tasks_from_set,
+    run_simulation_set,
+    set_simulation_task_parameters,
+)
 
 class TestEnhancedPSCADTools(unittest.IsolatedAsyncioTestCase):
 
@@ -107,6 +117,47 @@ class TestEnhancedPSCADTools(unittest.IsolatedAsyncioTestCase):
         self.mock_simset_manager.service.run_simulation_set.assert_awaited_once_with(
             "TestProj", "Batch1"
         )
+
+    async def test_create_simulation_set_routes_to_service(self):
+        self.mock_simset_manager.service.create_simulation_set = AsyncMock(
+            return_value={"name": "Batch1"}
+        )
+        result = await create_simulation_set("Batch1")
+        self.assertEqual(result, {"name": "Batch1"})
+        self.mock_simset_manager.service.create_simulation_set.assert_awaited_once_with(
+            "Batch1"
+        )
+
+    async def test_remove_simulation_set_routes_confirmation(self):
+        self.mock_simset_manager.service.remove_simulation_set = AsyncMock(
+            return_value={"removed": "Batch1"}
+        )
+        result = await remove_simulation_set("Batch1", confirm=True)
+        self.assertEqual(result, {"removed": "Batch1"})
+        self.mock_simset_manager.service.remove_simulation_set.assert_awaited_once_with(
+            "Batch1", confirm=True
+        )
+
+    async def test_simulation_set_task_tools_route_to_service(self):
+        cases = [
+            (list_simulation_set_tasks, ("Batch1",), {"tasks": ["case"]}),
+            (remove_tasks_from_set, ("Batch1", ["case"]), {"removed": ["case"]}),
+            (get_simulation_task_parameters, ("Batch1", "case"), {"volley": 1}),
+            (set_simulation_task_parameters, ("Batch1", "case", {"volley": 2}), {"volley": 2}),
+            (get_simulation_set_details, ("Batch1",), {"name": "Batch1"}),
+        ]
+        for function, args, expected in cases:
+            with self.subTest(function=function.__name__):
+                service_method = getattr(self.mock_simset_manager.service, function.__name__)
+                service_method = AsyncMock(return_value=expected)
+                setattr(self.mock_simset_manager.service, function.__name__, service_method)
+                if function is remove_tasks_from_set:
+                    result = await function(*args, confirm=True)
+                    service_method.assert_awaited_once_with(*args, confirm=True)
+                else:
+                    result = await function(*args)
+                    service_method.assert_awaited_once_with(*args)
+                self.assertEqual(result, expected)
 
     async def test_get_project_settings(self):
         """Test retrieving project settings."""
