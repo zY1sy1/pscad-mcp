@@ -51,6 +51,22 @@ class RunState:
     progress: float | None
 
 
+@dataclass(frozen=True)
+class SimulationSetInfo:
+    name: str
+    depends_on: str | None
+    tasks: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class SimulationTaskInfo:
+    name: str
+    namespace: str | None
+    controlgroup: str | None
+    volley: int | None
+    affinity: int | None
+
+
 class BackendError(RuntimeError):
     """A vendor-neutral backend failure suitable for MCP serialization."""
 

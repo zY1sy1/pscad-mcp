@@ -10,6 +10,8 @@ from pscad_mcp.core.backend.base import (
     ProjectInfo,
     PscadBackend,
     RunState,
+    SimulationSetInfo,
+    SimulationTaskInfo,
 )
 
 
@@ -26,6 +28,8 @@ class TestBackendRecords(unittest.TestCase):
             ComponentInfo(7, "R1", "master:resistor", {"x": 10, "y": 20}),
             PortInfo("A", 10, 20, 1, "electrical"),
             RunState("running", 25.0),
+            SimulationSetInfo("Batch1", None, ("CaseA", "CaseB")),
+            SimulationTaskInfo("CaseA", "CaseA", "", 1, 1),
         ]
 
         payload = json.loads(json.dumps([asdict(record) for record in records]))
@@ -33,6 +37,8 @@ class TestBackendRecords(unittest.TestCase):
         self.assertEqual(payload[0]["version"], "4.6.2")
         self.assertEqual(payload[2]["location"], {"x": 10, "y": 20})
         self.assertEqual(payload[4]["progress"], 25.0)
+        self.assertEqual(payload[5]["tasks"], ["CaseA", "CaseB"])
+        self.assertEqual(payload[6]["volley"], 1)
 
     def test_backend_error_has_stable_payload(self):
         error = BackendError(
