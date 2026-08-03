@@ -1,0 +1,16 @@
+# Copy this server block into %USERPROFILE%\.codex\config.toml and replace
+# the example interpreter and workspace paths for your machine.
+
+[mcp_servers.pscad]
+type = 'stdio'
+command = 'C:/path/to/pscad-mcp/.venv/Scripts/python.exe'
+args = ['-m', 'pscad_mcp.main']
+startup_timeout_sec = 120
+tool_timeout_sec = 600
+
+[mcp_servers.pscad.env]
+PSCAD_MCP_BACKEND = 'legacy'
+PSCAD_MCP_VERSION = '4.6.2'
+PSCAD_MCP_X64 = 'true'
+PSCAD_MCP_LAUNCH_TIMEOUT = '30'
+PSCAD_MCP_WORKSPACE = 'C:/path/to/PSCAD-Workspace'

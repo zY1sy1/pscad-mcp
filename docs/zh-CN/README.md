@@ -29,24 +29,26 @@ Legacy PSCAD 4.6.2 后端只支持启动新的 Automation 实例，不能附加�
 - 画布 12 个：元件、导线、母线、连接、端口连接、注释、图框、控制框、对象列表、空位搜索、批量删除；
 - 元件操作 10 个：位置、旋转、镜像、克隆、端口、启用/禁用、删除。
 
-## D 盘安装
+## Windows 安装
 
-以下命令假定仓库位于 `D:\pscad-mcp`：
+以下命令从仓库根目录执行，并通过变量保留路径可移植性：
 
 ```powershell
-py -3 -m venv D:\pscad-mcp\.venv
-& D:\pscad-mcp\.venv\Scripts\python.exe -m pip install --upgrade pip
-& D:\pscad-mcp\.venv\Scripts\python.exe -m pip install -e "D:\pscad-mcp[windows]"
+$repoRoot = (Get-Location).Path
+$venvPath = Join-Path $repoRoot ".venv"
+py -3 -m venv $venvPath
+& (Join-Path $venvPath "Scripts\python.exe") -m pip install --upgrade pip
+& (Join-Path $venvPath "Scripts\python.exe") -m pip install -e "$repoRoot[windows]"
 ```
 
 PSCAD 4.6.x 还需要安装与许可证配套的官方 Automation Library wheel。该 wheel 受厂商授权约束，本仓库不会复制或分发：
 
 ```powershell
-& D:\pscad-mcp\.venv\Scripts\python.exe -m pip install `
-  "D:\合法安装介质\mhrc_automation-1.2.4-py3-none-any.whl"
+& (Join-Path $venvPath "Scripts\python.exe") -m pip install `
+  "C:\合法安装介质\mhrc_automation-1.2.4-py3-none-any.whl"
 ```
 
-本地虚拟环境就是 `D:\pscad-mcp\.venv`：它是一套只供本项目使用的 Python、MCP 和 PSCAD Python 包，不会替换系统 Python，也不会修改 PSCAD 安装目录。删除虚拟环境只会删除这些项目依赖；仓库代码和 PSCAD 工程不受影响。
+本地虚拟环境就是仓库下的 `.venv`：它是一套只供本项目使用的 Python、MCP 和 PSCAD Python 包，不会替换系统 Python，也不会修改 PSCAD 安装目录。删除虚拟环境只会删除这些项目依赖；仓库代码和 PSCAD 工程不受影响。
 
 ## 环境变量
 
@@ -73,11 +75,12 @@ $env:PSCAD_MCP_WORKSPACE = "D:\PSCAD-Workspace"
 
 ## Codex 配置
 
-在 `%USERPROFILE%\.codex\config.toml` 中加入：
+仓库提供了可移植模板 [`config.example.toml`](../../config.example.toml)。把其中的 `mcp_servers.pscad` 区块复制到 `%USERPROFILE%\.codex\config.toml`，再把 Python 解释器和工作区路径替换为本机路径：
 
 ```toml
 [mcp_servers.pscad]
-command = 'D:\pscad-mcp\.venv\Scripts\python.exe'
+type = 'stdio'
+command = 'C:/path/to/pscad-mcp/.venv/Scripts/python.exe'
 args = ['-m', 'pscad_mcp.main']
 startup_timeout_sec = 120
 tool_timeout_sec = 600
@@ -87,7 +90,7 @@ PSCAD_MCP_BACKEND = 'legacy'
 PSCAD_MCP_VERSION = '4.6.2'
 PSCAD_MCP_X64 = 'true'
 PSCAD_MCP_LAUNCH_TIMEOUT = '30'
-PSCAD_MCP_WORKSPACE = 'D:\PSCAD-Workspace'
+PSCAD_MCP_WORKSPACE = 'C:/path/to/PSCAD-Workspace'
 ```
 
 保存后新建 Codex 任务，使 MCP 配置重新加载。本轮代码验收不会自动改写全局 Codex 配置。

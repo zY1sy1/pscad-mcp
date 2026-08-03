@@ -140,13 +140,16 @@ copilot
 
 If needed, sign in from inside the CLI using `/login`.
 
-## Install this MCP server on D:
+## Install this MCP server on Windows
 
-From the repository root:
+From the repository root, keep the checkout and virtual environment paths in
+variables so the same commands work on another machine:
 
 ```powershell
-py -3 -m venv D:\pscad-mcp\.venv
-& D:\pscad-mcp\.venv\Scripts\python.exe -m pip install -e "D:\pscad-mcp[windows]"
+$repoRoot = (Get-Location).Path
+$venvPath = Join-Path $repoRoot ".venv"
+py -3 -m venv $venvPath
+& (Join-Path $venvPath "Scripts\python.exe") -m pip install -e "$repoRoot[windows]"
 ```
 
 For PSCAD 4.6.x, install the licensed Automation Library wheel supplied with
@@ -154,7 +157,7 @@ your PSCAD installation or by the vendor; it is not redistributed by this
 repository:
 
 ```powershell
-& D:\pscad-mcp\.venv\Scripts\python.exe -m pip install "D:\path\to\mhrc_automation-1.2.4-py3-none-any.whl"
+& (Join-Path $venvPath "Scripts\python.exe") -m pip install "C:\path\to\mhrc_automation-1.2.4-py3-none-any.whl"
 ```
 
 For non-Windows development tasks such as tests or documentation work, install base dependencies only:
@@ -162,6 +165,13 @@ For non-Windows development tasks such as tests or documentation work, install b
 ```powershell
 py -3 -m pip install -e .
 ```
+
+The repository includes a portable Codex template at
+[`config.example.toml`](config.example.toml). Copy its `mcp_servers.pscad`
+block into `%USERPROFILE%\.codex\config.toml`, then replace the example
+Python interpreter and workspace paths with paths on your machine. Do not
+copy the maintainer's local configuration file. After saving the TOML file,
+start a new Codex task so the MCP server is loaded again.
 
 ## Quick setup for Copilot CLI
 
@@ -221,11 +231,12 @@ Replace the `command` path with the interpreter from the environment where `psca
 
 ### Codex configuration
 
-Add this to `%USERPROFILE%\.codex\config.toml`, then start a new Codex task:
+The equivalent path-neutral entry is:
 
 ```toml
 [mcp_servers.pscad]
-command = 'D:\pscad-mcp\.venv\Scripts\python.exe'
+type = 'stdio'
+command = 'C:/path/to/pscad-mcp/.venv/Scripts/python.exe'
 args = ['-m', 'pscad_mcp.main']
 startup_timeout_sec = 120
 tool_timeout_sec = 600
@@ -234,10 +245,14 @@ tool_timeout_sec = 600
 PSCAD_MCP_BACKEND = 'legacy'
 PSCAD_MCP_VERSION = '4.6.2'
 PSCAD_MCP_X64 = 'true'
-PSCAD_MCP_WORKSPACE = 'D:\PSCAD-Workspace'
+PSCAD_MCP_WORKSPACE = 'C:/path/to/PSCAD-Workspace'
 ```
 
-Use `PSCAD_MCP_BACKEND='modern'` and an installed 5.x version for PSCAD 5.x.
+Replace both local paths in this example, or copy the values from
+[`config.example.toml`](config.example.toml). Use
+`PSCAD_MCP_BACKEND='modern'` and an installed 5.x version for PSCAD 5.x.
+The current repository has contract coverage for Modern but does not claim
+real PSCAD 5.x end-to-end acceptance.
 
 ## First prompts to try in Copilot CLI
 
