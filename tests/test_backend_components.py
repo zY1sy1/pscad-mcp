@@ -1046,7 +1046,7 @@ class TestBackendComponentContracts(unittest.IsolatedAsyncioTestCase):
 
             discovered = await backend._discover_master_library()
 
-        self.assertEqual(discovered, master_library)
+        self.assertEqual(discovered.resolve(), master_library.resolve())
 
     async def test_legacy_occupied_rectangles_enrich_sparse_canvas_xml_from_project_file(self):
         project = LegacyComponentProject()

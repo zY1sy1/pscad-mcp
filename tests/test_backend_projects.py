@@ -1035,7 +1035,10 @@ class TestBackendProjectContracts(unittest.IsolatedAsyncioTestCase):
                     expected_loads = [str(source)]
                     if backend.name == "legacy":
                         expected_loads.append(str(Path(folder) / "copy.pscx"))
-                    self.assertEqual(app.loaded, expected_loads)
+                    self.assertEqual(
+                        [str(Path(path).resolve()) for path in app.loaded],
+                        [str(Path(path).resolve()) for path in expected_loads],
+                    )
                     self.assertTrue(app.built_all)
 
     async def test_create_definitions_settings_and_output_match(self):
