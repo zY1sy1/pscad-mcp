@@ -1,12 +1,12 @@
 # PSCAD MCP 中文使用与验收说明
 
-本项目把 PSCAD 自动化封装为 53 个 MCP 工具，可供 Codex、GitHub Copilot CLI 等支持 stdio MCP 的客户端调用。项目采用双后端：
+本项目把 PSCAD 自动化封装为 60 个 MCP 工具，可供 Codex、GitHub Copilot CLI 等支持 stdio MCP 的客户端调用。项目采用双后端：
 
 - PSCAD 4.6.x：`mhrc.automation`，当前已在本机 PSCAD 4.6.2 x64 许可环境做真实验收；
 - PSCAD 5.x：`mhi.pscad` 3.1.x，当前完成契约测试，但由于本机没有 PSCAD 5.x，不能声称端到端真实验收通过；
 - 结果文件：`mhi.psout` 1.3.x。
 
-Legacy PSCAD 4.6.2 后端只支持启动新的 Automation 实例，不能附加到用户已打开的 GUI。`repair_connection` 仅在后端确认该进程属于 MCP 时退出旧实例；非自有连接只会断开，不会终止外部进程。
+Legacy PSCAD 4.6.2 后端只支持启动新的 Automation 实例，不能附加到用户已打开的 GUI。`repair_connection` 使用连接时缓存的进程归属：自有实例会先正常退出，非自有连接只会断开，不会终止外部进程。
 
 ## PSCAD 4.6.2 已验证行为与限制
 
@@ -19,34 +19,36 @@ Legacy PSCAD 4.6.2 后端只支持启动新的 Automation 实例，不能附加�
 
 ## 功能范围
 
-服务器固定注册 53 个工具，分为以下七组：
+服务器固定注册 60 个工具，分为以下七组：
 
 - 应用与文档 7 个：连接、状态、修复、退出、文档同步/列出/读取；
 - 工程与参数 12 个：加载、列出、运行、暂停、停止、运行状态、元件查询、参数读取/写入/校验、工程设置读取/写入；
 - 输出 2 个：工程消息和 `.psout`/`.out` 结果读取；
-- 仿真集 3 个：列出、运行、添加任务；
+- 仿真集 10 个：列出、创建、删除、详情、任务列表、运行、添加任务、移除任务、任务参数读取、任务参数写入；仿真集是工作区级资源，不属于单个工程；
 - 创建、保存与构建 7 个：新建算例/库、保存、另存、构建、全部构建、定义列表；
 - 画布 12 个：元件、导线、母线、连接、端口连接、注释、图框、控制框、对象列表、空位搜索、批量删除；
 - 元件操作 10 个：位置、旋转、镜像、克隆、端口、启用/禁用、删除。
 
-## D 盘安装
+## Windows 安装
 
-以下命令假定仓库位于 `D:\pscad-mcp`：
+以下命令从仓库根目录执行，并通过变量保留路径可移植性：
 
 ```powershell
-py -3 -m venv D:\pscad-mcp\.venv
-& D:\pscad-mcp\.venv\Scripts\python.exe -m pip install --upgrade pip
-& D:\pscad-mcp\.venv\Scripts\python.exe -m pip install -e "D:\pscad-mcp[windows]"
+$repoRoot = (Get-Location).Path
+$venvPath = Join-Path $repoRoot ".venv"
+py -3 -m venv $venvPath
+& (Join-Path $venvPath "Scripts\python.exe") -m pip install --upgrade pip
+& (Join-Path $venvPath "Scripts\python.exe") -m pip install -e "$repoRoot[windows]"
 ```
 
 PSCAD 4.6.x 还需要安装与许可证配套的官方 Automation Library wheel。该 wheel 受厂商授权约束，本仓库不会复制或分发：
 
 ```powershell
-& D:\pscad-mcp\.venv\Scripts\python.exe -m pip install `
-  "D:\合法安装介质\mhrc_automation-1.2.4-py3-none-any.whl"
+& (Join-Path $venvPath "Scripts\python.exe") -m pip install `
+  "C:\合法安装介质\mhrc_automation-1.2.4-py3-none-any.whl"
 ```
 
-本地虚拟环境就是 `D:\pscad-mcp\.venv`：它是一套只供本项目使用的 Python、MCP 和 PSCAD Python 包，不会替换系统 Python，也不会修改 PSCAD 安装目录。删除虚拟环境只会删除这些项目依赖；仓库代码和 PSCAD 工程不受影响。
+本地虚拟环境就是仓库下的 `.venv`：它是一套只供本项目使用的 Python、MCP 和 PSCAD Python 包，不会替换系统 Python，也不会修改 PSCAD 安装目录。删除虚拟环境只会删除这些项目依赖；仓库代码和 PSCAD 工程不受影响。
 
 ## 环境变量
 
@@ -73,11 +75,12 @@ $env:PSCAD_MCP_WORKSPACE = "D:\PSCAD-Workspace"
 
 ## Codex 配置
 
-在 `%USERPROFILE%\.codex\config.toml` 中加入：
+仓库提供了可移植模板 [`config.example.toml`](../../config.example.toml)。把其中的 `mcp_servers.pscad` 区块复制到 `%USERPROFILE%\.codex\config.toml`，再把 Python 解释器和工作区路径替换为本机路径：
 
 ```toml
 [mcp_servers.pscad]
-command = 'D:\pscad-mcp\.venv\Scripts\python.exe'
+type = 'stdio'
+command = 'C:/path/to/pscad-mcp/.venv/Scripts/python.exe'
 args = ['-m', 'pscad_mcp.main']
 startup_timeout_sec = 120
 tool_timeout_sec = 600
@@ -87,12 +90,20 @@ PSCAD_MCP_BACKEND = 'legacy'
 PSCAD_MCP_VERSION = '4.6.2'
 PSCAD_MCP_X64 = 'true'
 PSCAD_MCP_LAUNCH_TIMEOUT = '30'
-PSCAD_MCP_WORKSPACE = 'D:\PSCAD-Workspace'
+PSCAD_MCP_WORKSPACE = 'C:/path/to/PSCAD-Workspace'
 ```
 
 保存后新建 Codex 任务，使 MCP 配置重新加载。本轮代码验收不会自动改写全局 Codex 配置。
 
 ## 安全边界
+
+仿真集管理工具包括 `create_simulation_set`、`remove_simulation_set`、
+`list_simulation_set_tasks`、`remove_tasks_from_set`、
+`get_simulation_task_parameters`、`set_simulation_task_parameters` 和
+`get_simulation_set_details`。删除仿真集或移除任务必须显式传入
+`confirm=true`。旧的 `project_name` 参数仅为兼容保留，不用于限定工作区级
+仿真集。PSCAD 4.6.2 可写任务字段只有 `controlgroup`、`volley` 和
+`affinity`；`namespace` 只读。
 
 - 设置 `PSCAD_MCP_WORKSPACE` 后，工作区外的工程和结果路径会被拒绝；
 - 支持的工程/结果后缀采用允许列表，不接受任意文件；
@@ -100,6 +111,7 @@ PSCAD_MCP_WORKSPACE = 'D:\PSCAD-Workspace'
 - 批量删除会先校验所有 ID，再开始删除，避免只删一半；
 - 所有 PSCAD COM/RMI 操作由单线程执行器串行处理，超时后必须修复连接；
 - MCP 工具不再暴露原始 PSCAD 代理，不能绕过服务层的安全检查；
+- 所有工具错误统一返回 `code`、`details`、`retryable` 和 `suggested_action`，不会在 MCP 边界丢失后端诊断；
 - 真实验收只复制公共示例到 `D:\PSCAD-Workspace\acceptance` 的时间戳目录，不修改原始示例；
 - 验收发现已有 PSCAD 进程时会拒绝运行，也不会用通配方式强制结束其他 PSCAD 进程。
 
@@ -121,7 +133,7 @@ Set-Location D:\pscad-mcp
   -Version '4.6.2' -X64
 ```
 
-脚本运行 6 个原有实机测试和 8 个可靠性测试，每个变更场景使用独立的时间戳副本。覆盖只读、画布变更、构建、仿真与消息、运行控制、PSOUT，以及模板新建/重载、另存回退、工程设置、图层能力限制、连接删除、18 网格碰撞搜索和自有进程修复。脚本会打印副本路径、证据目录、启动的 PSCAD PID 和最终 `ACCEPTANCE_COMPLETE=PASS`；任何自有残留进程都会导致验收失败，但脚本不会强制关闭未确认的进程。
+脚本运行 6 个原有实机测试和 9 个可靠性测试，每个变更场景使用独立的时间戳副本。覆盖只读、画布变更、构建、仿真与消息、运行控制、PSOUT，以及模板新建/重载、另存回退、工程设置、图层能力限制、连接删除、18 网格碰撞搜索、自有进程修复和仿真集生命周期。脚本会打印副本路径、证据目录、启动的 PSCAD PID 和最终 `ACCEPTANCE_COMPLETE=PASS`；任何自有残留进程都会导致验收失败，但脚本不会强制关闭未确认的进程。
 
 完整终验还应执行：
 
@@ -134,13 +146,14 @@ git diff --check
 git status --short --branch
 ```
 
-工具数量应输出 `53 53`。真实 PSCAD 5.x 必须在安装并运行对应版本后另做相同级别验收。
+工具数量应输出 `60 60`。真实 PSCAD 5.x 必须在安装并运行对应版本后另做相同级别验收。
 
 ## 常见故障
 
 - `DEPENDENCY_MISSING`：确认 4.6.x 的官方 `mhrc.automation` wheel 安装在本项目虚拟环境；
 - 找不到指定版本：检查 `PSCAD_MCP_VERSION`、`PSCAD_MCP_X64` 与本机实际安装是否一致；
-- MCP 能启动但工具超时：先用 `repair_connection`，不要并行向 PSCAD 发多条变更命令；
+- MCP 能启动但工具超时：先查看 `get_pscad_status.executor` 中的 `healthy`、`last_operation`、`last_error` 和 `last_timeout_seconds`，再调用 `repair_connection`；不要并行向 PSCAD 发多条变更命令；
+- `REPAIR_CLEANUP_FAILED`：MCP 自己启动的 PSCAD 在执行器重建后仍无法正常退出。修复流程不会继续启动第二个实例；请手动关闭该 PSCAD 进程，再调用 `repair_connection`；
 - 路径被拒绝：把工程复制到 `D:\PSCAD-Workspace` 下，或调整工作区根目录后重启 MCP；
 - 删除、覆盖或退出被拒绝：确认目标无误后，重新调用并传入 `confirm=true`；
 - Codex 看不到新配置：保存 `config.toml` 后新建任务或重启 Codex。

@@ -3,6 +3,7 @@ from typing import Any, Optional
 from mcp.server.fastmcp import FastMCP
 
 from ..core.connection_manager import pscad_manager
+from .registration import register_tool
 
 
 async def add_component(
@@ -198,15 +199,15 @@ async def delete_components(
 
 def register_canvas_tools(mcp: FastMCP) -> None:
     """Register Canvas creation, connection, query, and deletion tools."""
-    mcp.tool()(add_component)
-    mcp.tool()(create_component)
-    mcp.tool()(create_wire)
-    mcp.tool()(create_bus)
-    mcp.tool()(create_connection)
-    mcp.tool()(connect_ports)
-    mcp.tool()(create_annotation)
-    mcp.tool()(create_graph_frame)
-    mcp.tool()(create_control_frame)
-    mcp.tool()(list_canvas_components)
-    mcp.tool()(find_empty_space)
-    mcp.tool()(delete_components)
+    register_tool(mcp, add_component)
+    register_tool(mcp, create_component)
+    register_tool(mcp, create_wire)
+    register_tool(mcp, create_bus)
+    register_tool(mcp, create_connection)
+    register_tool(mcp, connect_ports)
+    register_tool(mcp, create_annotation)
+    register_tool(mcp, create_graph_frame)
+    register_tool(mcp, create_control_frame)
+    register_tool(mcp, list_canvas_components)
+    register_tool(mcp, find_empty_space)
+    register_tool(mcp, delete_components)

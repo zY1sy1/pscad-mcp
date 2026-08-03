@@ -1,6 +1,6 @@
 # PSCAD MCP for Codex and GitHub Copilot CLI
 
-`pscad-mcp` is a Windows Model Context Protocol (MCP) server for PSCAD automation. It uses `mhrc.automation` for PSCAD 4.6.x and `mhi.pscad` for PSCAD 5.x behind one stable 53-tool service contract.
+`pscad-mcp` is a Windows Model Context Protocol (MCP) server for PSCAD automation. It uses `mhrc.automation` for PSCAD 4.6.x and `mhi.pscad` for PSCAD 5.x behind one stable 60-tool service contract.
 
 中文安装、配置、安全和验收说明：[docs/zh-CN/README.md](docs/zh-CN/README.md)
 
@@ -63,6 +63,34 @@ The server currently exposes tool groups for:
 
 The implementation is modular, with each tool family registered from its own module in `pscad_mcp\tools`.
 
+Simulation sets are workspace-level resources rather than project-owned
+resources. The original `project_name` arguments on `list_simulation_sets`,
+`run_simulation_set`, and `add_task_to_set` remain for compatibility only.
+The complete workflow includes `create_simulation_set`,
+`remove_simulation_set`, `list_simulation_set_tasks`,
+`remove_tasks_from_set`, `get_simulation_task_parameters`,
+`set_simulation_task_parameters`, and `get_simulation_set_details`.
+Destructive removals require `confirm=true`; PSCAD 4.6.2 task writes support
+only `controlgroup`, `volley`, and `affinity`, with `namespace` read-only.
+
+## Errors and connection recovery
+
+Every MCP tool returns failures in one stable `error` object containing
+`code`, `message`, `backend`, `operation`, `details`, `retryable`, and
+`suggested_action`. This preserves backend diagnostics such as
+`PARTIAL_COMPLETION` and `POSTCONDITION_FAILED` instead of reducing them to an
+unstructured MCP execution error.
+
+`get_pscad_status` also returns an `executor` object with `healthy`,
+`last_operation`, `last_error`, and `last_timeout_seconds`. After a timeout,
+call `repair_connection` before retrying the failed operation. Recovery uses
+the backend's cached process ownership and never terminates a process reported
+as external.
+
+If an owned PSCAD 4.6.x instance cannot be closed after the executor is reset,
+repair returns `REPAIR_CLEANUP_FAILED` and does not launch a second instance.
+Close that PSCAD process manually, then call `repair_connection` again.
+
 ## Requirements
 
 For full PSCAD automation you need:
@@ -112,13 +140,16 @@ copilot
 
 If needed, sign in from inside the CLI using `/login`.
 
-## Install this MCP server on D:
+## Install this MCP server on Windows
 
-From the repository root:
+From the repository root, keep the checkout and virtual environment paths in
+variables so the same commands work on another machine:
 
 ```powershell
-py -3 -m venv D:\pscad-mcp\.venv
-& D:\pscad-mcp\.venv\Scripts\python.exe -m pip install -e "D:\pscad-mcp[windows]"
+$repoRoot = (Get-Location).Path
+$venvPath = Join-Path $repoRoot ".venv"
+py -3 -m venv $venvPath
+& (Join-Path $venvPath "Scripts\python.exe") -m pip install -e "$repoRoot[windows]"
 ```
 
 For PSCAD 4.6.x, install the licensed Automation Library wheel supplied with
@@ -126,7 +157,7 @@ your PSCAD installation or by the vendor; it is not redistributed by this
 repository:
 
 ```powershell
-& D:\pscad-mcp\.venv\Scripts\python.exe -m pip install "D:\path\to\mhrc_automation-1.2.4-py3-none-any.whl"
+& (Join-Path $venvPath "Scripts\python.exe") -m pip install "C:\path\to\mhrc_automation-1.2.4-py3-none-any.whl"
 ```
 
 For non-Windows development tasks such as tests or documentation work, install base dependencies only:
@@ -134,6 +165,13 @@ For non-Windows development tasks such as tests or documentation work, install b
 ```powershell
 py -3 -m pip install -e .
 ```
+
+The repository includes a portable Codex template at
+[`config.example.toml`](config.example.toml). Copy its `mcp_servers.pscad`
+block into `%USERPROFILE%\.codex\config.toml`, then replace the example
+Python interpreter and workspace paths with paths on your machine. Do not
+copy the maintainer's local configuration file. After saving the TOML file,
+start a new Codex task so the MCP server is loaded again.
 
 ## Quick setup for Copilot CLI
 
@@ -193,11 +231,12 @@ Replace the `command` path with the interpreter from the environment where `psca
 
 ### Codex configuration
 
-Add this to `%USERPROFILE%\.codex\config.toml`, then start a new Codex task:
+The equivalent path-neutral entry is:
 
 ```toml
 [mcp_servers.pscad]
-command = 'D:\pscad-mcp\.venv\Scripts\python.exe'
+type = 'stdio'
+command = 'C:/path/to/pscad-mcp/.venv/Scripts/python.exe'
 args = ['-m', 'pscad_mcp.main']
 startup_timeout_sec = 120
 tool_timeout_sec = 600
@@ -206,10 +245,14 @@ tool_timeout_sec = 600
 PSCAD_MCP_BACKEND = 'legacy'
 PSCAD_MCP_VERSION = '4.6.2'
 PSCAD_MCP_X64 = 'true'
-PSCAD_MCP_WORKSPACE = 'D:\PSCAD-Workspace'
+PSCAD_MCP_WORKSPACE = 'C:/path/to/PSCAD-Workspace'
 ```
 
-Use `PSCAD_MCP_BACKEND='modern'` and an installed 5.x version for PSCAD 5.x.
+Replace both local paths in this example, or copy the values from
+[`config.example.toml`](config.example.toml). Use
+`PSCAD_MCP_BACKEND='modern'` and an installed 5.x version for PSCAD 5.x.
+The current repository has contract coverage for Modern but does not claim
+real PSCAD 5.x end-to-end acceptance.
 
 ## First prompts to try in Copilot CLI
 
@@ -269,7 +312,7 @@ Licensed PSCAD 4.6.2 acceptance is opt-in and works only on timestamped copies:
 
 The runner refuses to start while another PSCAD process is open and never
 broadly terminates PSCAD processes. It runs the six original acceptance tests
-plus eight reliability tests, records owned PIDs and evidence directories, and
+plus nine reliability tests, records owned PIDs and evidence directories, and
 requires all owned processes to exit. PSCAD 4.6.2 has been exercised on a real
 licensed installation; PSCAD 5.x remains contract-tested until a real 5.x
 installation is available for end-to-end acceptance.

@@ -8,11 +8,163 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable
 
 from .backend.base import BackendError, BackendInfo
-from .executor import robust_executor
+from .executor import (
+    ExecutorTimeoutError,
+    ExecutorUnhealthyError,
+    robust_executor,
+)
 from .path_policy import PathPolicy
 
 
 BackendFactory = Callable[[], Any | Awaitable[Any]]
+_ERROR_TEXT_LIMIT = 512
+_DEFAULT_ERROR_GUIDANCE = (
+    False,
+    "Inspect get_pscad_status and server logs before retrying.",
+)
+_ERROR_GUIDANCE: dict[str, tuple[bool, str]] = {
+    "ALREADY_EXISTS": (
+        False,
+        "Choose a different name or inspect the existing PSCAD object.",
+    ),
+    "CAPABILITY_UNAVAILABLE": (
+        False,
+        "Use a supported PSCAD 4.6 operation or adjust the requested workflow.",
+    ),
+    "CONFIRMATION_REQUIRED": (
+        False,
+        "Review the destructive operation, then call it again with confirm=true.",
+    ),
+    "DEPENDENCY_MISSING": (
+        False,
+        "Install the required PSCAD 4.6 Automation Library dependency.",
+    ),
+    "EXECUTOR_UNHEALTHY": (
+        True,
+        "Call repair_connection before retrying the operation.",
+    ),
+    "INTERNAL_ERROR": _DEFAULT_ERROR_GUIDANCE,
+    "INVALID_ARGUMENT": (
+        False,
+        "Correct the argument values and retry the operation.",
+    ),
+    "NOT_CONNECTED": (
+        True,
+        "Call get_local_pscad or repair_connection before retrying.",
+    ),
+    "NOT_FOUND": (
+        False,
+        "Check names and list the current PSCAD objects.",
+    ),
+    "PARTIAL_COMPLETION": (
+        False,
+        "Inspect details and the current PSCAD state before retrying.",
+    ),
+    "POSTCONDITION_FAILED": (
+        False,
+        "Inspect details and verify the PSCAD project state before retrying.",
+    ),
+    "PSCAD_COMMAND_FAILED": (
+        False,
+        "Inspect error details and PSCAD project output before retrying.",
+    ),
+    "REPAIR_CLEANUP_FAILED": (
+        False,
+        "Close the owned PSCAD process manually, then call repair_connection.",
+    ),
+    "TIMEOUT": (
+        True,
+        "Call get_pscad_status, then repair_connection before retrying.",
+    ),
+}
+
+
+_TASK_PARAMETER_FIELDS = frozenset({"controlgroup", "volley", "affinity"})
+
+
+def _require_object_name(value: str, field: str, operation: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise BackendError(
+            "INVALID_ARGUMENT",
+            f"{field} must be a non-empty string.",
+            "service",
+            operation,
+            {"field": field},
+        )
+    return value
+
+
+def _validated_task_parameters(parameters: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(parameters, dict) or not parameters:
+        raise BackendError(
+            "INVALID_ARGUMENT",
+            "parameters must not be empty.",
+            "service",
+            "set_simulation_task_parameters",
+        )
+    if "namespace" in parameters:
+        raise BackendError(
+            "INVALID_ARGUMENT",
+            "namespace is read-only.",
+            "service",
+            "set_simulation_task_parameters",
+            {"read_only": ["namespace"]},
+        )
+    unsupported = sorted(set(parameters) - _TASK_PARAMETER_FIELDS)
+    if unsupported:
+        raise BackendError(
+            "INVALID_ARGUMENT",
+            "Unsupported task parameters.",
+            "service",
+            "set_simulation_task_parameters",
+            {"unsupported": unsupported},
+        )
+    for key in ("volley", "affinity"):
+        if key in parameters and (
+            isinstance(parameters[key], bool)
+            or not isinstance(parameters[key], int)
+            or parameters[key] < 1
+        ):
+            raise BackendError(
+                "INVALID_ARGUMENT",
+                f"{key} must be an integer >= 1.",
+                "service",
+                "set_simulation_task_parameters",
+                {"field": key},
+            )
+    if "controlgroup" in parameters and not isinstance(parameters["controlgroup"], str):
+        raise BackendError(
+            "INVALID_ARGUMENT",
+            "controlgroup must be a string.",
+            "service",
+            "set_simulation_task_parameters",
+            {"field": "controlgroup"},
+        )
+    return dict(parameters)
+
+
+def _bounded_error_text(error: BaseException) -> str:
+    value = f"{type(error).__name__}: {error}"
+    if len(value) <= _ERROR_TEXT_LIMIT:
+        return value
+    return value[: _ERROR_TEXT_LIMIT - 3] + "..."
+
+
+def _bounded_message(error: BaseException) -> str:
+    value = str(error)
+    if len(value) <= _ERROR_TEXT_LIMIT:
+        return value
+    return value[: _ERROR_TEXT_LIMIT - 3] + "..."
+
+
+def _with_error_guidance(payload: dict[str, Any]) -> dict[str, Any]:
+    retryable, suggested_action = _ERROR_GUIDANCE.get(
+        str(payload.get("code")),
+        _DEFAULT_ERROR_GUIDANCE,
+    )
+    payload["retryable"] = retryable
+    payload["suggested_action"] = suggested_action
+    return payload
 
 
 class ConfirmationRequired(BackendError):
@@ -76,6 +228,10 @@ class PscadService:
             f"PSCAD {info.version} ({architecture})."
         )
 
+    def executor_status(self) -> dict[str, Any]:
+        """Return a bounded snapshot of the shared COM executor."""
+        return dict(self.executor.snapshot())
+
     async def status(self) -> dict[str, Any]:
         if self._backend is None:
             return {
@@ -88,11 +244,13 @@ class PscadService:
                 "busy": False,
                 "licensed": None,
                 "owns_process": False,
+                "executor": self.executor_status(),
             }
         info: BackendInfo = await self._backend.heartbeat()
         payload = asdict(info)
         payload["connected"] = bool(info.alive)
         payload["selected_version"] = info.version
+        payload["executor"] = self.executor_status()
         return payload
 
     async def disconnect(self) -> None:
@@ -103,9 +261,38 @@ class PscadService:
     async def repair_connection(self) -> str:
         current = self._backend
         if current is not None:
-            info = await current.heartbeat()
-            if info.owns_process:
-                await current.quit()
+            owns_process = bool(getattr(current, "owns_process", False))
+            executor_was_unhealthy = not bool(
+                getattr(self.executor, "healthy", True)
+            )
+            if owns_process:
+                if executor_was_unhealthy:
+                    self.executor.reset()
+                try:
+                    await current.quit()
+                except Exception as cleanup_error:
+                    if not executor_was_unhealthy:
+                        raise
+                    details = {
+                        "cleanup_error": _bounded_error_text(cleanup_error),
+                    }
+                    try:
+                        await current.disconnect()
+                    except Exception as disconnect_error:
+                        details["disconnect_error"] = _bounded_error_text(
+                            disconnect_error
+                        )
+                    self._backend = None
+                    self.executor.reset()
+                    raise BackendError(
+                        "REPAIR_CLEANUP_FAILED",
+                        "The owned PSCAD process could not be closed after an "
+                        "executor timeout. Close it manually, then call "
+                        "repair_connection again.",
+                        str(getattr(current, "name", "legacy")),
+                        "repair_connection",
+                        details,
+                    ) from cleanup_error
             else:
                 await current.disconnect()
             self._backend = None
@@ -235,9 +422,103 @@ class PscadService:
     async def list_simulation_sets(self, project_name: str) -> list[str]:
         return await self.backend.list_simulation_sets(project_name)
 
+    async def create_simulation_set(self, sim_set_name: str) -> dict[str, Any]:
+        name = _require_object_name(
+            sim_set_name, "sim_set_name", "create_simulation_set"
+        )
+        return asdict(await self.backend.create_simulation_set(name))
+
+    async def remove_simulation_set(
+        self, sim_set_name: str, *, confirm: bool = False
+    ) -> dict[str, str]:
+        if not confirm:
+            raise ConfirmationRequired("remove_simulation_set")
+        name = _require_object_name(
+            sim_set_name, "sim_set_name", "remove_simulation_set"
+        )
+        await self.backend.remove_simulation_set(name)
+        return {"removed": name}
+
+    async def list_simulation_set_tasks(self, sim_set_name: str) -> list[str]:
+        name = _require_object_name(
+            sim_set_name, "sim_set_name", "list_simulation_set_tasks"
+        )
+        return await self.backend.list_simulation_set_tasks(name)
+
+    async def remove_tasks_from_set(
+        self,
+        sim_set_name: str,
+        task_names: list[str],
+        *,
+        confirm: bool = False,
+    ) -> dict[str, list[str]]:
+        if not confirm:
+            raise ConfirmationRequired("remove_tasks_from_set")
+        name = _require_object_name(
+            sim_set_name, "sim_set_name", "remove_tasks_from_set"
+        )
+        if not isinstance(task_names, list):
+            raise BackendError(
+                "INVALID_ARGUMENT",
+                "task_names must be a list.",
+                "service",
+                "remove_tasks_from_set",
+            )
+        unique = list(dict.fromkeys(task_names))
+        if not unique:
+            raise BackendError(
+                "INVALID_ARGUMENT",
+                "task_names must not be empty.",
+                "service",
+                "remove_tasks_from_set",
+            )
+        for task_name in unique:
+            _require_object_name(task_name, "task_name", "remove_tasks_from_set")
+        await self.backend.remove_tasks_from_set(name, unique)
+        return {"removed": unique}
+
+    async def get_simulation_task_parameters(
+        self, sim_set_name: str, task_name: str
+    ) -> dict[str, Any]:
+        set_name = _require_object_name(
+            sim_set_name,
+            "sim_set_name",
+            "get_simulation_task_parameters",
+        )
+        task = _require_object_name(
+            task_name, "task_name", "get_simulation_task_parameters"
+        )
+        return asdict(await self.backend.get_simulation_task_parameters(set_name, task))
+
+    async def set_simulation_task_parameters(
+        self,
+        sim_set_name: str,
+        task_name: str,
+        parameters: dict[str, Any],
+    ) -> dict[str, Any]:
+        set_name = _require_object_name(
+            sim_set_name,
+            "sim_set_name",
+            "set_simulation_task_parameters",
+        )
+        task = _require_object_name(
+            task_name, "task_name", "set_simulation_task_parameters"
+        )
+        values = _validated_task_parameters(parameters)
+        return asdict(
+            await self.backend.set_simulation_task_parameters(set_name, task, values)
+        )
+
+    async def get_simulation_set_details(self, sim_set_name: str) -> dict[str, Any]:
+        name = _require_object_name(
+            sim_set_name, "sim_set_name", "get_simulation_set_details"
+        )
+        return asdict(await self.backend.get_simulation_set_details(name))
+
     async def run_simulation_set(
         self, project_name: str, sim_set_name: str
     ) -> str:
+        await self.backend.get_simulation_set_details(sim_set_name)
         await self.backend.run_simulation_set(project_name, sim_set_name)
         return (
             f"Simulation set '{sim_set_name}' in project "
@@ -250,6 +531,16 @@ class PscadService:
         sim_set_name: str,
         task_project_name: str,
     ) -> str:
+        await self.backend.get_simulation_set_details(sim_set_name)
+        projects = {item.name for item in await self.backend.list_projects()}
+        if task_project_name not in projects:
+            raise BackendError(
+                "NOT_FOUND",
+                f"Project '{task_project_name}' is not loaded.",
+                getattr(self.backend, "name", "backend"),
+                "add_task_to_set",
+                {"task_project_name": task_project_name},
+            )
         await self.backend.add_task_to_set(
             project_name,
             sim_set_name,
@@ -650,13 +941,22 @@ class PscadService:
     @staticmethod
     def error_payload(error: Exception, operation: str) -> dict[str, Any]:
         if isinstance(error, BackendError):
-            return {"error": error.to_dict()}
+            return {"error": _with_error_guidance(error.to_dict())}
+        if isinstance(error, ExecutorTimeoutError):
+            code = "TIMEOUT"
+            backend = "executor"
+        elif isinstance(error, ExecutorUnhealthyError):
+            code = "EXECUTOR_UNHEALTHY"
+            backend = "executor"
+        else:
+            code = "INTERNAL_ERROR"
+            backend = "service"
         return {
-            "error": {
-                "code": "INTERNAL_ERROR",
-                "message": str(error),
-                "backend": "service",
+            "error": _with_error_guidance({
+                "code": code,
+                "message": _bounded_message(error),
+                "backend": backend,
                 "operation": operation,
                 "details": {},
-            }
+            })
         }

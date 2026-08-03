@@ -1,6 +1,7 @@
 from typing import List, Dict, Any, Optional
 from mcp.server.fastmcp import FastMCP
 from ..core.connection_manager import pscad_manager
+from .registration import register_tool
 
 
 async def create_case(
@@ -61,10 +62,10 @@ async def get_project_definitions(project_name: str) -> List[str]:
 
 def register_creation_tools(mcp: FastMCP):
     """Register tools for creating and building projects."""
-    mcp.tool()(create_case)
-    mcp.tool()(create_library)
-    mcp.tool()(save_project)
-    mcp.tool()(save_project_as)
-    mcp.tool()(build_project)
-    mcp.tool()(build_all_projects)
-    mcp.tool()(get_project_definitions)
+    register_tool(mcp, create_case)
+    register_tool(mcp, create_library)
+    register_tool(mcp, save_project)
+    register_tool(mcp, save_project_as)
+    register_tool(mcp, build_project)
+    register_tool(mcp, build_all_projects)
+    register_tool(mcp, get_project_definitions)

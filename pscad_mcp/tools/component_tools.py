@@ -3,6 +3,7 @@ from typing import Any, Dict
 from mcp.server.fastmcp import FastMCP
 
 from ..core.connection_manager import pscad_manager
+from .registration import register_tool
 
 
 async def get_component_location(
@@ -99,13 +100,13 @@ async def delete_component(
 
 def register_component_tools(mcp: FastMCP):
     """Register per-component tools."""
-    mcp.tool()(get_component_location)
-    mcp.tool()(set_component_location)
-    mcp.tool()(rotate_component)
-    mcp.tool()(mirror_component)
-    mcp.tool()(clone_component)
-    mcp.tool()(get_component_ports)
-    mcp.tool()(get_component_port)
-    mcp.tool()(enable_component)
-    mcp.tool()(disable_component)
-    mcp.tool()(delete_component)
+    register_tool(mcp, get_component_location)
+    register_tool(mcp, set_component_location)
+    register_tool(mcp, rotate_component)
+    register_tool(mcp, mirror_component)
+    register_tool(mcp, clone_component)
+    register_tool(mcp, get_component_ports)
+    register_tool(mcp, get_component_port)
+    register_tool(mcp, enable_component)
+    register_tool(mcp, disable_component)
+    register_tool(mcp, delete_component)

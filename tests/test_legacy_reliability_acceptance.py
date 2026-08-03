@@ -375,6 +375,59 @@ class TestLegacyReliabilityAcceptance(LegacyAcceptanceCase):
             flush=True,
         )
 
+    async def test_09_simulation_set_lifecycle_and_task_parameters(self) -> None:
+        path = self._timestamped_project_copy("reliability-simset")
+        set_name = f"MCP_{path.parent.name[-24:]}"[:48]
+        project_name = path.stem
+        service = PscadService(lambda: self.backend, executor=robust_executor)
+        service._backend = self.backend
+        created = False
+        try:
+            await service.load_projects([str(path)])
+            details = await service.create_simulation_set(set_name)
+            created = True
+            self.assertEqual(details["tasks"], ())
+
+            await service.add_task_to_set("", set_name, project_name)
+            self.assertEqual(
+                await service.list_simulation_set_tasks(set_name),
+                [project_name],
+            )
+
+            original = await service.get_simulation_task_parameters(
+                set_name, project_name
+            )
+            updated_volley = 2 if original["volley"] != 2 else 3
+            updated = await service.set_simulation_task_parameters(
+                set_name, project_name, {"volley": updated_volley}
+            )
+            self.assertEqual(updated["volley"], updated_volley)
+            restored = await service.set_simulation_task_parameters(
+                set_name, project_name, {"volley": original["volley"]}
+            )
+            self.assertEqual(restored["volley"], original["volley"])
+
+            await service.remove_tasks_from_set(
+                set_name, [project_name], confirm=True
+            )
+            await service.remove_simulation_set(set_name, confirm=True)
+            created = False
+            print(
+                "ACCEPTANCE_RELIABILITY=simulation-set;PASS;"
+                f"set_name={set_name};project={path}",
+                flush=True,
+            )
+        finally:
+            if created:
+                try:
+                    await service.remove_simulation_set(set_name, confirm=True)
+                except Exception as cleanup_error:
+                    print(
+                        "ACCEPTANCE_RELIABILITY=simulation-set-cleanup;FAIL;"
+                        f"error_type={type(cleanup_error).__name__}",
+                        flush=True,
+                    )
+
 
 if __name__ == "__main__":
     unittest.main()

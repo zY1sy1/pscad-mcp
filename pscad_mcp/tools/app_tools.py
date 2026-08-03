@@ -4,6 +4,7 @@ from mcp.server.fastmcp import FastMCP
 from ..core.connection_manager import pscad_manager
 from ..utils.doc_manager import doc_manager
 from ..core.path_policy import PathPolicy
+from .registration import register_tool
 
 path_policy = PathPolicy()
 
@@ -18,6 +19,7 @@ async def get_pscad_status() -> Dict[str, Any]:
     except Exception as e:
         return {
             "connected": False,
+            "executor": pscad_manager.service.executor_status(),
             **pscad_manager.error_payload(e, "get_pscad_status"),
         }
 
@@ -65,7 +67,7 @@ async def repair_connection() -> str:
     """Force-reset the connection to PSCAD."""
     return await pscad_manager.repair_connection()
 
-async def quit_pscad(confirm: bool = False) -> Any:
+async def quit_pscad(confirm: bool = False) -> str | dict[str, Any]:
     """Terminate the PSCAD application."""
     try:
         return await pscad_manager.quit_pscad(confirm=confirm)
@@ -74,10 +76,10 @@ async def quit_pscad(confirm: bool = False) -> Any:
 
 def register_app_tools(mcp: FastMCP):
     """Register core application lifecycle and sync tools."""
-    mcp.tool()(get_local_pscad)
-    mcp.tool()(get_pscad_status)
-    mcp.tool()(sync_documentation)
-    mcp.tool()(list_documentation)
-    mcp.tool()(read_documentation)
-    mcp.tool()(repair_connection)
-    mcp.tool()(quit_pscad)
+    register_tool(mcp, get_local_pscad)
+    register_tool(mcp, get_pscad_status)
+    register_tool(mcp, sync_documentation)
+    register_tool(mcp, list_documentation)
+    register_tool(mcp, read_documentation)
+    register_tool(mcp, repair_connection)
+    register_tool(mcp, quit_pscad)

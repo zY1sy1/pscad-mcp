@@ -14,6 +14,8 @@ from .base import (
     ResultBackend,
     RunState,
     SimulationSetBackend,
+    SimulationSetInfo,
+    SimulationTaskInfo,
 )
 
 __all__ = [
@@ -30,4 +32,6 @@ __all__ = [
     "ResultBackend",
     "RunState",
     "SimulationSetBackend",
+    "SimulationSetInfo",
+    "SimulationTaskInfo",
 ]

@@ -1,7 +1,17 @@
 import json
 import unittest
 
-from pscad_mcp.core.backend.base import BackendError, BackendInfo
+from pscad_mcp.core.backend.base import (
+    BackendError,
+    BackendInfo,
+    ProjectInfo,
+    SimulationSetInfo,
+    SimulationTaskInfo,
+)
+from pscad_mcp.core.executor import (
+    ExecutorTimeoutError,
+    ExecutorUnhealthyError,
+)
 from pscad_mcp.core.service import ConfirmationRequired, PscadService
 from tests.backend_fakes import ImmediateExecutor
 
@@ -18,6 +28,7 @@ class FakeLifecycleBackend:
         attach_error=None,
         disconnect_error=None,
         quit_error=None,
+        heartbeat_error=None,
     ):
         self.name = name
         self.version = version
@@ -28,6 +39,7 @@ class FakeLifecycleBackend:
         self.attach_error = attach_error
         self.disconnect_error = disconnect_error
         self.quit_error = quit_error
+        self.heartbeat_error = heartbeat_error
         self.attached = False
         self.disconnect_count = 0
         self.quit_count = 0
@@ -51,6 +63,8 @@ class FakeLifecycleBackend:
         return self.info()
 
     async def heartbeat(self):
+        if self.heartbeat_error is not None:
+            raise self.heartbeat_error
         return self.info()
 
     async def disconnect(self):
@@ -68,6 +82,56 @@ class FakeLifecycleBackend:
         self.attached = False
 
 
+class FakeSimulationBackend:
+    name = "legacy"
+
+    def __init__(self):
+        self.calls = []
+
+    async def create_simulation_set(self, name):
+        self.calls.append(("create", name))
+        return SimulationSetInfo(name, None, ())
+
+    async def remove_simulation_set(self, name):
+        self.calls.append(("remove", name))
+
+    async def list_simulation_set_tasks(self, name):
+        self.calls.append(("tasks", name))
+        return ["case"]
+
+    async def remove_tasks_from_set(self, name, task_names):
+        self.calls.append(("remove_tasks", name, list(task_names)))
+
+    async def get_simulation_task_parameters(self, set_name, task_name):
+        self.calls.append(("get_task", set_name, task_name))
+        return SimulationTaskInfo(task_name, task_name, "", 1, 1)
+
+    async def set_simulation_task_parameters(self, set_name, task_name, parameters):
+        self.calls.append(("set_task", set_name, task_name, dict(parameters)))
+        current = SimulationTaskInfo(task_name, task_name, "", 1, 1)
+        return SimulationTaskInfo(
+            task_name,
+            current.namespace,
+            parameters.get("controlgroup", current.controlgroup),
+            parameters.get("volley", current.volley),
+            parameters.get("affinity", current.affinity),
+        )
+
+    async def get_simulation_set_details(self, name):
+        self.calls.append(("details", name))
+        return SimulationSetInfo(name, None, ("case",))
+
+    async def run_simulation_set(self, project_name, set_name):
+        self.calls.append(("run", project_name, set_name))
+
+    async def add_task_to_set(self, project_name, set_name, task_name):
+        self.calls.append(("add", project_name, set_name, task_name))
+
+    async def list_projects(self):
+        self.calls.append(("projects",))
+        return [ProjectInfo("case", "Case", "")]
+
+
 class RecordingExecutor(ImmediateExecutor):
     def __init__(self, events):
         super().__init__()
@@ -78,7 +142,103 @@ class RecordingExecutor(ImmediateExecutor):
         super().reset()
 
 
+def service_with_backend(backend):
+    service = PscadService(lambda: backend, executor=ImmediateExecutor())
+    service._backend = backend
+    return service
+
+
 class TestPscadService(unittest.IsolatedAsyncioTestCase):
+    async def test_remove_tasks_requires_confirmation_before_backend_call(self):
+        backend = FakeSimulationBackend()
+        service = service_with_backend(backend)
+        with self.assertRaises(ConfirmationRequired):
+            await service.remove_tasks_from_set("Batch1", ["case"])
+        self.assertEqual(backend.calls, [])
+
+    async def test_remove_tasks_deduplicates_before_backend_call(self):
+        backend = FakeSimulationBackend()
+        service = service_with_backend(backend)
+        result = await service.remove_tasks_from_set(
+            "Batch1", ["case", "case"], confirm=True
+        )
+        self.assertEqual(result, {"removed": ["case"]})
+        self.assertEqual(backend.calls, [("remove_tasks", "Batch1", ["case"])])
+
+    async def test_task_parameters_reject_bool_as_integer(self):
+        service = service_with_backend(FakeSimulationBackend())
+        with self.assertRaises(BackendError) as raised:
+            await service.set_simulation_task_parameters(
+                "Batch1", "case", {"volley": True}
+            )
+        self.assertEqual(raised.exception.code, "INVALID_ARGUMENT")
+
+    async def test_task_parameters_reject_values_below_one(self):
+        service = service_with_backend(FakeSimulationBackend())
+        with self.assertRaises(BackendError) as raised:
+            await service.set_simulation_task_parameters(
+                "Batch1", "case", {"affinity": 0}
+            )
+        self.assertEqual(raised.exception.code, "INVALID_ARGUMENT")
+
+    async def test_task_parameters_reject_read_only_and_unknown_fields(self):
+        service = service_with_backend(FakeSimulationBackend())
+        for values in ({"namespace": "other"}, {"unknown": 1}):
+            with self.subTest(values=values):
+                with self.assertRaises(BackendError) as raised:
+                    await service.set_simulation_task_parameters(
+                        "Batch1", "case", values
+                    )
+                self.assertEqual(raised.exception.code, "INVALID_ARGUMENT")
+
+    async def test_simulation_set_results_are_normalized(self):
+        backend = FakeSimulationBackend()
+        service = service_with_backend(backend)
+        self.assertEqual(
+            await service.create_simulation_set("Batch1"),
+            {"name": "Batch1", "depends_on": None, "tasks": ()},
+        )
+        self.assertEqual(
+            await service.get_simulation_task_parameters("Batch1", "case"),
+            {
+                "name": "case",
+                "namespace": "case",
+                "controlgroup": "",
+                "volley": 1,
+                "affinity": 1,
+            },
+        )
+
+    async def test_simulation_set_names_must_be_non_empty(self):
+        service = service_with_backend(FakeSimulationBackend())
+        with self.assertRaises(BackendError) as raised:
+            await service.create_simulation_set(" ")
+        self.assertEqual(raised.exception.code, "INVALID_ARGUMENT")
+
+    async def test_run_simulation_set_verifies_set_before_backend_run(self):
+        backend = FakeSimulationBackend()
+        service = service_with_backend(backend)
+        await service.run_simulation_set("compat", "Batch1")
+        self.assertEqual(
+            backend.calls[:2],
+            [("details", "Batch1"), ("run", "compat", "Batch1")],
+        )
+
+    async def test_add_task_rejects_unloaded_project(self):
+        backend = FakeSimulationBackend()
+        backend.list_projects = lambda: None
+
+        async def no_projects():
+            backend.calls.append(("projects",))
+            return []
+
+        backend.list_projects = no_projects
+        service = service_with_backend(backend)
+        with self.assertRaises(BackendError) as raised:
+            await service.add_task_to_set("compat", "Batch1", "missing")
+        self.assertEqual(raised.exception.code, "NOT_FOUND")
+        self.assertNotIn(("add", "compat", "Batch1", "missing"), backend.calls)
+
     async def test_backend_is_selected_lazily(self):
         created = []
 
@@ -106,6 +266,15 @@ class TestPscadService(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(status["connected"])
         self.assertEqual(status["backend"], "legacy")
         self.assertEqual(status["selected_version"], "4.6.2")
+        self.assertEqual(
+            status["executor"],
+            {
+                "healthy": True,
+                "last_operation": None,
+                "last_error": None,
+                "last_timeout_seconds": None,
+            },
+        )
         json.dumps(status)
 
     async def test_status_before_attach_does_not_create_backend(self):
@@ -119,6 +288,15 @@ class TestPscadService(unittest.IsolatedAsyncioTestCase):
 
         self.assertFalse(status["connected"])
         self.assertEqual(created, [])
+        self.assertEqual(
+            status["executor"],
+            {
+                "healthy": True,
+                "last_operation": None,
+                "last_error": None,
+                "last_timeout_seconds": None,
+            },
+        )
 
     async def test_quit_requires_confirmation(self):
         backend = FakeLifecycleBackend()
@@ -201,6 +379,116 @@ class TestPscadService(unittest.IsolatedAsyncioTestCase):
             ],
         )
 
+    async def test_repair_unhealthy_owned_process_resets_before_cleanup(self):
+        events = []
+        executor = RecordingExecutor(events)
+        backends = []
+
+        def factory():
+            label = f"backend-{len(backends) + 1}"
+            events.append(("factory", label))
+            backend = FakeLifecycleBackend(
+                owns_process=True,
+                events=events,
+                label=label,
+                heartbeat_error=AssertionError("repair must not call heartbeat"),
+            )
+            backends.append(backend)
+            return backend
+
+        service = PscadService(factory, executor=executor)
+        await service.attach_local()
+        events.clear()
+        executor.healthy = False
+
+        result = await service.repair_connection()
+
+        self.assertEqual(
+            events,
+            [
+                ("reset", "executor"),
+                ("quit", "backend-1"),
+                ("reset", "executor"),
+                ("factory", "backend-2"),
+                ("attach", "backend-2"),
+            ],
+        )
+        self.assertEqual(len(backends), 2)
+        self.assertIn("4.6.2", result)
+
+    async def test_repair_unhealthy_external_process_disconnects_without_heartbeat(self):
+        events = []
+        executor = RecordingExecutor(events)
+        backends = []
+
+        def factory():
+            label = f"backend-{len(backends) + 1}"
+            events.append(("factory", label))
+            backend = FakeLifecycleBackend(
+                owns_process=False,
+                events=events,
+                label=label,
+                heartbeat_error=AssertionError("repair must not call heartbeat"),
+            )
+            backends.append(backend)
+            return backend
+
+        service = PscadService(factory, executor=executor)
+        await service.attach_local()
+        events.clear()
+        executor.healthy = False
+
+        await service.repair_connection()
+
+        self.assertEqual(
+            events,
+            [
+                ("disconnect", "backend-1"),
+                ("reset", "executor"),
+                ("factory", "backend-2"),
+                ("attach", "backend-2"),
+            ],
+        )
+        self.assertEqual(backends[0].quit_count, 0)
+
+    async def test_repair_unhealthy_owned_cleanup_failure_does_not_reattach(self):
+        events = []
+        executor = RecordingExecutor(events)
+        cleanup_failure = RuntimeError("cleanup failed")
+        backend = FakeLifecycleBackend(
+            owns_process=True,
+            events=events,
+            label="backend-1",
+            quit_error=cleanup_failure,
+            heartbeat_error=AssertionError("repair must not call heartbeat"),
+        )
+        created = []
+        service = PscadService(
+            lambda: created.append(FakeLifecycleBackend()),
+            executor=executor,
+        )
+        service._backend = backend
+        backend.attached = True
+        executor.healthy = False
+
+        with self.assertRaises(BackendError) as raised:
+            await service.repair_connection()
+
+        self.assertEqual(raised.exception.code, "REPAIR_CLEANUP_FAILED")
+        self.assertEqual(raised.exception.backend, "legacy")
+        self.assertIsNone(service._backend)
+        self.assertTrue(executor.healthy)
+        self.assertEqual(created, [])
+        self.assertEqual(
+            events,
+            [
+                ("reset", "executor"),
+                ("quit", "backend-1"),
+                ("disconnect", "backend-1"),
+                ("reset", "executor"),
+            ],
+        )
+
     async def test_repair_shutdown_failure_preserves_original_backend(self):
         for owns_process in (True, False):
             with self.subTest(owns_process=owns_process):
@@ -277,6 +565,54 @@ class TestPscadService(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(payload["error"]["code"], "NOT_FOUND")
         self.assertEqual(payload["error"]["details"], {"name": "case"})
+        self.assertFalse(payload["error"]["retryable"])
+        self.assertEqual(
+            payload["error"]["suggested_action"],
+            "Check names and list the current PSCAD objects.",
+        )
+
+    def test_error_payload_classifies_executor_failures(self):
+        timeout = PscadService.error_payload(
+            ExecutorTimeoutError("timed out"),
+            "run_project",
+        )["error"]
+        unhealthy = PscadService.error_payload(
+            ExecutorUnhealthyError("reset required"),
+            "run_project",
+        )["error"]
+
+        self.assertEqual(timeout["code"], "TIMEOUT")
+        self.assertEqual(timeout["backend"], "executor")
+        self.assertTrue(timeout["retryable"])
+        self.assertIn("repair_connection", timeout["suggested_action"])
+        self.assertEqual(unhealthy["code"], "EXECUTOR_UNHEALTHY")
+        self.assertTrue(unhealthy["retryable"])
+
+    def test_error_payload_requires_inspection_after_partial_completion(self):
+        error = BackendError(
+            "PARTIAL_COMPLETION",
+            "some objects were deleted",
+            "legacy",
+            "delete_components",
+            {"deleted_component_ids": [7]},
+        )
+
+        payload = PscadService.error_payload(error, "fallback")["error"]
+
+        self.assertFalse(payload["retryable"])
+        self.assertIn("Inspect details", payload["suggested_action"])
+
+    def test_error_payload_normalizes_unknown_exception_without_traceback(self):
+        payload = PscadService.error_payload(
+            ValueError("invalid value"),
+            "set_project_settings",
+        )["error"]
+
+        self.assertEqual(payload["code"], "INTERNAL_ERROR")
+        self.assertEqual(payload["message"], "invalid value")
+        self.assertFalse(payload["retryable"])
+        self.assertIn("server logs", payload["suggested_action"])
+        self.assertNotIn("traceback", payload)
 
 
 if __name__ == "__main__":

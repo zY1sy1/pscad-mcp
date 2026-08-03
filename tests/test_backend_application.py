@@ -72,6 +72,28 @@ class TestBackendApplicationLifecycle(unittest.IsolatedAsyncioTestCase):
                 self.assertTrue(app.quit_called)
                 self.assertFalse((await backend.heartbeat()).alive)
 
+    async def test_legacy_quit_rejects_unverified_shutdown(self):
+        app = FakeApplication()
+
+        def quit_without_exit():
+            app.quit_called = True
+
+        app.quit = quit_without_exit
+        backend = LegacyBackend(
+            ImmediateExecutor(),
+            version="4.6.2",
+            x64=True,
+            automation_module=FakeLegacyAutomation(app),
+        )
+
+        await backend.attach()
+
+        with self.assertRaises(BackendError) as raised:
+            await backend.quit()
+
+        self.assertEqual(raised.exception.code, "SHUTDOWN_UNVERIFIED")
+        self.assertTrue(backend.owns_process)
+
     async def test_legacy_launch_uses_exact_display_name_and_safe_flags(self):
         module = FakeLegacyAutomation()
         backend = LegacyBackend(

@@ -2,11 +2,40 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from pscad_mcp.core.backend.base import BackendError
 from pscad_mcp.core.connection_manager import PSCADConnectionManager
 from pscad_mcp.tools.app_tools import get_pscad_status
 
 
 class TestConnectionMetadata(unittest.IsolatedAsyncioTestCase):
+    async def test_attach_preserves_structured_backend_error(self):
+        error = BackendError(
+            "DEPENDENCY_MISSING",
+            "legacy automation is missing",
+            "legacy",
+            "attach",
+            {"legacy_wheel": None},
+        )
+        manager = object.__new__(PSCADConnectionManager)
+        manager._service = MagicMock()
+        manager._service.attach_local = AsyncMock(side_effect=error)
+
+        with self.assertRaises(BackendError) as raised:
+            await manager.attach_local()
+
+        self.assertIs(raised.exception, error)
+
+    async def test_attach_wraps_unknown_error_with_original_cause(self):
+        error = ValueError("invalid configuration")
+        manager = object.__new__(PSCADConnectionManager)
+        manager._service = MagicMock()
+        manager._service.attach_local = AsyncMock(side_effect=error)
+
+        with self.assertRaisesRegex(RuntimeError, "Failed to attach") as raised:
+            await manager.attach_local()
+
+        self.assertIs(raised.exception.__cause__, error)
+
     async def test_status_uses_manager_service_metadata(self):
         expected = {
             "connected": True,
