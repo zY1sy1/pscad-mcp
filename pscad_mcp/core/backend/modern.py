@@ -214,21 +214,60 @@ class ModernBackend:
         )
 
     @staticmethod
+    def _message_source_value(value: Any) -> Any:
+        if value is None or isinstance(value, (str, int, float, bool)):
+            return value
+        if isinstance(value, Mapping):
+            return {
+                str(key): ModernBackend._message_source_value(item)
+                for key, item in value.items()
+            }
+        if isinstance(value, (list, tuple, set)):
+            return [ModernBackend._message_source_value(item) for item in value]
+        return str(value)
+
+    @staticmethod
     def _project_message(value: Any) -> ProjectMessage:
-        if isinstance(value, dict):
+        source_fields = ("label", "scope", "name", "link", "group", "classid")
+        if isinstance(value, Mapping):
             text = value.get("text", value.get("message", ""))
-            severity = value.get("severity", value.get("level", "normal"))
+            severity = value.get(
+                "severity",
+                value.get("level", value.get("status", "normal")),
+            )
             source = value.get("source")
+            if source is None:
+                source = {
+                    field: value[field]
+                    for field in source_fields
+                    if value.get(field) not in (None, "")
+                }
         else:
             text = getattr(value, "text", getattr(value, "message", value))
-            severity = getattr(value, "severity", getattr(value, "level", "normal"))
+            severity = getattr(
+                value,
+                "severity",
+                getattr(value, "level", getattr(value, "status", "normal")),
+            )
             source = getattr(value, "source", None)
-        if source is not None and not isinstance(source, dict):
-            source = {"value": str(source)}
+            if source is None:
+                source = {
+                    field: getattr(value, field)
+                    for field in source_fields
+                    if getattr(value, field, None) not in (None, "")
+                }
+        if isinstance(source, Mapping):
+            normalized_source = ModernBackend._message_source_value(source)
+        elif source:
+            normalized_source = {
+                "value": ModernBackend._message_source_value(source)
+            }
+        else:
+            normalized_source = None
         return ProjectMessage(
             str(severity),
             str(text),
-            dict(source) if source is not None else None,
+            normalized_source,
         )
 
     async def project_messages(self, project_name: str) -> list[ProjectMessage]:

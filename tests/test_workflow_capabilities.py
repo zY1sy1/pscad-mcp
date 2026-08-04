@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import namedtuple
 import json
 import tempfile
 import unittest
@@ -29,6 +30,12 @@ class ModernMessage:
     text = "modern output"
     severity = "error"
     source = {"module": "compiler", "line": 7}
+
+
+ModernApiMessage = namedtuple(
+    "ModernApiMessage",
+    "text label status scope name link group classid",
+)
 
 
 class ModernMessageProject:
@@ -141,6 +148,48 @@ class TestStructuredProjectMessages(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result, [ProjectMessage("error", "modern output", ModernMessage.source)])
         json.dumps([record.__dict__ for record in result])
+
+    async def test_modern_mhi_message_fields_preserve_severity_and_source(self):
+        message = ModernApiMessage(
+            "compile failed",
+            "build",
+            "warning",
+            "case",
+            "R1",
+            42,
+            7,
+            99,
+        )
+
+        result = ModernBackend._project_message(message)
+
+        self.assertEqual(
+            result,
+            ProjectMessage(
+                "warning",
+                "compile failed",
+                {
+                    "label": "build",
+                    "scope": "case",
+                    "name": "R1",
+                    "link": 42,
+                    "group": 7,
+                    "classid": 99,
+                },
+            ),
+        )
+        json.dumps(result.__dict__)
+
+    async def test_modern_scalar_message_source_remains_a_json_record(self):
+        class ScalarSourceMessage:
+            text = "compiler output"
+            severity = "normal"
+            source = "compiler"
+
+        result = ModernBackend._project_message(ScalarSourceMessage())
+
+        self.assertEqual(result.source, {"value": "compiler"})
+        json.dumps(result.__dict__)
 
     async def test_service_keeps_text_output_by_default_and_supports_structured_mode(self):
         backend = MessageServiceBackend()
