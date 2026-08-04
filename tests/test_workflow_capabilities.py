@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, patch
 from pscad_mcp.core.backend.base import BackendError, ParameterGridRequest, ProjectMessage
 from pscad_mcp.core.backend.legacy import LegacyBackend
 from pscad_mcp.core.backend.modern import ModernBackend
+from pscad_mcp.core.path_policy import PathPolicy
 from pscad_mcp.core.service import PscadService
 from pscad_mcp.tools.data_tools import get_project_output, read_output_file
 from tests.backend_fakes import ImmediateExecutor
@@ -215,7 +216,11 @@ class TestStructuredProjectMessages(unittest.IsolatedAsyncioTestCase):
 
     async def test_service_and_tool_forward_focused_psout_options(self):
         backend = OutputServiceBackend()
-        service = PscadService(lambda: backend, executor=ImmediateExecutor())
+        service = PscadService(
+            lambda: backend,
+            executor=ImmediateExecutor(),
+            path_policy=PathPolicy(allow_unscoped_paths=True),
+        )
         service._backend = backend
 
         with tempfile.TemporaryDirectory() as folder:
@@ -267,7 +272,11 @@ class TestStructuredProjectMessages(unittest.IsolatedAsyncioTestCase):
 
     async def test_parameter_grid_normalizes_requests_and_resolves_csv_paths(self):
         backend = ParameterGridServiceBackend()
-        service = PscadService(lambda: backend, executor=ImmediateExecutor())
+        service = PscadService(
+            lambda: backend,
+            executor=ImmediateExecutor(),
+            path_policy=PathPolicy(allow_unscoped_paths=True),
+        )
         service._backend = backend
 
         with tempfile.TemporaryDirectory() as folder:

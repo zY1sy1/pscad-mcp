@@ -125,15 +125,27 @@ The current implementation targets `mcp>=1.29,<2`, official
 and `mhi-psout` 1.3.x. The `mcp` upper bound is intentional because this
 repository uses the FastMCP 1.x import path.
 
-For safer file handling, set `PSCAD_MCP_WORKSPACE` to the directory that
-contains the projects and output files you want the server to access:
+File operations require `PSCAD_MCP_WORKSPACE` to be set to the directory that
+contains the projects and output files the server may access:
 
 ```powershell
 $env:PSCAD_MCP_WORKSPACE = "D:\PSCAD-Workspace"
 ```
 
 When this variable is set, project and result paths outside the workspace are
-rejected. Destructive or overwrite-capable tools also require `confirm=true`.
+rejected. If it is not set, file operations return
+`WORKSPACE_NOT_CONFIGURED` instead of accessing an unscoped path. Destructive
+or overwrite-capable tools also require `confirm=true`.
+
+For controlled development only, you may explicitly opt into the previous
+unscoped behavior:
+
+```powershell
+$env:PSCAD_MCP_ALLOW_UNSCOPED_PATHS = "true"
+```
+
+Do not use that override for shared or production MCP servers. Restart the MCP
+connection after changing either workspace variable.
 
 You can still run tests and documentation-related tasks without PSCAD installed.
 
@@ -265,6 +277,7 @@ PSCAD_MCP_BACKEND = 'legacy'
 PSCAD_MCP_VERSION = '4.6.2'
 PSCAD_MCP_X64 = 'true'
 PSCAD_MCP_WORKSPACE = 'C:/path/to/PSCAD-Workspace'
+PSCAD_MCP_ALLOW_UNSCOPED_PATHS = 'false'
 ```
 
 Replace both local paths in this example, or copy the values from

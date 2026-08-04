@@ -1,5 +1,7 @@
 import json
+import os
 import unittest
+from unittest.mock import patch
 
 from pscad_mcp.core.backend.base import (
     BackendError,
@@ -13,6 +15,7 @@ from pscad_mcp.core.executor import (
     ExecutorUnhealthyError,
 )
 from pscad_mcp.core.service import ConfirmationRequired, PscadService
+from pscad_mcp.core.path_policy import PathPolicy
 from tests.backend_fakes import ImmediateExecutor
 
 
@@ -155,6 +158,27 @@ def service_with_backend(backend):
 
 
 class TestPscadService(unittest.IsolatedAsyncioTestCase):
+    async def test_file_operation_without_workspace_returns_structured_error(self):
+        backend = FakeLifecycleBackend()
+        with patch.dict(
+            os.environ,
+            {
+                "PSCAD_MCP_WORKSPACE": "",
+                "PSCAD_MCP_ALLOW_UNSCOPED_PATHS": "false",
+            },
+            clear=False,
+        ):
+            service = PscadService(
+                lambda: backend,
+                executor=ImmediateExecutor(),
+                path_policy=PathPolicy(),
+            )
+            with self.assertRaises(BackendError) as raised:
+                await service.load_projects(["case.pscx"])
+
+        self.assertEqual(raised.exception.code, "WORKSPACE_NOT_CONFIGURED")
+        self.assertEqual(raised.exception.operation, "load_projects")
+
     async def test_run_project_raises_structured_error_when_license_is_false(self):
         backend = FakeLifecycleBackend(licensed=False)
         backend.attached = True
@@ -609,6 +633,19 @@ class TestPscadService(unittest.IsolatedAsyncioTestCase):
 
         self.assertFalse(payload["retryable"])
         self.assertIn("license", payload["suggested_action"].lower())
+
+    def test_error_payload_guides_workspace_configuration(self):
+        error = BackendError(
+            "WORKSPACE_NOT_CONFIGURED",
+            "workspace required",
+            "service",
+            "load_projects",
+        )
+
+        payload = PscadService.error_payload(error, "load_projects")["error"]
+
+        self.assertFalse(payload["retryable"])
+        self.assertIn("PSCAD_MCP_WORKSPACE", payload["suggested_action"])
 
     def test_error_payload_classifies_executor_failures(self):
         timeout = PscadService.error_payload(
