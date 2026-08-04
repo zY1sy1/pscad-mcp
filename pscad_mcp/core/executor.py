@@ -43,6 +43,8 @@ class RobustExecutor:
         self.last_operation: str | None = None
         self.last_error: str | None = None
         self.last_timeout_seconds: float | None = None
+        self.reset_generation = 0
+        self._active_generations: set[int] = set()
         self._com_initializer = com_initializer or _initialize_windows_com
         self.executor = self._new_executor()
 
@@ -69,6 +71,11 @@ class RobustExecutor:
                 "last_operation": self.last_operation,
                 "last_error": self.last_error,
                 "last_timeout_seconds": self.last_timeout_seconds,
+                "reset_generation": self.reset_generation,
+                "previous_worker_retiring": any(
+                    generation != self.reset_generation
+                    for generation in self._active_generations
+                ),
             }
 
     async def run_safe(
@@ -86,22 +93,30 @@ class RobustExecutor:
             timeout: Override the default timeout (seconds). Use for long operations like builds.
         **kwargs: Keyword arguments for func.
         """
-        if not self.healthy:
-            raise ExecutorUnhealthyError(
-                "PSCAD executor is unhealthy; reset it before retrying."
-            )
         effective_timeout = timeout if timeout is not None else self.timeout
         loop = asyncio.get_running_loop()
         func_name = getattr(func, "__name__", str(func))
         started_at = time.perf_counter()
         with self._state_lock:
+            if not self.healthy:
+                raise ExecutorUnhealthyError(
+                    "PSCAD executor is unhealthy; reset it before retrying."
+                )
+            generation = self.reset_generation
+            call_lock = self.lock
             self.last_operation = func_name
             self.last_error = None
             self.last_timeout_seconds = None
 
         def wrapped_call():
-            with self.lock:
-                return func(*args, **kwargs)
+            with self._state_lock:
+                self._active_generations.add(generation)
+            try:
+                with call_lock:
+                    return func(*args, **kwargs)
+            finally:
+                with self._state_lock:
+                    self._active_generations.discard(generation)
 
         try:
             result = await asyncio.wait_for(
@@ -145,6 +160,7 @@ class RobustExecutor:
         self.executor = self._new_executor()
         self.lock = threading.Lock()
         with self._state_lock:
+            self.reset_generation += 1
             self.healthy = True
             self.last_error = None
             self.last_timeout_seconds = None

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import asdict
 import inspect
 from pathlib import Path
@@ -195,6 +196,7 @@ class PscadService:
         self.executor = executor
         self.path_policy = path_policy or PathPolicy()
         self._backend: Any = None
+        self._mutation_lock = asyncio.Lock()
 
     @property
     def backend(self) -> Any:
@@ -263,6 +265,10 @@ class PscadService:
         self._backend = None
 
     async def repair_connection(self) -> str:
+        async with self._mutation_lock:
+            return await self._repair_connection_unlocked()
+
+    async def _repair_connection_unlocked(self) -> str:
         current = self._backend
         if current is not None:
             owns_process = bool(getattr(current, "owns_process", False))
@@ -331,17 +337,18 @@ class PscadService:
         return [asdict(item) for item in await self.backend.list_projects()]
 
     async def run_project(self, project_name: str) -> str:
-        info = await self.backend.heartbeat()
-        if info.licensed is False:
-            raise BackendError(
-                "NOT_LICENSED",
-                "PSCAD is not licensed; simulation was not started.",
-                getattr(self.backend, "name", "backend"),
-                "run_project",
-                {"project_name": project_name},
-            )
-        await self.backend.run_project(project_name)
-        return f"Simulation started for '{project_name}'."
+        async with self._mutation_lock:
+            info = await self.backend.heartbeat()
+            if info.licensed is False:
+                raise BackendError(
+                    "NOT_LICENSED",
+                    "PSCAD is not licensed; simulation was not started.",
+                    getattr(self.backend, "name", "backend"),
+                    "run_project",
+                    {"project_name": project_name},
+                )
+            await self.backend.run_project(project_name)
+            return f"Simulation started for '{project_name}'."
 
     async def get_run_status(self, project_name: str) -> dict[str, Any]:
         return asdict(await self.backend.project_run_state(project_name))
@@ -528,12 +535,13 @@ class PscadService:
     async def run_simulation_set(
         self, project_name: str, sim_set_name: str
     ) -> str:
-        await self.backend.get_simulation_set_details(sim_set_name)
-        await self.backend.run_simulation_set(project_name, sim_set_name)
-        return (
-            f"Simulation set '{sim_set_name}' in project "
-            f"'{project_name}' started."
-        )
+        async with self._mutation_lock:
+            await self.backend.get_simulation_set_details(sim_set_name)
+            await self.backend.run_simulation_set(project_name, sim_set_name)
+            return (
+                f"Simulation set '{sim_set_name}' in project "
+                f"'{project_name}' started."
+            )
 
     async def add_task_to_set(
         self,
@@ -541,22 +549,23 @@ class PscadService:
         sim_set_name: str,
         task_project_name: str,
     ) -> str:
-        await self.backend.get_simulation_set_details(sim_set_name)
-        projects = {item.name for item in await self.backend.list_projects()}
-        if task_project_name not in projects:
-            raise BackendError(
-                "NOT_FOUND",
-                f"Project '{task_project_name}' is not loaded.",
-                getattr(self.backend, "name", "backend"),
-                "add_task_to_set",
-                {"task_project_name": task_project_name},
+        async with self._mutation_lock:
+            await self.backend.get_simulation_set_details(sim_set_name)
+            projects = {item.name for item in await self.backend.list_projects()}
+            if task_project_name not in projects:
+                raise BackendError(
+                    "NOT_FOUND",
+                    f"Project '{task_project_name}' is not loaded.",
+                    getattr(self.backend, "name", "backend"),
+                    "add_task_to_set",
+                    {"task_project_name": task_project_name},
+                )
+            await self.backend.add_task_to_set(
+                project_name,
+                sim_set_name,
+                task_project_name,
             )
-        await self.backend.add_task_to_set(
-            project_name,
-            sim_set_name,
-            task_project_name,
-        )
-        return f"Task '{task_project_name}' added to set '{sim_set_name}'."
+            return f"Task '{task_project_name}' added to set '{sim_set_name}'."
 
     async def get_project_output(self, project_name: str) -> str:
         return await self.backend.project_output(project_name)
@@ -856,32 +865,33 @@ class PscadService:
         *,
         canvas_name: str = "Main",
     ) -> dict[str, Any]:
-        port1 = await self.get_component_port(
-            project_name, component1_id, port1_name
-        )
-        port2 = await self.get_component_port(
-            project_name, component2_id, port2_name
-        )
-        wire = await self.backend.create_wire(
-            project_name,
-            canvas_name,
-            [(port1["x"], port1["y"]), (port2["x"], port2["y"])],
-        )
-        return {
-            "wire_id": wire["id"],
-            "from": {
-                "component_id": component1_id,
-                "port": port1_name,
-                "x": port1["x"],
-                "y": port1["y"],
-            },
-            "to": {
-                "component_id": component2_id,
-                "port": port2_name,
-                "x": port2["x"],
-                "y": port2["y"],
-            },
-        }
+        async with self._mutation_lock:
+            port1 = await self.get_component_port(
+                project_name, component1_id, port1_name
+            )
+            port2 = await self.get_component_port(
+                project_name, component2_id, port2_name
+            )
+            wire = await self.backend.create_wire(
+                project_name,
+                canvas_name,
+                [(port1["x"], port1["y"]), (port2["x"], port2["y"])],
+            )
+            return {
+                "wire_id": wire["id"],
+                "from": {
+                    "component_id": component1_id,
+                    "port": port1_name,
+                    "x": port1["x"],
+                    "y": port1["y"],
+                },
+                "to": {
+                    "component_id": component2_id,
+                    "port": port2_name,
+                    "x": port2["x"],
+                    "y": port2["y"],
+                },
+            }
 
     async def create_annotation(
         self,

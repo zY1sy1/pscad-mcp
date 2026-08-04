@@ -7,6 +7,10 @@ from .executor import RobustExecutor
 from .pscad_config import PscadLaunchConfig, select_installation
 
 
+_PSOUT_REASON_LIMIT = 256
+_PSOUT_DIAGNOSTIC_LIMIT = 128
+
+
 class PscadAdapter:
     """Version-sensitive boundary around the MHI PSCAD and PSOUT APIs."""
 
@@ -161,12 +165,24 @@ class PscadAdapter:
                 )
             run = record.run(run_index)
             channels = []
-            self._collect_traces(record.root, run, [], channels, max_samples)
+            warnings = []
+            skipped_channels = []
+            self._collect_traces(
+                record.root,
+                run,
+                [],
+                channels,
+                max_samples,
+                warnings,
+                skipped_channels,
+            )
             return {
                 "path": str(file_path),
                 "runs": record.num_runs,
                 "run_index": run_index,
                 "channels": channels,
+                "warnings": warnings,
+                "skipped_channels": skipped_channels,
             }
 
     def _collect_traces(
@@ -176,21 +192,50 @@ class PscadAdapter:
         path: list[str],
         channels: list[dict],
         max_samples: int,
+        warnings: list[str],
+        skipped_channels: list[dict],
     ) -> None:
         try:
             name = node["Name"]
         except Exception:
             name = None
         next_path = path + ([str(name)] if name else [])
-        children = list(node.calls())
+        try:
+            children = list(node.calls())
+        except Exception as error:
+            self._record_psout_skip(
+                node,
+                next_path,
+                "identify",
+                error,
+                warnings,
+                skipped_channels,
+            )
+            return
         if not children:
             try:
                 trace = run.trace(node)
-            except Exception:
+            except Exception as error:
+                self._record_psout_skip(
+                    node,
+                    next_path,
+                    "trace",
+                    error,
+                    warnings,
+                    skipped_channels,
+                )
                 return
             try:
                 values = self._sample(trace.data, max_samples)
-            except Exception:
+            except Exception as error:
+                self._record_psout_skip(
+                    node,
+                    next_path,
+                    "values",
+                    error,
+                    warnings,
+                    skipped_channels,
+                )
                 return
             try:
                 domain_trace = trace.domain
@@ -199,8 +244,16 @@ class PscadAdapter:
                     if domain_trace is not None
                     else []
                 )
-            except Exception:
+            except Exception as error:
                 domain = []
+                self._record_psout_skip(
+                    node,
+                    next_path,
+                    "domain",
+                    error,
+                    warnings,
+                    skipped_channels,
+                )
             channels.append(
                 {
                     "path": "/".join(next_path),
@@ -211,7 +264,55 @@ class PscadAdapter:
             )
             return
         for child in children:
-            self._collect_traces(child, run, next_path, channels, max_samples)
+            self._collect_traces(
+                child,
+                run,
+                next_path,
+                channels,
+                max_samples,
+                warnings,
+                skipped_channels,
+            )
+
+    @staticmethod
+    def _bounded_psout_reason(error: BaseException) -> str:
+        value = f"{type(error).__name__}: {error}"
+        if len(value) <= _PSOUT_REASON_LIMIT:
+            return value
+        return value[: _PSOUT_REASON_LIMIT - 3] + "..."
+
+    @staticmethod
+    def _record_psout_skip(
+        node: Any,
+        path: list[str],
+        stage: str,
+        error: BaseException,
+        warnings: list[str],
+        skipped_channels: list[dict],
+    ) -> None:
+        if len(skipped_channels) >= _PSOUT_DIAGNOSTIC_LIMIT:
+            return
+        try:
+            call_id = node.id
+        except Exception:
+            call_id = None
+        try:
+            call_id = int(call_id) if call_id is not None else None
+        except (TypeError, ValueError, OverflowError):
+            call_id = None
+        channel_path = "/".join(path)
+        reason = PscadAdapter._bounded_psout_reason(error)
+        skipped_channels.append(
+            {
+                "path": channel_path,
+                "call_id": call_id,
+                "stage": stage,
+                "reason": reason,
+            }
+        )
+        if len(warnings) < _PSOUT_DIAGNOSTIC_LIMIT:
+            label = channel_path or "<unknown>"
+            warnings.append(f"Skipped channel {label} during {stage}: {reason}")
 
     @staticmethod
     def _sample(values: Any, max_samples: int) -> list:
