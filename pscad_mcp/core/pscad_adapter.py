@@ -221,8 +221,16 @@ class PscadAdapter:
     ) -> None:
         try:
             name = node["Name"]
-        except Exception:
-            name = None
+        except Exception as error:
+            self._record_psout_skip(
+                node,
+                path,
+                "identify",
+                error,
+                warnings,
+                skipped_channels,
+            )
+            return
         next_path = path + ([str(name)] if name else [])
         try:
             children = list(node.calls())

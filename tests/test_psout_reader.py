@@ -146,6 +146,34 @@ class NonNumericPsout:
     File = NonNumericFile
 
 
+class UnidentifiedCall(FakeCall):
+    def __getitem__(self, key):
+        if key == "Name":
+            raise RuntimeError("channel name unavailable")
+        return super().__getitem__(key)
+
+
+class UnidentifiedFile:
+    root = UnidentifiedCall("Hidden", 21)
+    num_runs = 1
+
+    def __init__(self, path):
+        self.path = path
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+    def run(self, index):
+        return FakeRun()
+
+
+class UnidentifiedPsout:
+    File = UnidentifiedFile
+
+
 class TestPsoutReader(unittest.IsolatedAsyncioTestCase):
     async def test_reads_trace_values_and_domains(self):
         adapter = PscadAdapter(ImmediateExecutor(), psout_module=FakePsout())
@@ -228,6 +256,22 @@ class TestPsoutReader(unittest.IsolatedAsyncioTestCase):
             {"count": 2, "numeric": False},
         )
         self.assertNotIn("values", result["channels"][0])
+
+    async def test_unidentified_trace_is_reported_and_skipped(self):
+        adapter = PscadAdapter(
+            ImmediateExecutor(), psout_module=UnidentifiedPsout()
+        )
+
+        result = await adapter.read_psout("sample.psout")
+
+        self.assertEqual(result["channels"], [])
+        self.assertEqual(result["skipped_channels"][0]["call_id"], 21)
+        self.assertEqual(result["skipped_channels"][0]["stage"], "identify")
+        self.assertIn(
+            "channel name unavailable",
+            result["skipped_channels"][0]["reason"],
+        )
+        self.assertTrue(any("identify" in item for item in result["warnings"]))
 
 
 if __name__ == "__main__":
