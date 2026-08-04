@@ -123,4 +123,3 @@ Required gates before claiming a batch complete:
 - broad refactoring of all 2,900+ lines of `legacy.py` before behavior is
   protected by additional tests;
 - claiming PSCAD 5.x end-to-end support without a licensed installation.
-
