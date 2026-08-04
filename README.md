@@ -4,6 +4,9 @@
 
 中文安装、配置、安全和验收说明：[docs/zh-CN/README.md](docs/zh-CN/README.md)
 
+Release notes are tracked in [CHANGELOG.md](CHANGELOG.md). A portable stdio
+configuration template is available at [config.example.toml](config.example.toml).
+
 The server is designed for Windows-based power-system workflows where you want Copilot to do more than explain code: it can connect to a live PSCAD session, open projects, edit parameters, build cases, run simulations, inspect outputs, and manipulate the canvas.
 
 ## Why this repo exists

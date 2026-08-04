@@ -1,0 +1,17 @@
+# Portable stdio configuration example for Codex-compatible MCP clients.
+# Replace "python" with the interpreter that has this package installed.
+
+[mcp_servers.pscad]
+type = "stdio"
+command = "python"
+args = ["-m", "pscad_mcp.main"]
+tools = ["*"]
+startup_timeout_sec = 120
+tool_timeout_sec = 600
+
+[mcp_servers.pscad.env]
+PSCAD_MCP_BACKEND = "legacy"
+PSCAD_MCP_VERSION = "4.6.2"
+PSCAD_MCP_X64 = "true"
+PSCAD_MCP_LAUNCH_TIMEOUT = "30"
+PSCAD_MCP_WORKSPACE = "D:\\PSCAD-Workspace"
