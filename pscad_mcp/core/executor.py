@@ -108,19 +108,21 @@ class RobustExecutor:
             self.last_error = None
             self.last_timeout_seconds = None
 
-        def wrapped_call():
-            with self._state_lock:
-                self._active_generations.add(generation)
-            try:
-                with call_lock:
-                    return func(*args, **kwargs)
-            finally:
+            def wrapped_call():
                 with self._state_lock:
-                    self._active_generations.discard(generation)
+                    self._active_generations.add(generation)
+                try:
+                    with call_lock:
+                        return func(*args, **kwargs)
+                finally:
+                    with self._state_lock:
+                        self._active_generations.discard(generation)
+
+            submitted = loop.run_in_executor(self.executor, wrapped_call)
 
         try:
             result = await asyncio.wait_for(
-                loop.run_in_executor(self.executor, wrapped_call),
+                submitted,
                 timeout=effective_timeout,
             )
             logger.debug(
@@ -156,10 +158,12 @@ class RobustExecutor:
             raise
 
     def reset(self) -> None:
-        old_executor = self.executor
-        self.executor = self._new_executor()
-        self.lock = threading.Lock()
+        new_executor = self._new_executor()
+        new_lock = threading.Lock()
         with self._state_lock:
+            old_executor = self.executor
+            self.executor = new_executor
+            self.lock = new_lock
             self.reset_generation += 1
             self.healthy = True
             self.last_error = None
@@ -167,7 +171,9 @@ class RobustExecutor:
         old_executor.shutdown(wait=False, cancel_futures=True)
 
     def shutdown(self) -> None:
-        self.executor.shutdown(wait=False, cancel_futures=True)
+        with self._state_lock:
+            executor = self.executor
+        executor.shutdown(wait=False, cancel_futures=True)
 
 
 # Global shared executor instance

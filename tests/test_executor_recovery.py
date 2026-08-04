@@ -2,6 +2,7 @@ import asyncio
 import logging
 import threading
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 
 from pscad_mcp.core import executor as executor_module
 from pscad_mcp.core.executor import RobustExecutor
@@ -14,6 +15,23 @@ class _RecordingHandler(logging.Handler):
 
     def emit(self, record):
         self.records.append(record)
+
+
+class _ResetAfterFirstStateCapture:
+    def __init__(self, lock, reset):
+        self._lock = lock
+        self._reset = reset
+        self._armed = True
+
+    def __enter__(self):
+        self._lock.acquire()
+        return self
+
+    def __exit__(self, exc_type, exc, traceback):
+        self._lock.release()
+        if self._armed:
+            self._armed = False
+            self._reset()
 
 
 class TestExecutorRecovery(unittest.IsolatedAsyncioTestCase):
@@ -125,6 +143,45 @@ class TestExecutorRecovery(unittest.IsolatedAsyncioTestCase):
         finally:
             release.set()
             await asyncio.sleep(0.05)
+            executor.shutdown()
+
+    async def test_reset_cannot_move_captured_generation_to_new_worker(self):
+        executor = RobustExecutor(timeout=1)
+        old_executor = executor.executor
+        old_shutdown = old_executor.shutdown
+        old_executor.shutdown = lambda **kwargs: None
+        executor._new_executor = lambda: ThreadPoolExecutor(
+            max_workers=1,
+            thread_name_prefix="pscad-current",
+        )
+        executor._state_lock = _ResetAfterFirstStateCapture(
+            executor._state_lock,
+            executor.reset,
+        )
+        started = threading.Event()
+        release = threading.Event()
+        worker_name = []
+
+        def blocked_call():
+            worker_name.append(threading.current_thread().name)
+            started.set()
+            release.wait(2)
+            return "released"
+
+        try:
+            task = asyncio.create_task(executor.run_safe(blocked_call))
+            self.assertTrue(await asyncio.to_thread(started.wait, 1))
+
+            snapshot = executor.snapshot()
+            self.assertTrue(worker_name[0].startswith("pscad-com"))
+            self.assertEqual(snapshot["reset_generation"], 1)
+            self.assertTrue(snapshot["previous_worker_retiring"])
+
+            release.set()
+            self.assertEqual(await task, "released")
+        finally:
+            release.set()
+            old_shutdown(wait=False, cancel_futures=True)
             executor.shutdown()
 
 
