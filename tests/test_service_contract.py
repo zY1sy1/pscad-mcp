@@ -29,6 +29,7 @@ class FakeLifecycleBackend:
         disconnect_error=None,
         quit_error=None,
         heartbeat_error=None,
+        licensed=True,
     ):
         self.name = name
         self.version = version
@@ -40,9 +41,11 @@ class FakeLifecycleBackend:
         self.disconnect_error = disconnect_error
         self.quit_error = quit_error
         self.heartbeat_error = heartbeat_error
+        self.licensed = licensed
         self.attached = False
         self.disconnect_count = 0
         self.quit_count = 0
+        self.run_calls = []
 
     def info(self):
         return BackendInfo(
@@ -51,7 +54,7 @@ class FakeLifecycleBackend:
             self.x64,
             self.attached,
             False,
-            True if self.attached else None,
+            self.licensed if self.attached else None,
             self.owns_process,
         )
 
@@ -80,6 +83,9 @@ class FakeLifecycleBackend:
             raise self.quit_error
         self.quit_count += 1
         self.attached = False
+
+    async def run_project(self, project_name):
+        self.run_calls.append(project_name)
 
 
 class FakeSimulationBackend:
@@ -149,6 +155,26 @@ def service_with_backend(backend):
 
 
 class TestPscadService(unittest.IsolatedAsyncioTestCase):
+    async def test_run_project_raises_structured_error_when_license_is_false(self):
+        backend = FakeLifecycleBackend(licensed=False)
+        backend.attached = True
+        service = service_with_backend(backend)
+
+        with self.assertRaises(BackendError) as raised:
+            await service.run_project("case")
+
+        self.assertEqual(raised.exception.code, "NOT_LICENSED")
+        self.assertEqual(raised.exception.operation, "run_project")
+        self.assertEqual(backend.run_calls, [])
+
+    async def test_run_project_allows_unknown_license_state(self):
+        backend = FakeLifecycleBackend(licensed=None)
+        backend.attached = True
+        service = service_with_backend(backend)
+
+        self.assertIn("Simulation started", await service.run_project("case"))
+        self.assertEqual(backend.run_calls, ["case"])
+
     async def test_remove_tasks_requires_confirmation_before_backend_call(self):
         backend = FakeSimulationBackend()
         service = service_with_backend(backend)
@@ -570,6 +596,19 @@ class TestPscadService(unittest.IsolatedAsyncioTestCase):
             payload["error"]["suggested_action"],
             "Check names and list the current PSCAD objects.",
         )
+
+    def test_error_payload_guides_unlicensed_simulation_recovery(self):
+        error = BackendError(
+            "NOT_LICENSED",
+            "PSCAD is not licensed",
+            "legacy",
+            "run_project",
+        )
+
+        payload = PscadService.error_payload(error, "run_project")["error"]
+
+        self.assertFalse(payload["retryable"])
+        self.assertIn("license", payload["suggested_action"].lower())
 
     def test_error_payload_classifies_executor_failures(self):
         timeout = PscadService.error_payload(
