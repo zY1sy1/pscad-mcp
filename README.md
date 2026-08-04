@@ -82,14 +82,33 @@ Every MCP tool returns failures in one stable `error` object containing
 unstructured MCP execution error.
 
 `get_pscad_status` also returns an `executor` object with `healthy`,
-`last_operation`, `last_error`, and `last_timeout_seconds`. After a timeout,
-call `repair_connection` before retrying the failed operation. Recovery uses
+`last_operation`, `last_error`, `last_timeout_seconds`, `reset_generation`, and
+`previous_worker_retiring`. After a timeout, call `repair_connection` before
+retrying the failed operation. Recovery uses
 the backend's cached process ownership and never terminates a process reported
 as external.
 
 If an owned PSCAD 4.6.x instance cannot be closed after the executor is reset,
 repair returns `REPAIR_CLEANUP_FAILED` and does not launch a second instance.
 Close that PSCAD process manually, then call `repair_connection` again.
+
+## Optional workflow extensions
+
+The existing 60 tools keep their names and default return shapes while accepting
+these optional arguments:
+
+- `get_project_output(project_name, structured=true)` returns JSON-safe message
+  records with `severity`, `text`, and optional `source`; the default remains a
+  text string.
+- `read_output_file(file_path, channel="Root/Voltage/PGB:Data",
+  summary_only=true)` selects one normalized channel path and returns bounded
+  statistics (`count`, `min`, `max`, `mean`, `first`, and `last`) without raw
+  samples. Skipped traces are reported in `warnings` and `skipped_channels`.
+- `get_project_settings` and `set_project_settings` accept
+  `mode="parameter_grid"` with an action mapping for `view_project`, `load`,
+  or `save` of a `.csv` grid. The modern backend forwards supported actions to
+  the vendor proxy; PSCAD 4.6.2 legacy automation returns
+  `CAPABILITY_UNAVAILABLE` explicitly.
 
 ## Requirements
 

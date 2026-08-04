@@ -1,5 +1,7 @@
 import asyncio
 import importlib
+import math
+from numbers import Real
 from pathlib import Path
 from typing import Any, Mapping, Optional
 
@@ -9,6 +11,7 @@ from .pscad_config import PscadLaunchConfig, select_installation
 
 _PSOUT_REASON_LIMIT = 256
 _PSOUT_DIAGNOSTIC_LIMIT = 128
+_PSOUT_CHANNEL_LIMIT = 256
 
 
 class PscadAdapter:
@@ -138,6 +141,8 @@ class PscadAdapter:
         *,
         run_index: int = 0,
         max_samples: int = 10_000,
+        channel: str | None = None,
+        summary_only: bool = False,
     ) -> dict:
         if self.psout_module is None:
             raise RuntimeError(
@@ -150,6 +155,8 @@ class PscadAdapter:
             Path(file_path),
             run_index,
             max_samples,
+            channel,
+            summary_only,
         )
 
     def _read_psout_sync(
@@ -157,6 +164,8 @@ class PscadAdapter:
         file_path: Path,
         run_index: int,
         max_samples: int,
+        channel: str | None,
+        summary_only: bool,
     ) -> dict:
         with self.psout_module.File(str(file_path)) as record:
             if run_index < 0 or run_index >= record.num_runs:
@@ -167,6 +176,7 @@ class PscadAdapter:
             channels = []
             warnings = []
             skipped_channels = []
+            matched = [False]
             self._collect_traces(
                 record.root,
                 run,
@@ -175,7 +185,18 @@ class PscadAdapter:
                 max_samples,
                 warnings,
                 skipped_channels,
+                channel,
+                summary_only,
+                matched,
             )
+            if channel is not None and not matched[0]:
+                selector = str(channel)
+                if len(selector) > _PSOUT_REASON_LIMIT:
+                    selector = selector[: _PSOUT_REASON_LIMIT - 3] + "..."
+                if len(warnings) < _PSOUT_DIAGNOSTIC_LIMIT:
+                    warnings.append(
+                        f"No PSOUT channel matched selector '{selector}'."
+                    )
             return {
                 "path": str(file_path),
                 "runs": record.num_runs,
@@ -194,6 +215,9 @@ class PscadAdapter:
         max_samples: int,
         warnings: list[str],
         skipped_channels: list[dict],
+        channel: str | None,
+        summary_only: bool,
+        matched: list[bool],
     ) -> None:
         try:
             name = node["Name"]
@@ -213,6 +237,10 @@ class PscadAdapter:
             )
             return
         if not children:
+            channel_path = "/".join(next_path)
+            if channel is not None and channel_path != channel:
+                return
+            matched[0] = True
             try:
                 trace = run.trace(node)
             except Exception as error:
@@ -254,14 +282,22 @@ class PscadAdapter:
                     warnings,
                     skipped_channels,
                 )
-            channels.append(
-                {
-                    "path": "/".join(next_path),
-                    "call_id": node.id,
-                    "values": values,
-                    "domain": domain,
-                }
-            )
+            if len(channels) >= _PSOUT_CHANNEL_LIMIT:
+                if len(warnings) < _PSOUT_DIAGNOSTIC_LIMIT:
+                    warnings.append(
+                        f"PSOUT channel limit {_PSOUT_CHANNEL_LIMIT} reached."
+                    )
+                return
+            channel_payload = {
+                "path": channel_path,
+                "call_id": node.id,
+            }
+            if summary_only:
+                channel_payload["summary"] = self._summarize_samples(values)
+            else:
+                channel_payload["values"] = values
+                channel_payload["domain"] = domain
+            channels.append(channel_payload)
             return
         for child in children:
             self._collect_traces(
@@ -272,7 +308,31 @@ class PscadAdapter:
                 max_samples,
                 warnings,
                 skipped_channels,
+                channel,
+                summary_only,
+                matched,
             )
+
+    @staticmethod
+    def _summarize_samples(values: list) -> dict:
+        if not values:
+            return {"count": 0, "numeric": False}
+        if not all(
+            isinstance(value, Real)
+            and not isinstance(value, bool)
+            and math.isfinite(float(value))
+            for value in values
+        ):
+            return {"count": len(values), "numeric": False}
+        numeric = [float(value) for value in values]
+        return {
+            "count": len(numeric),
+            "min": min(numeric),
+            "max": max(numeric),
+            "mean": sum(numeric) / len(numeric),
+            "first": numeric[0],
+            "last": numeric[-1],
+        }
 
     @staticmethod
     def _bounded_psout_reason(error: BaseException) -> str:

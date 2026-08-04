@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Mapping
 from dataclasses import asdict
 import inspect
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
-from .backend.base import BackendError, BackendInfo
+from .backend.base import BackendError, BackendInfo, ParameterGridRequest
 from .executor import (
     ExecutorTimeoutError,
     ExecutorUnhealthyError,
@@ -85,6 +86,10 @@ _ERROR_GUIDANCE: dict[str, tuple[bool, str]] = {
 
 
 _TASK_PARAMETER_FIELDS = frozenset({"controlgroup", "volley", "affinity"})
+_PARAMETER_GRID_FIELDS = frozenset(
+    {"action", "project_name", "filename", "folder"}
+)
+_PARAMETER_GRID_ACTIONS = frozenset({"view_project", "load", "save"})
 
 
 def _require_object_name(value: str, field: str, operation: str) -> str:
@@ -361,12 +366,127 @@ class PscadService:
         await self.backend.stop_project(project_name)
         return f"Simulation stopped for '{project_name}'."
 
-    async def get_project_settings(self, project_name: str) -> dict[str, Any]:
+    async def parameter_grid(
+        self, request: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        if not isinstance(request, Mapping):
+            raise BackendError(
+                "INVALID_ARGUMENT",
+                "parameter_grid must be a mapping.",
+                "service",
+                "parameter_grid",
+            )
+        unknown = sorted(set(request) - _PARAMETER_GRID_FIELDS)
+        if unknown:
+            raise BackendError(
+                "INVALID_ARGUMENT",
+                "Unsupported parameter-grid fields.",
+                "service",
+                "parameter_grid",
+                {"unsupported": unknown},
+            )
+        action = request.get("action")
+        if action not in _PARAMETER_GRID_ACTIONS:
+            raise BackendError(
+                "INVALID_ARGUMENT",
+                "action must be one of: view_project, load, save.",
+                "service",
+                "parameter_grid",
+                {"action": action},
+            )
+        project_name = request.get("project_name")
+        filename = request.get("filename")
+        folder = request.get("folder")
+        if action == "view_project":
+            if not isinstance(project_name, str) or not project_name.strip():
+                raise BackendError(
+                    "INVALID_ARGUMENT",
+                    "project_name is required for view_project.",
+                    "service",
+                    "parameter_grid",
+                )
+            if filename is not None or folder is not None:
+                raise BackendError(
+                    "INVALID_ARGUMENT",
+                    "filename and folder are not valid for view_project.",
+                    "service",
+                    "parameter_grid",
+                )
+            normalized = ParameterGridRequest(
+                action,
+                project_name.strip(),
+                None,
+                None,
+            )
+        else:
+            if not isinstance(filename, str) or not filename.strip():
+                raise BackendError(
+                    "INVALID_ARGUMENT",
+                    f"filename is required for {action}.",
+                    "service",
+                    "parameter_grid",
+                )
+            if folder is not None and not isinstance(folder, str):
+                raise BackendError(
+                    "INVALID_ARGUMENT",
+                    "folder must be a string when provided.",
+                    "service",
+                    "parameter_grid",
+                )
+            candidate = str(Path(folder) / filename) if folder else filename
+            resolved = self.path_policy.resolve(
+                candidate,
+                suffixes={".csv"},
+                must_exist=action == "load",
+            )
+            normalized = ParameterGridRequest(
+                action,
+                None,
+                str(resolved),
+                None,
+            )
+        return await self.backend.parameter_grid(normalized)
+
+    async def get_project_settings(
+        self,
+        project_name: str,
+        mode: str = "project",
+        parameter_grid: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        if mode == "parameter_grid":
+            request = dict(parameter_grid or {})
+            request.setdefault("action", "view_project")
+            request.setdefault("project_name", project_name)
+            return await self.parameter_grid(request)
+        if mode != "project":
+            raise BackendError(
+                "INVALID_ARGUMENT",
+                "mode must be 'project' or 'parameter_grid'.",
+                "service",
+                "get_project_settings",
+                {"mode": mode},
+            )
         return await self.backend.get_settings(project_name)
 
     async def set_project_settings(
-        self, project_name: str, settings: dict[str, Any]
-    ) -> str:
+        self,
+        project_name: str,
+        settings: dict[str, Any],
+        mode: str = "project",
+        parameter_grid: Mapping[str, Any] | None = None,
+    ) -> str | dict[str, Any]:
+        if mode == "parameter_grid":
+            request = dict(parameter_grid or settings)
+            request.setdefault("project_name", project_name)
+            return await self.parameter_grid(request)
+        if mode != "project":
+            raise BackendError(
+                "INVALID_ARGUMENT",
+                "mode must be 'project' or 'parameter_grid'.",
+                "service",
+                "set_project_settings",
+                {"mode": mode},
+            )
         await self.backend.set_settings(project_name, settings)
         return f"Settings updated for project '{project_name}'."
 
@@ -567,20 +687,40 @@ class PscadService:
             )
             return f"Task '{task_project_name}' added to set '{sim_set_name}'."
 
-    async def get_project_output(self, project_name: str) -> str:
+    async def get_project_output(
+        self, project_name: str, structured: bool = False
+    ) -> str | list[dict[str, Any]]:
+        if structured:
+            return [
+                asdict(message)
+                for message in await self.backend.project_messages(project_name)
+            ]
         return await self.backend.project_output(project_name)
 
     async def read_output_file(
-        self, file_path: str, max_samples: int = 10_000
+        self,
+        file_path: str,
+        max_samples: int = 10_000,
+        channel: str | None = None,
+        summary_only: bool = False,
     ) -> dict[str, Any]:
         if not 1 <= max_samples <= 1_000_000:
             raise ValueError("max_samples must be between 1 and 1000000.")
+        if channel is not None and (not isinstance(channel, str) or not channel):
+            raise ValueError("channel must be a non-empty string when provided.")
+        if not isinstance(summary_only, bool):
+            raise ValueError("summary_only must be a boolean.")
         resolved = self.path_policy.resolve(
             file_path,
             suffixes={".psout", ".out"},
             must_exist=True,
         )
-        return await self.backend.read_output_file(str(resolved), max_samples)
+        return await self.backend.read_output_file(
+            str(resolved),
+            max_samples,
+            channel=channel,
+            summary_only=summary_only,
+        )
 
     async def find_components(
         self,

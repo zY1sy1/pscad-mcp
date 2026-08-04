@@ -58,15 +58,37 @@ async def stop_simulation(project_name: str) -> str:
     return await pscad_manager.service.stop_simulation(project_name)
 
 
-async def get_project_settings(project_name: str) -> Dict[str, Any]:
-    """Get application settings exposed by the current PSCAD API."""
-    return await pscad_manager.service.get_project_settings(project_name)
+async def get_project_settings(
+    project_name: str,
+    mode: str = "project",
+    parameter_grid: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Get project settings or a normalized parameter-grid view."""
+    if mode == "project" and parameter_grid is None:
+        return await pscad_manager.service.get_project_settings(project_name)
+    return await pscad_manager.service.get_project_settings(
+        project_name,
+        mode=mode,
+        parameter_grid=parameter_grid,
+    )
 
-async def set_project_settings(project_name: str, settings: Dict[str, Any]) -> str:
-    """Update application settings exposed by the current PSCAD API."""
+async def set_project_settings(
+    project_name: str,
+    settings: Dict[str, Any],
+    mode: str = "project",
+    parameter_grid: Optional[Dict[str, Any]] = None,
+) -> str | Dict[str, Any]:
+    """Update project settings or run a parameter-grid action."""
+    if mode == "project" and parameter_grid is None:
+        return await pscad_manager.service.set_project_settings(
+            project_name,
+            settings,
+        )
     return await pscad_manager.service.set_project_settings(
         project_name,
         settings,
+        mode=mode,
+        parameter_grid=parameter_grid,
     )
 
 

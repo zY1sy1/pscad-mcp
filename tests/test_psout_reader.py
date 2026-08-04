@@ -120,6 +120,32 @@ class FailingPsout:
     File = FailureFile
 
 
+class NonNumericRun:
+    def trace(self, call):
+        return FakeTrace(["a", "b"], ["x", "y"])
+
+
+class NonNumericFile:
+    root = FakeCall("Text", 20)
+    num_runs = 1
+
+    def __init__(self, path):
+        self.path = path
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+    def run(self, index):
+        return NonNumericRun()
+
+
+class NonNumericPsout:
+    File = NonNumericFile
+
+
 class TestPsoutReader(unittest.IsolatedAsyncioTestCase):
     async def test_reads_trace_values_and_domains(self):
         adapter = PscadAdapter(ImmediateExecutor(), psout_module=FakePsout())
@@ -150,6 +176,58 @@ class TestPsoutReader(unittest.IsolatedAsyncioTestCase):
             max(len(item["reason"]) for item in result["skipped_channels"]),
             256,
         )
+
+    async def test_selects_a_channel_and_returns_bounded_summary_without_samples(self):
+        adapter = PscadAdapter(ImmediateExecutor(), psout_module=FakePsout())
+
+        result = await adapter.read_psout(
+            "sample.psout",
+            max_samples=10,
+            channel="Root/Voltage/PGB:Data",
+            summary_only=True,
+        )
+
+        self.assertEqual(
+            result["channels"],
+            [
+                {
+                    "path": "Root/Voltage/PGB:Data",
+                    "call_id": 1,
+                    "summary": {
+                        "count": 3,
+                        "min": 1.0,
+                        "max": 3.0,
+                        "mean": 2.0,
+                        "first": 1.0,
+                        "last": 3.0,
+                    },
+                }
+            ],
+        )
+        self.assertNotIn("values", result["channels"][0])
+
+    async def test_missing_channel_selector_returns_a_bounded_warning(self):
+        adapter = PscadAdapter(ImmediateExecutor(), psout_module=FakePsout())
+
+        result = await adapter.read_psout(
+            "sample.psout", channel="missing", summary_only=True
+        )
+
+        self.assertEqual(result["channels"], [])
+        self.assertTrue(any("missing" in warning for warning in result["warnings"]))
+
+    async def test_summary_marks_non_numeric_samples_without_raw_values(self):
+        adapter = PscadAdapter(
+            ImmediateExecutor(), psout_module=NonNumericPsout()
+        )
+
+        result = await adapter.read_psout("sample.psout", summary_only=True)
+
+        self.assertEqual(
+            result["channels"][0]["summary"],
+            {"count": 2, "numeric": False},
+        )
+        self.assertNotIn("values", result["channels"][0])
 
 
 if __name__ == "__main__":

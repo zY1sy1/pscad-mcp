@@ -29,6 +29,21 @@ class ProjectInfo:
 
 
 @dataclass(frozen=True)
+class ProjectMessage:
+    severity: str
+    text: str
+    source: JsonDict | None = None
+
+
+@dataclass(frozen=True)
+class ParameterGridRequest:
+    action: str
+    project_name: str | None = None
+    filename: str | None = None
+    folder: str | None = None
+
+
+@dataclass(frozen=True)
 class ComponentInfo:
     id: int
     name: str
@@ -117,6 +132,8 @@ class ProjectBackend(Protocol):
     async def get_settings(self, project_name: str) -> JsonDict: ...
     async def set_settings(self, project_name: str, settings: Mapping[str, Any]) -> None: ...
     async def project_output(self, project_name: str) -> str: ...
+    async def project_messages(self, project_name: str) -> list[ProjectMessage]: ...
+    async def parameter_grid(self, request: ParameterGridRequest) -> JsonDict: ...
 
 
 class SimulationSetBackend(Protocol):
@@ -180,7 +197,14 @@ class CanvasBackend(Protocol):
 
 
 class ResultBackend(Protocol):
-    async def read_output_file(self, file_path: str, max_samples: int) -> JsonDict: ...
+    async def read_output_file(
+        self,
+        file_path: str,
+        max_samples: int,
+        *,
+        channel: str | None = None,
+        summary_only: bool = False,
+    ) -> JsonDict: ...
 
 
 @runtime_checkable

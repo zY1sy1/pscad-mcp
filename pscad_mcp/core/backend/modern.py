@@ -11,7 +11,9 @@ from .base import (
     BackendError,
     BackendInfo,
     ComponentInfo,
+    ParameterGridRequest,
     PortInfo,
+    ProjectMessage,
     ProjectInfo,
     RunState,
     SimulationSetInfo,
@@ -210,6 +212,92 @@ class ModernBackend:
         return str(
             await self.adapter.call(await self._project(project_name), "output")
         )
+
+    @staticmethod
+    def _project_message(value: Any) -> ProjectMessage:
+        if isinstance(value, dict):
+            text = value.get("text", value.get("message", ""))
+            severity = value.get("severity", value.get("level", "normal"))
+            source = value.get("source")
+        else:
+            text = getattr(value, "text", getattr(value, "message", value))
+            severity = getattr(value, "severity", getattr(value, "level", "normal"))
+            source = getattr(value, "source", None)
+        if source is not None and not isinstance(source, dict):
+            source = {"value": str(source)}
+        return ProjectMessage(
+            str(severity),
+            str(text),
+            dict(source) if source is not None else None,
+        )
+
+    async def project_messages(self, project_name: str) -> list[ProjectMessage]:
+        project = await self._project(project_name)
+        messages_method = getattr(project, "messages", None)
+        if messages_method is not None:
+            values = await self.adapter.call(project, "messages")
+            return [self._project_message(value) for value in values]
+        output = getattr(project, "output", None)
+        if output is not None:
+            return [
+                ProjectMessage(
+                    "normal",
+                    str(await self.adapter.call(project, "output")),
+                    None,
+                )
+            ]
+        return []
+
+    async def parameter_grid(self, request: ParameterGridRequest) -> dict[str, Any]:
+        if self._app is None:
+            raise BackendError(
+                "NOT_CONNECTED",
+                "PSCAD is not connected.",
+                self.name,
+                "parameter_grid",
+            )
+        grid = getattr(self._app, "parameter_grid", None)
+        if grid is None:
+            try:
+                from mhi.pscad.parameter_grid import ParameterGrid
+            except ImportError as error:
+                raise BackendError(
+                    "CAPABILITY_UNAVAILABLE",
+                    "The installed modern PSCAD API does not expose parameter-grid operations.",
+                    self.name,
+                    "parameter_grid",
+                ) from error
+            grid = ParameterGrid(self._app)
+        elif not any(
+            callable(getattr(grid, method_name, None))
+            for method_name in ("view", "load", "save")
+        ) and callable(grid):
+            grid = grid()
+
+        if request.action == "view_project":
+            project = await self._project(request.project_name or "")
+            await self.adapter.call(grid, "view", project)
+        elif request.action in {"load", "save"}:
+            await self.adapter.call(
+                grid,
+                request.action,
+                request.filename,
+                folder=request.folder,
+            )
+        else:
+            raise BackendError(
+                "INVALID_ARGUMENT",
+                f"Unsupported parameter-grid action '{request.action}'.",
+                self.name,
+                "parameter_grid",
+                {"action": request.action},
+            )
+        return {
+            "action": request.action,
+            "project": request.project_name,
+            "filename": request.filename,
+            "supported": True,
+        }
 
     async def list_simulation_sets(self, project_name: str) -> list[str]:
         values = await self.adapter.call(self._app, "simulation_sets")
@@ -418,11 +506,18 @@ class ModernBackend:
             raise
 
     async def read_output_file(
-        self, file_path: str, max_samples: int
+        self,
+        file_path: str,
+        max_samples: int,
+        *,
+        channel: str | None = None,
+        summary_only: bool = False,
     ) -> dict[str, Any]:
         return await self.adapter.read_psout(
             file_path,
             max_samples=max_samples,
+            channel=channel,
+            summary_only=summary_only,
         )
 
     async def _component(self, project_name: str, component_id: int) -> Any:
