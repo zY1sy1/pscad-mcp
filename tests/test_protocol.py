@@ -62,6 +62,27 @@ class TestProtocolIntegrity(unittest.IsolatedAsyncioTestCase):
             {"project_name": "missing"},
         )
 
+    async def test_fastmcp_serializes_unlicensed_simulation_error(self):
+        error = BackendError(
+            "NOT_LICENSED",
+            "PSCAD is not licensed; simulation was not started.",
+            "legacy",
+            "run_project",
+            {"project_name": "case"},
+        )
+        self.mock_service.run_project = AsyncMock(side_effect=error)
+
+        result = await create_server()._tool_manager.call_tool(
+            "run_project",
+            {"project_name": "case"},
+            convert_result=True,
+        )
+
+        _, structured = result
+        payload = structured["result"]["error"]
+        self.assertEqual(payload["code"], "NOT_LICENSED")
+        self.assertFalse(payload["retryable"])
+
     async def test_fastmcp_normalizes_unexpected_error(self):
         self.mock_service.run_project = AsyncMock(
             side_effect=ValueError("bad project")

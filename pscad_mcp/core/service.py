@@ -56,6 +56,10 @@ _ERROR_GUIDANCE: dict[str, tuple[bool, str]] = {
         False,
         "Check names and list the current PSCAD objects.",
     ),
+    "NOT_LICENSED": (
+        False,
+        "Activate or verify the PSCAD license before retrying the simulation.",
+    ),
     "PARTIAL_COMPLETION": (
         False,
         "Inspect details and the current PSCAD state before retrying.",
@@ -329,7 +333,13 @@ class PscadService:
     async def run_project(self, project_name: str) -> str:
         info = await self.backend.heartbeat()
         if info.licensed is False:
-            return "Error: PSCAD is not licensed."
+            raise BackendError(
+                "NOT_LICENSED",
+                "PSCAD is not licensed; simulation was not started.",
+                getattr(self.backend, "name", "backend"),
+                "run_project",
+                {"project_name": project_name},
+            )
         await self.backend.run_project(project_name)
         return f"Simulation started for '{project_name}'."
 
