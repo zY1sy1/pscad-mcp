@@ -97,6 +97,36 @@ class TestExecutorRecovery(unittest.IsolatedAsyncioTestCase):
             await asyncio.sleep(0.05)
             executor.shutdown()
 
+    async def test_reset_reports_retiring_previous_worker_generation(self):
+        executor = RobustExecutor(timeout=0.2)
+        started = threading.Event()
+        release = threading.Event()
+
+        def blocked_call():
+            started.set()
+            release.wait(2)
+            return "released"
+
+        try:
+            with self.assertRaises(executor_module.ExecutorTimeoutError):
+                await executor.run_safe(blocked_call, timeout=0.01)
+
+            before_reset = executor.snapshot()
+            self.assertEqual(before_reset["reset_generation"], 0)
+
+            executor.reset()
+            during_retirement = executor.snapshot()
+            self.assertEqual(during_retirement["reset_generation"], 1)
+            self.assertTrue(during_retirement["previous_worker_retiring"])
+
+            release.set()
+            await asyncio.sleep(0.05)
+            self.assertFalse(executor.snapshot()["previous_worker_retiring"])
+        finally:
+            release.set()
+            await asyncio.sleep(0.05)
+            executor.shutdown()
+
 
 if __name__ == "__main__":
     unittest.main()
