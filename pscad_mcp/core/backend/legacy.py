@@ -23,7 +23,9 @@ from .base import (
     BackendError,
     BackendInfo,
     ComponentInfo,
+    ParameterGridRequest,
     PortInfo,
+    ProjectMessage,
     ProjectInfo,
     RunState,
     SimulationSetInfo,
@@ -1105,6 +1107,60 @@ class LegacyBackend:
         messages = await self.executor.run_safe(project.messages)
         return "\n".join(str(message[0] if isinstance(message, tuple) else message) for message in messages)
 
+    @staticmethod
+    def _project_message(value: Any) -> ProjectMessage:
+        if isinstance(value, MappingABC):
+            text = value.get("text", value.get("message", ""))
+            severity = value.get("severity", value.get("level", "normal"))
+            source = value.get("source")
+            if source is not None and not isinstance(source, MappingABC):
+                source = {"value": str(source)}
+            return ProjectMessage(
+                str(severity),
+                str(text),
+                dict(source) if source is not None else None,
+            )
+        if isinstance(value, (tuple, list)):
+            source: dict[str, Any] = {}
+            if len(value) > 1 and value[1] not in (None, ""):
+                source["kind"] = str(value[1])
+            if len(value) > 3 and value[3] not in (None, ""):
+                source["project"] = str(value[3])
+            if len(value) > 4 and value[4] not in (None, ""):
+                source["detail"] = str(value[4])
+            return ProjectMessage(
+                str(value[2]) if len(value) > 2 else "normal",
+                str(value[0]) if value else "",
+                source or None,
+            )
+        return ProjectMessage("normal", str(value), None)
+
+    async def project_messages(self, project_name: str) -> list[ProjectMessage]:
+        project = await self._project(project_name)
+        messages_method = getattr(project, "messages", None)
+        if messages_method is not None:
+            values = await self.executor.run_safe(messages_method)
+            return [self._project_message(value) for value in values]
+        output = getattr(project, "output", None)
+        if output is not None:
+            return [
+                ProjectMessage(
+                    "normal",
+                    str(await self.executor.run_safe(output)),
+                    None,
+                )
+            ]
+        return []
+
+    async def parameter_grid(self, request: ParameterGridRequest) -> dict[str, Any]:
+        raise BackendError(
+            "CAPABILITY_UNAVAILABLE",
+            "Parameter-grid operations are not exposed by the PSCAD 4.6.2 legacy Automation Library.",
+            self.name,
+            "parameter_grid",
+            {"action": request.action},
+        )
+
     async def list_simulation_sets(self, project_name: str) -> list[str]:
         workspace = await self.executor.run_safe(self._require_app().workspace)
         names = await self.executor.run_safe(workspace.list_simulation_sets)
@@ -1359,11 +1415,18 @@ class LegacyBackend:
             raise
 
     async def read_output_file(
-        self, file_path: str, max_samples: int
+        self,
+        file_path: str,
+        max_samples: int,
+        *,
+        channel: str | None = None,
+        summary_only: bool = False,
     ) -> dict[str, Any]:
         return await self.result_adapter.read_psout(
             file_path,
             max_samples=max_samples,
+            channel=channel,
+            summary_only=summary_only,
         )
 
     async def _canvas(self, project_name: str, canvas_name: str = "Main") -> Any:

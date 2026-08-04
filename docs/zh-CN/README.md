@@ -151,8 +151,23 @@ git status --short --branch
 
 - `DEPENDENCY_MISSING`：确认 4.6.x 的官方 `mhrc.automation` wheel 安装在本项目虚拟环境；
 - 找不到指定版本：检查 `PSCAD_MCP_VERSION`、`PSCAD_MCP_X64` 与本机实际安装是否一致；
-- MCP 能启动但工具超时：先查看 `get_pscad_status.executor` 中的 `healthy`、`last_operation`、`last_error` 和 `last_timeout_seconds`，再调用 `repair_connection`；不要并行向 PSCAD 发多条变更命令；
+- MCP 能启动但工具超时：先查看 `get_pscad_status.executor` 中的 `healthy`、`last_operation`、`last_error`、`last_timeout_seconds`、`reset_generation` 和 `previous_worker_retiring`，再调用 `repair_connection`；不要并行向 PSCAD 发多条变更命令；
 - `REPAIR_CLEANUP_FAILED`：MCP 自己启动的 PSCAD 在执行器重建后仍无法正常退出。修复流程不会继续启动第二个实例；请手动关闭该 PSCAD 进程，再调用 `repair_connection`；
 - 路径被拒绝：把工程复制到 `D:\PSCAD-Workspace` 下，或调整工作区根目录后重启 MCP；
 - 删除、覆盖或退出被拒绝：确认目标无误后，重新调用并传入 `confirm=true`；
 - Codex 看不到新配置：保存 `config.toml` 后新建任务或重启 Codex。
+
+## 可选工作流扩展
+
+现有 60 个工具的名称和默认返回形状保持不变，同时支持以下可选参数：
+
+- `get_project_output(project_name, structured=true)` 返回带有
+  `severity`、`text` 和可选 `source` 的 JSON 消息记录；默认仍返回文本。
+- `read_output_file(file_path, channel="Root/Voltage/PGB:Data",
+  summary_only=true)` 按规范化通道路径筛选，并只返回有界统计量
+  （`count`、`min`、`max`、`mean`、`first`、`last`），不返回原始采样值。
+  无法读取的通道会记录在 `warnings` 和 `skipped_channels` 中。
+- `get_project_settings` 和 `set_project_settings` 支持
+  `mode="parameter_grid"`，动作仅限 `view_project`、`load`、`save`，文件后缀
+  必须为 `.csv`。现代后端转发到厂商参数网格代理；PSCAD 4.6.2 legacy
+  自动化不支持时会明确返回 `CAPABILITY_UNAVAILABLE`。
