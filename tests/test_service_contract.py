@@ -1,5 +1,6 @@
 import json
 import os
+from pathlib import Path
 import unittest
 from unittest.mock import patch
 
@@ -157,7 +158,39 @@ def service_with_backend(backend):
     return service
 
 
+def service_with_unconfigured_path_policy():
+    with patch.dict(
+        os.environ,
+        {
+            "PSCAD_MCP_WORKSPACE": "",
+            "PSCAD_MCP_ALLOW_UNSCOPED_PATHS": "false",
+        },
+        clear=False,
+    ):
+        return PscadService(
+            lambda: FakeLifecycleBackend(),
+            executor=ImmediateExecutor(),
+            path_policy=PathPolicy(),
+        )
+
+
 class TestPscadService(unittest.IsolatedAsyncioTestCase):
+    async def test_workspace_error_marks_relative_candidate(self):
+        service = service_with_unconfigured_path_policy()
+
+        with self.assertRaises(BackendError) as raised:
+            await service.load_projects(["case.pscx"])
+
+        self.assertTrue(raised.exception.details["candidate_is_relative"])
+
+    async def test_workspace_error_marks_absolute_candidate(self):
+        service = service_with_unconfigured_path_policy()
+
+        with self.assertRaises(BackendError) as raised:
+            await service.load_projects([str(Path.cwd() / "case.pscx")])
+
+        self.assertFalse(raised.exception.details["candidate_is_relative"])
+
     async def test_file_operation_without_workspace_returns_structured_error(self):
         backend = FakeLifecycleBackend()
         with patch.dict(

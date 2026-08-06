@@ -235,6 +235,7 @@ class PscadService:
                 operation,
                 {
                     "candidate": candidate,
+                    "candidate_is_relative": not Path(candidate).expanduser().is_absolute(),
                     "environment": "PSCAD_MCP_WORKSPACE",
                     "allow_override": "PSCAD_MCP_ALLOW_UNSCOPED_PATHS",
                 },

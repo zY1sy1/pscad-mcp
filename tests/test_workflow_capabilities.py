@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import namedtuple
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -14,6 +15,18 @@ from pscad_mcp.core.path_policy import PathPolicy
 from pscad_mcp.core.service import PscadService
 from pscad_mcp.tools.data_tools import get_project_output, read_output_file
 from tests.backend_fakes import ImmediateExecutor
+
+
+def unscoped_path_policy():
+    with patch.dict(
+        os.environ,
+        {
+            "PSCAD_MCP_WORKSPACE": "",
+            "PSCAD_MCP_ALLOW_UNSCOPED_PATHS": "true",
+        },
+        clear=False,
+    ):
+        return PathPolicy(allow_unscoped_paths=True)
 
 
 class LegacyMessageProject:
@@ -219,7 +232,7 @@ class TestStructuredProjectMessages(unittest.IsolatedAsyncioTestCase):
         service = PscadService(
             lambda: backend,
             executor=ImmediateExecutor(),
-            path_policy=PathPolicy(allow_unscoped_paths=True),
+            path_policy=unscoped_path_policy(),
         )
         service._backend = backend
 
@@ -275,7 +288,7 @@ class TestStructuredProjectMessages(unittest.IsolatedAsyncioTestCase):
         service = PscadService(
             lambda: backend,
             executor=ImmediateExecutor(),
-            path_policy=PathPolicy(allow_unscoped_paths=True),
+            path_policy=unscoped_path_policy(),
         )
         service._backend = backend
 
