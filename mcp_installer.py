@@ -110,6 +110,17 @@ def print_copilot_cli_setup():
     logger.info("  Type: stdio")
     logger.info("  Command: %s", python_exe)
     logger.info("  Args: -m pscad_mcp.main")
+    logger.info("  Environment:")
+    if workspace:
+        logger.info("    PSCAD_MCP_WORKSPACE=%s", workspace)
+    else:
+        logger.info(
+            "    PSCAD_MCP_WORKSPACE=<set this before using file operations>"
+        )
+    logger.info(
+        "    PSCAD_MCP_ALLOW_UNSCOPED_PATHS=%s",
+        environment["PSCAD_MCP_ALLOW_UNSCOPED_PATHS"],
+    )
     logger.info("Press Ctrl+S in Copilot CLI to save the server definition.")
     logger.info("\nIf you prefer editing the config file directly, add this JSON to mcp-config.json:")
     logger.info(json.dumps(config, indent=2))

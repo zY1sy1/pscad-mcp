@@ -31,6 +31,9 @@ def test_configured_workspace_is_included_in_setup_json(caplog):
         "PSCAD_MCP_WORKSPACE": workspace,
         "PSCAD_MCP_ALLOW_UNSCOPED_PATHS": "false",
     }
+    output = "\n".join(caplog.messages)
+    assert f"PSCAD_MCP_WORKSPACE={workspace}" in output
+    assert "PSCAD_MCP_ALLOW_UNSCOPED_PATHS=false" in output
 
 
 def test_missing_workspace_warns_that_file_operations_are_unavailable(caplog):

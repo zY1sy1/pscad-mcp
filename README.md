@@ -236,6 +236,8 @@ You can also configure the server manually.
    - Type: `stdio`
    - Command: your Python executable
    - Args: `-m pscad_mcp.main`
+   - Environment: `PSCAD_MCP_WORKSPACE=C:\\path\\to\\PSCAD-Workspace`
+   - Environment: `PSCAD_MCP_ALLOW_UNSCOPED_PATHS=false`
 
 4. Press `Ctrl+S` to save.
 
@@ -252,7 +254,11 @@ If you prefer editing the config file yourself, add an entry like this:
       "type": "stdio",
       "command": "C:\\Path\\To\\Python\\python.exe",
       "args": ["-m", "pscad_mcp.main"],
-      "tools": ["*"]
+      "tools": ["*"],
+      "env": {
+        "PSCAD_MCP_WORKSPACE": "C:\\path\\to\\PSCAD-Workspace",
+        "PSCAD_MCP_ALLOW_UNSCOPED_PATHS": "false"
+      }
     }
   }
 }

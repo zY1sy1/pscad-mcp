@@ -25,3 +25,11 @@ def test_workspace_safety_is_documented_in_both_languages():
         text = (root / relative).read_text(encoding="utf-8")
         assert "PSCAD_MCP_ALLOW_UNSCOPED_PATHS" in text
         assert "WORKSPACE_NOT_CONFIGURED" in text
+
+
+def test_readme_copilot_configuration_includes_workspace_environment():
+    text = (Path(__file__).parents[1] / "README.md").read_text(encoding="utf-8")
+
+    assert '"env": {' in text
+    assert '"PSCAD_MCP_WORKSPACE": "C:\\\\path\\\\to\\\\PSCAD-Workspace"' in text
+    assert '"PSCAD_MCP_ALLOW_UNSCOPED_PATHS": "false"' in text
