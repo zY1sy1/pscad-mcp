@@ -17,7 +17,7 @@
 - Modify: `tests/test_packaging_metadata.py`
 - Create: `tests/test_install_smoke.py`
 
-- [ ] **Step 1: Run the current focused tests**
+- [x] **Step 1: Run the current focused tests**
 
 Run:
 
@@ -27,7 +27,7 @@ Run:
 
 Expected: the existing tests pass; this records the pre-change baseline before adding new assertions.
 
-- [ ] **Step 2: Add failing path-policy tests**
+- [x] **Step 2: Add failing path-policy tests**
 
 Add tests covering the new contract:
 
@@ -57,11 +57,11 @@ def test_child_resolution_stays_contained_in_all_modes(tmp_path):
 
 The test imports the not-yet-created `WorkspaceNotConfiguredError`, so it must fail because the new API is absent.
 
-- [ ] **Step 3: Add failing version/install assertions**
+- [x] **Step 3: Add failing version/install assertions**
 
 Extend `tests/test_packaging_metadata.py` to compare the TOML version and runtime package version. Add `tests/test_install_smoke.py` with a subprocess-level test that accepts a wheel path through `PSCAD_MCP_SMOKE_WHEEL`, installs it into a temporary target directory, imports `pscad_mcp`, and creates a server with 60 unique tools. Skip only when the wheel variable is not set, so normal unit runs do not require a prebuilt artifact.
 
-- [ ] **Step 4: Run the new focused tests and verify RED**
+- [x] **Step 4: Run the new focused tests and verify RED**
 
 Run:
 
@@ -79,19 +79,19 @@ Expected: failures identify the missing `allow_unscoped_paths` behavior and miss
 - Modify: `tests/test_path_safety.py`
 - Modify: `tests/test_service_contract.py`
 
-- [ ] **Step 1: Add the minimal policy exception and constructor flag**
+- [x] **Step 1: Add the minimal policy exception and constructor flag**
 
 Define `WorkspaceNotConfiguredError(ValueError)` in `path_policy.py`. Extend the constructor to accept `allow_unscoped_paths: bool | None = None`; when omitted, parse `PSCAD_MCP_ALLOW_UNSCOPED_PATHS` using the existing true/false vocabulary and default to `False`.
 
-- [ ] **Step 2: Gate `resolve()` when no workspace is configured**
+- [x] **Step 2: Gate `resolve()` when no workspace is configured**
 
 At the start of `resolve()`, if `workspace_root is None` and `allow_unscoped_paths` is false, raise `WorkspaceNotConfiguredError` with the candidate path and the environment variable name. Keep suffix and existence checks unchanged for configured or explicitly unscoped modes.
 
-- [ ] **Step 3: Preserve `resolve_child()` containment**
+- [x] **Step 3: Preserve `resolve_child()` containment**
 
 Do not bypass the existing base-directory containment check. Add only the minimum validation needed to preserve the child-directory invariant when unscoped mode is enabled.
 
-- [ ] **Step 4: Normalize path-policy failures at the service boundary**
+- [x] **Step 4: Normalize path-policy failures at the service boundary**
 
 Catch `WorkspaceNotConfiguredError` in the existing path-resolution helper(s) in `PscadService` and raise `BackendError` with:
 
@@ -107,7 +107,7 @@ BackendError(
 
 Do not catch unrelated `ValueError`, `FileNotFoundError`, or backend failures.
 
-- [ ] **Step 5: Add service-level error tests and run them**
+- [x] **Step 5: Add service-level error tests and run them**
 
 Add a test invoking a file-path service operation without workspace configuration and assert the serialized error code is `WORKSPACE_NOT_CONFIGURED`. Run:
 
@@ -124,15 +124,15 @@ Expected: PASS.
 - Modify: `tests/test_pscad_config.py` if environment parsing is shared
 - Modify: `pscad_mcp/core/path_policy.py` only if RED tests require a small refactor
 
-- [ ] **Step 1: Add environment parsing tests**
+- [x] **Step 1: Add environment parsing tests**
 
 Cover unset, `true`, `false`, `1`, `0`, and invalid values for `PSCAD_MCP_ALLOW_UNSCOPED_PATHS`. Invalid values must fail during policy construction with an actionable `ValueError`.
 
-- [ ] **Step 2: Add configured workspace regression tests**
+- [x] **Step 2: Add configured workspace regression tests**
 
 Verify that a configured workspace still resolves relative paths, rejects traversal outside the root, rejects wrong suffixes, and rejects symlink/junction escape where supported by the existing test environment.
 
-- [ ] **Step 3: Run all path and safety tests**
+- [x] **Step 3: Run all path and safety tests**
 
 Run:
 
@@ -150,7 +150,7 @@ Expected: PASS with the existing destructive-operation safety contract unchanged
 - Modify: `.github/workflows/windows-ci.yml`
 - Modify: `pyproject.toml` only if build metadata needs a missing test dependency
 
-- [ ] **Step 1: Add a build-and-install helper script**
+- [x] **Step 1: Add a build-and-install helper script**
 
 Create `scripts/verify_package.ps1` that:
 
@@ -163,7 +163,7 @@ Create `scripts/verify_package.ps1` that:
 
 The script must use explicit resolved temporary paths and must not touch the repository `.venv`.
 
-- [ ] **Step 2: Run the helper against the working tree**
+- [x] **Step 2: Run the helper against the working tree**
 
 Run:
 
@@ -173,7 +173,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify_package.ps1
 
 Expected: exit code 0 and output showing the installed version and `60` unique tools.
 
-- [ ] **Step 3: Add the helper to Windows CI**
+- [x] **Step 3: Add the helper to Windows CI**
 
 Add a CI step after dependency installation and before the full test run:
 
@@ -183,7 +183,7 @@ Add a CI step after dependency installation and before the full test run:
   run: .\scripts\verify_package.ps1
 ```
 
-- [ ] **Step 4: Run packaging and protocol tests**
+- [x] **Step 4: Run packaging and protocol tests**
 
 Run:
 
@@ -202,7 +202,7 @@ Expected: PASS.
 - Modify: `CHANGELOG.md`
 - Modify: `tests/test_config_example.py`
 
-- [ ] **Step 1: Add the environment variable to the example config**
+- [x] **Step 1: Add the environment variable to the example config**
 
 Add:
 
@@ -212,15 +212,15 @@ PSCAD_MCP_ALLOW_UNSCOPED_PATHS = 'false'
 
 Keep `PSCAD_MCP_WORKSPACE` as the recommended required production setting and use placeholder paths only.
 
-- [ ] **Step 2: Document fail-closed behavior and recovery**
+- [x] **Step 2: Document fail-closed behavior and recovery**
 
 Explain that file operations return `WORKSPACE_NOT_CONFIGURED` until a workspace is configured, and that the unscoped override is for controlled development only. Document that MCP clients must restart the server connection after changing environment variables.
 
-- [ ] **Step 3: Add documentation assertions**
+- [x] **Step 3: Add documentation assertions**
 
 Extend the config/documentation tests to require both environment variable names, the error code, and the production recommendation in English and Chinese docs.
 
-- [ ] **Step 4: Run documentation and configuration tests**
+- [x] **Step 4: Run documentation and configuration tests**
 
 Run:
 
@@ -235,7 +235,7 @@ Expected: PASS.
 **Files:**
 - No new production files; inspect all changed files and the final diff.
 
-- [ ] **Step 1: Run the complete test suite**
+- [x] **Step 1: Run the complete test suite**
 
 Run:
 
@@ -245,7 +245,7 @@ Run:
 
 Expected: all non-acceptance tests pass; licensed PSCAD acceptance tests remain skipped when their environment variables are absent.
 
-- [ ] **Step 2: Run static and packaging checks**
+- [x] **Step 2: Run static and packaging checks**
 
 Run:
 
@@ -258,7 +258,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify_package.ps1
 
 Expected: all commands exit 0.
 
-- [ ] **Step 3: Verify the exact contract**
+- [x] **Step 3: Verify the exact contract**
 
 Run:
 
@@ -274,7 +274,7 @@ print('60 unique tools')
 
 Expected: `60 unique tools`.
 
-- [ ] **Step 4: Inspect status and commit implementation**
+- [x] **Step 4: Inspect status and commit implementation**
 
 Run:
 

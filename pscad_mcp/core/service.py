@@ -15,7 +15,7 @@ from .executor import (
     ExecutorUnhealthyError,
     robust_executor,
 )
-from .path_policy import PathPolicy
+from .path_policy import PathPolicy, WorkspaceNotConfiguredError
 
 
 BackendFactory = Callable[[], Any | Awaitable[Any]]
@@ -49,6 +49,10 @@ _ERROR_GUIDANCE: dict[str, tuple[bool, str]] = {
     "INVALID_ARGUMENT": (
         False,
         "Correct the argument values and retry the operation.",
+    ),
+    "WORKSPACE_NOT_CONFIGURED": (
+        False,
+        "Set PSCAD_MCP_WORKSPACE, then retry the file operation.",
     ),
     "NOT_CONNECTED": (
         True,
@@ -209,6 +213,34 @@ class PscadService:
             raise RuntimeError("PSCAD is not connected. Call get_local_pscad first.")
         return self._backend
 
+    def _resolve_path(
+        self,
+        candidate: str,
+        *,
+        suffixes: set[str],
+        must_exist: bool = False,
+        operation: str,
+    ) -> Path:
+        try:
+            return self.path_policy.resolve(
+                candidate,
+                suffixes=suffixes,
+                must_exist=must_exist,
+            )
+        except WorkspaceNotConfiguredError as error:
+            raise BackendError(
+                "WORKSPACE_NOT_CONFIGURED",
+                str(error),
+                "service",
+                operation,
+                {
+                    "candidate": candidate,
+                    "candidate_is_relative": not Path(candidate).expanduser().is_absolute(),
+                    "environment": "PSCAD_MCP_WORKSPACE",
+                    "allow_override": "PSCAD_MCP_ALLOW_UNSCOPED_PATHS",
+                },
+            ) from error
+
     async def _select_backend(self) -> Any:
         if self._backend is None:
             candidate = self._backend_factory()
@@ -327,10 +359,11 @@ class PscadService:
             raise ValueError("filenames must contain at least one project.")
         resolved = [
             str(
-                self.path_policy.resolve(
+                self._resolve_path(
                     filename,
                     suffixes={".pscx", ".pslx", ".pswx"},
                     must_exist=True,
+                    operation="load_projects",
                 )
             )
             for filename in filenames
@@ -434,10 +467,11 @@ class PscadService:
                     "parameter_grid",
                 )
             candidate = str(Path(folder) / filename) if folder else filename
-            resolved = self.path_policy.resolve(
+            resolved = self._resolve_path(
                 candidate,
                 suffixes={".csv"},
                 must_exist=action == "load",
+                operation="parameter_grid",
             )
             normalized = ParameterGridRequest(
                 action,
@@ -495,9 +529,15 @@ class PscadService:
         filename: str,
         folder: str | None,
         suffixes: set[str],
+        *,
+        operation: str,
     ) -> Path:
         candidate = str(Path(folder) / filename) if folder else filename
-        return self.path_policy.resolve(candidate, suffixes=suffixes)
+        return self._resolve_path(
+            candidate,
+            suffixes=suffixes,
+            operation=operation,
+        )
 
     async def create_project(
         self,
@@ -508,7 +548,12 @@ class PscadService:
         confirm: bool = False,
     ) -> dict[str, str]:
         suffixes = {".pscx"} if kind == "case" else {".pslx"}
-        destination = self._resolve_destination(filename, folder, suffixes)
+        destination = self._resolve_destination(
+            filename,
+            folder,
+            suffixes,
+            operation=f"create_{kind}",
+        )
         if destination.exists() and not confirm:
             raise ConfirmationRequired(f"create_{kind}")
         info = await self.backend.create_project(
@@ -535,7 +580,12 @@ class PscadService:
         confirm: bool = False,
     ) -> str:
         suffixes = {".pscx", ".pslx"}
-        destination = self._resolve_destination(filename, folder, suffixes)
+        destination = self._resolve_destination(
+            filename,
+            folder,
+            suffixes,
+            operation="save_project_as",
+        )
         if destination.exists() and not confirm:
             raise ConfirmationRequired("save_project_as")
         await self.backend.save_project_as(
@@ -710,10 +760,11 @@ class PscadService:
             raise ValueError("channel must be a non-empty string when provided.")
         if not isinstance(summary_only, bool):
             raise ValueError("summary_only must be a boolean.")
-        resolved = self.path_policy.resolve(
+        resolved = self._resolve_path(
             file_path,
             suffixes={".psout", ".out"},
             must_exist=True,
+            operation="read_output_file",
         )
         return await self.backend.read_output_file(
             str(resolved),

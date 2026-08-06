@@ -54,7 +54,7 @@ PSCAD 4.6.x 还需要安装与许可证配套的官方 Automation Library wheel�
 
 ## 环境变量
 
-启动相关变量有五个，另有一个工作区安全变量：
+启动相关变量有五个，另有两个工作区安全变量：
 
 | 变量 | 示例 | 作用 |
 |---|---|---|
@@ -64,6 +64,7 @@ PSCAD 4.6.x 还需要安装与许可证配套的官方 Automation Library wheel�
 | `PSCAD_MCP_LAUNCH_TIMEOUT` | `30` | 启动超时秒数，必须为正整数 |
 | `PSCAD_MCP_LEGACY_WHEEL` | `D:\...\wheel.whl` | 旧版依赖缺失时显示合法 wheel 位置提示 |
 | `PSCAD_MCP_WORKSPACE` | `D:\PSCAD-Workspace` | 限制工程、保存和结果文件的可访问根目录 |
+| `PSCAD_MCP_ALLOW_UNSCOPED_PATHS` | `false` | 仅受控开发环境允许未配置工作区时访问路径 |
 
 推荐 PSCAD 4.6.2 配置：
 
@@ -73,6 +74,7 @@ $env:PSCAD_MCP_VERSION = "4.6.2"
 $env:PSCAD_MCP_X64 = "true"
 $env:PSCAD_MCP_LAUNCH_TIMEOUT = "30"
 $env:PSCAD_MCP_WORKSPACE = "D:\PSCAD-Workspace"
+$env:PSCAD_MCP_ALLOW_UNSCOPED_PATHS = "false"
 ```
 
 ## Codex 配置
@@ -93,6 +95,7 @@ PSCAD_MCP_VERSION = '4.6.2'
 PSCAD_MCP_X64 = 'true'
 PSCAD_MCP_LAUNCH_TIMEOUT = '30'
 PSCAD_MCP_WORKSPACE = 'C:/path/to/PSCAD-Workspace'
+PSCAD_MCP_ALLOW_UNSCOPED_PATHS = 'false'
 ```
 
 保存后新建 Codex 任务，使 MCP 配置重新加载。本轮代码验收不会自动改写全局 Codex 配置。
@@ -107,6 +110,10 @@ PSCAD_MCP_WORKSPACE = 'C:/path/to/PSCAD-Workspace'
 仿真集。PSCAD 4.6.2 可写任务字段只有 `controlgroup`、`volley` 和
 `affinity`；`namespace` 只读。
 
+- 必须设置 `PSCAD_MCP_WORKSPACE`；未设置时文件工具返回
+  `WORKSPACE_NOT_CONFIGURED`，不会访问未受限路径；
+- 只有在受控开发环境中才设置 `PSCAD_MCP_ALLOW_UNSCOPED_PATHS=true`；
+- 设置或修改工作区变量后必须重启 MCP 连接；
 - 设置 `PSCAD_MCP_WORKSPACE` 后，工作区外的工程和结果路径会被拒绝；
 - 支持的工程/结果后缀采用允许列表，不接受任意文件；
 - 退出 PSCAD、删除元件、覆盖保存等操作需要显式 `confirm=true`；
@@ -156,7 +163,8 @@ git status --short --branch
 - 找不到指定版本：检查 `PSCAD_MCP_VERSION`、`PSCAD_MCP_X64` 与本机实际安装是否一致；
 - MCP 能启动但工具超时：先查看 `get_pscad_status.executor` 中的 `healthy`、`last_operation`、`last_error`、`last_timeout_seconds`、`reset_generation` 和 `previous_worker_retiring`，再调用 `repair_connection`；不要并行向 PSCAD 发多条变更命令；
 - `REPAIR_CLEANUP_FAILED`：MCP 自己启动的 PSCAD 在执行器重建后仍无法正常退出。修复流程不会继续启动第二个实例；请手动关闭该 PSCAD 进程，再调用 `repair_connection`；
-- 路径被拒绝：把工程复制到 `D:\PSCAD-Workspace` 下，或调整工作区根目录后重启 MCP；
+- 路径被拒绝：配置正确的 `PSCAD_MCP_WORKSPACE` 后重启 MCP；如果看到
+  `WORKSPACE_NOT_CONFIGURED`，不要反复重试文件工具；
 - 删除、覆盖或退出被拒绝：确认目标无误后，重新调用并传入 `confirm=true`；
 - Codex 看不到新配置：保存 `config.toml` 后新建任务或重启 Codex。
 

@@ -1,12 +1,32 @@
 import sys
 import subprocess
 import json
+import os
 import platform
 import logging
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(message)s')
 logger = logging.getLogger("mcp-installer")
+
+_TRUE_VALUES = {"1", "true", "yes", "on"}
+
+
+def _workspace_environment():
+    workspace = os.getenv("PSCAD_MCP_WORKSPACE", "").strip()
+    allow_unscoped = (
+        "true"
+        if os.getenv("PSCAD_MCP_ALLOW_UNSCOPED_PATHS", "").strip().lower()
+        in _TRUE_VALUES
+        else "false"
+    )
+    environment = {"PSCAD_MCP_ALLOW_UNSCOPED_PATHS": allow_unscoped}
+    if workspace:
+        environment = {
+            "PSCAD_MCP_WORKSPACE": workspace,
+            **environment,
+        }
+    return environment
 
 def check_pscad():
     """Check if PSCAD is potentially installed (Windows only)."""
@@ -53,6 +73,9 @@ def sync_docs():
 def print_copilot_cli_setup():
     """Generate and print GitHub Copilot CLI configuration guidance."""
     python_exe = sys.executable
+    environment = _workspace_environment()
+    workspace = environment.get("PSCAD_MCP_WORKSPACE")
+    allow_unscoped = environment["PSCAD_MCP_ALLOW_UNSCOPED_PATHS"] == "true"
 
     config = {
         "mcpServers": {
@@ -60,18 +83,44 @@ def print_copilot_cli_setup():
                 "type": "stdio",
                 "command": python_exe,
                 "args": ["-m", "pscad_mcp.main"],
-                "tools": ["*"]
+                "tools": ["*"],
+                "env": environment,
             }
         }
     }
 
     logger.info("\n--- 🤖 GITHUB COPILOT CLI SETUP ---")
+    if workspace:
+        logger.info("Workspace boundary: %s", workspace)
+    elif allow_unscoped:
+        logger.warning(
+            "PSCAD_MCP_ALLOW_UNSCOPED_PATHS=true enables unscoped file access "
+            "for controlled development only."
+        )
+    else:
+        logger.warning(
+            "PSCAD_MCP_WORKSPACE is not set. File operations are unavailable "
+            "until the workspace is configured; they will return "
+            "WORKSPACE_NOT_CONFIGURED. Set PSCAD_MCP_WORKSPACE to the directory "
+            "that the server may access."
+        )
     logger.info("Start GitHub Copilot CLI in this repository and run `/mcp add`.")
     logger.info("Use the following values in the form:")
     logger.info("  Name: pscad")
     logger.info("  Type: stdio")
     logger.info("  Command: %s", python_exe)
     logger.info("  Args: -m pscad_mcp.main")
+    logger.info("  Environment:")
+    if workspace:
+        logger.info("    PSCAD_MCP_WORKSPACE=%s", workspace)
+    else:
+        logger.info(
+            "    PSCAD_MCP_WORKSPACE=<set this before using file operations>"
+        )
+    logger.info(
+        "    PSCAD_MCP_ALLOW_UNSCOPED_PATHS=%s",
+        environment["PSCAD_MCP_ALLOW_UNSCOPED_PATHS"],
+    )
     logger.info("Press Ctrl+S in Copilot CLI to save the server definition.")
     logger.info("\nIf you prefer editing the config file directly, add this JSON to mcp-config.json:")
     logger.info(json.dumps(config, indent=2))
@@ -81,6 +130,8 @@ def print_copilot_cli_setup():
     else:
         logger.info("\nDefault config location: ~/.copilot/mcp-config.json")
 
+    return bool(workspace or allow_unscoped)
+
 def main():
     logger.info("=== PSCAD MCP SERVER INSTALLER ===")
     
@@ -88,9 +139,18 @@ def main():
     install_package()
     sync_docs()
 
-    print_copilot_cli_setup()
+    file_operations_available = print_copilot_cli_setup()
 
-    logger.info("\n🎉 Setup Complete! You can now use PSCAD tools from GitHub Copilot CLI.")
+    if file_operations_available:
+        logger.info(
+            "\n🎉 Setup Complete! You can now use PSCAD tools from GitHub "
+            "Copilot CLI."
+        )
+    else:
+        logger.info(
+            "\nSetup complete for non-file PSCAD tools. Configure "
+            "PSCAD_MCP_WORKSPACE before using file operations."
+        )
 
 if __name__ == "__main__":
     main()

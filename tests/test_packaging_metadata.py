@@ -1,4 +1,5 @@
 from pathlib import Path
+import importlib.metadata
 
 import pscad_mcp
 
@@ -22,3 +23,12 @@ def test_runtime_version_matches_project_metadata():
     document = tomllib.loads(path.read_text(encoding="utf-8"))
 
     assert pscad_mcp.__version__ == document["project"]["version"]
+
+
+def test_installed_metadata_matches_runtime_version_when_available():
+    try:
+        installed_version = importlib.metadata.version("pscad-mcp")
+    except importlib.metadata.PackageNotFoundError:
+        return
+
+    assert installed_version == pscad_mcp.__version__

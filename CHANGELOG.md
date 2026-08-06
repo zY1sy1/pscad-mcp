@@ -4,6 +4,13 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+### Changed
+
+- File operations now fail closed with `WORKSPACE_NOT_CONFIGURED` unless
+  `PSCAD_MCP_WORKSPACE` is configured.
+- Added the explicit development-only `PSCAD_MCP_ALLOW_UNSCOPED_PATHS` escape
+  hatch and a built-package installation smoke test.
+
 ### Planned
 
 - Real PSCAD 5.x end-to-end acceptance after a licensed 5.x environment is available.
