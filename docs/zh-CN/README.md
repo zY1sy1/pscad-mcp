@@ -8,6 +8,8 @@
 
 Legacy PSCAD 4.6.2 后端只支持启动新的 Automation 实例，不能附加到用户已打开的 GUI。`repair_connection` 使用连接时缓存的进程归属：自有实例会先正常退出，非自有连接只会断开，不会终止外部进程。
 
+版本变更记录见 [CHANGELOG.md](../../CHANGELOG.md)，可移植的 stdio 配置模板见 [config.example.toml](../../config.example.toml)。
+
 ## PSCAD 4.6.2 已验证行为与限制
 
 - 新建空算例和库使用随包分发、由 PSCAD 保存的模板；新建和另存会同时改写工程根身份及精确的工程自命名空间引用，并由 PSCAD 回读验证名称和类型。新目标会先尝试原生另存，未产生有效目标时回退；已有目标始终先保存当前操作副本，再通过原子替换生成目标。

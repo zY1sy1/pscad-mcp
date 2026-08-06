@@ -24,6 +24,14 @@ All notable changes to this project are documented here.
 - Simulation-set mutations verify vendor responses and read back postconditions.
 - Task parameter writes use the PSCAD 4.6.2 allowlist and bounded restoration.
 - Package metadata is versioned as 0.2.0.
+- Delivery hardening aligned package metadata, added development dependencies,
+  portable configuration, release notes, and a Windows Python 3.10-3.12 CI matrix.
+- Unlicensed simulation attempts use the structured `NOT_LICENSED` MCP error
+  payload.
+- Runtime reliability includes serialized service mutations, executor reset and
+  retirement diagnostics, and PSOUT skipped-channel warnings.
+- PSCAD 4.6.2 workflow capabilities include structured project messages,
+  bounded PSOUT analysis, and a validated minimal parameter-grid path.
 
 ### Verified
 

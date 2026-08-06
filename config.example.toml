@@ -5,6 +5,7 @@
 type = 'stdio'
 command = 'C:/path/to/pscad-mcp/.venv/Scripts/python.exe'
 args = ['-m', 'pscad_mcp.main']
+tools = ["*"]
 startup_timeout_sec = 120
 tool_timeout_sec = 600
 
