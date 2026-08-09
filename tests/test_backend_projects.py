@@ -1071,6 +1071,58 @@ class TestLegacyRunControl(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(raised.exception.code, "PSCAD_COMMAND_FAILED")
 
 
+class TestModernRunControl(unittest.IsolatedAsyncioTestCase):
+    async def make_backend(self):
+        app = FakeModernApp()
+        backend = ModernBackend(
+            ImmediateExecutor(),
+            version="5.0.2",
+            x64=True,
+            pscad_module=FakeModernPscad(app),
+            psout_module=False,
+        )
+        await backend.attach()
+        return backend, app, app.project_map["case"]
+
+    async def test_stop_prefers_single_project_api(self):
+        backend, app, project = await self.make_backend()
+        single_stop_calls = []
+
+        def stop_single_project(target):
+            single_stop_calls.append(target.name)
+            target.run_status_response = ("stopped", 100.0)
+            return True
+
+        app.stop_single_project = stop_single_project
+
+        await backend.stop_project("case")
+
+        self.assertEqual(single_stop_calls, ["case"])
+        self.assertNotIn(("stop",), project.calls)
+
+    async def test_pause_rejects_multiple_active_projects(self):
+        backend, app, _project = await self.make_backend()
+        app.project_map["other"] = FakeProject("other")
+
+        with self.assertRaises(BackendError) as raised:
+            await backend.pause_project("case")
+
+        self.assertEqual(
+            raised.exception.code, "RUN_CONTROL_SCOPE_CONFLICT"
+        )
+        self.assertNotIn(("pause",), app.project_map["case"].calls)
+
+    async def test_stop_rejects_inactive_target(self):
+        backend, _app, project = await self.make_backend()
+        project.run_status_response = ("idle", None)
+
+        with self.assertRaises(BackendError) as raised:
+            await backend.stop_project("case")
+
+        self.assertEqual(raised.exception.code, "RUN_NOT_ACTIVE")
+        self.assertNotIn(("stop",), project.calls)
+
+
 class TestBackendProjectContracts(unittest.IsolatedAsyncioTestCase):
     async def make_backends(self):
         legacy_app = FakeLegacyApp()

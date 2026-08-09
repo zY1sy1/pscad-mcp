@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Mapping
+import time
 from typing import Any, Sequence
 
 from ..pscad_adapter import PscadAdapter
@@ -19,11 +21,18 @@ from .base import (
     SimulationSetInfo,
     SimulationTaskInfo,
 )
+from .run_control import (
+    STOPPED_RUN_STATUSES,
+    require_active_target,
+    require_single_active_target,
+)
 
 
 class ModernBackend:
     name = "modern"
     _TASK_PARAMETER_ORDER = ("controlgroup", "volley", "affinity")
+    RUN_CONTROL_TIMEOUT = 5.0
+    RUN_CONTROL_POLL_INTERVAL = 0.1
 
     def __init__(
         self,
@@ -184,10 +193,92 @@ class ModernBackend:
         )
 
     async def pause_project(self, project_name: str) -> None:
+        states = await self._case_run_states()
+        target = require_single_active_target(
+            project_name,
+            states,
+            backend=self.name,
+            operation="pause_project",
+        )
+        if target.status.casefold() == "paused":
+            return
         await self.adapter.call(await self._project(project_name), "pause")
+        await self._wait_for_project_state(
+            project_name,
+            frozenset({"paused"}),
+            "pause_project",
+        )
 
     async def stop_project(self, project_name: str) -> None:
-        await self.adapter.call(await self._project(project_name), "stop")
+        states = await self._case_run_states()
+        require_active_target(
+            project_name,
+            states,
+            backend=self.name,
+            operation="stop_project",
+        )
+        project = await self._project(project_name)
+        single_stop = getattr(self._app, "stop_single_project", None)
+        if callable(single_stop):
+            response = await self.adapter.call(
+                self._app,
+                "stop_single_project",
+                project,
+            )
+            if response is False:
+                raise BackendError(
+                    "PSCAD_COMMAND_FAILED",
+                    "PSCAD rejected the single-project stop command.",
+                    self.name,
+                    "stop_project",
+                    {
+                        "project_name": project_name,
+                        "scope": "single-project",
+                    },
+                )
+        else:
+            await self.adapter.call(project, "stop")
+        await self._wait_for_project_state(
+            project_name,
+            STOPPED_RUN_STATUSES,
+            "stop_project",
+        )
+
+    async def _case_run_states(self) -> dict[str, RunState]:
+        states: dict[str, RunState] = {}
+        for project in await self.list_projects():
+            if project.type.casefold() != "case":
+                continue
+            states[project.name] = await self.project_run_state(project.name)
+        return states
+
+    async def _wait_for_project_state(
+        self,
+        project_name: str,
+        expected: frozenset[str],
+        operation: str,
+    ) -> RunState:
+        deadline = time.monotonic() + self.RUN_CONTROL_TIMEOUT
+        last_state: RunState | None = None
+        while True:
+            last_state = await self.project_run_state(project_name)
+            if last_state.status.casefold() in expected:
+                return last_state
+            if time.monotonic() >= deadline:
+                raise BackendError(
+                    "POSTCONDITION_FAILED",
+                    "PSCAD accepted the run-control command, but the requested "
+                    "project state was not observed.",
+                    self.name,
+                    operation,
+                    {
+                        "project_name": project_name,
+                        "expected_states": sorted(expected),
+                        "last_state": last_state.status.casefold(),
+                        "timeout_seconds": self.RUN_CONTROL_TIMEOUT,
+                    },
+                )
+            await asyncio.sleep(self.RUN_CONTROL_POLL_INTERVAL)
 
     async def project_run_state(self, project_name: str) -> RunState:
         status, progress = await self.adapter.call(
