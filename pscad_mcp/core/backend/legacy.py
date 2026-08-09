@@ -14,10 +14,11 @@ from collections.abc import Mapping as MappingABC
 from decimal import Decimal, InvalidOperation
 from importlib.resources import as_file, files
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any, Callable, Mapping, Sequence
 import xml.etree.ElementTree as ET
 
 from ..definition_metadata import DefinitionMetadata, read_definition_metadata
+from ..process_inventory import bounded_process_records
 from ..pscad_adapter import PscadAdapter
 from .base import (
     BackendError,
@@ -63,6 +64,7 @@ class LegacyBackend:
         definition_paths: Mapping[str, str | Path] | None = None,
         legacy_minimize: bool = False,
         legacy_existing_policy: str = "reject",
+        process_probe: Callable[[], Sequence[Mapping[str, Any]]] | None = None,
     ) -> None:
         self.executor = executor
         self.version = version
@@ -70,6 +72,7 @@ class LegacyBackend:
         self.legacy_wheel = legacy_wheel
         self.legacy_minimize = legacy_minimize
         self.legacy_existing_policy = legacy_existing_policy
+        self.process_probe = process_probe or (lambda: ())
         if automation_module is False:
             self.automation = None
         elif automation_module is not None:
@@ -81,6 +84,8 @@ class LegacyBackend:
                 self.automation = None
         self._app: Any = None
         self.owns_process = False
+        self._managed_pid: int | None = None
+        self._managed_executable: str | None = None
         self.definition_paths = {
             str(name): Path(path).resolve()
             for name, path in (definition_paths or {}).items()
@@ -96,6 +101,17 @@ class LegacyBackend:
             psout_module=psout_module,
             environ={},
         )
+
+    @property
+    def session_details(self) -> dict[str, object]:
+        return {
+            "mode": "managed-launch",
+            "managed_pid": self._managed_pid,
+            "managed_executable": self._managed_executable,
+            "legacy_minimize": self.legacy_minimize,
+            "existing_process_policy": self.legacy_existing_policy,
+            "ordinary_gui_attach_supported": False,
+        }
 
     def _info(
         self,
@@ -129,6 +145,24 @@ class LegacyBackend:
                 {"legacy_wheel": self.legacy_wheel},
             )
 
+        existing = bounded_process_records(
+            await self.executor.run_safe(self.process_probe)
+        )
+        if existing and self.legacy_existing_policy == "reject":
+            raise BackendError(
+                "EXTERNAL_PSCAD_PRESENT",
+                "An existing PSCAD process cannot be attached by the legacy "
+                "automation API. Close it or explicitly allow a parallel "
+                "managed instance.",
+                self.name,
+                "attach",
+                {
+                    "processes": existing,
+                    "policy": self.legacy_existing_policy,
+                    "ordinary_gui_attach_supported": False,
+                },
+            )
+
         display_name = (
             f"PSCAD {self.version} ({'x64' if self.x64 else 'x86'})"
         )
@@ -137,12 +171,32 @@ class LegacyBackend:
             return self.automation.launch_pscad(
                 pscad_version=display_name,
                 silence=True,
-                minimize=True,
+                minimize=self.legacy_minimize,
                 certificate=False,
             )
 
         self._app = await self.executor.run_safe(launch)
         self.owns_process = True
+        process = getattr(self._app, "_proc", None)
+        raw_pid = getattr(process, "pid", None)
+        try:
+            self._managed_pid = int(raw_pid) if raw_pid is not None else None
+        except (TypeError, ValueError, OverflowError):
+            self._managed_pid = None
+        after_launch = bounded_process_records(
+            await self.executor.run_safe(self.process_probe)
+        )
+        managed_record = next(
+            (
+                item
+                for item in after_launch
+                if item["pid"] == self._managed_pid
+            ),
+            None,
+        )
+        self._managed_executable = (
+            str(managed_record["exe"]) if managed_record else None
+        )
         return await self.heartbeat()
 
     async def heartbeat(self) -> BackendInfo:
@@ -166,6 +220,8 @@ class LegacyBackend:
     async def disconnect(self) -> None:
         self._app = None
         self.owns_process = False
+        self._managed_pid = None
+        self._managed_executable = None
         self._component_orientations.clear()
         self._running_projects.clear()
         self._run_activity_seen.clear()

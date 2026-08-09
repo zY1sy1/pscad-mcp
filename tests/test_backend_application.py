@@ -1,4 +1,5 @@
 import unittest
+from types import SimpleNamespace
 
 from pscad_mcp.core.backend.base import BackendError
 from pscad_mcp.core.backend.legacy import LegacyBackend
@@ -94,13 +95,14 @@ class TestBackendApplicationLifecycle(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(raised.exception.code, "SHUTDOWN_UNVERIFIED")
         self.assertTrue(backend.owns_process)
 
-    async def test_legacy_launch_uses_exact_display_name_and_safe_flags(self):
+    async def test_legacy_launch_uses_exact_display_name_and_visible_flags(self):
         module = FakeLegacyAutomation()
         backend = LegacyBackend(
             ImmediateExecutor(),
             version="4.6.2",
             x64=False,
             automation_module=module,
+            process_probe=lambda: [],
         )
 
         await backend.attach()
@@ -110,9 +112,72 @@ class TestBackendApplicationLifecycle(unittest.IsolatedAsyncioTestCase):
             {
                 "pscad_version": "PSCAD 4.6.2 (x86)",
                 "silence": True,
-                "minimize": True,
+                "minimize": False,
                 "certificate": False,
             },
+        )
+
+    async def test_legacy_launch_can_be_explicitly_minimized(self):
+        module = FakeLegacyAutomation()
+        backend = LegacyBackend(
+            ImmediateExecutor(),
+            version="4.6.2",
+            x64=True,
+            automation_module=module,
+            legacy_minimize=True,
+            process_probe=lambda: [],
+        )
+
+        await backend.attach()
+
+        self.assertTrue(module.launch_kwargs["minimize"])
+
+    async def test_legacy_rejects_existing_unmanaged_pscad_before_launch(self):
+        module = FakeLegacyAutomation()
+        existing = {
+            "pid": 4321,
+            "name": "Pscad.exe",
+            "exe": r"C:\Program Files (x86)\PSCAD46\bin\win64\Pscad.exe",
+        }
+        backend = LegacyBackend(
+            ImmediateExecutor(),
+            version="4.6.2",
+            x64=True,
+            automation_module=module,
+            process_probe=lambda: [existing],
+        )
+
+        with self.assertRaises(BackendError) as raised:
+            await backend.attach()
+
+        self.assertEqual(raised.exception.code, "EXTERNAL_PSCAD_PRESENT")
+        self.assertEqual(raised.exception.details["processes"], [existing])
+        self.assertIsNone(module.launch_kwargs)
+
+    async def test_explicit_allow_policy_starts_a_separate_owned_instance(self):
+        app = FakeApplication()
+        app._proc = SimpleNamespace(pid=9876)
+        module = FakeLegacyAutomation(app)
+        backend = LegacyBackend(
+            ImmediateExecutor(),
+            version="4.6.2",
+            x64=True,
+            automation_module=module,
+            legacy_existing_policy="allow",
+            process_probe=lambda: [
+                {"pid": 4321, "name": "Pscad.exe", "exe": "Pscad.exe"}
+            ],
+        )
+
+        await backend.attach()
+
+        self.assertTrue(backend.owns_process)
+        self.assertEqual(backend.session_details["managed_pid"], 9876)
+        self.assertEqual(
+            backend.session_details["existing_process_policy"], "allow"
+        )
+        self.assertFalse(
+            backend.session_details["ordinary_gui_attach_supported"]
         )
 
     async def test_modern_rejects_legacy_version_before_launch(self):

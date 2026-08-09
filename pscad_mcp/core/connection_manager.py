@@ -9,6 +9,7 @@ from .backend.modern import ModernBackend
 from .backend.base import BackendError
 from .backend.selector import select_backend
 from .pscad_config import PscadLaunchConfig
+from .process_inventory import list_pscad_processes
 from .service import PscadService
 
 logger = logging.getLogger("pscad-mcp.connection")
@@ -58,6 +59,7 @@ async def _default_backend_factory() -> Any:
             legacy_wheel=config.legacy_wheel,
             legacy_minimize=config.legacy_minimize,
             legacy_existing_policy=config.legacy_existing_policy,
+            process_probe=list_pscad_processes,
         )
     return ModernBackend(
         robust_executor,
