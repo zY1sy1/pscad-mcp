@@ -55,6 +55,7 @@ class FakeProject:
         self.native_save_as_payload = None
         self.run_command = FakeCommand(self, "run")
         self.run_status_response = ("running", 50.0)
+        self.run_status_responses = []
         self.run_status_args = ()
         self.run_status_kwargs = {}
         self.run_status_callback_enabled = True
@@ -109,6 +110,8 @@ class FakeProject:
     def _send_run_status(self, callback):
 
         def send():
+            if self.run_status_responses:
+                self.run_status_response = self.run_status_responses.pop(0)
             callback(
                 self.run_status_response,
                 *self.run_status_args,
@@ -1044,17 +1047,80 @@ class TestLegacyRunControl(unittest.IsolatedAsyncioTestCase):
         stopped = await backend.project_run_state("case")
         self.assertIn(stopped.status, {"stopped", "idle", "completed"})
 
-    async def test_pause_reports_failed_postcondition(self):
+    async def test_pause_tracks_state_when_legacy_status_stays_running(self):
         backend, app, project = await self.make_backend()
         project.run_status_response = ("running", 25)
         app.command_effects["ID_RIBBON_HOME_RUN_PAUSE"] = lambda: None
 
         with patch.object(LegacyBackend, "RUN_CONTROL_TIMEOUT", 0):
-            with self.assertRaises(BackendError) as raised:
-                await backend.pause_project("case")
+            await backend.pause_project("case")
 
-        self.assertEqual(raised.exception.code, "POSTCONDITION_FAILED")
-        self.assertEqual(raised.exception.details["last_state"], "running")
+        state = await backend.project_run_state("case")
+        self.assertEqual(state.status, "paused")
+        self.assertEqual(
+            backend.session_details["paused_state_source"],
+            "command-tracked",
+        )
+        self.assertEqual(
+            backend.session_details["tracked_paused_projects"],
+            ["case"],
+        )
+
+    async def test_run_and_terminal_status_clear_tracked_pause(self):
+        backend, _app, project = await self.make_backend()
+        project.run_status_response = ("running", 25)
+        backend._paused_projects.add("case")
+
+        await backend.run_project("case")
+
+        self.assertEqual(
+            (await backend.project_run_state("case")).status,
+            "running",
+        )
+        self.assertEqual(backend._paused_projects, set())
+
+        backend._paused_projects.add("case")
+        project.run_status_response = ("idle", None)
+        self.assertEqual(
+            (await backend.project_run_state("case")).status,
+            "idle",
+        )
+        self.assertEqual(backend._paused_projects, set())
+
+    async def test_pause_waits_for_running_before_sending_global_command(self):
+        backend, app, project = await self.make_backend()
+        project.run_status_responses = [
+            ("starting", None),
+            ("running", 25),
+        ]
+        status_at_command = []
+
+        def pause_effect():
+            status_at_command.append(project.run_status_response[0])
+            app._set_all_run_states("paused")
+
+        app.command_effects["ID_RIBBON_HOME_RUN_PAUSE"] = pause_effect
+
+        await backend.pause_project("case")
+
+        self.assertEqual(status_at_command, ["running"])
+        self.assertEqual(
+            (await backend.project_run_state("case")).status,
+            "paused",
+        )
+
+    async def test_pause_does_not_send_when_run_finishes_before_running(self):
+        backend, app, project = await self.make_backend()
+        project.run_status_responses = [
+            ("starting", None),
+            ("idle", None),
+        ]
+
+        with self.assertRaises(BackendError) as raised:
+            await backend.pause_project("case")
+
+        self.assertEqual(raised.exception.code, "RUN_NOT_ACTIVE")
+        self.assertEqual(app.command_calls, [])
 
     async def test_pause_and_stop_reject_failed_command_responses(self):
         for operation, command_id in (

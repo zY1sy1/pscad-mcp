@@ -50,6 +50,7 @@ class LegacyBackend:
     RUN_START_GRACE = 5.0
     RUN_CONTROL_TIMEOUT = 5.0
     RUN_CONTROL_POLL_INTERVAL = 0.1
+    PAUSE_READY_TIMEOUT = 120.0
     SETTING_DETAIL_TEXT_LIMIT = 64
     SETTING_DETAIL_MAX_DEPTH = 2
     SETTING_DETAIL_MAX_ENTRIES = 2
@@ -98,6 +99,7 @@ class LegacyBackend:
         }
         self._component_orientations: dict[tuple[str, int], int] = {}
         self._running_projects: set[str] = set()
+        self._paused_projects: set[str] = set()
         self._run_activity_seen: set[str] = set()
         self._run_submitted_at: dict[str, float] = {}
         self._known_managed_layers: set[tuple[str, str]] = set()
@@ -117,6 +119,8 @@ class LegacyBackend:
             "legacy_minimize": self.legacy_minimize,
             "existing_process_policy": self.legacy_existing_policy,
             "ordinary_gui_attach_supported": False,
+            "paused_state_source": "command-tracked",
+            "tracked_paused_projects": sorted(self._paused_projects),
         }
 
     def _info(
@@ -230,6 +234,7 @@ class LegacyBackend:
         self._managed_executable = None
         self._component_orientations.clear()
         self._running_projects.clear()
+        self._paused_projects.clear()
         self._run_activity_seen.clear()
         self._run_submitted_at.clear()
         self._known_managed_layers.clear()
@@ -582,23 +587,19 @@ class LegacyBackend:
             command.execute(False)
 
         await self.executor.run_safe(start)
+        self._paused_projects.discard(project_name)
         self._running_projects.add(project_name)
         self._run_activity_seen.discard(project_name)
         self._run_submitted_at[project_name] = time.monotonic()
 
     async def pause_project(self, project_name: str) -> None:
-        states = await self._case_run_states()
-        target = require_single_active_target(
-            project_name,
-            states,
-            backend=self.name,
-            operation="pause_project",
-        )
+        target = await self._wait_for_pauseable_target(project_name)
         if target.status.casefold() == "paused":
             return
         await self._run_control_command(
             "ID_RIBBON_HOME_RUN_PAUSE", "pause_project"
         )
+        self._paused_projects.add(project_name)
         await self._wait_for_project_state(
             project_name,
             frozenset({"paused"}),
@@ -616,6 +617,7 @@ class LegacyBackend:
         await self._run_control_command(
             "ID_RIBBON_HOME_RUN_STOP", "stop_project"
         )
+        self._paused_projects.discard(project_name)
         await self._wait_for_project_state(
             project_name,
             STOPPED_RUN_STATUSES,
@@ -633,6 +635,36 @@ class LegacyBackend:
                 continue
             states[project.name] = await self.project_run_state(project.name)
         return states
+
+    async def _wait_for_pauseable_target(
+        self, project_name: str
+    ) -> RunState:
+        deadline = time.monotonic() + self.PAUSE_READY_TIMEOUT
+        while True:
+            states = await self._case_run_states()
+            target = require_single_active_target(
+                project_name,
+                states,
+                backend=self.name,
+                operation="pause_project",
+            )
+            status = target.status.casefold()
+            if status in {"running", "paused"}:
+                return target
+            if time.monotonic() >= deadline:
+                raise BackendError(
+                    "POSTCONDITION_FAILED",
+                    "The project remained active but did not become pauseable.",
+                    self.name,
+                    "pause_project",
+                    {
+                        "project_name": project_name,
+                        "expected_states": ["paused", "running"],
+                        "last_state": status,
+                        "timeout_seconds": self.PAUSE_READY_TIMEOUT,
+                    },
+                )
+            await asyncio.sleep(self.RUN_CONTROL_POLL_INTERVAL)
 
     async def _wait_for_project_state(
         self,
@@ -951,16 +983,25 @@ class LegacyBackend:
             return RunState("starting", state.progress)
         if state.status in {"building", "running", "paused"}:
             self._run_activity_seen.add(project_name)
-        if state.status.casefold() in {
+        terminal = state.status.casefold() in {
             "complete",
             "completed",
             "stopped",
             "failed",
             "idle",
-        }:
+        }
+        if terminal:
             self._running_projects.discard(project_name)
+            self._paused_projects.discard(project_name)
             self._run_activity_seen.discard(project_name)
             self._run_submitted_at.pop(project_name, None)
+        elif state.status.casefold() == "paused":
+            self._paused_projects.add(project_name)
+        elif (
+            project_name in self._paused_projects
+            and state.status.casefold() == "running"
+        ):
+            return RunState("paused", state.progress)
         return state
 
     async def project_definitions(self, project_name: str) -> list[str]:

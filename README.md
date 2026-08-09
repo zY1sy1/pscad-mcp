@@ -41,8 +41,10 @@ external process.
   vendor commands, so the backend sends them only when the requested case is
   the sole active case. An inactive target returns `RUN_NOT_ACTIVE`; another
   active case returns `RUN_CONTROL_SCOPE_CONFLICT` without sending the command.
-  A successful command is reported only after the requested paused or terminal
-  state is read back.
+  Stop is reported only after a terminal state is read back. The legacy status
+  API continues to report `running` while the GUI is visibly paused, so a
+  successfully dispatched Pause is exposed as a command-tracked `paused` state;
+  resume, stop, terminal status, and disconnect clear that state.
 - The shipped PSCAD 4.6.2 Automation Library rejects `create-layer` and
   `add-to-layer`, including membership in an existing valid layer. Component
   disable therefore returns `PSCAD_COMMAND_FAILED` instead of claiming a state
@@ -99,7 +101,8 @@ as external.
 
 For a managed legacy session, `get_pscad_status.session` includes the launch
 mode, managed PID when the vendor process handle exposes it, existing-process
-policy, and `ordinary_gui_attach_supported=false`.
+policy, `ordinary_gui_attach_supported=false`, the pause-state source, and any
+currently tracked paused project.
 
 If an owned PSCAD 4.6.x instance cannot be closed after the executor is reset,
 repair returns `REPAIR_CLEANUP_FAILED` and does not launch a second instance.

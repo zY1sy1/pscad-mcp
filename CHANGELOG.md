@@ -10,8 +10,10 @@ All notable changes to this project are documented here.
   default, rejects pre-existing external PSCAD processes before launch, and
   reports bounded owned-session diagnostics.
 - Application-wide pause/stop commands now require the requested case to be
-  the sole active case and verify the resulting state; modern stop prefers the
-  vendor `stop_single_project` entry point.
+  the sole active case. Legacy pause is command-tracked because the 4.6.2 GUI
+  displays `Paused.` while its status API still reports `running`; stop retains
+  terminal-state verification. Modern stop prefers the vendor
+  `stop_single_project` entry point.
 - Component enable/disable behavior is unchanged; the tested PSCAD 4.6.2 layer
   limitation remains explicit.
 - File operations now fail closed with `WORKSPACE_NOT_CONFIGURED` unless

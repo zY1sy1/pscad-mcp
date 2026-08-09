@@ -28,6 +28,10 @@ mhrc.automation 1.2.4 的 legacy 后端在启动时创建回连 socket，并以 
 - legacy 保留 scope=single-active-project 的诊断信息；现代后端优先使用厂商提供的单工程停止入口（若当前版本存在），否则沿用项目代理并报告实际作用域。
 - 不改变已有 60 个 MCP 工具名称和默认输入形状；新增信息只进入结构化错误详情和状态诊断。
 
+### 2.1 实机修订（2026-08-10）
+
+PSCAD 4.6.2 GUI 在官方 Pause 命令后明确显示 `Paused.`，但 legacy `get-run-status` 持续返回 `running`。因此暂停不能伪称由厂商状态接口回读验证：后端只在目标为唯一活动工程、目标已进入 `running` 且官方 Pause 命令成功分派后，以 `command-tracked` 来源报告 `paused`；恢复、停止、终止或断开立即清除该状态。停止仍要求厂商状态回读到终止状态。
+
 ### 3. Codex 注册与冒烟
 
 - 在 %USERPROFILE%\\.codex\\config.toml 增加 mcp_servers.pscad，指向仓库 .venv\\Scripts\\python.exe -m pscad_mcp.main，固定 legacy 4.6.2 x64、工作区和安全路径策略。
