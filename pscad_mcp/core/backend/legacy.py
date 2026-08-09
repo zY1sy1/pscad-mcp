@@ -48,6 +48,7 @@ class LegacyBackend:
     _disabled_layer = "PSCAD_MCP_DISABLED"
     RUN_STATUS_TIMEOUT = 5.0
     RUN_START_GRACE = 5.0
+    RUN_TRANSITION_GRACE = 2.0
     RUN_CONTROL_TIMEOUT = 5.0
     RUN_CONTROL_POLL_INTERVAL = 0.1
     PAUSE_READY_TIMEOUT = 120.0
@@ -102,6 +103,8 @@ class LegacyBackend:
         self._paused_projects: set[str] = set()
         self._run_activity_seen: set[str] = set()
         self._run_submitted_at: dict[str, float] = {}
+        self._run_last_active_at: dict[str, float] = {}
+        self._run_last_active_status: dict[str, str] = {}
         self._known_managed_layers: set[tuple[str, str]] = set()
         self.result_adapter = PscadAdapter(
             executor,
@@ -237,6 +240,8 @@ class LegacyBackend:
         self._paused_projects.clear()
         self._run_activity_seen.clear()
         self._run_submitted_at.clear()
+        self._run_last_active_at.clear()
+        self._run_last_active_status.clear()
         self._known_managed_layers.clear()
 
     async def quit(self) -> None:
@@ -591,6 +596,8 @@ class LegacyBackend:
         self._running_projects.add(project_name)
         self._run_activity_seen.discard(project_name)
         self._run_submitted_at[project_name] = time.monotonic()
+        self._run_last_active_at.pop(project_name, None)
+        self._run_last_active_status.pop(project_name, None)
 
     async def pause_project(self, project_name: str) -> None:
         target = await self._wait_for_pauseable_target(project_name)
@@ -972,6 +979,7 @@ class LegacyBackend:
         state = self._parse_run_state(
             response, callback_args, callback_kwargs
         )
+        observed_at = time.monotonic()
         if (
             state.status == "idle"
             and project_name in self._running_projects
@@ -981,8 +989,23 @@ class LegacyBackend:
             < self.RUN_START_GRACE
         ):
             return RunState("starting", state.progress)
+        if (
+            state.status == "idle"
+            and project_name in self._running_projects
+            and project_name in self._run_activity_seen
+            and self._run_last_active_status.get(project_name) == "building"
+            and observed_at
+            - self._run_last_active_at.get(project_name, 0.0)
+            < self.RUN_TRANSITION_GRACE
+        ):
+            return RunState(
+                self._run_last_active_status.get(project_name, "starting"),
+                state.progress,
+            )
         if state.status in {"building", "running", "paused"}:
             self._run_activity_seen.add(project_name)
+            self._run_last_active_at[project_name] = observed_at
+            self._run_last_active_status[project_name] = state.status
         terminal = state.status.casefold() in {
             "complete",
             "completed",
@@ -995,6 +1018,8 @@ class LegacyBackend:
             self._paused_projects.discard(project_name)
             self._run_activity_seen.discard(project_name)
             self._run_submitted_at.pop(project_name, None)
+            self._run_last_active_at.pop(project_name, None)
+            self._run_last_active_status.pop(project_name, None)
         elif state.status.casefold() == "paused":
             self._paused_projects.add(project_name)
         elif (

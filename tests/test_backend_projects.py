@@ -1109,6 +1109,31 @@ class TestLegacyRunControl(unittest.IsolatedAsyncioTestCase):
             "paused",
         )
 
+    async def test_pause_tolerates_build_to_run_idle_transition(self):
+        backend, app, project = await self.make_backend()
+        await backend.run_project("case")
+        project.run_status_responses = [
+            ("building", None),
+            ("idle", None),
+            ("running", 25),
+        ]
+        status_at_command = []
+
+        def pause_effect():
+            status_at_command.append(project.run_status_response[0])
+            app._set_all_run_states("paused")
+
+        app.command_effects["ID_RIBBON_HOME_RUN_PAUSE"] = pause_effect
+
+        with patch.object(LegacyBackend, "RUN_CONTROL_POLL_INTERVAL", 0):
+            await backend.pause_project("case")
+
+        self.assertEqual(status_at_command, ["running"])
+        self.assertEqual(
+            (await backend.project_run_state("case")).status,
+            "paused",
+        )
+
     async def test_pause_does_not_send_when_run_finishes_before_running(self):
         backend, app, project = await self.make_backend()
         project.run_status_responses = [
