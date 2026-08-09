@@ -61,11 +61,15 @@ class LegacyBackend:
         legacy_wheel: str | None = None,
         psout_module: Any = None,
         definition_paths: Mapping[str, str | Path] | None = None,
+        legacy_minimize: bool = False,
+        legacy_existing_policy: str = "reject",
     ) -> None:
         self.executor = executor
         self.version = version
         self.x64 = x64
         self.legacy_wheel = legacy_wheel
+        self.legacy_minimize = legacy_minimize
+        self.legacy_existing_policy = legacy_existing_policy
         if automation_module is False:
             self.automation = None
         elif automation_module is not None:

@@ -4,6 +4,36 @@ from pscad_mcp.core.pscad_config import PscadLaunchConfig, select_installation
 
 
 class TestPscadLaunchConfig(unittest.TestCase):
+    def test_legacy_session_defaults_are_visible_and_reject_external_processes(self):
+        config = PscadLaunchConfig.from_environ({})
+
+        self.assertFalse(config.legacy_minimize)
+        self.assertEqual(config.legacy_existing_policy, "reject")
+
+    def test_legacy_session_policy_accepts_explicit_values(self):
+        config = PscadLaunchConfig.from_environ(
+            {
+                "PSCAD_MCP_LEGACY_MINIMIZE": "true",
+                "PSCAD_MCP_LEGACY_EXISTING_POLICY": "allow",
+            }
+        )
+
+        self.assertTrue(config.legacy_minimize)
+        self.assertEqual(config.legacy_existing_policy, "allow")
+
+    def test_legacy_session_policy_rejects_invalid_values(self):
+        with self.assertRaisesRegex(ValueError, "PSCAD_MCP_LEGACY_MINIMIZE"):
+            PscadLaunchConfig.from_environ(
+                {"PSCAD_MCP_LEGACY_MINIMIZE": "maybe"}
+            )
+
+        with self.assertRaisesRegex(
+            ValueError, "PSCAD_MCP_LEGACY_EXISTING_POLICY"
+        ):
+            PscadLaunchConfig.from_environ(
+                {"PSCAD_MCP_LEGACY_EXISTING_POLICY": "attach"}
+            )
+
     def test_prefers_highest_version_then_x64(self):
         config = PscadLaunchConfig.from_environ({})
 

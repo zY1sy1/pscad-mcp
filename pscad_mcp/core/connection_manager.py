@@ -8,6 +8,7 @@ from .backend.legacy import LegacyBackend
 from .backend.modern import ModernBackend
 from .backend.base import BackendError
 from .backend.selector import select_backend
+from .pscad_config import PscadLaunchConfig
 from .service import PscadService
 
 logger = logging.getLogger("pscad-mcp.connection")
@@ -21,6 +22,7 @@ def _optional_import(module_name: str) -> Any:
 
 
 async def _default_backend_factory() -> Any:
+    config = PscadLaunchConfig.from_environ(os.environ)
     legacy_module = _optional_import("mhrc.automation")
     modern_module = _optional_import("mhi.pscad")
 
@@ -53,14 +55,16 @@ async def _default_backend_factory() -> Any:
             version=choice.version,
             x64=choice.x64,
             automation_module=legacy_module if legacy_module is not None else False,
-            legacy_wheel=os.getenv("PSCAD_MCP_LEGACY_WHEEL"),
+            legacy_wheel=config.legacy_wheel,
+            legacy_minimize=config.legacy_minimize,
+            legacy_existing_policy=config.legacy_existing_policy,
         )
     return ModernBackend(
         robust_executor,
         version=choice.version,
         x64=choice.x64,
         pscad_module=modern_module,
-        timeout=int(os.getenv("PSCAD_MCP_LAUNCH_TIMEOUT", "30")),
+        timeout=config.timeout,
     )
 
 class PSCADConnectionManager:

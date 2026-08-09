@@ -13,6 +13,24 @@ class PscadLaunchConfig:
     timeout: int = 30
     backend: Literal["auto", "legacy", "modern"] = "auto"
     legacy_wheel: Optional[str] = None
+    legacy_minimize: bool = False
+    legacy_existing_policy: Literal["reject", "allow"] = "reject"
+
+    @staticmethod
+    def _boolean(
+        values: Mapping[str, str],
+        name: str,
+        default: bool,
+    ) -> bool:
+        raw = values.get(name)
+        if raw is None:
+            return default
+        normalized = raw.strip().lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off"}:
+            return False
+        raise ValueError(f"{name} must be true or false.")
 
     @classmethod
     def from_environ(
@@ -26,15 +44,10 @@ class PscadLaunchConfig:
                 "PSCAD_MCP_BACKEND must be auto, legacy, or modern."
             )
         version = values.get("PSCAD_MCP_VERSION", "").strip() or None
-        raw_x64 = values.get("PSCAD_MCP_X64")
-        if raw_x64 is None:
+        if "PSCAD_MCP_X64" not in values:
             x64 = None
-        elif raw_x64.strip().lower() in {"1", "true", "yes", "on"}:
-            x64 = True
-        elif raw_x64.strip().lower() in {"0", "false", "no", "off"}:
-            x64 = False
         else:
-            raise ValueError("PSCAD_MCP_X64 must be true or false.")
+            x64 = cls._boolean(values, "PSCAD_MCP_X64", False)
 
         raw_timeout = values.get("PSCAD_MCP_LAUNCH_TIMEOUT", "30")
         try:
@@ -50,12 +63,24 @@ class PscadLaunchConfig:
         legacy_wheel = (
             values.get("PSCAD_MCP_LEGACY_WHEEL", "").strip() or None
         )
+        legacy_minimize = cls._boolean(
+            values, "PSCAD_MCP_LEGACY_MINIMIZE", False
+        )
+        legacy_existing_policy = values.get(
+            "PSCAD_MCP_LEGACY_EXISTING_POLICY", "reject"
+        ).strip().lower()
+        if legacy_existing_policy not in {"reject", "allow"}:
+            raise ValueError(
+                "PSCAD_MCP_LEGACY_EXISTING_POLICY must be reject or allow."
+            )
         return cls(
             version=version,
             x64=x64,
             timeout=timeout,
             backend=backend,
             legacy_wheel=legacy_wheel,
+            legacy_minimize=legacy_minimize,
+            legacy_existing_policy=legacy_existing_policy,
         )
 
 
