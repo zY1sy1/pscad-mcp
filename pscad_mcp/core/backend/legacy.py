@@ -33,6 +33,10 @@ from .base import (
     SimulationTaskInfo,
 )
 from . import legacy_support
+from .run_control import (
+    STOPPED_RUN_STATUSES,
+    require_single_active_target,
+)
 
 
 _RUN_STATE_MISSING = object()
@@ -44,6 +48,8 @@ class LegacyBackend:
     _disabled_layer = "PSCAD_MCP_DISABLED"
     RUN_STATUS_TIMEOUT = 5.0
     RUN_START_GRACE = 5.0
+    RUN_CONTROL_TIMEOUT = 5.0
+    RUN_CONTROL_POLL_INTERVAL = 0.1
     SETTING_DETAIL_TEXT_LIMIT = 64
     SETTING_DETAIL_MAX_DEPTH = 2
     SETTING_DETAIL_MAX_ENTRIES = 2
@@ -581,17 +587,80 @@ class LegacyBackend:
         self._run_submitted_at[project_name] = time.monotonic()
 
     async def pause_project(self, project_name: str) -> None:
+        states = await self._case_run_states()
+        target = require_single_active_target(
+            project_name,
+            states,
+            backend=self.name,
+            operation="pause_project",
+        )
+        if target.status.casefold() == "paused":
+            return
         await self._run_control_command(
             "ID_RIBBON_HOME_RUN_PAUSE", "pause_project"
         )
+        await self._wait_for_project_state(
+            project_name,
+            frozenset({"paused"}),
+            "pause_project",
+        )
 
     async def stop_project(self, project_name: str) -> None:
+        states = await self._case_run_states()
+        require_single_active_target(
+            project_name,
+            states,
+            backend=self.name,
+            operation="stop_project",
+        )
         await self._run_control_command(
             "ID_RIBBON_HOME_RUN_STOP", "stop_project"
         )
-        self._running_projects.clear()
-        self._run_activity_seen.clear()
-        self._run_submitted_at.clear()
+        await self._wait_for_project_state(
+            project_name,
+            STOPPED_RUN_STATUSES,
+            "stop_project",
+        )
+        self._running_projects.discard(project_name)
+        self._run_activity_seen.discard(project_name)
+        self._run_submitted_at.pop(project_name, None)
+
+    async def _case_run_states(self) -> dict[str, RunState]:
+        projects = await self.list_projects()
+        states: dict[str, RunState] = {}
+        for project in projects:
+            if project.type.casefold() != "case":
+                continue
+            states[project.name] = await self.project_run_state(project.name)
+        return states
+
+    async def _wait_for_project_state(
+        self,
+        project_name: str,
+        expected: frozenset[str],
+        operation: str,
+    ) -> RunState:
+        deadline = time.monotonic() + self.RUN_CONTROL_TIMEOUT
+        last_state: RunState | None = None
+        while True:
+            last_state = await self.project_run_state(project_name)
+            if last_state.status.casefold() in expected:
+                return last_state
+            if time.monotonic() >= deadline:
+                raise BackendError(
+                    "POSTCONDITION_FAILED",
+                    "PSCAD accepted the run-control command, but the requested "
+                    "project state was not observed.",
+                    self.name,
+                    operation,
+                    {
+                        "project_name": project_name,
+                        "expected_states": sorted(expected),
+                        "last_state": last_state.status.casefold(),
+                        "timeout_seconds": self.RUN_CONTROL_TIMEOUT,
+                    },
+                )
+            await asyncio.sleep(self.RUN_CONTROL_POLL_INTERVAL)
 
     async def _run_control_command(
         self, command_id: str, operation: str
@@ -602,7 +671,7 @@ class LegacyBackend:
         legacy_support.require_success(
             response,
             operation,
-            {"scope": "all-running-projects"},
+            {"scope": "single-active-project"},
         )
 
     @staticmethod

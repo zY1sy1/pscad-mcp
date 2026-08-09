@@ -82,9 +82,14 @@ class FakeProject:
         return self.native_save_as_response
     def build(self): self.calls.append(("build",))
     def run(self): self.calls.append(("run",))
-    def pause(self): self.calls.append(("pause",))
-    def stop(self): self.calls.append(("stop",))
-    def run_status(self): return ("running", 50.0)
+    def pause(self):
+        self.calls.append(("pause",))
+        self.run_status_response = ("paused", 50.0)
+    def stop(self):
+        self.calls.append(("stop",))
+        self.run_status_response = ("stopped", 100.0)
+    def run_status(self):
+        return self.run_status_response
     def command(self, name):
         self.calls.append(("command", name))
         if name != "run":
@@ -151,6 +156,13 @@ class FakeCommand:
         calls = getattr(self.owner, "calls", None)
         if calls is not None:
             calls.append(("execute", self.name, wait_for_response))
+        succeeded = not (
+            isinstance(self.response, ET.Element)
+            and self.response.get("success", "true").casefold() == "false"
+        )
+        effect = getattr(self.owner, "command_effects", {}).get(self.name)
+        if succeeded and callable(effect):
+            effect()
         return self.response if wait_for_response else None
 
 
@@ -316,6 +328,20 @@ class FakeLegacyApp:
                 "response", {"success": "true"}
             ),
         }
+        self.command_effects = {
+            "ID_RIBBON_HOME_RUN_PAUSE": lambda: self._set_all_run_states(
+                "paused"
+            ),
+            "ID_RIBBON_HOME_RUN_STOP": lambda: self._set_all_run_states(
+                "stopped"
+            ),
+        }
+
+    def _set_all_run_states(self, status):
+        progress = 100.0 if status == "stopped" else 50.0
+        for project in self.project_map.values():
+            if project.type.casefold() == "case":
+                project.run_status_response = (status, progress)
 
     def is_alive(self): return True
     def licensed(self): return True
@@ -974,6 +1000,62 @@ class TestLegacyRunControl(unittest.IsolatedAsyncioTestCase):
             ["ID_RIBBON_HOME_RUN_PAUSE", "ID_RIBBON_HOME_RUN_STOP"],
         )
 
+    async def test_pause_rejects_two_active_projects_without_sending_command(self):
+        backend, app, project = await self.make_backend()
+        other = FakeProject("other")
+        app.project_map["other"] = other
+        project.run_status_response = ("running", 20)
+        other.run_status_response = ("building", None)
+
+        with self.assertRaises(BackendError) as raised:
+            await backend.pause_project("case")
+
+        self.assertEqual(
+            raised.exception.code, "RUN_CONTROL_SCOPE_CONFLICT"
+        )
+        self.assertEqual(
+            raised.exception.details["active_projects"],
+            {"case": "running", "other": "building"},
+        )
+        self.assertEqual(app.command_calls, [])
+
+    async def test_stop_rejects_inactive_target_without_sending_command(self):
+        backend, app, project = await self.make_backend()
+        project.run_status_response = ("idle", None)
+
+        with self.assertRaises(BackendError) as raised:
+            await backend.stop_project("case")
+
+        self.assertEqual(raised.exception.code, "RUN_NOT_ACTIVE")
+        self.assertEqual(raised.exception.details["state"], "idle")
+        self.assertEqual(app.command_calls, [])
+
+    async def test_pause_and_stop_verify_postconditions(self):
+        backend, _app, project = await self.make_backend()
+        project.run_status_response = ("running", 25)
+
+        await backend.pause_project("case")
+
+        paused = await backend.project_run_state("case")
+        self.assertEqual(paused.status, "paused")
+
+        await backend.stop_project("case")
+
+        stopped = await backend.project_run_state("case")
+        self.assertIn(stopped.status, {"stopped", "idle", "completed"})
+
+    async def test_pause_reports_failed_postcondition(self):
+        backend, app, project = await self.make_backend()
+        project.run_status_response = ("running", 25)
+        app.command_effects["ID_RIBBON_HOME_RUN_PAUSE"] = lambda: None
+
+        with patch.object(LegacyBackend, "RUN_CONTROL_TIMEOUT", 0):
+            with self.assertRaises(BackendError) as raised:
+                await backend.pause_project("case")
+
+        self.assertEqual(raised.exception.code, "POSTCONDITION_FAILED")
+        self.assertEqual(raised.exception.details["last_state"], "running")
+
     async def test_pause_and_stop_reject_failed_command_responses(self):
         for operation, command_id in (
             ("pause_project", "ID_RIBBON_HOME_RUN_PAUSE"),
@@ -1030,8 +1112,8 @@ class TestBackendProjectContracts(unittest.IsolatedAsyncioTestCase):
 
                     self.assertEqual(projects[0].name, "case")
                     self.assertEqual(projects[0].type, "Case")
-                    self.assertEqual(state.status, "running")
-                    self.assertEqual(state.progress, 50.0)
+                    self.assertEqual(state.status, "stopped")
+                    self.assertEqual(state.progress, 100.0)
                     expected_loads = [str(source)]
                     if backend.name == "legacy":
                         expected_loads.append(str(Path(folder) / "copy.pscx"))
