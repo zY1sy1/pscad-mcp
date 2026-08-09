@@ -41,6 +41,11 @@ _ERROR_GUIDANCE: dict[str, tuple[bool, str]] = {
         False,
         "Install the required PSCAD 4.6 Automation Library dependency.",
     ),
+    "EXTERNAL_PSCAD_PRESENT": (
+        False,
+        "Close the existing PSCAD GUI, then let MCP launch a managed instance; "
+        "or explicitly set PSCAD_MCP_LEGACY_EXISTING_POLICY=allow.",
+    ),
     "EXECUTOR_UNHEALTHY": (
         True,
         "Call repair_connection before retrying the operation.",
@@ -81,6 +86,15 @@ _ERROR_GUIDANCE: dict[str, tuple[bool, str]] = {
     "REPAIR_CLEANUP_FAILED": (
         False,
         "Close the owned PSCAD process manually, then call repair_connection.",
+    ),
+    "RUN_CONTROL_SCOPE_CONFLICT": (
+        False,
+        "Stop or finish the other active PSCAD projects, then retry with only "
+        "the requested project active.",
+    ),
+    "RUN_NOT_ACTIVE": (
+        False,
+        "Run the requested project and wait for an active state before retrying.",
     ),
     "TIMEOUT": (
         True,
@@ -261,8 +275,15 @@ class PscadService:
             raise
         architecture = "x64" if info.x64 else "x86"
         if info.backend == "legacy":
+            session = getattr(backend, "session_details", None)
+            minimized = bool(
+                session.get("legacy_minimize", False)
+                if isinstance(session, Mapping)
+                else False
+            )
+            launch_mode = "minimized managed" if minimized else "visible managed"
             return (
-                "Successfully launched a new PSCAD automation instance using "
+                f"Successfully launched a {launch_mode} PSCAD automation instance using "
                 f"legacy backend for PSCAD {info.version} ({architecture}); legacy "
                 "automation does not attach to an already-open GUI."
             )
@@ -294,6 +315,9 @@ class PscadService:
         payload["connected"] = bool(info.alive)
         payload["selected_version"] = info.version
         payload["executor"] = self.executor_status()
+        session = getattr(self._backend, "session_details", None)
+        if isinstance(session, Mapping):
+            payload["session"] = dict(session)
         return payload
 
     async def disconnect(self) -> None:
@@ -392,12 +416,14 @@ class PscadService:
         return asdict(await self.backend.project_run_state(project_name))
 
     async def pause_simulation(self, project_name: str) -> str:
-        await self.backend.pause_project(project_name)
-        return f"Simulation paused for '{project_name}'."
+        async with self._mutation_lock:
+            await self.backend.pause_project(project_name)
+            return f"Simulation paused for '{project_name}'."
 
     async def stop_simulation(self, project_name: str) -> str:
-        await self.backend.stop_project(project_name)
-        return f"Simulation stopped for '{project_name}'."
+        async with self._mutation_lock:
+            await self.backend.stop_project(project_name)
+            return f"Simulation stopped for '{project_name}'."
 
     async def parameter_grid(
         self, request: Mapping[str, Any]

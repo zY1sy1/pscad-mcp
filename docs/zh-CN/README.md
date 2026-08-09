@@ -6,7 +6,7 @@
 - PSCAD 5.x：`mhi.pscad` 3.1.x，当前完成契约测试，但由于本机没有 PSCAD 5.x，不能声称端到端真实验收通过；
 - 结果文件：`mhi.psout` 1.3.x。
 
-Legacy PSCAD 4.6.2 后端只支持启动新的 Automation 实例，不能附加到用户已打开的 GUI。`repair_connection` 使用连接时缓存的进程归属：自有实例会先正常退出，非自有连接只会断开，不会终止外部进程。
+Legacy PSCAD 4.6.2 后端只支持启动新的受管 Automation 实例，不能附加到用户普通方式打开的 GUI。受管窗口默认可见；默认检测到已有 PSCAD 进程时会在启动前返回 `EXTERNAL_PSCAD_PRESENT`。`repair_connection` 使用连接时缓存的进程归属：自有实例会先正常退出，外部进程不会被终止。
 
 版本变更记录见 [CHANGELOG.md](../../CHANGELOG.md)，可移植的 stdio 配置模板见 [config.example.toml](../../config.example.toml)。
 
@@ -14,7 +14,7 @@ Legacy PSCAD 4.6.2 后端只支持启动新的 Automation 实例，不能附加�
 
 - 新建空算例和库使用随包分发、由 PSCAD 保存的模板；新建和另存会同时改写工程根身份及精确的工程自命名空间引用，并由 PSCAD 回读验证名称和类型。新目标会先尝试原生另存，未产生有效目标时回退；已有目标始终先保存当前操作副本，再通过原子替换生成目标。
 - 工程设置只读取和写入所选工程的参数，不修改 PSCAD 应用全局设置。
-- 运行命令非阻塞；PSCAD 4.6.2 的暂停和停止仍是应用级命令，即使工具参数中包含工程名。
+- 运行命令非阻塞；PSCAD 4.6.2 的暂停和停止仍是应用级厂商命令，因此只有目标是唯一活动算例时才会发送。目标未活动返回 `RUN_NOT_ACTIVE`；存在第二个活动算例时返回 `RUN_CONTROL_SCOPE_CONFLICT` 且不发送命令；发送后还必须回读到暂停或终止状态才报告成功。
 - 本机随 PSCAD 4.6.2 提供的 Automation Library 会拒绝 `create-layer` 和 `add-to-layer`；对已有且结构有效的图层加入成员也会失败。因此禁用元件会明确返回 `PSCAD_COMMAND_FAILED`，不能声称专用禁用层已生效。
 - 已连接批量删除会先校验目标、把导线相对顶点转换为绝对坐标、检查所需选区是否包含非目标对象、执行一次原生画布删除，再验证全部计划 ID 消失。无法形成安全选区时会在变更前返回 `CAPABILITY_UNAVAILABLE`。
 - 空位搜索使用 PSCAD 的 18 单位网格和碰撞余量。实时画布 XML 缺少几何时，会用已保存工程 XML 和实时位置补齐；两者都没有尺寸时才采用保守的 36×36 矩形。
@@ -54,7 +54,7 @@ PSCAD 4.6.x 还需要安装与许可证配套的官方 Automation Library wheel�
 
 ## 环境变量
 
-启动相关变量有五个，另有两个工作区安全变量：
+启动相关变量有七个，另有两个工作区安全变量：
 
 | 变量 | 示例 | 作用 |
 |---|---|---|
@@ -63,6 +63,8 @@ PSCAD 4.6.x 还需要安装与许可证配套的官方 Automation Library wheel�
 | `PSCAD_MCP_X64` | `true` | 选择 x64 或 x86 |
 | `PSCAD_MCP_LAUNCH_TIMEOUT` | `30` | 启动超时秒数，必须为正整数 |
 | `PSCAD_MCP_LEGACY_WHEEL` | `D:\...\wheel.whl` | 旧版依赖缺失时显示合法 wheel 位置提示 |
+| `PSCAD_MCP_LEGACY_MINIMIZE` | `false` | `false` 默认显示受管窗口；`true` 显式最小化 |
+| `PSCAD_MCP_LEGACY_EXISTING_POLICY` | `reject` | `reject` 拒绝已有外部 PSCAD；`allow` 只允许另启受管实例，并不接管外部 GUI |
 | `PSCAD_MCP_WORKSPACE` | `D:\PSCAD-Workspace` | 限制工程、保存和结果文件的可访问根目录 |
 | `PSCAD_MCP_ALLOW_UNSCOPED_PATHS` | `false` | 仅受控开发环境允许未配置工作区时访问路径 |
 
@@ -73,6 +75,8 @@ $env:PSCAD_MCP_BACKEND = "legacy"
 $env:PSCAD_MCP_VERSION = "4.6.2"
 $env:PSCAD_MCP_X64 = "true"
 $env:PSCAD_MCP_LAUNCH_TIMEOUT = "30"
+$env:PSCAD_MCP_LEGACY_MINIMIZE = "false"
+$env:PSCAD_MCP_LEGACY_EXISTING_POLICY = "reject"
 $env:PSCAD_MCP_WORKSPACE = "D:\PSCAD-Workspace"
 $env:PSCAD_MCP_ALLOW_UNSCOPED_PATHS = "false"
 ```
@@ -94,11 +98,13 @@ PSCAD_MCP_BACKEND = 'legacy'
 PSCAD_MCP_VERSION = '4.6.2'
 PSCAD_MCP_X64 = 'true'
 PSCAD_MCP_LAUNCH_TIMEOUT = '30'
+PSCAD_MCP_LEGACY_MINIMIZE = 'false'
+PSCAD_MCP_LEGACY_EXISTING_POLICY = 'reject'
 PSCAD_MCP_WORKSPACE = 'C:/path/to/PSCAD-Workspace'
 PSCAD_MCP_ALLOW_UNSCOPED_PATHS = 'false'
 ```
 
-保存后新建 Codex 任务，使 MCP 配置重新加载。本轮代码验收不会自动改写全局 Codex 配置。
+保存后新建 Codex 任务，使 MCP 配置重新加载。普通安装流程不会自动改写全局 Codex 配置。
 
 ## 安全边界
 
@@ -163,6 +169,9 @@ git status --short --branch
 - 找不到指定版本：检查 `PSCAD_MCP_VERSION`、`PSCAD_MCP_X64` 与本机实际安装是否一致；
 - MCP 能启动但工具超时：先查看 `get_pscad_status.executor` 中的 `healthy`、`last_operation`、`last_error`、`last_timeout_seconds`、`reset_generation` 和 `previous_worker_retiring`，再调用 `repair_connection`；不要并行向 PSCAD 发多条变更命令；
 - `REPAIR_CLEANUP_FAILED`：MCP 自己启动的 PSCAD 在执行器重建后仍无法正常退出。修复流程不会继续启动第二个实例；请手动关闭该 PSCAD 进程，再调用 `repair_connection`；
+- `EXTERNAL_PSCAD_PRESENT`：普通打开的 PSCAD 4.6.2 不能被 legacy API 事后接管；关闭该 GUI 后让 MCP 启动，或明确设置 `PSCAD_MCP_LEGACY_EXISTING_POLICY=allow` 另启受管实例；
+- `RUN_CONTROL_SCOPE_CONFLICT`：还有其他活动算例；先停止或等待其他算例结束，再对唯一活动目标执行暂停/停止；
+- `RUN_NOT_ACTIVE`：目标当前不是启动、构建、运行或暂停状态；先运行目标并等待进入活动状态；
 - 路径被拒绝：配置正确的 `PSCAD_MCP_WORKSPACE` 后重启 MCP；如果看到
   `WORKSPACE_NOT_CONFIGURED`，不要反复重试文件工具；
 - 删除、覆盖或退出被拒绝：确认目标无误后，重新调用并传入 `confirm=true`；

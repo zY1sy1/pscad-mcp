@@ -1,3 +1,4 @@
+import asyncio
 import json
 import os
 from pathlib import Path
@@ -360,6 +361,72 @@ class TestPscadService(unittest.IsolatedAsyncioTestCase):
         )
         json.dumps(status)
 
+    async def test_status_includes_bounded_session_details(self):
+        backend = FakeLifecycleBackend()
+        backend.session_details = {
+            "mode": "managed-launch",
+            "managed_pid": 1234,
+            "ordinary_gui_attach_supported": False,
+        }
+        service = PscadService(
+            lambda: backend,
+            executor=ImmediateExecutor(),
+        )
+        await service.attach_local()
+
+        status = await service.status()
+
+        self.assertEqual(status["session"]["managed_pid"], 1234)
+        self.assertFalse(
+            status["session"]["ordinary_gui_attach_supported"]
+        )
+        json.dumps(status)
+
+    async def test_pause_and_stop_are_serialized_by_mutation_lock(self):
+        class SerialRunControlBackend(FakeLifecycleBackend):
+            def __init__(self):
+                super().__init__()
+                self.active_calls = 0
+                self.max_active = 0
+                self.entered = asyncio.Event()
+                self.release = asyncio.Event()
+
+            async def _record(self):
+                self.active_calls += 1
+                self.max_active = max(self.max_active, self.active_calls)
+                self.entered.set()
+                await self.release.wait()
+                self.active_calls -= 1
+
+            async def pause_project(self, _project_name):
+                await self._record()
+
+            async def stop_project(self, _project_name):
+                await self._record()
+
+        backend = SerialRunControlBackend()
+        service = PscadService(
+            lambda: backend,
+            executor=ImmediateExecutor(),
+        )
+        await service.attach_local()
+        pause = asyncio.create_task(service.pause_simulation("case"))
+        await backend.entered.wait()
+        stop = asyncio.create_task(service.stop_simulation("case"))
+        await asyncio.sleep(0)
+
+        backend.release.set()
+        messages = await asyncio.gather(pause, stop)
+
+        self.assertEqual(
+            messages,
+            [
+                "Simulation paused for 'case'.",
+                "Simulation stopped for 'case'.",
+            ],
+        )
+        self.assertEqual(backend.max_active, 1)
+
     async def test_status_before_attach_does_not_create_backend(self):
         created = []
         service = PscadService(
@@ -636,8 +703,30 @@ class TestPscadService(unittest.IsolatedAsyncioTestCase):
 
         result = await service.attach_local()
 
-        self.assertIn("launched a new PSCAD automation instance", result)
+        self.assertIn("launched a visible managed PSCAD automation instance", result)
         self.assertIn("does not attach to an already-open GUI", result)
+
+    def test_error_payload_guides_run_control_recovery(self):
+        cases = (
+            (
+                "EXTERNAL_PSCAD_PRESENT",
+                "close",
+            ),
+            (
+                "RUN_CONTROL_SCOPE_CONFLICT",
+                "active",
+            ),
+            (
+                "RUN_NOT_ACTIVE",
+                "run",
+            ),
+        )
+        for code, phrase in cases:
+            with self.subTest(code=code):
+                error = BackendError(code, "blocked", "legacy", "operation")
+                payload = PscadService.error_payload(error, "fallback")["error"]
+                self.assertFalse(payload["retryable"])
+                self.assertIn(phrase, payload["suggested_action"].lower())
 
     def test_error_payload_preserves_backend_details(self):
         error = BackendError(

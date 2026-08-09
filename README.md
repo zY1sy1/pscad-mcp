@@ -13,17 +13,19 @@ The server is designed for Windows-based power-system workflows where you want C
 
 PSCAD automation is powerful, but the raw API is not especially friendly for conversational workflows. This project packages that API into structured MCP tools so Copilot CLI can:
 
-- launch a new PSCAD 4.6.x automation instance, or attach/launch through the modern backend
+- launch a visible, owned PSCAD 4.6.x automation instance, or attach/launch through the modern backend
 - inspect projects, simulation status, and output messages
 - update project settings and component parameters
 - create, place, wire, move, and delete components on the canvas
 - run builds, simulation sets, and output file reads
 - read synced PSCAD API documentation when it needs extra context
 
-The legacy PSCAD 4.6.2 backend is launch-only: it starts a new automation
-instance and does not attach to an already-open GUI. `repair_connection` quits
-that instance only when the backend reports that the MCP server owns it;
-otherwise it disconnects without terminating the external process.
+The legacy PSCAD 4.6.2 backend is launch-only: it starts a visible managed
+automation instance and does not attach to an ordinary already-open GUI. By
+default, an existing PSCAD process produces `EXTERNAL_PSCAD_PRESENT` before a
+second instance is launched. `repair_connection` quits an instance only when
+the backend reports that the MCP server owns it; it never terminates an
+external process.
 
 ### Verified PSCAD 4.6.2 behavior and limits
 
@@ -36,7 +38,11 @@ otherwise it disconnects without terminating the external process.
 - Project settings read and write the selected project's parameters. They do
   not mutate application-global settings.
 - Run is non-blocking. PSCAD 4.6.2 pause and stop remain application-wide
-  commands, even though the tools accept a project name.
+  vendor commands, so the backend sends them only when the requested case is
+  the sole active case. An inactive target returns `RUN_NOT_ACTIVE`; another
+  active case returns `RUN_CONTROL_SCOPE_CONFLICT` without sending the command.
+  A successful command is reported only after the requested paused or terminal
+  state is read back.
 - The shipped PSCAD 4.6.2 Automation Library rejects `create-layer` and
   `add-to-layer`, including membership in an existing valid layer. Component
   disable therefore returns `PSCAD_COMMAND_FAILED` instead of claiming a state
@@ -90,6 +96,10 @@ unstructured MCP execution error.
 retrying the failed operation. Recovery uses
 the backend's cached process ownership and never terminates a process reported
 as external.
+
+For a managed legacy session, `get_pscad_status.session` includes the launch
+mode, managed PID when the vendor process handle exposes it, existing-process
+policy, and `ordinary_gui_attach_supported=false`.
 
 If an owned PSCAD 4.6.x instance cannot be closed after the executor is reset,
 repair returns `REPAIR_CLEANUP_FAILED` and does not launch a second instance.
@@ -285,6 +295,8 @@ tool_timeout_sec = 600
 PSCAD_MCP_BACKEND = 'legacy'
 PSCAD_MCP_VERSION = '4.6.2'
 PSCAD_MCP_X64 = 'true'
+PSCAD_MCP_LEGACY_MINIMIZE = 'false'
+PSCAD_MCP_LEGACY_EXISTING_POLICY = 'reject'
 PSCAD_MCP_WORKSPACE = 'C:/path/to/PSCAD-Workspace'
 PSCAD_MCP_ALLOW_UNSCOPED_PATHS = 'false'
 ```
@@ -294,6 +306,11 @@ Replace both local paths in this example, or copy the values from
 `PSCAD_MCP_BACKEND='modern'` and an installed 5.x version for PSCAD 5.x.
 The current repository has contract coverage for Modern but does not claim
 real PSCAD 5.x end-to-end acceptance.
+
+`PSCAD_MCP_LEGACY_MINIMIZE=false` keeps the managed 4.6.x window visible.
+`PSCAD_MCP_LEGACY_EXISTING_POLICY=allow` is an explicit opt-in to launch a
+separate managed instance while another PSCAD process exists; it does not
+attach to that external GUI.
 
 ## First prompts to try in Copilot CLI
 

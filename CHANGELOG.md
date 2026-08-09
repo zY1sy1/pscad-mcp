@@ -6,6 +6,14 @@ All notable changes to this project are documented here.
 
 ### Changed
 
+- Legacy PSCAD 4.6.x now launches a visible managed automation window by
+  default, rejects pre-existing external PSCAD processes before launch, and
+  reports bounded owned-session diagnostics.
+- Application-wide pause/stop commands now require the requested case to be
+  the sole active case and verify the resulting state; modern stop prefers the
+  vendor `stop_single_project` entry point.
+- Component enable/disable behavior is unchanged; the tested PSCAD 4.6.2 layer
+  limitation remains explicit.
 - File operations now fail closed with `WORKSPACE_NOT_CONFIGURED` unless
   `PSCAD_MCP_WORKSPACE` is configured.
 - Added the explicit development-only `PSCAD_MCP_ALLOW_UNSCOPED_PATHS` escape
