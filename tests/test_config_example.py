@@ -13,6 +13,7 @@ def test_codex_config_template_is_portable():
 
     assert server["type"] == "stdio"
     assert server["args"] == ["-m", "pscad_mcp.main"]
+    assert "tools" not in server
     assert "PSCAD_MCP_BACKEND" in server["env"]
     assert server["env"]["PSCAD_MCP_ALLOW_UNSCOPED_PATHS"] == "false"
     assert r"D:\pscad-mcp" not in path_text
