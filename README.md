@@ -426,6 +426,11 @@ If Copilot CLI can see the server but tool calls fail:
 
 If documentation tools return no modules, run the documentation sync command again.
 
-## License
+## License and attribution
 
-MIT
+Project material contributed under this repository is available under the
+[MIT License](LICENSE). This repository is a modified fork of
+[`SecchiAlessandro/pscad-mcp`](https://github.com/SecchiAlessandro/pscad-mcp).
+
+See [NOTICE](NOTICE) for upstream attribution, third-party material boundaries,
+and the PSCAD/MHI non-affiliation statement.
