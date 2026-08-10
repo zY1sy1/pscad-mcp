@@ -1,0 +1,23 @@
+PSCAD MCP Notice
+
+This repository is a modified fork of the pscad-mcp project maintained at:
+https://github.com/SecchiAlessandro/pscad-mcp
+
+The upstream package metadata identifies LL0pez20 as an author and declares
+the project as MIT-licensed. Modifications in this fork are contributed by
+zY1sy1 and other contributors. The Git history records the detailed provenance
+of the upstream work and subsequent modifications.
+
+The MIT License in LICENSE applies only to material for which the relevant
+contributors have authority to grant those rights. It does not grant rights in
+third-party software, documentation, trademarks, or other materials.
+
+The directories docs/raw and docs/md contain API reference snapshots generated
+from locally installed PSCAD automation libraries. Those snapshots are not
+covered by this project's MIT License and remain subject to the applicable
+third-party terms.
+
+PSCAD is a trademark of Manitoba Hydro International Ltd. (MHI). This is an
+independent community project and is not affiliated with, endorsed by, or
+sponsored by MHI. All third-party names and trademarks belong to their
+respective owners.
