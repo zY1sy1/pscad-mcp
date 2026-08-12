@@ -215,8 +215,22 @@ class TestSweepSpec(unittest.TestCase):
             with self.subTest(parameter_name=parameter_name):
                 self.assert_invalid(raw, "parameter")
 
-    def test_parameter_values_accept_only_json_scalars_and_preserve_strings_as_data(self):
-        values = [None, True, False, 42, -3, 1.25, "${HOME}", "x + 1", "run()"]
+    def test_parameter_values_accept_json_scalars_and_legitimate_pscad_strings(self):
+        values = [
+            None,
+            True,
+            False,
+            42,
+            -3,
+            1.25,
+            "Fixed Frequency",
+            "Three Phase",
+            "10 [ohm]",
+            "A-B",
+            "3-Phase",
+            "RLC/Branch",
+            "C:/PSCAD Data/case.pscx",
+        ]
         for value in values:
             raw = self.valid_spec()
             raw["scenarios"][0]["updates"][0]["parameters"] = {"value": value}
@@ -230,6 +244,28 @@ class TestSweepSpec(unittest.TestCase):
             raw["scenarios"][0]["updates"][0]["parameters"] = {"value": value}
             with self.subTest(value=value):
                 self.assert_invalid(raw, "JSON scalar")
+
+    def test_parameter_string_values_reject_code_expression_and_interpolation_syntax(self):
+        invalid_values = [
+            "${HOME}",
+            "$env:HOME",
+            "%HOME%",
+            "$(Get-Location)",
+            "x + 1",
+            "gain*2",
+            "a / b",
+            "x == 1",
+            "name = value",
+            "run()",
+            "obj.run(1)",
+            "enabled and ready",
+            "lambda x: x",
+        ]
+        for value in invalid_values:
+            raw = self.valid_spec()
+            raw["scenarios"][0]["updates"][0]["parameters"] = {"value": value}
+            with self.subTest(value=value):
+                self.assert_invalid(raw, "code, expression")
 
     def test_rejects_duplicate_component_parameter_targets_across_updates(self):
         raw = self.valid_spec()
@@ -276,6 +312,35 @@ class TestSweepSpec(unittest.TestCase):
             raw["outputs"][0]["channels"] = channels
             with self.subTest(channels=channels):
                 self.assert_invalid(raw, "channels")
+
+    def test_channel_selectors_are_normalized_to_exact_adapter_paths(self):
+        raw = self.valid_spec()
+        raw["outputs"][0]["channels"] = [
+            "  Measurements\\Main Bus\\Phase A Voltage  ",
+            " Root / Main Bus / Phase B Voltage ",
+        ]
+
+        self.assertEqual(
+            self.parse(raw).outputs[0].channels,
+            (
+                "Measurements/Main Bus/Phase A Voltage",
+                "Root/Main Bus/Phase B Voltage",
+            ),
+        )
+
+        invalid_selectors = [
+            "/Main/Voltage",
+            "Main/Voltage/",
+            "Main//Voltage",
+            "Main\\\\Voltage",
+            "Main/   /Voltage",
+            "Main\\/Voltage",
+        ]
+        for selector in invalid_selectors:
+            raw = self.valid_spec()
+            raw["outputs"][0]["channels"] = [selector]
+            with self.subTest(selector=selector):
+                self.assert_invalid(raw, "empty path segment")
 
     def test_numeric_options_enforce_types_and_inclusive_bounds(self):
         valid_values = {

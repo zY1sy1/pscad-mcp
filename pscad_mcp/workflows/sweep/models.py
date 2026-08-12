@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import math
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
@@ -16,6 +17,31 @@ JsonScalar = None | bool | int | float | str
 
 _ENTRY_SUFFIXES = {".pscx", ".pslx", ".pswx"}
 _OUTPUT_SUFFIXES = {".out", ".psout"}
+_ENV_INTERPOLATION = re.compile(
+    r"\$\{[^{}]+\}|\$\(|\$env:[A-Za-z_][A-Za-z0-9_]*|%[A-Za-z_][A-Za-z0-9_]*%",
+    re.IGNORECASE,
+)
+_CALL_EXPRESSION = re.compile(
+    r"(?:^|[^A-Za-z0-9_])(?:[A-Za-z_]\w*\.)*[A-Za-z_]\w*\([^()]*\)"
+)
+_ASSIGNMENT_OR_COMPARISON = re.compile(r"==|!=|<=|>=|(?<![<>=!])=(?!=)")
+_SIMPLE_OPERAND = r"(?:[A-Za-z_]\w*|(?:\d+(?:\.\d*)?|\.\d+))"
+_PLUS_OR_PRODUCT_EXPRESSION = re.compile(
+    rf"^\s*{_SIMPLE_OPERAND}(?:\s*(?:\+|\*|%|\*\*)\s*{_SIMPLE_OPERAND})+\s*$"
+)
+_DIVISION_EXPRESSION = re.compile(
+    rf"^\s*(?:\d+(?:\.\d*)?|\.\d+)\s*/\s*(?:\d+(?:\.\d*)?|\.\d+)\s*$"
+    rf"|^\s*[A-Za-z_]\w*\s+/\s+[A-Za-z_]\w*\s*$"
+)
+_SUBTRACTION_EXPRESSION = re.compile(
+    rf"^\s*(?:(?:\d+(?:\.\d*)?|\.\d+)\s*-\s*(?:\d+(?:\.\d*)?|\.\d+)"
+    rf"|{_SIMPLE_OPERAND}\s+-\s+{_SIMPLE_OPERAND})\s*$"
+)
+_BOOLEAN_EXPRESSION = re.compile(
+    r"^\s*(?:not\s+)?[A-Za-z_]\w*(?:\s+(?:and|or)\s+(?:not\s+)?[A-Za-z_]\w*)+\s*$",
+    re.IGNORECASE,
+)
+_LAMBDA_EXPRESSION = re.compile(r"^\s*lambda\b", re.IGNORECASE)
 _TOP_LEVEL_FIELDS = {
     "source_root",
     "entry_file",
@@ -110,13 +136,49 @@ def _directory_key(name: str) -> str:
 
 
 def _json_scalar(value: Any, label: str) -> JsonScalar:
-    if value is None or isinstance(value, (bool, str)):
+    if value is None or isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        if _looks_like_unsupported_parameter_syntax(value):
+            raise ValueError(
+                f"{label} must not contain code, expression, environment "
+                "interpolation, or formula syntax."
+            )
         return value
     if isinstance(value, int) and not isinstance(value, bool):
         return value
     if isinstance(value, float) and math.isfinite(value):
         return value
     raise ValueError(f"{label} must be a JSON scalar (null, boolean, number, or string).")
+
+
+def _looks_like_unsupported_parameter_syntax(value: str) -> bool:
+    return any(
+        pattern.search(value)
+        for pattern in (
+            _ENV_INTERPOLATION,
+            _CALL_EXPRESSION,
+            _ASSIGNMENT_OR_COMPARISON,
+            _PLUS_OR_PRODUCT_EXPRESSION,
+            _DIVISION_EXPRESSION,
+            _SUBTRACTION_EXPRESSION,
+            _BOOLEAN_EXPRESSION,
+            _LAMBDA_EXPRESSION,
+        )
+    )
+
+
+def _channel_selector(value: Any, label: str) -> str:
+    selector = _nonempty_string(value, label).strip().replace("\\", "/")
+    segments = selector.split("/")
+    if any(not segment.strip() for segment in segments):
+        raise ValueError(f"{label} must not contain an empty path segment.")
+    normalized = "/".join(segment.strip() for segment in segments)
+    if any(character in normalized for character in "*?[]"):
+        raise ValueError(
+            f"{label} must be an exact selector without wildcards."
+        )
+    return normalized
 
 
 @dataclass(frozen=True)
@@ -348,14 +410,10 @@ class SweepSpec:
                 raise ValueError(f"{label}.channels must be a non-empty list.")
             channels: list[str] = []
             for channel_index, channel_value in enumerate(channels_value):
-                channel = _nonempty_string(
+                channel = _channel_selector(
                     channel_value,
                     f"{label}.channels[{channel_index}]",
                 )
-                if any(character in channel for character in "*?[]"):
-                    raise ValueError(
-                        f"{label}.channels must contain exact selectors without wildcards."
-                    )
                 channels.append(channel)
             outputs.append(SweepOutput(path, tuple(channels)))
         return tuple(outputs)
