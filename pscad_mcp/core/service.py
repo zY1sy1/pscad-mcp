@@ -112,6 +112,10 @@ _ERROR_GUIDANCE: dict[str, tuple[bool, str]] = {
         False,
         "Add or configure the missing mapped channels/components before retrying.",
     ),
+    "HVDC_MAPPING_CONFLICT": (
+        False,
+        "Remove duplicate aliases or correct the unit mapping before retrying.",
+    ),
     "HVDC_SCENARIO_INVALID": (
         False,
         "Correct the declarative scenario and retry validation.",

@@ -56,3 +56,20 @@ def test_project_inspection_preserves_workspace_error_code():
     with pytest.raises(BackendError) as raised:
         service.inspect_project("case.pscx")
     assert raised.value.code in {"WORKSPACE_NOT_CONFIGURED", "NOT_FOUND"}
+
+
+def test_read_only_inspection_accepts_existing_absolute_pscx_outside_workspace(tmp_path):
+    path = tmp_path / "outside.pscx"
+    path.write_text("<project><canvas name='Main'><label>Idc</label></canvas></project>", encoding="utf-8")
+    service = HvdcDomainService()
+    result = service.inspect_project(str(path))
+    assert result["project"]["name"] == "outside"
+
+
+def test_validation_fails_closed_on_mapping_conflicts(tmp_path):
+    path = tmp_path / "conflict.pscx"
+    path.write_text("<project><definitions><Definition name='RectCC'/><Definition name='RectPole'/><Definition name='InverterPole'/></definitions><canvas name='Main'><label>Idc</label><label>Idc (kV)</label></canvas></project>", encoding="utf-8")
+    service = HvdcDomainService()
+    result = service.validate_project(str(path), profile="lcc_bipolar_generic")
+    assert result["valid"] is False
+    assert any(error["code"] == "HVDC_MAPPING_CONFLICT" for error in result["errors"])

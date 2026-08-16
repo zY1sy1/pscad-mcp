@@ -12,6 +12,7 @@ class MappingResolution:
     mappings: tuple[HvdcMapping, ...]
     unresolved: tuple[str, ...]
     warnings: tuple[str, ...]
+    conflicts: tuple[str, ...] = ()
 
 
 def resolve_mappings(evidence: HvdcProjectEvidence, profile: dict) -> MappingResolution:
@@ -25,11 +26,13 @@ def resolve_mappings(evidence: HvdcProjectEvidence, profile: dict) -> MappingRes
     mappings: list[HvdcMapping] = []
     unresolved: list[str] = []
     warnings: list[str] = []
+    conflicts: list[str] = []
     for item in profile.get("mappings", []):
         canonical = str(item["canonical"])
         aliases = tuple(str(alias) for alias in item.get("aliases", []))
         matched: tuple[str, HvdcSourceRef] | None = None
         matches: list[tuple[str, HvdcSourceRef]] = []
+        unit_conflict = False
         for text, source in observed:
             normalized = text.strip().lower()
             if normalized in {alias.lower() for alias in aliases} or any(alias.lower() in normalized for alias in aliases):
@@ -43,11 +46,20 @@ def resolve_mappings(evidence: HvdcProjectEvidence, profile: dict) -> MappingRes
             lower = text.lower()
             if expected_family == "current" and any(token in lower for token in ("kv", "mv", "volt")):
                 warnings.append(f"Unit conflict for '{canonical}': observed source '{text}' looks like voltage.")
+                unit_conflict = True
             if expected_family == "voltage" and any(token in lower for token in ("ka", "ma", "amp")):
                 warnings.append(f"Unit conflict for '{canonical}': observed source '{text}' looks like current.")
+                unit_conflict = True
+        conflict = len(matches) > 1 or unit_conflict
         if matched:
-            mappings.append(HvdcMapping(canonical, aliases, matched[1], item.get("units"), item.get("unit_family"), item.get("direction", "measurement"), "observed", 1.0))
+            status = "conflict" if conflict else "observed"
+            confidence = 0.0 if conflict else 1.0
+            mappings.append(HvdcMapping(canonical, aliases, matched[1], item.get("units"), item.get("unit_family"), item.get("direction", "measurement"), status, confidence))
         else:
             mappings.append(HvdcMapping(canonical, aliases, None, item.get("units"), item.get("unit_family"), item.get("direction", "measurement"), "unresolved", 0.0))
             unresolved.append(canonical)
-    return MappingResolution(tuple(mappings), tuple(unresolved), tuple(warnings))
+        if conflict:
+            conflicts.append(canonical)
+            if canonical not in unresolved:
+                unresolved.append(canonical)
+    return MappingResolution(tuple(mappings), tuple(unresolved), tuple(warnings), tuple(conflicts))

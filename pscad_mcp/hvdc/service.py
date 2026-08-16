@@ -29,6 +29,11 @@ class HvdcDomainService:
         candidate = Path(project_name).expanduser()
         if candidate.suffix.lower() != ".pscx":
             candidate = candidate.with_suffix(".pscx")
+        # Inspection is strictly read-only, so an existing absolute PSCX may
+        # be scanned as an external source. Mutation paths still require the
+        # configured workspace and confirmation gates below.
+        if candidate.is_absolute() and candidate.exists():
+            return candidate.resolve()
         try:
             try:
                 return self.path_policy.resolve(str(candidate), suffixes={".pscx"}, must_exist=True)
@@ -40,6 +45,22 @@ class HvdcDomainService:
             raise BackendError("NOT_FOUND", f"HVDC project '{project_name}' was not found.", "hvdc", "inspect_hvdc_project", {"candidate": project_name}) from error
         except ValueError as error:
             raise BackendError("INVALID_ARGUMENT", str(error), "hvdc", "inspect_hvdc_project", {"candidate": project_name}) from error
+
+    def _resolve_mutation_project(self, project_name: str) -> Path:
+        candidate = Path(project_name).expanduser()
+        if candidate.suffix.lower() != ".pscx":
+            candidate = candidate.with_suffix(".pscx")
+        try:
+            try:
+                return self.path_policy.resolve(str(candidate), suffixes={".pscx"}, must_exist=True)
+            except TypeError:
+                return self.path_policy.resolve(str(candidate))
+        except WorkspaceNotConfiguredError as error:
+            raise BackendError("WORKSPACE_NOT_CONFIGURED", str(error), "hvdc", "run_hvdc_scenario", {"candidate": project_name}) from error
+        except FileNotFoundError as error:
+            raise BackendError("NOT_FOUND", f"HVDC target project '{project_name}' was not found.", "hvdc", "run_hvdc_scenario", {"candidate": project_name}) from error
+        except ValueError as error:
+            raise BackendError("INVALID_ARGUMENT", str(error), "hvdc", "run_hvdc_scenario", {"candidate": project_name}) from error
 
     def _inspection(self, project_name: str, canvas_name: str = "Main") -> dict[str, Any]:
         path = self._resolve_project(project_name)
@@ -67,6 +88,7 @@ class HvdcDomainService:
             "assets": [asdict(asset) for asset in assets],
             "mappings": [asdict(mapping) for mapping in mappings.mappings],
             "unresolved": unresolved,
+            "mapping_conflicts": list(mappings.conflicts),
             "warnings": list(evidence.warnings) + list(mappings.warnings),
             "confidence": topology.confidence,
         }
@@ -83,7 +105,7 @@ class HvdcDomainService:
     def get_mappings(self, project_name: str, canonical: str | None = None, canvas_name: str = "Main") -> dict[str, Any]:
         result = self._inspection(project_name, canvas_name)
         mappings = [item for item in result["mappings"] if canonical is None or item["canonical"] == canonical]
-        return {"mappings": mappings, "unresolved": result["unresolved"], "warnings": result["warnings"]}
+        return {"mappings": mappings, "unresolved": result["unresolved"], "conflicts": result.get("mapping_conflicts", []), "warnings": result["warnings"]}
 
     def validate_project(self, project_name: str, profile: str = "auto", canvas_name: str = "Main") -> dict[str, Any]:
         result = self._inspection(project_name, canvas_name)
@@ -91,6 +113,14 @@ class HvdcDomainService:
         if profile == "auto":
             profile_name = "hvdc_breaker_difforder" if any(item["kind"] == "breaker" for item in result["assets"]) else "lcc_bipolar_generic"
         loaded = load_profile(profile_name)
+        if profile_name != "auto" and not result["mappings"]:
+            evidence = scan_project(self._resolve_project(project_name), canvas_name)
+            resolution = resolve_mappings(evidence, loaded)
+            result = dict(result)
+            result["mappings"] = [asdict(mapping) for mapping in resolution.mappings]
+            result["unresolved"] = list(resolution.unresolved)
+            result["mapping_conflicts"] = list(resolution.conflicts)
+            result["warnings"] = list(result.get("warnings", [])) + list(resolution.warnings)
         found = {item["kind"] for item in result["assets"]}
         missing_assets = sorted(set(loaded.get("required_assets", [])) - found)
         errors: list[dict[str, Any]] = []
@@ -98,6 +128,8 @@ class HvdcDomainService:
             errors.append({"code": "HVDC_TOPOLOGY_AMBIGUOUS", "message": "Topology family is unknown.", "evidence": result["topology"]["evidence"]})
         if missing_assets:
             errors.append({"code": "HVDC_MAPPING_MISSING", "message": "Required HVDC assets are missing.", "missing_assets": missing_assets})
+        if result.get("mapping_conflicts"):
+            errors.append({"code": "HVDC_MAPPING_CONFLICT", "message": "One or more semantic mappings have duplicate or incompatible evidence.", "conflicts": result["mapping_conflicts"]})
         return {"valid": not errors and not result["unresolved"], "profile": profile_name, "missing_assets": missing_assets, "unresolved": result["unresolved"], "errors": errors, "warnings": result["warnings"], "topology": result["topology"]}
 
     def list_profiles(self) -> list[dict[str, Any]]:
@@ -126,14 +158,16 @@ class HvdcDomainService:
         return await run_scenario(self, project_name, scenario, confirm=confirm)
 
     async def scenario_status(self, scenario_id: str) -> dict[str, Any]:
-        return dict(self._scenarios.get(scenario_id, {"error": {"code": "NOT_FOUND", "message": f"Scenario '{scenario_id}' was not found."}}))
+        if scenario_id not in self._scenarios:
+            raise BackendError("NOT_FOUND", f"Scenario '{scenario_id}' was not found.", "hvdc", "get_hvdc_scenario_status", {"scenario_id": scenario_id})
+        return dict(self._scenarios[scenario_id])
 
     async def analyze_results(self, scenario_id: str, metrics: list[str] | None = None) -> dict[str, Any]:
         from .metrics import calculate_metrics
 
         record = self._scenarios.get(scenario_id)
         if record is None:
-            return {"error": {"code": "NOT_FOUND", "message": f"Scenario '{scenario_id}' was not found."}}
+            raise BackendError("NOT_FOUND", f"Scenario '{scenario_id}' was not found.", "hvdc", "analyze_hvdc_results", {"scenario_id": scenario_id})
         samples = record.get("samples")
         if samples is None and record.get("output_files") and self.backend_service is not None:
             try:
@@ -149,11 +183,11 @@ class HvdcDomainService:
 
     async def compare_scenarios(self, scenario_ids: list[str], metrics: list[str] | None = None) -> dict[str, Any]:
         if not isinstance(scenario_ids, list) or not scenario_ids:
-            return {"error": {"code": "INVALID_ARGUMENT", "message": "scenario_ids must not be empty."}}
+            raise BackendError("INVALID_ARGUMENT", "scenario_ids must not be empty.", "hvdc", "compare_hvdc_scenarios")
         records: list[dict[str, Any]] = []
         for scenario_id in scenario_ids:
             if scenario_id not in self._scenarios:
-                return {"error": {"code": "NOT_FOUND", "message": f"Scenario '{scenario_id}' was not found."}}
+                raise BackendError("NOT_FOUND", f"Scenario '{scenario_id}' was not found.", "hvdc", "compare_hvdc_scenarios", {"scenario_id": scenario_id})
             if not self._scenarios[scenario_id].get("metrics"):
                 await self.analyze_results(scenario_id, metrics)
             records.append(self._scenarios[scenario_id])

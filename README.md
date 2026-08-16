@@ -88,6 +88,11 @@ rewiring a canvas returns `HVDC_CAPABILITY_UNAVAILABLE`. Mutating scenario
 parameters and registering a user profile require `confirm=true` and remain
 subject to `PSCAD_MCP_WORKSPACE` path policy.
 
+Read-only HVDC inspection may scan an existing absolute `.pscx` source such as
+`C:\\PSCADFiles\\Breaker\\TEST1\\difforder_new.pscx`; all scenario mutations
+still require a workspace-scoped, pre-existing `derived_project` and explicit
+confirmation.
+
 Example read-only inspection:
 
 ```text

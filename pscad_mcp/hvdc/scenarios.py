@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import math
+import asyncio
 from collections.abc import Mapping
 from datetime import datetime, timezone
+from pathlib import Path
 from uuid import uuid4
 from typing import Any
 
@@ -65,13 +67,28 @@ def validate_scenario(scenario: Mapping[str, Any]) -> dict[str, Any]:
 async def run_scenario(service: Any, project_name: str, scenario: Mapping[str, Any], *, confirm: bool = False) -> dict[str, Any]:
     validation = validate_scenario(scenario)
     if not validation["valid"]:
-        return validation
+        first = validation["errors"][0]
+        raise BackendError(first["code"], first["message"], "hvdc", "run_hvdc_scenario", {key: value for key, value in first.items() if key not in {"code", "message"}})
     if not confirm:
         raise ConfirmationRequired("run_hvdc_scenario")
+    for field in ("parameter_changes", "events"):
+        for index, event in enumerate(scenario.get(field, [])):
+            if not event.get("component_id") or not event.get("parameter_name"):
+                raise BackendError("HVDC_CAPABILITY_UNAVAILABLE", f"Scenario target '{event.get('target')}' is not bound to an existing component parameter.", "hvdc", "run_hvdc_scenario", {"target": event.get("target"), "field": field, "index": index, "suggested_action": "Provide component_id and parameter_name for an existing mapped control."})
+    mutating = bool(scenario.get("parameter_changes") or scenario.get("events"))
+    target_project = str(scenario.get("derived_project") or project_name)
+    if mutating and not scenario.get("derived_project") and Path(project_name).suffix.lower() == ".pscx":
+        raise BackendError("HVDC_CAPABILITY_UNAVAILABLE", "Mutating scenarios require a pre-existing derived_project; source PSCX files are read-only inputs.", "hvdc", "run_hvdc_scenario", {"project": project_name, "suggested_action": "Create a confirmed derived project with existing generic PSCAD tools, then pass derived_project."})
+    if scenario.get("derived_project") and Path(target_project).suffix.lower() == ".pscx":
+        try:
+            service._resolve_mutation_project(target_project)
+        except BackendError:
+            raise
     scenario_id = f"hvdc-{uuid4().hex}"
     record: dict[str, Any] = {
         "scenario_id": scenario_id,
         "project_name": project_name,
+        "target_project": target_project,
         "name": scenario["name"],
         "profile": scenario["profile"],
         "status": "validated",
@@ -95,12 +112,18 @@ async def run_scenario(service: Any, project_name: str, scenario: Mapping[str, A
             if component_id is None or not parameter_name:
                 record["warnings"].append(f"Parameter change '{change.get('target')}' has no component_id/parameter_name and was not applied.")
                 continue
-            await backend.set_component_parameters(project_name, int(component_id), {str(parameter_name): change.get("value")})
+            await backend.set_component_parameters(target_project, int(component_id), {str(parameter_name): change.get("value")})
         run = scenario.get("run", {}) or {}
         if run.get("simulation_set"):
-            await backend.run_simulation_set(project_name, str(run["simulation_set"]))
+            await backend.run_simulation_set(target_project, str(run["simulation_set"]))
         else:
-            await backend.run_project(project_name)
+            await backend.run_project(target_project)
+        previous_time = 0.0
+        for event in sorted(scenario.get("events", []), key=lambda item: float(item["time_s"])):
+            event_time = float(event["time_s"])
+            await asyncio.sleep(max(0.0, event_time - previous_time))
+            await backend.set_component_parameters(target_project, int(event["component_id"]), {str(event["parameter_name"]): event.get("value")})
+            previous_time = event_time
         record["status"] = "running"
     except Exception as error:
         record["status"] = "failed"

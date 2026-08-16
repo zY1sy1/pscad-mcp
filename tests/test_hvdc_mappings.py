@@ -27,3 +27,4 @@ def test_mapping_reads_component_parameters_and_reports_unit_conflict(tmp_path):
     result = resolve_mappings(scan_project(path), load_profile("lcc_bipolar_generic"))
     assert any(mapping.source and mapping.source.component_id == "4" for mapping in result.mappings)
     assert result.warnings
+    assert any(mapping.status == "conflict" for mapping in result.mappings)
