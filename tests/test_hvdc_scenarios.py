@@ -1,6 +1,7 @@
 import asyncio
 
 from pscad_mcp.hvdc.scenarios import validate_scenario
+from pscad_mcp.core.service import ConfirmationRequired
 from pscad_mcp.hvdc.service import HvdcDomainService
 
 
@@ -14,12 +15,20 @@ def test_unsupported_event_is_structured_capability_error():
 def test_scenario_requires_confirmation_before_parameter_mutation():
     service = HvdcDomainService()
     scenario = {"name": "trip", "profile": "hvdc_breaker_difforder", "project": "case", "parameter_changes": [{"target": "fault_command", "value": 1}], "events": []}
-    result = asyncio.run(service.run_scenario("case", scenario, confirm=False))
-    assert result["error"]["code"] == "CONFIRMATION_REQUIRED"
+    try:
+        asyncio.run(service.run_scenario("case", scenario, confirm=False))
+    except ConfirmationRequired as error:
+        assert error.code == "CONFIRMATION_REQUIRED"
+    else:
+        raise AssertionError("confirmation was not required")
 
 
 def test_even_baseline_run_requires_confirmation():
     service = HvdcDomainService()
     scenario = {"name": "baseline", "profile": "lcc_bipolar_generic", "project": "case", "parameter_changes": [], "events": []}
-    result = asyncio.run(service.run_scenario("case", scenario, confirm=False))
-    assert result["error"]["code"] == "CONFIRMATION_REQUIRED"
+    try:
+        asyncio.run(service.run_scenario("case", scenario, confirm=False))
+    except ConfirmationRequired as error:
+        assert error.code == "CONFIRMATION_REQUIRED"
+    else:
+        raise AssertionError("confirmation was not required")

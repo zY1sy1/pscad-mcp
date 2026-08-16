@@ -67,8 +67,7 @@ async def run_scenario(service: Any, project_name: str, scenario: Mapping[str, A
     if not validation["valid"]:
         return validation
     if not confirm:
-        error = ConfirmationRequired("run_hvdc_scenario")
-        return {"error": error.to_dict()}
+        raise ConfirmationRequired("run_hvdc_scenario")
     scenario_id = f"hvdc-{uuid4().hex}"
     record: dict[str, Any] = {
         "scenario_id": scenario_id,

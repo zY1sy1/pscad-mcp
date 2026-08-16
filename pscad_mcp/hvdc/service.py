@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from ..core.backend.base import BackendError
-from ..core.path_policy import PathPolicy
+from ..core.path_policy import PathPolicy, WorkspaceNotConfiguredError
 from .classifier import classify_topology, extract_assets
 from .mappings import MappingResolution, resolve_mappings
 from .profiles import list_profiles, load_profile, register_profile
@@ -30,9 +30,16 @@ class HvdcDomainService:
         if candidate.suffix.lower() != ".pscx":
             candidate = candidate.with_suffix(".pscx")
         try:
-            return self.path_policy.resolve(str(candidate), suffixes={".pscx"}, must_exist=True)
-        except TypeError:
-            return self.path_policy.resolve(str(candidate))
+            try:
+                return self.path_policy.resolve(str(candidate), suffixes={".pscx"}, must_exist=True)
+            except TypeError:
+                return self.path_policy.resolve(str(candidate))
+        except WorkspaceNotConfiguredError as error:
+            raise BackendError("WORKSPACE_NOT_CONFIGURED", str(error), "hvdc", "inspect_hvdc_project", {"candidate": project_name}) from error
+        except FileNotFoundError as error:
+            raise BackendError("NOT_FOUND", f"HVDC project '{project_name}' was not found.", "hvdc", "inspect_hvdc_project", {"candidate": project_name}) from error
+        except ValueError as error:
+            raise BackendError("INVALID_ARGUMENT", str(error), "hvdc", "inspect_hvdc_project", {"candidate": project_name}) from error
 
     def _inspection(self, project_name: str, canvas_name: str = "Main") -> dict[str, Any]:
         path = self._resolve_project(project_name)
@@ -98,9 +105,16 @@ class HvdcDomainService:
 
     def register_profile(self, profile_name: str, mapping_file: str) -> dict[str, Any]:
         try:
-            resolved = self.path_policy.resolve(mapping_file, suffixes={".json"}, must_exist=True)
-        except TypeError:
-            resolved = self.path_policy.resolve(mapping_file)
+            try:
+                resolved = self.path_policy.resolve(mapping_file, suffixes={".json"}, must_exist=True)
+            except TypeError:
+                resolved = self.path_policy.resolve(mapping_file)
+        except WorkspaceNotConfiguredError as error:
+            raise BackendError("WORKSPACE_NOT_CONFIGURED", str(error), "hvdc", "register_hvdc_profile", {"candidate": mapping_file}) from error
+        except FileNotFoundError as error:
+            raise BackendError("NOT_FOUND", f"HVDC mapping file '{mapping_file}' was not found.", "hvdc", "register_hvdc_profile", {"candidate": mapping_file}) from error
+        except ValueError as error:
+            raise BackendError("INVALID_ARGUMENT", str(error), "hvdc", "register_hvdc_profile", {"candidate": mapping_file}) from error
         return register_profile(profile_name, str(resolved))
 
     async def validate_scenario(self, scenario: Mapping[str, Any]) -> dict[str, Any]:

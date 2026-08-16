@@ -1,4 +1,5 @@
 import json
+import pytest
 
 import asyncio
 
@@ -47,3 +48,11 @@ def test_profile_registration_uses_workspace_path_policy(tmp_path):
     service = HvdcDomainService(path_policy=Policy())
     result = service.register_profile("custom", str(mapping))
     assert result["registered"] is True
+
+
+def test_project_inspection_preserves_workspace_error_code():
+    from pscad_mcp.core.backend.base import BackendError
+    service = HvdcDomainService()
+    with pytest.raises(BackendError) as raised:
+        service.inspect_project("case.pscx")
+    assert raised.value.code in {"WORKSPACE_NOT_CONFIGURED", "NOT_FOUND"}
