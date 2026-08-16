@@ -535,7 +535,11 @@ class HvdcDomainService:
                 recovery_baselines.update(source)
         normalized_samples["recovery_baselines"] = recovery_baselines
         record["recovery_baselines"] = dict(recovery_baselines)
-        result = calculate_metrics(normalized_samples, metrics)
+        configured_metrics = (
+            analysis.get("metrics") if isinstance(analysis, Mapping) else None
+        )
+        selected_metrics = metrics if metrics is not None else configured_metrics
+        result = calculate_metrics(normalized_samples, selected_metrics)
         result["warnings"] = [*resolution["warnings"], *result["warnings"]]
         record["resolved_channels"] = resolution["resolved_channels"]
         record["metrics"] = result["metrics"]

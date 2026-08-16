@@ -236,6 +236,23 @@ def validate_scenario(scenario: Mapping[str, Any], *, workspace_root: str | Path
     if not isinstance(analysis, Mapping):
         errors.append(_error("HVDC_SCENARIO_INVALID", "analysis must be an object.", field="analysis"))
     else:
+        if "metrics" in analysis:
+            metrics = analysis.get("metrics")
+            if (
+                not isinstance(metrics, list)
+                or not metrics
+                or any(
+                    not isinstance(metric, str) or not metric.strip()
+                    for metric in metrics
+                )
+            ):
+                errors.append(
+                    _error(
+                        "HVDC_SCENARIO_INVALID",
+                        "analysis.metrics must be a non-empty list of non-empty strings.",
+                        field="analysis.metrics",
+                    )
+                )
         recovery_baselines = analysis.get("recovery_baselines", {})
         if not isinstance(recovery_baselines, Mapping):
             errors.append(

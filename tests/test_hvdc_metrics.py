@@ -252,6 +252,49 @@ def test_service_uses_analysis_recovery_baseline_and_promotes_it_to_record():
     }
 
 
+def test_service_uses_scenario_analysis_metrics_when_no_explicit_metrics():
+    service = HvdcDomainService()
+    service._scenarios["configured-metrics"] = {
+        "scenario_id": "configured-metrics",
+        "profile": "lcc_bipolar_generic",
+        "samples": {
+            "time": [0.0, 0.1],
+            "channels": {"dc_voltage": [500.0, 510.0]},
+        },
+        "analysis": {"metrics": ["dc_voltage_peak"]},
+        "warnings": [],
+    }
+
+    result = asyncio.run(service.analyze_results("configured-metrics"))
+
+    assert [item["name"] for item in result["metrics"]] == ["dc_voltage_peak"]
+    assert result["metrics"][0]["value"] == 510.0
+
+
+def test_explicit_analysis_metrics_override_scenario_configuration():
+    service = HvdcDomainService()
+    service._scenarios["explicit-metrics"] = {
+        "scenario_id": "explicit-metrics",
+        "profile": "lcc_bipolar_generic",
+        "samples": {
+            "time": [0.0, 0.1],
+            "channels": {
+                "dc_voltage": [500.0, 510.0],
+                "dc_current": [1.0, 1.2],
+            },
+        },
+        "analysis": {"metrics": ["dc_voltage_peak"]},
+        "warnings": [],
+    }
+
+    result = asyncio.run(
+        service.analyze_results("explicit-metrics", ["dc_current_peak"])
+    )
+
+    assert [item["name"] for item in result["metrics"]] == ["dc_current_peak"]
+    assert result["metrics"][0]["value"] == 1.2
+
+
 def test_empty_or_unaligned_channels_never_fabricate_zero_metrics():
     samples = {
         "time": [0.0, 0.1],

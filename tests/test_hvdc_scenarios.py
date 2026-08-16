@@ -125,6 +125,31 @@ def test_scenario_analysis_recovery_baselines_are_validated(analysis):
     assert result["errors"][0]["field"].startswith("analysis")
 
 
+@pytest.mark.parametrize(
+    "metrics",
+    [
+        "dc_voltage_peak",
+        [],
+        [""],
+        [1],
+    ],
+)
+def test_scenario_analysis_metrics_must_be_nonempty_string_list(metrics):
+    result = validate_scenario(
+        {
+            "name": "baseline",
+            "profile": "lcc_bipolar_generic",
+            "project": "case",
+            "parameter_changes": [],
+            "events": [],
+            "analysis": {"metrics": metrics},
+        }
+    )
+
+    assert result["valid"] is False
+    assert result["errors"][0]["field"] == "analysis.metrics"
+
+
 def test_unbound_event_cannot_execute_as_baseline():
     scenario = {"name": "trip", "profile": "hvdc_breaker_difforder", "project": "case", "parameter_changes": [], "events": [{"time_s": 1.0, "target": "breaker_command", "value": 1}]}
     service = HvdcDomainService()
