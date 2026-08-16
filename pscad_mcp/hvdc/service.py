@@ -558,7 +558,7 @@ class HvdcDomainService:
         for scenario_id in scenario_ids:
             if scenario_id not in self._scenarios:
                 raise BackendError("NOT_FOUND", f"Scenario '{scenario_id}' was not found.", "hvdc", "compare_hvdc_scenarios", {"scenario_id": scenario_id})
-            if not self._scenarios[scenario_id].get("metrics"):
+            if metrics is not None or not self._scenarios[scenario_id].get("metrics"):
                 await self.analyze_results(scenario_id, metrics)
             records.append(self._scenarios[scenario_id])
         names = metrics or sorted({item["name"] for record in records for item in record.get("metrics", [])})

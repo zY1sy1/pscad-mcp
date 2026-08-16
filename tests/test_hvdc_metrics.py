@@ -42,6 +42,44 @@ def test_service_compares_stored_scenario_metrics():
     assert result["comparisons"][0]["delta"] == 10.0
 
 
+def test_explicit_comparison_metrics_refresh_stale_scenario_metric_caches():
+    service = HvdcDomainService()
+    service._scenarios["a"] = {
+        "scenario_id": "a",
+        "samples": {
+            "time": [0, 1],
+            "channels": {"dc_current": [1.0, 2.0]},
+        },
+        "warnings": [],
+    }
+    service._scenarios["b"] = {
+        "scenario_id": "b",
+        "samples": {
+            "time": [0, 1],
+            "channels": {"dc_current": [1.0, 3.0]},
+        },
+        "warnings": [],
+    }
+    asyncio.run(service.analyze_results("a", ["dc_voltage_peak"]))
+    asyncio.run(service.analyze_results("b", ["dc_voltage_peak"]))
+
+    result = asyncio.run(
+        service.compare_scenarios(["a", "b"], ["dc_current_peak"])
+    )
+
+    assert result["comparisons"] == [
+        {
+            "metric": "dc_current_peak",
+            "baseline": "a",
+            "scenario_id": "b",
+            "baseline_value": 2.0,
+            "value": 3.0,
+            "delta": 1.0,
+        }
+    ]
+    assert result["verdicts"] == {"a": "PASS", "b": "PASS"}
+
+
 def test_step_response_metrics_are_bounded_and_deterministic():
     samples = {"time": [0, 1, 2, 3, 4], "channels": {"dc_current": [0, 2, 1.2, 1.01, 1.0]}}
     result = calculate_metrics(samples, ["dc_current_overshoot", "dc_current_undershoot", "dc_current_settling_time_s"])
