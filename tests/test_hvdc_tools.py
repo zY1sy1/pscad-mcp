@@ -1,5 +1,6 @@
 import json
 import pytest
+from pathlib import Path
 
 import asyncio
 
@@ -79,6 +80,20 @@ def test_profile_registration_rejects_builtin_overwrite(tmp_path):
     with pytest.raises(BackendError) as raised:
         service.register_profile("lcc_bipolar_generic", str(mapping))
     assert raised.value.code == "INVALID_ARGUMENT"
+
+
+def test_profile_registration_rejects_existing_user_profile_overwrite(tmp_path):
+    mapping = tmp_path / "custom.json"
+    mapping.write_text('{"required_assets": [], "mappings": []}', encoding="utf-8")
+    service = HvdcDomainService(path_policy=PathPolicy(workspace_root=str(tmp_path)))
+    registered = service.register_profile("existing", str(mapping))
+    persisted = Path(registered["mapping_file"])
+    original = persisted.read_bytes()
+    mapping.write_text('{"required_assets": ["breaker"], "mappings": []}', encoding="utf-8")
+    with pytest.raises(BackendError) as raised:
+        service.register_profile("existing", str(mapping))
+    assert raised.value.code == "HVDC_PROFILE_ALREADY_EXISTS"
+    assert persisted.read_bytes() == original
 
 
 def test_inspection_cache_is_scoped_by_canvas_name(tmp_path):

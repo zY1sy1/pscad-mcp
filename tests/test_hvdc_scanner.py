@@ -1,7 +1,11 @@
 import json
 from dataclasses import asdict
+from pathlib import Path
 
 from pscad_mcp.hvdc.scanner import scan_project
+
+
+REACHABLE_FIXTURE = Path(__file__).parent / "fixtures" / "hvdc" / "reachable_definitions.pscx"
 
 
 def test_scanner_extracts_definitions_components_labels_and_source(tmp_path):
@@ -77,3 +81,15 @@ def test_scanner_preserves_simplified_fixture_support(tmp_path):
     assert evidence.components[0].name == "B1"
     assert evidence.components[0].parameters == {"trip": "1"}
     assert any(item.text == "DC breaker" for item in evidence.labels)
+
+
+def test_scanner_aggregates_only_reachable_definition_schematics_with_provenance():
+    evidence = scan_project(REACHABLE_FIXTURE, canvas_name="Main")
+    by_id = {component.component_id: component for component in evidence.components}
+    assert {"1", "2", "10", "11", "12", "20"} <= set(by_id)
+    assert "99" not in by_id
+    assert by_id["10"].source.canvas_name == "BreakerBlock"
+    assert by_id["20"].source.canvas_name == "LineBlock"
+    assert {port["name"] for port in by_id["20"].ports} == {"P1", "P2"}
+    imc = next(label for label in evidence.labels if label.text == "IMC")
+    assert imc.source.canvas_name == "BreakerBlock"

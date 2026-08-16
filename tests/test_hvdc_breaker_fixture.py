@@ -7,6 +7,7 @@ from pscad_mcp.hvdc.scanner import scan_project
 
 
 FIXTURE = Path(__file__).parent / "fixtures" / "hvdc" / "difforder_new.pscx"
+REACHABLE_FIXTURE = Path(__file__).parent / "fixtures" / "hvdc" / "reachable_definitions.pscx"
 
 
 def test_breaker_fixture_contains_domain_evidence():
@@ -22,3 +23,19 @@ def test_breaker_fixture_contains_domain_evidence():
     assert {mapping.canonical for mapping in mappings.mappings if mapping.status == "observed"} >= {"dc_current", "dc_voltage", "breaker_command", "breaker_status", "protection_trip"}
     assert all(mapping.source and mapping.source.component_id for mapping in mappings.mappings if mapping.status == "observed")
     assert next(mapping for mapping in mappings.mappings if mapping.canonical == "dc_voltage").units is None
+
+
+def test_reachable_definition_evidence_resolves_current_control_and_line_interface():
+    evidence = scan_project(REACHABLE_FIXTURE)
+    assets = extract_assets(evidence)
+    line = next(asset for asset in assets if asset.kind == "dc_line" and asset.source.canvas_name == "LineBlock")
+    assert line.source.canvas_name == "LineBlock"
+    component = next(item for item in evidence.components if item.source == line.source)
+    assert {port["name"] for port in component.ports} == {"P1", "P2"}
+    mappings = resolve_mappings(evidence, load_profile("hvdc_breaker_difforder"))
+    by_name = {mapping.canonical: mapping for mapping in mappings.mappings}
+    assert by_name["dc_current"].status == "observed"
+    assert by_name["dc_current"].source.canvas_name == "BreakerBlock"
+    assert by_name["dc_current"].source.definition == "master:ammeter"
+    assert by_name["breaker_command"].status == "observed"
+    assert by_name["breaker_command"].source.canvas_name == "BreakerBlock"

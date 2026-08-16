@@ -88,6 +88,52 @@ def _canvas_scopes(root: ET.Element, canvas_name: str) -> list[ET.Element]:
     ]
 
 
+def _component_elements(scope: ET.Element) -> list[ET.Element]:
+    return [
+        element
+        for element in scope.iter()
+        if _local_name(element.tag) == "component"
+        or (
+            _local_name(element.tag) == "user"
+            and _text(element.attrib.get("classid")).casefold() == "usercmp"
+        )
+    ]
+
+
+def _scope_name(scope: ET.Element, fallback: str) -> str:
+    if _local_name(scope.tag) in {"definition", "canvas", "schematic"}:
+        return _text(scope.attrib.get("name") or scope.attrib.get("id")) or fallback
+    return fallback
+
+
+def _reachable_scopes(root: ET.Element, initial: list[ET.Element], canvas_name: str) -> list[tuple[ET.Element, str]]:
+    definitions = {
+        _text(element.attrib.get("name")).casefold(): element
+        for element in root.iter()
+        if _local_name(element.tag) == "definition" and _text(element.attrib.get("name"))
+    }
+    queue = [(scope, _scope_name(scope, canvas_name)) for scope in initial]
+    result: list[tuple[ET.Element, str]] = []
+    visited_definitions = {
+        source_name.casefold()
+        for scope, source_name in queue
+        if _local_name(scope.tag) == "definition"
+    }
+    while queue:
+        scope, source_name = queue.pop(0)
+        result.append((scope, source_name))
+        for component in _component_elements(scope):
+            reference = _text(component.attrib.get("definition") or component.attrib.get("defn") or component.attrib.get("type"))
+            local_reference = reference.rsplit(":", 1)[-1].casefold()
+            definition = definitions.get(local_reference)
+            if definition is None or local_reference in visited_definitions:
+                continue
+            visited_definitions.add(local_reference)
+            definition_name = _text(definition.attrib.get("name"))
+            queue.append((definition, definition_name))
+    return result
+
+
 def scan_project(path: str | Path, canvas_name: str = "Main") -> HvdcProjectEvidence:
     project_path = Path(path).expanduser().resolve()
     warnings: list[str] = []
@@ -111,19 +157,12 @@ def scan_project(path: str | Path, canvas_name: str = "Main") -> HvdcProjectEvid
     canvases = _canvas_scopes(root, canvas_name)
     if not canvases:
         warnings.append(f"Canvas '{canvas_name}' was not found.")
+    scopes = _reachable_scopes(root, canvases, canvas_name)
 
     components: list[HvdcComponentRecord] = []
     labels: list[HvdcLabelRecord] = []
-    for canvas in canvases:
-        component_elements = [
-            element
-            for element in canvas.iter()
-            if _local_name(element.tag) == "component"
-            or (
-                _local_name(element.tag) == "user"
-                and _text(element.attrib.get("classid")).casefold() == "usercmp"
-            )
-        ]
+    for canvas, source_canvas_name in scopes:
+        component_elements = _component_elements(canvas)
         component_label_elements: set[int] = set()
         for element in component_elements:
             component_id = _text(element.attrib.get("id") or element.attrib.get("ID")) or str(len(components) + 1)
@@ -141,7 +180,7 @@ def scan_project(path: str | Path, canvas_name: str = "Main") -> HvdcProjectEvid
                     value = _label_value(child)
                     if value:
                         local_labels.append(value)
-            source = HvdcSourceRef(str(project_path), canvas_name, component_id, definition)
+            source = HvdcSourceRef(str(project_path), source_canvas_name, component_id, definition)
             components.append(
                 HvdcComponentRecord(
                     component_id,
@@ -157,7 +196,7 @@ def scan_project(path: str | Path, canvas_name: str = "Main") -> HvdcProjectEvid
                 HvdcLabelRecord(
                     value,
                     "component",
-                    HvdcSourceRef(str(project_path), canvas_name, component_id, definition, label=value),
+                    HvdcSourceRef(str(project_path), source_canvas_name, component_id, definition, label=value),
                 )
                 for value in dict.fromkeys(local_labels)
             )
@@ -168,7 +207,7 @@ def scan_project(path: str | Path, canvas_name: str = "Main") -> HvdcProjectEvid
                         HvdcLabelRecord(
                             value,
                             "datalabel",
-                            HvdcSourceRef(str(project_path), canvas_name, component_id, definition, label=value),
+                            HvdcSourceRef(str(project_path), source_canvas_name, component_id, definition, label=value),
                         )
                     )
         for element in canvas.iter():
@@ -177,11 +216,11 @@ def scan_project(path: str | Path, canvas_name: str = "Main") -> HvdcProjectEvid
             if _local_name(element.tag) in {"label", "annotation", "datalabel", "nodelabel"}:
                 value = _label_value(element)
                 if value:
-                    labels.append(HvdcLabelRecord(value, _local_name(element.tag), HvdcSourceRef(str(project_path), canvas_name, label=value)))
+                    labels.append(HvdcLabelRecord(value, _local_name(element.tag), HvdcSourceRef(str(project_path), source_canvas_name, label=value)))
             elif _local_name(element.tag) == "text":
                 value = _label_value(element)
                 if value:
-                    labels.append(HvdcLabelRecord(value, "text", HvdcSourceRef(str(project_path), canvas_name, label=value)))
+                    labels.append(HvdcLabelRecord(value, "text", HvdcSourceRef(str(project_path), source_canvas_name, label=value)))
 
     return HvdcProjectEvidence(
         project_path=str(project_path),

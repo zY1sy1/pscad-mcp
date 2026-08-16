@@ -42,6 +42,14 @@ def _alias_matches(text: str, alias: str) -> bool:
 def _component_kinds(component: HvdcComponentRecord) -> frozenset[str]:
     value = f"{component.name} {component.definition}".casefold()
     kinds = {"parameter"}
+    if "ammeter" in value:
+        kinds.add("ammeter")
+    if "voltmeter" in value:
+        kinds.add("voltmeter")
+    if "multimeter" in value:
+        kinds.add("multimeter")
+    if "master:pgb" in value:
+        kinds.add("graph")
     if any(token in value for token in ("ammeter", "voltmeter", "multimeter", "meter", "master:pgb")):
         kinds.update(("meter", "measurement"))
     if any(token in value for token in ("controller", "control", "ctrl", "command", "order", "master:const", "master:import", "master:export")):

@@ -46,8 +46,8 @@ _BUILTIN_PROFILES: dict[str, dict[str, Any]] = {
         "extends": "lcc_bipolar_generic",
         "required_assets": ["rectifier", "inverter", "pole", "breaker", "dc_line"],
         "mappings": [
-            {"canonical": "dc_voltage", "aliases": ["UMC", "VDCL", "VDCp1", "VDCp2", "VDCIp1", "VDCIp2", "VDCRp1", "VDCRp2"], "source_kinds": ["datalabel", "meter"], "unit_family": "voltage", "direction": "measurement", "units": None},
-            {"canonical": "dc_current", "aliases": ["IMC"], "source_kinds": ["datalabel", "meter"], "unit_family": "current", "direction": "measurement", "units": "kA"},
+            {"canonical": "dc_voltage", "aliases": ["UMC", "VDCL", "VDCp1", "VDCp2", "VDCIp1", "VDCIp2", "VDCRp1", "VDCRp2"], "source_kinds": ["voltmeter"], "unit_family": "voltage", "direction": "measurement", "units": None},
+            {"canonical": "dc_current", "aliases": ["IMC"], "source_kinds": ["ammeter"], "unit_family": "current", "direction": "measurement", "units": "kA"},
             {"canonical": "current_order", "aliases": ["Rectifier Current Order"], "source_kinds": ["datalabel", "control"], "unit_family": "current", "direction": "command", "units": None},
             {"canonical": "breaker_command", "aliases": ["BrkOrd1"], "source_kinds": ["datalabel", "control"], "unit_family": "boolean", "direction": "command", "units": None},
             {"canonical": "breaker_status", "aliases": ["BRK1"], "source_kinds": ["datalabel", "measurement"], "unit_family": "boolean", "direction": "measurement", "units": None},
@@ -58,12 +58,22 @@ _BUILTIN_PROFILES: dict[str, dict[str, Any]] = {
 
 
 _PROFILE_NAME = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
-_SOURCE_KINDS = {"label", "datalabel", "text", "meter", "measurement", "control", "parameter"}
+_SOURCE_KINDS = {"label", "datalabel", "text", "meter", "ammeter", "voltmeter", "multimeter", "graph", "measurement", "control", "parameter"}
 _USER_PROFILE_FILES: dict[str, Path] = {}
 
 
 def _invalid(message: str, name: str) -> BackendError:
     return BackendError("INVALID_ARGUMENT", message, "hvdc", "register_hvdc_profile", {"profile": name})
+
+
+def _already_exists(name: str, destination: Path) -> BackendError:
+    return BackendError(
+        "HVDC_PROFILE_ALREADY_EXISTS",
+        f"User HVDC profile '{name}' already exists and cannot be overwritten.",
+        "hvdc",
+        "register_hvdc_profile",
+        {"profile": name, "path": str(destination)},
+    )
 
 
 def _validate_name(name: str) -> None:
@@ -174,15 +184,17 @@ def register_profile(name: str, mapping_file: str, *, workspace_root: str | Path
     root = _workspace_root(workspace_root)
     if root is None:
         raise _invalid("A configured workspace is required for user-scoped profile registration.", name)
-    profile = load_profile(name, mapping_file)
-    parent = profile.get("extends")
-    if parent:
-        load_profile(parent, workspace_root=root)
     destination = _profile_path(name, root)
     assert destination is not None
     destination = destination.resolve()
     if destination != root and root not in destination.parents:
         raise _invalid("User profile destination escapes the configured workspace.", name)
+    if destination.exists():
+        raise _already_exists(name, destination)
+    profile = load_profile(name, mapping_file)
+    parent = profile.get("extends")
+    if parent:
+        load_profile(parent, workspace_root=root)
     destination.parent.mkdir(parents=True, exist_ok=True)
     payload = json.dumps(profile, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
     temporary_name: str | None = None
@@ -192,7 +204,10 @@ def register_profile(name: str, mapping_file: str, *, workspace_root: str | Path
             temporary.flush()
             os.fsync(temporary.fileno())
             temporary_name = temporary.name
-        os.replace(temporary_name, destination)
+        try:
+            os.link(temporary_name, destination)
+        except FileExistsError as error:
+            raise _already_exists(name, destination) from error
     finally:
         if temporary_name and Path(temporary_name).exists():
             Path(temporary_name).unlink()

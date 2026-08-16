@@ -98,3 +98,18 @@ def test_duplicate_text_candidates_from_one_parameter_are_one_source(tmp_path):
     result = resolve_mappings(scan_project(path), profile)
     assert result.conflicts == ()
     assert result.mappings[0].status == "observed"
+
+
+def test_specialized_meter_source_kind_selects_physical_meter(tmp_path):
+    path = tmp_path / "case.pscx"
+    path.write_text(
+        "<project><canvas name='Main'>"
+        "<component id='1' name='master:datalabel' definition='master:datalabel'><parameter name='Name' value='IMC'/></component>"
+        "<component id='2' name='master:ammeter' definition='master:ammeter'><parameter name='Name' value='IMC'/></component>"
+        "</canvas></project>",
+        encoding="utf-8",
+    )
+    profile = {"mappings": [{"canonical": "dc_current", "aliases": ["IMC"], "source_kinds": ["ammeter"]}]}
+    result = resolve_mappings(scan_project(path), profile)
+    assert result.mappings[0].status == "observed"
+    assert result.mappings[0].source.component_id == "2"

@@ -23,6 +23,8 @@
         <User classid="UserCmp" id="18" name="master:datalabel" defn="master:datalabel"><paramlist><param name="Name" value="BrkOrd1" /></paramlist></User>
         <User classid="UserCmp" id="19" name="master:datalabel" defn="master:datalabel"><paramlist><param name="Name" value="BRK1" /></paramlist></User>
         <User classid="UserCmp" id="20" name="master:datalabel" defn="master:datalabel"><paramlist><param name="Name" value="protection trip" /></paramlist></User>
+        <User classid="UserCmp" id="21" name="master:ammeter" defn="master:ammeter"><paramlist><param name="Name" value="IMC" /></paramlist></User>
+        <User classid="UserCmp" id="22" name="master:voltmeter" defn="master:voltmeter"><paramlist><param name="Name" value="UMC" /></paramlist></User>
         <text>DC breaker protection</text>
       </schematic>
     </Definition>
