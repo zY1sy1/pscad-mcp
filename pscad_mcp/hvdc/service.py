@@ -24,6 +24,36 @@ class HvdcDomainService:
         self._cache: dict[tuple[str, str], tuple[int, dict[str, Any]]] = {}
         self._scenarios: dict[str, dict[str, Any]] = {}
         self._scenario_tasks: dict[str, asyncio.Task[None]] = {}
+        self._scenario_run_tasks: dict[str, asyncio.Task[Any]] = {}
+        self._scenario_reservation_lock = asyncio.Lock()
+        self._active_scenario_id: str | None = None
+
+    async def _reserve_scenario(self, scenario_id: str) -> None:
+        async with self._scenario_reservation_lock:
+            if self._active_scenario_id is not None:
+                active = self._scenarios.get(self._active_scenario_id, {})
+                raise BackendError(
+                    "HVDC_SCENARIO_CONFLICT",
+                    "Only one application-wide HVDC scenario may be active at a time.",
+                    "hvdc",
+                    "run_hvdc_scenario",
+                    {
+                        "active_scenario_id": self._active_scenario_id,
+                        "active_status": active.get("status"),
+                        "active_outcome": active.get("outcome"),
+                    },
+                )
+            self._active_scenario_id = scenario_id
+
+    async def _release_scenario(self, scenario_id: str) -> bool:
+        async with self._scenario_reservation_lock:
+            if self._active_scenario_id != scenario_id:
+                return False
+            self._active_scenario_id = None
+            record = self._scenarios.get(scenario_id)
+            if record is not None:
+                record["reservation_held"] = False
+            return True
 
     def _workspace_root(self) -> Path | None:
         root = getattr(self.path_policy, "workspace_root", None)
@@ -211,6 +241,18 @@ class HvdcDomainService:
                         status = str(project_status.get("status", "")).casefold()
                         task = self._scenario_tasks.get(scenario_id)
                         orchestration_active = task is not None and not task.done()
+                        if (
+                            not orchestration_active
+                            and record.get("outcome") == "needs_review"
+                            and status in {"completed", "complete", "finished", "done", "idle", "stopped", "failed", "error", "aborted"}
+                        ):
+                            record["containment"] = {
+                                "status": "contained",
+                                "project_status": dict(project_status),
+                                "confirmed_by": "get_hvdc_scenario_status",
+                            }
+                            record["outcome"] = "contained_after_status_refresh"
+                            await self._release_scenario(scenario_id)
                         if not orchestration_active and record.get("status") in {"validated", "running"}:
                             if status in {"completed", "complete", "finished", "done", "idle", "stopped"}:
                                 from .scenarios import transition_scenario

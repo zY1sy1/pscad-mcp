@@ -31,6 +31,9 @@ class ScenarioBackend:
     async def set_component_parameters(self, project_name, component_id, values):
         self.calls.append(("set", project_name, component_id, values))
 
+    async def get_run_status(self, project_name):
+        return {"status": "completed", "progress": 100.0}
+
 
 async def _wait_for_terminal(service, scenario_id, timeout=0.5):
     deadline = asyncio.get_running_loop().time() + timeout
@@ -299,7 +302,12 @@ def test_run_timeout_must_be_finite_positive_and_bounded(timeout_s):
 def test_timed_events_run_in_background_without_blocking_the_start_call(tmp_path):
     source = tmp_path / "case.pscx"
     _write_command_project(source)
-    backend = ScenarioBackend()
+    class TimedBackend(ScenarioBackend):
+        async def get_run_status(self, project_name):
+            delivered = any(call[0] == "set" for call in self.calls)
+            return {"status": "completed" if delivered else "running", "progress": 100.0 if delivered else None}
+
+    backend = TimedBackend()
     service = HvdcDomainService(backend, path_policy=PathPolicy(workspace_root=str(tmp_path)))
     scenario = {
         "name": "timed",
@@ -366,6 +374,7 @@ def test_backend_error_is_structured_and_preserves_partial_completion(tmp_path):
         "applied_parameter_changes": [],
         "applied_events": [],
         "run_started": False,
+        "run_command_dispatched": False,
     }
 
 
@@ -541,11 +550,22 @@ def test_failed_run_captures_outputs_produced_before_event_failure(tmp_path):
     output.write_text("partial result", encoding="utf-8")
 
     class PartialBackend(ScenarioBackend):
+        def __init__(self):
+            super().__init__()
+            self.stopped = False
+
         async def set_component_parameters(self, project_name, component_id, values):
             raise BackendError("EVENT_FAILED", "event rejected", "fake", "set_component_parameters")
 
         async def list_output_files(self, project_name):
             return [str(output)]
+
+        async def get_run_status(self, project_name):
+            return {"status": "stopped" if self.stopped else "running", "progress": None}
+
+        async def stop_simulation(self, project_name):
+            self.stopped = True
+            return "stopped"
 
     service = HvdcDomainService(PartialBackend(), path_policy=PathPolicy(workspace_root=str(tmp_path)))
     scenario = {

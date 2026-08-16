@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 import asyncio
 import os
+import time
 from collections.abc import Mapping
 from datetime import datetime, timezone
 from pathlib import Path
@@ -246,17 +247,24 @@ def _serialize_execution_error(error: BaseException) -> dict[str, Any]:
     ).to_dict()
 
 
-async def _wait_for_project_terminal(backend: Any, target_project: str) -> None:
+async def _get_project_status(backend: Any, target_project: str) -> dict[str, Any] | None:
     get_status = getattr(backend, "get_run_status", None)
     if not callable(get_status):
-        return
+        return None
+    state = await get_status(target_project)
+    return dict(state) if isinstance(state, Mapping) else None
+
+
+async def _wait_for_project_terminal(backend: Any, target_project: str) -> dict[str, Any] | None:
+    if not callable(getattr(backend, "get_run_status", None)):
+        return None
     while True:
-        state = await get_status(target_project)
-        if not isinstance(state, Mapping):
-            return
+        state = await _get_project_status(backend, target_project)
+        if state is None:
+            return None
         status = str(state.get("status", "")).casefold()
         if status in _TERMINAL_PROJECT_STATUSES:
-            return
+            return state
         if status in _FAILED_PROJECT_STATUSES:
             raise BackendError(
                 "HVDC_SCENARIO_RUN_FAILED",
@@ -268,15 +276,70 @@ async def _wait_for_project_terminal(backend: Any, target_project: str) -> None:
         await asyncio.sleep(0.1)
 
 
-async def _capture_outputs(service: Any, record: dict[str, Any]) -> None:
+async def _attempt_containment(
+    service: Any,
+    record: dict[str, Any],
+    *,
+    timeout_s: float,
+) -> bool:
     backend = service.backend_service
-    discover = None
-    for name in ("list_output_files", "discover_output_files", "get_output_files"):
+    target_project = record["target_project"]
+    stop = None
+    stop_name = None
+    for name in ("stop_simulation", "stop_project"):
         candidate = getattr(backend, name, None)
         if callable(candidate):
-            discover = candidate
+            stop = candidate
+            stop_name = name
             break
-    if discover is None:
+    containment_timeout = min(5.0, max(0.25, timeout_s))
+    stop_record: dict[str, Any] = {"attempted": stop is not None, "operation": stop_name}
+    if stop is not None:
+        try:
+            result = await asyncio.wait_for(stop(target_project), timeout=containment_timeout)
+            stop_record["result"] = result if isinstance(result, (str, int, float, bool, dict, list, type(None))) else str(result)
+        except Exception as error:
+            stop_record["error"] = _serialize_execution_error(error)
+    record["containment"] = {"status": "unknown", "stop": stop_record}
+    get_status = getattr(backend, "get_run_status", None)
+    if not callable(get_status):
+        return False
+    deadline = asyncio.get_running_loop().time() + containment_timeout
+    while True:
+        try:
+            state = await asyncio.wait_for(
+                _get_project_status(backend, target_project),
+                timeout=max(0.01, deadline - asyncio.get_running_loop().time()),
+            )
+        except Exception as error:
+            record["containment"]["status_error"] = _serialize_execution_error(error)
+            return False
+        if state is not None:
+            record["project_status"] = state
+            status = str(state.get("status", "")).casefold()
+            if status in _TERMINAL_PROJECT_STATUSES | _FAILED_PROJECT_STATUSES:
+                record["containment"] = {
+                    "status": "contained",
+                    "stop": stop_record,
+                    "project_status": state,
+                }
+                return True
+        if asyncio.get_running_loop().time() >= deadline:
+            return False
+        await asyncio.sleep(0.05)
+
+
+async def _capture_outputs(service: Any, record: dict[str, Any]) -> None:
+    backend = service.backend_service
+    discover = getattr(backend, "discover_output_files", None)
+    legacy_discover = None
+    if not callable(discover):
+        for name in ("list_output_files", "get_output_files"):
+            candidate = getattr(backend, name, None)
+            if callable(candidate):
+                legacy_discover = candidate
+                break
+    if not callable(discover) and legacy_discover is None:
         record["output_discovery"] = "unavailable"
         record["warnings"].append(
             {
@@ -287,7 +350,15 @@ async def _capture_outputs(service: Any, record: dict[str, Any]) -> None:
         )
         return
     try:
-        discovered = await discover(record["target_project"])
+        if callable(discover):
+            discovered = await discover(
+                record["target_project"],
+                started_after=float(record["run_started_at_epoch"]),
+            )
+            record["output_discovery"] = "service"
+        else:
+            discovered = await legacy_discover(record["target_project"])
+            record["output_discovery"] = "backend"
         if not isinstance(discovered, (list, tuple)):
             raise TypeError("output discovery must return a list of file paths")
         validated = list(record["output_files"])
@@ -296,7 +367,6 @@ async def _capture_outputs(service: Any, record: dict[str, Any]) -> None:
             if resolved not in validated:
                 validated.append(resolved)
         record["output_files"] = validated
-        record["output_discovery"] = "backend"
     except Exception as error:
         warning: dict[str, Any] = {
             "code": "OUTPUT_DISCOVERY_FAILED",
@@ -322,25 +392,91 @@ async def _orchestrate_scenario(service: Any, record: dict[str, Any], normalized
         )
         record["partial_completion"]["applied_parameter_changes"].append(dict(change))
     run = normalized.get("run", {}) or {}
+    run_started = asyncio.get_running_loop().time()
+    record["run_started_at_epoch"] = time.time()
+    record["partial_completion"]["run_command_dispatched"] = True
     if run.get("simulation_set"):
-        await backend.run_simulation_set(target_project, str(run["simulation_set"]))
+        run_task = asyncio.create_task(
+            backend.run_simulation_set(target_project, str(run["simulation_set"])),
+            name=f"{record['scenario_id']}-run",
+        )
     else:
-        await backend.run_project(target_project)
-    record["partial_completion"]["run_started"] = True
+        run_task = asyncio.create_task(
+            backend.run_project(target_project),
+            name=f"{record['scenario_id']}-run",
+        )
+    scenario_id = record["scenario_id"]
+    service._scenario_run_tasks[scenario_id] = run_task
+
+    def _forget_run(completed: asyncio.Task[Any]) -> None:
+        if service._scenario_run_tasks.get(scenario_id) is completed:
+            service._scenario_run_tasks.pop(scenario_id, None)
+        if not completed.cancelled():
+            completed.exception()
+
+    run_task.add_done_callback(_forget_run)
+    await asyncio.sleep(0)
+    record["partial_completion"]["run_started"] = "unknown"
     try:
-        previous_time = 0.0
         for event in sorted(normalized.get("events", []), key=lambda item: float(item["time_s"])):
             event_time = float(event["time_s"])
-            await asyncio.sleep(max(0.0, event_time - previous_time))
+            elapsed = asyncio.get_running_loop().time() - run_started
+            await asyncio.sleep(max(0.0, event_time - elapsed))
+            if run_task.done():
+                await asyncio.shield(run_task)
+                state = await _get_project_status(backend, target_project)
+                if state is None:
+                    raise BackendError(
+                        "HVDC_RUN_STATE_UNKNOWN",
+                        "The run command returned before a timed event, but project state is unavailable.",
+                        "hvdc",
+                        "run_hvdc_scenario",
+                        {"target": event.get("target"), "time_s": event_time},
+                    )
+                record["project_status"] = state
+                status = str(state.get("status", "")).casefold()
+                if status in _FAILED_PROJECT_STATUSES:
+                    raise BackendError(
+                        "HVDC_SCENARIO_RUN_FAILED",
+                        f"PSCAD project '{target_project}' reported terminal status '{status}'.",
+                        "hvdc",
+                        "run_hvdc_scenario",
+                        {"project_name": target_project, "project_status": state},
+                    )
+                if status in _TERMINAL_PROJECT_STATUSES:
+                    raise BackendError(
+                        "HVDC_EVENT_WINDOW_MISSED",
+                        "The PSCAD run reached a terminal state before a timed event could be applied.",
+                        "hvdc",
+                        "run_hvdc_scenario",
+                        {"target": event.get("target"), "time_s": event_time, "project_status": state},
+                    )
+                record["partial_completion"]["run_started"] = True
             await backend.set_component_parameters(
                 target_project,
                 int(event["component_id"]),
                 {str(event["parameter_name"]): event.get("value")},
             )
             record["partial_completion"]["applied_events"].append(dict(event))
-            previous_time = event_time
-        await _wait_for_project_terminal(backend, target_project)
+        # Keep cancellation of the bounded scenario worker separate from the
+        # vendor run command. Some vendor calls do not acknowledge task
+        # cancellation until an explicit stop command is issued; the worker
+        # must regain control promptly so it can perform that containment.
+        await asyncio.shield(run_task)
+        terminal = await _wait_for_project_terminal(backend, target_project)
+        if terminal is None:
+            raise BackendError(
+                "HVDC_RUN_STATE_UNKNOWN",
+                "The backend cannot confirm that the PSCAD run reached a terminal state.",
+                "hvdc",
+                "run_hvdc_scenario",
+                {"project_name": target_project},
+            )
+        record["project_status"] = terminal
+        record["partial_completion"]["run_started"] = True
     except asyncio.CancelledError:
+        if not run_task.done():
+            run_task.cancel()
         record["warnings"].append(
             {
                 "code": "OUTPUT_DISCOVERY_SKIPPED",
@@ -351,6 +487,8 @@ async def _orchestrate_scenario(service: Any, record: dict[str, Any], normalized
         record["output_discovery"] = "skipped"
         raise
     except Exception:
+        if not run_task.done():
+            run_task.cancel()
         await _capture_outputs(service, record)
         raise
     else:
@@ -358,6 +496,7 @@ async def _orchestrate_scenario(service: Any, record: dict[str, Any], normalized
 
 
 async def _scenario_worker(service: Any, record: dict[str, Any], normalized: dict[str, Any], timeout_s: float) -> None:
+    release_reservation = False
     try:
         await asyncio.wait_for(_orchestrate_scenario(service, record, normalized), timeout=timeout_s)
     except asyncio.TimeoutError:
@@ -368,7 +507,10 @@ async def _scenario_worker(service: Any, record: dict[str, Any], normalized: dic
             "run_hvdc_scenario",
             {"scenario_id": record["scenario_id"], "timeout_s": timeout_s},
         ).to_dict()
+        contained = await _attempt_containment(service, record, timeout_s=timeout_s)
+        record["outcome"] = "timed_out_contained" if contained else "needs_review"
         transition_scenario(record, "timed_out")
+        release_reservation = contained
     except asyncio.CancelledError:
         record["error"] = BackendError(
             "HVDC_SCENARIO_CANCELLED",
@@ -377,12 +519,29 @@ async def _scenario_worker(service: Any, record: dict[str, Any], normalized: dic
             "run_hvdc_scenario",
             {"scenario_id": record["scenario_id"]},
         ).to_dict()
+        contained = await _attempt_containment(service, record, timeout_s=timeout_s)
+        record["outcome"] = "cancelled_contained" if contained else "needs_review"
         transition_scenario(record, "failed")
+        release_reservation = contained
     except Exception as error:
         record["error"] = _serialize_execution_error(error)
+        if record["partial_completion"].get("run_command_dispatched"):
+            contained = await _attempt_containment(service, record, timeout_s=timeout_s)
+            record["outcome"] = "failed_contained" if contained else "needs_review"
+            release_reservation = contained
+        else:
+            record["containment"] = {"status": "not_required"}
+            record["outcome"] = "failed"
+            release_reservation = True
         transition_scenario(record, "failed")
     else:
+        record["containment"] = {"status": "terminal", "project_status": record.get("project_status")}
+        record["outcome"] = "completed"
         transition_scenario(record, "completed")
+        release_reservation = True
+    finally:
+        if release_reservation:
+            await service._release_scenario(record["scenario_id"])
 
 
 async def run_scenario(
@@ -409,14 +568,29 @@ async def run_scenario(
         raise BackendError("HVDC_CAPABILITY_UNAVAILABLE", "Mutating scenarios require a pre-existing derived_project; source projects are read-only inputs.", "hvdc", "run_hvdc_scenario", {"project": project_name, "suggested_action": "Create a confirmed derived project with existing generic PSCAD tools, then pass derived_project."})
     if mutating:
         _bind_approved_commands(service, project_name, normalized, workspace_root)
-        target_project = await _resolve_target_project(service, project_name, str(normalized["derived_project"]))
-    elif _is_path_like(target_project):
-        target_project = str(service._resolve_mutation_project(target_project))
-    explicit_outputs = [
-        str(service._resolve_output_file(file_path, must_exist=False))
-        for file_path in normalized.get("output_files", [])
-    ]
     scenario_id = f"hvdc-{uuid4().hex}"
+    await service._reserve_scenario(scenario_id)
+    try:
+        if mutating:
+            target_project = await _resolve_target_project(service, project_name, str(normalized["derived_project"]))
+        elif _is_path_like(target_project):
+            target_project = str(service._resolve_mutation_project(target_project))
+        explicit_outputs = [
+            str(service._resolve_output_file(file_path, must_exist=False))
+            for file_path in normalized.get("output_files", [])
+        ]
+        backend = getattr(service, "backend_service", None)
+        if backend is None:
+            raise BackendError(
+                "HVDC_CAPABILITY_UNAVAILABLE",
+                "Scenario execution requires a connected PSCAD backend service.",
+                "hvdc",
+                "run_hvdc_scenario",
+                {"project_name": target_project},
+            )
+    except BaseException:
+        await service._release_scenario(scenario_id)
+        raise
     created_at = _utc_now()
     record: dict[str, Any] = {
         "scenario_id": scenario_id,
@@ -425,6 +599,9 @@ async def run_scenario(
         "name": normalized["name"],
         "profile": normalized["profile"],
         "status": "validated",
+        "outcome": "pending",
+        "containment": {"status": "pending"},
+        "reservation_held": True,
         "changed_parameters": list(normalized.get("parameter_changes", [])),
         "events": list(normalized.get("events", [])),
         "output_files": explicit_outputs,
@@ -438,27 +615,23 @@ async def run_scenario(
             "applied_parameter_changes": [],
             "applied_events": [],
             "run_started": False,
+            "run_command_dispatched": False,
         },
         "created_at": created_at,
         "status_history": [{"status": "validated", "at": created_at}],
     }
     service._scenarios[scenario_id] = record
-    backend = getattr(service, "backend_service", None)
-    if backend is None:
-        service._scenarios.pop(scenario_id, None)
-        raise BackendError(
-            "HVDC_CAPABILITY_UNAVAILABLE",
-            "Scenario execution requires a connected PSCAD backend service.",
-            "hvdc",
-            "run_hvdc_scenario",
-            {"project_name": target_project},
-        )
     timeout_s = float((normalized.get("run") or {}).get("timeout_s", 300))
-    task = asyncio.create_task(
-        _scenario_worker(service, record, normalized, timeout_s),
-        name=f"hvdc-scenario-{scenario_id}",
-    )
-    service._scenario_tasks[scenario_id] = task
+    try:
+        task = asyncio.create_task(
+            _scenario_worker(service, record, normalized, timeout_s),
+            name=f"hvdc-scenario-{scenario_id}",
+        )
+        service._scenario_tasks[scenario_id] = task
+    except BaseException:
+        service._scenarios.pop(scenario_id, None)
+        await service._release_scenario(scenario_id)
+        raise
 
     def _forget(completed: asyncio.Task[None]) -> None:
         if service._scenario_tasks.get(scenario_id) is completed:
