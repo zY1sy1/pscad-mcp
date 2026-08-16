@@ -70,7 +70,7 @@ def test_bound_event_is_applied_after_run_starts():
             self.calls.append(("set", project_name, component_id, values))
     backend = Backend()
     service = HvdcDomainService(backend)
-    scenario = {"name": "trip", "profile": "hvdc_breaker_difforder", "project": "case", "parameter_changes": [], "events": [{"time_s": 0.0, "target": "breaker_command", "component_id": 2, "parameter_name": "Command", "value": 1}]}
+    scenario = {"name": "trip", "profile": "hvdc_breaker_difforder", "project": "case", "derived_project": "case_derived", "parameter_changes": [], "events": [{"time_s": 0.0, "target": "breaker_command", "component_id": 2, "parameter_name": "Command", "value": 1}]}
     result = asyncio.run(service.run_scenario("case", scenario, confirm=True))
     assert result["status"] == "running"
-    assert backend.calls == [("run", "case"), ("set", "case", 2, {"Command": 1})]
+    assert backend.calls == [("run", "case_derived"), ("set", "case_derived", 2, {"Command": 1})]

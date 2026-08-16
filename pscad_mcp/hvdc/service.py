@@ -113,7 +113,7 @@ class HvdcDomainService:
         if profile == "auto":
             profile_name = "hvdc_breaker_difforder" if any(item["kind"] == "breaker" for item in result["assets"]) else "lcc_bipolar_generic"
         loaded = load_profile(profile_name)
-        if profile_name != "auto" and not result["mappings"]:
+        if profile_name != "auto":
             evidence = scan_project(self._resolve_project(project_name), canvas_name)
             resolution = resolve_mappings(evidence, loaded)
             result = dict(result)

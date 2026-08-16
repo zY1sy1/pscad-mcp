@@ -65,7 +65,28 @@ def validate_scenario(scenario: Mapping[str, Any]) -> dict[str, Any]:
 
 
 async def run_scenario(service: Any, project_name: str, scenario: Mapping[str, Any], *, confirm: bool = False) -> dict[str, Any]:
-    validation = validate_scenario(scenario)
+    normalized: dict[str, Any] = dict(scenario)
+    for field in ("parameter_changes", "events"):
+        raw = scenario.get(field, [])
+        normalized[field] = [dict(item) if isinstance(item, Mapping) else item for item in raw] if isinstance(raw, list) else raw
+    try:
+        inspection = service.inspect_project(project_name)
+        observed = {
+            mapping["canonical"]: mapping["source"]
+            for mapping in inspection.get("mappings", [])
+            if mapping.get("status") == "observed" and mapping.get("source", {}).get("component_id") and mapping.get("source", {}).get("parameter_name")
+        }
+        for field in ("parameter_changes", "events"):
+            for item in normalized[field]:
+                source = observed.get(item.get("target"))
+                if source:
+                    item.setdefault("component_id", source["component_id"])
+                    item.setdefault("parameter_name", source["parameter_name"])
+    except Exception:
+        # A loaded PSCAD project may not have a source file available for
+        # inspection; explicit component bindings remain mandatory then.
+        pass
+    validation = validate_scenario(normalized)
     if not validation["valid"]:
         first = validation["errors"][0]
         raise BackendError(first["code"], first["message"], "hvdc", "run_hvdc_scenario", {key: value for key, value in first.items() if key not in {"code", "message"}})
@@ -75,11 +96,11 @@ async def run_scenario(service: Any, project_name: str, scenario: Mapping[str, A
         for index, event in enumerate(scenario.get(field, [])):
             if not event.get("component_id") or not event.get("parameter_name"):
                 raise BackendError("HVDC_CAPABILITY_UNAVAILABLE", f"Scenario target '{event.get('target')}' is not bound to an existing component parameter.", "hvdc", "run_hvdc_scenario", {"target": event.get("target"), "field": field, "index": index, "suggested_action": "Provide component_id and parameter_name for an existing mapped control."})
-    mutating = bool(scenario.get("parameter_changes") or scenario.get("events"))
-    target_project = str(scenario.get("derived_project") or project_name)
-    if mutating and not scenario.get("derived_project") and Path(project_name).suffix.lower() == ".pscx":
-        raise BackendError("HVDC_CAPABILITY_UNAVAILABLE", "Mutating scenarios require a pre-existing derived_project; source PSCX files are read-only inputs.", "hvdc", "run_hvdc_scenario", {"project": project_name, "suggested_action": "Create a confirmed derived project with existing generic PSCAD tools, then pass derived_project."})
-    if scenario.get("derived_project") and Path(target_project).suffix.lower() == ".pscx":
+    mutating = bool(normalized.get("parameter_changes") or normalized.get("events"))
+    target_project = str(normalized.get("derived_project") or project_name)
+    if mutating and not normalized.get("derived_project"):
+        raise BackendError("HVDC_CAPABILITY_UNAVAILABLE", "Mutating scenarios require a pre-existing derived_project; source projects are read-only inputs.", "hvdc", "run_hvdc_scenario", {"project": project_name, "suggested_action": "Create a confirmed derived project with existing generic PSCAD tools, then pass derived_project."})
+    if normalized.get("derived_project") and Path(target_project).suffix.lower() == ".pscx":
         try:
             service._resolve_mutation_project(target_project)
         except BackendError:
@@ -89,12 +110,12 @@ async def run_scenario(service: Any, project_name: str, scenario: Mapping[str, A
         "scenario_id": scenario_id,
         "project_name": project_name,
         "target_project": target_project,
-        "name": scenario["name"],
-        "profile": scenario["profile"],
+        "name": normalized["name"],
+        "profile": normalized["profile"],
         "status": "validated",
-        "changed_parameters": list(scenario.get("parameter_changes", [])),
-        "events": list(scenario.get("events", [])),
-        "output_files": list(scenario.get("output_files", [])),
+        "changed_parameters": list(normalized.get("parameter_changes", [])),
+        "events": list(normalized.get("events", [])),
+        "output_files": list(normalized.get("output_files", [])),
         "resolved_channels": [],
         "metrics": [],
         "warnings": [],
@@ -106,20 +127,20 @@ async def run_scenario(service: Any, project_name: str, scenario: Mapping[str, A
         record["status"] = "planned"
         return {"scenario_id": scenario_id, **record}
     try:
-        for change in scenario.get("parameter_changes", []):
+        for change in normalized.get("parameter_changes", []):
             component_id = change.get("component_id")
             parameter_name = change.get("parameter_name")
             if component_id is None or not parameter_name:
                 record["warnings"].append(f"Parameter change '{change.get('target')}' has no component_id/parameter_name and was not applied.")
                 continue
             await backend.set_component_parameters(target_project, int(component_id), {str(parameter_name): change.get("value")})
-        run = scenario.get("run", {}) or {}
+        run = normalized.get("run", {}) or {}
         if run.get("simulation_set"):
             await backend.run_simulation_set(target_project, str(run["simulation_set"]))
         else:
             await backend.run_project(target_project)
         previous_time = 0.0
-        for event in sorted(scenario.get("events", []), key=lambda item: float(item["time_s"])):
+        for event in sorted(normalized.get("events", []), key=lambda item: float(item["time_s"])):
             event_time = float(event["time_s"])
             await asyncio.sleep(max(0.0, event_time - previous_time))
             await backend.set_component_parameters(target_project, int(event["component_id"]), {str(event["parameter_name"]): event.get("value")})

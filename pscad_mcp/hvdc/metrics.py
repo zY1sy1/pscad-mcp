@@ -72,6 +72,22 @@ def calculate_metrics(samples: dict[str, Any], metrics: list[str] | None = None)
     requested = metrics or ["dc_voltage_peak", "dc_current_peak", "dc_power"]
     result: list[dict[str, Any]] = []
     for name in requested:
+        if name in {"voltage_imbalance", "current_imbalance", "pole_imbalance"}:
+            prefix = "dc_voltage" if name == "voltage_imbalance" else "dc_current"
+            positive, negative = channels.get(f"{prefix}_positive", []), channels.get(f"{prefix}_negative", [])
+            count = min(len(positive), len(negative))
+            units = "kV" if prefix == "dc_voltage" else "kA"
+            result.append(_metric(name, max((abs(abs(positive[index]) - abs(negative[index])) for index in range(count)), default=0.0), units, (f"{prefix}_positive", f"{prefix}_negative"), time, "maximum absolute pole-magnitude difference", "derived") if count else _missing(name, (f"{prefix}_positive", f"{prefix}_negative"), time))
+            continue
+        if name in {"breaker_sequence", "breaker_protection_sequence"}:
+            names = ("breaker_command", "breaker_status", "protection_trip")
+            indices = [_first_crossing(channels.get(channel, [])) for channel in names]
+            if any(index is None for index in indices) or not time:
+                result.append(_missing(name, names, time))
+            else:
+                ordered = indices == sorted(indices)
+                result.append(_metric(name, 1.0 if ordered else 0.0, "boolean", names, time, "ordered command/status/protection threshold crossings", "observed"))
+            continue
         response_suffix = next((suffix for suffix in ("_overshoot", "_undershoot", "_settling_time_s", "_recovery_time_s") if name.endswith(suffix)), None)
         if response_suffix:
             channel = name[: -len(response_suffix)]
@@ -104,6 +120,17 @@ def calculate_metrics(samples: dict[str, Any], metrics: list[str] | None = None)
             channel = name.removesuffix("_min")
             values = channels.get(channel, [])
             result.append(_metric(name, min(values), "kV" if "voltage" in channel else "kA" if "current" in channel else None, (channel,), time, "minimum sampled value") if values else _missing(name, (channel,), time))
+        elif name.endswith("_steady_state_mean") or name.endswith("_steady_state_rms"):
+            suffix = "_steady_state_mean" if name.endswith("_steady_state_mean") else "_steady_state_rms"
+            channel = name[: -len(suffix)]
+            values = channels.get(channel, [])
+            tail = values[max(0, len(values) - max(1, len(values) // 10)):]
+            if not tail:
+                result.append(_missing(name, (channel,), time))
+            elif suffix.endswith("rms"):
+                result.append(_metric(name, math.sqrt(sum(value * value for value in tail) / len(tail)), None, (channel,), time, "last 10% RMS", "derived"))
+            else:
+                result.append(_metric(name, sum(tail) / len(tail), None, (channel,), time, "last 10% arithmetic mean", "derived"))
         elif name.endswith("_mean"):
             channel = name.removesuffix("_mean")
             values = channels.get(channel, [])
@@ -116,10 +143,6 @@ def calculate_metrics(samples: dict[str, Any], metrics: list[str] | None = None)
             voltage, current = channels.get("dc_voltage", []), channels.get("dc_current", [])
             count = min(len(voltage), len(current))
             result.append(_metric(name, max((voltage[index] * current[index] for index in range(count)), default=0.0), "MW", ("dc_voltage", "dc_current"), time, "pointwise Vdc * Idc peak", "derived") if count else _missing(name, ("dc_voltage", "dc_current"), time))
-        elif name == "pole_imbalance":
-            positive, negative = channels.get("dc_current_positive", []), channels.get("dc_current_negative", [])
-            count = min(len(positive), len(negative))
-            result.append(_metric(name, max((abs(positive[index] - negative[index]) for index in range(count)), default=0.0), "kA", ("dc_current_positive", "dc_current_negative"), time, "maximum absolute pole difference", "derived") if count else _missing(name, ("dc_current_positive", "dc_current_negative"), time))
         elif name == "trip_delay_s":
             command, status = channels.get("breaker_command", []), channels.get("breaker_status", [])
             command_index, status_index = _first_crossing(command), _first_crossing(status)

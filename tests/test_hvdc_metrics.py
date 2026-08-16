@@ -48,3 +48,11 @@ def test_step_response_metrics_are_bounded_and_deterministic():
     assert by_name["dc_current_overshoot"]["value"] == 1.0
     assert by_name["dc_current_undershoot"]["value"] == 0.0
     assert by_name["dc_current_settling_time_s"]["value"] == 4.0
+
+
+def test_pole_imbalance_and_sequence_metrics_require_ordered_channels():
+    samples = {"time": [0, 1, 2], "channels": {"dc_voltage_positive": [500, 490, 495], "dc_voltage_negative": [-500, -480, -495], "breaker_command": [0, 1, 1], "breaker_status": [0, 0, 1], "protection_trip": [0, 0, 1]}}
+    result = calculate_metrics(samples, ["voltage_imbalance", "breaker_sequence"])
+    by_name = {item["name"]: item for item in result["metrics"]}
+    assert by_name["voltage_imbalance"]["value"] == 10.0
+    assert by_name["breaker_sequence"]["status"] == "observed"
