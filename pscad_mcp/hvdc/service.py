@@ -25,8 +25,110 @@ class HvdcDomainService:
         self._scenarios: dict[str, dict[str, Any]] = {}
         self._scenario_tasks: dict[str, asyncio.Task[None]] = {}
         self._scenario_run_tasks: dict[str, asyncio.Task[Any]] = {}
+        self._scenario_operation_tasks: dict[str, dict[asyncio.Task[Any], str]] = {}
+        self._scenario_cleanup_tasks: dict[str, asyncio.Task[None]] = {}
+        self._scenario_release_after_operations: set[str] = set()
         self._scenario_reservation_lock = asyncio.Lock()
         self._active_scenario_id: str | None = None
+
+    def _pending_scenario_operations(self, scenario_id: str) -> list[str]:
+        return [
+            operation
+            for task, operation in self._scenario_operation_tasks.get(scenario_id, {}).items()
+            if not task.done()
+        ]
+
+    def _track_scenario_operation(
+        self,
+        scenario_id: str,
+        task: asyncio.Task[Any],
+        operation: str,
+    ) -> None:
+        operations = self._scenario_operation_tasks.setdefault(scenario_id, {})
+        operations[task] = operation
+        record = self._scenarios.get(scenario_id)
+        if record is not None:
+            record["pending_operations"] = list(operations.values())
+
+        def operation_finished(completed: asyncio.Task[Any]) -> None:
+            current = self._scenario_operation_tasks.get(scenario_id)
+            if current is None or completed not in current:
+                return
+            name = current.pop(completed)
+            result: dict[str, Any] = {"operation": name}
+            if completed.cancelled():
+                result["status"] = "cancelled"
+            else:
+                error = completed.exception()
+                if error is None:
+                    result["status"] = "completed"
+                else:
+                    result["status"] = "failed"
+                    if isinstance(error, BackendError):
+                        result["error"] = error.to_dict()
+                    else:
+                        result["error"] = {
+                            "code": "HVDC_SCENARIO_EXECUTION_FAILED",
+                            "message": str(error),
+                            "backend": "hvdc",
+                            "operation": name,
+                        }
+            current_record = self._scenarios.get(scenario_id)
+            if current_record is not None:
+                current_record.setdefault("operation_history", []).append(result)
+                current_record["pending_operations"] = list(current.values())
+            if current:
+                return
+            self._scenario_operation_tasks.pop(scenario_id, None)
+            if current_record is None or scenario_id not in self._scenario_release_after_operations:
+                return
+            self._scenario_release_after_operations.discard(scenario_id)
+            if current_record.get("outcome") == "needs_review":
+                current_record["outcome"] = "unknown_outcome"
+                containment = current_record.get("containment")
+                if isinstance(containment, dict) and containment.get("status") == "pending_operations":
+                    containment["status"] = "operations_completed"
+                    containment["outcome_known"] = False
+            cleanup = asyncio.create_task(
+                self._release_after_operation_completion(scenario_id),
+                name=f"{scenario_id}-operation-cleanup",
+            )
+            self._scenario_cleanup_tasks[scenario_id] = cleanup
+
+            def cleanup_finished(done: asyncio.Task[None]) -> None:
+                if self._scenario_cleanup_tasks.get(scenario_id) is done:
+                    self._scenario_cleanup_tasks.pop(scenario_id, None)
+                if not done.cancelled():
+                    done.exception()
+
+            cleanup.add_done_callback(cleanup_finished)
+
+        task.add_done_callback(operation_finished)
+
+    async def _release_after_operation_completion(self, scenario_id: str) -> None:
+        if self._pending_scenario_operations(scenario_id):
+            return
+        await self._release_scenario(scenario_id)
+
+    async def _request_scenario_release(
+        self,
+        scenario_id: str,
+        *,
+        after_pending_operations: bool,
+    ) -> bool:
+        pending = self._pending_scenario_operations(scenario_id)
+        operations_tracked = scenario_id in self._scenario_operation_tasks
+        if pending or operations_tracked:
+            record = self._scenarios.get(scenario_id)
+            if record is not None:
+                record["pending_operations"] = pending
+            if after_pending_operations:
+                self._scenario_release_after_operations.add(scenario_id)
+            return False
+        if after_pending_operations:
+            await self._release_after_operation_completion(scenario_id)
+            return True
+        return False
 
     async def _reserve_scenario(self, scenario_id: str) -> None:
         async with self._scenario_reservation_lock:
@@ -50,6 +152,7 @@ class HvdcDomainService:
             if self._active_scenario_id != scenario_id:
                 return False
             self._active_scenario_id = None
+            self._scenario_release_after_operations.discard(scenario_id)
             record = self._scenarios.get(scenario_id)
             if record is not None:
                 record["reservation_held"] = False
@@ -241,8 +344,12 @@ class HvdcDomainService:
                         status = str(project_status.get("status", "")).casefold()
                         task = self._scenario_tasks.get(scenario_id)
                         orchestration_active = task is not None and not task.done()
+                        pending_operations = self._pending_scenario_operations(scenario_id)
+                        operations_tracked = scenario_id in self._scenario_operation_tasks
                         if (
                             not orchestration_active
+                            and not pending_operations
+                            and not operations_tracked
                             and record.get("outcome") == "needs_review"
                             and status in {"completed", "complete", "finished", "done", "idle", "stopped", "failed", "error", "aborted"}
                         ):

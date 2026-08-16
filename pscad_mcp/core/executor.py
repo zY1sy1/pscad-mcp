@@ -122,7 +122,7 @@ class RobustExecutor:
 
         try:
             result = await asyncio.wait_for(
-                submitted,
+                asyncio.shield(submitted),
                 timeout=effective_timeout,
             )
             logger.debug(
@@ -131,6 +131,16 @@ class RobustExecutor:
                 time.perf_counter() - started_at,
             )
             return result
+        except asyncio.CancelledError:
+            # Cancelling an asyncio wrapper cannot stop a COM call that is
+            # already executing in its worker thread. Keep this coroutine
+            # pending until the underlying call has truly settled so callers
+            # do not release application-wide mutation ownership early.
+            try:
+                await asyncio.shield(submitted)
+            except Exception:
+                pass
+            raise
         except asyncio.TimeoutError as error:
             failure = ExecutorTimeoutError(
                 f"PSCAD timed out during {func_name}. It might be frozen or "

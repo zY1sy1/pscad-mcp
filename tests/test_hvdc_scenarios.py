@@ -463,8 +463,14 @@ def test_status_refresh_does_not_finish_scenario_while_event_task_is_active(tmp_
     _write_command_project(source)
 
     class ActiveBackend(ScenarioBackend):
+        def __init__(self):
+            super().__init__()
+            self.status_calls = 0
+
         async def get_run_status(self, project_name):
-            return {"status": "failed", "progress": 100.0}
+            self.status_calls += 1
+            status = "running" if self.status_calls == 1 else "failed"
+            return {"status": status, "progress": 100.0}
 
     service = HvdcDomainService(ActiveBackend(), path_policy=PathPolicy(workspace_root=str(tmp_path)))
     scenario = {

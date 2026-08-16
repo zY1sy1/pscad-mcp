@@ -255,6 +255,78 @@ async def _get_project_status(backend: Any, target_project: str) -> dict[str, An
     return dict(state) if isinstance(state, Mapping) else None
 
 
+async def _await_tracked_operation(
+    service: Any,
+    record: dict[str, Any],
+    operation: str,
+    awaitable: Any,
+) -> Any:
+    task = asyncio.create_task(
+        awaitable,
+        name=f"{record['scenario_id']}-{operation}",
+    )
+    service._track_scenario_operation(record["scenario_id"], task, operation)
+    try:
+        return await asyncio.shield(task)
+    except asyncio.CancelledError:
+        if not task.done():
+            task.cancel()
+        raise
+
+
+async def _wait_for_confirmed_running(
+    backend: Any,
+    target_project: str,
+    run_task: asyncio.Task[Any],
+) -> dict[str, Any]:
+    if not callable(getattr(backend, "get_run_status", None)):
+        raise BackendError(
+            "HVDC_TIMED_CONTROL_STATUS_UNAVAILABLE",
+            "Timed scenario events require backend confirmation that the project is running.",
+            "hvdc",
+            "run_hvdc_scenario",
+            {"project_name": target_project},
+        )
+    while True:
+        state = await _get_project_status(backend, target_project)
+        if state is None:
+            raise BackendError(
+                "HVDC_TIMED_CONTROL_STATUS_UNAVAILABLE",
+                "Timed scenario events require a structured backend run status.",
+                "hvdc",
+                "run_hvdc_scenario",
+                {"project_name": target_project},
+            )
+        status = str(state.get("status", "")).casefold()
+        if status in {"running", "active", "executing"}:
+            return state
+        if status in _FAILED_PROJECT_STATUSES:
+            raise BackendError(
+                "HVDC_SCENARIO_RUN_FAILED",
+                f"PSCAD project '{target_project}' reported terminal status '{status}'.",
+                "hvdc",
+                "run_hvdc_scenario",
+                {"project_name": target_project, "project_status": state},
+            )
+        if status in _TERMINAL_PROJECT_STATUSES:
+            raise BackendError(
+                "HVDC_EVENT_WINDOW_MISSED",
+                "The PSCAD run reached a terminal state before timed control became available.",
+                "hvdc",
+                "run_hvdc_scenario",
+                {"project_name": target_project, "project_status": state},
+            )
+        if run_task.done():
+            await asyncio.shield(run_task)
+        await asyncio.sleep(0.01)
+
+
+def _mutation_scope_is_locked(backend: Any) -> bool:
+    lock = getattr(backend, "_mutation_lock", None)
+    locked = getattr(lock, "locked", None)
+    return bool(locked()) if callable(locked) else False
+
+
 async def _wait_for_project_terminal(backend: Any, target_project: str) -> dict[str, Any] | None:
     if not callable(getattr(backend, "get_run_status", None)):
         return None
@@ -318,6 +390,21 @@ async def _attempt_containment(
             record["project_status"] = state
             status = str(state.get("status", "")).casefold()
             if status in _TERMINAL_PROJECT_STATUSES | _FAILED_PROJECT_STATUSES:
+                # A successful stop commonly releases the vendor run task on
+                # the next event-loop turn. Give that task one chance to settle
+                # before classifying it as an operation that survived
+                # containment.
+                await asyncio.sleep(0)
+                pending = service._pending_scenario_operations(record["scenario_id"])
+                if pending:
+                    record["containment"] = {
+                        "status": "pending_operations",
+                        "stop": stop_record,
+                        "project_status": state,
+                        "pending_operations": pending,
+                        "outcome_known": False,
+                    }
+                    return False
                 record["containment"] = {
                     "status": "contained",
                     "stop": stop_record,
@@ -384,15 +471,19 @@ async def _orchestrate_scenario(service: Any, record: dict[str, Any], normalized
     target_project = record["target_project"]
     transition_scenario(record, "running")
     record["started_at"] = _utc_now()
-    for change in normalized.get("parameter_changes", []):
-        await backend.set_component_parameters(
-            target_project,
-            int(change["component_id"]),
-            {str(change["parameter_name"]): change.get("value")},
+    for index, change in enumerate(normalized.get("parameter_changes", [])):
+        await _await_tracked_operation(
+            service,
+            record,
+            f"parameter_change:{index}",
+            backend.set_component_parameters(
+                target_project,
+                int(change["component_id"]),
+                {str(change["parameter_name"]): change.get("value")},
+            ),
         )
         record["partial_completion"]["applied_parameter_changes"].append(dict(change))
     run = normalized.get("run", {}) or {}
-    run_started = asyncio.get_running_loop().time()
     record["run_started_at_epoch"] = time.time()
     record["partial_completion"]["run_command_dispatched"] = True
     if run.get("simulation_set"):
@@ -407,6 +498,7 @@ async def _orchestrate_scenario(service: Any, record: dict[str, Any], normalized
         )
     scenario_id = record["scenario_id"]
     service._scenario_run_tasks[scenario_id] = run_task
+    service._track_scenario_operation(scenario_id, run_task, "run_command")
 
     def _forget_run(completed: asyncio.Task[Any]) -> None:
         if service._scenario_run_tasks.get(scenario_id) is completed:
@@ -418,10 +510,66 @@ async def _orchestrate_scenario(service: Any, record: dict[str, Any], normalized
     await asyncio.sleep(0)
     record["partial_completion"]["run_started"] = "unknown"
     try:
-        for event in sorted(normalized.get("events", []), key=lambda item: float(item["time_s"])):
+        events = sorted(normalized.get("events", []), key=lambda item: float(item["time_s"]))
+        running_started = None
+        if events:
+            if _mutation_scope_is_locked(backend):
+                record["timing_basis"] = {
+                    "kind": "unavailable_blocking_run",
+                    "mutation_scope_locked": True,
+                }
+                raise BackendError(
+                    "HVDC_TIMED_CONTROL_UNAVAILABLE",
+                    "The backend serializes status and mutations behind the blocking run command; timed events cannot be dispatched safely.",
+                    "hvdc",
+                    "run_hvdc_scenario",
+                    {
+                        "project_name": target_project,
+                        "timing_basis": record["timing_basis"],
+                        "mutation_scope_locked": True,
+                    },
+                )
+            running_state = await _wait_for_confirmed_running(backend, target_project, run_task)
+            running_started = asyncio.get_running_loop().time()
+            record["project_status"] = running_state
+            record["partial_completion"]["run_started"] = True
+            record["timing_basis"] = {
+                "kind": "backend_confirmed_running",
+                "confirmed_at": _utc_now(),
+                "project_status": running_state,
+            }
+            if _mutation_scope_is_locked(backend):
+                raise BackendError(
+                    "HVDC_TIMED_CONTROL_UNAVAILABLE",
+                    "The backend serializes mutations behind the blocking run command; timed events cannot be dispatched safely.",
+                    "hvdc",
+                    "run_hvdc_scenario",
+                    {
+                        "project_name": target_project,
+                        "timing_basis": record["timing_basis"],
+                        "mutation_scope_locked": True,
+                    },
+                )
+        else:
+            record["timing_basis"] = {"kind": "not_applicable"}
+        for index, event in enumerate(events):
             event_time = float(event["time_s"])
-            elapsed = asyncio.get_running_loop().time() - run_started
+            elapsed = asyncio.get_running_loop().time() - float(running_started)
             await asyncio.sleep(max(0.0, event_time - elapsed))
+            if _mutation_scope_is_locked(backend):
+                raise BackendError(
+                    "HVDC_TIMED_CONTROL_UNAVAILABLE",
+                    "The backend mutation scope became unavailable before a timed event could be dispatched.",
+                    "hvdc",
+                    "run_hvdc_scenario",
+                    {
+                        "project_name": target_project,
+                        "target": event.get("target"),
+                        "time_s": event_time,
+                        "timing_basis": record["timing_basis"],
+                        "mutation_scope_locked": True,
+                    },
+                )
             if run_task.done():
                 await asyncio.shield(run_task)
                 state = await _get_project_status(backend, target_project)
@@ -452,10 +600,15 @@ async def _orchestrate_scenario(service: Any, record: dict[str, Any], normalized
                         {"target": event.get("target"), "time_s": event_time, "project_status": state},
                     )
                 record["partial_completion"]["run_started"] = True
-            await backend.set_component_parameters(
-                target_project,
-                int(event["component_id"]),
-                {str(event["parameter_name"]): event.get("value")},
+            await _await_tracked_operation(
+                service,
+                record,
+                f"timed_event:{index}",
+                backend.set_component_parameters(
+                    target_project,
+                    int(event["component_id"]),
+                    {str(event["parameter_name"]): event.get("value")},
+                ),
             )
             record["partial_completion"]["applied_events"].append(dict(event))
         # Keep cancellation of the bounded scenario worker separate from the
@@ -497,6 +650,7 @@ async def _orchestrate_scenario(service: Any, record: dict[str, Any], normalized
 
 async def _scenario_worker(service: Any, record: dict[str, Any], normalized: dict[str, Any], timeout_s: float) -> None:
     release_reservation = False
+    release_after_pending = False
     try:
         await asyncio.wait_for(_orchestrate_scenario(service, record, normalized), timeout=timeout_s)
     except asyncio.TimeoutError:
@@ -511,6 +665,10 @@ async def _scenario_worker(service: Any, record: dict[str, Any], normalized: dic
         record["outcome"] = "timed_out_contained" if contained else "needs_review"
         transition_scenario(record, "timed_out")
         release_reservation = contained
+        release_after_pending = (
+            record.get("containment", {}).get("status") == "pending_operations"
+            and bool(service._pending_scenario_operations(record["scenario_id"]))
+        )
     except asyncio.CancelledError:
         record["error"] = BackendError(
             "HVDC_SCENARIO_CANCELLED",
@@ -523,12 +681,21 @@ async def _scenario_worker(service: Any, record: dict[str, Any], normalized: dic
         record["outcome"] = "cancelled_contained" if contained else "needs_review"
         transition_scenario(record, "failed")
         release_reservation = contained
+        release_after_pending = (
+            record.get("containment", {}).get("status") == "pending_operations"
+            and bool(service._pending_scenario_operations(record["scenario_id"]))
+        )
     except Exception as error:
         record["error"] = _serialize_execution_error(error)
         if record["partial_completion"].get("run_command_dispatched"):
             contained = await _attempt_containment(service, record, timeout_s=timeout_s)
             record["outcome"] = "failed_contained" if contained else "needs_review"
             release_reservation = contained
+            pending = bool(service._pending_scenario_operations(record["scenario_id"]))
+            release_after_pending = pending and (
+                record.get("containment", {}).get("status") == "pending_operations"
+                or (isinstance(error, BackendError) and error.code == "HVDC_TIMED_CONTROL_UNAVAILABLE")
+            )
         else:
             record["containment"] = {"status": "not_required"}
             record["outcome"] = "failed"
@@ -540,8 +707,11 @@ async def _scenario_worker(service: Any, record: dict[str, Any], normalized: dic
         transition_scenario(record, "completed")
         release_reservation = True
     finally:
-        if release_reservation:
-            await service._release_scenario(record["scenario_id"])
+        if release_reservation or release_after_pending:
+            await service._request_scenario_release(
+                record["scenario_id"],
+                after_pending_operations=True,
+            )
 
 
 async def run_scenario(
@@ -606,6 +776,9 @@ async def run_scenario(
         "events": list(normalized.get("events", [])),
         "output_files": explicit_outputs,
         "output_discovery": "pending",
+        "timing_basis": {"kind": "pending"},
+        "pending_operations": [],
+        "operation_history": [],
         "resolved_channels": [],
         "metrics": [],
         "warnings": [],
