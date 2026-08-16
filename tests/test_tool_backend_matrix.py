@@ -32,16 +32,20 @@ EXPECTED_TOOLS = {
     "set_component_location", "rotate_component", "mirror_component",
     "clone_component", "get_component_ports", "get_component_port",
     "enable_component", "disable_component", "delete_component",
+    "inspect_hvdc_project", "get_hvdc_assets", "get_hvdc_mappings",
+    "validate_hvdc_project", "run_hvdc_scenario", "get_hvdc_scenario_status",
+    "analyze_hvdc_results", "compare_hvdc_scenarios", "list_hvdc_profiles",
+    "register_hvdc_profile",
 }
 
 
 class TestToolBackendMatrix(unittest.TestCase):
-    def test_exact_60_tool_registration(self):
+    def test_generic_and_hvdc_tool_registration(self):
         names = {
             tool.name for tool in create_server()._tool_manager.list_tools()
         }
         self.assertEqual(names, EXPECTED_TOOLS)
-        self.assertEqual(len(names), 60)
+        self.assertEqual(len(names), 70)
 
     def test_both_backends_implement_complete_protocol(self):
         legacy = LegacyBackend(

@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<project version="4.6.2">
+  <definitions>
+    <Definition name="Rectifier_AC" />
+    <Definition name="Inverter_AC" />
+    <Definition name="RectCC" />
+    <Definition name="RectPole" />
+    <Definition name="InverterPole" />
+    <Definition name="InvCtrl" />
+    <Definition name="Station" />
+    <Definition name="TransLine" />
+    <Definition name="TL1" />
+    <Definition name="TL2" />
+    <Definition name="loadbreaker_3" />
+  </definitions>
+  <canvas name="Main">
+    <component id="10" name="Rectifier" definition="Rectifier_AC" />
+    <component id="11" name="RectifierPole" definition="RectPole" />
+    <component id="12" name="Inverter" definition="Inverter_AC" />
+    <component id="13" name="InverterPole" definition="InverterPole" />
+    <component id="14" name="Breaker" definition="loadbreaker_3" />
+    <component id="15" name="Line" definition="TL1" />
+    <label>Idc</label>
+    <label>Vdc</label>
+    <label>breaker command</label>
+    <label>breaker status</label>
+    <label>protection trip</label>
+  </canvas>
+</project>

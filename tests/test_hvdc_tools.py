@@ -1,0 +1,49 @@
+import json
+
+import asyncio
+
+from pscad_mcp.main import create_server
+from pscad_mcp.hvdc.service import HvdcDomainService
+
+
+EXPECTED = {
+    "inspect_hvdc_project", "get_hvdc_assets", "get_hvdc_mappings",
+    "validate_hvdc_project", "run_hvdc_scenario", "get_hvdc_scenario_status",
+    "analyze_hvdc_results", "compare_hvdc_scenarios", "list_hvdc_profiles",
+    "register_hvdc_profile",
+}
+
+
+def test_hvdc_tools_are_registered_without_removing_generic_tools():
+    names = {tool.name for tool in create_server()._tool_manager.list_tools()}
+    assert EXPECTED <= names
+    assert len(names) == 70
+
+
+def test_inspect_hvdc_project_is_json_safe(tmp_path):
+    path = tmp_path / "case.pscx"
+    path.write_text("<project version='4.6.2'><definitions><Definition name='RectCC'/><Definition name='RectPole'/><Definition name='InverterPole'/></definitions><canvas name='Main'><label>Idc</label></canvas></project>", encoding="utf-8")
+    service = HvdcDomainService(path_policy=type("Policy", (), {"resolve": lambda self, candidate, **kwargs: path})())
+    result = service.inspect_project(str(path))
+    assert result["topology"]["family"] == "lcc"
+    assert json.loads(json.dumps(result))
+
+
+def test_validation_reports_missing_required_assets(tmp_path):
+    path = tmp_path / "case.pscx"
+    path.write_text("<project><definitions><Definition name='RectCC'/></definitions></project>", encoding="utf-8")
+    service = HvdcDomainService(path_policy=type("Policy", (), {"resolve": lambda self, candidate, **kwargs: path})())
+    result = service.validate_project(str(path), profile="hvdc_breaker_difforder")
+    assert result["valid"] is False
+    assert result["missing_assets"]
+
+
+def test_profile_registration_uses_workspace_path_policy(tmp_path):
+    mapping = tmp_path / "custom.json"
+    mapping.write_text('{"required_assets": [], "mappings": []}', encoding="utf-8")
+    class Policy:
+        def resolve(self, candidate, **kwargs):
+            return mapping
+    service = HvdcDomainService(path_policy=Policy())
+    result = service.register_profile("custom", str(mapping))
+    assert result["registered"] is True

@@ -100,6 +100,30 @@ _ERROR_GUIDANCE: dict[str, tuple[bool, str]] = {
         True,
         "Call get_pscad_status, then repair_connection before retrying.",
     ),
+    "HVDC_PROFILE_NOT_FOUND": (
+        False,
+        "Call list_hvdc_profiles or register a workspace-scoped profile.",
+    ),
+    "HVDC_TOPOLOGY_AMBIGUOUS": (
+        False,
+        "Inspect the evidence and provide an explicit HVDC profile.",
+    ),
+    "HVDC_MAPPING_MISSING": (
+        False,
+        "Add or configure the missing mapped channels/components before retrying.",
+    ),
+    "HVDC_SCENARIO_INVALID": (
+        False,
+        "Correct the declarative scenario and retry validation.",
+    ),
+    "HVDC_CAPABILITY_UNAVAILABLE": (
+        False,
+        "Use an existing mapped control; component insertion is not supported.",
+    ),
+    "INCOMPLETE_ANALYSIS": (
+        False,
+        "Map the required result channels and rerun the analysis.",
+    ),
 }
 
 
