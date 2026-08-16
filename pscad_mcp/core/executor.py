@@ -223,8 +223,21 @@ class RobustExecutor:
                 raise
 
         def queued_submission_finished(completed: Any) -> None:
-            if completed.cancelled() and not worker_started.is_set():
-                settle_token()
+            if worker_started.is_set():
+                return
+            if not completed.cancelled():
+                try:
+                    submission_error = completed.exception()
+                except BaseException as error:
+                    submission_error = error
+                if submission_error is not None:
+                    with self._state_lock:
+                        self.healthy = False
+                        self.last_error = self._bounded_error(submission_error)
+            # A completed Future whose wrapper never started cannot reach the
+            # wrapper's finally block (for example, cancellation while queued
+            # or ThreadPoolExecutor initializer failure). Settle it here.
+            settle_token()
 
         concurrent.add_done_callback(queued_submission_finished)
         submitted = asyncio.wrap_future(concurrent, loop=loop)

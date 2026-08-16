@@ -88,6 +88,24 @@ class TestExecutorRecovery(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(executor.snapshot()["in_flight_calls"], 0)
         self.assertEqual(executor.pending_settlements(), ())
 
+    async def test_failed_worker_initializer_settles_unstarted_submission(self):
+        def fail_initializer():
+            raise RuntimeError("COM initialization failed")
+
+        executor = RobustExecutor(timeout=0.1, com_initializer=fail_initializer)
+        try:
+            with self.assertRaises(Exception):
+                await executor.run_safe(lambda: None)
+
+            await asyncio.sleep(0)
+            snapshot = executor.snapshot()
+            self.assertEqual(snapshot["in_flight_calls"], 0)
+            self.assertEqual(executor.pending_settlements(), ())
+            self.assertFalse(snapshot["healthy"])
+            self.assertIn("BrokenThreadPool", snapshot["last_error"])
+        finally:
+            executor.shutdown()
+
     async def test_cancel_wait_is_bounded_while_worker_settlement_remains_visible(self):
         executor = RobustExecutor(timeout=1)
         executor.cancel_wait_timeout = 0.02
