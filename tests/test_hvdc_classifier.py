@@ -11,6 +11,7 @@ def test_classifier_reports_lcc_bipolar_breaker_with_evidence(tmp_path):
         "<Definition name='InvCtrl'/><Definition name='Rectifier_AC'/><Definition name='loadbreaker_3'/>"
         "<Definition name='TL1'/></definitions><canvas name='Main'>"
         "<component id='1' name='P1' definition='RectPole'/><component id='2' name='P2' definition='InverterPole'/>"
+        "<component id='3' name='B1' definition='loadbreaker_3'/><component id='4' name='L1' definition='TL1'/>"
         "</canvas></project>", encoding="utf-8"
     )
     evidence = scan_project(path)
@@ -21,6 +22,19 @@ def test_classifier_reports_lcc_bipolar_breaker_with_evidence(tmp_path):
     assert any("RectCC" in item for item in summary.evidence)
     assets = extract_assets(evidence)
     assert {asset.kind for asset in assets} >= {"rectifier", "inverter", "pole", "breaker", "dc_line"}
+
+
+def test_definitions_classify_topology_but_do_not_create_instantiated_assets(tmp_path):
+    path = tmp_path / "definitions_only.pscx"
+    path.write_text(
+        "<project><definitions><Definition name='RectCC'/><Definition name='RectPole'/>"
+        "<Definition name='InverterPole'/><Definition name='loadbreaker_3'/><Definition name='TL1'/>"
+        "</definitions><canvas name='Main'/></project>",
+        encoding="utf-8",
+    )
+    evidence = scan_project(path)
+    assert classify_topology(evidence).family == "lcc"
+    assert extract_assets(evidence) == []
 
 
 def test_classifier_does_not_force_family_from_one_generic_name():

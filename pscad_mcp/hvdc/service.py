@@ -20,8 +20,12 @@ class HvdcDomainService:
     def __init__(self, backend_service: Any | None = None, *, path_policy: Any | None = None) -> None:
         self.backend_service = backend_service
         self.path_policy = path_policy or PathPolicy()
-        self._cache: dict[str, tuple[int, dict[str, Any]]] = {}
+        self._cache: dict[tuple[str, str], tuple[int, dict[str, Any]]] = {}
         self._scenarios: dict[str, dict[str, Any]] = {}
+
+    def _workspace_root(self) -> Path | None:
+        root = getattr(self.path_policy, "workspace_root", None)
+        return Path(root).resolve() if root is not None else None
 
     def _resolve_project(self, project_name: str) -> Path:
         if not isinstance(project_name, str) or not project_name.strip():
@@ -64,7 +68,7 @@ class HvdcDomainService:
 
     def _inspection(self, project_name: str, canvas_name: str = "Main") -> dict[str, Any]:
         path = self._resolve_project(project_name)
-        key = str(path)
+        key = (str(path), canvas_name.casefold())
         mtime = path.stat().st_mtime_ns
         cached = self._cache.get(key)
         if cached and cached[0] == mtime:
@@ -79,7 +83,7 @@ class HvdcDomainService:
             mappings = MappingResolution((), (), ())
             unresolved = []
         else:
-            mappings = resolve_mappings(evidence, load_profile(profile_name))
+            mappings = resolve_mappings(evidence, load_profile(profile_name, workspace_root=self._workspace_root()))
             unresolved = list(mappings.unresolved)
         result = {
             "project": {"name": evidence.project_name, "path": evidence.project_path, "pscad_version": evidence.pscad_version, "canvas": canvas_name},
@@ -112,7 +116,7 @@ class HvdcDomainService:
         profile_name = profile
         if profile == "auto":
             profile_name = "hvdc_breaker_difforder" if any(item["kind"] == "breaker" for item in result["assets"]) else "lcc_bipolar_generic"
-        loaded = load_profile(profile_name)
+        loaded = load_profile(profile_name, workspace_root=self._workspace_root())
         if profile_name != "auto":
             evidence = scan_project(self._resolve_project(project_name), canvas_name)
             resolution = resolve_mappings(evidence, loaded)
@@ -133,7 +137,8 @@ class HvdcDomainService:
         return {"valid": not errors and not result["unresolved"], "profile": profile_name, "missing_assets": missing_assets, "unresolved": result["unresolved"], "errors": errors, "warnings": result["warnings"], "topology": result["topology"]}
 
     def list_profiles(self) -> list[dict[str, Any]]:
-        return [{"name": name, "profile": load_profile(name)} for name in list_profiles()]
+        root = self._workspace_root()
+        return [{"name": name, "profile": load_profile(name, workspace_root=root)} for name in list_profiles(root)]
 
     def register_profile(self, profile_name: str, mapping_file: str) -> dict[str, Any]:
         try:
@@ -147,7 +152,7 @@ class HvdcDomainService:
             raise BackendError("NOT_FOUND", f"HVDC mapping file '{mapping_file}' was not found.", "hvdc", "register_hvdc_profile", {"candidate": mapping_file}) from error
         except ValueError as error:
             raise BackendError("INVALID_ARGUMENT", str(error), "hvdc", "register_hvdc_profile", {"candidate": mapping_file}) from error
-        return register_profile(profile_name, str(resolved))
+        return register_profile(profile_name, str(resolved), workspace_root=self._workspace_root())
 
     async def validate_scenario(self, scenario: Mapping[str, Any]) -> dict[str, Any]:
         from .scenarios import validate_scenario

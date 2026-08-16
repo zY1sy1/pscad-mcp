@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 
-from .models import HvdcAsset, HvdcProjectEvidence, HvdcSourceRef, HvdcTopologySummary
+from .models import HvdcAsset, HvdcProjectEvidence, HvdcTopologySummary
 
 
 def _tokens(values: list[str] | tuple[str, ...]) -> set[str]:
@@ -68,10 +68,7 @@ def classify_topology(evidence: HvdcProjectEvidence) -> HvdcTopologySummary:
 
 def extract_assets(evidence: HvdcProjectEvidence) -> list[HvdcAsset]:
     assets: list[HvdcAsset] = []
-    records = list(evidence.components)
-    for definition in evidence.definitions:
-        records.append(type("DefinitionRecord", (), {"name": definition, "definition": definition, "source": HvdcSourceRef(evidence.project_path, definition=definition)})())
-    for item in records:
+    for item in evidence.components:
         value = f"{item.name} {item.definition}"
         lowered = value.lower()
         kinds: list[str] = []

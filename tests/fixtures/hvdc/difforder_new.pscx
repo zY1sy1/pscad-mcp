@@ -1,29 +1,30 @@
 <?xml version="1.0" encoding="utf-8"?>
-<project version="4.6.2">
+<!-- Structurally minimized from PSCAD 4.6.2 XML; no live design content copied. -->
+<project name="difforder_new" version="4.6.2">
   <definitions>
-    <Definition name="Rectifier_AC" />
-    <Definition name="Inverter_AC" />
-    <Definition name="RectCC" />
-    <Definition name="RectPole" />
-    <Definition name="InverterPole" />
-    <Definition name="InvCtrl" />
-    <Definition name="Station" />
-    <Definition name="TransLine" />
-    <Definition name="TL1" />
-    <Definition name="TL2" />
-    <Definition name="loadbreaker_3" />
+    <Definition classid="UserCmpDefn" name="Rectifier_AC" instances="1" />
+    <Definition classid="UserCmpDefn" name="Inverter_AC" instances="1" />
+    <Definition classid="UserCmpDefn" name="RectCC" instances="2" />
+    <Definition classid="UserCmpDefn" name="RectPole" instances="2" />
+    <Definition classid="UserCmpDefn" name="InverterPole" instances="2" />
+    <Definition classid="UserCmpDefn" name="InvCtrl" instances="2" />
+    <Definition classid="UserCmpDefn" name="TransLine" instances="2" />
+    <Definition classid="UserCmpDefn" name="loadbreaker_3" instances="2" />
+    <Definition classid="UserCmpDefn" name="Main">
+      <schematic classid="UserCanvas">
+        <User classid="UserCmp" id="10" name="Rectifier" defn="Rectifier_AC"><paramlist><param name="Name" value="Rectifier" /></paramlist></User>
+        <User classid="UserCmp" id="11" name="RectifierPole" defn="RectPole"><paramlist><param name="Name" value="Pole 1" /></paramlist></User>
+        <User classid="UserCmp" id="12" name="Inverter" defn="Inverter_AC"><paramlist><param name="Name" value="Inverter" /></paramlist></User>
+        <User classid="UserCmp" id="13" name="InverterPole" defn="InverterPole"><paramlist><param name="Name" value="Pole 2" /></paramlist></User>
+        <User classid="UserCmp" id="14" name="Breaker" defn="loadbreaker_3"><paramlist><param name="Name" value="BRK1" /></paramlist></User>
+        <User classid="UserCmp" id="15" name="Line" defn="TransLine"><paramlist><param name="Name" value="DC Line" /></paramlist><Port id="150" classid="Port" name="P1" /></User>
+        <User classid="UserCmp" id="16" name="master:datalabel" defn="master:datalabel"><paramlist><param name="Name" value="IMC" /></paramlist></User>
+        <User classid="UserCmp" id="17" name="master:datalabel" defn="master:datalabel"><paramlist><param name="Name" value="UMC" /></paramlist></User>
+        <User classid="UserCmp" id="18" name="master:datalabel" defn="master:datalabel"><paramlist><param name="Name" value="BrkOrd1" /></paramlist></User>
+        <User classid="UserCmp" id="19" name="master:datalabel" defn="master:datalabel"><paramlist><param name="Name" value="BRK1" /></paramlist></User>
+        <User classid="UserCmp" id="20" name="master:datalabel" defn="master:datalabel"><paramlist><param name="Name" value="protection trip" /></paramlist></User>
+        <text>DC breaker protection</text>
+      </schematic>
+    </Definition>
   </definitions>
-  <canvas name="Main">
-    <component id="10" name="Rectifier" definition="Rectifier_AC" />
-    <component id="11" name="RectifierPole" definition="RectPole" />
-    <component id="12" name="Inverter" definition="Inverter_AC" />
-    <component id="13" name="InverterPole" definition="InverterPole" />
-    <component id="14" name="Breaker" definition="loadbreaker_3" />
-    <component id="15" name="Line" definition="TL1" />
-    <label>Idc</label>
-    <label>Vdc</label>
-    <label>breaker command</label>
-    <label>breaker status</label>
-    <label>protection trip</label>
-  </canvas>
 </project>

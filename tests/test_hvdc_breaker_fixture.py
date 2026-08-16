@@ -20,3 +20,5 @@ def test_breaker_fixture_contains_domain_evidence():
     assert {"rectifier", "inverter", "pole", "breaker", "dc_line"} <= kinds
     mappings = resolve_mappings(evidence, load_profile("hvdc_breaker_difforder"))
     assert {mapping.canonical for mapping in mappings.mappings if mapping.status == "observed"} >= {"dc_current", "dc_voltage", "breaker_command", "breaker_status", "protection_trip"}
+    assert all(mapping.source and mapping.source.component_id for mapping in mappings.mappings if mapping.status == "observed")
+    assert next(mapping for mapping in mappings.mappings if mapping.canonical == "dc_voltage").units is None
