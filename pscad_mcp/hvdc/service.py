@@ -502,6 +502,7 @@ class HvdcDomainService:
 
     async def analyze_results(self, scenario_id: str, metrics: list[str] | None = None) -> dict[str, Any]:
         from .metrics import calculate_metrics
+        from .results import resolve_result_channels
 
         record = self._scenarios.get(scenario_id)
         if record is None:
@@ -513,11 +514,22 @@ class HvdcDomainService:
             except Exception as error:
                 record.setdefault("warnings", []).append(str(error))
         samples = samples or {"time": [], "channels": {}}
-        result = calculate_metrics(samples, metrics)
+        profile = load_profile(
+            record.get("profile", "lcc_bipolar_generic"),
+            workspace_root=self._workspace_root(),
+        )
+        resolution = resolve_result_channels(samples, profile)
+        result = calculate_metrics(resolution["samples"], metrics)
+        result["warnings"] = [*resolution["warnings"], *result["warnings"]]
+        record["resolved_channels"] = resolution["resolved_channels"]
         record["metrics"] = result["metrics"]
         record["verdict"] = result["verdict"]
         record.setdefault("warnings", []).extend(result["warnings"])
-        return {"scenario_id": scenario_id, **result}
+        return {
+            "scenario_id": scenario_id,
+            "resolved_channels": list(record["resolved_channels"]),
+            **result,
+        }
 
     async def compare_scenarios(self, scenario_ids: list[str], metrics: list[str] | None = None) -> dict[str, Any]:
         if not isinstance(scenario_ids, list) or not scenario_ids:
