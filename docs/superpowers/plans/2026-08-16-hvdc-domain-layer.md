@@ -199,3 +199,12 @@ Accept normalized `{time, channels}` samples. Return each metric as `{name, valu
 
 - [ ] **Step 6: Review the diff against every design section, commit `feat: complete HVDC domain layer baseline`, and report any real-PSCAD acceptance steps that remain unavailable without PSCAD 4.6.2.**
 
+## Execution record
+
+Implemented on branch `codex/hvdc-domain-layer` through commits `a8e0579`,
+`b53ad65`, `b37bd8f`, `a85d13e`, and `d8fdc1d`. The full Python suite passes
+(`368 passed, 16 skipped`); compileall and diff checks are clean. The package
+verification wrapper was attempted but the available LibreOffice Python
+runtime cannot create pip build subprocesses (`WinError 5`), so a real wheel
+probe remains an environment limitation. Real PSCAD 4.6.2 execution remains
+the documented acceptance step when that licensed installation is available.
