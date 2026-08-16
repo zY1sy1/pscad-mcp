@@ -61,8 +61,8 @@ _PROFILE_NAME = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
 _SOURCE_KINDS = {"label", "datalabel", "text", "meter", "ammeter", "voltmeter", "multimeter", "graph", "measurement", "control", "parameter"}
 
 
-def _invalid(message: str, name: str) -> BackendError:
-    return BackendError("INVALID_ARGUMENT", message, "hvdc", "register_hvdc_profile", {"profile": name})
+def _invalid(message: str, name: str, operation: str = "register_hvdc_profile") -> BackendError:
+    return BackendError("INVALID_ARGUMENT", message, "hvdc", operation, {"profile": name})
 
 
 def _already_exists(name: str, destination: Path) -> BackendError:
@@ -75,9 +75,9 @@ def _already_exists(name: str, destination: Path) -> BackendError:
     )
 
 
-def _validate_name(name: str) -> None:
+def _validate_name(name: str, operation: str = "register_hvdc_profile") -> None:
     if not isinstance(name, str) or not _PROFILE_NAME.fullmatch(name):
-        raise _invalid("Profile names must use lowercase letters, digits, underscores, or hyphens and start with a letter.", str(name))
+        raise _invalid("Profile names must use lowercase letters, digits, underscores, or hyphens and start with a letter.", str(name), operation)
 
 
 def _validate_profile(profile: Any, name: str) -> dict[str, Any]:
@@ -125,16 +125,32 @@ def _workspace_root(workspace_root: str | Path | None) -> Path | None:
     return Path(configured).expanduser().resolve() if configured else None
 
 
-def _profile_path(name: str, workspace_root: str | Path | None) -> Path | None:
+def _profile_directory(workspace_root: str | Path | None, operation: str) -> Path | None:
     root = _workspace_root(workspace_root)
-    return root / ".pscad-mcp" / "hvdc-profiles" / f"{name}.json" if root else None
+    if root is None:
+        return None
+    directory = (root / ".pscad-mcp" / "hvdc-profiles").resolve()
+    if directory != root and root not in directory.parents:
+        raise _invalid("HVDC profile directory escapes the configured workspace.", "", operation)
+    return directory
 
 
-def _read_profile(path: Path, name: str) -> dict[str, Any]:
+def _profile_path(name: str, workspace_root: str | Path | None, operation: str) -> Path | None:
+    _validate_name(name, operation)
+    directory = _profile_directory(workspace_root, operation)
+    if directory is None:
+        return None
+    path = (directory / f"{name}.json").resolve()
+    if path.parent != directory:
+        raise _invalid("HVDC profile path escapes the configured profile directory.", name, operation)
+    return path
+
+
+def _read_profile(path: Path, name: str, operation: str = "register_hvdc_profile") -> dict[str, Any]:
     try:
         profile = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as error:
-        raise _invalid(f"Unable to load profile '{name}': {error}", name) from error
+        raise _invalid(f"Unable to load profile '{name}': {error}", name, operation) from error
     return _validate_profile(profile, name)
 
 
@@ -150,24 +166,24 @@ def _merge_profile(base: dict[str, Any], profile: dict[str, Any]) -> dict[str, A
 
 def list_profiles(workspace_root: str | Path | None = None) -> list[str]:
     names = set(_BUILTIN_PROFILES)
-    root = _workspace_root(workspace_root)
-    directory = root / ".pscad-mcp" / "hvdc-profiles" if root else None
+    directory = _profile_directory(workspace_root, "list_hvdc_profiles")
     if directory and directory.is_dir():
         names.update(path.stem for path in directory.glob("*.json") if _PROFILE_NAME.fullmatch(path.stem))
     return sorted(names)
 
 
 def load_profile(name: str, mapping_file: str | None = None, *, workspace_root: str | Path | None = None) -> dict[str, Any]:
+    _validate_name(name, "load_profile")
     if mapping_file:
         path = Path(mapping_file).expanduser().resolve()
-        return _read_profile(path, name)
+        return _read_profile(path, name, "load_profile")
     if name in _BUILTIN_PROFILES:
         profile = dict(_BUILTIN_PROFILES[name])
     else:
-        path = _profile_path(name, workspace_root)
+        path = _profile_path(name, workspace_root, "load_profile")
         if path is None or not path.is_file():
             raise BackendError("HVDC_PROFILE_NOT_FOUND", f"HVDC profile '{name}' was not found.", "hvdc", "load_profile", {"profile": name, "available": list_profiles(workspace_root)})
-        profile = dict(_read_profile(path, name))
+        profile = dict(_read_profile(path, name, "load_profile"))
     parent = profile.get("extends")
     if parent:
         base = load_profile(parent, workspace_root=workspace_root)
@@ -182,7 +198,7 @@ def register_profile(name: str, mapping_file: str, *, workspace_root: str | Path
     root = _workspace_root(workspace_root)
     if root is None:
         raise _invalid("A configured workspace is required for user-scoped profile registration.", name)
-    destination = _profile_path(name, root)
+    destination = _profile_path(name, root, "register_hvdc_profile")
     assert destination is not None
     destination = destination.resolve()
     if destination != root and root not in destination.parents:

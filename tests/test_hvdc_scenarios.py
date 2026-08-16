@@ -1,6 +1,9 @@
 import asyncio
+import pytest
 
 from pscad_mcp.hvdc.scenarios import validate_scenario
+from pscad_mcp.core.backend.base import BackendError
+from pscad_mcp.core.path_policy import PathPolicy
 from pscad_mcp.core.service import ConfirmationRequired
 from pscad_mcp.hvdc.service import HvdcDomainService
 
@@ -74,3 +77,22 @@ def test_bound_event_is_applied_after_run_starts():
     result = asyncio.run(service.run_scenario("case", scenario, confirm=True))
     assert result["status"] == "running"
     assert backend.calls == [("run", "case_derived"), ("set", "case_derived", 2, {"Command": 1})]
+
+
+def test_workspace_registered_profile_is_available_to_scenario_validation_and_run(tmp_path):
+    mapping = tmp_path / "scenario-custom.json"
+    mapping.write_text('{"required_assets": [], "mappings": []}', encoding="utf-8")
+    service = HvdcDomainService(path_policy=PathPolicy(workspace_root=str(tmp_path)))
+    service.register_profile("scenario_custom", str(mapping))
+    scenario = {
+        "name": "baseline",
+        "profile": "scenario_custom",
+        "project": "case",
+        "parameter_changes": [],
+        "events": [],
+    }
+
+    validation = asyncio.run(service.validate_scenario(scenario))
+    assert validation["valid"] is True
+    with pytest.raises(ConfirmationRequired):
+        asyncio.run(service.run_scenario("case", scenario, confirm=False))

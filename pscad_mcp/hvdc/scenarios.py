@@ -22,7 +22,7 @@ def _error(code: str, message: str, **details: Any) -> dict[str, Any]:
     return {"code": code, "message": message, **details}
 
 
-def validate_scenario(scenario: Mapping[str, Any]) -> dict[str, Any]:
+def validate_scenario(scenario: Mapping[str, Any], *, workspace_root: str | Path | None = None) -> dict[str, Any]:
     errors: list[dict[str, Any]] = []
     if not isinstance(scenario, Mapping):
         return {"valid": False, "errors": [_error("HVDC_SCENARIO_INVALID", "scenario must be an object.")], "warnings": []}
@@ -35,7 +35,7 @@ def validate_scenario(scenario: Mapping[str, Any]) -> dict[str, Any]:
         errors.append(_error("HVDC_SCENARIO_INVALID", "profile must be a non-empty string.", field="profile"))
     else:
         try:
-            load_profile(profile)
+            load_profile(profile, workspace_root=workspace_root)
         except BackendError as error:
             errors.append(_error(error.code, str(error), profile=profile))
     if not isinstance(project, str) or not project.strip():
@@ -64,7 +64,14 @@ def validate_scenario(scenario: Mapping[str, Any]) -> dict[str, Any]:
     return {"valid": not errors, "errors": errors, "warnings": []}
 
 
-async def run_scenario(service: Any, project_name: str, scenario: Mapping[str, Any], *, confirm: bool = False) -> dict[str, Any]:
+async def run_scenario(
+    service: Any,
+    project_name: str,
+    scenario: Mapping[str, Any],
+    *,
+    confirm: bool = False,
+    workspace_root: str | Path | None = None,
+) -> dict[str, Any]:
     normalized: dict[str, Any] = dict(scenario)
     for field in ("parameter_changes", "events"):
         raw = scenario.get(field, [])
@@ -86,7 +93,7 @@ async def run_scenario(service: Any, project_name: str, scenario: Mapping[str, A
         # A loaded PSCAD project may not have a source file available for
         # inspection; explicit component bindings remain mandatory then.
         pass
-    validation = validate_scenario(normalized)
+    validation = validate_scenario(normalized, workspace_root=workspace_root)
     if not validation["valid"]:
         first = validation["errors"][0]
         raise BackendError(first["code"], first["message"], "hvdc", "run_hvdc_scenario", {key: value for key, value in first.items() if key not in {"code", "message"}})

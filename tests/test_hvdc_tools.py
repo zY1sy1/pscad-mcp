@@ -113,6 +113,36 @@ def test_user_profiles_are_isolated_by_workspace_root(tmp_path):
     assert raised.value.code == "HVDC_PROFILE_NOT_FOUND"
 
 
+def test_profile_load_rejects_traversal_outside_workspace(tmp_path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    outside = tmp_path / "outside.json"
+    outside.write_text('{"required_assets": [], "mappings": []}', encoding="utf-8")
+
+    with pytest.raises(BackendError) as raised:
+        load_profile("../../../outside", workspace_root=workspace)
+
+    assert raised.value.code == "INVALID_ARGUMENT"
+    assert raised.value.operation == "load_profile"
+
+
+def test_profile_parent_name_cannot_traverse_outside_workspace(tmp_path):
+    workspace = tmp_path / "workspace"
+    profile_dir = workspace / ".pscad-mcp" / "hvdc-profiles"
+    profile_dir.mkdir(parents=True)
+    (tmp_path / "outside.json").write_text('{"required_assets": [], "mappings": []}', encoding="utf-8")
+    (profile_dir / "child.json").write_text(
+        '{"extends": "../../../outside", "required_assets": [], "mappings": []}',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(BackendError) as raised:
+        load_profile("child", workspace_root=workspace)
+
+    assert raised.value.code == "INVALID_ARGUMENT"
+    assert raised.value.operation == "load_profile"
+
+
 def test_inspection_cache_is_scoped_by_canvas_name(tmp_path):
     path = tmp_path / "case.pscx"
     path.write_text(

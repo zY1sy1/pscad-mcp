@@ -156,11 +156,11 @@ class HvdcDomainService:
 
     async def validate_scenario(self, scenario: Mapping[str, Any]) -> dict[str, Any]:
         from .scenarios import validate_scenario
-        return validate_scenario(scenario)
+        return validate_scenario(scenario, workspace_root=self._workspace_root())
 
     async def run_scenario(self, project_name: str, scenario: Mapping[str, Any], confirm: bool = False) -> dict[str, Any]:
         from .scenarios import run_scenario
-        return await run_scenario(self, project_name, scenario, confirm=confirm)
+        return await run_scenario(self, project_name, scenario, confirm=confirm, workspace_root=self._workspace_root())
 
     async def scenario_status(self, scenario_id: str) -> dict[str, Any]:
         if scenario_id not in self._scenarios:
