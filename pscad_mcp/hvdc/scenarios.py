@@ -697,9 +697,19 @@ async def _scenario_worker(service: Any, record: dict[str, Any], normalized: dic
                 or (isinstance(error, BackendError) and error.code == "HVDC_TIMED_CONTROL_UNAVAILABLE")
             )
         else:
-            record["containment"] = {"status": "not_required"}
-            record["outcome"] = "failed"
-            release_reservation = True
+            pending = service._pending_scenario_operations(record["scenario_id"])
+            if pending:
+                record["containment"] = {
+                    "status": "pending_operations",
+                    "pending_operations": pending,
+                    "outcome_known": False,
+                }
+                record["outcome"] = "needs_review"
+                release_after_pending = True
+            else:
+                record["containment"] = {"status": "not_required"}
+                record["outcome"] = "failed"
+                release_reservation = True
         transition_scenario(record, "failed")
     else:
         record["containment"] = {"status": "terminal", "project_status": record.get("project_status")}

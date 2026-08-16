@@ -45,6 +45,8 @@ class RobustExecutor:
         self.last_timeout_seconds: float | None = None
         self.reset_generation = 0
         self._active_generations: set[int] = set()
+        self._pending_submissions: set[asyncio.Future[Any]] = set()
+        self.cancel_wait_timeout = min(1.0, max(0.01, timeout))
         self._com_initializer = com_initializer or _initialize_windows_com
         self.executor = self._new_executor()
 
@@ -76,7 +78,19 @@ class RobustExecutor:
                     generation != self.reset_generation
                     for generation in self._active_generations
                 ),
+                "in_flight_calls": sum(
+                    1 for submitted in self._pending_submissions if not submitted.done()
+                ),
             }
+
+    def pending_settlements(self) -> tuple[asyncio.Future[Any], ...]:
+        """Return loop futures whose worker calls have not actually settled."""
+        with self._state_lock:
+            return tuple(
+                submitted
+                for submitted in self._pending_submissions
+                if not submitted.done()
+            )
 
     async def run_safe(
         self,
@@ -119,6 +133,13 @@ class RobustExecutor:
                         self._active_generations.discard(generation)
 
             submitted = loop.run_in_executor(self.executor, wrapped_call)
+            self._pending_submissions.add(submitted)
+
+            def submission_settled(completed: asyncio.Future[Any]) -> None:
+                with self._state_lock:
+                    self._pending_submissions.discard(completed)
+
+            submitted.add_done_callback(submission_settled)
 
         try:
             result = await asyncio.wait_for(
@@ -137,7 +158,12 @@ class RobustExecutor:
             # pending until the underlying call has truly settled so callers
             # do not release application-wide mutation ownership early.
             try:
-                await asyncio.shield(submitted)
+                await asyncio.wait_for(
+                    asyncio.shield(submitted),
+                    timeout=self.cancel_wait_timeout,
+                )
+            except asyncio.TimeoutError:
+                pass
             except Exception:
                 pass
             raise

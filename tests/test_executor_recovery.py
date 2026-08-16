@@ -35,6 +35,42 @@ class _ResetAfterFirstStateCapture:
 
 
 class TestExecutorRecovery(unittest.IsolatedAsyncioTestCase):
+    async def test_cancel_wait_is_bounded_while_worker_settlement_remains_visible(self):
+        executor = RobustExecutor(timeout=1)
+        executor.cancel_wait_timeout = 0.02
+        started = threading.Event()
+        release = threading.Event()
+
+        def blocked_call():
+            started.set()
+            release.wait(2)
+
+        task = asyncio.create_task(executor.run_safe(blocked_call))
+        try:
+            self.assertTrue(await asyncio.to_thread(started.wait, 0.1))
+            task.cancel()
+            await asyncio.sleep(0.05)
+
+            self.assertTrue(task.done())
+            self.assertEqual(executor.snapshot()["in_flight_calls"], 1)
+            with self.assertRaises(asyncio.CancelledError):
+                await task
+
+            release.set()
+            deadline = asyncio.get_running_loop().time() + 0.2
+            while executor.snapshot()["in_flight_calls"] and asyncio.get_running_loop().time() < deadline:
+                await asyncio.sleep(0.001)
+            self.assertEqual(executor.snapshot()["in_flight_calls"], 0)
+        finally:
+            release.set()
+            if not task.done():
+                task.cancel()
+            try:
+                await task
+            except BaseException:
+                pass
+            executor.shutdown()
+
     async def test_success_updates_diagnostic_snapshot(self):
         executor = RobustExecutor()
         try:

@@ -266,6 +266,57 @@ def test_vendor_thread_surviving_asyncio_cancellation_keeps_scenario_lease(tmp_p
     assert service._active_scenario_id is None
 
 
+def test_executor_watchdog_timeout_keeps_lease_until_vendor_thread_settles(tmp_path):
+    source = tmp_path / "case.pscx"
+    _write_project(source)
+    executor = RobustExecutor(timeout=0.01)
+
+    class WatchdogBackend(BlockingBackend):
+        def __init__(self):
+            super().__init__()
+            self.executor = executor
+            self.write_entered = threading.Event()
+            self.allow_write = threading.Event()
+            self.late_writes = []
+
+        async def set_component_parameters(self, project_name, component_id, values):
+            def vendor_write():
+                self.write_entered.set()
+                self.allow_write.wait()
+                self.late_writes.append(dict(values))
+
+            await self.executor.run_safe(vendor_write)
+
+    backend = WatchdogBackend()
+    service = HvdcDomainService(backend, path_policy=PathPolicy(workspace_root=str(tmp_path)))
+    scenario = _scenario(source, timeout_s=0.2)
+    scenario["parameter_changes"] = [{"target": "current_order", "value": 6}]
+
+    async def exercise():
+        started = await service.run_scenario(str(source), scenario, confirm=True)
+        assert await asyncio.to_thread(backend.write_entered.wait, 0.1)
+        terminal = await _terminal(service, started["scenario_id"], timeout=0.2)
+        try:
+            assert terminal["status"] == "failed"
+            assert service._active_scenario_id == started["scenario_id"]
+            assert terminal["pending_operations"]
+        finally:
+            backend.allow_write.set()
+        deadline = asyncio.get_running_loop().time() + 0.2
+        while service._active_scenario_id is not None and asyncio.get_running_loop().time() < deadline:
+            await asyncio.sleep(0.001)
+        return terminal
+
+    try:
+        terminal = asyncio.run(exercise())
+    finally:
+        backend.allow_write.set()
+        executor.shutdown()
+    assert backend.late_writes == [{"Name": 6}]
+    assert terminal["partial_completion"]["applied_parameter_changes"] == []
+    assert service._active_scenario_id is None
+
+
 def test_timed_event_waits_for_confirmed_running_state(tmp_path):
     source = tmp_path / "case.pscx"
     _write_project(source)

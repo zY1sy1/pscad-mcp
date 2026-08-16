@@ -26,6 +26,9 @@ class HvdcDomainService:
         self._scenario_tasks: dict[str, asyncio.Task[None]] = {}
         self._scenario_run_tasks: dict[str, asyncio.Task[Any]] = {}
         self._scenario_operation_tasks: dict[str, dict[asyncio.Task[Any], str]] = {}
+        self._scenario_settlement_waiters: dict[
+            str, dict[asyncio.Future[Any], asyncio.Task[None]]
+        ] = {}
         self._scenario_cleanup_tasks: dict[str, asyncio.Task[None]] = {}
         self._scenario_release_after_operations: set[str] = set()
         self._scenario_reservation_lock = asyncio.Lock()
@@ -50,11 +53,24 @@ class HvdcDomainService:
         if record is not None:
             record["pending_operations"] = list(operations.values())
 
+        async def await_vendor_settlement(settlement: asyncio.Future[Any]) -> None:
+            try:
+                await asyncio.shield(settlement)
+            except BaseException:
+                pass
+
         def operation_finished(completed: asyncio.Task[Any]) -> None:
             current = self._scenario_operation_tasks.get(scenario_id)
             if current is None or completed not in current:
                 return
             name = current.pop(completed)
+            settlement_waiters = self._scenario_settlement_waiters.get(scenario_id)
+            if settlement_waiters is not None:
+                for settlement, waiter in list(settlement_waiters.items()):
+                    if waiter is completed:
+                        settlement_waiters.pop(settlement, None)
+                if not settlement_waiters:
+                    self._scenario_settlement_waiters.pop(scenario_id, None)
             result: dict[str, Any] = {"operation": name}
             if completed.cancelled():
                 result["status"] = "cancelled"
@@ -73,6 +89,27 @@ class HvdcDomainService:
                             "backend": "hvdc",
                             "operation": name,
                         }
+            executor = getattr(self.backend_service, "executor", None)
+            pending_settlements = getattr(executor, "pending_settlements", None)
+            settlements = list(pending_settlements()) if callable(pending_settlements) else []
+            waiters = self._scenario_settlement_waiters.setdefault(scenario_id, {})
+            added_settlements = 0
+            for settlement in settlements:
+                if settlement in waiters:
+                    continue
+                waiter = asyncio.create_task(
+                    await_vendor_settlement(settlement),
+                    name=f"{scenario_id}-{name}-vendor-settlement",
+                )
+                waiters[settlement] = waiter
+                current[waiter] = f"{name}:vendor_settlement"
+                waiter.add_done_callback(operation_finished)
+                added_settlements += 1
+            if not waiters:
+                self._scenario_settlement_waiters.pop(scenario_id, None)
+            if added_settlements:
+                result["status"] = "awaiting_vendor_settlement"
+                result["settlement_count"] = added_settlements
             current_record = self._scenarios.get(scenario_id)
             if current_record is not None:
                 current_record.setdefault("operation_history", []).append(result)
