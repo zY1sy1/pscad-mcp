@@ -137,6 +137,32 @@ def test_trip_delay_fails_closed_when_status_crosses_before_command():
     assert result["verdict"] == "INCOMPLETE_ANALYSIS"
 
 
+@pytest.mark.parametrize(
+    ("command", "status"),
+    [
+        ([1, 1, 1], [0, 1, 1]),
+        ([0, 1, 1], [1, 1, 1]),
+        ([1, 1, 1], [1, 1, 1]),
+    ],
+)
+def test_trip_delay_requires_low_to_high_edges(command, status):
+    result = calculate_metrics(
+        {
+            "time": [0.0, 0.1, 0.2],
+            "channels": {
+                "breaker_command": command,
+                "breaker_status": status,
+            },
+        },
+        ["trip_delay_s"],
+    )
+
+    metric = result["metrics"][0]
+    assert metric["value"] is None
+    assert metric["status"] == "invalid"
+    assert result["verdict"] == "INCOMPLETE_ANALYSIS"
+
+
 def test_recovery_time_requires_explicit_baseline_and_does_not_reuse_settling():
     samples = {
         "time": [0, 1, 2, 3, 4],
@@ -151,6 +177,79 @@ def test_recovery_time_requires_explicit_baseline_and_does_not_reuse_settling():
     assert by_name["dc_current_recovery_time_s"]["value"] is None
     assert by_name["dc_current_recovery_time_s"]["status"] == "invalid"
     assert result["verdict"] == "INCOMPLETE_ANALYSIS"
+
+
+def test_service_uses_scenario_record_recovery_baseline_for_public_analysis():
+    service = HvdcDomainService()
+    service._scenarios["recovery"] = {
+        "scenario_id": "recovery",
+        "profile": "lcc_bipolar_generic",
+        "samples": {
+            "time": [0, 1, 2, 3, 4],
+            "channels": {"dc_current": [1.0, 2.0, 1.2, 1.005, 1.0]},
+        },
+        "recovery_baselines": {"dc_current": 1.0},
+        "warnings": [],
+    }
+
+    result = asyncio.run(
+        service.analyze_results("recovery", ["dc_current_recovery_time_s"])
+    )
+
+    metric = result["metrics"][0]
+    assert metric["value"] == 2.0
+    assert metric["status"] == "derived"
+    assert result["verdict"] == "PASS"
+    assert service._scenarios["recovery"]["recovery_baselines"] == {
+        "dc_current": 1.0
+    }
+
+
+def test_service_rejects_unaudited_sample_only_recovery_baseline():
+    service = HvdcDomainService()
+    service._scenarios["sample-only"] = {
+        "scenario_id": "sample-only",
+        "profile": "lcc_bipolar_generic",
+        "samples": {
+            "time": [0, 1, 2, 3],
+            "channels": {"dc_current": [1.0, 2.0, 1.005, 1.0]},
+            "recovery_baselines": {"dc_current": 1.0},
+        },
+        "warnings": [],
+    }
+
+    result = asyncio.run(
+        service.analyze_results("sample-only", ["dc_current_recovery_time_s"])
+    )
+
+    assert result["metrics"][0]["value"] is None
+    assert result["metrics"][0]["status"] == "invalid"
+    assert result["verdict"] == "INCOMPLETE_ANALYSIS"
+
+
+def test_service_uses_analysis_recovery_baseline_and_promotes_it_to_record():
+    service = HvdcDomainService()
+    service._scenarios["analysis-baseline"] = {
+        "scenario_id": "analysis-baseline",
+        "profile": "lcc_bipolar_generic",
+        "samples": {
+            "time": [0, 1, 2, 3],
+            "channels": {"dc_current": [1.0, 2.0, 1.005, 1.0]},
+        },
+        "analysis": {"recovery_baselines": {"dc_current": 1.0}},
+        "warnings": [],
+    }
+
+    result = asyncio.run(
+        service.analyze_results(
+            "analysis-baseline", ["dc_current_recovery_time_s"]
+        )
+    )
+
+    assert result["metrics"][0]["value"] == 1.0
+    assert service._scenarios["analysis-baseline"]["recovery_baselines"] == {
+        "dc_current": 1.0
+    }
 
 
 def test_empty_or_unaligned_channels_never_fabricate_zero_metrics():

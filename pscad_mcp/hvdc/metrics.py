@@ -136,8 +136,8 @@ def _metric(name: str, value: float, units: str | None, channels: Iterable[str],
 
 
 def _first_crossing(values: list[float], threshold: float = 0.5) -> int | None:
-    for index, value in enumerate(values):
-        if value >= threshold:
+    for index in range(1, len(values)):
+        if values[index - 1] < threshold <= values[index]:
             return index
     return None
 
@@ -272,8 +272,17 @@ def calculate_metrics(samples: dict[str, Any], metrics: list[str] | None = None)
         elif name == "trip_delay_s":
             command, status = channels.get("breaker_command", []), channels.get("breaker_status", [])
             command_index, status_index = _first_crossing(command), _first_crossing(status)
-            if command_index is None or status_index is None or not time:
+            if not command or not status or not time:
                 result.append(unavailable(name, ("breaker_command", "breaker_status")))
+            elif command_index is None or status_index is None:
+                result.append(
+                    _invalid(
+                        name,
+                        ("breaker_command", "breaker_status"),
+                        time,
+                        "Trip delay requires observed low-to-high command and status edges.",
+                    )
+                )
             elif status_index < command_index:
                 result.append(
                     _invalid(

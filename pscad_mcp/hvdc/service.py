@@ -519,7 +519,23 @@ class HvdcDomainService:
             workspace_root=self._workspace_root(),
         )
         resolution = resolve_result_channels(samples, profile)
-        result = calculate_metrics(resolution["samples"], metrics)
+        analysis = record.get("analysis", {})
+        analysis_baselines = (
+            analysis.get("recovery_baselines", {})
+            if isinstance(analysis, Mapping)
+            else {}
+        )
+        normalized_samples = dict(resolution["samples"])
+        recovery_baselines: dict[str, Any] = {}
+        for source in (
+            analysis_baselines,
+            record.get("recovery_baselines", {}),
+        ):
+            if isinstance(source, Mapping):
+                recovery_baselines.update(source)
+        normalized_samples["recovery_baselines"] = recovery_baselines
+        record["recovery_baselines"] = dict(recovery_baselines)
+        result = calculate_metrics(normalized_samples, metrics)
         result["warnings"] = [*resolution["warnings"], *result["warnings"]]
         record["resolved_channels"] = resolution["resolved_channels"]
         record["metrics"] = result["metrics"]

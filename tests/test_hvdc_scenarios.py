@@ -75,6 +75,56 @@ def test_even_baseline_run_requires_confirmation():
         raise AssertionError("confirmation was not required")
 
 
+def test_scenario_record_preserves_analysis_recovery_baselines():
+    service = HvdcDomainService(ScenarioBackend())
+    scenario = {
+        "name": "baseline",
+        "profile": "lcc_bipolar_generic",
+        "project": "case_derived",
+        "parameter_changes": [],
+        "events": [],
+        "analysis": {
+            "metrics": ["dc_current_recovery_time_s"],
+            "recovery_baselines": {"dc_current": 1.0},
+        },
+    }
+
+    async def exercise():
+        started = await service.run_scenario("case_derived", scenario, confirm=True)
+        await _wait_for_terminal(service, started["scenario_id"])
+        return started
+
+    started = asyncio.run(exercise())
+
+    assert started["analysis"] == scenario["analysis"]
+    assert started["recovery_baselines"] == {"dc_current": 1.0}
+
+
+@pytest.mark.parametrize(
+    "analysis",
+    [
+        "not-an-object",
+        {"recovery_baselines": []},
+        {"recovery_baselines": {"dc_current": "unknown"}},
+        {"recovery_baselines": {"dc_current": float("nan")}},
+    ],
+)
+def test_scenario_analysis_recovery_baselines_are_validated(analysis):
+    scenario = {
+        "name": "baseline",
+        "profile": "lcc_bipolar_generic",
+        "project": "case",
+        "parameter_changes": [],
+        "events": [],
+        "analysis": analysis,
+    }
+
+    result = validate_scenario(scenario)
+
+    assert result["valid"] is False
+    assert result["errors"][0]["field"].startswith("analysis")
+
+
 def test_unbound_event_cannot_execute_as_baseline():
     scenario = {"name": "trip", "profile": "hvdc_breaker_difforder", "project": "case", "parameter_changes": [], "events": [{"time_s": 1.0, "target": "breaker_command", "value": 1}]}
     service = HvdcDomainService()

@@ -232,6 +232,35 @@ def validate_scenario(scenario: Mapping[str, Any], *, workspace_root: str | Path
     output_files = scenario.get("output_files", [])
     if not isinstance(output_files, list) or any(not isinstance(item, str) or not item.strip() for item in output_files):
         errors.append(_error("HVDC_SCENARIO_INVALID", "output_files must be a list of non-empty strings.", field="output_files"))
+    analysis = scenario.get("analysis", {})
+    if not isinstance(analysis, Mapping):
+        errors.append(_error("HVDC_SCENARIO_INVALID", "analysis must be an object.", field="analysis"))
+    else:
+        recovery_baselines = analysis.get("recovery_baselines", {})
+        if not isinstance(recovery_baselines, Mapping):
+            errors.append(
+                _error(
+                    "HVDC_SCENARIO_INVALID",
+                    "analysis.recovery_baselines must be an object.",
+                    field="analysis.recovery_baselines",
+                )
+            )
+        else:
+            for channel, baseline in recovery_baselines.items():
+                if (
+                    not isinstance(channel, str)
+                    or not channel.strip()
+                    or isinstance(baseline, bool)
+                    or not isinstance(baseline, (int, float))
+                    or not math.isfinite(float(baseline))
+                ):
+                    errors.append(
+                        _error(
+                            "HVDC_SCENARIO_INVALID",
+                            "Recovery baselines require non-empty channel names and finite numeric values.",
+                            field=f"analysis.recovery_baselines.{channel}",
+                        )
+                    )
     return {"valid": not errors, "errors": errors, "warnings": []}
 
 
@@ -736,6 +765,8 @@ async def run_scenario(
     for field in ("parameter_changes", "events"):
         raw = scenario.get(field, [])
         normalized[field] = [dict(item) if isinstance(item, Mapping) else item for item in raw] if isinstance(raw, list) else raw
+    raw_analysis = scenario.get("analysis", {})
+    normalized["analysis"] = dict(raw_analysis) if isinstance(raw_analysis, Mapping) else raw_analysis
     validation = validate_scenario(normalized, workspace_root=workspace_root)
     if not validation["valid"]:
         first = validation["errors"][0]
@@ -772,6 +803,10 @@ async def run_scenario(
         await service._release_scenario(scenario_id)
         raise
     created_at = _utc_now()
+    analysis = dict(normalized["analysis"])
+    recovery_baselines = dict(analysis.get("recovery_baselines", {}))
+    if "recovery_baselines" in analysis:
+        analysis["recovery_baselines"] = dict(recovery_baselines)
     record: dict[str, Any] = {
         "scenario_id": scenario_id,
         "project_name": project_name,
@@ -784,6 +819,8 @@ async def run_scenario(
         "reservation_held": True,
         "changed_parameters": list(normalized.get("parameter_changes", [])),
         "events": list(normalized.get("events", [])),
+        "analysis": analysis,
+        "recovery_baselines": recovery_baselines,
         "output_files": explicit_outputs,
         "output_discovery": "pending",
         "timing_basis": {"kind": "pending"},
