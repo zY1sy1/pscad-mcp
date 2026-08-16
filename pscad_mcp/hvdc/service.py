@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Mapping
@@ -22,6 +23,7 @@ class HvdcDomainService:
         self.path_policy = path_policy or PathPolicy()
         self._cache: dict[tuple[str, str], tuple[int, dict[str, Any]]] = {}
         self._scenarios: dict[str, dict[str, Any]] = {}
+        self._scenario_tasks: dict[str, asyncio.Task[None]] = {}
 
     def _workspace_root(self) -> Path | None:
         root = getattr(self.path_policy, "workspace_root", None)
@@ -65,6 +67,23 @@ class HvdcDomainService:
             raise BackendError("NOT_FOUND", f"HVDC target project '{project_name}' was not found.", "hvdc", "run_hvdc_scenario", {"candidate": project_name}) from error
         except ValueError as error:
             raise BackendError("INVALID_ARGUMENT", str(error), "hvdc", "run_hvdc_scenario", {"candidate": project_name}) from error
+
+    def _resolve_output_file(self, file_path: str, *, must_exist: bool = False) -> Path:
+        try:
+            try:
+                return self.path_policy.resolve(
+                    file_path,
+                    suffixes={".psout", ".out"},
+                    must_exist=must_exist,
+                )
+            except TypeError:
+                return self.path_policy.resolve(file_path)
+        except WorkspaceNotConfiguredError as error:
+            raise BackendError("WORKSPACE_NOT_CONFIGURED", str(error), "hvdc", "run_hvdc_scenario", {"candidate": file_path}) from error
+        except FileNotFoundError as error:
+            raise BackendError("NOT_FOUND", f"HVDC output file '{file_path}' was not found.", "hvdc", "run_hvdc_scenario", {"candidate": file_path}) from error
+        except ValueError as error:
+            raise BackendError("INVALID_ARGUMENT", str(error), "hvdc", "run_hvdc_scenario", {"candidate": file_path}) from error
 
     def _inspection(self, project_name: str, canvas_name: str = "Main") -> dict[str, Any]:
         path = self._resolve_project(project_name)
@@ -110,6 +129,20 @@ class HvdcDomainService:
         result = self._inspection(project_name, canvas_name)
         mappings = [item for item in result["mappings"] if canonical is None or item["canonical"] == canonical]
         return {"mappings": mappings, "unresolved": result["unresolved"], "conflicts": result.get("mapping_conflicts", []), "warnings": result["warnings"]}
+
+    def resolve_scenario_mappings(self, project_name: str, profile: str, canvas_name: str = "Main") -> dict[str, Any]:
+        """Resolve mutation bindings against the explicitly selected profile."""
+        evidence = scan_project(self._resolve_project(project_name), canvas_name)
+        resolution = resolve_mappings(
+            evidence,
+            load_profile(profile, workspace_root=self._workspace_root()),
+        )
+        return {
+            "mappings": [asdict(mapping) for mapping in resolution.mappings],
+            "unresolved": list(resolution.unresolved),
+            "conflicts": list(resolution.conflicts),
+            "warnings": list(resolution.warnings),
+        }
 
     def validate_project(self, project_name: str, profile: str = "auto", canvas_name: str = "Main") -> dict[str, Any]:
         result = self._inspection(project_name, canvas_name)
@@ -165,7 +198,55 @@ class HvdcDomainService:
     async def scenario_status(self, scenario_id: str) -> dict[str, Any]:
         if scenario_id not in self._scenarios:
             raise BackendError("NOT_FOUND", f"Scenario '{scenario_id}' was not found.", "hvdc", "get_hvdc_scenario_status", {"scenario_id": scenario_id})
-        return dict(self._scenarios[scenario_id])
+        record = self._scenarios[scenario_id]
+        backend = self.backend_service
+        target_project = record.get("target_project")
+        if backend is not None and target_project:
+            get_status = getattr(backend, "get_run_status", None)
+            if callable(get_status):
+                try:
+                    project_status = await get_status(target_project)
+                    if isinstance(project_status, Mapping):
+                        record["project_status"] = dict(project_status)
+                        status = str(project_status.get("status", "")).casefold()
+                        task = self._scenario_tasks.get(scenario_id)
+                        orchestration_active = task is not None and not task.done()
+                        if not orchestration_active and record.get("status") in {"validated", "running"}:
+                            if status in {"completed", "complete", "finished", "done", "idle", "stopped"}:
+                                from .scenarios import transition_scenario
+                                transition_scenario(record, "completed")
+                            elif status in {"failed", "error", "aborted"}:
+                                from .scenarios import transition_scenario
+                                record["error"] = BackendError(
+                                    "HVDC_SCENARIO_RUN_FAILED",
+                                    f"PSCAD project '{target_project}' reported terminal status '{status}'.",
+                                    "hvdc",
+                                    "get_hvdc_scenario_status",
+                                    {"project_name": target_project, "project_status": dict(project_status)},
+                                ).to_dict()
+                                transition_scenario(record, "failed")
+                except Exception as error:
+                    warning = {
+                        "code": "PROJECT_STATUS_UNAVAILABLE",
+                        "message": str(error),
+                    }
+                    if isinstance(error, BackendError):
+                        warning["error"] = error.to_dict()
+                    if warning not in record.setdefault("warnings", []):
+                        record["warnings"].append(warning)
+            get_messages = getattr(backend, "get_project_output", None)
+            if callable(get_messages):
+                try:
+                    messages = await get_messages(target_project, structured=True)
+                    if isinstance(messages, list):
+                        record["messages"] = [dict(item) if isinstance(item, Mapping) else {"severity": "info", "text": str(item), "source": None} for item in messages]
+                except Exception as error:
+                    warning = {"code": "PROJECT_MESSAGES_UNAVAILABLE", "message": str(error)}
+                    if isinstance(error, BackendError):
+                        warning["error"] = error.to_dict()
+                    if warning not in record.setdefault("warnings", []):
+                        record["warnings"].append(warning)
+        return dict(record)
 
     async def analyze_results(self, scenario_id: str, metrics: list[str] | None = None) -> dict[str, Any]:
         from .metrics import calculate_metrics
