@@ -8,7 +8,7 @@ from pscad_mcp.main import create_server
 from pscad_mcp.core.backend.base import BackendError
 from pscad_mcp.core.path_policy import PathPolicy
 from pscad_mcp.hvdc.service import HvdcDomainService
-from pscad_mcp.hvdc.profiles import load_profile
+from pscad_mcp.hvdc.profiles import list_profiles, load_profile
 
 
 EXPECTED = {
@@ -94,6 +94,23 @@ def test_profile_registration_rejects_existing_user_profile_overwrite(tmp_path):
         service.register_profile("existing", str(mapping))
     assert raised.value.code == "HVDC_PROFILE_ALREADY_EXISTS"
     assert persisted.read_bytes() == original
+
+
+def test_user_profiles_are_isolated_by_workspace_root(tmp_path):
+    workspace_a = tmp_path / "workspace-a"
+    workspace_b = tmp_path / "workspace-b"
+    workspace_a.mkdir()
+    workspace_b.mkdir()
+    mapping = workspace_a / "scope-probe.json"
+    mapping.write_text('{"required_assets": [], "mappings": []}', encoding="utf-8")
+    service_a = HvdcDomainService(path_policy=PathPolicy(workspace_root=str(workspace_a)))
+    service_a.register_profile("scope_probe", str(mapping))
+
+    assert "scope_probe" in list_profiles(workspace_a)
+    assert "scope_probe" not in list_profiles(workspace_b)
+    with pytest.raises(BackendError) as raised:
+        load_profile("scope_probe", workspace_root=workspace_b)
+    assert raised.value.code == "HVDC_PROFILE_NOT_FOUND"
 
 
 def test_inspection_cache_is_scoped_by_canvas_name(tmp_path):

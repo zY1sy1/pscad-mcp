@@ -59,7 +59,6 @@ _BUILTIN_PROFILES: dict[str, dict[str, Any]] = {
 
 _PROFILE_NAME = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
 _SOURCE_KINDS = {"label", "datalabel", "text", "meter", "ammeter", "voltmeter", "multimeter", "graph", "measurement", "control", "parameter"}
-_USER_PROFILE_FILES: dict[str, Path] = {}
 
 
 def _invalid(message: str, name: str) -> BackendError:
@@ -150,7 +149,7 @@ def _merge_profile(base: dict[str, Any], profile: dict[str, Any]) -> dict[str, A
 
 
 def list_profiles(workspace_root: str | Path | None = None) -> list[str]:
-    names = set(_BUILTIN_PROFILES) | {name for name, path in _USER_PROFILE_FILES.items() if path.is_file()}
+    names = set(_BUILTIN_PROFILES)
     root = _workspace_root(workspace_root)
     directory = root / ".pscad-mcp" / "hvdc-profiles" if root else None
     if directory and directory.is_dir():
@@ -165,8 +164,7 @@ def load_profile(name: str, mapping_file: str | None = None, *, workspace_root: 
     if name in _BUILTIN_PROFILES:
         profile = dict(_BUILTIN_PROFILES[name])
     else:
-        registered = _USER_PROFILE_FILES.get(name)
-        path = registered if registered and registered.is_file() else _profile_path(name, workspace_root)
+        path = _profile_path(name, workspace_root)
         if path is None or not path.is_file():
             raise BackendError("HVDC_PROFILE_NOT_FOUND", f"HVDC profile '{name}' was not found.", "hvdc", "load_profile", {"profile": name, "available": list_profiles(workspace_root)})
         profile = dict(_read_profile(path, name))
@@ -211,5 +209,4 @@ def register_profile(name: str, mapping_file: str, *, workspace_root: str | Path
     finally:
         if temporary_name and Path(temporary_name).exists():
             Path(temporary_name).unlink()
-    _USER_PROFILE_FILES[name] = destination
     return {"profile": name, "registered": True, "mapping_file": str(destination)}
