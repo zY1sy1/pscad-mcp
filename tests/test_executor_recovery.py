@@ -35,6 +35,49 @@ class _ResetAfterFirstStateCapture:
 
 
 class TestExecutorRecovery(unittest.IsolatedAsyncioTestCase):
+    async def test_reset_and_shutdown_settle_tokens_for_cancelled_queued_calls(self):
+        for action in ("reset", "shutdown"):
+            with self.subTest(action=action):
+                executor = RobustExecutor(timeout=1)
+                first_started = threading.Event()
+                release_first = threading.Event()
+                queued_ran = threading.Event()
+
+                def first_call():
+                    first_started.set()
+                    release_first.wait(2)
+
+                def queued_call():
+                    queued_ran.set()
+
+                first = asyncio.create_task(executor.run_safe(first_call))
+                second = None
+                try:
+                    self.assertTrue(await asyncio.to_thread(first_started.wait, 0.1))
+                    second = asyncio.create_task(executor.run_safe(queued_call))
+                    await asyncio.sleep(0.01)
+                    getattr(executor, action)()
+                    release_first.set()
+                    await first
+                    with self.assertRaises(asyncio.CancelledError):
+                        await second
+                    await asyncio.sleep(0)
+
+                    self.assertFalse(queued_ran.is_set())
+                    self.assertEqual(executor.snapshot()["in_flight_calls"], 0)
+                    self.assertEqual(executor.pending_settlements(), ())
+                finally:
+                    release_first.set()
+                    for task in (first, second):
+                        if task is not None and not task.done():
+                            task.cancel()
+                        if task is not None:
+                            try:
+                                await task
+                            except BaseException:
+                                pass
+                    executor.shutdown()
+
     async def test_rejected_submission_does_not_leak_settlement_token(self):
         executor = RobustExecutor(timeout=0.1)
         executor.shutdown()

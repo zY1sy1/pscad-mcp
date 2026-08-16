@@ -185,27 +185,32 @@ class RobustExecutor:
             self.last_operation = func_name
             self.last_error = None
             self.last_timeout_seconds = None
+            worker_started = threading.Event()
+
+            def settle_token() -> None:
+                with self._state_lock:
+                    self._active_generations.discard(generation)
+                    self._pending_tokens.discard(token)
+                    if owner is not None:
+                        owned = self._tokens_by_owner.get(owner)
+                        if owned is not None:
+                            owned.discard(token)
+                            if not owned:
+                                self._tokens_by_owner.pop(owner, None)
+                token.settle()
 
             def wrapped_call():
+                worker_started.set()
                 with self._state_lock:
                     self._active_generations.add(generation)
                 try:
                     with call_lock:
                         return func(*args, **kwargs)
                 finally:
-                    with self._state_lock:
-                        self._active_generations.discard(generation)
-                        self._pending_tokens.discard(token)
-                        if owner is not None:
-                            owned = self._tokens_by_owner.get(owner)
-                            if owned is not None:
-                                owned.discard(token)
-                                if not owned:
-                                    self._tokens_by_owner.pop(owner, None)
-                    token.settle()
+                    settle_token()
 
             try:
-                submitted = loop.run_in_executor(self.executor, wrapped_call)
+                concurrent = self.executor.submit(wrapped_call)
             except BaseException:
                 self._pending_tokens.discard(token)
                 if owner is not None:
@@ -216,6 +221,13 @@ class RobustExecutor:
                             self._tokens_by_owner.pop(owner, None)
                 token.settle()
                 raise
+
+        def queued_submission_finished(completed: Any) -> None:
+            if completed.cancelled() and not worker_started.is_set():
+                settle_token()
+
+        concurrent.add_done_callback(queued_submission_finished)
+        submitted = asyncio.wrap_future(concurrent, loop=loop)
 
         try:
             result = await asyncio.wait_for(
