@@ -17,6 +17,46 @@ class ExecutorUnhealthyError(RuntimeError):
     """Raised when a timed-out executor must be reset before reuse."""
 
 
+class ExecutorSettlementToken:
+    """Loop-independent identity and completion signal for one worker call."""
+
+    def __init__(self, operation_id: int, generation: int, operation: str):
+        self.operation_id = operation_id
+        self.generation = generation
+        self.operation = operation
+        self._settled = threading.Event()
+        self._lock = threading.Lock()
+        self._callbacks: list[Callable[["ExecutorSettlementToken"], None]] = []
+
+    @property
+    def settled(self) -> bool:
+        return self._settled.is_set()
+
+    def add_done_callback(
+        self,
+        callback: Callable[["ExecutorSettlementToken"], None],
+    ) -> None:
+        call_now = False
+        with self._lock:
+            if self._settled.is_set():
+                call_now = True
+            else:
+                self._callbacks.append(callback)
+        if call_now:
+            callback(self)
+
+    def settle(self) -> None:
+        callbacks: list[Callable[["ExecutorSettlementToken"], None]]
+        with self._lock:
+            if self._settled.is_set():
+                return
+            self._settled.set()
+            callbacks = self._callbacks
+            self._callbacks = []
+        for callback in callbacks:
+            callback(self)
+
+
 def _initialize_windows_com() -> None:
     """Initialize COM when pywin32 is available on the worker platform."""
     try:
@@ -45,7 +85,11 @@ class RobustExecutor:
         self.last_timeout_seconds: float | None = None
         self.reset_generation = 0
         self._active_generations: set[int] = set()
-        self._pending_submissions: set[asyncio.Future[Any]] = set()
+        self._next_operation_id = 0
+        self._pending_tokens: set[ExecutorSettlementToken] = set()
+        self._tokens_by_owner: dict[
+            asyncio.Task[Any], set[ExecutorSettlementToken]
+        ] = {}
         self.cancel_wait_timeout = min(1.0, max(0.01, timeout))
         self._com_initializer = com_initializer or _initialize_windows_com
         self.executor = self._new_executor()
@@ -79,17 +123,27 @@ class RobustExecutor:
                     for generation in self._active_generations
                 ),
                 "in_flight_calls": sum(
-                    1 for submitted in self._pending_submissions if not submitted.done()
+                    1 for token in self._pending_tokens if not token.settled
                 ),
             }
 
-    def pending_settlements(self) -> tuple[asyncio.Future[Any], ...]:
-        """Return loop futures whose worker calls have not actually settled."""
+    def pending_settlements(self) -> tuple[ExecutorSettlementToken, ...]:
+        """Return loop-independent tokens for all unsettled worker calls."""
         with self._state_lock:
             return tuple(
-                submitted
-                for submitted in self._pending_submissions
-                if not submitted.done()
+                token for token in self._pending_tokens if not token.settled
+            )
+
+    def pending_settlements_for(
+        self,
+        owner: asyncio.Task[Any],
+    ) -> tuple[ExecutorSettlementToken, ...]:
+        """Return only unsettled calls issued by the supplied asyncio task."""
+        with self._state_lock:
+            return tuple(
+                token
+                for token in self._tokens_by_owner.get(owner, ())
+                if not token.settled
             )
 
     async def run_safe(
@@ -111,12 +165,22 @@ class RobustExecutor:
         loop = asyncio.get_running_loop()
         func_name = getattr(func, "__name__", str(func))
         started_at = time.perf_counter()
+        owner = asyncio.current_task()
         with self._state_lock:
             if not self.healthy:
                 raise ExecutorUnhealthyError(
                     "PSCAD executor is unhealthy; reset it before retrying."
                 )
             generation = self.reset_generation
+            self._next_operation_id += 1
+            token = ExecutorSettlementToken(
+                self._next_operation_id,
+                generation,
+                func_name,
+            )
+            self._pending_tokens.add(token)
+            if owner is not None:
+                self._tokens_by_owner.setdefault(owner, set()).add(token)
             call_lock = self.lock
             self.last_operation = func_name
             self.last_error = None
@@ -131,15 +195,27 @@ class RobustExecutor:
                 finally:
                     with self._state_lock:
                         self._active_generations.discard(generation)
+                        self._pending_tokens.discard(token)
+                        if owner is not None:
+                            owned = self._tokens_by_owner.get(owner)
+                            if owned is not None:
+                                owned.discard(token)
+                                if not owned:
+                                    self._tokens_by_owner.pop(owner, None)
+                    token.settle()
 
-            submitted = loop.run_in_executor(self.executor, wrapped_call)
-            self._pending_submissions.add(submitted)
-
-            def submission_settled(completed: asyncio.Future[Any]) -> None:
-                with self._state_lock:
-                    self._pending_submissions.discard(completed)
-
-            submitted.add_done_callback(submission_settled)
+            try:
+                submitted = loop.run_in_executor(self.executor, wrapped_call)
+            except BaseException:
+                self._pending_tokens.discard(token)
+                if owner is not None:
+                    owned = self._tokens_by_owner.get(owner)
+                    if owned is not None:
+                        owned.discard(token)
+                        if not owned:
+                            self._tokens_by_owner.pop(owner, None)
+                token.settle()
+                raise
 
         try:
             result = await asyncio.wait_for(

@@ -35,6 +35,16 @@ class _ResetAfterFirstStateCapture:
 
 
 class TestExecutorRecovery(unittest.IsolatedAsyncioTestCase):
+    async def test_rejected_submission_does_not_leak_settlement_token(self):
+        executor = RobustExecutor(timeout=0.1)
+        executor.shutdown()
+
+        with self.assertRaises(RuntimeError):
+            await executor.run_safe(lambda: None)
+
+        self.assertEqual(executor.snapshot()["in_flight_calls"], 0)
+        self.assertEqual(executor.pending_settlements(), ())
+
     async def test_cancel_wait_is_bounded_while_worker_settlement_remains_visible(self):
         executor = RobustExecutor(timeout=1)
         executor.cancel_wait_timeout = 0.02

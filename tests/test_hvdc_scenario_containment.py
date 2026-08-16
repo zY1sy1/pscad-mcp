@@ -317,6 +317,113 @@ def test_executor_watchdog_timeout_keeps_lease_until_vendor_thread_settles(tmp_p
     assert service._active_scenario_id is None
 
 
+def test_closed_origin_loop_does_not_rebuild_vendor_settlement_waiters(tmp_path):
+    source = tmp_path / "case.pscx"
+    _write_project(source)
+    executor = RobustExecutor(timeout=0.01)
+
+    class CrossLoopBackend(BlockingBackend):
+        def __init__(self):
+            super().__init__()
+            self.executor = executor
+            self.write_entered = threading.Event()
+            self.allow_write = threading.Event()
+
+        async def set_component_parameters(self, project_name, component_id, values):
+            def vendor_write():
+                self.write_entered.set()
+                self.allow_write.wait()
+
+            await self.executor.run_safe(vendor_write)
+
+    backend = CrossLoopBackend()
+    service = HvdcDomainService(backend, path_policy=PathPolicy(workspace_root=str(tmp_path)))
+    scenario = _scenario(source, timeout_s=0.2)
+    scenario["parameter_changes"] = [{"target": "current_order", "value": 7}]
+    result = {}
+
+    def run_origin_loop():
+        async def exercise():
+            started = await service.run_scenario(str(source), scenario, confirm=True)
+            result["scenario_id"] = started["scenario_id"]
+            result["terminal"] = await _terminal(service, started["scenario_id"], timeout=0.2)
+
+        asyncio.run(exercise())
+
+    origin = threading.Thread(target=run_origin_loop, daemon=True)
+    origin.start()
+    try:
+        assert backend.write_entered.wait(0.2)
+        origin.join(0.3)
+        assert not origin.is_alive(), "closing the origin loop rebuilt a pending settlement waiter"
+        scenario_id = result["scenario_id"]
+        history_size = len(service._scenarios[scenario_id]["operation_history"])
+        assert history_size <= 3
+        assert service._active_scenario_id == scenario_id
+
+        backend.allow_write.set()
+        time.sleep(0.05)
+        assert len(service._scenarios[scenario_id]["operation_history"]) == history_size
+        assert service._active_scenario_id == scenario_id
+        assert getattr(service, "_scenario_settlement_tokens", {}) == {}
+        assert getattr(service, "_scenario_settlement_waiters", {}) == {}
+        assert any(
+            warning.get("code") == "SETTLEMENT_LOOP_UNAVAILABLE"
+            for warning in service._scenarios[scenario_id].get("warnings", [])
+            if isinstance(warning, dict)
+        )
+    finally:
+        backend.allow_write.set()
+        origin.join(0.5)
+        executor.shutdown()
+
+
+def test_unrelated_retired_executor_worker_does_not_capture_scenario_lease(tmp_path):
+    source = tmp_path / "case.pscx"
+    _write_project(source)
+    executor = RobustExecutor(timeout=0.01)
+    unrelated_started = threading.Event()
+    release_unrelated = threading.Event()
+
+    def unrelated_vendor_call():
+        unrelated_started.set()
+        release_unrelated.wait()
+
+    class IndependentBackend(BlockingBackend):
+        def __init__(self):
+            super().__init__()
+            self.executor = executor
+
+        async def run_project(self, project_name):
+            return None
+
+        async def get_run_status(self, project_name):
+            return {"status": "completed", "progress": 100.0}
+
+    backend = IndependentBackend()
+    service = HvdcDomainService(backend, path_policy=PathPolicy(workspace_root=str(tmp_path)))
+
+    async def exercise():
+        with pytest.raises(RuntimeError):
+            await executor.run_safe(unrelated_vendor_call)
+        assert unrelated_started.is_set()
+        executor.reset()
+        started = await service.run_scenario(str(source), _scenario(source, timeout_s=0.2), confirm=True)
+        terminal = await _terminal(service, started["scenario_id"], timeout=0.2)
+        await asyncio.sleep(0)
+        return terminal
+
+    try:
+        terminal = asyncio.run(exercise())
+        assert terminal["status"] == "completed"
+        assert service._active_scenario_id is None
+        assert service._scenario_operation_tasks == {}
+    finally:
+        release_unrelated.set()
+        time.sleep(0.05)
+        executor.shutdown()
+
+
 def test_timed_event_waits_for_confirmed_running_state(tmp_path):
     source = tmp_path / "case.pscx"
     _write_project(source)

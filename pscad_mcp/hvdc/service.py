@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import asdict
 from pathlib import Path
+import threading
 from typing import Any, Mapping
 
 from ..core.backend.base import BackendError
@@ -26,20 +27,113 @@ class HvdcDomainService:
         self._scenario_tasks: dict[str, asyncio.Task[None]] = {}
         self._scenario_run_tasks: dict[str, asyncio.Task[Any]] = {}
         self._scenario_operation_tasks: dict[str, dict[asyncio.Task[Any], str]] = {}
-        self._scenario_settlement_waiters: dict[
-            str, dict[asyncio.Future[Any], asyncio.Task[None]]
-        ] = {}
+        self._scenario_settlement_tokens: dict[str, dict[Any, str]] = {}
+        self._scenario_settlement_lock = threading.Lock()
         self._scenario_cleanup_tasks: dict[str, asyncio.Task[None]] = {}
         self._scenario_release_after_operations: set[str] = set()
         self._scenario_reservation_lock = asyncio.Lock()
         self._active_scenario_id: str | None = None
 
     def _pending_scenario_operations(self, scenario_id: str) -> list[str]:
-        return [
+        pending = [
             operation
             for task, operation in self._scenario_operation_tasks.get(scenario_id, {}).items()
             if not task.done()
         ]
+        with self._scenario_settlement_lock:
+            pending.extend(self._scenario_settlement_tokens.get(scenario_id, {}).values())
+        return pending
+
+    def _finish_scenario_operations_if_ready(self, scenario_id: str) -> None:
+        if self._pending_scenario_operations(scenario_id):
+            return
+        self._scenario_operation_tasks.pop(scenario_id, None)
+        with self._scenario_settlement_lock:
+            self._scenario_settlement_tokens.pop(scenario_id, None)
+        record = self._scenarios.get(scenario_id)
+        if record is None or scenario_id not in self._scenario_release_after_operations:
+            return
+        self._scenario_release_after_operations.discard(scenario_id)
+        if record.get("outcome") == "needs_review":
+            record["outcome"] = "unknown_outcome"
+            containment = record.get("containment")
+            if isinstance(containment, dict) and containment.get("status") == "pending_operations":
+                containment["status"] = "operations_completed"
+                containment["outcome_known"] = False
+        cleanup = asyncio.create_task(
+            self._release_after_operation_completion(scenario_id),
+            name=f"{scenario_id}-operation-cleanup",
+        )
+        self._scenario_cleanup_tasks[scenario_id] = cleanup
+
+        def cleanup_finished(done: asyncio.Task[None]) -> None:
+            if self._scenario_cleanup_tasks.get(scenario_id) is done:
+                self._scenario_cleanup_tasks.pop(scenario_id, None)
+            if not done.cancelled():
+                done.exception()
+
+        cleanup.add_done_callback(cleanup_finished)
+
+    def _settlement_finished_on_origin_loop(
+        self,
+        scenario_id: str,
+        token: Any,
+    ) -> None:
+        with self._scenario_settlement_lock:
+            tracked = self._scenario_settlement_tokens.get(scenario_id)
+            if tracked is None or token not in tracked:
+                return
+            operation = tracked.pop(token)
+            if not tracked:
+                self._scenario_settlement_tokens.pop(scenario_id, None)
+        operations = self._scenario_operation_tasks.get(scenario_id)
+        if operations is not None and all(task.done() for task in operations):
+            self._scenario_operation_tasks.pop(scenario_id, None)
+        record = self._scenarios.get(scenario_id)
+        if record is not None:
+            record.setdefault("operation_history", []).append(
+                {
+                    "operation": operation,
+                    "status": "vendor_settled",
+                    "generation": getattr(token, "generation", None),
+                    "operation_id": getattr(token, "operation_id", None),
+                }
+            )
+            record["pending_operations"] = self._pending_scenario_operations(scenario_id)
+        self._finish_scenario_operations_if_ready(scenario_id)
+
+    def _settlement_origin_loop_unavailable(
+        self,
+        scenario_id: str,
+        token: Any,
+    ) -> None:
+        with self._scenario_settlement_lock:
+            tracked = self._scenario_settlement_tokens.get(scenario_id)
+            if tracked is None or token not in tracked:
+                return
+            tracked.pop(token)
+            if not tracked:
+                self._scenario_settlement_tokens.pop(scenario_id, None)
+        operations = self._scenario_operation_tasks.get(scenario_id)
+        if operations is not None and all(task.done() for task in operations):
+            self._scenario_operation_tasks.pop(scenario_id, None)
+        record = self._scenarios.get(scenario_id)
+        if record is None:
+            return
+        warning = {
+            "code": "SETTLEMENT_LOOP_UNAVAILABLE",
+            "message": "The vendor operation settled after its scenario event loop closed; the application-wide lease remains held for review.",
+            "operation_id": getattr(token, "operation_id", None),
+            "generation": getattr(token, "generation", None),
+        }
+        if warning not in record.setdefault("warnings", []):
+            record["warnings"].append(warning)
+        record["pending_operations"] = []
+        record["outcome"] = "unknown_outcome"
+        record["containment"] = {
+            "status": "settled_after_loop_closed",
+            "outcome_known": False,
+        }
 
     def _track_scenario_operation(
         self,
@@ -53,24 +147,11 @@ class HvdcDomainService:
         if record is not None:
             record["pending_operations"] = list(operations.values())
 
-        async def await_vendor_settlement(settlement: asyncio.Future[Any]) -> None:
-            try:
-                await asyncio.shield(settlement)
-            except BaseException:
-                pass
-
         def operation_finished(completed: asyncio.Task[Any]) -> None:
             current = self._scenario_operation_tasks.get(scenario_id)
             if current is None or completed not in current:
                 return
             name = current.pop(completed)
-            settlement_waiters = self._scenario_settlement_waiters.get(scenario_id)
-            if settlement_waiters is not None:
-                for settlement, waiter in list(settlement_waiters.items()):
-                    if waiter is completed:
-                        settlement_waiters.pop(settlement, None)
-                if not settlement_waiters:
-                    self._scenario_settlement_waiters.pop(scenario_id, None)
             result: dict[str, Any] = {"operation": name}
             if completed.cancelled():
                 result["status"] = "cancelled"
@@ -90,55 +171,40 @@ class HvdcDomainService:
                             "operation": name,
                         }
             executor = getattr(self.backend_service, "executor", None)
-            pending_settlements = getattr(executor, "pending_settlements", None)
-            settlements = list(pending_settlements()) if callable(pending_settlements) else []
-            waiters = self._scenario_settlement_waiters.setdefault(scenario_id, {})
+            pending_for = getattr(executor, "pending_settlements_for", None)
+            settlements = list(pending_for(completed)) if callable(pending_for) else []
             added_settlements = 0
-            for settlement in settlements:
-                if settlement in waiters:
-                    continue
-                waiter = asyncio.create_task(
-                    await_vendor_settlement(settlement),
-                    name=f"{scenario_id}-{name}-vendor-settlement",
-                )
-                waiters[settlement] = waiter
-                current[waiter] = f"{name}:vendor_settlement"
-                waiter.add_done_callback(operation_finished)
+            origin_loop = completed.get_loop()
+            for token in settlements:
+                with self._scenario_settlement_lock:
+                    tracked = self._scenario_settlement_tokens.setdefault(scenario_id, {})
+                    if token in tracked:
+                        continue
+                    tracked[token] = f"{name}:vendor_settlement"
+
+                def token_finished(settled: Any, *, loop: asyncio.AbstractEventLoop = origin_loop) -> None:
+                    if loop.is_closed() or not loop.is_running():
+                        self._settlement_origin_loop_unavailable(scenario_id, settled)
+                        return
+                    try:
+                        loop.call_soon_threadsafe(
+                            self._settlement_finished_on_origin_loop,
+                            scenario_id,
+                            settled,
+                        )
+                    except RuntimeError:
+                        self._settlement_origin_loop_unavailable(scenario_id, settled)
+
+                token.add_done_callback(token_finished)
                 added_settlements += 1
-            if not waiters:
-                self._scenario_settlement_waiters.pop(scenario_id, None)
             if added_settlements:
                 result["status"] = "awaiting_vendor_settlement"
                 result["settlement_count"] = added_settlements
             current_record = self._scenarios.get(scenario_id)
             if current_record is not None:
                 current_record.setdefault("operation_history", []).append(result)
-                current_record["pending_operations"] = list(current.values())
-            if current:
-                return
-            self._scenario_operation_tasks.pop(scenario_id, None)
-            if current_record is None or scenario_id not in self._scenario_release_after_operations:
-                return
-            self._scenario_release_after_operations.discard(scenario_id)
-            if current_record.get("outcome") == "needs_review":
-                current_record["outcome"] = "unknown_outcome"
-                containment = current_record.get("containment")
-                if isinstance(containment, dict) and containment.get("status") == "pending_operations":
-                    containment["status"] = "operations_completed"
-                    containment["outcome_known"] = False
-            cleanup = asyncio.create_task(
-                self._release_after_operation_completion(scenario_id),
-                name=f"{scenario_id}-operation-cleanup",
-            )
-            self._scenario_cleanup_tasks[scenario_id] = cleanup
-
-            def cleanup_finished(done: asyncio.Task[None]) -> None:
-                if self._scenario_cleanup_tasks.get(scenario_id) is done:
-                    self._scenario_cleanup_tasks.pop(scenario_id, None)
-                if not done.cancelled():
-                    done.exception()
-
-            cleanup.add_done_callback(cleanup_finished)
+                current_record["pending_operations"] = self._pending_scenario_operations(scenario_id)
+            self._finish_scenario_operations_if_ready(scenario_id)
 
         task.add_done_callback(operation_finished)
 
