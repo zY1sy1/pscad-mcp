@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Structurally minimized from PSCAD 4.6.2 XML; no live design content copied. -->
+<project name="difforder_new" version="4.6.2">
+  <definitions>
+    <Definition classid="UserCmpDefn" name="Rectifier_AC" instances="1" />
+    <Definition classid="UserCmpDefn" name="Inverter_AC" instances="1" />
+    <Definition classid="UserCmpDefn" name="RectCC" instances="2" />
+    <Definition classid="UserCmpDefn" name="RectPole" instances="2" />
+    <Definition classid="UserCmpDefn" name="InverterPole" instances="2" />
+    <Definition classid="UserCmpDefn" name="InvCtrl" instances="2" />
+    <Definition classid="UserCmpDefn" name="TransLine" instances="2" />
+    <Definition classid="UserCmpDefn" name="loadbreaker_3" instances="2" />
+    <Definition classid="UserCmpDefn" name="Main">
+      <schematic classid="UserCanvas">
+        <User classid="UserCmp" id="10" name="Rectifier" defn="Rectifier_AC"><paramlist><param name="Name" value="Rectifier" /></paramlist></User>
+        <User classid="UserCmp" id="11" name="RectifierPole" defn="RectPole"><paramlist><param name="Name" value="Pole 1" /></paramlist></User>
+        <User classid="UserCmp" id="12" name="Inverter" defn="Inverter_AC"><paramlist><param name="Name" value="Inverter" /></paramlist></User>
+        <User classid="UserCmp" id="13" name="InverterPole" defn="InverterPole"><paramlist><param name="Name" value="Pole 2" /></paramlist></User>
+        <User classid="UserCmp" id="14" name="Breaker" defn="loadbreaker_3"><paramlist><param name="Name" value="BRK1" /></paramlist></User>
+        <User classid="UserCmp" id="15" name="Line" defn="TransLine"><paramlist><param name="Name" value="DC Line" /></paramlist><Port id="150" classid="Port" name="P1" /></User>
+        <User classid="UserCmp" id="16" name="master:datalabel" defn="master:datalabel"><paramlist><param name="Name" value="IMC" /></paramlist></User>
+        <User classid="UserCmp" id="17" name="master:datalabel" defn="master:datalabel"><paramlist><param name="Name" value="UMC" /></paramlist></User>
+        <User classid="UserCmp" id="18" name="master:datalabel" defn="master:datalabel"><paramlist><param name="Name" value="BrkOrd1" /></paramlist></User>
+        <User classid="UserCmp" id="19" name="master:datalabel" defn="master:datalabel"><paramlist><param name="Name" value="BRK1" /></paramlist></User>
+        <User classid="UserCmp" id="20" name="master:datalabel" defn="master:datalabel"><paramlist><param name="Name" value="protection trip" /></paramlist></User>
+        <User classid="UserCmp" id="21" name="master:ammeter" defn="master:ammeter"><paramlist><param name="Name" value="IMC" /></paramlist></User>
+        <User classid="UserCmp" id="22" name="master:voltmeter" defn="master:voltmeter"><paramlist><param name="Name" value="UMC" /></paramlist></User>
+        <text>DC breaker protection</text>
+      </schematic>
+    </Definition>
+  </definitions>
+</project>

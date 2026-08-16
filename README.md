@@ -1,6 +1,6 @@
 # PSCAD MCP for Codex and GitHub Copilot CLI
 
-`pscad-mcp` is a Windows Model Context Protocol (MCP) server for PSCAD automation. It uses `mhrc.automation` for PSCAD 4.6.x and `mhi.pscad` for PSCAD 5.x behind one stable 60-tool service contract.
+`pscad-mcp` is a Windows Model Context Protocol (MCP) server for PSCAD automation. It uses `mhrc.automation` for PSCAD 4.6.x and `mhi.pscad` for PSCAD 5.x behind one stable 60-tool generic service contract, plus a separate HVDC domain layer.
 
 中文安装、配置、安全和验收说明：[docs/zh-CN/README.md](docs/zh-CN/README.md)
 
@@ -71,6 +71,50 @@ The server currently exposes tool groups for:
 - simulation-set operations
 - project creation, save, and build tasks
 - simulation output capture and file parsing
+
+The HVDC domain layer adds ten tools without changing the original generic
+inventory: `inspect_hvdc_project`, `get_hvdc_assets`, `get_hvdc_mappings`,
+`validate_hvdc_project`, `run_hvdc_scenario`, `get_hvdc_scenario_status`,
+`analyze_hvdc_results`, `compare_hvdc_scenarios`, `list_hvdc_profiles`, and
+`register_hvdc_profile`. Inspection is read-only and keeps source project,
+canvas, component, definition, and parameter references in every inferred
+asset or mapping. Topology and metrics are marked as observed, derived, or
+unresolved; missing channels produce `INCOMPLETE_ANALYSIS` rather than zeros.
+
+Built-in profiles include `lcc_bipolar_generic`, `vsc_2level_generic`,
+`mmc_bipolar_generic`, and `hvdc_breaker_difforder`. A scenario can only use
+controls already mapped in the project; inserting fault components or
+rewiring a canvas returns `HVDC_CAPABILITY_UNAVAILABLE`. Mutating scenario
+parameters and registering a user profile require `confirm=true` and remain
+subject to `PSCAD_MCP_WORKSPACE` path policy.
+
+Read-only HVDC inspection may scan an existing absolute `.pscx` source such as
+`C:\\PSCADFiles\\Breaker\\TEST1\\difforder_new.pscx`; all scenario mutations
+still require a workspace-scoped, pre-existing `derived_project` and explicit
+confirmation.
+
+Example read-only inspection:
+
+```text
+inspect_hvdc_project(project_name="D:\\PSCAD-Workspace\\difforder_new.pscx")
+```
+
+Example declarative scenario:
+
+```json
+{
+  "name": "dc_fault_breaker_trip",
+  "profile": "hvdc_breaker_difforder",
+  "project": "difforder_new",
+  "parameter_changes": [],
+  "events": [
+    {"time_s": 1.0, "target": "fault_command", "value": 1},
+    {"time_s": 1.05, "target": "breaker_command", "value": 1}
+  ],
+  "run": {"timeout_s": 300},
+  "analysis": {"metrics": ["dc_current_peak", "dc_voltage_min", "trip_delay_s"]}
+}
+```
 
 The implementation is modular, with each tool family registered from its own module in `pscad_mcp\tools`.
 
@@ -390,6 +434,15 @@ pscad_mcp\
     connection_manager.py
     executor.py
     service.py
+  hvdc\
+    models.py
+    scanner.py
+    classifier.py
+    mappings.py
+    profiles.py
+    scenarios.py
+    metrics.py
+    service.py
   tools\
     app_tools.py
     project_tools.py
@@ -398,6 +451,7 @@ pscad_mcp\
     creation_tools.py
     canvas_tools.py
     component_tools.py
+    hvdc_tools.py
   utils\
     doc_manager.py
   main.py

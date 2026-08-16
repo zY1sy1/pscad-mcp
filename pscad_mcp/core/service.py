@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import math
+import os
+import re
 from collections.abc import Mapping
 from dataclasses import asdict
 import inspect
@@ -99,6 +102,34 @@ _ERROR_GUIDANCE: dict[str, tuple[bool, str]] = {
     "TIMEOUT": (
         True,
         "Call get_pscad_status, then repair_connection before retrying.",
+    ),
+    "HVDC_PROFILE_NOT_FOUND": (
+        False,
+        "Call list_hvdc_profiles or register a workspace-scoped profile.",
+    ),
+    "HVDC_TOPOLOGY_AMBIGUOUS": (
+        False,
+        "Inspect the evidence and provide an explicit HVDC profile.",
+    ),
+    "HVDC_MAPPING_MISSING": (
+        False,
+        "Add or configure the missing mapped channels/components before retrying.",
+    ),
+    "HVDC_MAPPING_CONFLICT": (
+        False,
+        "Remove duplicate aliases or correct the unit mapping before retrying.",
+    ),
+    "HVDC_SCENARIO_INVALID": (
+        False,
+        "Correct the declarative scenario and retry validation.",
+    ),
+    "HVDC_CAPABILITY_UNAVAILABLE": (
+        False,
+        "Use an existing mapped control; component insertion is not supported.",
+    ),
+    "INCOMPLETE_ANALYSIS": (
+        False,
+        "Map the required result channels and rerun the analysis.",
     ),
 }
 
@@ -798,6 +829,93 @@ class PscadService:
             channel=channel,
             summary_only=summary_only,
         )
+
+    async def discover_output_files(
+        self,
+        project_name: str,
+        *,
+        started_after: float,
+        max_files: int = 100,
+    ) -> list[str]:
+        """Find bounded, project-scoped result files created by a run."""
+        if (
+            isinstance(started_after, bool)
+            or not isinstance(started_after, (int, float))
+            or not math.isfinite(float(started_after))
+            or float(started_after) < 0
+        ):
+            raise BackendError(
+                "INVALID_ARGUMENT",
+                "started_after must be a finite non-negative Unix timestamp.",
+                "service",
+                "discover_output_files",
+            )
+        if isinstance(max_files, bool) or not isinstance(max_files, int) or not 1 <= max_files <= 1_000:
+            raise BackendError(
+                "INVALID_ARGUMENT",
+                "max_files must be between 1 and 1000.",
+                "service",
+                "discover_output_files",
+            )
+        project_candidate = Path(project_name).expanduser()
+        if not project_candidate.suffix:
+            project_candidate = project_candidate.with_suffix(".pscx")
+        project_path = self._resolve_path(
+            str(project_candidate),
+            suffixes={".pscx"},
+            must_exist=True,
+            operation="discover_output_files",
+        )
+
+        def scan() -> list[str]:
+            candidates: list[Path] = []
+            for suffix in (".out", ".psout"):
+                direct = project_path.with_suffix(suffix)
+                if direct.is_file():
+                    candidates.append(direct)
+            generated_name = re.compile(rf"{re.escape(project_path.stem)}\.gf\d+", re.IGNORECASE)
+            generated = sorted(
+                (
+                    child
+                    for child in project_path.parent.iterdir()
+                    if child.is_dir() and generated_name.fullmatch(child.name)
+                ),
+                key=lambda item: item.name.casefold(),
+            )
+            scanned = 0
+            for directory in generated[:32]:
+                for root, directories, filenames in os.walk(directory):
+                    directories[:] = sorted(directories, key=str.casefold)[:64]
+                    for filename in sorted(filenames, key=str.casefold):
+                        scanned += 1
+                        if scanned > 10_000:
+                            break
+                        path = Path(root) / filename
+                        if path.suffix.casefold() in {".out", ".psout"}:
+                            candidates.append(path)
+                    if scanned > 10_000:
+                        break
+                if scanned > 10_000:
+                    break
+            found: list[str] = []
+            for candidate in sorted(set(candidates), key=lambda item: str(item).casefold()):
+                try:
+                    if candidate.stat().st_mtime < float(started_after):
+                        continue
+                    resolved = self._resolve_path(
+                        str(candidate),
+                        suffixes={".out", ".psout"},
+                        must_exist=True,
+                        operation="discover_output_files",
+                    )
+                except FileNotFoundError:
+                    continue
+                found.append(str(resolved))
+                if len(found) >= max_files:
+                    break
+            return found
+
+        return await asyncio.to_thread(scan)
 
     async def find_components(
         self,

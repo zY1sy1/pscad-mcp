@@ -75,8 +75,8 @@ def test_built_wheel_is_installable_and_exposes_tools():
                     f"expected_version = {expected_version!r}; "
                     "assert installed == expected_version == pscad_mcp.__version__; "
                     "tools = create_server()._tool_manager.list_tools(); "
-                    "assert len(tools) == 60; "
-                    "assert len({tool.name for tool in tools}) == 60; "
+                    "assert len(tools) == 70; "
+                    "assert len({tool.name for tool in tools}) == 70; "
                     "print(installed, len(tools))"
                 ),
             ],
@@ -87,4 +87,4 @@ def test_built_wheel_is_installable_and_exposes_tools():
             env=env,
         )
         assert probe.returncode == 0, probe.stderr
-        assert probe.stdout.strip() == f"{expected_version} 60"
+        assert probe.stdout.strip() == f"{expected_version} 70"
