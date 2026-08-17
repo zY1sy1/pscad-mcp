@@ -14,29 +14,11 @@ from typing import Any
 
 from ..core.backend.base import BackendError
 from ..core.service import ConfirmationRequired
+from .bindings import _UNSAFE_COMMAND_PARAMETERS
 from .profiles import load_profile
 
 
 _UNSUPPORTED_TARGETS = {"insert_fault", "add_component", "rewire", "insert_breaker"}
-_UNSAFE_COMMAND_PARAMETERS = {
-    "caption",
-    "comment",
-    "description",
-    "display",
-    "enab",
-    "group",
-    "label",
-    "max",
-    "min",
-    "mrun",
-    "name",
-    "pol",
-    "scale",
-    "title",
-    "text",
-    "units",
-    "usesignalname",
-}
 _MAX_TIMEOUT_S = 86_400.0
 _TERMINAL_PROJECT_STATUSES = {"completed", "complete", "finished", "done", "idle", "stopped"}
 _FAILED_PROJECT_STATUSES = {"failed", "error", "aborted"}
