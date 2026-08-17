@@ -268,7 +268,7 @@ class PscadAdapter:
 
         metadata = []
         pattern = re.compile(
-            r'^PGB\((\d+)\).+Desc="([^"]+)"\s+Group="([^"]*)"'
+            r'^PGB\((\d+)\).*?Desc="([^"]+)"\s+Group="([^"]*)"(?:\s+Max=([^\s]+)\s+Min=([^\s]+)\s+Units="([^"]*)")?'
         )
         with metadata_path.open(encoding="utf-8") as stream:
             for line in stream:
@@ -278,10 +278,23 @@ class PscadAdapter:
                 call_id = int(match.group(1))
                 description = match.group(2)
                 group = match.group(3)
+                maximum = minimum = None
+                if match.group(4) is not None:
+                    try:
+                        maximum = float(match.group(4))
+                        minimum = float(match.group(5))
+                    except ValueError:
+                        continue
+                    if not math.isfinite(maximum) or not math.isfinite(minimum):
+                        continue
                 metadata.append(
                     {
                         "call_id": call_id,
                         "description": description,
+                        "group": group,
+                        "units": match.group(6) or "",
+                        "max": maximum,
+                        "min": minimum,
                         "path": f"{group}/{description}" if group else description,
                     }
                 )
@@ -376,6 +389,11 @@ class PscadAdapter:
             payload = {
                 "path": item["path"],
                 "call_id": item["call_id"],
+                "description": item["description"],
+                "group": item["group"],
+                "units": item["units"],
+                "max": item["max"],
+                "min": item["min"],
             }
             if summary_only:
                 payload["summary"] = self._summarize_samples(

@@ -30,6 +30,8 @@ def resolve_result_channels(
             "warnings": [],
         }
 
+    if profile.get("profile_version", 1) == 2:
+        return _resolve_profile_v2_channels(samples, profile)
     aliases: dict[str, set[str]] = {}
     metadata: dict[str, Mapping[str, Any]] = {}
     for mapping in profile.get("mappings", []):
@@ -126,3 +128,40 @@ def resolve_result_channels(
         "resolved_channels": resolved,
         "warnings": warnings,
     }
+
+
+def _resolve_profile_v2_channels(samples: Mapping[str, Any], profile: Mapping[str, Any]) -> dict[str, Any]:
+    raw_channels = samples.get("channels")
+    warnings: list[dict[str, Any]] = []
+    if not isinstance(raw_channels, list):
+        return {"samples": dict(samples), "resolved_channels": [], "warnings": warnings}
+    indexed: dict[str, list[Mapping[str, Any]]] = {}
+    for channel in raw_channels[:10_000]:
+        if isinstance(channel, Mapping):
+            path = channel.get("path") or channel.get("name")
+            if isinstance(path, str):
+                indexed.setdefault(path.replace("\\", "/").casefold(), []).append(channel)
+    normalized_channels: list[dict[str, Any]] = []
+    resolved: list[dict[str, Any]] = []
+    for selector in profile.get("result_channels", []):
+        if not isinstance(selector, Mapping):
+            continue
+        canonical = selector.get("canonical")
+        path = selector.get("path")
+        candidates = indexed.get(str(path).replace("\\", "/").casefold(), [])
+        if selector.get("call_id") is not None:
+            candidates = [item for item in candidates if item.get("call_id") == selector["call_id"]]
+        if selector.get("units") is not None:
+            candidates = [item for item in candidates if str(item.get("units", "")).casefold() == str(selector["units"]).casefold()]
+        if len(candidates) != 1:
+            warnings.append({"code": "HVDC_RESULT_SELECTOR_UNRESOLVED", "canonical": canonical, "path": path, "candidate_count": len(candidates), "candidates": [dict(item) for item in candidates]})
+            continue
+        channel = candidates[0]
+        item = dict(channel)
+        item["name"] = canonical
+        item.update({key: value for key, value in selector.items() if key not in {"canonical", "path"}})
+        normalized_channels.append(item)
+        resolved.append({"canonical": canonical, "source": path, **{key: value for key, value in selector.items() if key != "canonical"}})
+    normalized = dict(samples)
+    normalized["channels"] = normalized_channels
+    return {"samples": normalized, "resolved_channels": resolved, "warnings": warnings}

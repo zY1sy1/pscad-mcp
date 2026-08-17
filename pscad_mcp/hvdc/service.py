@@ -539,7 +539,7 @@ class HvdcDomainService:
             analysis.get("metrics") if isinstance(analysis, Mapping) else None
         )
         selected_metrics = metrics if metrics is not None else configured_metrics
-        result = calculate_metrics(normalized_samples, selected_metrics)
+        result = calculate_metrics(normalized_samples, selected_metrics, profile=profile)
         result["warnings"] = [*resolution["warnings"], *result["warnings"]]
         record["resolved_channels"] = resolution["resolved_channels"]
         record["metrics"] = result["metrics"]
