@@ -132,6 +132,29 @@ PSCAD_MCP_ALLOW_UNSCOPED_PATHS = 'false'
 
 ## 自动化测试与真实验收
 
+HVDC 事件中的 `time_s` 始终表示 EMTDC 仿真时间，不使用墙钟时间兜底。
+没有经过验证的原生调度或仿真时钟轮询能力时，事件会安全拒绝。内置
+`hvdc_breaker_difforder` 是 v2 配置，包含七个带单位的明确只读结果选择器，
+故意不包含可写断路器或故障绑定；用户配置必须提供经过确认且限定工程的命令
+绑定。`PlotType="OUT"` 只允许在已确认的派生工程中修正。
+
+内置选择器为：`dc_voltage_breaker`（`kV`）、`dc_current_breaker`（`kA`）、
+`breaker_command_observed`（二值），以及整流侧/逆变侧两极的四个直流电压选择器
+（`pu`）。路径和 legacy call ID 均按明确选择器解析；写操作不会根据别名推断。
+
+真实验收必须显式设置 `PSCAD_MCP_ACCEPTANCE=1`、
+`PSCAD_MCP_HVDC_SOURCE`、`PSCAD_MCP_HVDC_LIBRARY` 和
+`PSCAD_MCP_WORKSPACE` 四个环境变量：
+
+```powershell
+$env:PSCAD_MCP_ACCEPTANCE='1'
+& .\.venv\Scripts\python.exe -m pytest tests\test_hvdc_real_acceptance.py -q -s
+```
+
+验收会把工程和库复制到带时间戳的工作区并核对源文件哈希；若没有严格定时或
+唯一命令绑定，应在写参数前得到 `HVDC_TIMED_CONTROL_UNAVAILABLE` 或
+`HVDC_MAPPING_MISSING` 的安全拒绝。
+
 日常测试不会启动 PSCAD：
 
 ```powershell

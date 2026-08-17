@@ -41,6 +41,7 @@ async def dispatch_timed_events(
     *,
     mode: str,
     liveness_deadline_s: float | None = None,
+    write_event: Any | None = None,
 ) -> list[dict[str, Any]]:
     normalized = sorted((dict(event) for event in events), key=lambda item: float(item["time_s"]))
     if any(not math.isfinite(float(event["time_s"])) for event in normalized):
@@ -78,9 +79,13 @@ async def dispatch_timed_events(
         while pending and observed >= float(pending[0]["time_s"]):
             event = pending.pop(0)
             component_id = int(event["component_id"])
-            await backend.set_component_parameters(project_name, component_id, {str(event["parameter_name"]): event["value"]})
+            if write_event is None:
+                await backend.set_component_parameters(project_name, component_id, {str(event["parameter_name"]): event["value"]})
+            else:
+                await write_event(event)
             requested = float(event["time_s"])
             applied.append({
+                **{key: event[key] for key in ("target", "canonical", "component_id", "parameter_name", "value") if key in event},
                 "requested_time_s": requested,
                 "observed_time_s": observed,
                 "timing_error_s": observed - requested,

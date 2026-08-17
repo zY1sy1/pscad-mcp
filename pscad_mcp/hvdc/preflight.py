@@ -6,7 +6,14 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from ..core.backend.base import BackendError
-from .bindings import resolve_requested_commands
+from .bindings import (
+    _UNSAFE_COMMAND_PARAMETERS,
+    _normalized_parameter_name,
+    matching_fingerprints,
+    resolve_requested_commands,
+)
+from .mappings import resolve_mappings
+from .scanner import scan_project
 from .timing import select_timing_mode
 
 
@@ -59,7 +66,29 @@ async def ensure_output_ready(
 def required_result_selectors(profile: Mapping[str, Any], requested_metrics: Sequence[str]) -> list[dict[str, Any]]:
     selectors = profile.get("result_channels", [])
     roles = profile.get("metric_roles", {})
-    needed = {roles[metric] for metric in requested_metrics if isinstance(roles, Mapping) and metric in roles}
+    requested = [str(metric) for metric in requested_metrics]
+    if profile.get("profile_version", 1) == 2:
+        selector_names = {
+            str(item.get("canonical"))
+            for item in selectors
+            if isinstance(item, Mapping) and item.get("canonical")
+        }
+        for metric in requested:
+            if not isinstance(roles, Mapping) or metric not in roles:
+                raise _error(
+                    "HVDC_MAPPING_MISSING",
+                    f"Profile metric '{metric}' has no explicit result selector role.",
+                    metric=metric,
+                )
+            canonical = roles[metric]
+            if canonical not in selector_names:
+                raise _error(
+                    "HVDC_MAPPING_MISSING",
+                    f"Metric '{metric}' points to undefined result selector '{canonical}'.",
+                    metric=metric,
+                    canonical=canonical,
+                )
+    needed = {roles[metric] for metric in requested if isinstance(roles, Mapping) and metric in roles}
     if not needed:
         return [dict(selector) for selector in selectors if isinstance(selector, Mapping)]
     return [dict(selector) for selector in selectors if isinstance(selector, Mapping) and selector.get("canonical") in needed]
@@ -76,19 +105,122 @@ async def preflight_scenario(
     profile = normalized.get("profile_data") or normalized.get("profile")
     if not isinstance(profile, Mapping):
         raise _error("HVDC_PROFILE_NOT_FOUND", "Preflight requires a loaded profile mapping.")
-    evidence = service.scan_hvdc_project(target_project)
+    try:
+        evidence = scan_project(service._resolve_project(target_project))
+    except BackendError:
+        raise
+    except Exception as error:
+        raise _error(
+            "HVDC_MAPPING_MISSING",
+            f"Unable to scan the target project before mutation: {error}",
+            project_name=target_project,
+        ) from error
+    fingerprints = matching_fingerprints(evidence, profile)
+    if profile.get("project_fingerprints") and not fingerprints:
+        raise _error(
+            "HVDC_MAPPING_MISSING",
+            "No configured project fingerprint matches the target project.",
+            project_name=target_project,
+            reason="project_fingerprint_mismatch",
+        )
     requests = [item for field in ("parameter_changes", "events") for item in normalized.get(field, [])]
-    commands = resolve_requested_commands(evidence, profile, requests) if requests else []
+    if requests and profile.get("profile_version", 1) == 1:
+        # Version 1 profiles remain readable for existing users. Their command
+        # mappings are still resolved against this exact target evidence and
+        # never participate in v2 binding inference.
+        legacy = resolve_mappings(evidence, profile)
+        by_canonical = {item.canonical: item for item in legacy.mappings}
+        commands: list[dict[str, Any]] = []
+        for index, request in enumerate(requests):
+            canonical = request.get("target", request.get("canonical"))
+            mapping = by_canonical.get(canonical)
+            source = mapping.source if mapping and mapping.status == "observed" else None
+            if mapping is None or mapping.direction != "command":
+                raise _error(
+                    "HVDC_CAPABILITY_UNAVAILABLE",
+                    f"Scenario target '{canonical}' is not an approved v1 command mapping.",
+                    target=canonical,
+                    direction=mapping.direction if mapping else "measurement",
+                    index=index,
+                )
+            if source is None or not source.component_id or not source.parameter_name:
+                raise _error(
+                    "HVDC_MAPPING_MISSING",
+                    f"Command target '{canonical}' has no unique observed component parameter.",
+                    target=canonical,
+                    index=index,
+                )
+            if _normalized_parameter_name(source.parameter_name) in _UNSAFE_COMMAND_PARAMETERS:
+                raise _error(
+                    "HVDC_MAPPING_MISSING",
+                    f"Command target '{canonical}' resolved to unsafe metadata.",
+                    target=canonical,
+                    component_id=str(source.component_id),
+                    parameter_name=source.parameter_name,
+                    reason="unsafe_command_parameter",
+                    index=index,
+                )
+            semantic_names = {
+                _normalized_parameter_name(str(canonical)),
+                *(_normalized_parameter_name(str(alias)) for alias in next(
+                    (item.get("aliases", []) for item in profile.get("mappings", []) if item.get("canonical") == canonical),
+                    []
+                )),
+            }
+            if _normalized_parameter_name(source.parameter_name) not in semantic_names:
+                raise _error(
+                    "HVDC_MAPPING_MISSING",
+                    f"Command target '{canonical}' did not resolve to its semantic parameter name.",
+                    target=canonical,
+                    component_id=str(source.component_id),
+                    parameter_name=source.parameter_name,
+                    reason="nonsemantic_command_parameter",
+                    index=index,
+                )
+            supplied_id = requests[index].get("component_id")
+            supplied_parameter = requests[index].get("parameter_name")
+            if supplied_id is not None or supplied_parameter is not None:
+                if str(supplied_id) != str(source.component_id) or str(supplied_parameter) != str(source.parameter_name):
+                    raise _error(
+                        "HVDC_MAPPING_MISSING",
+                        f"Explicit binding for '{canonical}' does not match the observed v1 mapping.",
+                        target=canonical,
+                        approved_source={"component_id": str(source.component_id), "parameter_name": source.parameter_name},
+                        index=index,
+                    )
+            commands.append({
+                "canonical": str(canonical),
+                "component_id": str(source.component_id),
+                "parameter_name": source.parameter_name,
+                "old_value": None,
+                "semantics": mapping.direction,
+                "read_back": True,
+                "matched_fingerprint": fingerprints[0] if fingerprints else {},
+            })
+    else:
+        commands = resolve_requested_commands(evidence, profile, requests) if requests else []
     timing_mode = await select_timing_mode(service.backend_service, target_project) if normalized.get("events") else None
-    output = await ensure_output_ready(
-        service.backend_service,
-        target_project,
-        source_project=source_project,
-        confirm=confirm,
-    )
+    selectors = required_result_selectors(profile, normalized.get("analysis", {}).get("metrics", []))
+    get_settings = getattr(service.backend_service, "get_project_settings", None)
+    if callable(get_settings):
+        output = await ensure_output_ready(
+            service.backend_service,
+            target_project,
+            source_project=source_project,
+            confirm=confirm,
+        )
+    elif profile.get("profile_version", 1) == 1:
+        output = {"changed": False, "verified": False, "reason": "project_settings_unavailable"}
+    else:
+        raise _error(
+            "HVDC_CAPABILITY_UNAVAILABLE",
+            "Project settings read-back is required before a v2 scenario can run.",
+            project_name=target_project,
+        )
     return {
         "resolved_commands": commands,
         "timing_mode": timing_mode,
         "output_change": output,
-        "required_result_selectors": required_result_selectors(profile, normalized.get("analysis", {}).get("metrics", [])),
+        "required_result_selectors": selectors,
+        "matched_fingerprint": fingerprints[0] if fingerprints else {},
     }

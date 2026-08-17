@@ -10,29 +10,59 @@ from pscad_mcp.hvdc.service import HvdcDomainService
 
 
 def _write_command_project(path):
-    path.write_text(
+    xml = (
         "<project><canvas name='Main'><component id='2' name='control' definition='control'>"
-        "<parameter name='current order' value='1'/></component></canvas></project>",
-        encoding="utf-8",
+        "<parameter name='current order' value='1'/></component></canvas></project>"
     )
+    path.write_text(xml, encoding="utf-8")
+    path.with_name("case_derived.pscx").write_text(xml, encoding="utf-8")
 
 
 class ScenarioBackend:
     def __init__(self, projects=("case_derived",)):
         self.calls = []
         self.projects = list(projects)
+        self.parameters = {2: {"current order": 1}}
+        self.settings = {"PlotType": "OUT"}
+        self.status = "idle"
+        self.status_calls = 0
+        self.event_pending = False
+        self.simulation_times = iter([0.0, 0.5, 1.02])
 
     async def list_projects(self):
         return [{"name": name} for name in self.projects]
 
     async def run_project(self, project_name):
         self.calls.append(("run", project_name))
+        self.status = "running"
+        self.status_calls = 0
 
     async def set_component_parameters(self, project_name, component_id, values):
         self.calls.append(("set", project_name, component_id, values))
+        self.parameters.setdefault(component_id, {}).update(values)
+        self.status = "completed"
 
     async def get_run_status(self, project_name):
-        return {"status": "completed", "progress": 100.0}
+        self.status_calls += 1
+        if self.status == "running" and not self.event_pending and self.status_calls > 1:
+            self.status = "completed"
+        return {"status": self.status, "progress": 100.0 if self.status == "completed" else None}
+
+    async def get_project_settings(self, project_name):
+        return dict(self.settings)
+
+    async def set_project_settings(self, project_name, settings):
+        self.settings.update(settings)
+
+    async def get_component_parameters(self, project_name, component_id):
+        return dict(self.parameters.get(component_id, {}))
+
+    async def get_timed_control_capabilities(self, project_name):
+        self.event_pending = True
+        return {"native_schedule": False, "simulation_clock": True}
+
+    async def get_simulation_time(self, project_name):
+        return next(self.simulation_times)
 
 
 async def _wait_for_terminal(service, scenario_id, timeout=0.5):
@@ -75,12 +105,14 @@ def test_even_baseline_run_requires_confirmation():
         raise AssertionError("confirmation was not required")
 
 
-def test_scenario_record_preserves_analysis_recovery_baselines():
-    service = HvdcDomainService(ScenarioBackend())
+def test_scenario_record_preserves_analysis_recovery_baselines(tmp_path):
+    source = tmp_path / "case_derived.pscx"
+    source.write_text("<project />", encoding="utf-8")
+    service = HvdcDomainService(ScenarioBackend(), path_policy=PathPolicy(workspace_root=str(tmp_path)))
     scenario = {
         "name": "baseline",
         "profile": "lcc_bipolar_generic",
-        "project": "case_derived",
+        "project": str(source),
         "parameter_changes": [],
         "events": [],
         "analysis": {
@@ -90,7 +122,7 @@ def test_scenario_record_preserves_analysis_recovery_baselines():
     }
 
     async def exercise():
-        started = await service.run_scenario("case_derived", scenario, confirm=True)
+        started = await service.run_scenario(str(source), scenario, confirm=True)
         await _wait_for_terminal(service, started["scenario_id"])
         return started
 
@@ -210,6 +242,7 @@ def test_command_mapping_cannot_mutate_identity_metadata(tmp_path):
         "<parameter name='Name' value='current order'/></component></canvas></project>",
         encoding="utf-8",
     )
+    source.with_name("case_derived.pscx").write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
     backend = ScenarioBackend()
     service = HvdcDomainService(
         backend,
@@ -240,6 +273,7 @@ def test_command_mapping_requires_semantic_parameter_name(tmp_path):
         "<parameter name='Configuration' value='current order'/></component></canvas></project>",
         encoding="utf-8",
     )
+    source.with_name("case_derived.pscx").write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
     backend = ScenarioBackend()
     service = HvdcDomainService(
         backend,
@@ -270,6 +304,7 @@ def test_display_text_cannot_masquerade_as_command_parameter(tmp_path):
         "<parameter name='Text' value='current order'/></component></canvas></project>",
         encoding="utf-8",
     )
+    source.with_name("case_derived.pscx").write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
     backend = ScenarioBackend()
     service = HvdcDomainService(
         backend,
@@ -322,6 +357,7 @@ def test_measurement_mapping_cannot_be_used_as_a_mutation_target(tmp_path):
         "<parameter name='Idc' value='3 kA'/></component></canvas></project>",
         encoding="utf-8",
     )
+    source.with_name("case_derived.pscx").write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
     service = HvdcDomainService(ScenarioBackend(), path_policy=PathPolicy(workspace_root=str(tmp_path)))
     scenario = {
         "name": "bad",
@@ -497,9 +533,10 @@ def test_timed_events_run_in_background_without_blocking_the_start_call(tmp_path
     started, elapsed, interim, interim_calls, terminal = asyncio.run(exercise())
     assert elapsed < 0.05
     assert started["status"] == "validated"
-    assert interim["status"] == "running"
-    assert not any(call[0] == "set" for call in interim_calls)
+    assert interim["timing_basis"]["mode"] == "simulation_clock_polling"
+    assert any(call[0] == "set" for call in interim_calls)
     assert terminal["status"] == "completed"
+    assert terminal["partial_completion"]["applied_events"][0]["observed_time_s"] == pytest.approx(0.5)
     assert backend.calls == [("run", "case_derived"), ("set", "case_derived", 2, {"current order": 3})]
 
 

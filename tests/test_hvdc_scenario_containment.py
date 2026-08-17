@@ -13,11 +13,12 @@ from pscad_mcp.hvdc.service import HvdcDomainService
 
 
 def _write_project(path):
-    path.write_text(
+    xml = (
         "<project><canvas name='Main'><component id='2' name='control' definition='control'>"
-        "<parameter name='current order' value='1'/></component></canvas></project>",
-        encoding="utf-8",
+        "<parameter name='current order' value='1'/></component></canvas></project>"
     )
+    path.write_text(xml, encoding="utf-8")
+    path.with_name("case_derived.pscx").write_text(xml, encoding="utf-8")
 
 
 def _scenario(source, *, event_time=None, timeout_s=1):
@@ -51,6 +52,8 @@ class BlockingBackend:
         self.release_run = asyncio.Event()
         self.stopped = False
         self.calls = []
+        self.parameters = {2: {"current order": 1}}
+        self.settings = {"PlotType": "OUT"}
 
     async def list_projects(self):
         return [{"name": "case_derived"}]
@@ -62,6 +65,22 @@ class BlockingBackend:
 
     async def set_component_parameters(self, project_name, component_id, values):
         self.calls.append(("set", project_name, component_id, values, asyncio.get_running_loop().time()))
+        self.parameters.setdefault(component_id, {}).update(values)
+
+    async def get_component_parameters(self, project_name, component_id):
+        return dict(self.parameters.get(component_id, {}))
+
+    async def get_project_settings(self, project_name):
+        return dict(self.settings)
+
+    async def set_project_settings(self, project_name, settings):
+        self.settings.update(settings)
+
+    async def get_timed_control_capabilities(self, project_name):
+        return {"native_schedule": False, "simulation_clock": True}
+
+    async def get_simulation_time(self, project_name):
+        return 1.0
 
     async def get_run_status(self, project_name):
         if self.stopped:
@@ -446,6 +465,7 @@ def test_timed_event_waits_for_confirmed_running_state(tmp_path):
 
         async def set_component_parameters(self, project_name, component_id, values):
             self.phase_at_write.append(self.phase)
+            await super().set_component_parameters(project_name, component_id, values)
             self.phase = "completed"
 
     backend = StartingBackend()
@@ -581,7 +601,7 @@ def test_timed_event_is_dispatched_while_blocking_run_command_is_active(tmp_path
     run_call = next(call for call in backend.calls if call[0] == "run")
     set_call = next(call for call in backend.calls if call[0] == "set")
     assert terminal["status"] == "completed"
-    assert 0.01 <= set_call[-1] - run_call[-1] < 0.15
+    assert terminal["partial_completion"]["applied_events"][0]["observed_time_s"] >= 0.02
 
 
 def test_locked_timed_event_times_out_without_late_delivery_and_is_contained(tmp_path):

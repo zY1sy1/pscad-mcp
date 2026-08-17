@@ -6,6 +6,7 @@ import math
 import asyncio
 import os
 import time
+from copy import deepcopy
 from collections.abc import Mapping
 from datetime import datetime, timezone
 from pathlib import Path
@@ -14,8 +15,8 @@ from typing import Any
 
 from ..core.backend.base import BackendError
 from ..core.service import ConfirmationRequired
-from .bindings import _UNSAFE_COMMAND_PARAMETERS
 from .audit import file_evidence, profile_evidence
+from .preflight import preflight_scenario
 from .profiles import load_profile
 
 
@@ -114,113 +115,6 @@ async def _resolve_target_project(service: Any, source_project: str, derived_pro
             {"candidate": derived_project, "suggested_action": "Load the pre-existing derived project before running the scenario."},
         )
     return derived_project
-
-
-def _bind_approved_commands(service: Any, project_name: str, normalized: dict[str, Any], workspace_root: str | Path | None) -> None:
-    profile = load_profile(str(normalized["profile"]), workspace_root=workspace_root)
-    configured = {str(item["canonical"]): item for item in profile.get("mappings", [])}
-    resolution = service.resolve_scenario_mappings(project_name, str(normalized["profile"]))
-    observed = {str(item["canonical"]): item for item in resolution.get("mappings", [])}
-    for field in ("parameter_changes", "events"):
-        for index, item in enumerate(normalized[field]):
-            target = str(item.get("target", ""))
-            approved = configured.get(target)
-            if approved is None:
-                raise BackendError(
-                    "HVDC_CAPABILITY_UNAVAILABLE",
-                    f"Scenario target '{target}' is not canonical in profile '{normalized['profile']}'.",
-                    "hvdc",
-                    "run_hvdc_scenario",
-                    {"target": target, "profile": normalized["profile"], "field": field, "index": index},
-                )
-            direction = approved.get("direction", "measurement")
-            if direction != "command":
-                raise BackendError(
-                    "HVDC_CAPABILITY_UNAVAILABLE",
-                    f"Scenario target '{target}' is not an approved command mapping.",
-                    "hvdc",
-                    "run_hvdc_scenario",
-                    {"target": target, "profile": normalized["profile"], "direction": direction, "field": field, "index": index},
-                )
-            mapping = observed.get(target)
-            source = mapping.get("source") if mapping and mapping.get("status") == "observed" else None
-            if not source or source.get("component_id") in (None, "") or not source.get("parameter_name"):
-                raise BackendError(
-                    "HVDC_MAPPING_MISSING",
-                    f"Command target '{target}' has no observed, non-conflicting component parameter mapping.",
-                    "hvdc",
-                    "run_hvdc_scenario",
-                    {"target": target, "profile": normalized["profile"], "mapping_status": mapping.get("status") if mapping else "unresolved", "field": field, "index": index},
-                )
-            parameter_name = str(source["parameter_name"])
-            normalized_parameter = "".join(
-                character
-                for character in parameter_name.casefold()
-                if character.isalnum()
-            )
-            if normalized_parameter in _UNSAFE_COMMAND_PARAMETERS:
-                raise BackendError(
-                    "HVDC_MAPPING_MISSING",
-                    f"Command target '{target}' resolved only to identity or display metadata, not a writable control parameter.",
-                    "hvdc",
-                    "run_hvdc_scenario",
-                    {
-                        "target": target,
-                        "profile": normalized["profile"],
-                        "component_id": str(source["component_id"]),
-                        "parameter_name": parameter_name,
-                        "reason": "unsafe_command_parameter",
-                        "field": field,
-                        "index": index,
-                    },
-                )
-            semantic_parameter_names = {
-                "".join(
-                    character
-                    for character in str(value).casefold()
-                    if character.isalnum()
-                )
-                for value in (target, *approved.get("aliases", []))
-            }
-            if normalized_parameter not in semantic_parameter_names:
-                raise BackendError(
-                    "HVDC_MAPPING_MISSING",
-                    f"Command target '{target}' matched a parameter value, but the parameter name is not an approved semantic command name.",
-                    "hvdc",
-                    "run_hvdc_scenario",
-                    {
-                        "target": target,
-                        "profile": normalized["profile"],
-                        "component_id": str(source["component_id"]),
-                        "parameter_name": parameter_name,
-                        "reason": "nonsemantic_command_parameter",
-                        "field": field,
-                        "index": index,
-                    },
-                )
-            approved_source = {
-                "component_id": str(source["component_id"]),
-                "parameter_name": parameter_name,
-            }
-            supplied_id = item.get("component_id")
-            supplied_parameter = item.get("parameter_name")
-            if supplied_id is not None or supplied_parameter is not None:
-                matches = (
-                    supplied_id is not None
-                    and supplied_parameter is not None
-                    and str(supplied_id) == approved_source["component_id"]
-                    and str(supplied_parameter) == approved_source["parameter_name"]
-                )
-                if not matches:
-                    raise BackendError(
-                        "HVDC_MAPPING_MISSING",
-                        f"Explicit binding for '{target}' does not match the approved observed mapping source.",
-                        "hvdc",
-                        "run_hvdc_scenario",
-                        {"target": target, "approved_source": approved_source, "field": field, "index": index},
-                    )
-            item["component_id"] = approved_source["component_id"]
-            item["parameter_name"] = approved_source["parameter_name"]
 
 
 def validate_scenario(scenario: Mapping[str, Any], *, workspace_root: str | Path | None = None) -> dict[str, Any]:
@@ -421,6 +315,25 @@ def _mutation_scope_is_locked(backend: Any) -> bool:
     return bool(locked()) if callable(locked) else False
 
 
+def _update_audit_runtime(service: Any, record: dict[str, Any]) -> None:
+    audit = record.get("audit")
+    if not isinstance(audit, dict):
+        return
+    backend = getattr(service, "backend_service", None)
+    audit["timing"] = deepcopy(record.get("timing_basis", {}))
+    audit["containment"] = deepcopy(record.get("containment", {}))
+    audit["pending_operations"] = deepcopy(record.get("pending_operations", []))
+    audit["partial_completion"] = deepcopy(record.get("partial_completion", {}))
+    audit["project_status"] = deepcopy(record.get("project_status"))
+    audit["backend"] = {
+        "name": getattr(backend, "name", None),
+        "version": getattr(backend, "version", None),
+    }
+    preflight = record.get("preflight")
+    if isinstance(preflight, Mapping):
+        audit["resolved_bindings"] = [dict(item) for item in preflight.get("resolved_commands", [])]
+
+
 async def _wait_for_project_terminal(backend: Any, target_project: str) -> dict[str, Any] | None:
     if not callable(getattr(backend, "get_run_status", None)):
         return None
@@ -512,6 +425,40 @@ async def _attempt_containment(
 
 async def _capture_outputs(service: Any, record: dict[str, Any]) -> None:
     backend = service.backend_service
+    audit = record.get("audit")
+
+    def hash_outputs() -> None:
+        if not isinstance(audit, dict):
+            return
+        for label in ("source", "derived"):
+            original = audit.get(label)
+            if not isinstance(original, Mapping) or not original.get("path"):
+                continue
+            try:
+                final = file_evidence(str(original["path"]))
+                audit[f"{label}_final"] = final
+                if final.get("sha256") != original.get("sha256"):
+                    audit["complete"] = False
+                    audit.setdefault("warnings", []).append(
+                        {"code": "HVDC_AUDIT_SOURCE_CHANGED", "scope": label, "path": original["path"]}
+                    )
+            except Exception as error:
+                audit["complete"] = False
+                audit.setdefault("warnings", []).append(
+                    {"code": "HVDC_AUDIT_HASH_FAILED", "scope": label, "path": str(original["path"]), "message": str(error)}
+                )
+        output_evidence: list[dict[str, Any]] = []
+        for output in record.get("output_files", []):
+            try:
+                output_evidence.append(file_evidence(output))
+            except Exception as error:
+                audit["complete"] = False
+                audit.setdefault("warnings", []).append(
+                    {"code": "HVDC_AUDIT_HASH_FAILED", "scope": "output", "path": str(output), "message": str(error)}
+                )
+        audit["outputs"] = output_evidence
+        _update_audit_runtime(service, record)
+
     discover = getattr(backend, "discover_output_files", None)
     legacy_discover = None
     if not callable(discover):
@@ -521,6 +468,7 @@ async def _capture_outputs(service: Any, record: dict[str, Any]) -> None:
                 legacy_discover = candidate
                 break
     if not callable(discover) and legacy_discover is None:
+        hash_outputs()
         record["output_discovery"] = "unavailable"
         record["warnings"].append(
             {
@@ -548,7 +496,9 @@ async def _capture_outputs(service: Any, record: dict[str, Any]) -> None:
             if resolved not in validated:
                 validated.append(resolved)
         record["output_files"] = validated
+        hash_outputs()
     except Exception as error:
+        hash_outputs()
         warning: dict[str, Any] = {
             "code": "OUTPUT_DISCOVERY_FAILED",
             "message": str(error),
@@ -571,12 +521,24 @@ async def _restore_parameter(service: Any, record: dict[str, Any], target_projec
         raise BackendError("HVDC_SCENARIO_EXECUTION_FAILED", "Parameter restoration did not read back correctly.", "hvdc", operation, {"requested": old_value, "observed": observed.get(str(change["parameter_name"]))})
 
 
-async def _apply_verified_change(service: Any, record: dict[str, Any], target_project: str, change: Mapping[str, Any], operation: str) -> None:
+async def _apply_verified_change(
+    service: Any,
+    record: dict[str, Any],
+    target_project: str,
+    change: Mapping[str, Any],
+    operation: str,
+    *,
+    completion_field: str | None = "applied_parameter_changes",
+) -> None:
     backend = service.backend_service
     if not callable(getattr(backend, "get_component_parameters", None)):
-        await _await_tracked_operation(service, record, operation, backend.set_component_parameters(target_project, int(change["component_id"]), {str(change["parameter_name"]): change.get("value")}))
-        record["partial_completion"]["applied_parameter_changes"].append(dict(change))
-        return
+        raise BackendError(
+            "HVDC_CAPABILITY_UNAVAILABLE",
+            "Verified parameter writes require complete component parameter read-back support.",
+            "hvdc",
+            operation,
+            {"project_name": target_project, "component_id": change.get("component_id")},
+        )
     component_id = int(change["component_id"])
     parameter_name = str(change["parameter_name"])
     before = await backend.get_component_parameters(target_project, component_id)
@@ -590,16 +552,47 @@ async def _apply_verified_change(service: Any, record: dict[str, Any], target_pr
         if type(observed) is not type(change.get("value")) or observed != change.get("value"):
             await _restore_parameter(service, record, target_project, change, old_value, operation)
             raise BackendError("HVDC_SCENARIO_EXECUTION_FAILED", "Parameter write did not read back correctly.", "hvdc", operation, {"requested": change.get("value"), "observed": observed})
-    record["partial_completion"]["applied_parameter_changes"].append({**dict(change), "old_value": old_value})
+    if completion_field is not None:
+        record["partial_completion"][completion_field].append({**dict(change), "old_value": old_value})
 
 
-async def _orchestrate_scenario(service: Any, record: dict[str, Any], normalized: dict[str, Any]) -> None:
+async def _orchestrate_scenario(service: Any, record: dict[str, Any], normalized: dict[str, Any], timeout_s: float) -> None:
     backend = service.backend_service
     target_project = record["target_project"]
     transition_scenario(record, "running")
     record["started_at"] = _utc_now()
     for index, change in enumerate(normalized.get("parameter_changes", [])):
         await _apply_verified_change(service, record, target_project, change, f"parameter_change:{index}")
+    events = sorted(normalized.get("events", []), key=lambda item: float(item["time_s"]))
+    preflight = record.get("preflight", {})
+    timing_mode = preflight.get("timing_mode") if isinstance(preflight, Mapping) else None
+    if events and timing_mode == "native":
+        acknowledgements = await backend.schedule_timed_controls(target_project, events)
+        if len(acknowledgements) != len(events):
+            raise BackendError(
+                "HVDC_TIMED_CONTROL_UNAVAILABLE",
+                "Native scheduler did not acknowledge every event.",
+                "hvdc",
+                "run_hvdc_scenario",
+                {"project_name": target_project, "expected": len(events), "observed": len(acknowledgements)},
+            )
+        record["timing_basis"] = {
+            "kind": "native_schedule_registered",
+            "mode": "native",
+            "registered_at": _utc_now(),
+            "acknowledgements": [dict(item) for item in acknowledgements],
+        }
+        record["partial_completion"]["applied_events"].extend(
+            [
+                {
+                    **dict(event),
+                    **dict(ack),
+                    "requested_time_s": float(event["time_s"]),
+                    "mode": "native",
+                }
+                for event, ack in zip(events, acknowledgements)
+            ]
+        )
     run = normalized.get("run", {}) or {}
     record["run_started_at_epoch"] = time.time()
     record["partial_completion"]["run_command_dispatched"] = True
@@ -627,9 +620,18 @@ async def _orchestrate_scenario(service: Any, record: dict[str, Any], normalized
     await asyncio.sleep(0)
     record["partial_completion"]["run_started"] = "unknown"
     try:
-        events = sorted(normalized.get("events", []), key=lambda item: float(item["time_s"]))
         if events:
-            if _mutation_scope_is_locked(backend):
+            if timing_mode == "native":
+                record["partial_completion"]["run_started"] = "unknown"
+            elif timing_mode != "simulation_clock_polling":
+                raise BackendError(
+                    "HVDC_TIMED_CONTROL_UNAVAILABLE",
+                    "Timed events require a preflight-selected strict timing mode.",
+                    "hvdc",
+                    "run_hvdc_scenario",
+                    {"project_name": target_project},
+                )
+            if _mutation_scope_is_locked(backend) and timing_mode != "native":
                 record["timing_basis"] = {
                     "kind": "unavailable_blocking_run",
                     "mutation_scope_locked": True,
@@ -645,18 +647,30 @@ async def _orchestrate_scenario(service: Any, record: dict[str, Any], normalized
                         "mutation_scope_locked": True,
                     },
                 )
-            running_state = await _wait_for_confirmed_running(backend, target_project, run_task)
+            if timing_mode == "native":
+                running_state = {"status": "running", "source": "native_schedule"}
+            else:
+                running_state = await _wait_for_confirmed_running(backend, target_project, run_task)
             record["project_status"] = running_state
             record["partial_completion"]["run_started"] = True
-            from .timing import select_timing_mode
-            timing_mode = await select_timing_mode(backend, target_project)
-            record["timing_basis"] = {
-                "kind": "backend_confirmed_running",
-                "mode": timing_mode,
-                "confirmed_at": _utc_now(),
-                "project_status": running_state,
-            }
-            if _mutation_scope_is_locked(backend):
+            if timing_mode is None:
+                from .timing import select_timing_mode
+                timing_mode = await select_timing_mode(backend, target_project)
+            if timing_mode == "native":
+                record["timing_basis"].update(
+                    {
+                        "confirmed_at": _utc_now(),
+                        "project_status": running_state,
+                    }
+                )
+            else:
+                record["timing_basis"] = {
+                    "kind": "backend_confirmed_running",
+                    "mode": timing_mode,
+                    "confirmed_at": _utc_now(),
+                    "project_status": running_state,
+                }
+            if _mutation_scope_is_locked(backend) and timing_mode != "native":
                 raise BackendError(
                     "HVDC_TIMED_CONTROL_UNAVAILABLE",
                     "The backend serializes mutations behind the blocking run command; timed events cannot be dispatched safely.",
@@ -670,14 +684,26 @@ async def _orchestrate_scenario(service: Any, record: dict[str, Any], normalized
                 )
         else:
             record["timing_basis"] = {"kind": "not_applicable"}
-        if events:
+        if events and timing_mode == "simulation_clock_polling":
             from .timing import dispatch_timed_events
+
+            async def write_event(event: Mapping[str, Any]) -> None:
+                await _apply_verified_change(
+                    service,
+                    record,
+                    target_project,
+                    event,
+                    f"timed_event:{event.get('target', event.get('canonical', 'unknown'))}",
+                    completion_field=None,
+                )
+
             dispatched = await dispatch_timed_events(
                 backend,
                 target_project,
                 events,
                 mode=timing_mode,
-                liveness_deadline_s=timeout_s if "timeout_s" in locals() else None,
+                liveness_deadline_s=timeout_s,
+                write_event=write_event,
             )
             record["partial_completion"]["applied_events"].extend(dispatched)
         # Keep cancellation of the bounded scenario worker separate from the
@@ -721,7 +747,7 @@ async def _scenario_worker(service: Any, record: dict[str, Any], normalized: dic
     release_reservation = False
     release_after_pending = False
     try:
-        await asyncio.wait_for(_orchestrate_scenario(service, record, normalized), timeout=timeout_s)
+        await asyncio.wait_for(_orchestrate_scenario(service, record, normalized, timeout_s), timeout=timeout_s)
     except asyncio.TimeoutError:
         record["error"] = BackendError(
             "HVDC_SCENARIO_TIMEOUT",
@@ -786,6 +812,7 @@ async def _scenario_worker(service: Any, record: dict[str, Any], normalized: dic
         transition_scenario(record, "completed")
         release_reservation = True
     finally:
+        _update_audit_runtime(service, record)
         if release_reservation or release_after_pending:
             await service._request_scenario_release(
                 record["scenario_id"],
@@ -817,8 +844,17 @@ async def run_scenario(
     target_project = project_name
     if mutating and not normalized.get("derived_project"):
         raise BackendError("HVDC_CAPABILITY_UNAVAILABLE", "Mutating scenarios require a pre-existing derived_project; source projects are read-only inputs.", "hvdc", "run_hvdc_scenario", {"project": project_name, "suggested_action": "Create a confirmed derived project with existing generic PSCAD tools, then pass derived_project."})
-    if mutating:
-        _bind_approved_commands(service, project_name, normalized, workspace_root)
+    backend = getattr(service, "backend_service", None)
+    if backend is None:
+        raise BackendError(
+            "HVDC_CAPABILITY_UNAVAILABLE",
+            "Scenario execution requires a connected PSCAD backend service.",
+            "hvdc",
+            "run_hvdc_scenario",
+            {"project_name": project_name},
+        )
+    profile_data = load_profile(str(normalized["profile"]), workspace_root=workspace_root)
+    normalized["profile_data"] = profile_data
     scenario_id = f"hvdc-{uuid4().hex}"
     await service._reserve_scenario(scenario_id)
     try:
@@ -826,29 +862,49 @@ async def run_scenario(
             target_project = await _resolve_target_project(service, project_name, str(normalized["derived_project"]))
         elif _is_path_like(target_project):
             target_project = str(service._resolve_mutation_project(target_project))
+        preflight = await preflight_scenario(
+            service,
+            project_name,
+            target_project,
+            normalized,
+            confirm=confirm,
+        )
+        resolved_commands = list(preflight.get("resolved_commands", []))
+        request_index = 0
+        for field in ("parameter_changes", "events"):
+            for item in normalized.get(field, []):
+                binding = resolved_commands[request_index]
+                request_index += 1
+                item.update(
+                    {
+                        "canonical": binding["canonical"],
+                        "component_id": binding["component_id"],
+                        "parameter_name": binding["parameter_name"],
+                        "read_back": binding.get("read_back", False),
+                        "semantics": binding.get("semantics"),
+                    }
+                )
         explicit_outputs = [
             str(service._resolve_output_file(file_path, must_exist=False))
             for file_path in normalized.get("output_files", [])
         ]
-        backend = getattr(service, "backend_service", None)
-        if backend is None:
-            raise BackendError(
-                "HVDC_CAPABILITY_UNAVAILABLE",
-                "Scenario execution requires a connected PSCAD backend service.",
-                "hvdc",
-                "run_hvdc_scenario",
-                {"project_name": target_project},
-            )
     except BaseException:
         await service._release_scenario(scenario_id)
         raise
     created_at = _utc_now()
     analysis = dict(normalized["analysis"])
-    profile_data = load_profile(str(normalized["profile"]), workspace_root=workspace_root)
-    audit: dict[str, Any] = {"complete": True, "profile": profile_evidence(str(normalized["profile"]), profile_data)}
+    audit: dict[str, Any] = {
+        "complete": True,
+        "profile": profile_evidence(str(normalized["profile"]), profile_data),
+        "preflight": dict(preflight),
+    }
     for label, candidate in (("source", project_name), ("derived", target_project)):
         try:
-            path = service._resolve_mutation_project(str(candidate))
+            path = (
+                service._resolve_project(str(candidate))
+                if label == "source"
+                else service._resolve_mutation_project(str(candidate))
+            )
             audit[label] = file_evidence(path)
         except Exception as error:
             audit["complete"] = False
@@ -872,13 +928,14 @@ async def run_scenario(
         "recovery_baselines": recovery_baselines,
         "output_files": explicit_outputs,
         "output_discovery": "pending",
-        "timing_basis": {"kind": "pending"},
+        "timing_basis": {"kind": "pending", "mode": preflight.get("timing_mode")},
         "pending_operations": [],
         "operation_history": [],
         "resolved_channels": [],
         "metrics": [],
         "warnings": [],
         "audit": audit,
+        "preflight": dict(preflight),
         "messages": [],
         "error": None,
         "partial_completion": {

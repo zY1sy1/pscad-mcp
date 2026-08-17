@@ -116,6 +116,36 @@ Example declarative scenario:
 }
 ```
 
+HVDC event `time_s` is always EMTDC simulation time. There is no wall-clock
+fallback: external events are rejected when the backend has neither verified
+native scheduling nor a simulation-clock polling capability. The built-in
+`hvdc_breaker_difforder` profile is version 2 and contains seven explicit
+read-only result selectors with their recorded units; it intentionally contains
+no writable breaker or fault binding. User profiles must provide a confirmed,
+project-qualified command binding before any mutation is allowed. Output
+`PlotType="OUT"` correction is limited to confirmed derived projects.
+
+The built-in selector contract is: `dc_voltage_breaker` (`kV`),
+`dc_current_breaker` (`kA`), `breaker_command_observed` (binary),
+`dc_voltage_rectifier_pole1`/`dc_voltage_inverter_pole1` (`pu`), and
+`dc_voltage_rectifier_pole2`/`dc_voltage_inverter_pole2` (`pu`). Selector
+paths and legacy call IDs are resolved exactly; aliases are not inferred for
+write operations.
+
+Opt-in licensed acceptance requires `PSCAD_MCP_ACCEPTANCE=1`,
+`PSCAD_MCP_HVDC_SOURCE`, `PSCAD_MCP_HVDC_LIBRARY`, and
+`PSCAD_MCP_WORKSPACE` to point to approved absolute paths:
+
+```powershell
+$env:PSCAD_MCP_ACCEPTANCE='1'
+& .\.venv\Scripts\python.exe -m pytest tests\test_hvdc_real_acceptance.py -q -s
+```
+
+Acceptance copies the case and library to a timestamped workspace, preserves
+source hashes, and safely reports `HVDC_TIMED_CONTROL_UNAVAILABLE` or
+`HVDC_MAPPING_MISSING` before mutation when strict timing or a confirmed
+binding is unavailable.
+
 The implementation is modular, with each tool family registered from its own module in `pscad_mcp\tools`.
 
 Simulation sets are workspace-level resources rather than project-owned
