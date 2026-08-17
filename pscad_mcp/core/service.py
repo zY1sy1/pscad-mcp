@@ -443,6 +443,15 @@ class PscadService:
             await self.backend.run_project(project_name)
             return f"Simulation started for '{project_name}'."
 
+    async def get_timed_control_capabilities(self, project_name: str) -> dict[str, Any]:
+        return await self.backend.get_timed_control_capabilities(project_name)
+
+    async def schedule_timed_controls(self, project_name: str, events: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+        return await self.backend.schedule_timed_controls(project_name, events)
+
+    async def get_simulation_time(self, project_name: str) -> float:
+        return await self.backend.get_simulation_time(project_name)
+
     async def get_run_status(self, project_name: str) -> dict[str, Any]:
         return asdict(await self.backend.project_run_state(project_name))
 

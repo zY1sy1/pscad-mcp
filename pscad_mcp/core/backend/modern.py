@@ -187,6 +187,27 @@ class ModernBackend:
     async def build_all_projects(self) -> None:
         await self.adapter.call(self._app, "build_all", timeout=300.0)
 
+    async def get_timed_control_capabilities(self, project_name: str) -> dict[str, Any]:
+        return {"native_schedule": False, "simulation_clock": False, "time_basis": "EMTDC"}
+
+    async def schedule_timed_controls(self, project_name: str, events: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+        raise BackendError(
+            "CAPABILITY_UNAVAILABLE",
+            "Modern PSCAD backend does not expose verified timed-control scheduling.",
+            self.name,
+            "schedule_timed_controls",
+            {"project_name": project_name, "backend_version": self.version},
+        )
+
+    async def get_simulation_time(self, project_name: str) -> float:
+        raise BackendError(
+            "CAPABILITY_UNAVAILABLE",
+            "Modern PSCAD backend does not expose a verified simulation clock.",
+            self.name,
+            "get_simulation_time",
+            {"project_name": project_name, "backend_version": self.version},
+        )
+
     async def run_project(self, project_name: str) -> None:
         await self.adapter.call(
             await self._project(project_name), "run", timeout=300.0
