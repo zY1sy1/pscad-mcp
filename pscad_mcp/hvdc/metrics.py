@@ -142,8 +142,28 @@ def _first_crossing(values: list[float], threshold: float = 0.5) -> int | None:
     return None
 
 
-def calculate_metrics(samples: dict[str, Any], metrics: list[str] | None = None) -> dict[str, Any]:
+def _transition_index(values: list[float], transition: str, threshold: float) -> int | None:
+    for index in range(1, len(values)):
+        previous, current = values[index - 1], values[index]
+        if transition == "rising" and previous < threshold <= current:
+            return index
+        if transition == "falling" and previous >= threshold > current:
+            return index
+    return None
+
+
+def calculate_metrics(samples: dict[str, Any], metrics: list[str] | None = None, *, profile: Mapping[str, Any] | None = None) -> dict[str, Any]:
     time, channels, invalid_channels, validation_warnings, recovery_baselines = _normalize(samples)
+    profile_provided = profile is not None and profile.get("profile_version", 1) == 2
+    profile = profile or {}
+    roles = profile.get("metric_roles", {}) if isinstance(profile, Mapping) else {}
+    selectors = {item.get("canonical"): item for item in profile.get("result_channels", []) if isinstance(item, Mapping)} if isinstance(profile, Mapping) else {}
+    units = {name: selectors.get(name, {}).get("units") for name in channels}
+    if isinstance(samples.get("channels"), list):
+        units.update({str(item.get("path") or item.get("name")): item.get("units", "") for item in samples["channels"] if isinstance(item, Mapping)})
+    def source(role: str, fallback: str) -> str:
+        value = roles.get(role) if isinstance(roles, Mapping) else None
+        return str(value) if isinstance(value, str) else fallback
     requested = metrics or ["dc_voltage_peak", "dc_current_peak", "dc_power"]
     result: list[dict[str, Any]] = []
 
@@ -167,8 +187,9 @@ def calculate_metrics(samples: dict[str, Any], metrics: list[str] | None = None)
             result.append(_metric(name, max(abs(abs(positive[index]) - abs(negative[index])) for index in range(count)), units, (f"{prefix}_positive", f"{prefix}_negative"), time, "maximum absolute pole-magnitude difference", "derived") if count else unavailable(name, (f"{prefix}_positive", f"{prefix}_negative")))
             continue
         if name in {"breaker_sequence", "breaker_protection_sequence"}:
-            names = ("breaker_command", "breaker_status", "protection_trip")
-            indices = [_first_crossing(channels.get(channel, [])) for channel in names]
+            configured = next((item for item in profile.get("sequences", []) if isinstance(item, Mapping) and item.get("canonical") == name), {})
+            names = tuple(configured.get("order", (source("breaker_command", "breaker_command"), source("breaker_status", "breaker_status"), source("protection_trip", "protection_trip"))))
+            indices = [_transition_index(channels.get(channel, []), selectors.get(channel, {}).get("transition", "rising"), float(selectors.get(channel, {}).get("threshold", 0.5))) for channel in names]
             if any(index is None for index in indices) or not time:
                 result.append(unavailable(name, names))
             else:
@@ -266,12 +287,21 @@ def calculate_metrics(samples: dict[str, Any], metrics: list[str] | None = None)
             values = channels.get(channel, [])
             result.append(_metric(name, math.sqrt(sum(value * value for value in values) / len(values)), "kA" if "current" in channel else "kV" if "voltage" in channel else None, (channel,), time, "root mean square") if values else unavailable(name, (channel,)))
         elif name == "dc_power":
-            voltage, current = channels.get("dc_voltage", []), channels.get("dc_current", [])
+            voltage_name, current_name = source("dc_voltage", "dc_voltage"), source("dc_current", "dc_current")
+            voltage, current = channels.get(voltage_name, []), channels.get(current_name, [])
             count = min(len(voltage), len(current))
-            result.append(_metric(name, max(voltage[index] * current[index] for index in range(count)), "MW", ("dc_voltage", "dc_current"), time, "pointwise Vdc * Idc peak", "derived") if count else unavailable(name, ("dc_voltage", "dc_current")))
+            valid_units = {str(units.get(voltage_name, "")).casefold(), str(units.get(current_name, "")).casefold()} >= {"kv", "ka"}
+            if count and (valid_units or not profile_provided):
+                result.append(_metric(name, max(voltage[index] * current[index] for index in range(count)), "MW", (voltage_name, current_name), time, "pointwise Vdc * Idc peak", "derived"))
+            elif count and profile_provided:
+                result.append(_invalid(name, (voltage_name, current_name), time, "dc_power requires confirmed kV and kA channels."))
+            else:
+                result.append(unavailable(name, (voltage_name, current_name)))
         elif name == "trip_delay_s":
-            command, status = channels.get("breaker_command", []), channels.get("breaker_status", [])
-            command_index, status_index = _first_crossing(command), _first_crossing(status)
+            command_name, status_name = source("breaker_command", "breaker_command"), source("breaker_status", "breaker_status")
+            command, status = channels.get(command_name, []), channels.get(status_name, [])
+            command_index = _transition_index(command, selectors.get(command_name, {}).get("transition", "rising"), float(selectors.get(command_name, {}).get("threshold", 0.5)))
+            status_index = _transition_index(status, selectors.get(status_name, {}).get("transition", "rising"), float(selectors.get(status_name, {}).get("threshold", 0.5)))
             if not command or not status or not time:
                 result.append(unavailable(name, ("breaker_command", "breaker_status")))
             elif command_index is None or status_index is None:
