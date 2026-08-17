@@ -15,6 +15,7 @@ from typing import Any
 from ..core.backend.base import BackendError
 from ..core.service import ConfirmationRequired
 from .bindings import _UNSAFE_COMMAND_PARAMETERS
+from .audit import file_evidence, profile_evidence
 from .profiles import load_profile
 
 
@@ -559,23 +560,46 @@ async def _capture_outputs(service: Any, record: dict[str, Any]) -> None:
         record["output_discovery"] = "failed"
 
 
+async def _restore_parameter(service: Any, record: dict[str, Any], target_project: str, change: Mapping[str, Any], old_value: Any, operation: str) -> None:
+    backend = service.backend_service
+    await _await_tracked_operation(
+        service, record, f"{operation}:restore",
+        backend.set_component_parameters(target_project, int(change["component_id"]), {str(change["parameter_name"]): old_value}),
+    )
+    observed = await backend.get_component_parameters(target_project, int(change["component_id"]))
+    if observed.get(str(change["parameter_name"])) != old_value:
+        raise BackendError("HVDC_SCENARIO_EXECUTION_FAILED", "Parameter restoration did not read back correctly.", "hvdc", operation, {"requested": old_value, "observed": observed.get(str(change["parameter_name"]))})
+
+
+async def _apply_verified_change(service: Any, record: dict[str, Any], target_project: str, change: Mapping[str, Any], operation: str) -> None:
+    backend = service.backend_service
+    if not callable(getattr(backend, "get_component_parameters", None)):
+        await _await_tracked_operation(service, record, operation, backend.set_component_parameters(target_project, int(change["component_id"]), {str(change["parameter_name"]): change.get("value")}))
+        record["partial_completion"]["applied_parameter_changes"].append(dict(change))
+        return
+    component_id = int(change["component_id"])
+    parameter_name = str(change["parameter_name"])
+    before = await backend.get_component_parameters(target_project, component_id)
+    if parameter_name not in before:
+        raise BackendError("HVDC_SCENARIO_EXECUTION_FAILED", f"Parameter '{parameter_name}' was not found.", "hvdc", operation, {"component_id": component_id, "parameter_name": parameter_name})
+    old_value = before[parameter_name]
+    await _await_tracked_operation(service, record, operation, backend.set_component_parameters(target_project, component_id, {parameter_name: change.get("value")}))
+    if change.get("read_back", True):
+        after = await backend.get_component_parameters(target_project, component_id)
+        observed = after.get(parameter_name)
+        if type(observed) is not type(change.get("value")) or observed != change.get("value"):
+            await _restore_parameter(service, record, target_project, change, old_value, operation)
+            raise BackendError("HVDC_SCENARIO_EXECUTION_FAILED", "Parameter write did not read back correctly.", "hvdc", operation, {"requested": change.get("value"), "observed": observed})
+    record["partial_completion"]["applied_parameter_changes"].append({**dict(change), "old_value": old_value})
+
+
 async def _orchestrate_scenario(service: Any, record: dict[str, Any], normalized: dict[str, Any]) -> None:
     backend = service.backend_service
     target_project = record["target_project"]
     transition_scenario(record, "running")
     record["started_at"] = _utc_now()
     for index, change in enumerate(normalized.get("parameter_changes", [])):
-        await _await_tracked_operation(
-            service,
-            record,
-            f"parameter_change:{index}",
-            backend.set_component_parameters(
-                target_project,
-                int(change["component_id"]),
-                {str(change["parameter_name"]): change.get("value")},
-            ),
-        )
-        record["partial_completion"]["applied_parameter_changes"].append(dict(change))
+        await _apply_verified_change(service, record, target_project, change, f"parameter_change:{index}")
     run = normalized.get("run", {}) or {}
     record["run_started_at_epoch"] = time.time()
     record["partial_completion"]["run_command_dispatched"] = True
@@ -604,7 +628,6 @@ async def _orchestrate_scenario(service: Any, record: dict[str, Any], normalized
     record["partial_completion"]["run_started"] = "unknown"
     try:
         events = sorted(normalized.get("events", []), key=lambda item: float(item["time_s"]))
-        running_started = None
         if events:
             if _mutation_scope_is_locked(backend):
                 record["timing_basis"] = {
@@ -623,11 +646,13 @@ async def _orchestrate_scenario(service: Any, record: dict[str, Any], normalized
                     },
                 )
             running_state = await _wait_for_confirmed_running(backend, target_project, run_task)
-            running_started = asyncio.get_running_loop().time()
             record["project_status"] = running_state
             record["partial_completion"]["run_started"] = True
+            from .timing import select_timing_mode
+            timing_mode = await select_timing_mode(backend, target_project)
             record["timing_basis"] = {
                 "kind": "backend_confirmed_running",
+                "mode": timing_mode,
                 "confirmed_at": _utc_now(),
                 "project_status": running_state,
             }
@@ -645,65 +670,16 @@ async def _orchestrate_scenario(service: Any, record: dict[str, Any], normalized
                 )
         else:
             record["timing_basis"] = {"kind": "not_applicable"}
-        for index, event in enumerate(events):
-            event_time = float(event["time_s"])
-            elapsed = asyncio.get_running_loop().time() - float(running_started)
-            await asyncio.sleep(max(0.0, event_time - elapsed))
-            if _mutation_scope_is_locked(backend):
-                raise BackendError(
-                    "HVDC_TIMED_CONTROL_UNAVAILABLE",
-                    "The backend mutation scope became unavailable before a timed event could be dispatched.",
-                    "hvdc",
-                    "run_hvdc_scenario",
-                    {
-                        "project_name": target_project,
-                        "target": event.get("target"),
-                        "time_s": event_time,
-                        "timing_basis": record["timing_basis"],
-                        "mutation_scope_locked": True,
-                    },
-                )
-            if run_task.done():
-                await asyncio.shield(run_task)
-                state = await _get_project_status(backend, target_project)
-                if state is None:
-                    raise BackendError(
-                        "HVDC_RUN_STATE_UNKNOWN",
-                        "The run command returned before a timed event, but project state is unavailable.",
-                        "hvdc",
-                        "run_hvdc_scenario",
-                        {"target": event.get("target"), "time_s": event_time},
-                    )
-                record["project_status"] = state
-                status = str(state.get("status", "")).casefold()
-                if status in _FAILED_PROJECT_STATUSES:
-                    raise BackendError(
-                        "HVDC_SCENARIO_RUN_FAILED",
-                        f"PSCAD project '{target_project}' reported terminal status '{status}'.",
-                        "hvdc",
-                        "run_hvdc_scenario",
-                        {"project_name": target_project, "project_status": state},
-                    )
-                if status in _TERMINAL_PROJECT_STATUSES:
-                    raise BackendError(
-                        "HVDC_EVENT_WINDOW_MISSED",
-                        "The PSCAD run reached a terminal state before a timed event could be applied.",
-                        "hvdc",
-                        "run_hvdc_scenario",
-                        {"target": event.get("target"), "time_s": event_time, "project_status": state},
-                    )
-                record["partial_completion"]["run_started"] = True
-            await _await_tracked_operation(
-                service,
-                record,
-                f"timed_event:{index}",
-                backend.set_component_parameters(
-                    target_project,
-                    int(event["component_id"]),
-                    {str(event["parameter_name"]): event.get("value")},
-                ),
+        if events:
+            from .timing import dispatch_timed_events
+            dispatched = await dispatch_timed_events(
+                backend,
+                target_project,
+                events,
+                mode=timing_mode,
+                liveness_deadline_s=timeout_s if "timeout_s" in locals() else None,
             )
-            record["partial_completion"]["applied_events"].append(dict(event))
+            record["partial_completion"]["applied_events"].extend(dispatched)
         # Keep cancellation of the bounded scenario worker separate from the
         # vendor run command. Some vendor calls do not acknowledge task
         # cancellation until an explicit stop command is issued; the worker
@@ -868,6 +844,15 @@ async def run_scenario(
         raise
     created_at = _utc_now()
     analysis = dict(normalized["analysis"])
+    profile_data = load_profile(str(normalized["profile"]), workspace_root=workspace_root)
+    audit: dict[str, Any] = {"complete": True, "profile": profile_evidence(str(normalized["profile"]), profile_data)}
+    for label, candidate in (("source", project_name), ("derived", target_project)):
+        try:
+            path = service._resolve_mutation_project(str(candidate))
+            audit[label] = file_evidence(path)
+        except Exception as error:
+            audit["complete"] = False
+            audit.setdefault("warnings", []).append({"code": "HVDC_AUDIT_HASH_FAILED", "scope": label, "message": str(error)})
     recovery_baselines = dict(analysis.get("recovery_baselines", {}))
     if "recovery_baselines" in analysis:
         analysis["recovery_baselines"] = dict(recovery_baselines)
@@ -893,6 +878,7 @@ async def run_scenario(
         "resolved_channels": [],
         "metrics": [],
         "warnings": [],
+        "audit": audit,
         "messages": [],
         "error": None,
         "partial_completion": {
