@@ -1,3 +1,5 @@
+from pathlib import Path
+import tempfile
 import unittest
 
 from pscad_mcp.core.pscad_adapter import PscadAdapter
@@ -175,6 +177,128 @@ class UnidentifiedPsout:
 
 
 class TestPsoutReader(unittest.IsolatedAsyncioTestCase):
+    def test_legacy_companion_must_resolve_inside_output_directory(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            outputs = root / "outputs"
+            outside = root / "outside"
+            outputs.mkdir()
+            outside.mkdir()
+            companion = outside / "case.inf"
+            companion.write_text("metadata", encoding="utf-8")
+
+            with self.assertRaisesRegex(ValueError, "escapes the output directory"):
+                PscadAdapter._resolve_legacy_companion(outputs, companion)
+
+    async def test_legacy_selector_can_read_channel_beyond_default_limit(self):
+        with tempfile.TemporaryDirectory() as directory:
+            basename = Path(directory) / "large"
+            basename.with_suffix(".inf").write_text(
+                "\n".join(
+                    f'PGB({index}) Output Desc="C{index}" Group="Main" '
+                    'Max=2 Min=-2 Units="kV"'
+                    for index in range(1, 301)
+                ),
+                encoding="utf-8",
+            )
+            for file_index in range(1, 31):
+                first_channel = (file_index - 1) * 10 + 1
+                values = " ".join(
+                    str(channel) for channel in range(first_channel, first_channel + 10)
+                )
+                Path(f"{basename}_{file_index:02d}.out").write_text(
+                    f"0.0 {values}\n0.1 {values}\n",
+                    encoding="utf-8",
+                )
+            adapter = PscadAdapter(ImmediateExecutor(), psout_module=FakePsout())
+
+            result = await adapter.read_psout(
+                f"{basename}_01.out", channel="Main/C300", max_samples=2
+            )
+
+        self.assertEqual([item["path"] for item in result["channels"]], ["Main/C300"])
+        self.assertEqual(result["channels"][0]["values"], [300.0, 300.0])
+
+    async def test_legacy_metadata_symlink_cannot_escape_output_directory(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            outputs = root / "outputs"
+            outside = root / "outside"
+            outputs.mkdir()
+            outside.mkdir()
+            basename = outputs / "case"
+            outside_metadata = outside / "case.inf"
+            outside_metadata.write_text(
+                'PGB(1) Output Desc="IDC" Group="Main" Max=2 Min=-2 Units="kA"\n',
+                encoding="utf-8",
+            )
+            try:
+                basename.with_suffix(".inf").symlink_to(outside_metadata)
+            except OSError as error:
+                self.skipTest(f"File symlinks are unavailable: {error}")
+            Path(f"{basename}_01.out").write_text("0.0 1.0\n", encoding="utf-8")
+            adapter = PscadAdapter(ImmediateExecutor(), psout_module=FakePsout())
+
+            with self.assertRaisesRegex(ValueError, "escapes the output directory"):
+                await adapter.read_psout(f"{basename}_01.out")
+
+    async def test_reads_bounded_legacy_out_channel_files(self):
+        with tempfile.TemporaryDirectory() as directory:
+            basename = Path(directory) / "difforder_new"
+            basename.with_suffix(".inf").write_text(
+                "\n".join(
+                    f'PGB({index}) Output Desc="C{index}" Group="Main" '
+                    'Max=2 Min=-2 Units="kV"'
+                    for index in range(1, 12)
+                ),
+                encoding="utf-8",
+            )
+            rows = [
+                [sample * 0.1, *(sample * 100 + channel for channel in range(1, 12))]
+                for sample in range(5)
+            ]
+            for file_index, columns in ((1, range(1, 11)), (2, range(11, 12))):
+                path = Path(f"{basename}_{file_index:02d}.out")
+                lines = [""]
+                for row in rows:
+                    values = [row[0], *(row[column] for column in columns)]
+                    lines.append(" ".join(str(value) for value in values))
+                path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+            adapter = PscadAdapter(
+                ImmediateExecutor(), psout_module=FakePsout()
+            )
+            result = await adapter.read_psout(
+                f"{basename}_01.out", max_samples=3
+            )
+
+        self.assertEqual(result["runs"], 1)
+        self.assertEqual(len(result["channels"]), 11)
+        self.assertEqual(result["channels"][0]["path"], "Main/C1")
+        self.assertEqual(result["channels"][0]["domain"], [0.0, 0.2, 0.4])
+        self.assertEqual(result["channels"][0]["values"], [1.0, 201.0, 401.0])
+        self.assertEqual(result["channels"][10]["path"], "Main/C11")
+        self.assertEqual(result["channels"][10]["values"], [11.0, 211.0, 411.0])
+
+    async def test_reads_legacy_out_without_modern_psout_dependency(self):
+        with tempfile.TemporaryDirectory() as directory:
+            basename = Path(directory) / "legacy"
+            basename.with_suffix(".inf").write_text(
+                'PGB(1) Output Desc="IDC" Group="Main" Max=2 Min=-2 Units="kA"\n',
+                encoding="utf-8",
+            )
+            Path(f"{basename}_01.out").write_text(
+                "\n0.0 1.5\n0.1 2.5\n",
+                encoding="utf-8",
+            )
+            adapter = PscadAdapter(ImmediateExecutor(), psout_module=FakePsout())
+            adapter.psout_module = None
+
+            result = await adapter.read_psout(f"{basename}_01.out")
+
+        self.assertEqual(result["channels"][0]["path"], "Main/IDC")
+        self.assertEqual(result["channels"][0]["values"], [1.5, 2.5])
+
     async def test_reads_trace_values_and_domains(self):
         adapter = PscadAdapter(ImmediateExecutor(), psout_module=FakePsout())
 

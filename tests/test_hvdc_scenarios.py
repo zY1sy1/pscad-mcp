@@ -12,7 +12,7 @@ from pscad_mcp.hvdc.service import HvdcDomainService
 def _write_command_project(path):
     path.write_text(
         "<project><canvas name='Main'><component id='2' name='control' definition='control'>"
-        "<parameter name='Name' value='current order'/></component></canvas></project>",
+        "<parameter name='current order' value='1'/></component></canvas></project>",
         encoding="utf-8",
     )
 
@@ -199,8 +199,98 @@ def test_auto_bound_command_is_applied_from_the_selected_profile(tmp_path):
     assert started["status"] == "validated"
     assert terminal["status"] == "completed"
     assert terminal["changed_parameters"][0]["component_id"] == "2"
-    assert terminal["changed_parameters"][0]["parameter_name"] == "Name"
-    assert backend.calls == [("set", "case_derived", 2, {"Name": 2}), ("run", "case_derived")]
+    assert terminal["changed_parameters"][0]["parameter_name"] == "current order"
+    assert backend.calls == [("set", "case_derived", 2, {"current order": 2}), ("run", "case_derived")]
+
+
+def test_command_mapping_cannot_mutate_identity_metadata(tmp_path):
+    source = tmp_path / "case.pscx"
+    source.write_text(
+        "<project><canvas name='Main'><component id='2' name='control' definition='control'>"
+        "<parameter name='Name' value='current order'/></component></canvas></project>",
+        encoding="utf-8",
+    )
+    backend = ScenarioBackend()
+    service = HvdcDomainService(
+        backend,
+        path_policy=PathPolicy(workspace_root=str(tmp_path)),
+    )
+    scenario = {
+        "name": "unsafe-name-binding",
+        "profile": "lcc_bipolar_generic",
+        "project": str(source),
+        "derived_project": "case_derived",
+        "parameter_changes": [{"target": "current_order", "value": 2}],
+        "events": [],
+    }
+
+    with pytest.raises(BackendError) as raised:
+        asyncio.run(service.run_scenario(str(source), scenario, confirm=True))
+
+    assert raised.value.code == "HVDC_MAPPING_MISSING"
+    assert raised.value.details["parameter_name"] == "Name"
+    assert raised.value.details["reason"] == "unsafe_command_parameter"
+    assert backend.calls == []
+
+
+def test_command_mapping_requires_semantic_parameter_name(tmp_path):
+    source = tmp_path / "case.pscx"
+    source.write_text(
+        "<project><canvas name='Main'><component id='2' name='control' definition='control'>"
+        "<parameter name='Configuration' value='current order'/></component></canvas></project>",
+        encoding="utf-8",
+    )
+    backend = ScenarioBackend()
+    service = HvdcDomainService(
+        backend,
+        path_policy=PathPolicy(workspace_root=str(tmp_path)),
+    )
+    scenario = {
+        "name": "unsafe-value-binding",
+        "profile": "lcc_bipolar_generic",
+        "project": str(source),
+        "derived_project": "case_derived",
+        "parameter_changes": [{"target": "current_order", "value": 2}],
+        "events": [],
+    }
+
+    with pytest.raises(BackendError) as raised:
+        asyncio.run(service.run_scenario(str(source), scenario, confirm=True))
+
+    assert raised.value.code == "HVDC_MAPPING_MISSING"
+    assert raised.value.details["parameter_name"] == "Configuration"
+    assert raised.value.details["reason"] == "nonsemantic_command_parameter"
+    assert backend.calls == []
+
+
+def test_display_text_cannot_masquerade_as_command_parameter(tmp_path):
+    source = tmp_path / "case.pscx"
+    source.write_text(
+        "<project><canvas name='Main'><component id='2' name='control' definition='control'>"
+        "<parameter name='Text' value='current order'/></component></canvas></project>",
+        encoding="utf-8",
+    )
+    backend = ScenarioBackend()
+    service = HvdcDomainService(
+        backend,
+        path_policy=PathPolicy(workspace_root=str(tmp_path)),
+    )
+    scenario = {
+        "name": "unsafe-display-binding",
+        "profile": "lcc_bipolar_generic",
+        "project": str(source),
+        "derived_project": "case_derived",
+        "parameter_changes": [{"target": "current_order", "value": 2}],
+        "events": [],
+    }
+
+    with pytest.raises(BackendError) as raised:
+        asyncio.run(service.run_scenario(str(source), scenario, confirm=True))
+
+    assert raised.value.code == "HVDC_MAPPING_MISSING"
+    assert raised.value.details["parameter_name"] == "Text"
+    assert raised.value.details["reason"] == "unsafe_command_parameter"
+    assert backend.calls == []
 
 
 def test_explicit_binding_must_exactly_match_observed_mapping_source(tmp_path):
@@ -221,7 +311,7 @@ def test_explicit_binding_must_exactly_match_observed_mapping_source(tmp_path):
     with pytest.raises(BackendError) as raised:
         asyncio.run(service.run_scenario(str(source), scenario, confirm=True))
     assert raised.value.code == "HVDC_MAPPING_MISSING"
-    assert raised.value.details["approved_source"] == {"component_id": "2", "parameter_name": "Name"}
+    assert raised.value.details["approved_source"] == {"component_id": "2", "parameter_name": "current order"}
     assert backend.calls == []
 
 
@@ -410,7 +500,7 @@ def test_timed_events_run_in_background_without_blocking_the_start_call(tmp_path
     assert interim["status"] == "running"
     assert not any(call[0] == "set" for call in interim_calls)
     assert terminal["status"] == "completed"
-    assert backend.calls == [("run", "case_derived"), ("set", "case_derived", 2, {"Name": 3})]
+    assert backend.calls == [("run", "case_derived"), ("set", "case_derived", 2, {"current order": 3})]
 
 
 def test_backend_error_is_structured_and_preserves_partial_completion(tmp_path):

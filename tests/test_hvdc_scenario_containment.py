@@ -15,7 +15,7 @@ from pscad_mcp.hvdc.service import HvdcDomainService
 def _write_project(path):
     path.write_text(
         "<project><canvas name='Main'><component id='2' name='control' definition='control'>"
-        "<parameter name='Name' value='current order'/></component></canvas></project>",
+        "<parameter name='current order' value='1'/></component></canvas></project>",
         encoding="utf-8",
     )
 
@@ -206,7 +206,7 @@ def test_late_parameter_write_keeps_lease_until_underlying_operation_finishes(tm
 
     terminal = asyncio.run(exercise())
     assert terminal["status"] == "timed_out"
-    assert backend.late_writes == [{"Name": 4}]
+    assert backend.late_writes == [{"current order": 4}]
     assert terminal["partial_completion"]["applied_parameter_changes"] == []
     assert service._active_scenario_id is None
 
@@ -262,7 +262,7 @@ def test_vendor_thread_surviving_asyncio_cancellation_keeps_scenario_lease(tmp_p
         backend.allow_write.set()
         executor.shutdown()
     assert terminal["status"] == "timed_out"
-    assert backend.late_writes == [{"Name": 5}]
+    assert backend.late_writes == [{"current order": 5}]
     assert service._active_scenario_id is None
 
 
@@ -312,7 +312,7 @@ def test_executor_watchdog_timeout_keeps_lease_until_vendor_thread_settles(tmp_p
     finally:
         backend.allow_write.set()
         executor.shutdown()
-    assert backend.late_writes == [{"Name": 6}]
+    assert backend.late_writes == [{"current order": 6}]
     assert terminal["partial_completion"]["applied_parameter_changes"] == []
     assert service._active_scenario_id is None
 

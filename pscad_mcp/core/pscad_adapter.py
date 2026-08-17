@@ -1,8 +1,10 @@
 import asyncio
+from contextlib import ExitStack
 import importlib
 import math
 from numbers import Real
 from pathlib import Path
+import re
 from typing import Any, Mapping, Optional
 
 from .executor import RobustExecutor
@@ -144,10 +146,6 @@ class PscadAdapter:
         channel: str | None = None,
         summary_only: bool = False,
     ) -> dict:
-        if self.psout_module is None:
-            raise RuntimeError(
-                "mhi-psout is not installed. Install the Windows extras for PSCAD MCP."
-            )
         if max_samples < 1:
             raise ValueError("max_samples must be positive.")
         return await asyncio.to_thread(
@@ -167,6 +165,20 @@ class PscadAdapter:
         channel: str | None,
         summary_only: bool,
     ) -> dict:
+        legacy_basename = self._legacy_out_basename(file_path)
+        if legacy_basename is not None:
+            return self._read_legacy_out_sync(
+                file_path,
+                legacy_basename,
+                run_index,
+                max_samples,
+                channel,
+                summary_only,
+            )
+        if self.psout_module is None:
+            raise RuntimeError(
+                "mhi-psout is not installed. Install the Windows extras for PSCAD MCP."
+            )
         with self.psout_module.File(str(file_path)) as record:
             if run_index < 0 or run_index >= record.num_runs:
                 raise ValueError(
@@ -205,6 +217,182 @@ class PscadAdapter:
                 "warnings": warnings,
                 "skipped_channels": skipped_channels,
             }
+
+    @staticmethod
+    def _legacy_out_basename(file_path: Path) -> Path | None:
+        if file_path.suffix.casefold() != ".out":
+            return None
+        match = re.fullmatch(r"(.+)_\d{2}", file_path.stem)
+        basename = (
+            file_path.with_name(match.group(1))
+            if match is not None
+            else file_path.with_suffix("")
+        )
+        return basename if basename.with_suffix(".inf").is_file() else None
+
+    @staticmethod
+    def _resolve_legacy_companion(
+        output_directory: Path,
+        companion: Path,
+    ) -> Path:
+        resolved_directory = output_directory.resolve(strict=True)
+        resolved_companion = companion.resolve(strict=True)
+        if resolved_companion.parent != resolved_directory:
+            raise ValueError(
+                f"Legacy PSCAD companion escapes the output directory: {companion}"
+            )
+        if not resolved_companion.is_file():
+            raise ValueError(
+                f"Legacy PSCAD companion is not a file: {companion}"
+            )
+        return resolved_companion
+
+    def _read_legacy_out_sync(
+        self,
+        file_path: Path,
+        basename: Path,
+        run_index: int,
+        max_samples: int,
+        channel: str | None,
+        summary_only: bool,
+    ) -> dict:
+        if run_index != 0:
+            raise ValueError("run_index must be 0 for legacy PSCAD OUT files.")
+
+        primary_output = file_path.resolve(strict=True)
+        output_directory = primary_output.parent
+        metadata_path = self._resolve_legacy_companion(
+            output_directory,
+            basename.with_suffix(".inf"),
+        )
+
+        metadata = []
+        pattern = re.compile(
+            r'^PGB\((\d+)\).+Desc="([^"]+)"\s+Group="([^"]*)"'
+        )
+        with metadata_path.open(encoding="utf-8") as stream:
+            for line in stream:
+                match = pattern.match(line)
+                if match is None:
+                    continue
+                call_id = int(match.group(1))
+                description = match.group(2)
+                group = match.group(3)
+                metadata.append(
+                    {
+                        "call_id": call_id,
+                        "description": description,
+                        "path": f"{group}/{description}" if group else description,
+                    }
+                )
+        metadata.sort(key=lambda item: item["call_id"])
+        if not metadata:
+            raise ValueError(
+                f"Legacy PSCAD metadata contains no output channels: {basename}.inf"
+            )
+        expected = list(range(1, len(metadata) + 1))
+        observed = [item["call_id"] for item in metadata]
+        if observed != expected:
+            raise ValueError("Legacy PSCAD output channel numbers are not sequential.")
+
+        warnings = []
+        if channel is not None:
+            selected = [
+                item
+                for item in metadata
+                if channel in {item["path"], item["description"]}
+            ]
+            if not selected:
+                selector = channel[:_PSOUT_REASON_LIMIT]
+                warnings.append(
+                    f"No PSOUT channel matched selector '{selector}'."
+                )
+        else:
+            selected = metadata
+        if len(selected) > _PSOUT_CHANNEL_LIMIT:
+            warnings.append(
+                f"PSOUT channel limit {_PSOUT_CHANNEL_LIMIT} reached."
+            )
+            selected = selected[:_PSOUT_CHANNEL_LIMIT]
+
+        first_output = self._resolve_legacy_companion(
+            output_directory,
+            Path(f"{basename}_01.out"),
+        )
+        with first_output.open(encoding="utf-8") as stream:
+            sample_count = sum(1 for line in stream if line.strip())
+        step = max(1, (sample_count + max_samples - 1) // max_samples)
+        file_count = (
+            (max(item["call_id"] for item in selected) + 9) // 10
+            if selected
+            else 1
+        )
+        domains = []
+        values = {item["call_id"]: [] for item in selected}
+        with ExitStack() as stack:
+            streams = [
+                stack.enter_context(
+                    self._resolve_legacy_companion(
+                        output_directory,
+                        Path(f"{basename}_{index:02d}.out"),
+                    ).open(encoding="utf-8")
+                )
+                for index in range(1, file_count + 1)
+            ]
+            row_index = 0
+            while True:
+                rows = []
+                for stream in streams:
+                    line = stream.readline()
+                    while line and not line.strip():
+                        line = stream.readline()
+                    rows.append(line)
+                if not rows[0]:
+                    if any(rows[1:]):
+                        raise ValueError("Legacy PSCAD output files have different lengths.")
+                    break
+                if any(not row for row in rows[1:]):
+                    raise ValueError("Legacy PSCAD output files have different lengths.")
+                if row_index % step == 0 and len(domains) < max_samples:
+                    parsed = [[float(value) for value in row.split()] for row in rows]
+                    times = [row[0] for row in parsed]
+                    if any(value != times[0] for value in times[1:]):
+                        raise ValueError("Legacy PSCAD output file time columns differ.")
+                    domains.append(times[0])
+                    for item in selected:
+                        call_id = item["call_id"]
+                        file_index = (call_id - 1) // 10
+                        column_index = (call_id - 1) % 10 + 1
+                        try:
+                            values[call_id].append(parsed[file_index][column_index])
+                        except IndexError as error:
+                            raise ValueError(
+                                f"Legacy PSCAD output channel {call_id} is missing data."
+                            ) from error
+                row_index += 1
+
+        channels = []
+        for item in selected:
+            payload = {
+                "path": item["path"],
+                "call_id": item["call_id"],
+            }
+            if summary_only:
+                payload["summary"] = self._summarize_samples(
+                    values[item["call_id"]]
+                )
+            else:
+                payload["values"] = values[item["call_id"]]
+                payload["domain"] = list(domains)
+            channels.append(payload)
+        return {
+            "path": str(file_path),
+            "runs": 1,
+            "run_index": 0,
+            "channels": channels,
+            "warnings": warnings,
+            "skipped_channels": [],
+        }
 
     def _collect_traces(
         self,

@@ -18,6 +18,25 @@ from .profiles import load_profile
 
 
 _UNSUPPORTED_TARGETS = {"insert_fault", "add_component", "rewire", "insert_breaker"}
+_UNSAFE_COMMAND_PARAMETERS = {
+    "caption",
+    "comment",
+    "description",
+    "display",
+    "enab",
+    "group",
+    "label",
+    "max",
+    "min",
+    "mrun",
+    "name",
+    "pol",
+    "scale",
+    "title",
+    "text",
+    "units",
+    "usesignalname",
+}
 _MAX_TIMEOUT_S = 86_400.0
 _TERMINAL_PROJECT_STATUSES = {"completed", "complete", "finished", "done", "idle", "stopped"}
 _FAILED_PROJECT_STATUSES = {"failed", "error", "aborted"}
@@ -150,9 +169,55 @@ def _bind_approved_commands(service: Any, project_name: str, normalized: dict[st
                     "run_hvdc_scenario",
                     {"target": target, "profile": normalized["profile"], "mapping_status": mapping.get("status") if mapping else "unresolved", "field": field, "index": index},
                 )
+            parameter_name = str(source["parameter_name"])
+            normalized_parameter = "".join(
+                character
+                for character in parameter_name.casefold()
+                if character.isalnum()
+            )
+            if normalized_parameter in _UNSAFE_COMMAND_PARAMETERS:
+                raise BackendError(
+                    "HVDC_MAPPING_MISSING",
+                    f"Command target '{target}' resolved only to identity or display metadata, not a writable control parameter.",
+                    "hvdc",
+                    "run_hvdc_scenario",
+                    {
+                        "target": target,
+                        "profile": normalized["profile"],
+                        "component_id": str(source["component_id"]),
+                        "parameter_name": parameter_name,
+                        "reason": "unsafe_command_parameter",
+                        "field": field,
+                        "index": index,
+                    },
+                )
+            semantic_parameter_names = {
+                "".join(
+                    character
+                    for character in str(value).casefold()
+                    if character.isalnum()
+                )
+                for value in (target, *approved.get("aliases", []))
+            }
+            if normalized_parameter not in semantic_parameter_names:
+                raise BackendError(
+                    "HVDC_MAPPING_MISSING",
+                    f"Command target '{target}' matched a parameter value, but the parameter name is not an approved semantic command name.",
+                    "hvdc",
+                    "run_hvdc_scenario",
+                    {
+                        "target": target,
+                        "profile": normalized["profile"],
+                        "component_id": str(source["component_id"]),
+                        "parameter_name": parameter_name,
+                        "reason": "nonsemantic_command_parameter",
+                        "field": field,
+                        "index": index,
+                    },
+                )
             approved_source = {
                 "component_id": str(source["component_id"]),
-                "parameter_name": str(source["parameter_name"]),
+                "parameter_name": parameter_name,
             }
             supplied_id = item.get("component_id")
             supplied_parameter = item.get("parameter_name")
