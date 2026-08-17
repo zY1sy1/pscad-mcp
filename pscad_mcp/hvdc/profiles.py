@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 import json
 import os
 from pathlib import Path
@@ -44,6 +45,7 @@ _BUILTIN_PROFILES: dict[str, dict[str, Any]] = {
     "mmc_bipolar_generic": {"required_assets": ["pole"], "mappings": [{"canonical": "arm_current", "aliases": ["arm current", "Iarm"], "source_kinds": ["label"], "unit_family": "current", "direction": "measurement", "units": "kA"}, {"canonical": "submodule_capacitor_voltage", "aliases": ["SM capacitor voltage", "Vsm"], "source_kinds": ["label"], "unit_family": "voltage", "direction": "measurement", "units": "kV"}]},
     "hvdc_breaker_difforder": {
         "extends": "lcc_bipolar_generic",
+        "profile_version": 2,
         "required_assets": ["rectifier", "inverter", "pole", "breaker", "dc_line"],
         "mappings": [
             {"canonical": "dc_voltage", "aliases": ["UMC", "VDCL", "VDCp1", "VDCp2", "VDCIp1", "VDCIp2", "VDCRp1", "VDCRp2"], "source_kinds": ["voltmeter"], "unit_family": "voltage", "direction": "measurement", "units": None},
@@ -53,6 +55,19 @@ _BUILTIN_PROFILES: dict[str, dict[str, Any]] = {
             {"canonical": "breaker_status", "aliases": ["BRK1"], "source_kinds": ["datalabel", "measurement"], "unit_family": "boolean", "direction": "measurement", "units": None},
             {"canonical": "protection_trip", "aliases": ["protection trip", "diff trip"], "source_kinds": ["datalabel", "control"], "unit_family": "boolean", "direction": "measurement", "units": None},
         ],
+        "project_fingerprints": [],
+        "command_bindings": [],
+        "result_channels": [
+            {"canonical": "dc_voltage_breaker", "path": "loadbreaker_3/UMC", "call_id": 90, "units": "kV", "location": "breaker"},
+            {"canonical": "dc_current_breaker", "path": "loadbreaker_3/IMC", "call_id": 83, "units": "kA", "location": "breaker"},
+            {"canonical": "breaker_command_observed", "path": "loadbreaker_3/BrkOrd1", "call_id": 78, "units": None, "location": "breaker"},
+            {"canonical": "dc_voltage_rectifier_pole1", "path": "Main/VDCRp1", "call_id": 1, "units": "pu", "location": "rectifier_pole1"},
+            {"canonical": "dc_voltage_inverter_pole1", "path": "Main/VDCIp1", "call_id": 3, "units": "pu", "location": "inverter_pole1"},
+            {"canonical": "dc_voltage_rectifier_pole2", "path": "Main/VDCRp2", "call_id": 6, "units": "pu", "location": "rectifier_pole2"},
+            {"canonical": "dc_voltage_inverter_pole2", "path": "Main/VDCIp2", "call_id": 9, "units": "pu", "location": "inverter_pole2"},
+        ],
+        "metric_roles": {},
+        "sequences": [],
     },
 }
 
@@ -80,9 +95,105 @@ def _validate_name(name: str, operation: str = "register_hvdc_profile") -> None:
         raise _invalid("Profile names must use lowercase letters, digits, underscores, or hyphens and start with a letter.", str(name), operation)
 
 
+def _validate_unique_canonicals(items: Any, field: str, name: str) -> list[dict[str, Any]]:
+    if not isinstance(items, list):
+        raise _invalid(f"'{field}' must be a list.", name)
+    result: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for index, raw in enumerate(items):
+        if not isinstance(raw, dict):
+            raise _invalid(f"{field}[{index}] must be an object.", name)
+        item = dict(raw)
+        canonical = item.get("canonical")
+        if not isinstance(canonical, str) or not canonical.strip():
+            raise _invalid(f"{field}[{index}] requires a non-empty canonical.", name)
+        if canonical in seen:
+            raise _invalid(f"Canonical '{canonical}' is duplicated in '{field}'.", name)
+        seen.add(canonical)
+        result.append(item)
+    return result
+
+
+def _validate_profile_v2(profile: dict[str, Any], name: str) -> None:
+    fingerprints = profile.get("project_fingerprints", [])
+    if not isinstance(fingerprints, list) or any(not isinstance(item, dict) for item in fingerprints):
+        raise _invalid("'project_fingerprints' must be a list of objects.", name)
+    for index, fingerprint in enumerate(fingerprints):
+        for field in ("project_stem", "pscad_version"):
+            value = fingerprint.get(field)
+            if value is not None and (not isinstance(value, str) or not value.strip()):
+                raise _invalid(
+                    f"project_fingerprints[{index}].{field} must be a non-empty string.",
+                    name,
+                )
+        definitions = fingerprint.get("definitions")
+        if definitions is not None and (
+            not isinstance(definitions, list)
+            or any(not isinstance(item, str) or not item.strip() for item in definitions)
+        ):
+            raise _invalid(
+                f"project_fingerprints[{index}].definitions must be a list of non-empty strings.",
+                name,
+            )
+    commands = _validate_unique_canonicals(profile.get("command_bindings", []), "command_bindings", name)
+    results = _validate_unique_canonicals(profile.get("result_channels", []), "result_channels", name)
+    for item in commands:
+        component = item.get("component")
+        if not isinstance(component, dict) or not component:
+            raise _invalid(f"Command '{item['canonical']}' requires a component selector.", name)
+        selector_fields = {"component_id", "canvas", "definition"}
+        if not selector_fields & component.keys():
+            raise _invalid(f"Command '{item['canonical']}' requires a component selector.", name)
+        for field in selector_fields & component.keys():
+            value = component[field]
+            if not isinstance(value, str) or not value.strip():
+                raise _invalid(
+                    f"Command '{item['canonical']}' has invalid component.{field}.",
+                    name,
+                )
+        if not isinstance(item.get("parameter_name"), str) or not item["parameter_name"].strip():
+            raise _invalid(f"Command '{item['canonical']}' requires parameter_name.", name)
+        if not isinstance(item.get("allowed_values"), list) or not item["allowed_values"]:
+            raise _invalid(f"Command '{item['canonical']}' requires allowed_values.", name)
+        if item.get("semantics") not in {"active_high", "active_low", "open", "close", "enable", "disable"}:
+            raise _invalid(f"Command '{item['canonical']}' has invalid semantics.", name)
+        if "read_back" in item and not isinstance(item["read_back"], bool):
+            raise _invalid(f"Command '{item['canonical']}' has invalid read_back.", name)
+    for item in results:
+        if not isinstance(item.get("path"), str) or not item["path"].strip():
+            raise _invalid(f"Result '{item['canonical']}' requires path.", name)
+        if item.get("call_id") is not None and (
+            isinstance(item["call_id"], bool)
+            or not isinstance(item["call_id"], int)
+            or item["call_id"] < 1
+        ):
+            raise _invalid(f"Result '{item['canonical']}' has invalid call_id.", name)
+        if item.get("units") is not None and not isinstance(item["units"], str):
+            raise _invalid(f"Result '{item['canonical']}' has invalid units.", name)
+        if item.get("location") is not None and (
+            not isinstance(item["location"], str) or not item["location"].strip()
+        ):
+            raise _invalid(f"Result '{item['canonical']}' has invalid location.", name)
+    roles = profile.get("metric_roles", {})
+    if not isinstance(roles, dict) or any(
+        not isinstance(key, str) or not isinstance(value, str)
+        for key, value in roles.items()
+    ):
+        raise _invalid("'metric_roles' must map strings to strings.", name)
+    sequences = profile.get("sequences", [])
+    if not isinstance(sequences, list) or any(not isinstance(item, dict) for item in sequences):
+        raise _invalid("'sequences' must be a list of objects.", name)
+    if any(not item for item in sequences):
+        index = next(index for index, item in enumerate(sequences) if not item)
+        raise _invalid(f"sequences[{index}] must not be empty.", name)
+
+
 def _validate_profile(profile: Any, name: str) -> dict[str, Any]:
     if not isinstance(profile, dict):
         raise _invalid("HVDC profile JSON must contain an object.", name)
+    profile_version = profile.get("profile_version", 1)
+    if isinstance(profile_version, bool) or not isinstance(profile_version, int) or profile_version not in {1, 2}:
+        raise _invalid("'profile_version' must be integer 1 or 2.", name)
     if "required_assets" not in profile or "mappings" not in profile:
         raise _invalid("HVDC profiles require 'required_assets' and 'mappings' sections.", name)
     required_assets = profile.get("required_assets", [])
@@ -117,6 +228,8 @@ def _validate_profile(profile: Any, name: str) -> dict[str, Any]:
     parent = profile.get("extends")
     if parent is not None and (not isinstance(parent, str) or not parent.strip() or parent == name):
         raise _invalid("'extends' must name a different profile.", name)
+    if profile_version == 2:
+        _validate_profile_v2(profile, name)
     return profile
 
 
@@ -154,13 +267,47 @@ def _read_profile(path: Path, name: str, operation: str = "register_hvdc_profile
     return _validate_profile(profile, name)
 
 
+def _merge_canonical_items(base_items: Any, profile_items: Any) -> Any:
+    if not isinstance(base_items, list):
+        return deepcopy(base_items)
+    if not isinstance(profile_items, list):
+        return deepcopy(profile_items)
+    merged = [deepcopy(item) for item in base_items]
+    indexes: dict[str, int] = {}
+    for index, item in enumerate(merged):
+        canonical = item.get("canonical") if isinstance(item, dict) else None
+        if isinstance(canonical, str) and canonical not in indexes:
+            indexes[canonical] = index
+    for raw in profile_items:
+        item = deepcopy(raw)
+        canonical = item.get("canonical") if isinstance(item, dict) else None
+        if isinstance(canonical, str) and canonical in indexes:
+            merged[indexes[canonical]] = item
+        else:
+            if isinstance(canonical, str):
+                indexes[canonical] = len(merged)
+            merged.append(item)
+    return merged
+
+
 def _merge_profile(base: dict[str, Any], profile: dict[str, Any]) -> dict[str, Any]:
-    merged = dict(base)
-    merged.update(profile)
-    by_canonical = {item["canonical"]: item for item in base.get("mappings", [])}
-    by_canonical.update({item["canonical"]: item for item in profile.get("mappings", [])})
+    merged = deepcopy(base)
+    merged.update(deepcopy(profile))
+    by_canonical = {item["canonical"]: deepcopy(item) for item in base.get("mappings", [])}
+    by_canonical.update({item["canonical"]: deepcopy(item) for item in profile.get("mappings", [])})
     merged["mappings"] = list(by_canonical.values())
     merged["required_assets"] = sorted(set(base.get("required_assets", [])) | set(profile.get("required_assets", [])))
+    if profile.get("profile_version") == 2:
+        for field in ("command_bindings", "result_channels"):
+            merged[field] = _merge_canonical_items(base.get(field, []), profile.get(field, []))
+        base_roles = base.get("metric_roles", {})
+        profile_roles = profile.get("metric_roles", {})
+        if not isinstance(base_roles, dict):
+            merged["metric_roles"] = deepcopy(base_roles)
+        elif not isinstance(profile_roles, dict):
+            merged["metric_roles"] = deepcopy(profile_roles)
+        else:
+            merged["metric_roles"] = {**deepcopy(base_roles), **deepcopy(profile_roles)}
     return merged
 
 
@@ -176,19 +323,29 @@ def load_profile(name: str, mapping_file: str | None = None, *, workspace_root: 
     _validate_name(name, "load_profile")
     if mapping_file:
         path = Path(mapping_file).expanduser().resolve()
-        return _read_profile(path, name, "load_profile")
-    if name in _BUILTIN_PROFILES:
-        profile = dict(_BUILTIN_PROFILES[name])
+        profile = deepcopy(_read_profile(path, name, "load_profile"))
+    elif name in _BUILTIN_PROFILES:
+        profile = deepcopy(_BUILTIN_PROFILES[name])
     else:
         path = _profile_path(name, workspace_root, "load_profile")
         if path is None or not path.is_file():
             raise BackendError("HVDC_PROFILE_NOT_FOUND", f"HVDC profile '{name}' was not found.", "hvdc", "load_profile", {"profile": name, "available": list_profiles(workspace_root)})
-        profile = dict(_read_profile(path, name, "load_profile"))
+        profile = deepcopy(_read_profile(path, name, "load_profile"))
     parent = profile.get("extends")
     if parent:
         base = load_profile(parent, workspace_root=workspace_root)
-        return _merge_profile(base, profile)
-    return profile
+        child_version = profile.get("profile_version", 1)
+        parent_version = base.get("profile_version", 1)
+        if child_version == 1 and parent_version == 2:
+            raise _invalid(
+                "A profile_version 1 child cannot extend a profile_version 2 parent.",
+                name,
+                "load_profile",
+            )
+        merged = _merge_profile(base, profile)
+        _validate_profile(merged, name)
+        return deepcopy(merged)
+    return deepcopy(profile)
 
 
 def register_profile(name: str, mapping_file: str, *, workspace_root: str | Path | None) -> dict[str, Any]:

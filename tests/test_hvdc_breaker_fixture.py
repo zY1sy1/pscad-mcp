@@ -23,6 +23,18 @@ def test_breaker_fixture_contains_domain_evidence():
     assert {mapping.canonical for mapping in mappings.mappings if mapping.status == "observed"} >= {"dc_current", "dc_voltage", "breaker_command", "breaker_status", "protection_trip"}
     assert all(mapping.source and mapping.source.component_id for mapping in mappings.mappings if mapping.status == "observed")
     assert next(mapping for mapping in mappings.mappings if mapping.canonical == "dc_voltage").units is None
+    profile = load_profile("hvdc_breaker_difforder")
+    assert profile["profile_version"] == 2
+    assert profile["command_bindings"] == []
+    assert {item["canonical"] for item in profile["result_channels"]} == {
+        "dc_voltage_breaker",
+        "dc_current_breaker",
+        "breaker_command_observed",
+        "dc_voltage_rectifier_pole1",
+        "dc_voltage_inverter_pole1",
+        "dc_voltage_rectifier_pole2",
+        "dc_voltage_inverter_pole2",
+    }
 
 
 def test_reachable_definition_evidence_resolves_current_control_and_line_interface():
