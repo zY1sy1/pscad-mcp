@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Mapping
 import hashlib
 import json
 import os
@@ -57,6 +58,119 @@ def _workspace_profile(workspace: Path) -> tuple[str, dict] | None:
         if payload.get("profile_version") == 2 and isinstance(bindings, list) and len(bindings) == 1:
             candidates.append((path.stem, payload))
     return candidates[0] if len(candidates) == 1 else None
+
+
+def _build_acceptance_service(acceptance: Path):
+    from pscad_mcp.core.backend.legacy import LegacyBackend
+    from pscad_mcp.core.executor import robust_executor
+    from pscad_mcp.core.path_policy import PathPolicy
+    from pscad_mcp.core.service import PscadService
+
+    selected: dict[str, object] = {}
+
+    def backend_factory():
+        backend = LegacyBackend(robust_executor, version="4.6.2", x64=True)
+        selected["backend"] = backend
+        return backend
+
+    service = PscadService(
+        backend_factory,
+        executor=robust_executor,
+        path_policy=PathPolicy(workspace_root=str(acceptance)),
+    )
+    return service, selected
+
+
+def test_acceptance_service_constructs_legacy_backend_through_factory(monkeypatch, tmp_path):
+    from pscad_mcp.core.backend.base import BackendInfo
+
+    class FakeLegacyBackend:
+        def __init__(self, *args, **kwargs):
+            self.name = "legacy"
+            self.version = "4.6.2"
+            self.owns_process = True
+
+        async def attach(self):
+            return BackendInfo("legacy", "4.6.2", True, True, False, True, True)
+
+    monkeypatch.setattr(
+        "pscad_mcp.core.backend.legacy.LegacyBackend",
+        FakeLegacyBackend,
+    )
+
+    service, selected = _build_acceptance_service(tmp_path)
+
+    assert selected == {}
+    asyncio.run(service.attach_local())
+    assert service.backend is selected["backend"]
+
+
+def test_acceptance_project_setup_uses_logical_identities(tmp_path):
+    class RecordingService:
+        def __init__(self):
+            self.calls = []
+            self.projects = []
+
+        async def load_projects(self, filenames):
+            self.calls.append(("load_projects", list(filenames)))
+            self.projects = [{"name": tmp_path.joinpath(filename).stem} for filename in filenames]
+
+        async def save_project_as(self, project_name, filename, folder, confirm=False):
+            self.calls.append(("save_project_as", project_name, filename, folder, confirm))
+            self.projects.append({"name": Path(filename).stem})
+
+        async def list_projects(self):
+            return list(self.projects)
+
+    source = tmp_path / "difforder_new.pscx"
+    library = tmp_path / "BreakerArc.pslx"
+    derived = tmp_path / "difforder_new_derived.pscx"
+    service = RecordingService()
+
+    source_name, derived_name = asyncio.run(
+        _load_acceptance_projects(service, source, library, derived)
+    )
+
+    assert (source_name, derived_name) == ("difforder_new", "difforder_new_derived")
+    assert service.calls == [
+        ("load_projects", [str(source), str(library)]),
+        ("save_project_as", "difforder_new", derived.name, str(tmp_path), True),
+    ]
+
+
+def _loaded_project_name(project: object) -> str:
+    if isinstance(project, Mapping):
+        return str(project.get("name", ""))
+    return str(getattr(project, "name", ""))
+
+
+async def _load_acceptance_projects(
+    service,
+    copied_source: Path,
+    copied_library: Path,
+    derived: Path,
+) -> tuple[str, str]:
+    source_name = copied_source.stem
+    derived_name = derived.stem
+    if source_name == derived_name:
+        raise AssertionError("source and derived project identities must differ")
+
+    await service.load_projects([str(copied_source), str(copied_library)])
+    await service.save_project_as(
+        source_name,
+        derived.name,
+        str(derived.parent),
+        confirm=True,
+    )
+    loaded_names = [_loaded_project_name(item) for item in await service.list_projects()]
+    for expected in (source_name, derived_name):
+        count = loaded_names.count(expected)
+        if count != 1:
+            raise AssertionError(
+                f"expected exactly one loaded project named {expected!r}; "
+                f"observed {loaded_names!r}"
+            )
+    return source_name, derived_name
 
 
 async def _wait_for_terminal(service, scenario_id: str):
@@ -151,35 +265,52 @@ def test_real_hvdc_acceptance_preserves_sources_and_fails_closed_without_capabil
         profile_destination.mkdir(parents=True)
         shutil.copy2(profile_source, profile_destination / profile_source.name)
     derived = acceptance / f"{source.stem}_derived.pscx"
-    shutil.copy2(copied_source, derived)
     print(f"HVDC_ACCEPTANCE_DIRECTORY={acceptance}")
 
+    pscad_service = None
     backend = None
     owned_process = False
     failure: BaseException | None = None
     try:
-        from pscad_mcp.core.backend.legacy import LegacyBackend
-        from pscad_mcp.core.executor import robust_executor
         from pscad_mcp.core.path_policy import PathPolicy
         from pscad_mcp.hvdc.preflight import ensure_output_ready
         from pscad_mcp.hvdc.service import HvdcDomainService
 
-        backend = LegacyBackend(robust_executor, version="4.6.2", x64=True)
-        asyncio.run(backend.attach())
+        pscad_service, selected = _build_acceptance_service(acceptance)
+        asyncio.run(pscad_service.attach_local())
+        backend = selected["backend"]
         owned_process = bool(getattr(backend, "owns_process", False))
-        asyncio.run(backend.load_projects([str(copied_source), str(derived), str(copied_library)]))
-        service = HvdcDomainService(backend, path_policy=PathPolicy(workspace_root=str(acceptance)))
-        asyncio.run(ensure_output_ready(backend, str(derived), source_project=str(copied_source), confirm=True))
+        source_name, derived_name = asyncio.run(
+            _load_acceptance_projects(
+                pscad_service,
+                copied_source,
+                copied_library,
+                derived,
+            )
+        )
+        assert derived.is_file(), derived
+        service = HvdcDomainService(
+            pscad_service,
+            path_policy=PathPolicy(workspace_root=str(acceptance)),
+        )
+        asyncio.run(
+            ensure_output_ready(
+                pscad_service,
+                derived_name,
+                source_project=source_name,
+                confirm=True,
+            )
+        )
 
         baseline = {
             "name": "baseline",
             "profile": "hvdc_breaker_difforder",
-            "project": str(derived),
+            "project": derived_name,
             "parameter_changes": [],
             "events": [],
             "analysis": {},
         }
-        started = asyncio.run(service.run_scenario(str(derived), baseline, confirm=True))
+        started = asyncio.run(service.run_scenario(derived_name, baseline, confirm=True))
 
         terminal = asyncio.run(_wait_for_terminal(service, started["scenario_id"]))
         assert terminal["status"] == "completed", terminal
@@ -188,7 +319,12 @@ def test_real_hvdc_acceptance_preserves_sources_and_fails_closed_without_capabil
         from pscad_mcp.hvdc.results import resolve_result_channels
 
         profile = load_profile("hvdc_breaker_difforder")
-        samples = asyncio.run(backend.read_output_file(str(derived), max_samples=10000, summary_only=False))
+        output_files = terminal.get("output_files", [])
+        assert output_files, terminal
+        result_path = Path(output_files[0]).expanduser().resolve()
+        assert result_path.is_absolute(), result_path
+        assert _within(result_path, acceptance), result_path
+        samples = asyncio.run(backend.read_output_file(str(result_path), max_samples=10000, summary_only=False))
         resolved = resolve_result_channels(samples, profile)
         expected_selectors = {
             "dc_voltage_breaker", "dc_current_breaker", "breaker_command_observed",
@@ -202,16 +338,16 @@ def test_real_hvdc_acceptance_preserves_sources_and_fails_closed_without_capabil
         candidate = _workspace_profile(acceptance)
         if candidate is not None:
             profile_name, profile_payload = candidate
-            capabilities = asyncio.run(backend.get_timed_control_capabilities(str(derived)))
+            capabilities = asyncio.run(backend.get_timed_control_capabilities(derived_name))
             event = {
                 "name": "external-trip",
                 "profile": profile_name,
-                "project": str(copied_source),
-                "derived_project": str(derived),
+                "project": source_name,
+                "derived_project": derived_name,
                 "parameter_changes": [],
                 "events": [{"time_s": 1.0, "target": profile_payload["command_bindings"][0]["canonical"], "value": profile_payload["command_bindings"][0]["allowed_values"][-1]}],
             }
-            result = asyncio.run(_run_external_event(service, str(copied_source), event, capabilities))
+            result = asyncio.run(_run_external_event(service, source_name, event, capabilities))
             if result["outcome"] == "safe_rejection":
                 print(f"HVDC_ACCEPTANCE_SAFE_REJECTION={result['code']}")
             else:
@@ -227,12 +363,12 @@ def test_real_hvdc_acceptance_preserves_sources_and_fails_closed_without_capabil
     except BaseException as error:
         failure = error
     finally:
-        if backend is not None:
+        if pscad_service is not None and backend is not None:
             try:
                 if owned_process:
-                    asyncio.run(backend.quit())
+                    asyncio.run(pscad_service.quit_pscad(confirm=True))
                 else:
-                    asyncio.run(backend.disconnect())
+                    asyncio.run(pscad_service.disconnect())
             finally:
                 print(f"HVDC_ACCEPTANCE_OWNED_PROCESS_CLEANED={not bool(getattr(backend, 'owns_process', False))}")
 
