@@ -356,6 +356,19 @@ def _convert(values: Sequence[float], from_units: str | None, to_units: str, cha
     return [value * from_scale / to_scale for value in values]
 
 
+def _validated_window(window: Any, *, field: str, channel: str | None = None) -> tuple[float, float]:
+    details: dict[str, Any] = {"field": field}
+    if channel is not None:
+        details["channel"] = channel
+    if not _is_sequence(window) or len(window) != 2:
+        raise _invalid(f"{field} must contain two numbers.", **details)
+    start = _finite_float(window[0], f"{field}[0]")
+    end = _finite_float(window[1], f"{field}[1]")
+    if end < start:
+        raise _invalid(f"{field} end must be greater than or equal to start.", **details)
+    return start, end
+
+
 def _convert_power_from_watts(values: Sequence[float], to_units: str) -> list[float]:
     if to_units not in _UNIT_TO_SI or _UNIT_TO_SI[to_units][0] != "power":
         raise _EvidenceError("unit mismatch", details={"expected_units": to_units})
@@ -369,12 +382,7 @@ def _window(channel: _Channel, window: Sequence[Any] | None, units: str | None =
         selected_time = list(channel_time)
         selected_values = list(channel_values)
     else:
-        if not _is_sequence(window) or len(window) != 2:
-            raise _invalid("window must contain two numbers.", channel=channel.name)
-        start = _finite_float(window[0], "window[0]")
-        end = _finite_float(window[1], "window[1]")
-        if end < start:
-            raise _invalid("window end must be greater than or equal to start.", channel=channel.name)
+        start, end = _validated_window(window, field="window", channel=channel.name)
         pairs = [(time, value) for time, value in zip(channel_time, channel_values) if start <= time <= end]
         if not pairs:
             raise _EvidenceError("inconsistent domains", channel=channel.name, details={"window": [start, end]})
@@ -673,8 +681,7 @@ def _target_grid(channel: _Channel, window: Sequence[Any] | None) -> tuple[list[
     channel_time, channel_values = _validate_time_values(channel.time, channel.values)
     if window is None:
         return list(channel_time), list(channel_values)
-    start = _finite_float(window[0], "comparison_window[0]")
-    end = _finite_float(window[1], "comparison_window[1]")
+    start, end = _validated_window(window, field="comparison_window")
     pairs = [(time, value) for time, value in zip(channel_time, channel_values) if start <= time <= end]
     if not pairs:
         raise _EvidenceError("inconsistent domains", channel=channel.name, details={"window": [start, end]})
@@ -689,9 +696,15 @@ def _evaluate_golden(
 ) -> None:
     golden_contract, declarations = _golden_declarations(contract, golden)
     result["canonical"]["golden_channels"] = [_text(item.get("name"), "golden channel name") for item in declarations]
+    comparison_window = golden_contract.get("comparison_window")
+    if comparison_window is not None:
+        _validated_window(comparison_window, field="golden.comparison_window")
+    for index, declaration in enumerate(declarations):
+        declaration_window = declaration.get("comparison_window", comparison_window)
+        if declaration_window is not None:
+            _validated_window(declaration_window, field=f"golden.channels[{index}].comparison_window")
     if not declarations:
         return
-    comparison_window = golden_contract.get("comparison_window")
     alignment_contract = golden_contract.get("alignment")
     shift = 0.0
     alignment_failed: _EvidenceError | None = None

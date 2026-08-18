@@ -263,6 +263,26 @@ def test_evaluate_acceptance_compares_golden_on_shifted_golden_grid_without_extr
 
 
 @pytest.mark.parametrize(
+    "comparison_window",
+    [
+        0.003,
+        [0.003],
+        [[0.003, 0.038], 0.038],
+        ["start", 0.038],
+        [0.038, 0.003],
+    ],
+)
+def test_malformed_golden_comparison_window_raises_invalid_backend_error(comparison_window):
+    contract = _golden_contract()
+    contract["golden"]["comparison_window"] = comparison_window
+
+    with pytest.raises(BackendError) as raised:
+        evaluate_acceptance(_sample_payload(), _golden_payload(), contract)
+
+    assert raised.value.code == "LCC_ACCEPTANCE_INVALID"
+
+
+@pytest.mark.parametrize(
     ("samples", "golden", "contract", "reason"),
     [
         (
