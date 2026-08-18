@@ -346,6 +346,61 @@ def test_channel_sample_limit_is_enforced_deterministically():
     assert result["errors"][0]["limit"] == 1_000_000
 
 
+def test_unused_channel_over_sample_limit_is_rejected_during_canonical_validation():
+    samples = _sample_payload()
+    long_time = [index * DT for index in range(1_000_001)]
+    samples["channels"]["Main/UNUSED"] = {
+        "time": long_time,
+        "values": [0.0] * len(long_time),
+        "units": "kV",
+    }
+
+    result = evaluate_acceptance(samples, _golden_payload(), _golden_contract())
+
+    assert result["verdict"] == "INCOMPLETE_ANALYSIS"
+    assert result["errors"][0]["reason"] == "too many samples"
+    assert result["errors"][0]["limit"] == 1_000_000
+
+
+def test_multi_channel_physical_check_rejects_equal_length_shifted_domains():
+    time = [0.04, 0.05, 0.06, 0.07]
+    shifted_time = [value + 0.001 for value in time]
+    samples = {
+        "channels": {
+            "Main/VDC_RECT": {"time": time, "values": [500.0] * 4, "units": "kV"},
+            "Main/IDC": {"time": shifted_time, "values": [2.0] * 4, "units": "kA"},
+            "Main/PDC": {"time": time, "values": [1000.0] * 4, "units": "MW"},
+        }
+    }
+    contract = {
+        "physical_checks": [
+            {
+                "name": "pdc_product",
+                "kind": "pdc_product",
+                "required": True,
+                "voltage_channel": "Main/VDC_RECT",
+                "current_channel": "Main/IDC",
+                "power_channel": "Main/PDC",
+                "voltage_units": "kV",
+                "current_units": "kA",
+                "power_units": "MW",
+                "max_abs": 1.0,
+            }
+        ]
+    }
+
+    result = evaluate_acceptance(samples, {}, contract)
+
+    assert result["verdict"] == "INCOMPLETE_ANALYSIS"
+    check = result["physical_checks"][0]
+    assert check["status"] == "invalid"
+    assert check["outcome"] == "INCOMPLETE_ANALYSIS"
+    assert any(
+        error["reason"] == "inconsistent domains" and error["check"] == "pdc_product"
+        for error in result["errors"]
+    )
+
+
 def test_physical_checks_pass_with_observed_and_derived_details():
     result = evaluate_acceptance(_physical_samples(), {}, _physical_contract())
 

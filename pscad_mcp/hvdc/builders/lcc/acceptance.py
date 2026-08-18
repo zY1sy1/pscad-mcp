@@ -98,10 +98,13 @@ def _validate_time_values(time: Any, values: Any, *, direct: bool = False) -> tu
         if direct:
             raise _invalid("time and values must have equal lengths.", time=len(times), values=len(numbers))
         raise _EvidenceError("inconsistent domains", details={"time_samples": len(times), "value_samples": len(numbers)})
-    if len(numbers) > MAX_CHANNEL_SAMPLES:
+    if max(len(times), len(numbers)) > MAX_CHANNEL_SAMPLES:
         if direct:
             raise _incomplete("channel sample limit exceeded.", reason="too many samples", limit=MAX_CHANNEL_SAMPLES)
-        raise _EvidenceError("too many samples", details={"limit": MAX_CHANNEL_SAMPLES, "observed": len(numbers)})
+        raise _EvidenceError(
+            "too many samples",
+            details={"limit": MAX_CHANNEL_SAMPLES, "observed": max(len(times), len(numbers))},
+        )
     if any(right <= left for left, right in zip(times, times[1:])):
         if direct:
             raise _incomplete("time values must be strictly increasing.", reason="duplicate or non-monotonic time")
@@ -300,6 +303,15 @@ def _canonical_channels(payload: Any, label: str) -> dict[str, _Channel]:
             raise _EvidenceError("empty samples", channel=name)
         times = list(time)
         numbers = list(values)
+        try:
+            times, numbers = _validate_time_values(times, numbers)
+        except _EvidenceError as error:
+            raise _EvidenceError(
+                error.reason,
+                status=error.status,
+                channel=name,
+                details=error.details,
+            ) from error
         channels[name] = _Channel(name=name, time=times, values=numbers, units=units)
     return channels
 
@@ -373,6 +385,35 @@ def _window(channel: _Channel, window: Sequence[Any] | None, units: str | None =
     return selected_time, selected_values
 
 
+def _require_identical_domains(
+    domains: Sequence[tuple[str, Sequence[float]]],
+    *,
+    check: str | None = None,
+) -> None:
+    """Require all referenced channels to describe the same usable time grid."""
+
+    if not domains:
+        raise _EvidenceError("inconsistent domains", details={"check": check} if check else {})
+    reference_name, reference_time = domains[0]
+    if any(not math.isfinite(time) for time in reference_time) or any(
+        right <= left for left, right in zip(reference_time, reference_time[1:])
+    ):
+        raise _EvidenceError("inconsistent domains", details={"check": check} if check else {})
+    for name, time in domains[1:]:
+        if any(not math.isfinite(value) for value in time) or any(
+            right <= left for left, right in zip(time, time[1:])
+        ):
+            raise _EvidenceError(
+                "inconsistent domains",
+                details={"check": check, "channels": [reference_name, name]} if check else {"channels": [reference_name, name]},
+            )
+        if len(time) != len(reference_time) or any(left != right for left, right in zip(reference_time, time)):
+            details: dict[str, Any] = {"channels": [reference_name, name]}
+            if check:
+                details["check"] = check
+            raise _EvidenceError("inconsistent domains", details=details)
+
+
 def _mean(values: Sequence[float]) -> float:
     return sum(values) / len(values)
 
@@ -441,11 +482,21 @@ def _physical_pdc(check: Mapping[str, Any], samples: Mapping[str, _Channel]) -> 
     current_name = _text(check.get("current_channel"), "current_channel")
     power_name = _text(check.get("power_channel"), "power_channel")
     power_units = _text(check.get("power_units"), "power_units")
-    _, voltage = _window(_channel(samples, voltage_name), check.get("window"), _text(check.get("voltage_units"), "voltage_units"))
-    _, current = _window(_channel(samples, current_name), check.get("window"), _text(check.get("current_units"), "current_units"))
-    _, reported_power = _window(_channel(samples, power_name), check.get("window"), power_units)
-    if not (len(voltage) == len(current) == len(reported_power)):
-        raise _EvidenceError("inconsistent domains", details={"check": check.get("name")})
+    voltage_time, voltage = _window(
+        _channel(samples, voltage_name),
+        check.get("window"),
+        _text(check.get("voltage_units"), "voltage_units"),
+    )
+    current_time, current = _window(
+        _channel(samples, current_name),
+        check.get("window"),
+        _text(check.get("current_units"), "current_units"),
+    )
+    power_time, reported_power = _window(_channel(samples, power_name), check.get("window"), power_units)
+    _require_identical_domains(
+        [(voltage_name, voltage_time), (current_name, current_time), (power_name, power_time)],
+        check=check.get("name"),
+    )
     voltage_si = _convert(voltage, check.get("voltage_units"), "V", voltage_name)
     current_si = _convert(current, check.get("current_units"), "A", current_name)
     derived = _convert_power_from_watts([left * right for left, right in zip(voltage_si, current_si)], power_units)
@@ -475,10 +526,12 @@ def _physical_power_balance(check: Mapping[str, Any], samples: Mapping[str, _Cha
     units = _text(check.get("units"), "units")
     rectifier_name = _text(check.get("rectifier_power_channel"), "rectifier_power_channel")
     inverter_name = _text(check.get("inverter_power_channel"), "inverter_power_channel")
-    _, rectifier = _window(_channel(samples, rectifier_name), check.get("window"), units)
-    _, inverter = _window(_channel(samples, inverter_name), check.get("window"), units)
-    if len(rectifier) != len(inverter):
-        raise _EvidenceError("inconsistent domains", details={"check": check.get("name")})
+    rectifier_time, rectifier = _window(_channel(samples, rectifier_name), check.get("window"), units)
+    inverter_time, inverter = _window(_channel(samples, inverter_name), check.get("window"), units)
+    _require_identical_domains(
+        [(rectifier_name, rectifier_time), (inverter_name, inverter_time)],
+        check=check.get("name"),
+    )
     imbalance_values = [abs(left + right) for left, right in zip(rectifier, inverter)]
     imbalance = max(imbalance_values)
     allowance = check.get("loss_allowance", check.get("max_abs"))
@@ -534,12 +587,14 @@ def _physical_ripple(check: Mapping[str, Any], samples: Mapping[str, _Channel]) 
 def _physical_control_error(check: Mapping[str, Any], samples: Mapping[str, _Channel]) -> tuple[str, dict[str, Any]]:
     actual_name = _text(check.get("actual_channel"), "actual_channel")
     units = _text(check.get("units"), "units")
-    _, actual = _window(_channel(samples, actual_name), check.get("window"), units)
+    actual_time, actual = _window(_channel(samples, actual_name), check.get("window"), units)
     if check.get("target_channel") is not None:
         target_name = _text(check.get("target_channel"), "target_channel")
-        _, target = _window(_channel(samples, target_name), check.get("window"), units)
-        if len(actual) != len(target):
-            raise _EvidenceError("inconsistent domains", details={"check": check.get("name")})
+        target_time, target = _window(_channel(samples, target_name), check.get("window"), units)
+        _require_identical_domains(
+            [(actual_name, actual_time), (target_name, target_time)],
+            check=check.get("name"),
+        )
     elif check.get("target") is not None:
         target = [_finite_float(check["target"], "target") for _ in actual]
     else:
