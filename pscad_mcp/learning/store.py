@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from collections.abc import Collection, Sequence
+from datetime import datetime, timedelta, timezone
 from os import PathLike
 from pathlib import Path
 import sqlite3
@@ -12,6 +13,7 @@ from .models import (
     GoalFailureKind,
     InvocationEvent,
     InvocationOutcome,
+    ReviewMarker,
     StoredGoalFailure,
     StoredInvocation,
 )
@@ -186,6 +188,12 @@ class LearningStore:
     def _sqlite_bool(value: Any) -> bool | None:
         return None if value is None else bool(value)
 
+    @staticmethod
+    def _as_utc(value: datetime) -> datetime:
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
+
     def record_invocation(self, event: InvocationEvent) -> int:
         with self._lock:
             connection = self._require_connection()
@@ -303,6 +311,274 @@ class LearningStore:
                 )
                 for row in rows
             ]
+
+    def prune(
+        self,
+        *,
+        now: datetime,
+        retention_days: int,
+        max_events: int,
+    ) -> bool:
+        utc_now = self._as_utc(now)
+        current_date = utc_now.date()
+        cutoff = (utc_now - timedelta(days=retention_days)).isoformat()
+
+        with self._lock:
+            connection = self._require_connection()
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                last_pass_row = connection.execute(
+                    "SELECT value FROM schema_metadata WHERE key = ?",
+                    ("last_retention_pass",),
+                ).fetchone()
+                if last_pass_row is not None:
+                    try:
+                        last_pass = datetime.fromisoformat(last_pass_row["value"])
+                    except (TypeError, ValueError):
+                        last_pass = None
+                    if last_pass is not None:
+                        last_pass = self._as_utc(last_pass)
+                        if last_pass.date() == current_date:
+                            connection.rollback()
+                            return False
+
+                connection.execute(
+                    "DELETE FROM tool_invocations WHERE occurred_at < ?",
+                    (cutoff,),
+                )
+                connection.execute(
+                    "DELETE FROM goal_failures WHERE occurred_at < ?",
+                    (cutoff,),
+                )
+
+                total_events = connection.execute(
+                    """
+                    SELECT (SELECT COUNT(*) FROM tool_invocations)
+                         + (SELECT COUNT(*) FROM goal_failures)
+                    """
+                ).fetchone()[0]
+                excess = total_events - max_events
+                if excess > 0:
+                    oldest = connection.execute(
+                        """
+                        SELECT event_type, event_id, occurred_at
+                        FROM (
+                            SELECT 'invocation' AS event_type,
+                                   id AS event_id,
+                                   occurred_at
+                            FROM tool_invocations
+                            UNION ALL
+                            SELECT 'goal_failure' AS event_type,
+                                   id AS event_id,
+                                   occurred_at
+                            FROM goal_failures
+                        )
+                        ORDER BY occurred_at, event_id, event_type
+                        LIMIT ?
+                        """,
+                        (excess,),
+                    ).fetchall()
+                    for row in oldest:
+                        if row["event_type"] == "invocation":
+                            connection.execute(
+                                "DELETE FROM tool_invocations WHERE id = ?",
+                                (row["event_id"],),
+                            )
+                        else:
+                            connection.execute(
+                                "DELETE FROM goal_failures WHERE id = ?",
+                                (row["event_id"],),
+                            )
+
+                connection.execute(
+                    """
+                    INSERT INTO schema_metadata (key, value)
+                    VALUES (?, ?)
+                    ON CONFLICT(key) DO UPDATE SET value = excluded.value
+                    """,
+                    ("last_retention_pass", utc_now.isoformat()),
+                )
+                connection.commit()
+            except Exception:
+                connection.rollback()
+                raise
+            return True
+
+    def mark_notified(self, markers: Sequence[ReviewMarker]) -> None:
+        with self._lock:
+            connection = self._require_connection()
+            try:
+                connection.executemany(
+                    """
+                    INSERT INTO candidate_reviews (
+                        fingerprint,
+                        first_notified_at,
+                        last_notified_at,
+                        notification_source,
+                        evidence_watermark
+                    ) VALUES (?, ?, ?, ?, ?)
+                    ON CONFLICT(fingerprint) DO UPDATE SET
+                        last_notified_at = excluded.last_notified_at,
+                        notification_source = excluded.notification_source,
+                        evidence_watermark = excluded.evidence_watermark
+                    """,
+                    (
+                        (
+                            marker.fingerprint,
+                            marker.first_notified_at,
+                            marker.last_notified_at,
+                            marker.notification_source,
+                            marker.evidence_watermark,
+                        )
+                        for marker in markers
+                    ),
+                )
+                connection.commit()
+            except Exception:
+                connection.rollback()
+                raise
+
+    def load_review_markers(self) -> dict[str, ReviewMarker]:
+        with self._lock:
+            connection = self._require_connection()
+            rows = connection.execute(
+                """
+                SELECT fingerprint, first_notified_at, last_notified_at,
+                       notification_source, evidence_watermark
+                FROM candidate_reviews
+                ORDER BY fingerprint
+                """
+            ).fetchall()
+            return {
+                row["fingerprint"]: ReviewMarker(
+                    fingerprint=row["fingerprint"],
+                    first_notified_at=row["first_notified_at"],
+                    last_notified_at=row["last_notified_at"],
+                    notification_source=row["notification_source"],
+                    evidence_watermark=row["evidence_watermark"],
+                )
+                for row in rows
+            }
+
+    def delete_review_markers_except(self, fingerprints: Collection[str]) -> None:
+        retained = set(fingerprints)
+        with self._lock:
+            connection = self._require_connection()
+            try:
+                if not retained:
+                    connection.execute("DELETE FROM candidate_reviews")
+                else:
+                    rows = connection.execute(
+                        "SELECT fingerprint FROM candidate_reviews"
+                    ).fetchall()
+                    for row in rows:
+                        if row["fingerprint"] not in retained:
+                            connection.execute(
+                                "DELETE FROM candidate_reviews WHERE fingerprint = ?",
+                                (row["fingerprint"],),
+                            )
+                connection.commit()
+            except Exception:
+                connection.rollback()
+                raise
+
+    def latest_invocation(
+        self,
+        session_id: str,
+        tool_name: str | None,
+    ) -> StoredInvocation | None:
+        with self._lock:
+            connection = self._require_connection()
+            if tool_name is None:
+                row = connection.execute(
+                    """
+                    SELECT id, occurred_at, session_id, tool_name, duration_ms,
+                           outcome, error_code, retryable, backend, pscad_version
+                    FROM tool_invocations
+                    WHERE session_id = ?
+                    ORDER BY occurred_at DESC, id DESC
+                    LIMIT 1
+                    """,
+                    (session_id,),
+                ).fetchone()
+            else:
+                row = connection.execute(
+                    """
+                    SELECT id, occurred_at, session_id, tool_name, duration_ms,
+                           outcome, error_code, retryable, backend, pscad_version
+                    FROM tool_invocations
+                    WHERE session_id = ? AND tool_name = ?
+                    ORDER BY occurred_at DESC, id DESC
+                    LIMIT 1
+                    """,
+                    (session_id, tool_name),
+                ).fetchone()
+            if row is None:
+                return None
+            return StoredInvocation(
+                event_id=row["id"],
+                occurred_at=row["occurred_at"],
+                session_id=row["session_id"],
+                tool_name=row["tool_name"],
+                duration_ms=row["duration_ms"],
+                outcome=InvocationOutcome(row["outcome"]),
+                error_code=row["error_code"],
+                retryable=self._sqlite_bool(row["retryable"]),
+                backend=row["backend"],
+                pscad_version=row["pscad_version"],
+            )
+
+    def has_failure_evidence(self, tool_name: str) -> bool:
+        with self._lock:
+            connection = self._require_connection()
+            row = connection.execute(
+                """
+                SELECT EXISTS(
+                    SELECT 1
+                    FROM tool_invocations
+                    WHERE tool_name = ? AND outcome = ?
+                    UNION ALL
+                    SELECT 1
+                    FROM goal_failures
+                    WHERE primary_tool = ?
+                )
+                """,
+                (tool_name, InvocationOutcome.ERROR.value, tool_name),
+            ).fetchone()
+            return bool(row[0])
+
+    def counts(self) -> dict[str, int]:
+        with self._lock:
+            connection = self._require_connection()
+            row = connection.execute(
+                """
+                SELECT
+                    (SELECT COUNT(*) FROM tool_invocations) AS invocations,
+                    (SELECT COUNT(*) FROM goal_failures) AS goal_failures,
+                    (SELECT COUNT(*) FROM candidate_reviews) AS review_markers
+                """
+            ).fetchone()
+            return {
+                "invocations": int(row["invocations"]),
+                "goal_failures": int(row["goal_failures"]),
+                "review_markers": int(row["review_markers"]),
+            }
+
+    def clear_history(self) -> None:
+        with self._lock:
+            connection = self._require_connection()
+            try:
+                connection.execute("BEGIN")
+                connection.execute("DELETE FROM goal_failures")
+                connection.execute("DELETE FROM tool_invocations")
+                connection.execute("DELETE FROM candidate_reviews")
+                connection.commit()
+            except Exception:
+                connection.rollback()
+                raise
+
+            connection.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            connection.execute("VACUUM")
 
     def close(self) -> None:
         with self._lock:
