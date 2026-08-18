@@ -118,6 +118,9 @@ class PSCADConnectionManager:
     async def get_status(self) -> dict:
         return await self.service.status()
 
+    def learning_snapshot(self) -> dict[str, str | None]:
+        return self.service.learning_snapshot()
+
     async def repair_connection(self) -> str:
         result = await self.service.repair_connection()
         return result

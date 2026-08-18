@@ -327,6 +327,15 @@ class PscadService:
         """Return a bounded snapshot of the shared COM executor."""
         return dict(self.executor.snapshot())
 
+    def learning_snapshot(self) -> dict[str, str | None]:
+        backend = self._backend
+        if backend is None:
+            return {"backend": None, "pscad_version": None}
+        return {
+            "backend": getattr(backend, "name", None),
+            "pscad_version": getattr(backend, "version", None),
+        }
+
     async def status(self) -> dict[str, Any]:
         if self._backend is None:
             return {

@@ -2,32 +2,224 @@
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from functools import wraps
 import inspect
+import logging
+import re
+import threading
+import time
 from typing import Any, ParamSpec, TypeVar, Union
 
 from mcp.server.fastmcp import FastMCP
 
 from ..core.connection_manager import pscad_manager
+from ..learning.models import InvocationOutcome
+from ..learning.recorder import InvocationRecorder, learning_recorder
 
 
 P = ParamSpec("P")
 R = TypeVar("R")
+_LOGGER = logging.getLogger("pscad-mcp.learning")
+_WARNING_LOCK = threading.Lock()
+_WARNING_EMITTED = False
+_ERROR_CODE = re.compile(r"[A-Z][A-Z0-9_]{0,63}\Z")
+_BACKEND_NAME = re.compile(r"[a-z][a-z0-9_-]{0,31}\Z")
+_PSCAD_VERSION = re.compile(r"[0-9A-Za-z][0-9A-Za-z._+-]{0,31}\Z")
+
+
+def _record_safely(action: Callable[[], Any], fallback: Any = None) -> Any:
+    try:
+        return action()
+    except Exception as error:
+        global _WARNING_EMITTED
+        with _WARNING_LOCK:
+            if not _WARNING_EMITTED:
+                _LOGGER.warning(
+                    "Learning instrumentation failed after %s.",
+                    type(error).__name__,
+                )
+                _WARNING_EMITTED = True
+        return fallback
+
+
+def _bounded_identifier(
+    value: Any,
+    pattern: re.Pattern[str],
+) -> str | None:
+    if isinstance(value, str) and pattern.fullmatch(value) is not None:
+        return value
+    return None
+
+
+def _snapshot_metadata() -> dict[str, str | None]:
+    def read_snapshot() -> dict[str, str | None]:
+        snapshot = pscad_manager.learning_snapshot()
+        if not isinstance(snapshot, Mapping):
+            return {"backend": None, "pscad_version": None}
+        return {
+            "backend": _bounded_identifier(
+                snapshot.get("backend"),
+                _BACKEND_NAME,
+            ),
+            "pscad_version": _bounded_identifier(
+                snapshot.get("pscad_version"),
+                _PSCAD_VERSION,
+            ),
+        }
+
+    return _record_safely(
+        read_snapshot,
+        fallback={"backend": None, "pscad_version": None},
+    )
+
+
+def _outcome_metadata(
+    result: Any,
+    snapshot: Mapping[str, str | None],
+) -> tuple[InvocationOutcome, str | None, bool | None, str | None]:
+    try:
+        error = result.get("error") if isinstance(result, Mapping) else None
+        if not isinstance(error, Mapping):
+            return (
+                InvocationOutcome.SUCCESS,
+                None,
+                None,
+                snapshot.get("backend"),
+            )
+        error_code = _bounded_identifier(error.get("code"), _ERROR_CODE)
+        retryable = error.get("retryable")
+        error_backend = _bounded_identifier(
+            error.get("backend"),
+            _BACKEND_NAME,
+        )
+    except Exception:
+        return (
+            InvocationOutcome.ERROR,
+            "INTERNAL_ERROR",
+            None,
+            snapshot.get("backend"),
+        )
+    return (
+        InvocationOutcome.ERROR,
+        error_code or "INTERNAL_ERROR",
+        retryable if isinstance(retryable, bool) else None,
+        error_backend or snapshot.get("backend"),
+    )
+
+
+def _is_json_safe(value: Any, seen: set[int] | None = None) -> bool:
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return True
+    seen = set() if seen is None else seen
+    value_id = id(value)
+    if value_id in seen:
+        return False
+    if isinstance(value, list):
+        seen.add(value_id)
+        try:
+            return all(_is_json_safe(item, seen) for item in value)
+        finally:
+            seen.remove(value_id)
+    if isinstance(value, dict):
+        seen.add(value_id)
+        try:
+            return all(
+                isinstance(key, str) and _is_json_safe(item, seen)
+                for key, item in value.items()
+            )
+        finally:
+            seen.remove(value_id)
+    return False
+
+
+def _register_with_original_result(mcp: FastMCP, guarded: Callable[..., Any]) -> None:
+    # FastMCP validates and then model-dumps structured output, which copies JSON-safe values.
+    mcp.add_tool(guarded)
+    tool = mcp._tool_manager.get_tool(guarded.__name__)
+    if tool is None:
+        return
+    convert_result = tool.fn_metadata.convert_result
+
+    def preserve_result(result: Any) -> Any:
+        converted = convert_result(result)
+        if (
+            isinstance(converted, tuple)
+            and len(converted) == 2
+            and isinstance(converted[1], dict)
+            and "result" in converted[1]
+            and _is_json_safe(result)
+        ):
+            unstructured, structured = converted
+            structured = dict(structured)
+            structured["result"] = result
+            return unstructured, structured
+        return converted
+
+    object.__setattr__(tool.fn_metadata, "convert_result", preserve_result)
 
 
 def register_tool(
     mcp: FastMCP,
     function: Callable[P, Awaitable[R]],
+    *,
+    recorder: InvocationRecorder = learning_recorder,
+    record_learning: bool = True,
 ) -> None:
     """Register an async tool while preserving structured backend failures."""
 
+    if record_learning:
+        _record_safely(lambda: recorder.register_tool_name(function.__name__))
+
     @wraps(function)
     async def guarded(*args: P.args, **kwargs: P.kwargs) -> Any:
+        if not record_learning:
+            try:
+                return await function(*args, **kwargs)
+            except Exception as error:
+                return pscad_manager.error_payload(error, function.__name__)
+
+        snapshot = _snapshot_metadata()
+        started = time.perf_counter()
         try:
-            return await function(*args, **kwargs)
+            result = await function(*args, **kwargs)
         except Exception as error:
-            return pscad_manager.error_payload(error, function.__name__)
+            duration_ms = max(0, int((time.perf_counter() - started) * 1000))
+            result = pscad_manager.error_payload(error, function.__name__)
+            outcome, error_code, retryable, backend = _outcome_metadata(
+                result,
+                snapshot,
+            )
+            _record_safely(
+                lambda: recorder.record(
+                    tool_name=function.__name__,
+                    duration_ms=duration_ms,
+                    outcome=outcome,
+                    error_code=error_code,
+                    retryable=retryable,
+                    backend=backend,
+                    pscad_version=snapshot.get("pscad_version"),
+                )
+            )
+            return result
+
+        duration_ms = max(0, int((time.perf_counter() - started) * 1000))
+        outcome, error_code, retryable, backend = _outcome_metadata(
+            result,
+            snapshot,
+        )
+        _record_safely(
+            lambda: recorder.record(
+                tool_name=function.__name__,
+                duration_ms=duration_ms,
+                outcome=outcome,
+                error_code=error_code,
+                retryable=retryable,
+                backend=backend,
+                pscad_version=snapshot.get("pscad_version"),
+            )
+        )
+        return result
 
     signature = inspect.signature(function)
     return_annotation = signature.return_annotation
@@ -39,4 +231,4 @@ def register_tool(
     )
     guarded.__annotations__ = dict(function.__annotations__)
     guarded.__annotations__["return"] = error_aware_return
-    mcp.tool()(guarded)
+    _register_with_original_result(mcp, guarded)
