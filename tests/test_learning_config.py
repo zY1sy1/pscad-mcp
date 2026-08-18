@@ -100,6 +100,26 @@ def test_path_resolution_errors_fail_closed_with_path_setting_name(
     assert config.issue == failing_variable
 
 
+def test_path_resolution_runtime_error_fails_closed(tmp_path, monkeypatch):
+    database = tmp_path / "state" / "custom.sqlite3"
+    original_resolve = Path.resolve
+
+    def fail_with_runtime_error(path, strict=False):
+        if path == database:
+            raise RuntimeError("symlink loop")
+        return original_resolve(path, strict=strict)
+
+    monkeypatch.setattr(Path, "resolve", fail_with_runtime_error)
+    config = LearningConfig.from_environ(
+        {"PSCAD_MCP_LEARNING_DB": str(database)},
+        home=tmp_path,
+    )
+
+    assert config.enabled is True
+    assert config.available is False
+    assert config.issue == "PSCAD_MCP_LEARNING_DB"
+
+
 def test_absolute_database_and_backlog_overrides_are_preserved(tmp_path):
     database = tmp_path / "state" / "custom.sqlite3"
     backlog = tmp_path / "review" / "custom.md"
