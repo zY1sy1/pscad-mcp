@@ -287,7 +287,15 @@ def _compare_nets(
 ) -> None:
     expected_by_key = {_expected_net_key(net): net for net in blueprint.nets}
     expected_by_endpoints = {key[1]: net for key, net in expected_by_key.items()}
-    observed_by_key = {_graph_net_key(net): net for net in graph.nets}
+    observed_counts = Counter(_graph_net_key(net) for net in graph.nets)
+    for key, count in observed_counts.items():
+        if count > 1:
+            expected_net = expected_by_key.get(key)
+            errors.append(_finding(None if expected_net is None else expected_net.logical_id, "duplicate net", 1, count))
+
+    observed_by_key: dict[tuple[str, tuple[str, ...]], GraphNet] = {}
+    for net in graph.nets:
+        observed_by_key.setdefault(_graph_net_key(net), net)
     observed_endpoint_sets = {key[1]: net for key, net in observed_by_key.items()}
 
     for key, expected_net in expected_by_key.items():

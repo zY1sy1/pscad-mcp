@@ -328,6 +328,24 @@ def test_validate_project_graph_rejects_duplicate_observed_component_port():
     ]
 
 
+def test_validate_project_graph_rejects_duplicate_observed_net():
+    graph = _graph()
+    duplicate_net = next(net for net in graph.nets if net.endpoints == ("bridge:ACY_A", "source:AC"))
+
+    result = validate_project_graph(replace(graph, nets=graph.nets + (duplicate_net,)), _blueprint())
+
+    assert result["valid"] is False
+    assert result["errors"] == [
+        {
+            "code": "LCC_STRUCTURE_INVALID",
+            "logical_id": "ac_a",
+            "reason": "duplicate net",
+            "expected": 1,
+            "observed": 2,
+        }
+    ]
+
+
 @pytest.mark.parametrize(
     ("graph", "reason"),
     [
