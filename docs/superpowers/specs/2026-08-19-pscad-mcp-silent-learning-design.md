@@ -462,12 +462,9 @@ their improvement evidence waits for the weekly review.
 
 ## Scheduled Review
 
-The desktop scheduled task uses this cadence:
-
-```text
-Timezone: Asia/Shanghai
-RRULE:FREQ=WEEKLY;BYDAY=MO;BYHOUR=9;BYMINUTE=0
-```
+The desktop heartbeat runs every Monday at 09:00 in `Asia/Shanghai`. It is
+created and managed through the Codex automation interface rather than a
+repository cron file or a hand-written scheduler directive.
 
 The task invokes the `pscad-mcp-improver` skill in review-only mode and calls
 `review_improvement_backlog`. When `attention_required=false`, it performs no
@@ -516,8 +513,10 @@ approved candidates:
    without merging or pushing.
 
 A failure in one group stops dependent work but does not erase completed,
-verified commits for independent groups. Unreproduced items remain in the
-backlog with a fixed `needs_evidence` action and no speculative patch.
+verified commits for independent groups. Unreproduced items remain unchanged
+in the generated backlog and are listed in the remediation summary under a
+fixed `needs_evidence` action. The skill does not edit the generated Markdown
+or create a speculative patch.
 
 The skill may improve `AGENTS.md` or its own instructions only when a repeated
 workflow mistake is demonstrated. It may not use a backlog candidate alone to
