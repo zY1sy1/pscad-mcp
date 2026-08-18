@@ -180,18 +180,45 @@ def _compare_component(
         if observed_value != _parameter_text(expected_value):
             errors.append(_finding(logical_id, "component parameter mismatch", {parameter: expected_value}, {parameter: observed_value}))
 
-    observed_ports = _port_map(observed)
-    expected_port_names = set(expected.ports)
-    observed_port_names = set(observed_ports)
+    expected_port_names = sorted(expected.ports)
+    observed_port_names = sorted(port.name for port in observed.ports)
     if expected_port_names != observed_port_names:
-        errors.append(
-            _finding(
-                logical_id,
-                "component port set mismatch",
-                sorted(expected_port_names),
-                sorted(observed_port_names),
+        expected_port_set = set(expected_port_names)
+        observed_port_set = set(observed_port_names)
+        if expected_port_set != observed_port_set:
+            errors.append(
+                _finding(
+                    logical_id,
+                    "component port set mismatch",
+                    expected_port_names,
+                    observed_port_names,
+                )
             )
-        )
+        else:
+            expected_counts = Counter(expected_port_names)
+            observed_counts = Counter(observed_port_names)
+            for port_name in sorted(expected_port_set):
+                expected_count = expected_counts[port_name]
+                observed_count = observed_counts[port_name]
+                if observed_count > expected_count:
+                    errors.append(
+                        _finding(
+                            f"{logical_id}:{port_name}",
+                            "duplicate component port",
+                            expected_count,
+                            observed_count,
+                        )
+                    )
+                elif observed_count < expected_count:
+                    errors.append(
+                        _finding(
+                            f"{logical_id}:{port_name}",
+                            "component port multiplicity mismatch",
+                            expected_count,
+                            observed_count,
+                        )
+                    )
+    observed_ports = _port_map(observed)
     for port_name in expected.ports:
         observed_port = observed_ports.get(port_name)
         contract = _expected_port_contract(expected, port_name)
@@ -394,26 +421,26 @@ def _int_attr(element: ET.Element, names: tuple[str, ...], default: int = 1) -> 
         return None
 
 
-def _definition_map(root: ET.Element) -> dict[str, ET.Element]:
-    definitions: dict[str, ET.Element] = {}
+def _definition_map(root: ET.Element) -> dict[str, tuple[ET.Element, ...]]:
+    definitions: dict[str, list[ET.Element]] = {}
     for element in root.iter():
         if _name(element.tag) != "definition":
             continue
         name = _text(_attr(element, "name", "id", "scoped_name"))
         if name:
-            definitions[name] = element
-    return definitions
+            definitions.setdefault(name, []).append(element)
+    return {name: tuple(elements) for name, elements in definitions.items()}
 
 
-def _ports(definition: ET.Element) -> dict[str, ET.Element]:
-    ports: dict[str, ET.Element] = {}
+def _ports(definition: ET.Element) -> dict[str, tuple[ET.Element, ...]]:
+    ports: dict[str, list[ET.Element]] = {}
     for element in definition.iter():
         if _name(element.tag) != "port":
             continue
         name = _text(_attr(element, "name", "id"))
         if name:
-            ports[name] = element
-    return ports
+            ports.setdefault(name, []).append(element)
+    return {name: tuple(elements) for name, elements in ports.items()}
 
 
 def _check_definition_ports(definition_name: str, definition: ET.Element | None, errors: list[dict[str, Any]]) -> None:
@@ -425,9 +452,19 @@ def _check_definition_ports(definition_name: str, definition: ET.Element | None,
     observed_names = tuple(sorted(observed_ports))
     if tuple(sorted(required)) != observed_names:
         errors.append(_finding(definition_name, "external port mismatch", sorted(required), observed_names))
-    gate = observed_ports.get("GATES")
-    if gate is not None and _int_attr(gate, ("dimension", "dim")) != 12:
-        errors.append(_finding(f"{definition_name}:GATES", "external gate dimension mismatch", 12, _attr(gate, "dimension", "dim")))
+    for port_name, records in sorted(observed_ports.items()):
+        if len(records) > 1:
+            errors.append(_finding(f"{definition_name}:{port_name}", "duplicate external port", 1, len(records)))
+    gate_records = observed_ports.get("GATES", ())
+    if gate_records and _int_attr(gate_records[0], ("dimension", "dim")) != 12:
+        errors.append(
+            _finding(
+                f"{definition_name}:GATES",
+                "external gate dimension mismatch",
+                12,
+                _attr(gate_records[0], "dimension", "dim"),
+            )
+        )
 
 
 def _bridge_group_count(definition: ET.Element) -> int:
@@ -471,8 +508,8 @@ def _gate_interface_dimension(definition: ET.Element) -> int | None:
 
 def _ac_groups_separated(definition: ET.Element) -> bool:
     ports = _ports(definition)
-    y_groups = {_text(_attr(ports[name], "group")).casefold() for name in ("ACY_A", "ACY_B", "ACY_C") if name in ports}
-    d_groups = {_text(_attr(ports[name], "group")).casefold() for name in ("ACD_A", "ACD_B", "ACD_C") if name in ports}
+    y_groups = {_text(_attr(ports[name][0], "group")).casefold() for name in ("ACY_A", "ACY_B", "ACY_C") if name in ports}
+    d_groups = {_text(_attr(ports[name][0], "group")).casefold() for name in ("ACD_A", "ACD_B", "ACD_C") if name in ports}
     if not y_groups or not d_groups:
         return False
     return y_groups.isdisjoint(d_groups)
@@ -520,6 +557,9 @@ def validate_companion_library(
     observed_custom_definition_names = {
         name for name in definitions if name.startswith("cigre_lcc_v1:")
     }
+    for definition_name, records in sorted(definitions.items()):
+        if definition_name.startswith("cigre_lcc_v1:") and len(records) > 1:
+            errors.append(_finding(definition_name, "duplicate companion definition", 1, len(records)))
     for definition_name in sorted(observed_custom_definition_names - expected_definition_names):
         errors.append(
             _finding(
@@ -530,8 +570,10 @@ def validate_companion_library(
             )
         )
     for definition_name in _REQUIRED_DEFINITION_PORTS:
-        _check_definition_ports(definition_name, definitions.get(definition_name), errors)
-    _check_bridge_internal(definitions.get("cigre_lcc_v1:LCC12PulseBridge"), errors)
+        records = definitions.get(definition_name, ())
+        _check_definition_ports(definition_name, records[0] if records else None, errors)
+    bridge_records = definitions.get("cigre_lcc_v1:LCC12PulseBridge", ())
+    _check_bridge_internal(bridge_records[0] if bridge_records else None, errors)
 
     sorted_errors = _sort_findings(errors)
     result = {"valid": not sorted_errors, "errors": sorted_errors, "warnings": []}

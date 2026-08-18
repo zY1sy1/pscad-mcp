@@ -302,6 +302,32 @@ def test_validate_project_graph_rejects_extra_observed_component_port():
     ]
 
 
+def test_validate_project_graph_rejects_duplicate_observed_component_port():
+    graph = _graph()
+    observed_components = tuple(
+        replace(
+            component,
+            ports=component.ports + (_port("GATES", "data", 12, (100, 20)),),
+        )
+        if component.logical_id == "bridge"
+        else component
+        for component in graph.components
+    )
+
+    result = validate_project_graph(replace(graph, components=observed_components), _blueprint())
+
+    assert result["valid"] is False
+    assert result["errors"] == [
+        {
+            "code": "LCC_STRUCTURE_INVALID",
+            "logical_id": "bridge:GATES",
+            "reason": "duplicate component port",
+            "expected": 1,
+            "observed": 2,
+        }
+    ]
+
+
 @pytest.mark.parametrize(
     ("graph", "reason"),
     [
@@ -374,9 +400,18 @@ def test_validate_project_graph_detects_single_structural_mutations(graph, reaso
     assert result["errors"] == sorted(result["errors"], key=lambda item: (item["code"], item["logical_id"], item["reason"]))
 
 
-def _library_xml(*, missing_valve: bool = False, gate_dimension: int = 12, extra_definition: bool = False) -> str:
+def _library_xml(
+    *,
+    missing_valve: bool = False,
+    gate_dimension: int = 12,
+    extra_definition: bool = False,
+    duplicate_interface_definition: bool = False,
+    duplicate_bridge_dc_pos_port: bool = False,
+) -> str:
     valves = "\n".join(f'<valve id="V{index:02d}" />' for index in range(1, 12 if missing_valve else 13))
     extra = '<definition name="cigre_lcc_v1:Extra" />' if extra_definition else ""
+    duplicate_interface = '<definition name="cigre_lcc_v1:SignalInterface" />' if duplicate_interface_definition else ""
+    duplicate_dc_pos = '<port name="DC_POS" kind="electrical" dimension="1" />' if duplicate_bridge_dc_pos_port else ""
     return f"""<?xml version="1.0" encoding="utf-8"?>
 <pslx>
   <definition name="cigre_lcc_v1:LCC12PulseBridge">
@@ -388,6 +423,7 @@ def _library_xml(*, missing_valve: bool = False, gate_dimension: int = 12, extra
       <port name="ACD_B" kind="electrical" dimension="1" group="acd" />
       <port name="ACD_C" kind="electrical" dimension="1" group="acd" />
       <port name="DC_POS" kind="electrical" dimension="1" />
+      {duplicate_dc_pos}
       <port name="DC_NEG" kind="electrical" dimension="1" />
       <port name="GATES" kind="data" dimension="{gate_dimension}" />
     </external_ports>
@@ -410,6 +446,7 @@ def _library_xml(*, missing_valve: bool = False, gate_dimension: int = 12, extra
     </external_ports>
   </definition>
   <definition name="cigre_lcc_v1:SignalInterface" />
+  {duplicate_interface}
   <definition name="cigre_lcc_v1:Initialization" />
   {extra}
 </pslx>
@@ -436,6 +473,42 @@ def test_validate_companion_library_rejects_extra_custom_definition(tmp_path):
         error["reason"] for error in result["errors"]
     } == {"unexpected companion definition"}
     assert result["errors"][0]["logical_id"] == "cigre_lcc_v1:Extra"
+
+
+def test_validate_companion_library_rejects_duplicate_custom_definition(tmp_path):
+    library = tmp_path / "duplicate_definition_cigre_lcc_v1.pslx"
+    library.write_text(_library_xml(duplicate_interface_definition=True), encoding="utf-8")
+
+    result = validate_companion_library(library)
+
+    assert result["valid"] is False
+    assert result["errors"] == [
+        {
+            "code": "LCC_STRUCTURE_INVALID",
+            "logical_id": "cigre_lcc_v1:SignalInterface",
+            "reason": "duplicate companion definition",
+            "expected": 1,
+            "observed": 2,
+        }
+    ]
+
+
+def test_validate_companion_library_rejects_duplicate_bridge_external_port(tmp_path):
+    library = tmp_path / "duplicate_port_cigre_lcc_v1.pslx"
+    library.write_text(_library_xml(duplicate_bridge_dc_pos_port=True), encoding="utf-8")
+
+    result = validate_companion_library(library)
+
+    assert result["valid"] is False
+    assert result["errors"] == [
+        {
+            "code": "LCC_STRUCTURE_INVALID",
+            "logical_id": "cigre_lcc_v1:LCC12PulseBridge:DC_POS",
+            "reason": "duplicate external port",
+            "expected": 1,
+            "observed": 2,
+        }
+    ]
 
 
 def test_validate_companion_library_reports_bridge_internal_contract_failures(tmp_path):
