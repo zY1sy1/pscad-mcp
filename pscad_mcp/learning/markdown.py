@@ -40,11 +40,16 @@ _PUBLIC_FIELDS = (
 )
 
 
+def _escape_scalar(value: object) -> str:
+    return str(value).replace("\r", "\\r").replace("\n", "\\n")
+
+
 def _render_candidate(candidate: ImprovementCandidate) -> list[str]:
     public = candidate.public_dict()
-    lines = [f"### {public['candidate_id']}", ""]
+    lines = [f"### {_escape_scalar(public['candidate_id'])}", ""]
     lines.extend(
-        f"- {label}: {public[field]}" for field, label in _PUBLIC_FIELDS
+        f"- {label}: {_escape_scalar(public[field])}"
+        for field, label in _PUBLIC_FIELDS
     )
     lines.append(f"- Next action: {_NEXT_ACTION[candidate.kind]}")
     return lines
@@ -62,7 +67,7 @@ def _render_text(
     lines = [
         "# PSCAD MCP Improvement Backlog",
         "",
-        f"Generated at: {generated_at}",
+        f"Generated at: {_escape_scalar(generated_at)}",
         "",
     ]
     if not any(grouped.values()):
@@ -92,6 +97,7 @@ def render_backlog(
     backlog_path.parent.mkdir(parents=True, exist_ok=True)
 
     temporary_path: Path | None = None
+    active_exception: BaseException | None = None
     try:
         with tempfile.NamedTemporaryFile(
             mode="w",
@@ -107,9 +113,15 @@ def render_backlog(
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(temporary_path, backlog_path)
+    except BaseException as error:
+        active_exception = error
+        raise
     finally:
         if temporary_path is not None:
             try:
                 temporary_path.unlink()
             except FileNotFoundError:
                 pass
+            except OSError:
+                if active_exception is None:
+                    raise
