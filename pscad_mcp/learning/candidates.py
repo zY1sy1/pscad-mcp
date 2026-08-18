@@ -5,6 +5,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import hashlib
+import json
 
 from .models import (
     CandidateKind,
@@ -18,6 +19,7 @@ from .models import (
 )
 
 
+_UNKNOWN_ERROR_CODE = "UNKNOWN_ERROR"
 _RELIABILITY_CODES = frozenset(
     {
         "TIMEOUT",
@@ -48,9 +50,18 @@ _GOAL_KIND_MAP = {
 }
 
 
+def _structured_digest(values: tuple[str | int | None, ...]) -> str:
+    serialized = json.dumps(
+        values,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        allow_nan=False,
+    )
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+
 def _fingerprint(kind: CandidateKind, tool: str | None, code: str) -> str:
-    source = f"{kind.value}|{tool or '-'}|{code}".encode("ascii")
-    return hashlib.sha256(source).hexdigest()
+    return _structured_digest((kind.value, tool, code))
 
 
 def _candidate_id(fingerprint: str) -> str:
@@ -63,11 +74,14 @@ def _watermark(
     latest_evidence_id: int,
     latest_evidence_at: str,
 ) -> str:
-    source = (
-        f"{fingerprint}|{latest_evidence_kind}|"
-        f"{latest_evidence_id}|{latest_evidence_at}"
+    return _structured_digest(
+        (
+            fingerprint,
+            latest_evidence_kind,
+            int(latest_evidence_id),
+            latest_evidence_at,
+        )
     )
-    return hashlib.sha256(source.encode("ascii")).hexdigest()
 
 
 @dataclass(frozen=True)
@@ -270,18 +284,22 @@ def build_candidates(
         if event.outcome == InvocationOutcome.SUCCESS:
             successes_by_tool[event.tool_name].append((event, occurred_at))
         elif event.outcome == InvocationOutcome.ERROR:
-            failures_by_key[(event.tool_name, event.error_code)].append(
+            normalized_code = (
+                event.error_code
+                if event.error_code is not None
+                else _UNKNOWN_ERROR_CODE
+            )
+            failures_by_key[(event.tool_name, normalized_code)].append(
                 (event, occurred_at)
             )
 
     specs: list[_CandidateSpec] = []
-    for (tool, raw_code), failures in failures_by_key.items():
-        if len(failures) < min_evidence and raw_code not in _IMMEDIATE_CODES:
+    for (tool, code), failures in failures_by_key.items():
+        if len(failures) < min_evidence and code not in _IMMEDIATE_CODES:
             continue
         failures.sort(key=lambda item: _event_key(item[0].event_id, item[1]))
-        first_event, first_at = failures[0]
+        _, first_at = failures[0]
         latest_event, latest_at = failures[-1]
-        code = raw_code or "UNKNOWN_ERROR"
         retryable = _group_retryable(failures)
         latest_key = _event_key(latest_event.event_id, latest_at)
         later_success = _has_later_success(
@@ -311,7 +329,7 @@ def build_candidates(
                 retryable=retryable,
                 latest_evidence_kind="invocation",
                 latest_evidence_id=latest_event.event_id,
-                immediate_attention=raw_code in _IMMEDIATE_CODES,
+                immediate_attention=code in _IMMEDIATE_CODES,
                 resolved_by_later_evidence=resolved,
                 priority=len(failures),
             )

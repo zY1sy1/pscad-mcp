@@ -1,6 +1,11 @@
 from datetime import datetime, timezone
 
-from pscad_mcp.learning.candidates import build_candidates
+from pscad_mcp.learning.candidates import (
+    _candidate_id,
+    _fingerprint,
+    _watermark,
+    build_candidates,
+)
 from pscad_mcp.learning.models import (
     CandidateKind,
     CandidateState,
@@ -35,6 +40,28 @@ def _stored_invocation(
         if outcome is InvocationOutcome.ERROR
         else None,
         retryable=retryable if outcome is InvocationOutcome.ERROR else None,
+        backend="legacy",
+        pscad_version="4.6.2",
+    )
+
+
+def _raw_error(
+    event_id,
+    at,
+    *,
+    tool="run_project",
+    error_code=None,
+    retryable=True,
+):
+    return StoredInvocation(
+        event_id=event_id,
+        occurred_at=at,
+        session_id="session-a",
+        tool_name=tool,
+        duration_ms=10,
+        outcome=InvocationOutcome.ERROR,
+        error_code=error_code,
+        retryable=retryable,
         backend="legacy",
         pscad_version="4.6.2",
     )
@@ -291,3 +318,160 @@ def test_candidates_sort_by_priority_and_repeat_deterministically():
     )
     assert first == second
     assert [candidate.priority for candidate in first] == [8, 3]
+
+
+def test_null_error_codes_are_normalized_before_grouping_and_thresholding():
+    events = [
+        _raw_error(
+            1,
+            "2026-08-19T01:01:00+00:00",
+            error_code=None,
+        ),
+        _raw_error(
+            2,
+            "2026-08-19T01:02:00+00:00",
+            error_code=None,
+        ),
+        _raw_error(
+            3,
+            "2026-08-19T01:03:00+00:00",
+            error_code="UNKNOWN_ERROR",
+        ),
+    ]
+    normalized = build_candidates(
+        events, [], {}, now=NOW, min_evidence=3
+    )
+    explicit = build_candidates(
+        [
+            _raw_error(
+                event_id,
+                f"2026-08-19T01:0{event_id}:00+00:00",
+                error_code="UNKNOWN_ERROR",
+            )
+            for event_id in range(1, 4)
+        ],
+        [],
+        {},
+        now=NOW,
+        min_evidence=3,
+    )
+
+    assert len(normalized) == 1
+    assert normalized[0].code == "UNKNOWN_ERROR"
+    assert normalized[0].invocation_count == 3
+    assert normalized[0].fingerprint == explicit[0].fingerprint
+    assert normalized[0].candidate_id == explicit[0].candidate_id
+
+
+def test_unicode_tool_and_error_code_have_a_stable_candidate_identity():
+    events = [
+        _raw_error(
+            event_id,
+            f"2026-08-19T01:0{event_id}:00+00:00",
+            tool="运行项目🚀",
+            error_code="错误|超时",
+        )
+        for event_id in range(1, 4)
+    ]
+    candidate = build_candidates(events, [], {}, now=NOW, min_evidence=3)[0]
+
+    assert candidate.primary_tool == "运行项目🚀"
+    assert candidate.code == "错误|超时"
+    assert len(candidate.fingerprint) == 64
+    assert len(candidate.evidence_watermark) == 64
+
+
+def test_structured_fingerprint_encoding_avoids_delimiter_collisions():
+    left = _fingerprint(CandidateKind.RELIABILITY, "tool|part", "code")
+    right = _fingerprint(CandidateKind.RELIABILITY, "tool", "part|code")
+
+    assert left != right
+    assert _candidate_id(left) != _candidate_id(right)
+
+
+def test_structured_watermark_encoding_avoids_delimiter_collisions_and_supports_unicode():
+    left = _watermark(
+        "finger|print",
+        "kind",
+        1,
+        "2026-08-19T01:00:00+00:00",
+    )
+    right = _watermark(
+        "finger",
+        "print|kind",
+        1,
+        "2026-08-19T01:00:00+00:00",
+    )
+    unicode_watermark = _watermark(
+        "指纹",
+        "证据",
+        1,
+        "2026-08-19T01:00:00+00:00",
+    )
+
+    assert left != right
+    assert len(unicode_watermark) == 64
+
+
+def test_candidate_aggregation_is_deterministic_under_input_permutations():
+    invocations = [
+        _raw_error(
+            event_id,
+            f"2026-08-19T01:0{event_id}:00+00:00",
+            tool="工具A" if event_id < 4 else "工具B",
+            error_code="错误A" if event_id < 4 else "错误B",
+        )
+        for event_id in range(1, 7)
+    ]
+    goals = [
+        StoredGoalFailure(
+            event_id=1,
+            occurred_at="2026-08-19T01:30:00+00:00",
+            session_id="session-a",
+            failure_kind=GoalFailureKind.INCORRECT_RESULT,
+            primary_tool="工具C",
+            correlated_invocation_id=None,
+        )
+    ]
+
+    first = build_candidates(
+        invocations, goals, {}, now=NOW, min_evidence=3
+    )
+    second = build_candidates(
+        list(reversed(invocations)),
+        list(reversed(goals)),
+        {},
+        now=NOW,
+        min_evidence=3,
+    )
+
+    assert first == second
+
+
+def test_public_dict_omits_identity_watermark_and_storage_details():
+    candidate = build_candidates(
+        [
+            _raw_error(
+                event_id,
+                f"2026-08-19T01:0{event_id}:00+00:00",
+            )
+            for event_id in range(1, 4)
+        ],
+        [],
+        {},
+        now=NOW,
+        min_evidence=3,
+    )[0]
+
+    public = candidate.public_dict()
+
+    assert "fingerprint" not in public
+    assert "evidence_watermark" not in public
+    assert {
+        "event_id",
+        "session_id",
+        "backend",
+        "pscad_version",
+    }.isdisjoint(public)
+    assert public["kind"] == "reliability"
+    assert public["state"] == "open"
