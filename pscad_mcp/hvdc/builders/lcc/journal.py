@@ -169,17 +169,30 @@ def _remove_matching_lock(lock_path: Path, expected_token: str) -> bool:
             except FileNotFoundError:
                 pass
         else:
-            try:
-                os.replace(tombstone, lock_path)
-            except FileNotFoundError:
-                pass
-            except FileExistsError:
-                # A cooperating contender has installed a new owner. Keep it
-                # intact; the temporary candidate is no longer a live lock.
-                try:
-                    tombstone.unlink()
-                except FileNotFoundError:
-                    pass
+            _restore_without_overwrite(tombstone, lock_path)
+
+
+def _restore_without_overwrite(tombstone: Path, lock_path: Path) -> bool:
+    """Restore a rejected candidate without replacing a newer lock.
+
+    ``os.replace`` overwrites an existing destination on Windows. A same-volume
+    hard-link creation is the portable standard-library primitive that fails
+    when the destination already exists; the source is removed only after the
+    link succeeds. If hard links are unavailable, leave the tombstone in place
+    rather than risking a new-owner overwrite.
+    """
+
+    try:
+        os.link(tombstone, lock_path)
+    except FileExistsError:
+        return False
+    except OSError:
+        return False
+    try:
+        tombstone.unlink()
+    except FileNotFoundError:
+        pass
+    return True
 
 
 class WorkspaceBuildLease:

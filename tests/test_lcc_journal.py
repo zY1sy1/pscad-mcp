@@ -237,3 +237,31 @@ def test_workspace_build_lease_stale_recovery_preserves_lock_replaced_before_rem
 
     _assert_backend_code(lambda: WorkspaceBuildLease.acquire(tmp_path, "new-build"), "LCC_BUILD_CONFLICT")
     assert _read_json(lock_path)["token"] == "replacement-token"
+
+
+def test_workspace_build_lease_release_preserves_replacement_installed_after_tombstone_move(tmp_path, monkeypatch):
+    lease = WorkspaceBuildLease.acquire(tmp_path, "build-1")
+    lock_path = tmp_path / ".pscad-mcp" / "lcc-build.lock"
+    replacement = {
+        "build_id": "replacement-build",
+        "pid": os.getpid(),
+        "token": "replacement-token",
+        "created_at_utc": "2026-08-19T00:00:00Z",
+        "journal_path": str(AtomicJournal(tmp_path, "replacement-build").path),
+    }
+    original_replace = journal_module.os.replace
+    moved = False
+
+    def replace_and_install_new_owner(source, destination):
+        nonlocal moved
+        original_replace(source, destination)
+        if Path(source) == lock_path and Path(destination).name.endswith(".pending") and not moved:
+            moved = True
+            replacement_path = lock_path.with_name("lcc-build.lock.replacement")
+            replacement_path.write_text(json.dumps(replacement), encoding="utf-8")
+            original_replace(replacement_path, lock_path)
+
+    monkeypatch.setattr(journal_module.os, "replace", replace_and_install_new_owner)
+
+    assert lease.release() is True
+    assert _read_json(lock_path)["token"] == "replacement-token"
