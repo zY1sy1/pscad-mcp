@@ -6,8 +6,10 @@ import json
 import math
 import os
 import tempfile
+import time
 import uuid
 from collections.abc import Mapping, Sequence
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
@@ -15,10 +17,16 @@ from typing import Any
 
 import psutil
 
+if os.name == "nt":
+    import msvcrt
+else:
+    import fcntl
+
 from ....core.backend.base import BackendError
 
 _JOURNAL_OPERATION = "write_lcc_journal"
 _LEASE_OPERATION = "acquire_lcc_build_lease"
+_GUARD_FILENAME = "lcc-build.guard"
 
 
 def _journal_invalid(message: str, **details: Any) -> BackendError:
@@ -95,6 +103,85 @@ class AtomicJournal:
         return _atomic_write_json(self.path, payload)
 
 
+@contextmanager
+def _workspace_guard(path: Path):
+    """Serialize lease transitions with an OS-level advisory file lock."""
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    flags = os.O_CREAT | os.O_RDWR | getattr(os, "O_BINARY", 0)
+    fd = os.open(str(path), flags, 0o600)
+    try:
+        if os.name == "nt":
+            os.ftruncate(fd, max(1, os.fstat(fd).st_size))
+            while True:
+                os.lseek(fd, 0, os.SEEK_SET)
+                try:
+                    msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+                    break
+                except OSError:
+                    time.sleep(0.01)
+        else:
+            fcntl.flock(fd, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            if os.name == "nt":
+                try:
+                    os.lseek(fd, 0, os.SEEK_SET)
+                    msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+                except OSError:
+                    pass
+            else:
+                fcntl.flock(fd, fcntl.LOCK_UN)
+    finally:
+        os.close(fd)
+
+
+def _remove_matching_lock(lock_path: Path, expected_token: str) -> bool:
+    """Remove only the lock file whose token was verified by the caller.
+
+    Renaming to a same-directory temporary name closes the path-based delete
+    race: a replacement that is already visible at ``lock_path`` is moved to
+    the tombstone and rejected by token, while a replacement created after the
+    rename remains at the original path.
+    """
+
+    tombstone = lock_path.with_name(f".{lock_path.name}.{uuid.uuid4().hex}.pending")
+    try:
+        os.replace(lock_path, tombstone)
+    except FileNotFoundError:
+        return False
+    except OSError:
+        return False
+
+    matched = False
+    try:
+        try:
+            metadata = _read_lock_metadata(tombstone)
+        except (OSError, BackendError, json.JSONDecodeError):
+            return False
+        matched = metadata["token"] == expected_token
+        return matched
+    finally:
+        if matched:
+            try:
+                tombstone.unlink()
+            except FileNotFoundError:
+                pass
+        else:
+            try:
+                os.replace(tombstone, lock_path)
+            except FileNotFoundError:
+                pass
+            except FileExistsError:
+                # A cooperating contender has installed a new owner. Keep it
+                # intact; the temporary candidate is no longer a live lock.
+                try:
+                    tombstone.unlink()
+                except FileNotFoundError:
+                    pass
+
+
 class WorkspaceBuildLease:
     """Cross-process build lease backed by an exclusive lock file."""
 
@@ -104,6 +191,7 @@ class WorkspaceBuildLease:
         self.token = token
         self.journal_path = Path(journal_path)
         self.lock_path = self.workspace_root / ".pscad-mcp" / "lcc-build.lock"
+        self.guard_path = self.lock_path.with_name(_GUARD_FILENAME)
 
     @classmethod
     def acquire(cls, workspace_root: str | Path, build_id: str) -> "WorkspaceBuildLease":
@@ -120,60 +208,52 @@ class WorkspaceBuildLease:
             "journal_path": str(journal_path),
         }
 
-        while True:
-            try:
-                fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-            except FileExistsError:
-                existing = _read_lock_metadata(lock_path)
-                if _pid_is_live(existing["pid"]):
-                    raise _build_conflict(
-                        "Another LCC build owns the workspace lock.",
-                        build_id=existing["build_id"],
-                        pid=existing["pid"],
-                        journal_path=existing["journal_path"],
-                    )
-                _mark_interrupted(existing)
+        with _workspace_guard(lock_path.parent / _GUARD_FILENAME):
+            while True:
                 try:
-                    lock_path.unlink()
-                except FileNotFoundError:
-                    pass
-                continue
+                    fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                except FileExistsError:
+                    existing = _read_lock_metadata(lock_path)
+                    if _pid_is_live(existing["pid"]):
+                        raise _build_conflict(
+                            "Another LCC build owns the workspace lock.",
+                            build_id=existing["build_id"],
+                            pid=existing["pid"],
+                            journal_path=existing["journal_path"],
+                        )
+                    _mark_interrupted(existing)
+                    _remove_matching_lock(lock_path, existing["token"])
+                    continue
 
-            try:
-                with os.fdopen(fd, "w", encoding="utf-8") as stream:
-                    json.dump(metadata, stream, ensure_ascii=True, sort_keys=True, indent=2, allow_nan=False)
-                    stream.write("\n")
-                    stream.flush()
-                    os.fsync(stream.fileno())
-            except Exception:
                 try:
-                    os.close(fd)
-                except OSError:
-                    pass
-                try:
-                    lock_path.unlink()
-                except OSError:
-                    pass
-                raise
-            return cls(root, build_id, token, journal_path)
+                    with os.fdopen(fd, "w", encoding="utf-8") as stream:
+                        json.dump(metadata, stream, ensure_ascii=True, sort_keys=True, indent=2, allow_nan=False)
+                        stream.write("\n")
+                        stream.flush()
+                        os.fsync(stream.fileno())
+                except Exception:
+                    try:
+                        os.close(fd)
+                    except OSError:
+                        pass
+                    try:
+                        lock_path.unlink()
+                    except OSError:
+                        pass
+                    raise
+                return cls(root, build_id, token, journal_path)
 
     def release(self, token: str | None = None) -> bool:
         expected_token = self.token if token is None else token
-        try:
-            original_text = self.lock_path.read_text(encoding="utf-8")
-            metadata = _validate_lock_metadata(json.loads(original_text), self.lock_path)
-        except (OSError, json.JSONDecodeError, BackendError):
-            return False
-
-        if metadata["token"] != expected_token:
-            return False
-        try:
-            if self.lock_path.read_text(encoding="utf-8") != original_text:
+        with _workspace_guard(self.guard_path):
+            try:
+                metadata = _read_lock_metadata(self.lock_path)
+            except (OSError, json.JSONDecodeError, BackendError):
                 return False
-            self.lock_path.unlink()
-        except FileNotFoundError:
-            return False
-        return True
+
+            if metadata["token"] != expected_token:
+                return False
+            return _remove_matching_lock(self.lock_path, expected_token)
 
 
 def _read_lock_metadata(lock_path: Path) -> dict[str, Any]:

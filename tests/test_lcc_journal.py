@@ -175,3 +175,65 @@ def test_workspace_build_lease_release_with_mismatched_token_does_not_remove_ano
 
     assert lease.release() is True
     assert not lock_path.exists()
+
+
+def test_workspace_build_lease_release_preserves_lock_replaced_after_owner_validation(tmp_path, monkeypatch):
+    lease = WorkspaceBuildLease.acquire(tmp_path, "build-1")
+    lock_path = tmp_path / ".pscad-mcp" / "lcc-build.lock"
+    replacement = {
+        "build_id": "replacement-build",
+        "pid": os.getpid(),
+        "token": "replacement-token",
+        "created_at_utc": "2026-08-19T00:00:00Z",
+        "journal_path": str(AtomicJournal(tmp_path, "replacement-build").path),
+    }
+    original_remove = journal_module._remove_matching_lock
+
+    def replace_before_conditional_remove(path, expected_token):
+        replacement_path = path.with_name("lcc-build.lock.replacement")
+        replacement_path.write_text(json.dumps(replacement), encoding="utf-8")
+        os.replace(replacement_path, path)
+        return original_remove(path, expected_token)
+
+    monkeypatch.setattr(journal_module, "_remove_matching_lock", replace_before_conditional_remove)
+
+    assert lease.release() is False
+    assert _read_json(lock_path)["token"] == "replacement-token"
+
+
+def test_workspace_build_lease_stale_recovery_preserves_lock_replaced_before_removal(tmp_path, monkeypatch):
+    old_journal = AtomicJournal(tmp_path, "old-build")
+    old_path = old_journal.write({"build_id": "old-build", "state": "components_placed"})
+    lock_path = tmp_path / ".pscad-mcp" / "lcc-build.lock"
+    lock_path.write_text(
+        json.dumps(
+            {
+                "build_id": "old-build",
+                "pid": 987654,
+                "token": "old-token",
+                "created_at_utc": "2026-08-19T00:00:00Z",
+                "journal_path": str(old_path),
+            }
+        ),
+        encoding="utf-8",
+    )
+    replacement = {
+        "build_id": "replacement-build",
+        "pid": os.getpid(),
+        "token": "replacement-token",
+        "created_at_utc": "2026-08-19T00:00:00Z",
+        "journal_path": str(AtomicJournal(tmp_path, "replacement-build").path),
+    }
+    original_remove = journal_module._remove_matching_lock
+
+    def replace_before_conditional_remove(path, expected_token):
+        replacement_path = path.with_name("lcc-build.lock.replacement")
+        replacement_path.write_text(json.dumps(replacement), encoding="utf-8")
+        os.replace(replacement_path, path)
+        return original_remove(path, expected_token)
+
+    monkeypatch.setattr(journal_module, "_remove_matching_lock", replace_before_conditional_remove)
+    monkeypatch.setattr(journal_module.psutil, "pid_exists", lambda pid: pid == os.getpid())
+
+    _assert_backend_code(lambda: WorkspaceBuildLease.acquire(tmp_path, "new-build"), "LCC_BUILD_CONFLICT")
+    assert _read_json(lock_path)["token"] == "replacement-token"
