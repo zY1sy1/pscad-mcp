@@ -229,6 +229,30 @@ def test_validate_project_graph_accepts_exact_blueprint_owned_structure():
     }
 
 
+def test_validate_project_graph_rejects_non_exact_route_vertices():
+    graph = _graph()
+    observed_nets = tuple(
+        replace(net, points=((90, 0), (50, 0), (10, 0)))
+        if net.endpoints == ("bridge:ACY_A", "source:AC")
+        else net
+        for net in graph.nets
+    )
+
+    result = validate_project_graph(replace(graph, nets=observed_nets), _blueprint())
+
+    assert result["valid"] is False
+    route_errors = [error for error in result["errors"] if error["reason"] == "net route mismatch"]
+    assert route_errors == [
+        {
+            "code": "LCC_STRUCTURE_INVALID",
+            "logical_id": "ac_a",
+            "reason": "net route mismatch",
+            "expected": [[10, 0], [90, 0]],
+            "observed": [[90, 0], [50, 0], [10, 0]],
+        }
+    ]
+
+
 @pytest.mark.parametrize(
     ("graph", "reason"),
     [
@@ -301,8 +325,9 @@ def test_validate_project_graph_detects_single_structural_mutations(graph, reaso
     assert result["errors"] == sorted(result["errors"], key=lambda item: (item["code"], item["logical_id"], item["reason"]))
 
 
-def _library_xml(*, missing_valve: bool = False, gate_dimension: int = 12) -> str:
+def _library_xml(*, missing_valve: bool = False, gate_dimension: int = 12, extra_definition: bool = False) -> str:
     valves = "\n".join(f'<valve id="V{index:02d}" />' for index in range(1, 12 if missing_valve else 13))
+    extra = '<definition name="cigre_lcc_v1:Extra" />' if extra_definition else ""
     return f"""<?xml version="1.0" encoding="utf-8"?>
 <pslx>
   <definition name="cigre_lcc_v1:LCC12PulseBridge">
@@ -337,6 +362,7 @@ def _library_xml(*, missing_valve: bool = False, gate_dimension: int = 12) -> st
   </definition>
   <definition name="cigre_lcc_v1:SignalInterface" />
   <definition name="cigre_lcc_v1:Initialization" />
+  {extra}
 </pslx>
 """
 
@@ -348,6 +374,19 @@ def test_validate_companion_library_accepts_required_custom_definitions(tmp_path
     result = validate_companion_library(library)
 
     assert result == {"valid": True, "errors": [], "warnings": []}
+
+
+def test_validate_companion_library_rejects_extra_custom_definition(tmp_path):
+    library = tmp_path / "extra_cigre_lcc_v1.pslx"
+    library.write_text(_library_xml(extra_definition=True), encoding="utf-8")
+
+    result = validate_companion_library(library)
+
+    assert result["valid"] is False
+    assert {
+        error["reason"] for error in result["errors"]
+    } == {"unexpected companion definition"}
+    assert result["errors"][0]["logical_id"] == "cigre_lcc_v1:Extra"
 
 
 def test_validate_companion_library_reports_bridge_internal_contract_failures(tmp_path):

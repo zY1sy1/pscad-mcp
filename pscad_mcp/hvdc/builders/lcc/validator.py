@@ -198,6 +198,19 @@ def _net_route_points(net: LccNetSpec) -> tuple[tuple[int, int], ...]:
     return () if net.route is None else tuple(net.route.vertices)
 
 
+def _observed_route_points(
+    graph: ProjectGraph,
+    net: GraphNet,
+    expected_points: tuple[tuple[int, int], ...],
+) -> tuple[tuple[int, int], ...]:
+    label_locations = {
+        label.location
+        for label in graph.labels
+        if label.location is not None and _matches_namespace(net.kind, label.kind)
+    }
+    return tuple(point for point in net.points if point not in label_locations or point in expected_points)
+
+
 def _port_kind(endpoint: str, components: Mapping[str, GraphComponent]) -> str | None:
     component_id, _, port_name = endpoint.partition(":")
     component = components.get(component_id)
@@ -239,14 +252,15 @@ def _compare_nets(
                 errors.append(_finding(expected_net.logical_id, "missing net", expected_net.to_dict(), None))
             continue
 
-        expected_points = set(_net_route_points(expected_net))
-        if expected_points and not expected_points <= set(observed_net.points):
+        expected_points = _net_route_points(expected_net)
+        observed_points = _observed_route_points(graph, observed_net, expected_points)
+        if expected_points and observed_points != expected_points:
             errors.append(
                 _finding(
                     expected_net.logical_id,
                     "net route mismatch",
-                    sorted(expected_points),
-                    sorted(observed_net.points),
+                    expected_points,
+                    observed_points,
                 )
             )
         if expected_net.label is not None and expected_net.label not in observed_net.labels:
@@ -480,6 +494,19 @@ def validate_companion_library(
         return {"valid": False, "errors": sorted_errors, "warnings": []}
 
     definitions = _definition_map(root)
+    expected_definition_names = set(_REQUIRED_DEFINITION_PORTS)
+    observed_custom_definition_names = {
+        name for name in definitions if name.startswith("cigre_lcc_v1:")
+    }
+    for definition_name in sorted(observed_custom_definition_names - expected_definition_names):
+        errors.append(
+            _finding(
+                definition_name,
+                "unexpected companion definition",
+                sorted(expected_definition_names),
+                sorted(observed_custom_definition_names),
+            )
+        )
     for definition_name in _REQUIRED_DEFINITION_PORTS:
         _check_definition_ports(definition_name, definitions.get(definition_name), errors)
     _check_bridge_internal(definitions.get("cigre_lcc_v1:LCC12PulseBridge"), errors)
