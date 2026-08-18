@@ -310,37 +310,47 @@ def test_counts_are_exact_and_empty_marker_allowlist_clears_all(tmp_path):
 def test_prune_deterministically_caps_mixed_event_types(tmp_path):
     database = tmp_path / "learning.sqlite3"
     store = LearningStore(database)
-    store.record_invocation(_invocation("2026-08-19T00:00:00+00:00"))
-    store.record_goal_failure(
+    target_time = "2026-08-19T00:00:00+00:00"
+    later_time = "2026-08-19T00:01:00+00:00"
+    later_failure = store.record_goal_failure(
         GoalFailureEvent(
-            occurred_at="2026-08-19T00:01:00+00:00",
+            occurred_at=later_time,
             session_id="session-a",
             failure_kind=GoalFailureKind.RECOVERY_FAILED,
             primary_tool="run_project",
             correlated_invocation_id=None,
         )
     )
-    store.record_invocation(_invocation("2026-08-19T00:02:00+00:00"))
-    store.record_goal_failure(
+    first_invocation = store.record_invocation(_invocation(target_time))
+    target_failure = store.record_goal_failure(
         GoalFailureEvent(
-            occurred_at="2026-08-19T00:03:00+00:00",
+            occurred_at=target_time,
             session_id="session-a",
             failure_kind=GoalFailureKind.RECOVERY_FAILED,
             primary_tool="run_project",
             correlated_invocation_id=None,
         )
     )
+    second_invocation = store.record_invocation(_invocation(target_time))
     assert store.prune(
         now=datetime(2026, 8, 19, 1, 0, tzinfo=timezone.utc),
         retention_days=90,
         max_events=2,
     ) is True
-    assert [row.occurred_at for row in store.load_invocations("2020-01-01T00:00:00+00:00")] == [
-        "2026-08-19T00:02:00+00:00",
+    assert [
+        (row.event_id, row.occurred_at)
+        for row in store.load_invocations("2020-01-01T00:00:00+00:00")
+    ] == [
+        (second_invocation, target_time),
     ]
-    assert [row.occurred_at for row in store.load_goal_failures("2020-01-01T00:00:00+00:00")] == [
-        "2026-08-19T00:03:00+00:00",
+    assert [
+        (row.event_id, row.occurred_at)
+        for row in store.load_goal_failures("2020-01-01T00:00:00+00:00")
+    ] == [
+        (later_failure, later_time),
     ]
+    assert first_invocation != second_invocation
+    assert target_failure != later_failure
     store.close()
 
 
@@ -365,6 +375,7 @@ def test_clear_history_preserves_metadata_and_vacuums_after_commit(tmp_path):
     finally:
         connection.close()
     assert metadata_before["schema_version"] == "1"
+    assert metadata_before["created_at"].endswith("+00:00")
     assert metadata_before["last_retention_pass"].startswith("2026-08-19T")
     assert page_count_before > 1
 
@@ -386,6 +397,7 @@ def test_clear_history_preserves_metadata_and_vacuums_after_commit(tmp_path):
     finally:
         connection.close()
     assert metadata_after["schema_version"] == metadata_before["schema_version"]
+    assert metadata_after["created_at"] == metadata_before["created_at"]
     assert metadata_after["last_retention_pass"] == metadata_before["last_retention_pass"]
     assert freelist_count == 0
     assert integrity == "ok"
