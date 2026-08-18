@@ -3,9 +3,10 @@ import logging
 import pytest
 
 from pscad_mcp.core.backend.base import BackendError
+from pscad_mcp.core.service import ConfirmationRequired
 from pscad_mcp.learning.config import LearningConfig
 from pscad_mcp.learning.models import GoalFailureKind, InvocationOutcome
-from pscad_mcp.learning.service import LearningRuntime
+from pscad_mcp.learning.service import LearningRuntime, LearningService
 
 
 def _config(tmp_path, enabled=True):
@@ -213,3 +214,35 @@ def test_review_marks_returned_candidates_and_clear_requires_confirmation(tmp_pa
         "cleared": True,
         "learning_enabled": True,
     }
+
+
+def test_learning_service_clear_requires_confirmation(tmp_path):
+    service = LearningService(_config(tmp_path))
+    with pytest.raises(ConfirmationRequired) as raised:
+        service.clear(confirm=False)
+    assert raised.value.code == "CONFIRMATION_REQUIRED"
+
+
+def test_learning_service_clear_returns_bounded_result(tmp_path):
+    service = LearningService(_config(tmp_path))
+    assert service.clear(confirm=True) == {
+        "cleared": True,
+        "learning_enabled": True,
+    }
+
+
+def test_unavailable_runtime_clear_keeps_bounded_error(tmp_path):
+    invalid = LearningConfig(
+        enabled=True,
+        database_path=tmp_path / "SECRET_PATH" / "learning.sqlite3",
+        backlog_path=tmp_path / "SECRET_PATH" / "backlog.md",
+        retention_days=90,
+        max_events=20_000,
+        issue="PSCAD_MCP_LEARNING_DB",
+    )
+    runtime = LearningRuntime(config_loader=lambda: invalid)
+    with pytest.raises(BackendError) as raised:
+        runtime.clear(confirm=True)
+    assert raised.value.code == "LEARNING_UNAVAILABLE"
+    assert raised.value.details == {"setting": "PSCAD_MCP_LEARNING_DB"}
+    assert "SECRET_PATH" not in str(raised.value)

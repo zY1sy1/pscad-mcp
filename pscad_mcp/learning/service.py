@@ -470,13 +470,16 @@ class LearningService:
                 "candidates": [candidate.public_dict() for candidate in bounded],
             }
 
-    def clear(self, *, confirm: bool) -> bool:
+    def clear(self, *, confirm: bool) -> dict[str, object]:
         with self._lock:
             if not confirm:
                 raise ConfirmationRequired("clear_learning_history")
             self._store.clear_history()
             self._render_candidates(self._now(), candidates=[])
-            return True
+            return {
+                "cleared": True,
+                "learning_enabled": True,
+            }
 
 
 class LearningRuntime:
@@ -707,7 +710,7 @@ class LearningRuntime:
                 }
             raise self._unavailable_error("clear_learning_history")
         try:
-            cleared = service.clear(confirm=True)
+            return service.clear(confirm=True)
         except BackendError:
             raise
         except Exception as error:
@@ -715,10 +718,6 @@ class LearningRuntime:
                 self._unavailable = True
                 self._log_runtime_fault(error)
             raise self._unavailable_error("clear_learning_history") from None
-        return {
-            "cleared": bool(cleared),
-            "learning_enabled": True,
-        }
 
 
 learning_runtime = LearningRuntime()
