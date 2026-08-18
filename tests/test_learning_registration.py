@@ -1,7 +1,12 @@
+from __future__ import annotations
+
+import math
 from unittest.mock import patch
+from typing import Any
 
 import pytest
 from mcp.server.fastmcp import FastMCP
+from mcp.types import CallToolResult
 
 from pscad_mcp.core.backend.base import BackendError
 from pscad_mcp.core.service import PscadService
@@ -161,6 +166,69 @@ async def test_record_learning_false_skips_names_snapshots_and_events():
     assert recorder.names == []
     assert recorder.events == []
     snapshot.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_unwrapped_result_with_result_key_is_preserved():
+    result_object = {"result": "original", "value": "kept"}
+
+    async def sample() -> dict[str, Any]:
+        return result_object
+
+    server = FastMCP("test")
+    register_tool(server, sample, record_learning=False)
+    tool = server._tool_manager._tools["sample"]
+    assert tool.fn_metadata.output_schema is not None
+    assert tool.fn_metadata.wrap_output is False
+    _, structured = await server._tool_manager.call_tool(
+        "sample", {}, convert_result=True
+    )
+    assert structured is result_object
+    assert structured == result_object
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+@pytest.mark.asyncio
+async def test_nonfinite_float_is_not_reinserted_into_structured_result(value):
+    result_object = {"value": value}
+
+    async def sample() -> dict[str, float]:
+        return result_object
+
+    server = FastMCP("test")
+    register_tool(server, sample, record_learning=False)
+    _, structured = await server._tool_manager.call_tool(
+        "sample", {}, convert_result=True
+    )
+    assert structured["result"] is not result_object
+    converted_value = structured["result"]["value"]
+    if isinstance(converted_value, float):
+        assert not math.isfinite(converted_value)
+
+
+@pytest.mark.asyncio
+async def test_future_annotations_and_call_tool_result_register_cleanly():
+    future_result = {"status": "ready"}
+    call_result = CallToolResult(content=[], structuredContent={"ok": True})
+
+    async def future_annotated() -> dict[str, str]:
+        return future_result
+
+    async def call_result_tool() -> CallToolResult:
+        return call_result
+
+    server = FastMCP("annotation-test")
+    register_tool(server, future_annotated, record_learning=False)
+    register_tool(server, call_result_tool, record_learning=False)
+
+    _, structured = await server._tool_manager.call_tool(
+        "future_annotated", {}, convert_result=True
+    )
+    assert structured["result"] is future_result
+    returned = await server._tool_manager.call_tool(
+        "call_result_tool", {}, convert_result=True
+    )
+    assert returned is call_result
 
 
 def test_learning_snapshot_never_creates_or_heartbeats_backend():

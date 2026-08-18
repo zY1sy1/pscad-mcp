@@ -6,12 +6,14 @@ from collections.abc import Awaitable, Callable, Mapping
 from functools import wraps
 import inspect
 import logging
+import math
 import re
 import threading
 import time
-from typing import Any, ParamSpec, TypeVar, Union
+from typing import Any, ParamSpec, TypeVar, Union, get_type_hints
 
 from mcp.server.fastmcp import FastMCP
+from mcp.types import CallToolResult
 
 from ..core.connection_manager import pscad_manager
 from ..learning.models import InvocationOutcome
@@ -109,8 +111,10 @@ def _outcome_metadata(
 
 
 def _is_json_safe(value: Any, seen: set[int] | None = None) -> bool:
-    if value is None or isinstance(value, (str, int, float, bool)):
+    if value is None or isinstance(value, (str, int, bool)):
         return True
+    if isinstance(value, float):
+        return math.isfinite(value)
     seen = set() if seen is None else seen
     value_id = id(value)
     if value_id in seen:
@@ -144,19 +148,41 @@ def _register_with_original_result(mcp: FastMCP, guarded: Callable[..., Any]) ->
     def preserve_result(result: Any) -> Any:
         converted = convert_result(result)
         if (
-            isinstance(converted, tuple)
+            tool.fn_metadata.output_schema is not None
+            and isinstance(converted, tuple)
             and len(converted) == 2
-            and isinstance(converted[1], dict)
-            and "result" in converted[1]
             and _is_json_safe(result)
         ):
             unstructured, structured = converted
-            structured = dict(structured)
-            structured["result"] = result
+            if tool.fn_metadata.wrap_output:
+                structured = dict(structured)
+                structured["result"] = result
+            else:
+                structured = result
             return unstructured, structured
         return converted
 
     object.__setattr__(tool.fn_metadata, "convert_result", preserve_result)
+
+
+def _resolved_return_annotation(
+    function: Callable[..., Any],
+    signature: inspect.Signature,
+) -> Any:
+    annotation = signature.return_annotation
+    if annotation is inspect.Signature.empty:
+        return Any
+    try:
+        return get_type_hints(function, include_extras=True).get(
+            "return",
+            annotation,
+        )
+    except Exception:
+        return annotation
+
+
+def _is_call_tool_result(annotation: Any) -> bool:
+    return isinstance(annotation, type) and issubclass(annotation, CallToolResult)
 
 
 def register_tool(
@@ -222,10 +248,12 @@ def register_tool(
         return result
 
     signature = inspect.signature(function)
-    return_annotation = signature.return_annotation
-    if return_annotation is inspect.Signature.empty:
-        return_annotation = Any
-    error_aware_return = Union[return_annotation, dict[str, Any]]
+    return_annotation = _resolved_return_annotation(function, signature)
+    error_aware_return = (
+        return_annotation
+        if _is_call_tool_result(return_annotation)
+        else Union[return_annotation, dict[str, Any]]
+    )
     guarded.__signature__ = signature.replace(
         return_annotation=error_aware_return
     )
