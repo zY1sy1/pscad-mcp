@@ -252,6 +252,17 @@ def _observed_route_points(
     net: GraphNet,
     expected_points: tuple[tuple[int, int], ...],
 ) -> tuple[tuple[int, int], ...]:
+    net_points = set(net.points)
+    wire_points = tuple(
+        point
+        for wire in graph.wires
+        if wire.kind == net.kind and net_points.intersection(wire.vertices)
+        for point in wire.vertices
+    )
+    if wire_points:
+        return wire_points
+
+    # Synthetic GraphNet-only fixtures may include label coordinates in points.
     label_locations = {
         label.location
         for label in graph.labels
@@ -463,16 +474,16 @@ def _check_definition_ports(definition_name: str, definition: ET.Element | None,
     for port_name, records in sorted(observed_ports.items()):
         if len(records) > 1:
             errors.append(_finding(f"{definition_name}:{port_name}", "duplicate external port", 1, len(records)))
-    gate_records = observed_ports.get("GATES", ())
-    if gate_records and _int_attr(gate_records[0], ("dimension", "dim")) != 12:
-        errors.append(
-            _finding(
-                f"{definition_name}:GATES",
-                "external gate dimension mismatch",
-                12,
-                _attr(gate_records[0], "dimension", "dim"),
+    for gate in observed_ports.get("GATES", ()):
+        if _int_attr(gate, ("dimension", "dim")) != 12:
+            errors.append(
+                _finding(
+                    f"{definition_name}:GATES",
+                    "external gate dimension mismatch",
+                    12,
+                    _attr(gate, "dimension", "dim"),
+                )
             )
-        )
 
 
 def _bridge_group_count(definition: ET.Element) -> int:
@@ -516,8 +527,16 @@ def _gate_interface_dimension(definition: ET.Element) -> int | None:
 
 def _ac_groups_separated(definition: ET.Element) -> bool:
     ports = _ports(definition)
-    y_groups = {_text(_attr(ports[name][0], "group")).casefold() for name in ("ACY_A", "ACY_B", "ACY_C") if name in ports}
-    d_groups = {_text(_attr(ports[name][0], "group")).casefold() for name in ("ACD_A", "ACD_B", "ACD_C") if name in ports}
+    y_groups = {
+        _text(_attr(port, "group")).casefold()
+        for name in ("ACY_A", "ACY_B", "ACY_C")
+        for port in ports.get(name, ())
+    }
+    d_groups = {
+        _text(_attr(port, "group")).casefold()
+        for name in ("ACD_A", "ACD_B", "ACD_C")
+        for port in ports.get(name, ())
+    }
     if not y_groups or not d_groups:
         return False
     return y_groups.isdisjoint(d_groups)
@@ -579,9 +598,14 @@ def validate_companion_library(
         )
     for definition_name in _REQUIRED_DEFINITION_PORTS:
         records = definitions.get(definition_name, ())
-        _check_definition_ports(definition_name, records[0] if records else None, errors)
+        if not records:
+            _check_definition_ports(definition_name, None, errors)
+        else:
+            for definition in records:
+                _check_definition_ports(definition_name, definition, errors)
     bridge_records = definitions.get("cigre_lcc_v1:LCC12PulseBridge", ())
-    _check_bridge_internal(bridge_records[0] if bridge_records else None, errors)
+    for definition in bridge_records:
+        _check_bridge_internal(definition, errors)
 
     sorted_errors = _sort_findings(errors)
     result = {"valid": not sorted_errors, "errors": sorted_errors, "warnings": []}

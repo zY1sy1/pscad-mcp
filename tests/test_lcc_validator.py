@@ -10,6 +10,7 @@ from pscad_mcp.hvdc.builders.lcc.project_graph import (
     GraphLabel,
     GraphNet,
     GraphPort,
+    GraphWire,
     ProjectGraph,
 )
 from pscad_mcp.hvdc.builders.lcc.schema import parse_blueprint
@@ -253,6 +254,36 @@ def test_validate_project_graph_rejects_non_exact_route_vertices():
     ]
 
 
+def test_validate_project_graph_does_not_filter_wire_vertex_at_electrical_label():
+    graph = _graph()
+    detour = ((10, 0), (50, 0), (90, 0))
+    observed_nets = tuple(
+        replace(net, points=detour)
+        if net.endpoints == ("bridge:ACY_A", "source:AC")
+        else net
+        for net in graph.nets
+    )
+    labels = graph.labels + (GraphLabel("WIRE_LABEL", "electrical", (50, 0)),)
+    wires = (GraphWire("electrical", detour),)
+
+    result = validate_project_graph(
+        replace(graph, labels=labels, nets=observed_nets, wires=wires),
+        _blueprint(),
+    )
+
+    assert result["valid"] is False
+    route_errors = [error for error in result["errors"] if error["reason"] == "net route mismatch"]
+    assert route_errors == [
+        {
+            "code": "LCC_STRUCTURE_INVALID",
+            "logical_id": "ac_a",
+            "reason": "net route mismatch",
+            "expected": [[10, 0], [90, 0]],
+            "observed": [[10, 0], [50, 0], [90, 0]],
+        }
+    ]
+
+
 def test_validate_project_graph_rejects_extra_observed_component_parameter():
     graph = _graph()
     observed_components = tuple(
@@ -425,11 +456,13 @@ def _library_xml(
     extra_definition: bool = False,
     duplicate_interface_definition: bool = False,
     duplicate_bridge_dc_pos_port: bool = False,
+    duplicate_bridge_gates_wrong_dimension: bool = False,
 ) -> str:
     valves = "\n".join(f'<valve id="V{index:02d}" />' for index in range(1, 12 if missing_valve else 13))
     extra = '<definition name="cigre_lcc_v1:Extra" />' if extra_definition else ""
     duplicate_interface = '<definition name="cigre_lcc_v1:SignalInterface" />' if duplicate_interface_definition else ""
     duplicate_dc_pos = '<port name="DC_POS" kind="electrical" dimension="1" />' if duplicate_bridge_dc_pos_port else ""
+    duplicate_gates = '<port name="GATES" kind="data" dimension="6" />' if duplicate_bridge_gates_wrong_dimension else ""
     return f"""<?xml version="1.0" encoding="utf-8"?>
 <pslx>
   <definition name="cigre_lcc_v1:LCC12PulseBridge">
@@ -444,6 +477,7 @@ def _library_xml(
       {duplicate_dc_pos}
       <port name="DC_NEG" kind="electrical" dimension="1" />
       <port name="GATES" kind="data" dimension="{gate_dimension}" />
+      {duplicate_gates}
     </external_ports>
     <six_pulse_group name="upper" />
     <six_pulse_group name="lower" />
@@ -527,6 +561,18 @@ def test_validate_companion_library_rejects_duplicate_bridge_external_port(tmp_p
             "observed": 2,
         }
     ]
+
+
+def test_validate_companion_library_checks_malformed_duplicate_external_port(tmp_path):
+    library = tmp_path / "malformed_duplicate_port_cigre_lcc_v1.pslx"
+    library.write_text(_library_xml(duplicate_bridge_gates_wrong_dimension=True), encoding="utf-8")
+
+    result = validate_companion_library(library)
+
+    assert result["valid"] is False
+    assert {
+        error["reason"] for error in result["errors"]
+    } == {"duplicate external port", "external gate dimension mismatch"}
 
 
 def test_validate_companion_library_reports_bridge_internal_contract_failures(tmp_path):
