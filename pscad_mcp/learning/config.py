@@ -141,11 +141,18 @@ class LearningConfig:
         if issue is None:
             issue = max_events_issue
 
-        if (
-            _normalized_path(database_path) == _normalized_path(backlog_path)
-            and issue is None
-        ):
-            issue = "PSCAD_MCP_LEARNING_BACKLOG"
+        try:
+            normalized_database = _normalized_path(database_path)
+        except (OSError, RuntimeError):
+            issue = "PSCAD_MCP_LEARNING_DB"
+        else:
+            try:
+                normalized_backlog = _normalized_path(backlog_path)
+            except (OSError, RuntimeError):
+                issue = "PSCAD_MCP_LEARNING_BACKLOG"
+            else:
+                if normalized_database == normalized_backlog and issue is None:
+                    issue = "PSCAD_MCP_LEARNING_BACKLOG"
 
         return cls(
             enabled=enabled,

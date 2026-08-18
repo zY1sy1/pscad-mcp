@@ -1,3 +1,7 @@
+from pathlib import Path
+
+import pytest
+
 from pscad_mcp.learning.config import LearningConfig
 from pscad_mcp.learning.models import (
     CandidateKind,
@@ -60,6 +64,40 @@ def test_database_and_backlog_cannot_target_the_same_file(tmp_path):
     )
     assert config.available is False
     assert config.issue == "PSCAD_MCP_LEARNING_BACKLOG"
+
+
+@pytest.mark.parametrize(
+    "failing_variable",
+    ("PSCAD_MCP_LEARNING_DB", "PSCAD_MCP_LEARNING_BACKLOG"),
+)
+def test_path_resolution_errors_fail_closed_with_path_setting_name(
+    tmp_path, monkeypatch, failing_variable
+):
+    database = tmp_path / "state" / "custom.sqlite3"
+    backlog = tmp_path / "review" / "custom.md"
+    failing_path = {
+        "PSCAD_MCP_LEARNING_DB": database,
+        "PSCAD_MCP_LEARNING_BACKLOG": backlog,
+    }[failing_variable]
+    original_resolve = Path.resolve
+
+    def fail_for_path(path, strict=False):
+        if path == failing_path:
+            raise OSError("symlink loop")
+        return original_resolve(path, strict=strict)
+
+    monkeypatch.setattr(Path, "resolve", fail_for_path)
+    config = LearningConfig.from_environ(
+        {
+            "PSCAD_MCP_LEARNING_DB": str(database),
+            "PSCAD_MCP_LEARNING_BACKLOG": str(backlog),
+        },
+        home=tmp_path,
+    )
+
+    assert config.enabled is True
+    assert config.available is False
+    assert config.issue == failing_variable
 
 
 def test_absolute_database_and_backlog_overrides_are_preserved(tmp_path):
