@@ -141,6 +141,8 @@ HVDC 事件中的 `time_s` 始终表示 EMTDC 仿真时间，不使用墙钟时�
 内置选择器为：`dc_voltage_breaker`（`kV`）、`dc_current_breaker`（`kA`）、
 `breaker_command_observed`（二值），以及整流侧/逆变侧两极的四个直流电压选择器
 （`pu`）。路径和 legacy call ID 均按明确选择器解析；写操作不会根据别名推断。
+当 v2 场景请求指标时，预检还要求后端提供输出通道元数据，并在任何参数写入前
+核对 path、call ID 和单位；无法检查时返回结构化安全拒绝。
 
 真实验收必须显式设置 `PSCAD_MCP_ACCEPTANCE=1`、
 `PSCAD_MCP_HVDC_SOURCE`、`PSCAD_MCP_HVDC_LIBRARY` 和

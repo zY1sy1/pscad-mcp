@@ -129,8 +129,10 @@ The built-in selector contract is: `dc_voltage_breaker` (`kV`),
 `dc_current_breaker` (`kA`), `breaker_command_observed` (binary),
 `dc_voltage_rectifier_pole1`/`dc_voltage_inverter_pole1` (`pu`), and
 `dc_voltage_rectifier_pole2`/`dc_voltage_inverter_pole2` (`pu`). Selector
-paths and legacy call IDs are resolved exactly; aliases are not inferred for
-write operations.
+ paths and legacy call IDs are resolved exactly; aliases are not inferred for
+ write operations. When a v2 scenario requests metrics, preflight also requires
+ backend output-channel metadata and verifies path, call ID, and units before any
+ parameter write; unavailable inspection is a structured safety rejection.
 
 Opt-in licensed acceptance requires `PSCAD_MCP_ACCEPTANCE=1`,
 `PSCAD_MCP_HVDC_SOURCE`, `PSCAD_MCP_HVDC_LIBRARY`, and

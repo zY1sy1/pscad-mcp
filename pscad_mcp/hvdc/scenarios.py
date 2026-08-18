@@ -15,7 +15,7 @@ from typing import Any
 
 from ..core.backend.base import BackendError
 from ..core.service import ConfirmationRequired
-from .audit import file_evidence, profile_evidence
+from .audit import file_evidence, json_safe, profile_evidence
 from .preflight import preflight_scenario
 from .profiles import load_profile
 
@@ -329,9 +329,17 @@ def _update_audit_runtime(service: Any, record: dict[str, Any]) -> None:
         "name": getattr(backend, "name", None),
         "version": getattr(backend, "version", None),
     }
+    audit["run"] = json_safe(record.get("run", {}))
+    audit["result_bindings"] = json_safe([dict(item) for item in record.get("resolved_channels", []) if isinstance(item, Mapping)])
+    audit["metrics"] = json_safe([dict(item) for item in record.get("metrics", []) if isinstance(item, Mapping)])
+    merged_warnings = list(audit.get("warnings", []))
+    for warning in record.get("warnings", []):
+        if warning not in merged_warnings:
+            merged_warnings.append(deepcopy(warning))
+    audit["warnings"] = json_safe(merged_warnings)
     preflight = record.get("preflight")
     if isinstance(preflight, Mapping):
-        audit["resolved_bindings"] = [dict(item) for item in preflight.get("resolved_commands", [])]
+        audit["resolved_bindings"] = json_safe([dict(item) for item in preflight.get("resolved_commands", [])])
 
 
 async def _wait_for_project_terminal(backend: Any, target_project: str) -> dict[str, Any] | None:
@@ -437,7 +445,7 @@ async def _capture_outputs(service: Any, record: dict[str, Any]) -> None:
             try:
                 final = file_evidence(str(original["path"]))
                 audit[f"{label}_final"] = final
-                if final.get("sha256") != original.get("sha256"):
+                if label == "source" and final.get("sha256") != original.get("sha256"):
                     audit["complete"] = False
                     audit.setdefault("warnings", []).append(
                         {"code": "HVDC_AUDIT_SOURCE_CHANGED", "scope": label, "path": original["path"]}
@@ -897,6 +905,7 @@ async def run_scenario(
         "complete": True,
         "profile": profile_evidence(str(normalized["profile"]), profile_data),
         "preflight": dict(preflight),
+        "run": deepcopy(normalized.get("run", {})),
     }
     for label, candidate in (("source", project_name), ("derived", target_project)):
         try:
@@ -925,6 +934,7 @@ async def run_scenario(
         "changed_parameters": list(normalized.get("parameter_changes", [])),
         "events": list(normalized.get("events", [])),
         "analysis": analysis,
+        "run": deepcopy(normalized.get("run", {})),
         "recovery_baselines": recovery_baselines,
         "output_files": explicit_outputs,
         "output_discovery": "pending",

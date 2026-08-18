@@ -12,6 +12,8 @@ import shutil
 
 import pytest
 
+from pscad_mcp.core.backend.base import BackendError
+
 
 _REQUIRED_ENV = (
     "PSCAD_MCP_HVDC_SOURCE",
@@ -55,6 +57,58 @@ def _workspace_profile(workspace: Path) -> tuple[str, dict] | None:
         if payload.get("profile_version") == 2 and isinstance(bindings, list) and len(bindings) == 1:
             candidates.append((path.stem, payload))
     return candidates[0] if len(candidates) == 1 else None
+
+
+async def _wait_for_terminal(service, scenario_id: str):
+    for _ in range(600):
+        terminal = await service.scenario_status(scenario_id)
+        if terminal["status"] in {"completed", "failed", "timed_out"}:
+            return terminal
+        await asyncio.sleep(0.05)
+    raise AssertionError("scenario did not reach a terminal state")
+
+
+async def _run_external_event(service, source_project: str, scenario: dict, capabilities: dict) -> dict:
+    strict = capabilities.get("native_schedule") is True or capabilities.get("simulation_clock") is True
+    if not strict:
+        try:
+            await service.run_scenario(source_project, scenario, confirm=True)
+        except BackendError as error:
+            if error.code not in {"HVDC_TIMED_CONTROL_UNAVAILABLE", "HVDC_MAPPING_MISSING"}:
+                raise
+            return {"outcome": "safe_rejection", "code": error.code}
+        raise AssertionError("external event was accepted without strict timing or an explicit binding")
+
+    started = await service.run_scenario(source_project, scenario, confirm=True)
+    terminal = await _wait_for_terminal(service, started["scenario_id"])
+    assert terminal["status"] == "completed", terminal
+    applied_events = terminal.get("partial_completion", {}).get("applied_events", [])
+    assert any(float(item.get("requested_time_s")) == float(scenario["events"][0]["time_s"]) for item in applied_events)
+    return {"outcome": "completed", "scenario": terminal}
+
+
+def test_external_acceptance_helper_requires_safe_rejection_without_capability():
+    class Service:
+        async def run_scenario(self, project_name, scenario, confirm=False):
+            raise BackendError("HVDC_TIMED_CONTROL_UNAVAILABLE", "unsupported", "test", "run")
+
+    result = asyncio.run(_run_external_event(Service(), "source", {"events": [{"time_s": 1.0}]}, {}))
+    assert result == {"outcome": "safe_rejection", "code": "HVDC_TIMED_CONTROL_UNAVAILABLE"}
+
+
+def test_external_acceptance_helper_waits_for_completed_event():
+    class Service:
+        async def run_scenario(self, project_name, scenario, confirm=False):
+            return {"scenario_id": "hvdc-1"}
+
+        async def scenario_status(self, scenario_id):
+            return {
+                "status": "completed",
+                "partial_completion": {"applied_events": [{"requested_time_s": 1.0}]},
+            }
+
+    result = asyncio.run(_run_external_event(Service(), "source", {"events": [{"time_s": 1.0}]}, {"simulation_clock": True}))
+    assert result["outcome"] == "completed"
 
 
 @pytest.mark.skipif(
@@ -127,15 +181,7 @@ def test_real_hvdc_acceptance_preserves_sources_and_fails_closed_without_capabil
         }
         started = asyncio.run(service.run_scenario(str(derived), baseline, confirm=True))
 
-        async def wait_terminal():
-            for _ in range(600):
-                terminal = await service.scenario_status(started["scenario_id"])
-                if terminal["status"] in {"completed", "failed", "timed_out"}:
-                    return terminal
-                await asyncio.sleep(0.05)
-            raise AssertionError("baseline did not reach a terminal PSCAD state")
-
-        terminal = asyncio.run(wait_terminal())
+        terminal = asyncio.run(_wait_for_terminal(service, started["scenario_id"]))
         assert terminal["status"] == "completed", terminal
 
         from pscad_mcp.hvdc.profiles import load_profile
@@ -157,8 +203,6 @@ def test_real_hvdc_acceptance_preserves_sources_and_fails_closed_without_capabil
         if candidate is not None:
             profile_name, profile_payload = candidate
             capabilities = asyncio.run(backend.get_timed_control_capabilities(str(derived)))
-            if not (capabilities.get("native_schedule") is True or capabilities.get("simulation_clock") is True):
-                pytest.fail("strict timing capability was unavailable without a safe rejection")
             event = {
                 "name": "external-trip",
                 "profile": profile_name,
@@ -167,12 +211,17 @@ def test_real_hvdc_acceptance_preserves_sources_and_fails_closed_without_capabil
                 "parameter_changes": [],
                 "events": [{"time_s": 1.0, "target": profile_payload["command_bindings"][0]["canonical"], "value": profile_payload["command_bindings"][0]["allowed_values"][-1]}],
             }
-            try:
-                asyncio.run(service.run_scenario(str(copied_source), event, confirm=True))
-            except Exception as error:
-                code = getattr(error, "code", None)
-                assert code in {"HVDC_TIMED_CONTROL_UNAVAILABLE", "HVDC_MAPPING_MISSING"}
-                print(f"HVDC_ACCEPTANCE_SAFE_REJECTION={code}")
+            result = asyncio.run(_run_external_event(service, str(copied_source), event, capabilities))
+            if result["outcome"] == "safe_rejection":
+                print(f"HVDC_ACCEPTANCE_SAFE_REJECTION={result['code']}")
+            else:
+                event_record = result["scenario"]["partial_completion"]["applied_events"][-1]
+                print(
+                    "HVDC_ACCEPTANCE_EVENT="
+                    f"requested={event_record['requested_time_s']};"
+                    f"observed={event_record.get('observed_time_s')};"
+                    f"error={event_record.get('timing_error_s')}"
+                )
         else:
             print("HVDC_ACCEPTANCE_SAFE_REJECTION=HVDC_MAPPING_MISSING")
     except BaseException as error:

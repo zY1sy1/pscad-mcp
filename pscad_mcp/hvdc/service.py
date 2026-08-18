@@ -545,6 +545,8 @@ class HvdcDomainService:
         record["metrics"] = result["metrics"]
         record["verdict"] = result["verdict"]
         record.setdefault("warnings", []).extend(result["warnings"])
+        from .scenarios import _update_audit_runtime
+        _update_audit_runtime(self, record)
         return {
             "scenario_id": scenario_id,
             "resolved_channels": list(record["resolved_channels"]),

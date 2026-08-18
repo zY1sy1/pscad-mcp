@@ -94,6 +94,86 @@ def required_result_selectors(profile: Mapping[str, Any], requested_metrics: Seq
     return [dict(selector) for selector in selectors if isinstance(selector, Mapping) and selector.get("canonical") in needed]
 
 
+async def verify_required_result_selectors(
+    backend: Any,
+    project_name: str,
+    profile: Mapping[str, Any],
+    requested_metrics: Sequence[str],
+) -> dict[str, Any]:
+    """Verify requested v2 selectors against backend-provided output metadata."""
+
+    required = required_result_selectors(profile, requested_metrics)
+    if profile.get("profile_version", 1) != 2 or not required:
+        return {"verified": True, "required": []}
+
+    provider = next(
+        (
+            getattr(backend, name, None)
+            for name in ("get_output_channels", "inspect_output_channels", "get_project_output_channels")
+            if callable(getattr(backend, name, None))
+        ),
+        None,
+    )
+    if provider is None:
+        raise _error(
+            "HVDC_CAPABILITY_UNAVAILABLE",
+            "The backend cannot inspect output channel metadata before a scenario run.",
+            project_name=project_name,
+            reason="output_channel_inspection_unavailable",
+        )
+    try:
+        observed = await provider(project_name)
+    except BackendError:
+        raise
+    except Exception as error:
+        raise _error(
+            "HVDC_CAPABILITY_UNAVAILABLE",
+            f"Output channel inspection failed: {error}",
+            project_name=project_name,
+            reason="output_channel_inspection_failed",
+        ) from error
+    if isinstance(observed, Mapping):
+        observed = observed.get("channels", observed.get("output_channels", []))
+    if not isinstance(observed, (list, tuple)):
+        raise _error(
+            "HVDC_CAPABILITY_UNAVAILABLE",
+            "Output channel inspection returned an invalid channel collection.",
+            project_name=project_name,
+            reason="output_channel_inspection_invalid",
+        )
+
+    normalized = [dict(item) for item in observed if isinstance(item, Mapping)]
+    matches: list[dict[str, Any]] = []
+    missing: list[dict[str, Any]] = []
+    for selector in required:
+        selector_path = str(selector.get("path", "")).casefold()
+        candidates = [
+            item
+            for item in normalized
+            if str(item.get("path", "")).casefold() == selector_path
+            and (selector.get("call_id") is None or item.get("call_id") == selector.get("call_id"))
+            and (selector.get("units") is None or str(item.get("units", "")).casefold() == str(selector.get("units")).casefold())
+        ]
+        evidence = {
+            "canonical": selector.get("canonical"),
+            "selector": dict(selector),
+            "candidates": candidates,
+        }
+        if len(candidates) != 1:
+            missing.append(evidence)
+        else:
+            matches.append({**evidence, "observed": candidates[0]})
+    if missing:
+        raise _error(
+            "HVDC_MAPPING_MISSING",
+            "One or more required result selectors are absent or ambiguous in the target output definitions.",
+            project_name=project_name,
+            reason="required_result_selector_unresolved",
+            unresolved=missing,
+        )
+    return {"verified": True, "required": matches}
+
+
 async def preflight_scenario(
     service: Any,
     source_project: str,
@@ -200,7 +280,14 @@ async def preflight_scenario(
     else:
         commands = resolve_requested_commands(evidence, profile, requests) if requests else []
     timing_mode = await select_timing_mode(service.backend_service, target_project) if normalized.get("events") else None
-    selectors = required_result_selectors(profile, normalized.get("analysis", {}).get("metrics", []))
+    requested_metrics = normalized.get("analysis", {}).get("metrics", [])
+    selectors = required_result_selectors(profile, requested_metrics)
+    selector_check = await verify_required_result_selectors(
+        service.backend_service,
+        target_project,
+        profile,
+        requested_metrics,
+    )
     get_settings = getattr(service.backend_service, "get_project_settings", None)
     if callable(get_settings):
         output = await ensure_output_ready(
@@ -222,5 +309,6 @@ async def preflight_scenario(
         "timing_mode": timing_mode,
         "output_change": output,
         "required_result_selectors": selectors,
+        "result_channel_check": selector_check,
         "matched_fingerprint": fingerprints[0] if fingerprints else {},
     }
