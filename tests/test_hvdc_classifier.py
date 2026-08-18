@@ -50,3 +50,19 @@ def test_explicit_annotation_overrides_weak_name_evidence(tmp_path):
     summary = classify_topology(scan_project(path))
     assert summary.family == "vsc_2level"
     assert any("override" in item.lower() for item in summary.evidence)
+
+
+def test_classifier_uses_labels_for_vsc_and_mmc_evidence(tmp_path):
+    vsc = tmp_path / "vsc.pscx"
+    vsc.write_text(
+        "<project><canvas name='Main'><label>PLL dq controller VSC 2-level</label></canvas></project>",
+        encoding="utf-8",
+    )
+    assert classify_topology(scan_project(vsc)).family == "vsc_2level"
+
+    mmc = tmp_path / "mmc.pscx"
+    mmc.write_text(
+        "<project><canvas name='Main'><label>MMC arm submodule circulating current</label></canvas></project>",
+        encoding="utf-8",
+    )
+    assert classify_topology(scan_project(mmc)).family == "mmc"

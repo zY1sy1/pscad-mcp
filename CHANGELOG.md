@@ -6,6 +6,12 @@ All notable changes to this project are documented here.
 
 ### Changed
 
+- HVDC strict control now supports explicit backend timing and output-channel
+  provider hooks, bounded simulation-clock polling, stalled-clock detection,
+  stable event IDs, and duplicate-event rejection.
+- Expanded VSC 2-level and MMC profiles with explicit v2 result selectors,
+  unit-aware metric roles, and read-only control boundaries.
+
 - Legacy PSCAD 4.6.x now launches a visible managed automation window by
   default, rejects pre-existing external PSCAD processes before launch, and
   reports bounded owned-session diagnostics.

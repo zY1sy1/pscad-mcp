@@ -16,14 +16,19 @@ def _contains(text: str, terms: tuple[str, ...]) -> bool:
     return any(term in normalized for term in terms)
 
 
+def _score(values: list[str], terms: tuple[str, ...]) -> int:
+    return sum(1 for value in values for term in terms if _contains(value, (term,)))
+
+
 def classify_topology(evidence: HvdcProjectEvidence) -> HvdcTopologySummary:
     names = list(evidence.definitions) + [component.definition for component in evidence.components]
     labels = [label.text for label in evidence.labels]
     joined = " ".join(names + labels)
+    evidence_terms = names + labels
     scores = {
-        "lcc": sum(_contains(name, ("rectcc", "rectpole", "inverterpole", "invctrl", "rectifier_ac")) for name in names),
-        "vsc_2level": sum(_contains(name, ("vsc", "igbt", "pll", "dq", "twolevel", "2level")) for name in names),
-        "mmc": sum(_contains(name, ("mmc", "submodule", "sub_module", "arm", "sm")) for name in names),
+        "lcc": _score(evidence_terms, ("rectcc", "rectpole", "inverterpole", "invctrl", "rectifier_ac")),
+        "vsc_2level": _score(evidence_terms, ("vsc", "igbt", "pll", "dq", "twolevel", "2level")),
+        "mmc": _score(evidence_terms, ("mmc", "submodule", "sub_module", "arm", "sm", "circulating")),
     }
     best_family, best_score = max(scores.items(), key=lambda pair: pair[1])
     explicit_family = None

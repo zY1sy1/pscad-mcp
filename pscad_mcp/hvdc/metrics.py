@@ -164,6 +164,23 @@ def calculate_metrics(samples: dict[str, Any], metrics: list[str] | None = None,
     def source(role: str, fallback: str) -> str:
         value = roles.get(role) if isinstance(roles, Mapping) else None
         return str(value) if isinstance(value, str) else fallback
+
+    def channel_units(channel: str, fallback: str | None = None) -> str | None:
+        configured = units.get(channel)
+        if configured not in (None, ""):
+            return str(configured)
+        lowered = channel.casefold()
+        if "frequency" in lowered or lowered.endswith("_freq"):
+            return "Hz"
+        if "voltage" in lowered:
+            return "kV"
+        if "current" in lowered:
+            return "kA"
+        if "active_power" in lowered or lowered in {"power", "p"}:
+            return "MW"
+        if "reactive_power" in lowered or lowered in {"q", "qreactive"}:
+            return "MVAr"
+        return fallback
     requested = metrics or ["dc_voltage_peak", "dc_current_peak", "dc_power"]
     result: list[dict[str, Any]] = []
 
@@ -262,11 +279,11 @@ def calculate_metrics(samples: dict[str, Any], metrics: list[str] | None = None,
         elif name.endswith("_peak"):
             channel = name.removesuffix("_peak")
             values = channels.get(channel, [])
-            result.append(_metric(name, max(values), "kV" if "voltage" in channel else "kA" if "current" in channel else None, (channel,), time, "maximum sampled value") if values else unavailable(name, (channel,)))
+            result.append(_metric(name, max(values), channel_units(channel), (channel,), time, "maximum sampled value") if values else unavailable(name, (channel,)))
         elif name.endswith("_min"):
             channel = name.removesuffix("_min")
             values = channels.get(channel, [])
-            result.append(_metric(name, min(values), "kV" if "voltage" in channel else "kA" if "current" in channel else None, (channel,), time, "minimum sampled value") if values else unavailable(name, (channel,)))
+            result.append(_metric(name, min(values), channel_units(channel), (channel,), time, "minimum sampled value") if values else unavailable(name, (channel,)))
         elif name.endswith("_steady_state_mean") or name.endswith("_steady_state_rms"):
             suffix = "_steady_state_mean" if name.endswith("_steady_state_mean") else "_steady_state_rms"
             channel = name[: -len(suffix)]
@@ -275,17 +292,17 @@ def calculate_metrics(samples: dict[str, Any], metrics: list[str] | None = None,
             if not tail:
                 result.append(unavailable(name, (channel,)))
             elif suffix.endswith("rms"):
-                result.append(_metric(name, math.sqrt(sum(value * value for value in tail) / len(tail)), None, (channel,), time, "last 10% RMS", "derived"))
+                result.append(_metric(name, math.sqrt(sum(value * value for value in tail) / len(tail)), channel_units(channel), (channel,), time, "last 10% RMS", "derived"))
             else:
-                result.append(_metric(name, sum(tail) / len(tail), None, (channel,), time, "last 10% arithmetic mean", "derived"))
+                result.append(_metric(name, sum(tail) / len(tail), channel_units(channel), (channel,), time, "last 10% arithmetic mean", "derived"))
         elif name.endswith("_mean"):
             channel = name.removesuffix("_mean")
             values = channels.get(channel, [])
-            result.append(_metric(name, sum(values) / len(values), None, (channel,), time, "arithmetic mean") if values else unavailable(name, (channel,)))
+            result.append(_metric(name, sum(values) / len(values), channel_units(channel), (channel,), time, "arithmetic mean") if values else unavailable(name, (channel,)))
         elif name.endswith("_rms"):
             channel = name.removesuffix("_rms")
             values = channels.get(channel, [])
-            result.append(_metric(name, math.sqrt(sum(value * value for value in values) / len(values)), "kA" if "current" in channel else "kV" if "voltage" in channel else None, (channel,), time, "root mean square") if values else unavailable(name, (channel,)))
+            result.append(_metric(name, math.sqrt(sum(value * value for value in values) / len(values)), channel_units(channel), (channel,), time, "root mean square") if values else unavailable(name, (channel,)))
         elif name == "dc_power":
             voltage_name, current_name = source("dc_voltage", "dc_voltage"), source("dc_current", "dc_current")
             voltage, current = channels.get(voltage_name, []), channels.get(current_name, [])

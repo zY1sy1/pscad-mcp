@@ -134,6 +134,18 @@ The built-in selector contract is: `dc_voltage_breaker` (`kV`),
  backend output-channel metadata and verifies path, call ID, and units before any
  parameter write; unavailable inspection is a structured safety rejection.
 
+VSC 2-level and MMC generic profiles now expose explicit measurement selectors
+and unit-aware roles for DC quantities, P/Q, PLL/dq signals, arm current,
+submodule capacitor voltage, and circulating current. Generic profiles remain
+read-only until a project-qualified result selector or command binding is
+registered.
+
+Polling-based EMTDC control uses a bounded interval and detects a stalled
+simulation clock. Timed events carry stable IDs and duplicate IDs are rejected
+before dispatch. Legacy and Modern adapters only advertise native scheduling,
+simulation-clock, or output-channel capabilities when the loaded project
+exposes an explicit provider; otherwise the scenario fails closed.
+
 Opt-in licensed acceptance requires `PSCAD_MCP_ACCEPTANCE=1`,
 `PSCAD_MCP_HVDC_SOURCE`, `PSCAD_MCP_HVDC_LIBRARY`, and
 `PSCAD_MCP_WORKSPACE` to point to approved absolute paths:

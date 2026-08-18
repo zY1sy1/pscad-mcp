@@ -813,6 +813,9 @@ class PscadService:
             ]
         return await self.backend.project_output(project_name)
 
+    async def get_output_channels(self, project_name: str) -> list[dict[str, Any]]:
+        return [dict(item) for item in await self.backend.get_output_channels(project_name)]
+
     async def read_output_file(
         self,
         file_path: str,

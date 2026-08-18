@@ -144,6 +144,14 @@ HVDC 事件中的 `time_s` 始终表示 EMTDC 仿真时间，不使用墙钟时�
 当 v2 场景请求指标时，预检还要求后端提供输出通道元数据，并在任何参数写入前
 核对 path、call ID 和单位；无法检查时返回结构化安全拒绝。
 
+VSC 两电平和 MMC 通用 Profile 现在提供显式测量选择器和单位感知语义，覆盖
+直流量、P/Q、PLL/dq、桥臂电流、子模块电容电压和环流。通用 Profile 在注册
+项目级结果选择器或命令绑定前仍保持只读。
+
+基于轮询的 EMTDC 控制现在使用有界轮询间隔，并检测仿真时钟停滞。定时事件带有
+稳定 ID，重复 ID 会在分发前被拒绝。Legacy 和 Modern 后端只有在加载工程显式
+提供对应能力时才会声明定时调度、仿真时钟或输出通道能力，否则安全失败。
+
 真实验收必须显式设置 `PSCAD_MCP_ACCEPTANCE=1`、
 `PSCAD_MCP_HVDC_SOURCE`、`PSCAD_MCP_HVDC_LIBRARY` 和
 `PSCAD_MCP_WORKSPACE` 四个环境变量：

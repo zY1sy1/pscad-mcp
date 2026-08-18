@@ -35,13 +35,15 @@ def test_native_timing_is_preferred():
 
 def test_polling_dispatch_uses_reported_simulation_time(monkeypatch):
     backend = PollingTimingBackend()
+    delays = []
 
     async def no_delay(_seconds):
-        return None
+        delays.append(_seconds)
 
     monkeypatch.setattr(asyncio, "sleep", no_delay)
     result = asyncio.run(dispatch_timed_events(backend, "case", [{
         "time_s": 1.0,
+        "event_id": "event-0",
         "component_id": "17",
         "parameter_name": "Value",
         "value": 1,
@@ -51,6 +53,53 @@ def test_polling_dispatch_uses_reported_simulation_time(monkeypatch):
     assert result[0]["requested_time_s"] == 1.0
     assert result[0]["observed_time_s"] == 1.05
     assert result[0]["timing_error_s"] == pytest.approx(0.05)
+    assert result[0]["event_id"] == "event-0"
+    assert delays and all(delay > 0 for delay in delays)
+
+
+def test_polling_rejects_a_stalled_simulation_clock(monkeypatch):
+    class Stalled:
+        def __init__(self):
+            self.calls = 0
+
+        async def get_simulation_time(self, project_name):
+            self.calls += 1
+            return 0.0
+
+    backend = Stalled()
+
+    async def no_delay(_seconds):
+        return None
+
+    monkeypatch.setattr(asyncio, "sleep", no_delay)
+    with pytest.raises(BackendError) as raised:
+        asyncio.run(dispatch_timed_events(
+            backend,
+            "case",
+            [{"time_s": 1.0, "component_id": 1, "parameter_name": "Value", "value": 1}],
+            mode="simulation_clock_polling",
+            liveness_deadline_s=0.01,
+            max_stalled_polls=2,
+        ))
+    assert raised.value.code == "HVDC_TIMED_CONTROL_UNAVAILABLE"
+
+
+def test_duplicate_event_ids_are_rejected_before_dispatch():
+    class Backend:
+        async def get_simulation_time(self, project_name):
+            return 1.0
+
+    with pytest.raises(BackendError) as raised:
+        asyncio.run(dispatch_timed_events(
+            Backend(),
+            "case",
+            [
+                {"event_id": "same", "time_s": 0.0, "component_id": 1, "parameter_name": "Value", "value": 1},
+                {"event_id": "same", "time_s": 0.1, "component_id": 1, "parameter_name": "Value", "value": 0},
+            ],
+            mode="simulation_clock_polling",
+        ))
+    assert raised.value.code == "HVDC_TIMED_CONTROL_UNAVAILABLE"
 
 
 def test_missing_strict_timing_capability_is_rejected():

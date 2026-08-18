@@ -585,9 +585,20 @@ class LegacyBackend:
         )
 
     async def get_timed_control_capabilities(self, project_name: str) -> dict[str, Any]:
-        return {"native_schedule": False, "simulation_clock": False, "time_basis": "EMTDC"}
+        project = await self._project(project_name)
+        return {
+            "native_schedule": callable(getattr(project, "schedule_timed_controls", None)),
+            "simulation_clock": callable(getattr(project, "get_simulation_time", None)),
+            "time_basis": "EMTDC",
+        }
 
     async def schedule_timed_controls(self, project_name: str, events: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+        project = await self._project(project_name)
+        provider = getattr(project, "schedule_timed_controls", None)
+        if callable(provider):
+            values = await self.executor.run_safe(provider, [dict(event) for event in events])
+            if isinstance(values, (list, tuple)):
+                return [dict(item) for item in values if isinstance(item, MappingABC)]
         raise BackendError(
             "CAPABILITY_UNAVAILABLE",
             "Legacy PSCAD backend does not expose verified timed-control scheduling.",
@@ -597,6 +608,10 @@ class LegacyBackend:
         )
 
     async def get_simulation_time(self, project_name: str) -> float:
+        project = await self._project(project_name)
+        provider = getattr(project, "get_simulation_time", None)
+        if callable(provider):
+            return float(await self.executor.run_safe(provider))
         raise BackendError(
             "CAPABILITY_UNAVAILABLE",
             "Legacy PSCAD backend does not expose a verified simulation clock.",
@@ -1322,6 +1337,39 @@ class LegacyBackend:
             return str(await self.executor.run_safe(output))
         messages = await self.executor.run_safe(project.messages)
         return "\n".join(str(message[0] if isinstance(message, tuple) else message) for message in messages)
+
+    async def get_output_channels(self, project_name: str) -> list[dict[str, Any]]:
+        project = await self._project(project_name)
+        provider = getattr(project, "output_channels", None)
+        if not callable(provider):
+            raise BackendError(
+                "CAPABILITY_UNAVAILABLE",
+                "Legacy PSCAD does not expose verified output-channel metadata.",
+                self.name,
+                "get_output_channels",
+                {"project_name": project_name, "backend_version": self.version},
+            )
+        values = await self.executor.run_safe(provider)
+        if isinstance(values, MappingABC):
+            values = values.get("channels", values.get("output_channels", []))
+        if not isinstance(values, (list, tuple)):
+            raise BackendError(
+                "CAPABILITY_UNAVAILABLE",
+                "Legacy output-channel metadata has an invalid shape.",
+                self.name,
+                "get_output_channels",
+                {"project_name": project_name},
+            )
+        return [
+            {
+                "path": str(item["path"]),
+                "call_id": item.get("call_id"),
+                "units": item.get("units"),
+                "description": str(item.get("description", "")),
+            }
+            for item in values
+            if isinstance(item, MappingABC) and item.get("path")
+        ]
 
     @staticmethod
     def _project_message(value: Any) -> ProjectMessage:

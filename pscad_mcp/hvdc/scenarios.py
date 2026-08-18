@@ -379,7 +379,9 @@ async def _attempt_containment(
             stop = candidate
             stop_name = name
             break
-    containment_timeout = min(5.0, max(0.25, timeout_s))
+    # Keep normal runs a quarter-second containment window, but do not let a
+    # deliberately tiny scenario timeout turn into an unrelated 250ms delay.
+    containment_timeout = min(5.0, max(0.05, timeout_s))
     stop_record: dict[str, Any] = {"attempted": stop is not None, "operation": stop_name}
     if stop is not None:
         try:
@@ -571,7 +573,15 @@ async def _orchestrate_scenario(service: Any, record: dict[str, Any], normalized
     record["started_at"] = _utc_now()
     for index, change in enumerate(normalized.get("parameter_changes", [])):
         await _apply_verified_change(service, record, target_project, change, f"parameter_change:{index}")
-    events = sorted(normalized.get("events", []), key=lambda item: float(item["time_s"]))
+    events = [
+        {
+            **dict(event),
+            "event_id": str(event.get("event_id") or f"{record['scenario_id']}:event:{index}"),
+        }
+        for index, event in enumerate(
+            sorted(normalized.get("events", []), key=lambda item: float(item["time_s"]))
+        )
+    ]
     preflight = record.get("preflight", {})
     timing_mode = preflight.get("timing_mode") if isinstance(preflight, Mapping) else None
     if events and timing_mode == "native":

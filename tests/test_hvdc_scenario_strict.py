@@ -132,6 +132,7 @@ def test_strict_polling_event_records_simulation_time(tmp_path):
     result = asyncio.run(exercise())
     assert result["status"] == "completed"
     event = result["partial_completion"]["applied_events"][0]
+    assert event["event_id"] == f"{result['scenario_id']}:event:0"
     assert event["requested_time_s"] == 1.0
     assert event["observed_time_s"] == pytest.approx(1.02)
     assert event["timing_error_s"] == pytest.approx(0.02)
