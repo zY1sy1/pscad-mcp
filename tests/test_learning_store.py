@@ -242,3 +242,150 @@ def test_review_markers_without_remaining_candidate_evidence_are_removed(tmp_pat
     store.mark_notified(markers)
     store.delete_review_markers_except({keep})
     assert set(store.load_review_markers()) == {keep}
+
+
+def test_mark_notified_upsert_preserves_first_and_updates_review_fields(tmp_path):
+    store = LearningStore(tmp_path / "learning.sqlite3")
+    fingerprint = "a" * 64
+    first = ReviewMarker(
+        fingerprint,
+        "2026-08-19T01:00:00+00:00",
+        "2026-08-19T01:00:00+00:00",
+        "scheduled",
+        "b" * 64,
+    )
+    second = ReviewMarker(
+        fingerprint,
+        "2026-08-20T01:00:00+00:00",
+        "2026-08-20T02:00:00+00:00",
+        "foreground",
+        "c" * 64,
+    )
+    store.mark_notified([first])
+    store.mark_notified([second])
+    assert store.load_review_markers()[fingerprint] == ReviewMarker(
+        fingerprint=fingerprint,
+        first_notified_at=first.first_notified_at,
+        last_notified_at=second.last_notified_at,
+        notification_source=second.notification_source,
+        evidence_watermark=second.evidence_watermark,
+    )
+    store.close()
+
+
+def test_counts_are_exact_and_empty_marker_allowlist_clears_all(tmp_path):
+    store = LearningStore(tmp_path / "learning.sqlite3")
+    invocation_id = store.record_invocation(_invocation("2026-08-19T00:00:00+00:00"))
+    store.record_goal_failure(
+        GoalFailureEvent(
+            occurred_at="2026-08-19T00:01:00+00:00",
+            session_id="session-a",
+            failure_kind=GoalFailureKind.RECOVERY_FAILED,
+            primary_tool="run_project",
+            correlated_invocation_id=invocation_id,
+        )
+    )
+    timestamp = "2026-08-19T01:00:00+00:00"
+    store.mark_notified(
+        [
+            ReviewMarker("a" * 64, timestamp, timestamp, "scheduled", "b" * 64),
+            ReviewMarker("c" * 64, timestamp, timestamp, "foreground", "d" * 64),
+        ]
+    )
+    assert store.counts() == {
+        "invocations": 1,
+        "goal_failures": 1,
+        "review_markers": 2,
+    }
+    store.delete_review_markers_except(set())
+    assert store.counts() == {
+        "invocations": 1,
+        "goal_failures": 1,
+        "review_markers": 0,
+    }
+    assert store.load_review_markers() == {}
+    store.close()
+
+
+def test_prune_deterministically_caps_mixed_event_types(tmp_path):
+    database = tmp_path / "learning.sqlite3"
+    store = LearningStore(database)
+    store.record_invocation(_invocation("2026-08-19T00:00:00+00:00"))
+    store.record_goal_failure(
+        GoalFailureEvent(
+            occurred_at="2026-08-19T00:01:00+00:00",
+            session_id="session-a",
+            failure_kind=GoalFailureKind.RECOVERY_FAILED,
+            primary_tool="run_project",
+            correlated_invocation_id=None,
+        )
+    )
+    store.record_invocation(_invocation("2026-08-19T00:02:00+00:00"))
+    store.record_goal_failure(
+        GoalFailureEvent(
+            occurred_at="2026-08-19T00:03:00+00:00",
+            session_id="session-a",
+            failure_kind=GoalFailureKind.RECOVERY_FAILED,
+            primary_tool="run_project",
+            correlated_invocation_id=None,
+        )
+    )
+    assert store.prune(
+        now=datetime(2026, 8, 19, 1, 0, tzinfo=timezone.utc),
+        retention_days=90,
+        max_events=2,
+    ) is True
+    assert [row.occurred_at for row in store.load_invocations("2020-01-01T00:00:00+00:00")] == [
+        "2026-08-19T00:02:00+00:00",
+    ]
+    assert [row.occurred_at for row in store.load_goal_failures("2020-01-01T00:00:00+00:00")] == [
+        "2026-08-19T00:03:00+00:00",
+    ]
+    store.close()
+
+
+def test_clear_history_preserves_metadata_and_vacuums_after_commit(tmp_path):
+    database = tmp_path / "learning.sqlite3"
+    store = LearningStore(database)
+    for index in range(128):
+        store.record_invocation(
+            _invocation(
+                f"2026-08-19T00:{index // 60:02d}:{index % 60:02d}+00:00"
+            )
+        )
+    now = datetime(2026, 8, 19, 1, 0, tzinfo=timezone.utc)
+    assert store.prune(now=now, retention_days=90, max_events=1000) is True
+
+    connection = sqlite3.connect(database)
+    try:
+        metadata_before = dict(
+            connection.execute("SELECT key, value FROM schema_metadata")
+        )
+        page_count_before = connection.execute("PRAGMA page_count").fetchone()[0]
+    finally:
+        connection.close()
+    assert metadata_before["schema_version"] == "1"
+    assert metadata_before["last_retention_pass"].startswith("2026-08-19T")
+    assert page_count_before > 1
+
+    store.clear_history()
+    assert store.counts() == {
+        "invocations": 0,
+        "goal_failures": 0,
+        "review_markers": 0,
+    }
+    store.close()
+
+    connection = sqlite3.connect(database)
+    try:
+        metadata_after = dict(
+            connection.execute("SELECT key, value FROM schema_metadata")
+        )
+        freelist_count = connection.execute("PRAGMA freelist_count").fetchone()[0]
+        integrity = connection.execute("PRAGMA integrity_check").fetchone()[0]
+    finally:
+        connection.close()
+    assert metadata_after["schema_version"] == metadata_before["schema_version"]
+    assert metadata_after["last_retention_pass"] == metadata_before["last_retention_pass"]
+    assert freelist_count == 0
+    assert integrity == "ok"
