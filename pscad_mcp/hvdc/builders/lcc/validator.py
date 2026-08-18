@@ -164,12 +164,34 @@ def _compare_component(
     if observed.orientation != expected.orientation:
         errors.append(_finding(logical_id, "component orientation mismatch", expected.orientation, observed.orientation))
 
+    expected_parameter_names = set(expected.parameters)
+    observed_parameter_names = set(observed.parameters)
+    if expected_parameter_names != observed_parameter_names:
+        errors.append(
+            _finding(
+                logical_id,
+                "component parameter set mismatch",
+                sorted(expected_parameter_names),
+                sorted(observed_parameter_names),
+            )
+        )
     for parameter, expected_value in expected.parameters.items():
         observed_value = observed.parameters.get(parameter)
         if observed_value != _parameter_text(expected_value):
             errors.append(_finding(logical_id, "component parameter mismatch", {parameter: expected_value}, {parameter: observed_value}))
 
     observed_ports = _port_map(observed)
+    expected_port_names = set(expected.ports)
+    observed_port_names = set(observed_ports)
+    if expected_port_names != observed_port_names:
+        errors.append(
+            _finding(
+                logical_id,
+                "component port set mismatch",
+                sorted(expected_port_names),
+                sorted(observed_port_names),
+            )
+        )
     for port_name in expected.ports:
         observed_port = observed_ports.get(port_name)
         contract = _expected_port_contract(expected, port_name)

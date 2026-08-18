@@ -253,6 +253,55 @@ def test_validate_project_graph_rejects_non_exact_route_vertices():
     ]
 
 
+def test_validate_project_graph_rejects_extra_observed_component_parameter():
+    graph = _graph()
+    observed_components = tuple(
+        replace(component, parameters={**component.parameters, "ExtraParameter": "unexpected"})
+        if component.logical_id == "bridge"
+        else component
+        for component in graph.components
+    )
+
+    result = validate_project_graph(replace(graph, components=observed_components), _blueprint())
+
+    assert result["valid"] is False
+    assert result["errors"] == [
+        {
+            "code": "LCC_STRUCTURE_INVALID",
+            "logical_id": "bridge",
+            "reason": "component parameter set mismatch",
+            "expected": ["ValveDrop"],
+            "observed": ["ExtraParameter", "ValveDrop"],
+        }
+    ]
+
+
+def test_validate_project_graph_rejects_extra_observed_component_port():
+    graph = _graph()
+    observed_components = tuple(
+        replace(
+            component,
+            ports=component.ports + (_port("EXTRA", "electrical", 1, (120, 0)),),
+        )
+        if component.logical_id == "bridge"
+        else component
+        for component in graph.components
+    )
+
+    result = validate_project_graph(replace(graph, components=observed_components), _blueprint())
+
+    assert result["valid"] is False
+    assert result["errors"] == [
+        {
+            "code": "LCC_STRUCTURE_INVALID",
+            "logical_id": "bridge",
+            "reason": "component port set mismatch",
+            "expected": ["ACY_A", "DC_POS", "GATES"],
+            "observed": ["ACY_A", "DC_POS", "EXTRA", "GATES"],
+        }
+    ]
+
+
 @pytest.mark.parametrize(
     ("graph", "reason"),
     [
