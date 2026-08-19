@@ -56,6 +56,21 @@ async def test_record_goal_failure_rejects_an_arbitrary_kind_without_echoing_it(
     assert "SECRET_FREE_TEXT" not in str(raised.value)
 
 
+@pytest.mark.asyncio
+async def test_mcp_entry_rejects_an_arbitrary_kind_without_echoing_it():
+    server = create_server()
+    _, structured = await server._tool_manager.call_tool(
+        "record_goal_failure",
+        {
+            "failure_kind": "SECRET_FREE_TEXT",
+            "primary_tool": None,
+        },
+        convert_result=True,
+    )
+    assert structured["error"]["code"] == "INVALID_ARGUMENT"
+    assert "SECRET_FREE_TEXT" not in repr(structured)
+
+
 def test_server_registers_73_unique_tools_and_silent_instructions():
     server = create_server()
     names = {tool.name for tool in server._tool_manager.list_tools()}

@@ -19,7 +19,7 @@ FailureKindValue = Literal[
 
 
 async def record_goal_failure(
-    failure_kind: FailureKindValue,
+    failure_kind: str,
     primary_tool: str | None = None,
 ) -> dict[str, Any]:
     try:
