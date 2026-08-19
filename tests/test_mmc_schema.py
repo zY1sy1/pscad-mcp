@@ -112,6 +112,7 @@ def assert_invalid(value: dict, *, fragment: str | None = None) -> None:
 def test_valid_fixed_blueprint_parses_exact_stations_arms_sequence_and_windows():
     blueprint = parse_blueprint(valid_blueprint())
     assert blueprint.profile == "cigre_b4_p2p_avm_v1"
+    assert blueprint.control_contract.version == "mmc-control-v1"
     assert {station.role for station in blueprint.stations} == {"P", "VDC"}
     assert [len(station.arms) for station in blueprint.stations] == [6, 6]
     assert [phase.name for phase in blueprint.sequence] == [

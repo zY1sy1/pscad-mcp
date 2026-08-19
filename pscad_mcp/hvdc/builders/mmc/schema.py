@@ -238,6 +238,7 @@ def _parse_control(value: Any, context: str, *, role: str | None = None, require
         active_power_command=_text(control["active_power_command"], f"{context}.active_power_command"),
         reactive_power_command=_text(control["reactive_power_command"], f"{context}.reactive_power_command"),
         dc_voltage_command=None if dc is None else _text(dc, f"{context}.dc_voltage_command"),
+        version=None if control.get("version") is None else _text(control["version"], f"{context}.version"),
         equations=equations_json,
         modulation_bounds=(float(bounds[0]), float(bounds[1])),
         signals=signals,

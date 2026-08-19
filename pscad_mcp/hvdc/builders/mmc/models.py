@@ -64,6 +64,7 @@ class MmcControlContract(_JsonRecord):
     active_power_command: str
     reactive_power_command: str
     dc_voltage_command: str | None = None
+    version: str | None = None
     equations: dict[str, str] = field(default_factory=dict)
     modulation_bounds: tuple[float, float] = (0.0, 1.0)
     signals: tuple[str, ...] = ()
