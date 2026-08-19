@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import math
+import json
 from unittest.mock import patch
 from typing import Any
 
@@ -202,8 +202,8 @@ async def test_nonfinite_float_is_not_reinserted_into_structured_result(value):
     )
     assert structured["result"] is not result_object
     converted_value = structured["result"]["value"]
-    if isinstance(converted_value, float):
-        assert not math.isfinite(converted_value)
+    json.dumps(structured, allow_nan=False)
+    assert converted_value is None
 
 
 @pytest.mark.asyncio

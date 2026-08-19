@@ -137,6 +137,34 @@ def _is_json_safe(value: Any, seen: set[int] | None = None) -> bool:
     return False
 
 
+def _json_safe_copy(value: Any, seen: set[int] | None = None) -> Any:
+    if value is None or isinstance(value, (str, int, bool)):
+        return value
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    seen = set() if seen is None else seen
+    value_id = id(value)
+    if value_id in seen:
+        return None
+    if isinstance(value, list):
+        seen.add(value_id)
+        try:
+            return [_json_safe_copy(item, seen) for item in value]
+        finally:
+            seen.remove(value_id)
+    if isinstance(value, dict):
+        seen.add(value_id)
+        try:
+            return {
+                key: _json_safe_copy(item, seen)
+                for key, item in value.items()
+                if isinstance(key, str)
+            }
+        finally:
+            seen.remove(value_id)
+    return None
+
+
 def _register_with_original_result(mcp: FastMCP, guarded: Callable[..., Any]) -> None:
     # FastMCP validates and then model-dumps structured output, which copies JSON-safe values.
     mcp.add_tool(guarded)
@@ -151,13 +179,13 @@ def _register_with_original_result(mcp: FastMCP, guarded: Callable[..., Any]) ->
             tool.fn_metadata.output_schema is not None
             and isinstance(converted, tuple)
             and len(converted) == 2
-            and _is_json_safe(result)
         ):
             unstructured, structured = converted
+            structured = _json_safe_copy(structured)
             if tool.fn_metadata.wrap_output:
-                structured = dict(structured)
-                structured["result"] = result
-            else:
+                if _is_json_safe(result):
+                    structured["result"] = result
+            elif _is_json_safe(result):
                 structured = result
             return unstructured, structured
         return converted
