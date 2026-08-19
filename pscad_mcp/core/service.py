@@ -762,6 +762,13 @@ class PscadService:
     async def get_project_definitions(self, project_name: str) -> list[str]:
         return await self.backend.project_definitions(project_name)
 
+    async def get_definition_inventory(self, project_name: str) -> dict[str, Any]:
+        name = _require_object_name(
+            project_name, "project_name", "get_definition_inventory"
+        )
+        result = await self.backend.get_definition_inventory(name)
+        return dict(result)
+
     async def list_simulation_sets(self, project_name: str) -> list[str]:
         return await self.backend.list_simulation_sets(project_name)
 

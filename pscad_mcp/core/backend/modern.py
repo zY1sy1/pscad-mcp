@@ -328,6 +328,48 @@ class ModernBackend:
         )
         return [str(value) for value in values]
 
+    async def get_definition_inventory(self, project_name: str) -> dict[str, Any]:
+        project = await self._project(project_name)
+        provider = next(
+            (
+                getattr(project, name, None)
+                for name in (
+                    "get_definition_inventory",
+                    "definition_inventory",
+                    "definitions_metadata",
+                )
+                if callable(getattr(project, name, None))
+            ),
+            None,
+        )
+        if provider is None:
+            raise BackendError(
+                "CAPABILITY_UNAVAILABLE",
+                "Modern PSCAD does not expose verified live definition metadata.",
+                self.name,
+                "get_definition_inventory",
+                {"project_name": project_name, "backend_version": self.version},
+            )
+        values = await self.executor.run_safe(provider)
+        if isinstance(values, Mapping):
+            definitions = values.get("definitions")
+        else:
+            definitions = values
+        if not isinstance(definitions, (list, tuple)) or any(
+            not isinstance(item, Mapping) for item in definitions
+        ):
+            raise BackendError(
+                "CAPABILITY_UNAVAILABLE",
+                "Modern live definition metadata has an invalid shape.",
+                self.name,
+                "get_definition_inventory",
+                {"project_name": project_name},
+            )
+        return {
+            "source": "live",
+            "definitions": [dict(item) for item in definitions],
+        }
+
     async def get_settings(self, project_name: str) -> dict[str, Any]:
         values = await self.adapter.call(self._app, "settings")
         return dict(values) if hasattr(values, "items") else {"value": str(values)}

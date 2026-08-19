@@ -1073,6 +1073,48 @@ class LegacyBackend:
         values = await self.executor.run_safe(method)
         return [str(value) for value in values]
 
+    async def get_definition_inventory(self, project_name: str) -> dict[str, Any]:
+        project = await self._project(project_name)
+        provider = next(
+            (
+                getattr(project, name, None)
+                for name in (
+                    "get_definition_inventory",
+                    "definition_inventory",
+                    "definitions_metadata",
+                )
+                if callable(getattr(project, name, None))
+            ),
+            None,
+        )
+        if provider is None:
+            raise BackendError(
+                "CAPABILITY_UNAVAILABLE",
+                "Legacy PSCAD does not expose verified live definition metadata.",
+                self.name,
+                "get_definition_inventory",
+                {"project_name": project_name, "backend_version": self.version},
+            )
+        values = await self.executor.run_safe(provider)
+        if isinstance(values, MappingABC):
+            definitions = values.get("definitions")
+        else:
+            definitions = values
+        if not isinstance(definitions, (list, tuple)) or any(
+            not isinstance(item, MappingABC) for item in definitions
+        ):
+            raise BackendError(
+                "CAPABILITY_UNAVAILABLE",
+                "Legacy live definition metadata has an invalid shape.",
+                self.name,
+                "get_definition_inventory",
+                {"project_name": project_name},
+            )
+        return {
+            "source": "live",
+            "definitions": [dict(item) for item in definitions],
+        }
+
     @staticmethod
     def _settings_values_match(expected: Any, actual: Any) -> bool:
         if isinstance(expected, bool) or isinstance(actual, bool):
