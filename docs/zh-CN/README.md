@@ -1,6 +1,6 @@
 # PSCAD MCP 中文使用与验收说明
 
-本项目把 PSCAD 自动化封装为 60 个 MCP 工具，可供 Codex、GitHub Copilot CLI 等支持 stdio MCP 的客户端调用。项目采用双后端：
+本项目把 PSCAD 自动化封装为 74 个 MCP 工具，其中原有通用服务契约保持 60 个工具，并增加 HVDC 与固定 CIGRE LCC 领域工具，可供 Codex、GitHub Copilot CLI 等支持 stdio MCP 的客户端调用。项目采用双后端：
 
 - PSCAD 4.6.x：`mhrc.automation`，当前已在本机 PSCAD 4.6.2 x64 许可环境做真实验收；
 - PSCAD 5.x：`mhi.pscad` 3.1.x，当前完成契约测试，但由于本机没有 PSCAD 5.x，不能声称端到端真实验收通过；
@@ -21,7 +21,7 @@ Legacy PSCAD 4.6.2 后端只支持启动新的受管 Automation 实例，不能�
 
 ## 功能范围
 
-服务器固定注册 60 个工具，分为以下七组：
+服务器固定注册 74 个工具，其中以下七组共 60 个通用工具：
 
 - 应用与文档 7 个：连接、状态、修复、退出、文档同步/列出/读取；
 - 工程与参数 12 个：加载、列出、运行、暂停、停止、运行状态、元件查询、参数读取/写入/校验、工程设置读取/写入；
@@ -30,6 +30,33 @@ Legacy PSCAD 4.6.2 后端只支持启动新的受管 Automation 实例，不能�
 - 创建、保存与构建 7 个：新建算例/库、保存、另存、构建、全部构建、定义列表；
 - 画布 12 个：元件、导线、母线、连接、端口连接、注释、图框、控制框、对象列表、空位搜索、批量删除；
 - 元件操作 10 个：位置、旋转、镜像、克隆、端口、启用/禁用、删除。
+
+### 固定 CIGRE LCC 构建器
+
+LCC 领域提供四个工具：`plan_lcc_model`、`build_lcc_model`、
+`get_lcc_build_status`、`validate_lcc_model`。它只支持 licensed PSCAD
+4.6.2 中固定的 CIGRE 单极 12 脉波 LCC 基准算例，使用固定电气参数和本仓库
+随包提供的原创 companion library；它不是 user-rated design 生成器。
+工作区写入限制在 `PSCAD_MCP_WORKSPACE` 内；已有目标不会覆盖；开始变更必须
+传入 `confirm=true`，并提供 `plan_lcc_model` 返回的精确 plan hash。
+构建只会写入 `PSCAD_MCP_WORKSPACE` 工作区，已有目标不会覆盖；开始变更必须
+传入 `confirm=true`，并提供 `plan_lcc_model` 返回的精确 plan hash。
+
+调用顺序是：先规划并审查 hash/operations，再用
+`build_lcc_model(..., expected_plan_hash=..., confirm=true)` 启动，使用
+`get_lcc_build_status` 轮询，最后用 `validate_lcc_model` 检查保存的工程。
+能力级别分别是 `planned`、`built`、`simulated`、`accepted`。结构验证、编译、
+模拟后端或 synthetic golden 都不等于真实验收。`poles=2`、用户额定设计、
+PSCAD 5.x、故障或换相失败验收、MMC 构建均不可用。
+
+规划阶段如果连接的 PSCAD 服务没有提供实时的 4.6.2 definition inventory，
+会 fail closed；随包 catalog 不会被当作实时证据。输出通道还必须有显式的
+公共 `create_output_channel` 写入能力并完成读回校验。当前随包
+`golden.json` 仍是等待独立授权参考运行生成的 release-gate 占位基线，因此
+本分支不能通过真实 LCC 验收。
+
+当前实现的 PSCAD 4.6.2 授权验收尚未通过；在 opt-in 实机验收
+通过前，不得把该功能描述为已自治构建并验收的 CIGRE LCC 模型。
 
 ## Windows 安装
 
@@ -194,7 +221,7 @@ git diff --check
 git status --short --branch
 ```
 
-工具数量应输出 `60 60`。真实 PSCAD 5.x 必须在安装并运行对应版本后另做相同级别验收。
+工具数量应输出 `74 74`。真实 PSCAD 5.x 必须在安装并运行对应版本后另做相同级别验收。
 
 ## 常见故障
 

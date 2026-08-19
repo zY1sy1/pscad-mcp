@@ -1,7 +1,9 @@
+import copy
 from pathlib import Path
 
 import pytest
 
+from pscad_mcp.core.backend.base import BackendError
 from pscad_mcp.hvdc.builders.lcc.catalog import parse_catalog
 from pscad_mcp.hvdc.builders.lcc.project_graph import read_project_graph
 
@@ -98,3 +100,35 @@ def test_real_pscx_shape_uses_catalog_ports_orientation_and_wire_origin(tmp_path
     source = next(component for component in graph.components if component.logical_id == "source")
     with pytest.raises(TypeError):
         source.parameters["new"] = "value"
+
+
+def test_explicit_port_shape_does_not_infer_catalog_ports_that_are_missing(tmp_path):
+    original = FIXTURE.read_text(encoding="utf-8")
+    original = original.replace(
+        '<Port name="ac" kind="electrical" dimension="3" x="-10" y="0" />',
+        '<Port name="ac" kind="electrical" dimension="3" x="-10" y="0" />'
+        '<Port name="shadow" kind="electrical" dimension="1" x="-20" y="0" />',
+    )
+    mutated = original.replace('<Port name="ac" kind="electrical" dimension="3" x="-10" y="0" />', "")
+    path = tmp_path / "missing-port.pscx"
+    path.write_text(mutated, encoding="utf-8")
+
+    catalog = copy.deepcopy(CATALOG)
+    catalog["definitions"][1]["ports"].append({"name": "shadow", "kind": "electrical", "dimension": 1, "offset": [-20, 0]})
+    graph = read_project_graph(path, parse_catalog(catalog))
+    bridge = next(component for component in graph.components if component.logical_id == "bridge")
+
+    assert [port.name for port in bridge.ports] == ["shadow"]
+
+
+def test_read_project_graph_rejects_missing_project_identity(tmp_path):
+    path = tmp_path / "missing-name.pscx"
+    path.write_text(
+        '<project version="4.6.2"><definitions><Definition name="Main"><schematic /></Definition></definitions></project>',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(BackendError) as raised:
+        read_project_graph(path, parse_catalog(CATALOG))
+
+    assert getattr(raised.value, "code", None) == "LCC_STRUCTURE_INVALID"

@@ -67,4 +67,4 @@ def test_windows_ci_covers_supported_python_versions_and_release_gates():
     assert "python -m pip check" in workflow
     assert "python -m compileall -q pscad_mcp tests" in workflow
     assert "print(len(tools), len({tool.name for tool in tools}))" in workflow
-    assert "70 70" in workflow
+    assert "74 74" in workflow

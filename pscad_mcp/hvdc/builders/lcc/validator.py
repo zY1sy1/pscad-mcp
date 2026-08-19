@@ -37,6 +37,22 @@ _REQUIRED_DEFINITION_PORTS: dict[str, tuple[str, ...]] = {
     "cigre_lcc_v1:Initialization": (),
 }
 
+_EXPECTED_VALVE_GROUPS = {
+    **{f"V{index:02d}": "upper" for index in range(1, 7)},
+    **{f"V{index:02d}": "lower" for index in range(7, 13)},
+}
+
+_CONTROL_CONTRACTS = {
+    "cigre_lcc_v1:RectifierControl": {
+        "definition": "master:cc_controller",
+        "role": "constant_current",
+    },
+    "cigre_lcc_v1:InverterControl": {
+        "definition": "master:cc_controller",
+        "role": "constant_extinction_angle",
+    },
+}
+
 
 def _json_safe(value: Any) -> Any:
     if value is None or isinstance(value, (str, bool, int, float)):
@@ -373,6 +389,8 @@ def validate_project_graph(
     blueprint: LccBlueprint | Mapping[str, Any],
     catalog: LccCatalog | Mapping[str, Any] | None = None,
     *,
+    expected_project_name: str | None = None,
+    expected_pscad_version: str | None = None,
     raise_on_error: bool = False,
 ) -> dict[str, Any]:
     """Compare a parsed PSCX graph against the exact blueprint-owned LCC topology."""
@@ -380,6 +398,26 @@ def validate_project_graph(
     parsed_blueprint = _as_blueprint(blueprint)
     parsed_catalog = _as_catalog(catalog)
     errors: list[dict[str, Any]] = []
+
+    expected_version = expected_pscad_version or parsed_blueprint.settings.get("pscad_version")
+    if isinstance(expected_version, str) and graph.pscad_version != expected_version:
+        errors.append(
+            _finding(
+                None,
+                "project version mismatch",
+                expected_version,
+                graph.pscad_version,
+            )
+        )
+    if expected_project_name is not None and graph.project_name != expected_project_name:
+        errors.append(
+            _finding(
+                None,
+                "project identity mismatch",
+                expected_project_name,
+                graph.project_name,
+            )
+        )
 
     expected_components = {component.logical_id: component for component in parsed_blueprint.components}
     observed_components, duplicate_errors = _component_map(graph.components)
@@ -506,6 +544,74 @@ def _bridge_valve_count(definition: ET.Element) -> int:
     return count
 
 
+def _bridge_valves(definition: ET.Element) -> tuple[ET.Element, ...]:
+    return tuple(element for element in definition.iter() if _name(element.tag) == "valve")
+
+
+def _check_bridge_valves(definition: ET.Element, errors: list[dict[str, Any]]) -> None:
+    logical_id = "cigre_lcc_v1:LCC12PulseBridge"
+    valves = _bridge_valves(definition)
+    observed_ids = [_text(_attr(valve, "id", "name")) for valve in valves]
+    expected_ids = list(_EXPECTED_VALVE_GROUPS)
+    if sorted(observed_ids) != sorted(expected_ids):
+        errors.append(_finding(logical_id, "bridge valve identity mismatch", expected_ids, sorted(observed_ids)))
+
+    group_counts: Counter[str] = Counter()
+    for valve in valves:
+        valve_id = _text(_attr(valve, "id", "name"))
+        expected_group = _EXPECTED_VALVE_GROUPS.get(valve_id)
+        observed_group = _text(_attr(valve, "group", "group_name"))
+        group_counts[observed_group] += 1
+        if expected_group is not None and observed_group != expected_group:
+            errors.append(_finding(f"{logical_id}:{valve_id}", "bridge valve group mismatch", expected_group, observed_group))
+        observed_definition = _text(_attr(valve, "definition", "scoped_name", "master"))
+        if observed_definition != "master:thyristor_valve":
+            errors.append(
+                _finding(
+                    f"{logical_id}:{valve_id}",
+                    "bridge valve definition mismatch",
+                    "master:thyristor_valve",
+                    observed_definition,
+                )
+            )
+    expected_counts = Counter({"upper": 6, "lower": 6})
+    if group_counts != expected_counts:
+        errors.append(_finding(logical_id, "bridge valve group count mismatch", dict(expected_counts), dict(group_counts)))
+
+
+def _check_bridge_groups(definition: ET.Element, errors: list[dict[str, Any]]) -> None:
+    logical_id = "cigre_lcc_v1:LCC12PulseBridge"
+    groups = tuple(
+        element
+        for element in definition.iter()
+        if _name(element.tag) in {"six_pulse_group", "sixpulsegroup"}
+    )
+    observed = Counter(_text(_attr(group, "name", "id")) for group in groups)
+    expected = Counter({"upper": 1, "lower": 1})
+    if observed != expected:
+        errors.append(_finding(logical_id, "bridge six-pulse group identity mismatch", dict(expected), dict(observed)))
+
+
+def _check_control_contract(
+    definition_name: str,
+    definition: ET.Element | None,
+    errors: list[dict[str, Any]],
+) -> None:
+    if definition is None:
+        return
+    expected = _CONTROL_CONTRACTS[definition_name]
+    blocks = tuple(element for element in definition.iter() if _name(element.tag) == "control_block")
+    if len(blocks) != 1:
+        errors.append(_finding(definition_name, "control block count mismatch", 1, len(blocks)))
+        return
+    observed = {
+        "definition": _text(_attr(blocks[0], "definition", "scoped_name", "master")),
+        "role": _text(_attr(blocks[0], "role", "control_role")),
+    }
+    if observed != expected:
+        errors.append(_finding(definition_name, "control block contract mismatch", expected, observed))
+
+
 def _has_common_dc_series_path(definition: ET.Element) -> bool:
     for element in definition.iter():
         tag = _name(element.tag)
@@ -552,6 +658,8 @@ def _check_bridge_internal(definition: ET.Element | None, errors: list[dict[str,
     valve_count = _bridge_valve_count(definition)
     if valve_count != 12:
         errors.append(_finding(logical_id, "bridge valve count mismatch", 12, valve_count))
+    _check_bridge_groups(definition, errors)
+    _check_bridge_valves(definition, errors)
     if not _ac_groups_separated(definition):
         errors.append(_finding(logical_id, "bridge AC port groups are not separated", ("ACY", "ACD"), None))
     if not _has_common_dc_series_path(definition):
@@ -606,6 +714,10 @@ def validate_companion_library(
     bridge_records = definitions.get("cigre_lcc_v1:LCC12PulseBridge", ())
     for definition in bridge_records:
         _check_bridge_internal(definition, errors)
+    for definition_name in _CONTROL_CONTRACTS:
+        records = definitions.get(definition_name, ())
+        for definition in records:
+            _check_control_contract(definition_name, definition, errors)
 
     sorted_errors = _sort_findings(errors)
     result = {"valid": not sorted_errors, "errors": sorted_errors, "warnings": []}

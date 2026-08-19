@@ -44,6 +44,13 @@ def _asset_error(code: str, message: str, operation: str, **details: Any) -> Bac
 
 
 def sha256_file(path: Path) -> str:
+    if path.is_symlink() or not path.is_file():
+        raise _asset_error(
+            "LCC_ASSET_MISMATCH",
+            f"Asset path '{path}' is not a regular file.",
+            "load_lcc_asset_set",
+            path=str(path),
+        )
     digest = hashlib.sha256()
     try:
         with path.open("rb") as stream:
@@ -57,6 +64,27 @@ def sha256_file(path: Path) -> str:
             path=str(path),
         ) from error
     return digest.hexdigest()
+
+
+def _read_hashed_file(path: Path) -> tuple[bytes, str]:
+    if path.is_symlink() or not path.is_file():
+        raise _asset_error(
+            "LCC_ASSET_MISMATCH",
+            f"Asset path '{path}' is not a regular file.",
+            "load_lcc_asset_set",
+            path=str(path),
+        )
+    try:
+        with path.open("rb") as stream:
+            payload = stream.read()
+    except OSError as error:
+        raise _asset_error(
+            "LCC_ASSET_MISMATCH",
+            f"Unable to read asset '{path}'.",
+            "load_lcc_asset_set",
+            path=str(path),
+        ) from error
+    return payload, hashlib.sha256(payload).hexdigest()
 
 
 def canonical_json(value: Any) -> bytes:
@@ -214,11 +242,18 @@ def load_asset_set(asset_root: str | Path) -> LccAssetSet:
 
     manifest["__root__"] = str(root)
     hashes = _manifest_hashes(manifest)
-    actual_files = {
-        path.relative_to(root).as_posix()
-        for path in root.rglob("*")
-        if path.is_file() and path.relative_to(root).as_posix() != "manifest.json"
-    }
+    actual_files: set[str] = set()
+    for path in root.rglob("*"):
+        relative = path.relative_to(root).as_posix()
+        if path.is_symlink():
+            raise _asset_error(
+                "LCC_ASSET_MISMATCH",
+                "Symlinks are not allowed in the packaged LCC asset set.",
+                "load_lcc_asset_set",
+                path=relative,
+            )
+        if path.is_file() and relative != "manifest.json":
+            actual_files.add(relative)
     if actual_files != set(hashes):
         raise _asset_error(
             "LCC_ASSET_MISMATCH",
@@ -231,16 +266,17 @@ def load_asset_set(asset_root: str | Path) -> LccAssetSet:
     files: dict[str, bytes] = {}
     for relative, expected in hashes.items():
         path = _relative_child(root, relative)
-        if not path.is_file() or sha256_file(path) != expected:
+        payload, observed = _read_hashed_file(path)
+        if observed != expected:
             raise _asset_error(
                 "LCC_ASSET_MISMATCH",
                 f"Asset '{relative}' does not match its manifest hash.",
                 "load_lcc_asset_set",
                 path=relative,
                 expected=expected,
-                observed=sha256_file(path) if path.is_file() else None,
+                observed=observed,
             )
-        files[relative] = path.read_bytes()
+        files[relative] = payload
 
     required = {
         "blueprint.json",
@@ -326,6 +362,13 @@ def materialize_library(asset_set: LccAssetSet, workspace_root: str | Path) -> P
             library=library_relative,
         )
     target = workspace / ".pscad-mcp" / "libraries" / Path(library_relative).name
+    if target.is_symlink() or (target.exists() and not target.is_file()):
+        raise _asset_error(
+            "LCC_ASSET_MISMATCH",
+            f"Workspace library target '{target}' is not a regular file.",
+            "materialize_lcc_library",
+            path=str(target),
+        )
     if target.is_file():
         observed = sha256_file(target)
         if observed == expected:
@@ -359,9 +402,39 @@ def materialize_library(asset_set: LccAssetSet, workspace_root: str | Path) -> P
                 "materialize_lcc_library",
                 path=str(temporary),
             )
-        temporary.replace(target)
+        try:
+            # A hard-link install is exclusive on the same filesystem and
+            # therefore does not replace a file created by a racing process.
+            os.link(temporary, target)
+        except FileExistsError:
+            if target.is_symlink() or not target.is_file():
+                raise _asset_error(
+                    "LCC_ASSET_MISMATCH",
+                    f"Workspace library target '{target}' is not a regular file.",
+                    "materialize_lcc_library",
+                    path=str(target),
+                )
+            observed = sha256_file(target)
+            if observed != expected:
+                raise _asset_error(
+                    "LCC_ASSET_MISMATCH",
+                    f"Workspace library '{target}' differs from the verified asset.",
+                    "materialize_lcc_library",
+                    path=str(target),
+                    expected=expected,
+                    observed=observed,
+                )
+        except OSError as error:
+            raise _asset_error(
+                "LCC_ASSET_MISMATCH",
+                "The verified library could not be installed without replacing a concurrent target.",
+                "materialize_lcc_library",
+                path=str(target),
+            ) from error
+        else:
+            temporary.unlink()
+            temporary = None
         return target
     finally:
         if temporary is not None and temporary.exists():
             temporary.unlink()
-

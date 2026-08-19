@@ -183,3 +183,29 @@ def test_materialize_library_does_not_replace_mismatched_file(tmp_path):
     _assert_error(lambda: materialize_library(asset_set, workspace), "LCC_ASSET_MISMATCH")
     assert target.read_bytes() == b"user file"
 
+
+def test_materialize_library_rejects_workspace_symlink_target(tmp_path):
+    root, _ = _asset_root(tmp_path)
+    asset_set = load_asset_set(root)
+    workspace = tmp_path / "workspace"
+    target = workspace / ".pscad-mcp" / "libraries" / "cigre_lcc_v1.pslx"
+    outside = tmp_path / "outside.pslx"
+    outside.write_bytes(b"outside")
+    target.parent.mkdir(parents=True)
+    try:
+        target.symlink_to(outside)
+    except (OSError, NotImplementedError) as error:
+        pytest.skip(f"symlink creation unavailable: {error}")
+
+    _assert_error(lambda: materialize_library(asset_set, workspace), "LCC_ASSET_MISMATCH")
+    assert outside.read_bytes() == b"outside"
+
+
+def test_materialize_library_rejects_non_file_target(tmp_path):
+    root, _ = _asset_root(tmp_path)
+    asset_set = load_asset_set(root)
+    workspace = tmp_path / "workspace"
+    target = workspace / ".pscad-mcp" / "libraries" / "cigre_lcc_v1.pslx"
+    target.mkdir(parents=True)
+
+    _assert_error(lambda: materialize_library(asset_set, workspace), "LCC_ASSET_MISMATCH")

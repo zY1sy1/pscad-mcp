@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="utf-8"?>
+<pslx name="cigre_lcc_v1" version="4.6.2" target="Library">
+  <definitions>
+    <definition name="cigre_lcc_v1:LCC12PulseBridge" classid="UserCmpDefn">
+      <form description="Two six-pulse groups with separated AC interfaces and a common DC series path." />
+      <external_ports>
+        <port name="ACY_A" kind="electrical" dimension="1" group="acy" />
+        <port name="ACY_B" kind="electrical" dimension="1" group="acy" />
+        <port name="ACY_C" kind="electrical" dimension="1" group="acy" />
+        <port name="ACD_A" kind="electrical" dimension="1" group="acd" />
+        <port name="ACD_B" kind="electrical" dimension="1" group="acd" />
+        <port name="ACD_C" kind="electrical" dimension="1" group="acd" />
+        <port name="DC_POS" kind="electrical" dimension="1" />
+        <port name="DC_NEG" kind="electrical" dimension="1" />
+        <port name="GATES" kind="data" dimension="12" />
+      </external_ports>
+      <six_pulse_group name="upper" transformer_interface="Y-Y" />
+      <six_pulse_group name="lower" transformer_interface="Y-delta" />
+      <valves>
+        <valve id="V01" definition="master:thyristor_valve" group="upper" />
+        <valve id="V02" definition="master:thyristor_valve" group="upper" />
+        <valve id="V03" definition="master:thyristor_valve" group="upper" />
+        <valve id="V04" definition="master:thyristor_valve" group="upper" />
+        <valve id="V05" definition="master:thyristor_valve" group="upper" />
+        <valve id="V06" definition="master:thyristor_valve" group="upper" />
+        <valve id="V07" definition="master:thyristor_valve" group="lower" />
+        <valve id="V08" definition="master:thyristor_valve" group="lower" />
+        <valve id="V09" definition="master:thyristor_valve" group="lower" />
+        <valve id="V10" definition="master:thyristor_valve" group="lower" />
+        <valve id="V11" definition="master:thyristor_valve" group="lower" />
+        <valve id="V12" definition="master:thyristor_valve" group="lower" />
+      </valves>
+      <dc_series_path common="true" positive="DC_POS" negative="DC_NEG" />
+      <gate_interface port="GATES" dimension="12" />
+    </definition>
+    <definition name="cigre_lcc_v1:RectifierControl" classid="UserCmpDefn">
+      <external_ports>
+        <port name="VDC" kind="data" dimension="1" />
+        <port name="IDC" kind="data" dimension="1" />
+        <port name="IORDER" kind="data" dimension="1" />
+        <port name="ENABLE" kind="data" dimension="1" />
+        <port name="GATES" kind="data" dimension="12" />
+        <port name="ALPHA" kind="data" dimension="1" />
+      </external_ports>
+      <control_block definition="master:cc_controller" role="constant_current" />
+    </definition>
+    <definition name="cigre_lcc_v1:InverterControl" classid="UserCmpDefn">
+      <external_ports>
+        <port name="VDC" kind="data" dimension="1" />
+        <port name="IDC" kind="data" dimension="1" />
+        <port name="GAMMA_ORDER" kind="data" dimension="1" />
+        <port name="ENABLE" kind="data" dimension="1" />
+        <port name="GATES" kind="data" dimension="12" />
+        <port name="GAMMA" kind="data" dimension="1" />
+      </external_ports>
+      <control_block definition="master:cc_controller" role="constant_extinction_angle" />
+    </definition>
+    <definition name="cigre_lcc_v1:SignalInterface" classid="UserCmpDefn">
+      <external_ports />
+      <interface_contract namespace="data" />
+    </definition>
+    <definition name="cigre_lcc_v1:Initialization" classid="UserCmpDefn">
+      <external_ports />
+      <initialization_contract steady_state="zero" />
+    </definition>
+  </definitions>
+</pslx>

@@ -18,13 +18,28 @@ class RecordingPscadService:
         self.next_component_id = 1
         self.project_file: Path | None = None
 
+    async def get_output_channels(self, project_name: str) -> list[dict[str, Any]]:
+        self._call("get_output_channels", project_name)
+        return [{"path": "Main/VDC", "units": "kV", "call_id": None}]
+
+    async def create_output_channel(
+        self,
+        project_name: str,
+        path: str,
+        units: str,
+        *,
+        call_id: int | None = None,
+    ) -> dict[str, Any]:
+        self._call("create_output_channel", project_name, path, units, call_id=call_id)
+        return {"path": path, "units": units, "call_id": call_id}
+
     def _call(self, name: str, *args: Any, **kwargs: Any) -> None:
         self.calls.append((name, args, kwargs))
         if self.fail_on == name:
             raise RuntimeError(f"injected failure at {name}")
 
-    def _write_project(self, path: Path) -> None:
-        root = ET.Element("project", {"name": path.stem, "version": "4.6.2"})
+    def _write_project(self, path: Path, project_name: str | None = None) -> None:
+        root = ET.Element("project", {"name": project_name or path.stem, "version": "4.6.2"})
         definition = ET.SubElement(root, "definition", {"name": "Main"})
         for component in sorted(self.components.values(), key=lambda value: value["id"]):
             element = ET.SubElement(
@@ -136,6 +151,10 @@ class RecordingPscadService:
         self._call("run_project", project_name)
         return "started"
 
+    async def stop_simulation(self, project_name: str) -> str:
+        self._call("stop_simulation", project_name)
+        return "stopped"
+
     async def get_run_status(self, project_name: str) -> dict[str, str]:
         self._call("get_run_status", project_name)
         value = self.run_statuses.pop(0) if self.run_statuses else "completed"
@@ -149,7 +168,6 @@ class RecordingPscadService:
         self._call("save_project_as", project_name, filename, folder, confirm=confirm)
         destination = Path(folder) / filename
         if self.project_file is not None:
-            self._write_project(self.project_file)
             destination.parent.mkdir(parents=True, exist_ok=True)
-            destination.write_bytes(self.project_file.read_bytes())
+            self._write_project(destination, destination.stem)
         return "saved as"

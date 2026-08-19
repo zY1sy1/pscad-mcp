@@ -8,6 +8,7 @@ from .tools.creation_tools import register_creation_tools
 from .tools.canvas_tools import register_canvas_tools
 from .tools.component_tools import register_component_tools
 from .tools.hvdc_tools import register_hvdc_tools
+from .tools.lcc_tools import register_lcc_tools
 
 # Configure central logging
 logging.basicConfig(
@@ -32,6 +33,7 @@ def create_server() -> FastMCP:
     register_canvas_tools(mcp)
     register_component_tools(mcp)
     register_hvdc_tools(mcp)
+    register_lcc_tools(mcp)
 
     logger.info("PSCAD MCP Server initialized with modular tools.")
     return mcp

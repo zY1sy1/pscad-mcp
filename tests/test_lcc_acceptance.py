@@ -10,6 +10,7 @@ from pscad_mcp.hvdc.builders.lcc.acceptance import (
     interpolate_to_grid,
     normalized_errors,
 )
+from pscad_mcp.hvdc.builders.lcc.assets import load_packaged_asset_set
 
 
 FREQUENCY_HZ = 50.0
@@ -262,6 +263,37 @@ def test_evaluate_acceptance_compares_golden_on_shifted_golden_grid_without_extr
     json.dumps(result)
 
 
+def test_required_manifest_checks_without_executable_declarations_are_incomplete():
+    result = evaluate_acceptance(
+        {},
+        {},
+        {
+            "checks": [
+                {"name": "golden_waveforms", "kind": "golden", "required": True},
+                {"name": "power_balance", "kind": "physical", "required": True},
+            ]
+        },
+    )
+
+    assert result["verdict"] == "INCOMPLETE_ANALYSIS"
+    assert result["errors"]
+    assert all(check["outcome"] == "INCOMPLETE_ANALYSIS" for check in result["golden_checks"] + result["physical_checks"])
+
+
+def test_unknown_required_manifest_check_cannot_produce_pass():
+    result = evaluate_acceptance(
+        _sample_payload(),
+        _golden_payload(),
+        {
+            **_golden_contract(),
+            "checks": [{"name": "future_gate", "kind": "future", "required": True}],
+        },
+    )
+
+    assert result["verdict"] == "INCOMPLETE_ANALYSIS"
+    assert result["manifest_checks"][0]["outcome"] == "INCOMPLETE_ANALYSIS"
+
+
 @pytest.mark.parametrize(
     "comparison_window",
     [
@@ -467,3 +499,12 @@ def test_malformed_contract_raises_backend_error():
         evaluate_acceptance(_sample_payload(), _golden_payload(), {"golden": {"channels": "Main/VAC_RECT_A"}})
 
     assert raised.value.code == "LCC_ACCEPTANCE_INVALID"
+
+
+def test_placeholder_golden_baseline_cannot_produce_acceptance_pass():
+    asset_set = load_packaged_asset_set()
+
+    result = evaluate_acceptance(asset_set.golden, asset_set.golden, asset_set.acceptance)
+
+    assert result["verdict"] == "INCOMPLETE_ANALYSIS"
+    assert result["errors"][0]["reason"] == "unverified golden baseline"

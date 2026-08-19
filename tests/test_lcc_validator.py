@@ -230,6 +230,48 @@ def test_validate_project_graph_accepts_exact_blueprint_owned_structure():
     }
 
 
+def test_validate_project_graph_rejects_project_version_drift_when_declared():
+    blueprint = replace(
+        _blueprint(),
+        settings={"simulation_duration_s": 1.0, "pscad_version": "4.6.2"},
+    )
+
+    result = validate_project_graph(
+        replace(_graph(), pscad_version="5.0"),
+        blueprint,
+    )
+
+    assert result["valid"] is False
+    assert result["errors"] == [
+        {
+            "code": "LCC_STRUCTURE_INVALID",
+            "logical_id": "",
+            "reason": "project version mismatch",
+            "expected": "4.6.2",
+            "observed": "5.0",
+        }
+    ]
+
+
+def test_validate_project_graph_rejects_project_identity_drift_when_expected():
+    result = validate_project_graph(
+        _graph(),
+        _blueprint(),
+        expected_project_name="OTHER_PROJECT",
+    )
+
+    assert result["valid"] is False
+    assert result["errors"] == [
+        {
+            "code": "LCC_STRUCTURE_INVALID",
+            "logical_id": "",
+            "reason": "project identity mismatch",
+            "expected": "OTHER_PROJECT",
+            "observed": "CIGRE_LCC",
+        }
+    ]
+
+
 def test_validate_project_graph_rejects_non_exact_route_vertices():
     graph = _graph()
     observed_nets = tuple(
@@ -377,6 +419,31 @@ def test_validate_project_graph_rejects_duplicate_observed_net():
     ]
 
 
+def test_validate_companion_library_rejects_valve_identity_and_control_reference_drift(tmp_path):
+    source = Path(__file__).parents[1] / "pscad_mcp" / "assets" / "lcc" / "cigre_lcc_monopole_v1" / "library" / "cigre_lcc_v1.pslx"
+    mutated = source.read_text(encoding="utf-8")
+    mutated = mutated.replace(
+        'id="V12" definition="master:thyristor_valve" group="lower"',
+        'id="V12" definition="master:wrong_valve" group="upper"',
+    )
+    mutated = mutated.replace(
+        'definition="master:cc_controller" role="constant_current"',
+        'definition="master:wrong_controller" role="constant_current"',
+    )
+    candidate = tmp_path / "mutated.pslx"
+    candidate.write_text(mutated, encoding="utf-8")
+
+    result = validate_companion_library(candidate)
+
+    assert result["valid"] is False
+    reasons = {error["reason"] for error in result["errors"]}
+    assert {
+        "bridge valve definition mismatch",
+        "bridge valve group mismatch",
+        "control block contract mismatch",
+    } <= reasons
+
+
 @pytest.mark.parametrize(
     ("graph", "reason"),
     [
@@ -458,7 +525,10 @@ def _library_xml(
     duplicate_bridge_dc_pos_port: bool = False,
     duplicate_bridge_gates_wrong_dimension: bool = False,
 ) -> str:
-    valves = "\n".join(f'<valve id="V{index:02d}" />' for index in range(1, 12 if missing_valve else 13))
+    valves = "\n".join(
+        f'<valve id="V{index:02d}" definition="master:thyristor_valve" group="{"upper" if index <= 6 else "lower"}" />'
+        for index in range(1, 12 if missing_valve else 13)
+    )
     extra = '<definition name="cigre_lcc_v1:Extra" />' if extra_definition else ""
     duplicate_interface = '<definition name="cigre_lcc_v1:SignalInterface" />' if duplicate_interface_definition else ""
     duplicate_dc_pos = '<port name="DC_POS" kind="electrical" dimension="1" />' if duplicate_bridge_dc_pos_port else ""
@@ -490,12 +560,14 @@ def _library_xml(
       <port name="VDC" /><port name="IDC" /><port name="IORDER" />
       <port name="ENABLE" /><port name="GATES" dimension="12" /><port name="ALPHA" />
     </external_ports>
+    <control_block definition="master:cc_controller" role="constant_current" />
   </definition>
   <definition name="cigre_lcc_v1:InverterControl">
     <external_ports>
       <port name="VDC" /><port name="IDC" /><port name="GAMMA_ORDER" />
       <port name="ENABLE" /><port name="GATES" dimension="12" /><port name="GAMMA" />
     </external_ports>
+    <control_block definition="master:cc_controller" role="constant_extinction_angle" />
   </definition>
   <definition name="cigre_lcc_v1:SignalInterface" />
   {duplicate_interface}

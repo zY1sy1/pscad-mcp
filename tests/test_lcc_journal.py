@@ -42,6 +42,11 @@ def test_atomic_journal_writes_valid_json_through_same_directory_temp(tmp_path, 
     assert json.loads(path.read_text(encoding="utf-8"))["state"] == "validated"
 
 
+def test_atomic_journal_rejects_path_traversal_build_id(tmp_path):
+    _assert_backend_code(lambda: AtomicJournal(tmp_path, "../escape"), "LCC_JOURNAL_INVALID")
+    assert not (tmp_path.parent / "escape" / "journal.json").exists()
+
+
 @pytest.mark.parametrize(
     "bad_value",
     [
@@ -237,6 +242,31 @@ def test_workspace_build_lease_stale_recovery_preserves_lock_replaced_before_rem
 
     _assert_backend_code(lambda: WorkspaceBuildLease.acquire(tmp_path, "new-build"), "LCC_BUILD_CONFLICT")
     assert _read_json(lock_path)["token"] == "replacement-token"
+
+
+def test_workspace_build_lease_rejects_stale_lock_journal_outside_workspace(tmp_path, monkeypatch):
+    outside = tmp_path.parent / "lcc-outside-journal.json"
+    outside.write_text(json.dumps({"build_id": "old-build", "state": "published"}), encoding="utf-8")
+    lock_path = tmp_path / ".pscad-mcp" / "lcc-build.lock"
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    lock_path.write_text(
+        json.dumps(
+            {
+                "build_id": "old-build",
+                "pid": 987654,
+                "token": "old-token",
+                "created_at_utc": "2026-08-19T00:00:00Z",
+                "journal_path": str(outside),
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(journal_module.psutil, "pid_exists", lambda pid: False)
+
+    _assert_backend_code(lambda: WorkspaceBuildLease.acquire(tmp_path, "new-build"), "LCC_BUILD_CONFLICT")
+
+    assert _read_json(outside) == {"build_id": "old-build", "state": "published"}
+    assert _read_json(lock_path)["token"] == "old-token"
 
 
 def test_workspace_build_lease_release_preserves_replacement_installed_after_tombstone_move(tmp_path, monkeypatch):

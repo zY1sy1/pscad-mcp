@@ -34,4 +34,10 @@ pscad-mcp = "pscad_mcp.main:main"
 include = ["pscad_mcp*"]
 
 [tool.setuptools.package-data]
-pscad_mcp = ["assets/templates/*.pscx", "assets/templates/*.pslx"]
+pscad_mcp = [
+    "assets/templates/*.pscx",
+    "assets/templates/*.pslx",
+    "assets/lcc/*/*.json",
+    "assets/lcc/*/*.md",
+    "assets/lcc/*/library/*.pslx",
+]

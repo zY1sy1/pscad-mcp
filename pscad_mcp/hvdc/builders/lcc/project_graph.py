@@ -258,7 +258,11 @@ def _component_ports(
                 dimension = contract.dimension
                 offset = contract.offset
         parsed.append(GraphPort(port_name, kind, dimension, offset, absolute_port(location, offset, orientation)))
-    if catalog is not None:
+    # PSCX shapes that explicitly carry port elements are authoritative.  A
+    # missing explicit port is structural evidence, not an invitation to fill
+    # it from the catalog.  Only sparse component shapes with no port
+    # elements at all may use catalog geometry to reconstruct endpoints.
+    if catalog is not None and not seen_names:
         try:
             definition = require_definition(catalog, definition_name)
         except BackendError:
@@ -429,12 +433,21 @@ def read_project_graph(path: str | Path, catalog: LccCatalog | Mapping[str, Any]
         root = ET.parse(project_path).getroot()
     except (OSError, ET.ParseError) as error:
         raise BackendError("LCC_STRUCTURE_INVALID", f"Unable to parse PSCX graph: {error}", "hvdc", "read_lcc_project_graph", {"path": str(project_path)}) from error
+    project_name = _text(_attr(root, "name", "project_name"))
+    if not project_name:
+        raise BackendError(
+            "LCC_STRUCTURE_INVALID",
+            "The PSCX project identity is missing.",
+            "hvdc",
+            "read_lcc_project_graph",
+            {"path": str(project_path)},
+        )
     scope = _main_scope(root)
     components = _parse_components(scope, catalog)
     wires = _parse_wires(scope)
     labels = _parse_labels(scope)
     return ProjectGraph(
-        project_name=_text(_attr(root, "name")) or project_path.stem,
+        project_name=project_name,
         pscad_version=_text(_attr(root, "version", "pscad_version")) or None,
         components=components,
         wires=wires,

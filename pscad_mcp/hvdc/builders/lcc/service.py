@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import secrets
+import threading
 import uuid
 from dataclasses import replace
 from pathlib import Path
@@ -13,7 +14,9 @@ from typing import Any, Callable
 from ....core.backend.base import BackendError
 from ....core.path_policy import PathPolicy, WorkspaceNotConfiguredError
 from ....core.service import ConfirmationRequired
-from .assets import LccAssetSet, load_packaged_asset_set
+from .acceptance import evaluate_acceptance
+from .assets import LccAssetSet, load_packaged_asset_set, sha256_file
+from .catalog import parse_catalog
 from .executor import execute_build
 from .journal import AtomicJournal, WorkspaceBuildLease
 from .models import LccBuildPlan, LccBuildRecord, LccBuildState
@@ -24,6 +27,31 @@ from .validator import validate_project_graph
 
 def _service_error(code: str, message: str, operation: str, **details: Any) -> BackendError:
     return BackendError(code, message, "hvdc", operation, details)
+
+
+def _run_coroutine_sync(factory: Callable[[], Any]) -> Any:
+    """Run a read-only backend coroutine from both sync and async callers."""
+
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(factory())
+
+    result: list[Any] = []
+    failure: list[BaseException] = []
+
+    def runner() -> None:
+        try:
+            result.append(asyncio.run(factory()))
+        except BaseException as error:
+            failure.append(error)
+
+    thread = threading.Thread(target=runner, name="lcc-validation-reader", daemon=True)
+    thread.start()
+    thread.join()
+    if failure:
+        raise failure[0]
+    return result[0]
 
 
 def _workspace_from(service: Any, workspace_root: str | Path | None) -> Path:
@@ -53,8 +81,13 @@ class LccBuilderService:
         executor_factory: Callable[..., Any] = execute_build,
     ) -> None:
         self.pscad_service = pscad_service
-        self.path_policy = getattr(pscad_service, "path_policy", None) or PathPolicy(workspace_root=str(workspace_root) if workspace_root else None)
-        self.workspace_root = _workspace_from(pscad_service, workspace_root)
+        if workspace_root is not None:
+            resolved_workspace = Path(workspace_root).expanduser().resolve()
+            self.path_policy = PathPolicy(workspace_root=str(resolved_workspace))
+            self.workspace_root = resolved_workspace
+        else:
+            self.path_policy = getattr(pscad_service, "path_policy", None) or PathPolicy()
+            self.workspace_root = _workspace_from(pscad_service, None)
         self.inventory = inventory
         self.asset_loader = asset_loader
         self.executor_factory = executor_factory
@@ -68,16 +101,57 @@ class LccBuilderService:
         candidate = getattr(self.pscad_service, "lcc_inventory", None)
         if candidate is not None:
             return candidate() if callable(candidate) else candidate
-        definitions: dict[str, dict[str, Any]] = {}
-        for definition in asset_set.catalog.get("definitions", ()):
-            if isinstance(definition, dict) and isinstance(definition.get("scoped_name"), str):
-                definitions[definition["scoped_name"]] = {
-                    "ports": [port.get("name") for port in definition.get("ports", ()) if isinstance(port, dict)]
-                }
-        return {"pscad_version": asset_set.pscad_version, "definitions": definitions}
+        raise _service_error(
+            "LCC_DEFINITION_MISSING",
+            "Live PSCAD definition inventory is required before LCC planning; the packaged catalog is not live evidence.",
+            "plan_lcc_model",
+            reason="live_inventory_unavailable",
+            required_version=asset_set.pscad_version,
+        )
 
     def _load_assets(self, blueprint: str) -> LccAssetSet:
         return self.asset_loader(blueprint)
+
+    def _validate_plan_assets(self, plan: LccBuildPlan, asset_set: LccAssetSet) -> None:
+        expected_hashes = dict(plan.asset_hashes)
+        observed_hashes = dict(asset_set.hashes)
+        if expected_hashes != observed_hashes:
+            raise _service_error(
+                "LCC_ASSET_MISMATCH",
+                "The packaged LCC assets changed after the plan was created.",
+                "build_lcc_model",
+                reason="plan_assets_changed",
+                expected_asset_hashes=expected_hashes,
+                observed_asset_hashes=observed_hashes,
+            )
+        if asset_set.name != plan.blueprint.name:
+            raise _service_error(
+                "LCC_ASSET_MISMATCH",
+                "The loaded LCC asset identity does not match the plan.",
+                "build_lcc_model",
+                reason="blueprint_identity_changed",
+                expected_blueprint=plan.blueprint.name,
+                observed_blueprint=asset_set.name,
+            )
+        if asset_set.pscad_version != plan.pscad_version:
+            raise _service_error(
+                "LCC_ASSET_MISMATCH",
+                "The loaded LCC PSCAD version does not match the plan.",
+                "build_lcc_model",
+                reason="pscad_version_changed",
+                expected_version=plan.pscad_version,
+                observed_version=asset_set.pscad_version,
+            )
+        observed_identity = parse_catalog(asset_set.catalog).identity
+        if observed_identity != plan.catalog_identity:
+            raise _service_error(
+                "LCC_ASSET_MISMATCH",
+                "The loaded LCC catalog identity does not match the plan.",
+                "build_lcc_model",
+                reason="catalog_identity_changed",
+                expected_catalog_identity=plan.catalog_identity,
+                observed_catalog_identity=observed_identity,
+            )
 
     def _create_plan(self, request: LccPlanRequest) -> LccBuildPlan:
         asset_set = self._load_assets(request.blueprint)
@@ -122,23 +196,30 @@ class LccBuilderService:
         return await self._start_build(plan)
 
     async def _start_build(self, plan: LccBuildPlan) -> dict[str, Any]:
+        asset_set = self._load_assets(plan.metadata.get("blueprint", plan.blueprint.name))
+        self._validate_plan_assets(plan, asset_set)
         build_id = uuid.uuid4().hex
         lease = WorkspaceBuildLease.acquire(self.workspace_root, build_id)
-        journal = AtomicJournal(self.workspace_root, build_id)
-        initial = LccBuildRecord(
-            build_id=build_id,
-            state=LccBuildState.VALIDATED,
-            plan=plan,
-            history=({"state": LccBuildState.VALIDATED.value},),
-            workspace=str(self.workspace_root),
-        )
-        self._records[build_id] = initial
-        self._leases[build_id] = lease
-        journal.write(initial.to_dict())
-        asset_set = self._load_assets(plan.metadata.get("blueprint", plan.blueprint.name))
-        task = asyncio.create_task(self._run_build(build_id, plan, asset_set, journal, lease))
-        self._tasks[build_id] = task
-        task.add_done_callback(lambda completed: self._task_done(build_id, completed))
+        try:
+            journal = AtomicJournal(self.workspace_root, build_id)
+            initial = LccBuildRecord(
+                build_id=build_id,
+                state=LccBuildState.VALIDATED,
+                plan=plan,
+                history=({"state": LccBuildState.VALIDATED.value},),
+                workspace=str(self.workspace_root),
+            )
+            self._records[build_id] = initial
+            self._leases[build_id] = lease
+            journal.write(initial.to_dict())
+            task = asyncio.create_task(self._run_build(build_id, plan, asset_set, journal, lease))
+            self._tasks[build_id] = task
+            task.add_done_callback(lambda completed: self._task_done(build_id, completed))
+        except BaseException:
+            self._tasks.pop(build_id, None)
+            self._leases.pop(build_id, None)
+            lease.release(lease.token)
+            raise
         return {
             "build_id": build_id,
             "state": LccBuildState.VALIDATED.value,
@@ -224,16 +305,22 @@ class LccBuilderService:
         record = self._load_record(build_id)
         return record.to_dict() if isinstance(record, LccBuildRecord) else dict(record)
 
-    def _output_path(self, project_name: str, output_file: str | None) -> Path:
-        if output_file is not None:
-            try:
-                return self.path_policy.resolve(output_file, suffixes={".pscx"}, must_exist=True)
-            except (WorkspaceNotConfiguredError, ValueError, OSError) as error:
-                raise _service_error("LCC_LAYOUT_INVALID", str(error), "validate_lcc_model", output_file=output_file) from error
+    def _project_path(self, project_name: str) -> Path:
+        if not isinstance(project_name, str) or not project_name.strip():
+            raise _service_error("LCC_LAYOUT_INVALID", "project_name must be a non-empty string.", "validate_lcc_model")
+        candidate = Path(project_name.strip()).expanduser()
+        if candidate.suffix.casefold() != ".pscx":
+            candidate = candidate.with_suffix(".pscx")
         try:
-            return self.path_policy.resolve_child(str(self.workspace_root), f"{project_name}.pscx", suffixes={".pscx"}, must_exist=True)
+            return self.path_policy.resolve(str(candidate), suffixes={".pscx"}, must_exist=True)
         except (ValueError, OSError) as error:
             raise _service_error("LCC_LAYOUT_INVALID", str(error), "validate_lcc_model", project_name=project_name) from error
+
+    def _waveform_path(self, output_file: str) -> Path:
+        try:
+            return self.path_policy.resolve(output_file, suffixes={".out", ".psout"}, must_exist=True)
+        except (WorkspaceNotConfiguredError, ValueError, OSError) as error:
+            raise _service_error("LCC_LAYOUT_INVALID", str(error), "validate_lcc_model", output_file=output_file) from error
 
     def validate_model(
         self,
@@ -242,10 +329,55 @@ class LccBuilderService:
         output_file: str | None = None,
     ) -> dict[str, Any]:
         asset_set = self._load_assets(blueprint)
-        path = self._output_path(project_name, output_file)
-        graph = read_project_graph(path, catalog=asset_set.catalog)
-        result = validate_project_graph(graph, asset_set.blueprint, catalog=asset_set.catalog)
-        result["output_file"] = str(path)
+        project_path = self._project_path(project_name)
+        graph = read_project_graph(project_path, catalog=asset_set.catalog)
+        result = validate_project_graph(
+            graph,
+            asset_set.blueprint,
+            catalog=asset_set.catalog,
+            expected_project_name=project_path.stem,
+            expected_pscad_version=asset_set.pscad_version,
+        )
+        result["project_file"] = str(project_path)
+        result["project_sha256"] = sha256_file(project_path)
+        result["output_file"] = None
+        result["accepted"] = False
+        if output_file is None:
+            result["acceptance"] = {
+                "status": "not_evaluated",
+                "verdict": "not_evaluated",
+                "reason": "No waveform output file was supplied to validate_lcc_model.",
+            }
+            return result
+
+        waveform_path = self._waveform_path(output_file)
+        reader = getattr(self.pscad_service, "read_output_file", None)
+        if not callable(reader):
+            raise _service_error(
+                "LCC_OUTPUT_INCOMPLETE",
+                "The PSCAD service does not expose an output reader.",
+                "validate_lcc_model",
+                output_file=str(waveform_path),
+            )
+        try:
+            samples = _run_coroutine_sync(
+                lambda: reader(str(waveform_path), max_samples=1_000_000, summary_only=False)
+            )
+        except BackendError:
+            raise
+        except BaseException as error:
+            raise _service_error(
+                "LCC_OUTPUT_INCOMPLETE",
+                "The supplied PSCAD output file could not be read.",
+                "validate_lcc_model",
+                output_file=str(waveform_path),
+                exception=type(error).__name__,
+            ) from error
+        acceptance = evaluate_acceptance(samples, asset_set.golden, asset_set.acceptance)
+        acceptance["status"] = "evaluated"
+        result["output_file"] = str(waveform_path)
+        result["acceptance"] = acceptance
+        result["accepted"] = bool(result.get("valid") and acceptance.get("verdict") == "PASS")
         return result
 
 

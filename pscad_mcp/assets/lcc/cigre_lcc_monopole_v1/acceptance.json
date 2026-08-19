@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "benchmark": "CIGRE 1991 fixed monopole",
+  "golden": {
+    "comparison_window": [0.0, 0.03],
+    "scale_floor": 1.0e-9,
+    "nrmse_limit": 0.05,
+    "max_error_limit": 0.15,
+    "alignment": {"channel": "Main/VAC_RECT_A", "rule": "positive_zero_crossing", "frequency_hz": 50.0, "max_cycles": 1.0},
+    "channels": [
+      {"name": "Main/VDC_RECT", "units": "kV", "required": true},
+      {"name": "Main/VDC_INV", "units": "kV", "required": true},
+      {"name": "Main/IDC", "units": "kA", "required": true},
+      {"name": "Main/P_RECT", "units": "MW", "required": true},
+      {"name": "Main/Q_RECT", "units": "MVAr", "required": true},
+      {"name": "Main/P_INV", "units": "MW", "required": true},
+      {"name": "Main/Q_INV", "units": "MVAr", "required": true},
+      {"name": "Main/ALPHA_RECT", "units": "deg", "required": true},
+      {"name": "Main/GAMMA_INV", "units": "deg", "required": true},
+      {"name": "Main/MU_RECT", "units": "deg", "required": true},
+      {"name": "Main/VAC_RECT_A", "units": "kV", "required": true}
+    ]
+  },
+  "physical_checks": [
+    {"name": "rectifier_dc_voltage", "kind": "dc_magnitude_polarity", "channel": "Main/VDC_RECT", "units": "kV", "polarity": "positive", "min": 0.0, "max": 1000.0, "window": [0.0, 0.03], "required": true},
+    {"name": "inverter_dc_voltage", "kind": "dc_magnitude_polarity", "channel": "Main/VDC_INV", "units": "kV", "polarity": "negative", "min": 0.0, "max": 1000.0, "window": [0.0, 0.03], "required": true},
+    {"name": "dc_power_product", "kind": "pdc_product", "voltage_channel": "Main/VDC_RECT", "current_channel": "Main/IDC", "power_channel": "Main/P_RECT", "voltage_units": "kV", "current_units": "kA", "power_units": "MW", "max_percent": 5.0, "window": [0.0, 0.03], "required": true},
+    {"name": "terminal_power_balance", "kind": "terminal_power_balance", "rectifier_power_channel": "Main/P_RECT", "inverter_power_channel": "Main/P_INV", "units": "MW", "loss_allowance": 100.0, "window": [0.0, 0.03], "required": true},
+    {"name": "rectifier_alpha", "kind": "angle_interval", "channel": "Main/ALPHA_RECT", "units": "deg", "min": 0.0, "max": 90.0, "window": [0.0, 0.03], "required": true},
+    {"name": "inverter_gamma", "kind": "angle_interval", "channel": "Main/GAMMA_INV", "units": "deg", "min": 10.0, "max": 40.0, "window": [0.0, 0.03], "required": true},
+    {"name": "commutation_overlap", "kind": "angle_interval", "channel": "Main/MU_RECT", "units": "deg", "min": 0.0, "max": 30.0, "window": [0.0, 0.03], "required": true},
+    {"name": "dc_voltage_ripple", "kind": "ripple", "channel": "Main/VDC_RECT", "units": "kV", "max_percent": 10.0, "window": [0.0, 0.03], "required": true},
+    {"name": "alpha_control_error", "kind": "steady_state_control_error", "actual_channel": "Main/ALPHA_RECT", "target": 15.0, "units": "deg", "max_abs": 5.0, "window": [0.0, 0.03], "required": true}
+  ],
+  "checks": [
+    {"name": "golden_waveforms", "kind": "golden", "required": true, "expected": {"nrmse": 0.05, "max_error": 0.15}, "units": "declared per channel", "comparison_window": [0.0, 0.03], "severity": "error", "rationale": "Reproducibility against an independently reviewed PSCAD 4.6.2 reference run."},
+    {"name": "dc_voltage_and_current", "kind": "physical", "required": true, "expected": {"polarity": "declared per terminal", "bounds": "asset contract"}, "units": "kV/kA", "comparison_window": [0.0, 0.03], "severity": "error", "rationale": "Fixed benchmark operating polarity and rated transfer."},
+    {"name": "power_balance", "kind": "physical", "required": true, "expected": {"loss_allowance_MW": 100.0}, "units": "MW", "comparison_window": [0.0, 0.03], "severity": "error", "rationale": "Terminal power must balance within the declared line and converter loss allowance."},
+    {"name": "commutation_angles", "kind": "physical", "required": true, "expected": {"alpha_deg": [0.0, 90.0], "gamma_deg": [10.0, 40.0], "mu_deg": [0.0, 30.0]}, "units": "deg", "comparison_window": [0.0, 0.03], "severity": "error", "rationale": "Engineering operating limits for the fixed firing and extinction controls."},
+    {"name": "control_error", "kind": "physical", "required": true, "expected": {"max_abs_deg": 5.0}, "units": "deg", "comparison_window": [0.0, 0.03], "severity": "error", "rationale": "Steady-state controller tracking bound."}
+  ]
+}

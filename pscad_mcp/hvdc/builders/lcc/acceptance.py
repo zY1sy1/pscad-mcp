@@ -840,6 +840,77 @@ def _evaluate_physical(samples: Mapping[str, _Channel], contract: Mapping[str, A
         result["physical_checks"].append(record)
 
 
+def _require_manifest_check_evidence(contract: Mapping[str, Any], result: dict[str, Any]) -> None:
+    """Prevent a required manifest check from disappearing from execution."""
+
+    raw_checks = contract.get("checks")
+    if raw_checks is None:
+        return
+    if not _is_sequence(raw_checks):
+        raise _invalid("checks must be a list.")
+    available = {
+        "golden": bool(result["golden_checks"]),
+        "physical": bool(result["physical_checks"]),
+    }
+    result.setdefault("manifest_checks", [])
+    for index, item in enumerate(raw_checks):
+        if not isinstance(item, Mapping):
+            raise _invalid("checks entries must be mappings.", index=index)
+        required = _required(item)
+        if not required:
+            continue
+        kind = item.get("kind")
+        name = _text(item.get("name", f"check_{index}"), f"checks[{index}].name")
+        manifest_record = {
+            "name": name,
+            "kind": kind,
+            "required": True,
+            "status": "missing",
+            "outcome": INCOMPLETE,
+        }
+        if not isinstance(kind, str) or kind not in available:
+            result["manifest_checks"].append(manifest_record)
+            result["errors"].append(
+                _error_record(
+                    "required acceptance check has no executable evaluator",
+                    check=name,
+                    details={"kind": kind},
+                )
+            )
+            continue
+        if not available[kind]:
+            result[f"{kind}_checks"].append(
+                {
+                    "name": name,
+                    "kind": kind,
+                    "required": True,
+                    "status": "missing",
+                    "outcome": INCOMPLETE,
+                }
+            )
+            result["errors"].append(
+                _error_record(
+                    "required acceptance check has no executable declaration",
+                    check=name,
+                    details={"kind": kind},
+                )
+            )
+            result["manifest_checks"].append(manifest_record)
+            continue
+        observed_checks = result[f"{kind}_checks"]
+        outcomes = [check.get("outcome") for check in observed_checks]
+        if any(outcome == INCOMPLETE for outcome in outcomes):
+            manifest_record["status"] = "incomplete"
+        elif any(outcome == FAIL for outcome in outcomes):
+            manifest_record["status"] = "failed"
+            manifest_record["outcome"] = FAIL
+        else:
+            manifest_record["status"] = "observed"
+            manifest_record["outcome"] = PASS
+        manifest_record["evidence_count"] = len(observed_checks)
+        result["manifest_checks"].append(manifest_record)
+
+
 def _add_unusable_declared_checks(contract: Mapping[str, Any], result: dict[str, Any], error: _EvidenceError) -> None:
     if not result["golden_checks"]:
         _, declarations = _golden_declarations(contract, {})
@@ -864,7 +935,7 @@ def _add_unusable_declared_checks(contract: Mapping[str, Any], result: dict[str,
 def _final_verdict(result: Mapping[str, Any]) -> str:
     required_checks = [
         check
-        for check in [*result["golden_checks"], *result["physical_checks"]]
+        for check in [*result["golden_checks"], *result["physical_checks"], *result.get("manifest_checks", [])]
         if check.get("required", True)
     ]
     if not required_checks:
@@ -894,13 +965,22 @@ def evaluate_acceptance(samples: Any, golden: Any, contract: Any) -> dict[str, A
         "errors": [],
         "metrics": {},
         "canonical": {"sample_channels": [], "golden_channels": []},
+        "manifest_checks": [],
     }
     try:
+        if isinstance(golden, Mapping):
+            source = golden.get("source")
+            if isinstance(source, str) and "placeholder" in source.casefold():
+                raise _EvidenceError(
+                    "unverified golden baseline",
+                    details={"source": source},
+                )
         sample_channels = _canonical_channels(samples, "samples")
         golden_channels = _canonical_channels(golden, "golden")
         result["canonical"]["sample_channels"] = sorted(sample_channels)
         _evaluate_golden(sample_channels, golden_channels, contract, result)
         _evaluate_physical(sample_channels, contract, result)
+        _require_manifest_check_evidence(contract, result)
     except _EvidenceError as error:
         result["errors"].append(_error_record(error.reason, channel=error.channel, details=error.details))
         _add_unusable_declared_checks(contract, result, error)

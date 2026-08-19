@@ -50,7 +50,13 @@ BLUEPRINT = {
             "route": {"vertices": [[10, 0], [90, 0]]},
         }
     ],
-    "measurements": [{"logical_id": "vdc_measurement", "kind": "electrical"}],
+    "measurements": [{
+        "logical_id": "vdc_measurement",
+        "kind": "electrical",
+        "component": "source",
+        "port": "ac",
+        "channels": ["Main/VDC"],
+    }],
     "outputs": [
         {
             "logical_id": "vdc",
@@ -157,6 +163,16 @@ def test_planner_rejects_existing_destination(tmp_path):
     _assert_code(lambda: create_plan(_request(), _asset_set(), INVENTORY, tmp_path), "LCC_BUILD_CONFLICT")
 
 
+def test_planner_rejects_dangling_symlink_destination(tmp_path):
+    target = tmp_path / "CIGRE_LCC.pscx"
+    try:
+        target.symlink_to(tmp_path / "missing.pscx")
+    except OSError as error:
+        pytest.skip(f"symlink creation unavailable: {error}")
+
+    _assert_code(lambda: create_plan(_request(), _asset_set(), INVENTORY, tmp_path), "LCC_BUILD_CONFLICT")
+
+
 def test_planner_rejects_missing_master_definition(tmp_path):
     inventory = copy.deepcopy(INVENTORY)
     del inventory["definitions"]["master:source3"]
@@ -197,6 +213,7 @@ def test_planner_rejects_route_collision_and_unbacked_output(tmp_path):
             "logical_id": "obstacle",
             "definition": "master:source3",
             "location": {"x": 50, "y": 0},
+            "parameters": {"Amplitude": 230.0},
             "ports": [],
         }
     )
@@ -207,3 +224,41 @@ def test_planner_rejects_route_collision_and_unbacked_output(tmp_path):
     unbacked = copy.deepcopy(BLUEPRINT)
     unbacked["outputs"][0]["measurement"] = "missing"
     _assert_code(lambda: create_plan(_request(), _asset_set(unbacked), INVENTORY, tmp_path), "LCC_BLUEPRINT_INVALID")
+
+
+def test_planner_rejects_output_measurement_without_exact_channel_binding(tmp_path):
+    candidate = copy.deepcopy(BLUEPRINT)
+    candidate["measurements"][0]["channels"] = ["Main/OTHER"]
+
+    _assert_code(lambda: create_plan(_request(), _asset_set(candidate), INVENTORY, tmp_path), "LCC_BLUEPRINT_INVALID")
+
+
+def test_planner_rejects_multiple_outputs_bound_to_one_measurement_endpoint(tmp_path):
+    candidate = copy.deepcopy(BLUEPRINT)
+    candidate["measurements"].append(
+        {
+            "logical_id": "duplicate_measurement",
+            "kind": "electrical",
+            "component": "source",
+            "port": "ac",
+            "channels": ["Main/OTHER"],
+        }
+    )
+    candidate["outputs"].append(
+        {
+            "logical_id": "other",
+            "path": "Main/OTHER",
+            "units": "kV",
+            "role": "other_voltage",
+            "measurement": "duplicate_measurement",
+        }
+    )
+
+    _assert_code(lambda: create_plan(_request(), _asset_set(candidate), INVENTORY, tmp_path), "LCC_BLUEPRINT_INVALID")
+
+
+def test_planner_rejects_unimplemented_route_policy(tmp_path):
+    candidate = copy.deepcopy(BLUEPRINT)
+    candidate["nets"][0]["route"]["policy"] = "shortest_path"
+
+    _assert_code(lambda: create_plan(_request(), _asset_set(candidate), INVENTORY, tmp_path), "LCC_LAYOUT_INVALID")

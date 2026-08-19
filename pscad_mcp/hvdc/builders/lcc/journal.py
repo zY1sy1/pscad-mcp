@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import re
 import tempfile
 import time
 import uuid
@@ -27,6 +28,7 @@ from ....core.backend.base import BackendError
 _JOURNAL_OPERATION = "write_lcc_journal"
 _LEASE_OPERATION = "acquire_lcc_build_lease"
 _GUARD_FILENAME = "lcc-build.guard"
+_BUILD_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 
 
 def _journal_invalid(message: str, **details: Any) -> BackendError:
@@ -39,6 +41,15 @@ def _build_conflict(message: str, **details: Any) -> BackendError:
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _validate_build_id(build_id: Any) -> str:
+    if not isinstance(build_id, str) or _BUILD_ID_RE.fullmatch(build_id) is None:
+        raise _journal_invalid(
+            "The LCC build_id must be a simple workspace-safe identifier.",
+            build_id=build_id,
+        )
+    return build_id
 
 
 def _json_safe(value: Any, path: str = "payload") -> Any:
@@ -95,9 +106,9 @@ class AtomicJournal:
     """Write JSON journals using same-directory atomic replacement."""
 
     def __init__(self, workspace_root: str | Path, build_id: str) -> None:
-        self.workspace_root = Path(workspace_root)
-        self.build_id = build_id
-        self.path = self.workspace_root / ".pscad-mcp" / "lcc-builds" / build_id / "journal.json"
+        self.workspace_root = Path(workspace_root).expanduser().resolve()
+        self.build_id = _validate_build_id(build_id)
+        self.path = self.workspace_root / ".pscad-mcp" / "lcc-builds" / self.build_id / "journal.json"
 
     def write(self, payload: Mapping[str, Any]) -> Path:
         return _atomic_write_json(self.path, payload)
@@ -199,8 +210,8 @@ class WorkspaceBuildLease:
     """Cross-process build lease backed by an exclusive lock file."""
 
     def __init__(self, workspace_root: str | Path, build_id: str, token: str, journal_path: str | Path) -> None:
-        self.workspace_root = Path(workspace_root)
-        self.build_id = build_id
+        self.workspace_root = Path(workspace_root).expanduser().resolve()
+        self.build_id = _validate_build_id(build_id)
         self.token = token
         self.journal_path = Path(journal_path)
         self.lock_path = self.workspace_root / ".pscad-mcp" / "lcc-build.lock"
@@ -208,7 +219,7 @@ class WorkspaceBuildLease:
 
     @classmethod
     def acquire(cls, workspace_root: str | Path, build_id: str) -> "WorkspaceBuildLease":
-        root = Path(workspace_root)
+        root = Path(workspace_root).expanduser().resolve()
         lock_path = root / ".pscad-mcp" / "lcc-build.lock"
         lock_path.parent.mkdir(parents=True, exist_ok=True)
         journal_path = AtomicJournal(root, build_id).path
@@ -227,6 +238,7 @@ class WorkspaceBuildLease:
                     fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
                 except FileExistsError:
                     existing = _read_lock_metadata(lock_path)
+                    _validate_lock_journal_path(root, existing)
                     if _pid_is_live(existing["pid"]):
                         raise _build_conflict(
                             "Another LCC build owns the workspace lock.",
@@ -234,7 +246,7 @@ class WorkspaceBuildLease:
                             pid=existing["pid"],
                             journal_path=existing["journal_path"],
                         )
-                    _mark_interrupted(existing)
+                    _mark_interrupted(root, existing)
                     _remove_matching_lock(lock_path, existing["token"])
                     continue
 
@@ -263,6 +275,8 @@ class WorkspaceBuildLease:
                 metadata = _read_lock_metadata(self.lock_path)
             except (OSError, json.JSONDecodeError, BackendError):
                 return False
+
+            _validate_lock_journal_path(self.workspace_root, metadata)
 
             if metadata["token"] != expected_token:
                 return False
@@ -304,8 +318,27 @@ def _pid_is_live(pid: int) -> bool:
         raise _build_conflict("The existing LCC build lock owner could not be validated.", pid=pid) from error
 
 
-def _mark_interrupted(lock_metadata: Mapping[str, Any]) -> None:
-    journal_path = Path(str(lock_metadata["journal_path"]))
+def _validate_lock_journal_path(workspace_root: Path, lock_metadata: Mapping[str, Any]) -> Path:
+    expected = AtomicJournal(workspace_root, str(lock_metadata["build_id"])).path
+    candidate = Path(str(lock_metadata["journal_path"])).expanduser()
+    try:
+        resolved = candidate.resolve()
+    except OSError as error:
+        raise _build_conflict(
+            "The existing LCC build lock has an invalid journal path.",
+            journal_path=str(candidate),
+        ) from error
+    if not candidate.is_absolute() or resolved != expected:
+        raise _build_conflict(
+            "The existing LCC build lock journal is outside the workspace or does not match its build ID.",
+            journal_path=str(candidate),
+            expected_journal_path=str(expected),
+        )
+    return expected
+
+
+def _mark_interrupted(workspace_root: Path, lock_metadata: Mapping[str, Any]) -> None:
+    journal_path = _validate_lock_journal_path(workspace_root, lock_metadata)
     try:
         raw = json.loads(journal_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):

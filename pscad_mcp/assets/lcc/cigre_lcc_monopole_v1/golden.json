@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "source": "independently reviewed reference run placeholder; licensed generation required",
+  "channels": {
+    "Main/VDC_RECT": {"units": "kV", "time": [0.0, 0.01, 0.02, 0.03], "values": [500.0, 500.0, 500.0, 500.0]},
+    "Main/VDC_INV": {"units": "kV", "time": [0.0, 0.01, 0.02, 0.03], "values": [-480.0, -480.0, -480.0, -480.0]},
+    "Main/IDC": {"units": "kA", "time": [0.0, 0.01, 0.02, 0.03], "values": [1.0, 1.0, 1.0, 1.0]},
+    "Main/P_RECT": {"units": "MW", "time": [0.0, 0.01, 0.02, 0.03], "values": [500.0, 500.0, 500.0, 500.0]},
+    "Main/Q_RECT": {"units": "MVAr", "time": [0.0, 0.01, 0.02, 0.03], "values": [100.0, 100.0, 100.0, 100.0]},
+    "Main/P_INV": {"units": "MW", "time": [0.0, 0.01, 0.02, 0.03], "values": [-480.0, -480.0, -480.0, -480.0]},
+    "Main/Q_INV": {"units": "MVAr", "time": [0.0, 0.01, 0.02, 0.03], "values": [120.0, 120.0, 120.0, 120.0]},
+    "Main/ALPHA_RECT": {"units": "deg", "time": [0.0, 0.01, 0.02, 0.03], "values": [15.0, 15.0, 15.0, 15.0]},
+    "Main/GAMMA_INV": {"units": "deg", "time": [0.0, 0.01, 0.02, 0.03], "values": [18.0, 18.0, 18.0, 18.0]},
+    "Main/MU_RECT": {"units": "deg", "time": [0.0, 0.01, 0.02, 0.03], "values": [10.0, 10.0, 10.0, 10.0]},
+    "Main/VAC_RECT_A": {"units": "kV", "time": [0.0, 0.01, 0.02, 0.03], "values": [-1.0, 1.0, -1.0, 1.0]}
+  }
+}

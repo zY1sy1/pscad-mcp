@@ -5,13 +5,13 @@ from __future__ import annotations
 import hashlib
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
 from ....core.path_policy import PathPolicy, WorkspaceNotConfiguredError
 from .assets import LccAssetSet, canonical_json
-from .catalog import LccCatalog, LccDefinitionSpec, parse_catalog, require_definition, require_port
+from .catalog import LccCatalog, LccDefinitionSpec, parse_catalog, require_definition, require_port, validate_parameters
 from .models import (
     LccAcceptanceCheck,
     LccBuildPlan,
@@ -204,7 +204,8 @@ def _resolve_paths(request: LccPlanRequest, workspace: str | Path | PathPolicy) 
     except (WorkspaceNotConfiguredError, ValueError, OSError) as error:
         raise _error("LCC_LAYOUT_INVALID", str(error), project_name=project_name) from error
     raw_final = folder / project_name
-    if final_path.exists() or raw_final.exists():
+    raw_target = folder / filename
+    if final_path.exists() or raw_final.exists() or raw_target.is_symlink():
         raise _error(
             "LCC_BUILD_CONFLICT",
             "The planned final destination already exists.",
@@ -284,15 +285,84 @@ def create_plan(
             asset_version=asset_set.pscad_version,
         )
     inventory_definitions = _inventory_definitions(inventory)
+    normalized_components: list[LccComponentSpec] = []
     component_map = {component.logical_id: component for component in blueprint.components}
-    measurement_ids = {record.get("logical_id") for record in blueprint.measurements if isinstance(record, Mapping)}
+    measurement_map = {
+        record.get("logical_id"): record
+        for record in blueprint.measurements
+        if isinstance(record, Mapping) and isinstance(record.get("logical_id"), str)
+    }
+    measurement_endpoints: dict[tuple[str, str], list[str]] = {}
+    for measurement in blueprint.measurements:
+        if not isinstance(measurement, Mapping):
+            continue
+        component_id = measurement.get("component")
+        port_name = measurement.get("port")
+        logical_id = measurement.get("logical_id")
+        if all(isinstance(value, str) for value in (component_id, port_name, logical_id)):
+            measurement_endpoints.setdefault((component_id, port_name), []).append(logical_id)
+    for endpoint, logical_ids in sorted(measurement_endpoints.items()):
+        if len(logical_ids) > 1:
+            raise _error(
+                "LCC_BLUEPRINT_INVALID",
+                "Multiple measurements cannot share one component port without an explicit derived-signal contract.",
+                endpoint=list(endpoint),
+                measurements=sorted(logical_ids),
+            )
+    output_paths = [output.path for output in blueprint.outputs]
+    if len(output_paths) != len(set(output_paths)):
+        raise _error(
+            "LCC_BLUEPRINT_INVALID",
+            "Output selectors must be unique.",
+            paths=output_paths,
+        )
     for output in blueprint.outputs:
-        if output.measurement is not None and output.measurement not in measurement_ids:
+        if output.measurement is None or output.measurement not in measurement_map:
             raise _error(
                 "LCC_BLUEPRINT_INVALID",
                 f"Output '{output.logical_id}' is not backed by a declared measurement.",
                 output=output.logical_id,
                 measurement=output.measurement,
+            )
+        measurement = measurement_map[output.measurement]
+        component_id = measurement.get("component")
+        port_name = measurement.get("port")
+        component = component_map.get(component_id) if isinstance(component_id, str) else None
+        if component is None or not isinstance(port_name, str) or port_name not in component.ports:
+            raise _error(
+                "LCC_BLUEPRINT_INVALID",
+                f"Output '{output.logical_id}' has an invalid measurement endpoint.",
+                output=output.logical_id,
+                measurement=output.measurement,
+                component=component_id,
+                port=port_name,
+            )
+        channels = measurement.get("channels", ())
+        if output.path not in channels:
+            raise _error(
+                "LCC_BLUEPRINT_INVALID",
+                f"Output '{output.logical_id}' is not declared by its measurement channel list.",
+                output=output.logical_id,
+                measurement=output.measurement,
+                path=output.path,
+            )
+        port_contract = require_port(require_definition(catalog, component.definition), port_name)
+        measurement_kind = measurement.get("kind")
+        if measurement_kind == "electrical" and port_contract.kind != "electrical":
+            raise _error(
+                "LCC_PORT_MISMATCH",
+                "Electrical measurements must bind to electrical ports.",
+                output=output.logical_id,
+                component=component_id,
+                port=port_name,
+            )
+        if measurement_kind == "data" and port_contract.kind not in {"data", "signal"}:
+            raise _error(
+                "LCC_PORT_MISMATCH",
+                "Data measurements must bind to data ports.",
+                output=output.logical_id,
+                component=component_id,
+                port=port_name,
             )
     for component in blueprint.components:
         definition = require_definition(catalog, component.definition)
@@ -302,6 +372,8 @@ def create_plan(
                 f"Definition '{component.definition}' is missing from the live inventory.",
                 definition=component.definition,
             )
+        normalized_parameters = validate_parameters(definition, dict(component.parameters))
+        normalized_components.append(replace(component, parameters=normalized_parameters))
         for port_name in component.ports:
             port = require_port(definition, port_name)
             live_ports = inventory_definitions[component.definition]
@@ -317,6 +389,8 @@ def create_plan(
                 raise _error("LCC_PORT_MISMATCH", "Blueprint port kind does not match catalog.", definition=component.definition, port=port_name)
             if contract.get("dimension") is not None and contract["dimension"] != port.dimension:
                 raise _error("LCC_PORT_MISMATCH", "Blueprint port dimension does not match catalog.", definition=component.definition, port=port_name)
+    blueprint = replace(blueprint, components=tuple(normalized_components))
+    component_map = {component.logical_id: component for component in blueprint.components}
     rectangles = _component_rectangles(blueprint.components, catalog)
     rectangle_items = list(rectangles.items())
     for index, (left_id, left_rect) in enumerate(rectangle_items):
@@ -324,6 +398,14 @@ def create_plan(
             if _rectangles_overlap(left_rect, right_rect):
                 raise _error("LCC_LAYOUT_INVALID", "Blueprint components overlap.", left=left_id, right=right_id)
     for net in blueprint.nets:
+        if net.route is not None and net.route.policy not in {None, "orthogonal"}:
+            raise _error(
+                "LCC_LAYOUT_INVALID",
+                "The requested route policy is not implemented by the deterministic planner.",
+                net=net.logical_id,
+                policy=net.route.policy,
+                supported_policies=["orthogonal"],
+            )
         route = _net_route(net, component_map, catalog)
         expected_kind = "electrical" if net.kind == "electrical" else "data"
         for endpoint in net.endpoints:
@@ -428,4 +510,3 @@ def create_plan(
         catalog_identity=catalog.identity,
         metadata=payload["request"],
     )
-
