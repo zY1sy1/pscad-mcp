@@ -40,6 +40,9 @@ def test_portable_config_example_describes_stdio_and_pscad_environment():
         "PSCAD_MCP_VERSION",
         "PSCAD_MCP_X64",
         "PSCAD_MCP_WORKSPACE",
+        "PSCAD_MCP_LEARNING_ENABLED",
+        "PSCAD_MCP_LEARNING_RETENTION_DAYS",
+        "PSCAD_MCP_LEARNING_MAX_EVENTS",
     ):
         assert key in server["env"]
 

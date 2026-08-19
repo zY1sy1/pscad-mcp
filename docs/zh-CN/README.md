@@ -1,10 +1,12 @@
 # PSCAD MCP 中文使用与验收说明
 
-本项目把 PSCAD 自动化封装为 60 个 MCP 工具，可供 Codex、GitHub Copilot CLI 等支持 stdio MCP 的客户端调用。项目采用双后端：
+本项目把 PSCAD 自动化封装为 60 个通用 MCP 工具，可供 Codex、GitHub Copilot CLI 等支持 stdio MCP 的客户端调用。项目采用双后端：
 
 - PSCAD 4.6.x：`mhrc.automation`，当前已在本机 PSCAD 4.6.2 x64 许可环境做真实验收；
 - PSCAD 5.x：`mhi.pscad` 3.1.x，当前完成契约测试，但由于本机没有 PSCAD 5.x，不能声称端到端真实验收通过；
 - 结果文件：`mhi.psout` 1.3.x。
+
+完整工具库存为 73 = 60 个通用工具 + 10 个 HVDC 工具 + 3 个学习工具；原有 60 个通用工具的名称和默认返回形状保持不变。
 
 Legacy PSCAD 4.6.2 后端只支持启动新的受管 Automation 实例，不能附加到用户普通方式打开的 GUI。受管窗口默认可见；默认检测到已有 PSCAD 进程时会在启动前返回 `EXTERNAL_PSCAD_PRESENT`。`repair_connection` 使用连接时缓存的进程归属：自有实例会先正常退出，外部进程不会被终止。
 
@@ -30,6 +32,7 @@ Legacy PSCAD 4.6.2 后端只支持启动新的受管 Automation 实例，不能�
 - 创建、保存与构建 7 个：新建算例/库、保存、另存、构建、全部构建、定义列表；
 - 画布 12 个：元件、导线、母线、连接、端口连接、注释、图框、控制框、对象列表、空位搜索、批量删除；
 - 元件操作 10 个：位置、旋转、镜像、克隆、端口、启用/禁用、删除。
+- 静默学习 3 个：`record_goal_failure`、`review_improvement_backlog`、`clear_learning_history`。
 
 ## Windows 安装
 
@@ -67,6 +70,11 @@ PSCAD 4.6.x 还需要安装与许可证配套的官方 Automation Library wheel�
 | `PSCAD_MCP_LEGACY_EXISTING_POLICY` | `reject` | `reject` 拒绝已有外部 PSCAD；`allow` 只允许另启受管实例，并不接管外部 GUI |
 | `PSCAD_MCP_WORKSPACE` | `D:\PSCAD-Workspace` | 限制工程、保存和结果文件的可访问根目录 |
 | `PSCAD_MCP_ALLOW_UNSCOPED_PATHS` | `false` | 仅受控开发环境允许未配置工作区时访问路径 |
+| `PSCAD_MCP_LEARNING_ENABLED` | `true` | 默认启用本地标量元数据学习；接受 `1/true/yes/on` 和 `0/false/no/off` |
+| `PSCAD_MCP_LEARNING_DB` | 可选绝对路径 | 覆盖本地 SQLite 路径，不记录工具参数或结果 |
+| `PSCAD_MCP_LEARNING_BACKLOG` | 可选绝对路径 | 覆盖生成的 `improvement-backlog.md` 路径 |
+| `PSCAD_MCP_LEARNING_RETENTION_DAYS` | `90` | 保留天数，范围 `1..3650` |
+| `PSCAD_MCP_LEARNING_MAX_EVENTS` | `20000` | 最大事件数，范围 `100..1000000` |
 
 推荐 PSCAD 4.6.2 配置：
 
@@ -79,6 +87,9 @@ $env:PSCAD_MCP_LEGACY_MINIMIZE = "false"
 $env:PSCAD_MCP_LEGACY_EXISTING_POLICY = "reject"
 $env:PSCAD_MCP_WORKSPACE = "D:\PSCAD-Workspace"
 $env:PSCAD_MCP_ALLOW_UNSCOPED_PATHS = "false"
+$env:PSCAD_MCP_LEARNING_ENABLED = "true"
+$env:PSCAD_MCP_LEARNING_RETENTION_DAYS = "90"
+$env:PSCAD_MCP_LEARNING_MAX_EVENTS = "20000"
 ```
 
 ## Codex 配置
@@ -102,9 +113,24 @@ PSCAD_MCP_LEGACY_MINIMIZE = 'false'
 PSCAD_MCP_LEGACY_EXISTING_POLICY = 'reject'
 PSCAD_MCP_WORKSPACE = 'C:/path/to/PSCAD-Workspace'
 PSCAD_MCP_ALLOW_UNSCOPED_PATHS = 'false'
+PSCAD_MCP_LEARNING_ENABLED = 'true'
+PSCAD_MCP_LEARNING_RETENTION_DAYS = '90'
+PSCAD_MCP_LEARNING_MAX_EVENTS = '20000'
 ```
 
 保存后新建 Codex 任务，使 MCP 配置重新加载。普通安装流程不会自动改写全局 Codex 配置。
+
+## 静默本地学习
+
+学习默认开启，只保存本机的有界标量元数据。不会持久化参数、结果、工程路径、提示词、异常文本、错误详情或 traceback，也不会上传遥测或训练模型。
+
+Windows 默认状态目录为 `%LOCALAPPDATA%\pscad-mcp`，其中的 `learning.sqlite3` 是证据源，`improvement-backlog.md` 是生成的 Markdown 投影。该文件会原子替换，手工编辑会被覆盖；仓库内的 `.pscad-mcp/learning/` 已加入忽略规则。
+
+正常成功操作保持静默。普通失败证据等待后续审查；只有定义明确的正确性、部分变更或恢复风险才可能产生一次简短 critical 提醒，原有运行或安全错误仍会显示。目标失败后，宿主界面仍可能显示折叠的 `record_goal_failure` 审计条目，但日常用户可见 prose 仍保持静默。
+
+三个学习工具是 `record_goal_failure`、`review_improvement_backlog` 和 `clear_learning_history`。清除历史必须显式确认，并会重新生成只有标题的 backlog。
+
+每周一 `09:00 Asia/Shanghai` 的 Codex desktop heartbeat 必须单独创建；MCP server 和 installer 不会隐式创建它。定时工作要求机器开机、Codex desktop app 正在运行、仓库仍可访问且 MCP server 在该时刻可用。
 
 ## 安全边界
 
@@ -194,7 +220,7 @@ git diff --check
 git status --short --branch
 ```
 
-工具数量应输出 `60 60`。真实 PSCAD 5.x 必须在安装并运行对应版本后另做相同级别验收。
+工具数量应输出 `73 73`，即 `73 = 60 + 10 + 3`；其中稳定的 generic 合约仍是 60 个工具。真实 PSCAD 5.x 必须在安装并运行对应版本后另做相同级别验收。
 
 ## 常见故障
 

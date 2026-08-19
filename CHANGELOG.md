@@ -26,6 +26,11 @@ All notable changes to this project are documented here.
   `PSCAD_MCP_WORKSPACE` is configured.
 - Added the explicit development-only `PSCAD_MCP_ALLOW_UNSCOPED_PATHS` escape
   hatch and a built-package installation smoke test.
+- Added silent learning with scalar local evidence, generated
+  `improvement-backlog.md`, three learning tools, narrowly defined critical
+  reminders, privacy exclusions for parameters, results, paths, prompts,
+  exception text, details, and tracebacks, and a 73-tool inventory
+  (`60` generic + `10` HVDC + `3` learning).
 - Added a separate ten-tool HVDC domain layer with read-only XML evidence
   scanning, deterministic LCC/VSC/MMC classification, profile mappings,
   confirmed scenario orchestration, bounded PSOUT metrics, and Breaker-family

@@ -10,9 +10,23 @@ logging.basicConfig(level=logging.INFO, format='%(message)s')
 logger = logging.getLogger("mcp-installer")
 
 _TRUE_VALUES = {"1", "true", "yes", "on"}
+_FALSE_VALUES = {"0", "false", "no", "off"}
 
 
-def _workspace_environment():
+def _learning_enabled_value():
+    raw = os.getenv("PSCAD_MCP_LEARNING_ENABLED")
+    if raw is None:
+        return "true"
+    normalized = raw.strip().lower()
+    if normalized in _TRUE_VALUES:
+        return "true"
+    if normalized in _FALSE_VALUES:
+        return "false"
+    logger.warning("PSCAD_MCP_LEARNING_ENABLED is invalid; using false.")
+    return "false"
+
+
+def _server_environment():
     workspace = os.getenv("PSCAD_MCP_WORKSPACE", "").strip()
     allow_unscoped = (
         "true"
@@ -20,7 +34,10 @@ def _workspace_environment():
         in _TRUE_VALUES
         else "false"
     )
-    environment = {"PSCAD_MCP_ALLOW_UNSCOPED_PATHS": allow_unscoped}
+    environment = {
+        "PSCAD_MCP_ALLOW_UNSCOPED_PATHS": allow_unscoped,
+        "PSCAD_MCP_LEARNING_ENABLED": _learning_enabled_value(),
+    }
     if workspace:
         environment = {
             "PSCAD_MCP_WORKSPACE": workspace,
@@ -73,7 +90,7 @@ def sync_docs():
 def print_copilot_cli_setup():
     """Generate and print GitHub Copilot CLI configuration guidance."""
     python_exe = sys.executable
-    environment = _workspace_environment()
+    environment = _server_environment()
     workspace = environment.get("PSCAD_MCP_WORKSPACE")
     allow_unscoped = environment["PSCAD_MCP_ALLOW_UNSCOPED_PATHS"] == "true"
 
@@ -120,6 +137,10 @@ def print_copilot_cli_setup():
     logger.info(
         "    PSCAD_MCP_ALLOW_UNSCOPED_PATHS=%s",
         environment["PSCAD_MCP_ALLOW_UNSCOPED_PATHS"],
+    )
+    logger.info(
+        "    PSCAD_MCP_LEARNING_ENABLED=%s",
+        environment["PSCAD_MCP_LEARNING_ENABLED"],
     )
     logger.info("Press Ctrl+S in Copilot CLI to save the server definition.")
     logger.info("\nIf you prefer editing the config file directly, add this JSON to mcp-config.json:")

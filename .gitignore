@@ -68,3 +68,6 @@ venv.bak/
 # Local Git worktrees
 .worktrees/
 
+# Repository-local learning state
+.pscad-mcp/learning/
+

@@ -10,3 +10,5 @@ def test_changelog_describes_current_release_boundary():
     assert "pscad 4.6.2" in text
     assert "pscad 5.x" in text
     assert "contract" in text
+    assert "silent learning" in text
+    assert "73" in text

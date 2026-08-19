@@ -61,6 +61,10 @@ external process.
 
 ## Tool coverage
 
+The complete inventory is 73 = 60 generic tools, 10 HVDC tools, and 3
+learning tools. The generic 60-tool contract keeps its existing names and
+default return shapes.
+
 The server currently exposes tool groups for:
 
 - application lifecycle and documentation access
@@ -171,6 +175,45 @@ The complete workflow includes `create_simulation_set`,
 `set_simulation_task_parameters`, and `get_simulation_set_details`.
 Destructive removals require `confirm=true`; PSCAD 4.6.2 task writes support
 only `controlgroup`, `volley`, and `affinity`, with `namespace` read-only.
+
+## Silent local learning
+
+Silent learning is enabled by default and stores local-only scalar metadata.
+It never persists parameters, results, project paths, prompts, exception text,
+error details, or tracebacks. It does not upload telemetry or create model
+training data.
+
+The default Windows state directory is `%LOCALAPPDATA%\pscad-mcp`, containing
+`learning.sqlite3` and the generated `improvement-backlog.md`. The Markdown
+file is a generated projection: it is atomically replaced and manual edits
+are overwritten. The recommended repository-local override is ignored by
+`.gitignore`.
+
+The five learning variables are:
+
+```text
+PSCAD_MCP_LEARNING_ENABLED=true
+PSCAD_MCP_LEARNING_DB=<optional absolute SQLite path>
+PSCAD_MCP_LEARNING_BACKLOG=<optional absolute Markdown path>
+PSCAD_MCP_LEARNING_RETENTION_DAYS=90       # 1 through 3650
+PSCAD_MCP_LEARNING_MAX_EVENTS=20000       # 100 through 1000000
+```
+
+Successful operation remains silent. Ordinary improvement evidence waits for
+review; only narrowly defined critical correctness, partial-mutation, or
+recovery risks may produce one concise reminder, while the original
+operational or safety error remains visible. After a failed goal, the host
+may still show a collapsed `record_goal_failure` audit entry even though
+routine user-facing prose remains silent.
+
+The three learning tools are `record_goal_failure`,
+`review_improvement_backlog`, and `clear_learning_history`. Clearing requires
+explicit confirmation and regenerates the header-only backlog.
+
+A separately created Codex desktop heartbeat reviews the backlog every Monday
+at 09:00 in `Asia/Shanghai`. The MCP server and installer do not create that
+heartbeat implicitly. Scheduled work requires the machine and Codex desktop
+app to be running, with the repository and MCP server available.
 
 ## Errors and connection recovery
 
@@ -342,6 +385,7 @@ You can also configure the server manually.
    - Args: `-m pscad_mcp.main`
    - Environment: `PSCAD_MCP_WORKSPACE=C:\\path\\to\\PSCAD-Workspace`
    - Environment: `PSCAD_MCP_ALLOW_UNSCOPED_PATHS=false`
+   - Environment: `PSCAD_MCP_LEARNING_ENABLED=true`
 
 4. Press `Ctrl+S` to save.
 
@@ -361,7 +405,8 @@ If you prefer editing the config file yourself, add an entry like this:
       "tools": ["*"],
       "env": {
         "PSCAD_MCP_WORKSPACE": "C:\\path\\to\\PSCAD-Workspace",
-        "PSCAD_MCP_ALLOW_UNSCOPED_PATHS": "false"
+        "PSCAD_MCP_ALLOW_UNSCOPED_PATHS": "false",
+        "PSCAD_MCP_LEARNING_ENABLED": "true"
       }
     }
   }
@@ -390,6 +435,9 @@ PSCAD_MCP_LEGACY_MINIMIZE = 'false'
 PSCAD_MCP_LEGACY_EXISTING_POLICY = 'reject'
 PSCAD_MCP_WORKSPACE = 'C:/path/to/PSCAD-Workspace'
 PSCAD_MCP_ALLOW_UNSCOPED_PATHS = 'false'
+PSCAD_MCP_LEARNING_ENABLED = 'true'
+PSCAD_MCP_LEARNING_RETENTION_DAYS = '90'
+PSCAD_MCP_LEARNING_MAX_EVENTS = '20000'
 ```
 
 Replace both local paths in this example, or copy the values from
