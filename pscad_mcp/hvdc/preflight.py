@@ -15,6 +15,7 @@ from .bindings import (
 from .mappings import resolve_mappings
 from .scanner import scan_project
 from .timing import select_timing_mode
+from .builders.lcc.measurements import validate_measurements
 
 
 _ENABLED_OUTPUT = {"out", "legacy", "1", "true", "yes"}
@@ -64,7 +65,7 @@ async def ensure_output_ready(
 
 
 def required_result_selectors(profile: Mapping[str, Any], requested_metrics: Sequence[str]) -> list[dict[str, Any]]:
-    selectors = profile.get("result_channels", [])
+    selectors = validate_measurements(profile.get("result_channels", []))
     roles = profile.get("metric_roles", {})
     requested = [str(metric) for metric in requested_metrics]
     if profile.get("profile_version", 1) == 2:
@@ -89,9 +90,24 @@ def required_result_selectors(profile: Mapping[str, Any], requested_metrics: Seq
                     canonical=canonical,
                 )
     needed = {roles[metric] for metric in requested if isinstance(roles, Mapping) and metric in roles}
+    by_canonical = {item["canonical"]: item for item in selectors}
+    pending = list(needed)
+    while pending:
+        canonical = pending.pop()
+        selector = by_canonical.get(canonical)
+        if selector and selector.get("kind") == "derived":
+            for source in selector["sources"]:
+                if source not in needed:
+                    needed.add(source)
+                    pending.append(source)
     if not needed:
-        return [dict(selector) for selector in selectors if isinstance(selector, Mapping)]
-    return [dict(selector) for selector in selectors if isinstance(selector, Mapping) and selector.get("canonical") in needed]
+        return [dict(selector) for selector in selectors if selector.get("kind") == "observed"]
+    return [
+        dict(selector)
+        for selector in selectors
+        if selector.get("kind") == "observed"
+        and selector.get("canonical") in needed
+    ]
 
 
 async def verify_required_result_selectors(

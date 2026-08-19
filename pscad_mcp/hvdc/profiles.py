@@ -11,6 +11,7 @@ import tempfile
 from typing import Any
 
 from ..core.backend.base import BackendError
+from .builders.lcc.measurements import validate_measurements
 
 
 _BUILTIN_PROFILES: dict[str, dict[str, Any]] = {
@@ -190,7 +191,8 @@ def _validate_profile_v2(profile: dict[str, Any], name: str) -> None:
                 name,
             )
     commands = _validate_unique_canonicals(profile.get("command_bindings", []), "command_bindings", name)
-    results = _validate_unique_canonicals(profile.get("result_channels", []), "result_channels", name)
+    results = validate_measurements(profile.get("result_channels", []))
+    profile["result_channels"] = results
     for item in commands:
         component = item.get("component")
         if not isinstance(component, dict) or not component:
@@ -213,21 +215,6 @@ def _validate_profile_v2(profile: dict[str, Any], name: str) -> None:
             raise _invalid(f"Command '{item['canonical']}' has invalid semantics.", name)
         if "read_back" in item and not isinstance(item["read_back"], bool):
             raise _invalid(f"Command '{item['canonical']}' has invalid read_back.", name)
-    for item in results:
-        if not isinstance(item.get("path"), str) or not item["path"].strip():
-            raise _invalid(f"Result '{item['canonical']}' requires path.", name)
-        if item.get("call_id") is not None and (
-            isinstance(item["call_id"], bool)
-            or not isinstance(item["call_id"], int)
-            or item["call_id"] < 1
-        ):
-            raise _invalid(f"Result '{item['canonical']}' has invalid call_id.", name)
-        if item.get("units") is not None and not isinstance(item["units"], str):
-            raise _invalid(f"Result '{item['canonical']}' has invalid units.", name)
-        if item.get("location") is not None and (
-            not isinstance(item["location"], str) or not item["location"].strip()
-        ):
-            raise _invalid(f"Result '{item['canonical']}' has invalid location.", name)
     roles = profile.get("metric_roles", {})
     if not isinstance(roles, dict) or any(
         not isinstance(key, str) or not isinstance(value, str)
