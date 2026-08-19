@@ -45,5 +45,39 @@ an approved remediation when a repeated workflow mistake has been reproduced;
 a backlog candidate alone is not sufficient evidence. It must never weaken
 safety or run licensed acceptance without the existing opt-in.
 
+## Rationalization Guards
+
+| Rationalization | Counter |
+| --- | --- |
+| review result alone is approval | Counter: review result is evidence, not approval; remain in review-only mode and wait for explicit user approval and an approved candidate list. |
+| time pressure means patch now | Counter: time pressure does not change the approval gate; stay in review-only mode until approval. |
+| tests pass means accepted | Counter: passing tests do not replace explicit user approval; tests only verify an approved change. |
+| candidate alone justifies AGENTS.md change | Counter: a backlog candidate alone is insufficient; require an approved remediation after a repeated workflow mistake has been reproduced. |
+
+## Red Flags
+
+Any violation of a guard means immediately return to review-only mode, make no
+remediation change, and wait for explicit user approval. Stop on any of these:
+
+- Treating a review result, priority, or evidence count as approval.
+- Using time pressure to skip the approved candidate list or the failing
+  regression test.
+- Treating passing tests as acceptance of an unapproved change.
+- Editing `AGENTS.md` because a candidate exists without reproducing a
+  repeated workflow mistake during approved remediation.
+- Patching an unreproduced candidate instead of recording `needs_evidence`.
+
+## Verification record
+
+Future operator checklist only. Record outcomes here only after actually
+running the checks; do not infer or invent results.
+
+- [ ] Scheduled empty run: confirm `attention_required=false` finishes quietly
+  without repository changes or remediation.
+- [ ] Critical finding under time pressure: confirm the skill remains
+  review-only until explicit approval and an approved candidate list exist.
+- [ ] Unreproduced candidate: confirm it stays unchanged and the remediation
+  summary uses the fixed action `needs_evidence`.
+
 Never merge, push, publish, or deploy.
 Never edit improvement-backlog.md; it is a generated projection.

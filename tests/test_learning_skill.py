@@ -18,6 +18,18 @@ def test_improver_skill_is_review_only_until_user_approval():
     assert "needs_evidence" in text
     assert "AGENTS.md" in text
     assert "repeated workflow mistake" in text
+    assert "## Rationalization Guards" in text
+    assert "| review result alone is approval |" in text
+    assert "| time pressure means patch now |" in text
+    assert "| tests pass means accepted |" in text
+    assert "| candidate alone justifies AGENTS.md change |" in text
+    assert "review result is evidence, not approval" in text
+    assert "time pressure does not change the approval gate" in text
+    assert "passing tests do not replace explicit user approval" in text
+    assert "repeated workflow mistake has been reproduced" in text
+    assert "## Red Flags" in text
+    assert "return to review-only mode" in text
+    assert "wait for explicit user approval" in text
 
 
 def test_scheduled_prompt_is_quiet_without_findings():
