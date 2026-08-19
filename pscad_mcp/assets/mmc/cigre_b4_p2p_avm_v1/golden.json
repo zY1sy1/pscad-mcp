@@ -1,0 +1,6 @@
+{
+  "schema_version": 1,
+  "source": {"status": "independently_reviewed_reference_required", "builder_generated": false},
+  "channels": {},
+  "limitations": ["golden_waveforms_not_embedded_until_independent_reference_is accepted"]
+}

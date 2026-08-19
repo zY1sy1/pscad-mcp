@@ -1,0 +1,83 @@
+{
+  "schema_version": 1,
+  "name": "cigre_b4_p2p_avm_v1",
+  "profile": "cigre_b4_p2p_avm_v1",
+  "model": "symmetrical_monopole_half_bridge_avm",
+  "topology": "two_terminal_two_station",
+  "equation_version": "mmc-avm-v1",
+  "nominal_vdc_kv": 640.0,
+  "nominal_power_mw": 1000.0,
+  "settings": {"time_step_s": 0.00005, "output_step_s": 0.00005, "simulation_duration_s": 2.0, "pscad_version": "4.6.2", "compiler_target": "fortran", "output_enabled": true},
+  "stations": [
+    {
+      "logical_id": "STATION_P",
+      "role": "P",
+      "ac_component": "STATION_P.ac",
+      "control_contract": {"role": "P", "active_power_command": "P_order", "reactive_power_command": "Q_order"},
+      "arms": [
+        {"logical_id": "STATION_P.A.upper", "station_role": "P", "phase": "A", "arm": "upper", "definition": "cigre_mmc_avm_v1:MMCAverageArm", "location": {"x": 100, "y": 100}, "parameters": {"C_eq_F": 10000.0, "L_arm_H": 0.1, "R_arm_ohm": 0.01}, "ports": ["AC", "DC_POS", "DC_NEG", "V_INSERTED", "I_ARM", "ENERGY"]},
+        {"logical_id": "STATION_P.A.lower", "station_role": "P", "phase": "A", "arm": "lower", "definition": "cigre_mmc_avm_v1:MMCAverageArm", "location": {"x": 100, "y": 150}, "parameters": {"C_eq_F": 10000.0, "L_arm_H": 0.1, "R_arm_ohm": 0.01}, "ports": ["AC", "DC_POS", "DC_NEG", "V_INSERTED", "I_ARM", "ENERGY"]},
+        {"logical_id": "STATION_P.B.upper", "station_role": "P", "phase": "B", "arm": "upper", "definition": "cigre_mmc_avm_v1:MMCAverageArm", "location": {"x": 200, "y": 100}, "parameters": {"C_eq_F": 10000.0, "L_arm_H": 0.1, "R_arm_ohm": 0.01}, "ports": ["AC", "DC_POS", "DC_NEG", "V_INSERTED", "I_ARM", "ENERGY"]},
+        {"logical_id": "STATION_P.B.lower", "station_role": "P", "phase": "B", "arm": "lower", "definition": "cigre_mmc_avm_v1:MMCAverageArm", "location": {"x": 200, "y": 150}, "parameters": {"C_eq_F": 10000.0, "L_arm_H": 0.1, "R_arm_ohm": 0.01}, "ports": ["AC", "DC_POS", "DC_NEG", "V_INSERTED", "I_ARM", "ENERGY"]},
+        {"logical_id": "STATION_P.C.upper", "station_role": "P", "phase": "C", "arm": "upper", "definition": "cigre_mmc_avm_v1:MMCAverageArm", "location": {"x": 300, "y": 100}, "parameters": {"C_eq_F": 10000.0, "L_arm_H": 0.1, "R_arm_ohm": 0.01}, "ports": ["AC", "DC_POS", "DC_NEG", "V_INSERTED", "I_ARM", "ENERGY"]},
+        {"logical_id": "STATION_P.C.lower", "station_role": "P", "phase": "C", "arm": "lower", "definition": "cigre_mmc_avm_v1:MMCAverageArm", "location": {"x": 300, "y": 150}, "parameters": {"C_eq_F": 10000.0, "L_arm_H": 0.1, "R_arm_ohm": 0.01}, "ports": ["AC", "DC_POS", "DC_NEG", "V_INSERTED", "I_ARM", "ENERGY"]}
+      ]
+    },
+    {
+      "logical_id": "STATION_VDC",
+      "role": "VDC",
+      "ac_component": "STATION_VDC.ac",
+      "control_contract": {"role": "VDC", "reactive_power_command": "Q_order", "active_power_command": "P_order", "dc_voltage_command": "Vdc_order"},
+      "arms": [
+        {"logical_id": "STATION_VDC.A.upper", "station_role": "VDC", "phase": "A", "arm": "upper", "definition": "cigre_mmc_avm_v1:MMCAverageArm", "location": {"x": 600, "y": 100}, "parameters": {"C_eq_F": 10000.0, "L_arm_H": 0.1, "R_arm_ohm": 0.01}, "ports": ["AC", "DC_POS", "DC_NEG", "V_INSERTED", "I_ARM", "ENERGY"]},
+        {"logical_id": "STATION_VDC.A.lower", "station_role": "VDC", "phase": "A", "arm": "lower", "definition": "cigre_mmc_avm_v1:MMCAverageArm", "location": {"x": 600, "y": 150}, "parameters": {"C_eq_F": 10000.0, "L_arm_H": 0.1, "R_arm_ohm": 0.01}, "ports": ["AC", "DC_POS", "DC_NEG", "V_INSERTED", "I_ARM", "ENERGY"]},
+        {"logical_id": "STATION_VDC.B.upper", "station_role": "VDC", "phase": "B", "arm": "upper", "definition": "cigre_mmc_avm_v1:MMCAverageArm", "location": {"x": 700, "y": 100}, "parameters": {"C_eq_F": 10000.0, "L_arm_H": 0.1, "R_arm_ohm": 0.01}, "ports": ["AC", "DC_POS", "DC_NEG", "V_INSERTED", "I_ARM", "ENERGY"]},
+        {"logical_id": "STATION_VDC.B.lower", "station_role": "VDC", "phase": "B", "arm": "lower", "definition": "cigre_mmc_avm_v1:MMCAverageArm", "location": {"x": 700, "y": 150}, "parameters": {"C_eq_F": 10000.0, "L_arm_H": 0.1, "R_arm_ohm": 0.01}, "ports": ["AC", "DC_POS", "DC_NEG", "V_INSERTED", "I_ARM", "ENERGY"]},
+        {"logical_id": "STATION_VDC.C.upper", "station_role": "VDC", "phase": "C", "arm": "upper", "definition": "cigre_mmc_avm_v1:MMCAverageArm", "location": {"x": 800, "y": 100}, "parameters": {"C_eq_F": 10000.0, "L_arm_H": 0.1, "R_arm_ohm": 0.01}, "ports": ["AC", "DC_POS", "DC_NEG", "V_INSERTED", "I_ARM", "ENERGY"]},
+        {"logical_id": "STATION_VDC.C.lower", "station_role": "VDC", "phase": "C", "arm": "lower", "definition": "cigre_mmc_avm_v1:MMCAverageArm", "location": {"x": 800, "y": 150}, "parameters": {"C_eq_F": 10000.0, "L_arm_H": 0.1, "R_arm_ohm": 0.01}, "ports": ["AC", "DC_POS", "DC_NEG", "V_INSERTED", "I_ARM", "ENERGY"]}
+      ]
+    }
+  ],
+  "components": [
+    {"logical_id": "STATION_P.ac", "definition": "master:source3", "location": {"x": 0, "y": 0}, "parameters": {"Amplitude": 230.0}, "ports": ["AC"]},
+    {"logical_id": "STATION_VDC.ac", "definition": "master:source3", "location": {"x": 0, "y": 400}, "parameters": {"Amplitude": 230.0}, "ports": ["AC"]}
+  ],
+  "nets": [
+    {"logical_id": "dc_positive", "kind": "electrical", "endpoints": ["STATION_P.dc_pos", "STATION_VDC.dc_pos"]},
+    {"logical_id": "dc_negative", "kind": "electrical", "endpoints": ["STATION_P.dc_neg", "STATION_VDC.dc_neg"]}
+  ],
+  "outputs": [
+    {"logical_id": "vdc_pole_to_pole", "path": "Main/VDC_P2P", "units": "kV", "role": "dc_voltage_pole_to_pole"},
+    {"logical_id": "p_ac_p", "path": "Main/STATION_P/P_AC", "units": "MW", "role": "station_ac_active_power"},
+    {"logical_id": "q_ac_p", "path": "Main/STATION_P/Q_AC", "units": "MVAr", "role": "station_ac_reactive_power"},
+    {"logical_id": "arm_current_p_a_upper", "path": "Main/STATION_P/A_UPPER/I", "units": "kA", "role": "arm_current"}
+  ],
+  "control_contract": {
+    "version": "mmc-control-v1",
+    "role": "link",
+    "active_power_command": "P_order",
+    "reactive_power_command": "Q_order",
+    "equations": {
+      "arm_current": "i_upper = I_dc / 3 + i_phase / 2 + i_circulating",
+      "arm_current_lower": "i_lower = I_dc / 3 - i_phase / 2 + i_circulating",
+      "energy": "W_arm = 0.5 * C_eq * V_cap_eq^2",
+      "energy_derivative": "dW_arm/dt = v_inserted * i_arm - p_loss_arm"
+    },
+    "modulation_bounds": [0.0, 1.0]
+  },
+  "sequence": [
+    {"name": "blocked_precharge", "order": 1, "entry_condition": "reset", "exit_condition": "ready", "duration_s": 0.1, "outputs": ["vdc_pole_to_pole"]},
+    {"name": "ready_to_deblock", "order": 2, "entry_condition": "ready", "exit_condition": "deblocked", "duration_s": 0.1, "outputs": ["vdc_pole_to_pole"]},
+    {"name": "forward_ramp", "order": 3, "entry_condition": "deblocked", "exit_condition": "forward", "duration_s": 0.5, "outputs": ["p_ac_p"]},
+    {"name": "forward_steady", "order": 4, "entry_condition": "forward", "exit_condition": "reversal", "duration_s": 0.5, "outputs": ["p_ac_p"]},
+    {"name": "power_reversal", "order": 5, "entry_condition": "reversal", "exit_condition": "reverse", "duration_s": 0.5, "outputs": ["p_ac_p"]},
+    {"name": "reverse_steady", "order": 6, "entry_condition": "reverse", "exit_condition": "complete", "duration_s": 0.5, "outputs": ["p_ac_p"]}
+  ],
+  "acceptance_checks": [
+    {"name": "precharge_ready", "kind": "window", "required": true, "expected": {"finite": true}, "units": "s", "comparison_window": [0.0, 0.1]},
+    {"name": "forward_steady", "kind": "window", "required": true, "expected": {"power_mw": 1000.0}, "units": "MW", "comparison_window": [0.6, 1.0]},
+    {"name": "power_reversal", "kind": "window", "required": true, "expected": {"direction": "negative"}, "units": "MW", "comparison_window": [1.0, 1.5]},
+    {"name": "reverse_steady", "kind": "window", "required": true, "expected": {"power_mw": -1000.0}, "units": "MW", "comparison_window": [1.5, 2.0]}
+  ],
+  "provenance": {"nominal_vdc_kv": "original_engineering_derivation", "nominal_power_mw": "original_engineering_derivation", "equations": "approved_design_document"}
+}

@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "pscad_version": "4.6.2",
+  "scope": "cigre_mmc_avm_v1",
+  "definitions": {
+    "cigre_mmc_avm_v1:MMCAverageArm": {
+      "ports": [
+        {"name": "AC", "kind": "electrical", "dimension": "1"},
+        {"name": "DC_POS", "kind": "electrical", "dimension": "1"},
+        {"name": "DC_NEG", "kind": "electrical", "dimension": "1"},
+        {"name": "V_INSERTED", "kind": "signal", "dimension": "1"},
+        {"name": "I_ARM", "kind": "signal", "dimension": "1"},
+        {"name": "ENERGY", "kind": "signal", "dimension": "1"}
+      ]
+    },
+    "cigre_mmc_avm_v1:MMCStationControl": {
+      "ports": [
+        {"name": "P_ORDER", "kind": "signal", "dimension": "1"},
+        {"name": "Q_ORDER", "kind": "signal", "dimension": "1"},
+        {"name": "VDC_ORDER", "kind": "signal", "dimension": "1"},
+        {"name": "GATES", "kind": "signal", "dimension": "6"}
+      ]
+    },
+    "cigre_mmc_avm_v1:MMCEnergyControl": {
+      "ports": [
+        {"name": "ENERGY_REF", "kind": "signal", "dimension": "1"},
+        {"name": "ENERGY", "kind": "signal", "dimension": "1"},
+        {"name": "I_CIRC", "kind": "signal", "dimension": "1"}
+      ]
+    },
+    "cigre_mmc_avm_v1:MMCInitialization": {
+      "ports": [
+        {"name": "RESET", "kind": "signal", "dimension": "1"},
+        {"name": "READY", "kind": "signal", "dimension": "1"}
+      ]
+    },
+    "cigre_mmc_avm_v1:MMCDimensionedSignal": {
+      "ports": [{"name": "SIGNAL", "kind": "signal", "dimension": "3"}]
+    },
+    "cigre_mmc_avm_v1:MMCSequenceSignal": {
+      "ports": [{"name": "STATE", "kind": "signal", "dimension": "1"}]
+    }
+  }
+}

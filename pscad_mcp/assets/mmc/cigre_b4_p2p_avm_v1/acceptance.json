@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "windows": [
+    {"name": "precharge_ready", "units": "s"},
+    {"name": "forward_steady", "units": "MW"},
+    {"name": "power_reversal", "units": "MW"},
+    {"name": "reverse_steady", "units": "MW"}
+  ],
+  "limitations": {"submodule_balance": "not_modeled", "switching_stress": "not_modeled", "switching_harmonics": "not_modeled", "dc_fault_blocking": "not_modeled"}
+}
