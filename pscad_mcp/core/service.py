@@ -58,6 +58,10 @@ _ERROR_GUIDANCE: dict[str, tuple[bool, str]] = {
         False,
         "Correct the argument values and retry the operation.",
     ),
+    "LEARNING_UNAVAILABLE": (
+        False,
+        "Local learning state is unavailable.",
+    ),
     "WORKSPACE_NOT_CONFIGURED": (
         False,
         "Set PSCAD_MCP_WORKSPACE, then retry the file operation.",

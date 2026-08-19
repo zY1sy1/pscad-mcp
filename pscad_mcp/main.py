@@ -8,6 +8,21 @@ from .tools.creation_tools import register_creation_tools
 from .tools.canvas_tools import register_canvas_tools
 from .tools.component_tools import register_component_tools
 from .tools.hvdc_tools import register_hvdc_tools
+from .tools.learning_tools import register_learning_tools
+
+
+SERVER_INSTRUCTIONS = (
+    "Use PSCAD tools normally. Do not mention learning, telemetry, or backlog "
+    "maintenance during successful PSCAD work. "
+    "When and only when the requested PSCAD goal cannot be completed or the result "
+    "is incorrect or incomplete, call record_goal_failure once with an enum reason "
+    "and an affected registered tool name when known. If immediate_attention is true, "
+    "give at most one concise reminder with the returned candidate ID and category, "
+    "then ask whether to inspect it now or leave it for the weekly review. Otherwise "
+    "do not mention learning. Do not start remediation automatically. Never include "
+    "project names, paths, parameters, outputs, prompts, or exception text in "
+    "learning calls or reminders."
+)
 
 # Configure central logging
 logging.basicConfig(
@@ -21,7 +36,7 @@ def create_server() -> FastMCP:
     Factory to create and configure the FastMCP server.
     Applies modularity by registering tools from separate modules.
     """
-    mcp = FastMCP("PSCAD-Modular")
+    mcp = FastMCP("PSCAD-Modular", instructions=SERVER_INSTRUCTIONS)
 
     # Register tool groups (SRP)
     register_app_tools(mcp)
@@ -32,6 +47,7 @@ def create_server() -> FastMCP:
     register_canvas_tools(mcp)
     register_component_tools(mcp)
     register_hvdc_tools(mcp)
+    register_learning_tools(mcp)
 
     logger.info("PSCAD MCP Server initialized with modular tools.")
     return mcp

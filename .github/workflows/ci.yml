@@ -26,6 +26,6 @@ jobs:
       - name: Verify dependencies
         run: python -m pip check
       - name: Verify exact MCP tool inventory
-        # Expected output: 70 70
+        # Expected output: 73 73
         run: >-
-          python -c "from pscad_mcp.main import create_server; tools=create_server()._tool_manager.list_tools(); print(len(tools), len({tool.name for tool in tools})); assert len(tools) == len({tool.name for tool in tools}) == 70"
+          python -c "from pscad_mcp.main import create_server; tools=create_server()._tool_manager.list_tools(); print(len(tools), len({tool.name for tool in tools})); assert len(tools) == len({tool.name for tool in tools}) == 73"

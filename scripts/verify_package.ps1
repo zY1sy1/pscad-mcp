@@ -51,8 +51,8 @@ from pscad_mcp.main import create_server
 installed = metadata.version('pscad-mcp')
 assert installed == pscad_mcp.__version__, (installed, pscad_mcp.__version__)
 tools = create_server()._tool_manager.list_tools()
-assert len(tools) == 70
-assert len({tool.name for tool in tools}) == 70
+assert len(tools) == 73
+assert len({tool.name for tool in tools}) == 73
 print(f'{installed} {len(tools)}')
 "@
 
