@@ -47,7 +47,7 @@ class TestToolBackendMatrix(unittest.TestCase):
             tool.name for tool in create_server()._tool_manager.list_tools()
         }
         self.assertEqual(names, EXPECTED_TOOLS)
-        self.assertEqual(len(names), 74)
+        self.assertEqual(len(names), 77)
 
     def test_both_backends_implement_complete_protocol(self):
         legacy = LegacyBackend(

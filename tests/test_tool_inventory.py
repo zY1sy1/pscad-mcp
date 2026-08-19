@@ -31,7 +31,7 @@ def test_server_preserves_the_exact_60_generic_tools_and_adds_hvdc_tools():
     tools = create_server()._tool_manager.list_tools()
     names = [tool.name for tool in tools]
 
-    assert len(set(names)) == 74
+    assert len(set(names)) == 77
     assert len(set(names) - HVDC_TOOLS - LEARNING_TOOLS - LCC_TOOLS) == 60
     assert HVDC_TOOLS <= set(names)
     assert LEARNING_TOOLS <= set(names)

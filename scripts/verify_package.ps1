@@ -52,8 +52,8 @@ from pscad_mcp.hvdc.builders.lcc.assets import load_packaged_asset_set
 installed = metadata.version('pscad-mcp')
 assert installed == pscad_mcp.__version__, (installed, pscad_mcp.__version__)
 tools = create_server()._tool_manager.list_tools()
-assert len(tools) == 74
-assert len({tool.name for tool in tools}) == 74
+assert len(tools) == 77
+assert len({tool.name for tool in tools}) == 77
 assets = load_packaged_asset_set()
 assert assets.name == 'cigre_lcc_monopole_v1'
 assert assets.pscad_version.startswith('4.')

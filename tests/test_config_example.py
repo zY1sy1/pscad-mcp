@@ -63,7 +63,7 @@ def test_learning_controls_and_inventory_are_documented_in_both_languages():
         "record_goal_failure",
         "review_improvement_backlog",
         "clear_learning_history",
-        "73",
+        "77",
     )
     language_phrases = {
         "README.md": (
@@ -142,12 +142,12 @@ def test_learning_controls_and_inventory_are_documented_in_both_languages():
     }
     inventory_fields = {
         "README.md": (
-            "73 = 60 generic tools",
+            "77 = 60 generic tools",
             "10 HVDC tools",
             "3 learning tools",
         ),
         "docs/zh-CN/README.md": (
-            "73 = 60 个通用工具 + 10 个 HVDC 工具 + 3 个学习工具",
+            "77 = 60 个通用工具 + 10 个 HVDC 工具 + 3 个学习工具 + 4 个固定 CIGRE LCC 工具",
         ),
     }
     headings = {
