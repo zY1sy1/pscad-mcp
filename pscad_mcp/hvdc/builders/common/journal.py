@@ -22,7 +22,7 @@ else:
     import fcntl
 
 from ....core.backend.base import BackendError
-from .serialization import json_safe
+from .serialization import SerializationError, json_safe
 
 
 _BUILD_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
@@ -41,10 +41,10 @@ def _utc_now() -> str:
 
 
 def _atomic_write_json(path: Path, payload: Mapping[str, Any], *, safe_copy, invalid_error) -> Path:
-    safe_payload = safe_copy(payload)
-    path.parent.mkdir(parents=True, exist_ok=True)
     temp_path: Path | None = None
     try:
+        safe_payload = safe_copy(payload)
+        path.parent.mkdir(parents=True, exist_ok=True)
         with tempfile.NamedTemporaryFile("w", encoding="utf-8", delete=False, dir=path.parent) as stream:
             temp_path = Path(stream.name)
             json.dump(safe_payload, stream, ensure_ascii=True, sort_keys=True, indent=2, allow_nan=False)
@@ -55,7 +55,7 @@ def _atomic_write_json(path: Path, payload: Mapping[str, Any], *, safe_copy, inv
         return path
     except BackendError:
         raise
-    except (TypeError, ValueError) as error:
+    except (SerializationError, TypeError, ValueError) as error:
         raise invalid_error(f"Journal payload could not be serialized: {error}") from error
     finally:
         if temp_path is not None and temp_path.exists():
