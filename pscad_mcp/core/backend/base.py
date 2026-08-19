@@ -202,6 +202,10 @@ class CanvasBackend(Protocol):
 
 
 class ResultBackend(Protocol):
+    async def create_output_channel(
+        self, project_name: str, channel: Mapping[str, Any]
+    ) -> JsonDict: ...
+
     async def get_output_channels(self, project_name: str) -> list[JsonDict]: ...
 
     async def read_output_file(

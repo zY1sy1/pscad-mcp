@@ -1371,6 +1371,81 @@ class LegacyBackend:
             if isinstance(item, MappingABC) and item.get("path")
         ]
 
+    async def create_output_channel(
+        self, project_name: str, channel: MappingABC[str, Any]
+    ) -> dict[str, Any]:
+        project = await self._project(project_name)
+        before = await self.get_output_channels(project_name)
+        path = str(channel["path"])
+        call_id = channel.get("call_id")
+        duplicates = [
+            item
+            for item in before
+            if str(item.get("path", "")).casefold() == path.casefold()
+            and item.get("call_id") == call_id
+        ]
+        if duplicates:
+            raise BackendError(
+                "ALREADY_EXISTS",
+                "The requested output channel endpoint already exists.",
+                self.name,
+                "create_output_channel",
+                {"project_name": project_name, "path": path, "call_id": call_id},
+            )
+        provider = next(
+            (
+                getattr(project, name, None)
+                for name in ("create_output_channel", "add_output_channel")
+                if callable(getattr(project, name, None))
+            ),
+            None,
+        )
+        if provider is None:
+            raise BackendError(
+                "CAPABILITY_UNAVAILABLE",
+                "Legacy PSCAD does not expose verified output-channel creation.",
+                self.name,
+                "create_output_channel",
+                {"project_name": project_name, "backend_version": self.version},
+            )
+        payload = {
+            key: channel.get(key)
+            for key in ("path", "call_id", "units", "description")
+        }
+        await self.executor.run_safe(provider, payload)
+        after = await self.get_output_channels(project_name)
+        matches = [
+            item
+            for item in after
+            if str(item.get("path", "")).casefold() == path.casefold()
+            and item.get("call_id") == call_id
+            and (
+                channel.get("units") is None
+                or str(item.get("units", "")).casefold()
+                == str(channel.get("units")).casefold()
+            )
+        ]
+        if len(matches) != 1:
+            raise BackendError(
+                "POSTCONDITION_FAILED",
+                "Output channel creation could not be verified by read-back.",
+                self.name,
+                "create_output_channel",
+                {
+                    "project_name": project_name,
+                    "path": path,
+                    "call_id": call_id,
+                    "match_count": len(matches),
+                },
+            )
+        return {
+            "canonical": str(channel["canonical"]),
+            "path": matches[0]["path"],
+            "call_id": matches[0].get("call_id"),
+            "units": matches[0].get("units"),
+            "description": matches[0].get("description", ""),
+        }
+
     @staticmethod
     def _project_message(value: Any) -> ProjectMessage:
         if isinstance(value, MappingABC):

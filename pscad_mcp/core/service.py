@@ -143,6 +143,9 @@ _PARAMETER_GRID_FIELDS = frozenset(
     {"action", "project_name", "filename", "folder"}
 )
 _PARAMETER_GRID_ACTIONS = frozenset({"view_project", "load", "save"})
+_OUTPUT_CHANNEL_FIELDS = frozenset(
+    {"canonical", "path", "call_id", "units", "description"}
+)
 
 
 def _require_object_name(value: str, field: str, operation: str) -> str:
@@ -155,6 +158,80 @@ def _require_object_name(value: str, field: str, operation: str) -> str:
             {"field": field},
         )
     return value
+
+
+def _validated_output_channel(channel: Mapping[str, Any]) -> dict[str, Any]:
+    operation = "create_output_channel"
+    if not isinstance(channel, Mapping):
+        raise BackendError(
+            "INVALID_ARGUMENT",
+            "channel must be an object.",
+            "service",
+            operation,
+        )
+    unsupported = sorted(set(channel) - _OUTPUT_CHANNEL_FIELDS)
+    if unsupported:
+        raise BackendError(
+            "INVALID_ARGUMENT",
+            "Unsupported output channel fields.",
+            "service",
+            operation,
+            {"unsupported": unsupported},
+        )
+    canonical = channel.get("canonical")
+    path = channel.get("path")
+    if not isinstance(canonical, str) or not canonical.strip():
+        raise BackendError(
+            "INVALID_ARGUMENT",
+            "channel.canonical must be a non-empty string.",
+            "service",
+            operation,
+            {"field": "canonical"},
+        )
+    if not isinstance(path, str) or not path.strip():
+        raise BackendError(
+            "INVALID_ARGUMENT",
+            "channel.path must be a non-empty string.",
+            "service",
+            operation,
+            {"field": "path"},
+        )
+    call_id = channel.get("call_id")
+    if call_id is not None and (
+        isinstance(call_id, bool) or not isinstance(call_id, int) or call_id < 1
+    ):
+        raise BackendError(
+            "INVALID_ARGUMENT",
+            "channel.call_id must be a positive integer when provided.",
+            "service",
+            operation,
+            {"field": "call_id"},
+        )
+    units = channel.get("units")
+    if units is not None and not isinstance(units, str):
+        raise BackendError(
+            "INVALID_ARGUMENT",
+            "channel.units must be a string when provided.",
+            "service",
+            operation,
+            {"field": "units"},
+        )
+    description = channel.get("description", "")
+    if not isinstance(description, str):
+        raise BackendError(
+            "INVALID_ARGUMENT",
+            "channel.description must be a string when provided.",
+            "service",
+            operation,
+            {"field": "description"},
+        )
+    return {
+        "canonical": canonical.strip(),
+        "path": path.strip(),
+        "call_id": call_id,
+        "units": units,
+        "description": description,
+    }
 
 
 def _validated_task_parameters(parameters: dict[str, Any]) -> dict[str, Any]:
@@ -828,6 +905,16 @@ class PscadService:
 
     async def get_output_channels(self, project_name: str) -> list[dict[str, Any]]:
         return [dict(item) for item in await self.backend.get_output_channels(project_name)]
+
+    async def create_output_channel(
+        self, project_name: str, channel: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        name = _require_object_name(
+            project_name, "project_name", "create_output_channel"
+        )
+        normalized = _validated_output_channel(channel)
+        async with self._mutation_lock:
+            return dict(await self.backend.create_output_channel(name, normalized))
 
     async def read_output_file(
         self,
