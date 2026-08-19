@@ -1,6 +1,6 @@
 # PSCAD MCP for Codex and GitHub Copilot CLI
 
-`pscad-mcp` is a Windows Model Context Protocol (MCP) server for PSCAD automation. It uses `mhrc.automation` for PSCAD 4.6.x and `mhi.pscad` for PSCAD 5.x behind one stable 60-tool generic service contract, plus a separate HVDC domain layer.
+`pscad-mcp` is a Windows Model Context Protocol (MCP) server for PSCAD automation. It uses `mhrc.automation` for PSCAD 4.6.x and `mhi.pscad` for PSCAD 5.x behind one stable 60-tool generic service contract, plus separate HVDC and fixed CIGRE LCC domain layers. The current inventory is 74 tools.
 
 中文安装、配置、安全和验收说明：[docs/zh-CN/README.md](docs/zh-CN/README.md)
 
@@ -91,6 +91,37 @@ controls already mapped in the project; inserting fault components or
 rewiring a canvas returns `HVDC_CAPABILITY_UNAVAILABLE`. Mutating scenario
 parameters and registering a user profile require `confirm=true` and remain
 subject to `PSCAD_MCP_WORKSPACE` path policy.
+
+### Fixed CIGRE LCC builder
+
+The LCC layer exposes four tools: `plan_lcc_model`, `build_lcc_model`,
+`get_lcc_build_status`, and `validate_lcc_model`. It targets only the fixed
+CIGRE single-pole 12-pulse benchmark in licensed PSCAD 4.6.2. The blueprint
+uses fixed electrical parameters and an original companion library packaged
+with this repository; it is not a user-rated design generator. Workspace writes
+are limited to `PSCAD_MCP_WORKSPACE`; builds refuse an existing destination, require
+`confirm=true`, and require the exact plan hash returned by
+`plan_lcc_model` before mutation.
+
+The intended sequence is: call `plan_lcc_model`, review its hash and
+operations, call `build_lcc_model(..., expected_plan_hash=..., confirm=true)`,
+poll with `get_lcc_build_status`, then call `validate_lcc_model` on the saved
+case. The four capability levels are `planned`, `built`, `simulated`, and
+`accepted`; structural success, compilation, or a mocked/synthetic waveform
+does not imply acceptance. `poles=2`, user-rated designs, PSCAD 5.x, fault or
+commutation-failure acceptance, and MMC construction are unavailable.
+
+Planning fails closed unless the attached PSCAD service supplies live
+4.6.2 definition inventory; the packaged catalog is not treated as live
+evidence. Build output channels also require an explicit public
+`create_output_channel` capability followed by read-back. The packaged
+`golden.json` is a release-gate placeholder until an independently reviewed
+licensed reference run is generated, so the current branch cannot pass real
+LCC acceptance.
+
+Licensed acceptance has not passed for the PSCAD 4.6.2 implementation branch,
+so the feature must not be described as an autonomously constructed
+accepted CIGRE LCC model until the opt-in real acceptance test passes.
 
 Read-only HVDC inspection may scan an existing absolute `.pscx` source such as
 `C:\\PSCADFiles\\Breaker\\TEST1\\difforder_new.pscx`; all scenario mutations

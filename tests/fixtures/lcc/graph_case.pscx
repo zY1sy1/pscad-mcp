@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<project name="graph_case" version="4.6.2" id="generated-project" crc="deadbeef" link="old-link" date="2026-08-19">
+  <definitions>
+    <Definition name="Auxiliary" classid="UserCmpDefn" />
+    <Definition name="Main" classid="UserCmpDefn" call_order="9">
+      <schematic classid="UserCanvas">
+        <User classid="UserCmp" id="101" logical_id="source" name="source" defn="master:source3" x="0" y="0" orientation="0" crc="a">
+          <paramlist>
+            <param name="Amplitude" value="230" />
+            <param name="Mode" value="balanced" />
+          </paramlist>
+          <Port name="ac" kind="electrical" dimension="3" x="10" y="0" />
+        </User>
+        <User classid="UserCmp" id="102" logical_id="bridge" name="bridge" defn="cigre_lcc_v1:LCC12PulseBridge" x="100" y="0" orientation="4" crc="b">
+          <paramlist><param name="ValveDrop" value="1.2" /></paramlist>
+          <Port name="ac" kind="electrical" dimension="3" x="-10" y="0" />
+        </User>
+        <User classid="UserCmp" id="103" logical_id="load" name="load" defn="master:line" x="200" y="0" orientation="2" crc="c">
+          <paramlist><param name="Length" value="100" /></paramlist>
+          <Port name="p" kind="electrical" dimension="1" x="-10" y="0" />
+        </User>
+        <wire kind="electrical" id="wire-generated">
+          <vertex x="10" y="0" />
+          <vertex x="50" y="0" />
+          <vertex x="50" y="20" />
+          <vertex x="90" y="20" />
+        </wire>
+        <label kind="data" name="ENABLE" x="20" y="40" />
+        <datalabel kind="data" text="ENABLE" x="120" y="40" />
+      </schematic>
+    </Definition>
+  </definitions>
+</project>

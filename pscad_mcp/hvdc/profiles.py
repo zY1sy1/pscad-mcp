@@ -14,6 +14,52 @@ from ..core.backend.base import BackendError
 
 
 _BUILTIN_PROFILES: dict[str, dict[str, Any]] = {
+    "cigre_lcc_monopole_v1": {
+        "profile_version": 2,
+        "required_assets": ["rectifier", "inverter", "controller", "pole", "dc_line"],
+        "mappings": [
+            {"canonical": "rectifier_dc_voltage", "aliases": ["VDC_RECT"], "source_kinds": ["label", "meter"], "unit_family": "voltage", "direction": "measurement", "units": "kV"},
+            {"canonical": "inverter_dc_voltage", "aliases": ["VDC_INV"], "source_kinds": ["label", "meter"], "unit_family": "voltage", "direction": "measurement", "units": "kV"},
+            {"canonical": "dc_current", "aliases": ["IDC"], "source_kinds": ["label", "meter"], "unit_family": "current", "direction": "measurement", "units": "kA"},
+            {"canonical": "rectifier_active_power", "aliases": ["P_RECT"], "source_kinds": ["label", "meter"], "unit_family": "power", "direction": "measurement", "units": "MW"},
+            {"canonical": "rectifier_reactive_power", "aliases": ["Q_RECT"], "source_kinds": ["label", "meter"], "unit_family": "power", "direction": "measurement", "units": "MVAr"},
+            {"canonical": "inverter_active_power", "aliases": ["P_INV"], "source_kinds": ["label", "meter"], "unit_family": "power", "direction": "measurement", "units": "MW"},
+            {"canonical": "inverter_reactive_power", "aliases": ["Q_INV"], "source_kinds": ["label", "meter"], "unit_family": "power", "direction": "measurement", "units": "MVAr"},
+            {"canonical": "rectifier_firing_angle", "aliases": ["ALPHA_RECT"], "source_kinds": ["label", "control"], "unit_family": "angle", "direction": "measurement", "units": "deg"},
+            {"canonical": "inverter_extinction_angle", "aliases": ["GAMMA_INV"], "source_kinds": ["label", "control"], "unit_family": "angle", "direction": "measurement", "units": "deg"},
+            {"canonical": "rectifier_overlap_angle", "aliases": ["MU_RECT"], "source_kinds": ["label", "control"], "unit_family": "angle", "direction": "measurement", "units": "deg"},
+            {"canonical": "rectifier_ac_voltage", "aliases": ["VAC_RECT_A"], "source_kinds": ["label", "meter"], "unit_family": "voltage", "direction": "measurement", "units": "kV"},
+        ],
+        "project_fingerprints": [],
+        "command_bindings": [],
+        "result_channels": [
+            {"canonical": "rectifier_dc_voltage", "path": "Main/VDC_RECT", "units": "kV", "location": "Main"},
+            {"canonical": "inverter_dc_voltage", "path": "Main/VDC_INV", "units": "kV", "location": "Main"},
+            {"canonical": "dc_current", "path": "Main/IDC", "units": "kA", "location": "Main"},
+            {"canonical": "rectifier_active_power", "path": "Main/P_RECT", "units": "MW", "location": "Main"},
+            {"canonical": "rectifier_reactive_power", "path": "Main/Q_RECT", "units": "MVAr", "location": "Main"},
+            {"canonical": "inverter_active_power", "path": "Main/P_INV", "units": "MW", "location": "Main"},
+            {"canonical": "inverter_reactive_power", "path": "Main/Q_INV", "units": "MVAr", "location": "Main"},
+            {"canonical": "rectifier_firing_angle", "path": "Main/ALPHA_RECT", "units": "deg", "location": "Main"},
+            {"canonical": "inverter_extinction_angle", "path": "Main/GAMMA_INV", "units": "deg", "location": "Main"},
+            {"canonical": "rectifier_overlap_angle", "path": "Main/MU_RECT", "units": "deg", "location": "Main"},
+            {"canonical": "rectifier_ac_voltage", "path": "Main/VAC_RECT_A", "units": "kV", "location": "Main"},
+        ],
+        "metric_roles": {
+            "rectifier_dc_voltage": "rectifier_dc_voltage",
+            "inverter_dc_voltage": "inverter_dc_voltage",
+            "dc_current": "dc_current",
+            "rectifier_active_power": "rectifier_active_power",
+            "rectifier_reactive_power": "rectifier_reactive_power",
+            "inverter_active_power": "inverter_active_power",
+            "inverter_reactive_power": "inverter_reactive_power",
+            "rectifier_firing_angle": "rectifier_firing_angle",
+            "inverter_extinction_angle": "inverter_extinction_angle",
+            "rectifier_overlap_angle": "rectifier_overlap_angle",
+            "rectifier_ac_voltage": "rectifier_ac_voltage",
+        },
+        "sequences": [],
+    },
     "lcc_bipolar_generic": {
         "required_assets": ["rectifier", "inverter", "pole"],
         "mappings": [

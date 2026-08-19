@@ -1,0 +1,154 @@
+{
+  "schema_version": 1,
+  "name": "cigre_lcc_monopole_v1",
+  "pscad_version": "4.6.2",
+  "identity": "cigre_lcc_monopole_v1/catalog-pscad-4.6.2",
+  "definitions": [
+    {
+      "scoped_name": "master:three_phase_source",
+      "ports": [
+        {"name": "A", "kind": "electrical", "dimension": 1, "offset": [0, 0]},
+        {"name": "B", "kind": "electrical", "dimension": 1, "offset": [0, 10]},
+        {"name": "C", "kind": "electrical", "dimension": 1, "offset": [0, 20]}
+      ],
+      "parameters": {
+        "Amplitude_kV": {"type": "float", "minimum": 0, "maximum": 1000, "unit": "kV"},
+        "Frequency_Hz": {"type": "float", "minimum": 45, "maximum": 65, "unit": "Hz"},
+        "Phase_deg": {"type": "float", "minimum": -360, "maximum": 360, "unit": "deg"}
+      },
+      "bounding_box": [-10, -10, 10, 30],
+      "metadata": {"library": "master", "characterized_for": "4.6.2"}
+    },
+    {
+      "scoped_name": "master:converter_transformer",
+      "ports": [
+        {"name": "HV_A", "kind": "electrical", "dimension": 1, "offset": [-30, 0]},
+        {"name": "HV_B", "kind": "electrical", "dimension": 1, "offset": [-30, 10]},
+        {"name": "HV_C", "kind": "electrical", "dimension": 1, "offset": [-30, 20]},
+        {"name": "LV_A", "kind": "electrical", "dimension": 1, "offset": [30, 0]},
+        {"name": "LV_B", "kind": "electrical", "dimension": 1, "offset": [30, 10]},
+        {"name": "LV_C", "kind": "electrical", "dimension": 1, "offset": [30, 20]}
+      ],
+      "parameters": {
+        "Ratio": {"type": "float", "minimum": 0.1, "maximum": 20},
+        "PhaseShift_deg": {"type": "float", "minimum": -180, "maximum": 180, "unit": "deg"},
+        "Connection": {"type": "enum", "enum": ["Y-Y", "Y-delta"]}
+      },
+      "bounding_box": [-40, -30, 40, 30],
+      "metadata": {"library": "master", "characterized_for": "4.6.2"}
+    },
+    {
+      "scoped_name": "master:ac_filter_branch",
+      "ports": [
+        {"name": "IN_A", "kind": "electrical", "dimension": 1, "offset": [-30, 0]},
+        {"name": "IN_B", "kind": "electrical", "dimension": 1, "offset": [-30, 10]},
+        {"name": "IN_C", "kind": "electrical", "dimension": 1, "offset": [-30, 20]},
+        {"name": "OUT_A", "kind": "electrical", "dimension": 1, "offset": [30, 0]},
+        {"name": "OUT_B", "kind": "electrical", "dimension": 1, "offset": [30, 10]},
+        {"name": "OUT_C", "kind": "electrical", "dimension": 1, "offset": [30, 20]}
+      ],
+      "parameters": {
+        "Branch_MVAR": {"type": "float", "minimum": 0, "maximum": 1000, "unit": "MVAr"},
+        "Tuning_Hz": {"type": "float", "minimum": 40, "maximum": 1000, "unit": "Hz"}
+      },
+      "bounding_box": [-40, -30, 40, 30],
+      "metadata": {"library": "master", "characterized_for": "4.6.2"}
+    },
+    {
+      "scoped_name": "master:smoothing_reactor",
+      "ports": [
+        {"name": "IN", "kind": "electrical", "dimension": 1, "offset": [-15, 0]},
+        {"name": "OUT", "kind": "electrical", "dimension": 1, "offset": [15, 0]}
+      ],
+      "parameters": {"Inductance_mH": {"type": "float", "minimum": 0, "maximum": 1000, "unit": "mH"}},
+      "bounding_box": [-20, -10, 20, 10],
+      "metadata": {"library": "master", "characterized_for": "4.6.2"}
+    },
+    {
+      "scoped_name": "master:dc_line_section",
+      "ports": [
+        {"name": "IN", "kind": "electrical", "dimension": 1, "offset": [-40, 0]},
+        {"name": "OUT", "kind": "electrical", "dimension": 1, "offset": [40, 0]}
+      ],
+      "parameters": {
+        "Length_km": {"type": "float", "minimum": 0, "maximum": 10000, "unit": "km"},
+        "Resistance_ohm": {"type": "float", "minimum": 0, "maximum": 1000, "unit": "ohm"}
+      },
+      "bounding_box": [-50, -10, 50, 10],
+      "metadata": {"library": "master", "characterized_for": "4.6.2"}
+    },
+    {
+      "scoped_name": "master:ac_meter",
+      "ports": [
+        {"name": "A", "kind": "electrical", "dimension": 1, "offset": [-15, 0]},
+        {"name": "B", "kind": "electrical", "dimension": 1, "offset": [-15, 10]},
+        {"name": "C", "kind": "electrical", "dimension": 1, "offset": [-15, 20]}
+      ],
+      "parameters": {},
+      "bounding_box": [-20, -10, 20, 30],
+      "metadata": {"library": "master", "characterized_for": "4.6.2"}
+    },
+    {
+      "scoped_name": "master:dc_meter",
+      "ports": [
+        {"name": "IN", "kind": "electrical", "dimension": 1, "offset": [-15, 0]},
+        {"name": "OUT", "kind": "electrical", "dimension": 1, "offset": [15, 0]}
+      ],
+      "parameters": {},
+      "bounding_box": [-20, -10, 20, 10],
+      "metadata": {"library": "master", "characterized_for": "4.6.2"}
+    },
+    {
+      "scoped_name": "master:ground",
+      "ports": [{"name": "GND", "kind": "electrical", "dimension": 1, "offset": [0, 0]}],
+      "parameters": {},
+      "bounding_box": [-10, -10, 10, 10],
+      "metadata": {"library": "master", "characterized_for": "4.6.2"}
+    },
+    {
+      "scoped_name": "cigre_lcc_v1:LCC12PulseBridge",
+      "ports": [
+        {"name": "ACY_A", "kind": "electrical", "dimension": 1, "offset": [-50, -20]},
+        {"name": "ACY_B", "kind": "electrical", "dimension": 1, "offset": [-50, -10]},
+        {"name": "ACY_C", "kind": "electrical", "dimension": 1, "offset": [-50, 0]},
+        {"name": "ACD_A", "kind": "electrical", "dimension": 1, "offset": [-50, 10]},
+        {"name": "ACD_B", "kind": "electrical", "dimension": 1, "offset": [-50, 20]},
+        {"name": "ACD_C", "kind": "electrical", "dimension": 1, "offset": [-50, 30]},
+        {"name": "DC_POS", "kind": "electrical", "dimension": 1, "offset": [50, -10]},
+        {"name": "DC_NEG", "kind": "electrical", "dimension": 1, "offset": [50, 10]},
+        {"name": "GATES", "kind": "data", "dimension": 12, "offset": [0, 50]}
+      ],
+      "parameters": {"ValveDrop_V": {"type": "float", "minimum": 0, "maximum": 1000, "unit": "V"}},
+      "bounding_box": [-55, -55, 55, 55],
+      "metadata": {"library": "cigre_lcc_v1", "internal_contract": "two_six_pulse_groups_twelve_valves"}
+    },
+    {
+      "scoped_name": "cigre_lcc_v1:RectifierControl",
+      "ports": [
+        {"name": "VDC", "kind": "data", "dimension": 1, "offset": [-20, 0]},
+        {"name": "IDC", "kind": "data", "dimension": 1, "offset": [-20, 10]},
+        {"name": "IORDER", "kind": "data", "dimension": 1, "offset": [-20, 20]},
+        {"name": "ENABLE", "kind": "data", "dimension": 1, "offset": [-20, 30]},
+        {"name": "GATES", "kind": "data", "dimension": 12, "offset": [20, 0]},
+        {"name": "ALPHA", "kind": "data", "dimension": 1, "offset": [20, 10]}
+      ],
+      "parameters": {"AlphaOrder_deg": {"type": "float", "minimum": 0, "maximum": 180, "unit": "deg"}},
+      "bounding_box": [-25, -25, 25, 40],
+      "metadata": {"library": "cigre_lcc_v1", "control_contract": "constant_current"}
+    },
+    {
+      "scoped_name": "cigre_lcc_v1:InverterControl",
+      "ports": [
+        {"name": "VDC", "kind": "data", "dimension": 1, "offset": [-20, 0]},
+        {"name": "IDC", "kind": "data", "dimension": 1, "offset": [-20, 10]},
+        {"name": "GAMMA_ORDER", "kind": "data", "dimension": 1, "offset": [-20, 20]},
+        {"name": "ENABLE", "kind": "data", "dimension": 1, "offset": [-20, 30]},
+        {"name": "GATES", "kind": "data", "dimension": 12, "offset": [20, 0]},
+        {"name": "GAMMA", "kind": "data", "dimension": 1, "offset": [20, 10]}
+      ],
+      "parameters": {"GammaOrder_deg": {"type": "float", "minimum": 0, "maximum": 180, "unit": "deg"}},
+      "bounding_box": [-25, -25, 25, 40],
+      "metadata": {"library": "cigre_lcc_v1", "control_contract": "constant_extinction_angle"}
+    }
+  ]
+}
