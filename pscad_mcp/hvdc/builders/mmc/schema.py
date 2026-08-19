@@ -193,7 +193,12 @@ def _ports(value: Any, context: str) -> tuple[str, ...]:
 
 def _parameters(value: Any, context: str) -> dict[str, Any]:
     mapping = _object(value, context)
-    return {key: _json_value(item, f"{context}.{key}") for key, item in mapping.items() if isinstance(key, str)} if all(isinstance(key, str) for key in mapping) else (_keys(mapping, set(), context) or {})
+    parsed: dict[str, Any] = {}
+    for key, item in mapping.items():
+        if not isinstance(key, str):
+            raise _invalid(f"{context} keys must be strings.", context=context)
+        parsed[key] = _json_value(item, f"{context}.{key}")
+    return parsed
 
 
 def _parse_control(value: Any, context: str, *, role: str | None = None, require_equations: bool = False) -> MmcControlContract:
@@ -213,9 +218,13 @@ def _parse_control(value: Any, context: str, *, role: str | None = None, require
     _keys(equations, _EQUATION_KEYS, f"{context}.equations")
     equations_json = {key: _text(item, f"{context}.equations.{key}") for key, item in equations.items()}
     if require_equations:
-        required_equations = {"arm_current", "energy", "energy_derivative"}
+        required_equations = {"energy", "energy_derivative"}
         _required(equations, required_equations, f"{context}.equations")
-        if equations["arm_current"] != _ARM_CURRENT_EQUATION or equations["energy"] != _ENERGY_EQUATION or equations["energy_derivative"] != _ENERGY_DERIVATIVE_EQUATION:
+        upper_equation = equations.get("arm_current_upper", equations.get("arm_current"))
+        lower_equation = equations.get("arm_current_lower")
+        if upper_equation is None or lower_equation is None:
+            raise _invalid(f"{context}.equations requires upper and lower arm-current equations.", context=context)
+        if upper_equation != _ARM_CURRENT_EQUATION or lower_equation != _ARM_CURRENT_LOWER_EQUATION or equations["energy"] != _ENERGY_EQUATION or equations["energy_derivative"] != _ENERGY_DERIVATIVE_EQUATION:
             raise _invalid(f"{context}.equations do not match the declared MMC equations.", context=context)
     bounds_value = _sequence(control.get("modulation_bounds", (0.0, 1.0)), f"{context}.modulation_bounds")
     if len(bounds_value) != 2:
@@ -366,7 +375,9 @@ def _parse_output(value: Any, index: int) -> MmcOutputSpec:
     role = _text(output["role"], f"{context}.role")
     expected_units = _OUTPUT_UNITS.get(role)
     units = _text(output["units"], f"{context}.units")
-    if expected_units is not None and units != expected_units:
+    if expected_units is None:
+        raise _invalid(f"{context}.role is not a declared fixed-profile output selector.", context=context)
+    if units != expected_units:
         raise _invalid(f"{context}.units must be {expected_units} for role {role}.", context=context)
     call_id = output.get("call_id")
     return MmcOutputSpec(
@@ -463,6 +474,9 @@ def parse_blueprint(data: Mapping[str, Any]) -> MmcBlueprint:
     station_ids = [station.logical_id for station in stations]
     if len(set(station_ids)) != len(station_ids):
         raise _invalid("station logical IDs must be unique.", context="stations")
+    arm_ids = [arm.logical_id for station in stations for arm in station.arms]
+    if len(set(arm_ids)) != len(arm_ids):
+        raise _invalid("arm logical IDs must be unique across both stations.", context="stations")
 
     component_values = _sequence(blueprint["components"], "components")
     components = tuple(_parse_component(item, index) for index, item in enumerate(component_values))

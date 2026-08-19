@@ -115,6 +115,7 @@ def test_mmc_records_are_frozen_and_json_safe():
             reactive_power_command="Q_order",
             equations={
                 "arm_current": "i_upper = I_dc / 3 + i_phase / 2 + i_circulating",
+                "arm_current_lower": "i_lower = I_dc / 3 - i_phase / 2 + i_circulating",
                 "energy": "W_arm = 0.5 * C_eq * V_cap_eq^2",
                 "energy_derivative": "dW_arm/dt = v_inserted * i_arm - p_loss_arm",
             },

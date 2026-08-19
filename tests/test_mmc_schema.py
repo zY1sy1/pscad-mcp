@@ -78,6 +78,7 @@ def valid_blueprint() -> dict:
             "reactive_power_command": "Q_order",
             "equations": {
                 "arm_current": "i_upper = I_dc / 3 + i_phase / 2 + i_circulating",
+                "arm_current_lower": "i_lower = I_dc / 3 - i_phase / 2 + i_circulating",
                 "energy": "W_arm = 0.5 * C_eq * V_cap_eq^2",
                 "energy_derivative": "dW_arm/dt = v_inserted * i_arm - p_loss_arm",
             },
@@ -171,3 +172,13 @@ def test_schema_requires_positive_steps_and_exact_acceptance_windows():
     value = valid_blueprint()
     value["acceptance_checks"] = value["acceptance_checks"][:-1]
     assert_invalid(value, fragment="four")
+
+
+def test_schema_rejects_wrong_equation_and_output_unit():
+    value = valid_blueprint()
+    value["control_contract"]["equations"]["arm_current_lower"] = "wrong"
+    assert_invalid(value, fragment="equations")
+
+    value = valid_blueprint()
+    value["outputs"][0]["units"] = "MW"
+    assert_invalid(value, fragment="units")
