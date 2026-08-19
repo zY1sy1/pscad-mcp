@@ -2,90 +2,13 @@
 
 from __future__ import annotations
 
-import copy
 from dataclasses import asdict, dataclass, field
 from enum import Enum
 from typing import Any
 
-
-class _FrozenDict(dict[str, Any]):
-    """A deepcopy-compatible mapping used inside frozen records."""
-
-    def __setitem__(self, key: str, value: Any) -> None:
-        raise TypeError("LCC record mappings are immutable")
-
-    def __delitem__(self, key: str) -> None:
-        raise TypeError("LCC record mappings are immutable")
-
-    def clear(self) -> None:
-        raise TypeError("LCC record mappings are immutable")
-
-    def pop(self, key: str, default: Any = None) -> Any:
-        raise TypeError("LCC record mappings are immutable")
-
-    def popitem(self) -> tuple[str, Any]:
-        raise TypeError("LCC record mappings are immutable")
-
-    def setdefault(self, key: str, default: Any = None) -> Any:
-        raise TypeError("LCC record mappings are immutable")
-
-    def update(self, *args: Any, **kwargs: Any) -> None:
-        raise TypeError("LCC record mappings are immutable")
-
-    def __ior__(self, other: Any) -> "_FrozenDict":
-        raise TypeError("LCC record mappings are immutable")
-
-    def __deepcopy__(self, memo: dict[int, Any]) -> "_FrozenDict":
-        copied = _FrozenDict()
-        memo[id(self)] = copied
-        for key, value in self.items():
-            dict.__setitem__(copied, copy.deepcopy(key, memo), copy.deepcopy(value, memo))
-        return copied
-
-
-def _freeze(value: Any) -> Any:
-    if isinstance(value, _FrozenDict):
-        return value
-    if isinstance(value, dict):
-        frozen = _FrozenDict()
-        for key, item in value.items():
-            if not isinstance(key, str):
-                raise TypeError("LCC record mapping keys must be strings")
-            dict.__setitem__(frozen, key, _freeze(item))
-        return frozen
-    if isinstance(value, list):
-        return tuple(_freeze(item) for item in value)
-    if isinstance(value, tuple):
-        return tuple(_freeze(item) for item in value)
-    return value
-
-
-def _json_safe(value: Any) -> Any:
-    """Normalize nested records and enums without retaining runtime objects."""
-
-    if isinstance(value, Enum):
-        return value.value
-    if value is None or isinstance(value, (str, bool, int)):
-        return value
-    if isinstance(value, float):
-        if value != value or value in (float("inf"), float("-inf")):
-            raise TypeError("LCC records cannot contain non-finite floats")
-        return value
-    if isinstance(value, dict):
-        result: dict[str, Any] = {}
-        for key, item in value.items():
-            if not isinstance(key, str):
-                raise TypeError("LCC record mapping keys must be strings")
-            result[key] = _json_safe(item)
-        return result
-    if isinstance(value, (list, tuple)):
-        return [_json_safe(item) for item in value]
-    raise TypeError(f"LCC record contains a non-JSON value: {type(value).__name__}")
-
-
-class _JsonRecord:
-    def to_dict(self) -> dict[str, Any]:
-        return _json_safe(asdict(self))
+from ..common.records import JsonRecord as _JsonRecord
+from ..common.records import freeze as _freeze
+from ..common.serialization import json_safe as _json_safe
 
 
 class LccBuildState(str, Enum):

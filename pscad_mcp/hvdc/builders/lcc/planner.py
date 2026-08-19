@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
@@ -10,7 +9,8 @@ from pathlib import Path
 from typing import Any
 
 from ....core.path_policy import PathPolicy, WorkspaceNotConfiguredError
-from .assets import LccAssetSet, canonical_json
+from ..common.serialization import content_hash
+from .assets import LccAssetSet
 from .catalog import LccCatalog, LccDefinitionSpec, parse_catalog, require_definition, require_port, validate_parameters
 from .models import (
     LccAcceptanceCheck,
@@ -497,7 +497,7 @@ def create_plan(
         "operations": [operation.to_dict() for operation in operations],
         "acceptance_contract": [check.to_dict() for check in checks],
     }
-    plan_hash = hashlib.sha256(canonical_json(payload)).hexdigest()
+    plan_hash = content_hash(payload)
     return LccBuildPlan(
         blueprint=blueprint,
         operations=tuple(operations),

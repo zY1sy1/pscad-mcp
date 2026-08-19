@@ -13,6 +13,7 @@ from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
 
 from ....core.backend.base import BackendError
+from ..common.serialization import canonical_json
 from .models import LccBlueprint
 from .schema import parse_blueprint
 
@@ -85,15 +86,6 @@ def _read_hashed_file(path: Path) -> tuple[bytes, str]:
             path=str(path),
         ) from error
     return payload, hashlib.sha256(payload).hexdigest()
-
-
-def canonical_json(value: Any) -> bytes:
-    return json.dumps(
-        value,
-        ensure_ascii=True,
-        sort_keys=True,
-        separators=(",", ":"),
-    ).encode("ascii")
 
 
 def _manifest_object(root: Path) -> dict[str, Any]:
