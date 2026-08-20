@@ -13,8 +13,14 @@ All notable changes to this project are documented here.
 - LCC planning now fails closed without live PSCAD definition inventory;
   output-channel creation, final-project identity, waveform ownership, asset
   fingerprints, and acceptance-report evidence are checked explicitly.
-- The MCP inventory is now 74 tools: the original 60 generic tools, ten HVDC
-  tools, and four LCC builder tools.
+- Added four fixed MMC Stage A builder tools for the CIGRE B4-derived
+  two-terminal symmetrical-monopole half-bridge average-value benchmark. The
+  scope is limited to PSCAD 4.6.2, exact plan hashes, staged publication, and
+  explicit AVM `not_modeled` limitations; licensed MMC acceptance is not
+  claimed until its opt-in real test passes.
+- The current MCP inventory is now 81 tools: the original 60 generic tools,
+  ten HVDC tools, three learning tools, four LCC builder tools, and four MMC
+  builder tools. The preceding LCC-only development snapshot was 74 tools.
 
 - HVDC strict control now supports explicit backend timing and output-channel
   provider hooks, bounded simulation-clock polling, stalled-clock detection,
@@ -39,7 +45,7 @@ All notable changes to this project are documented here.
 - Added silent learning with scalar local evidence, generated
   `improvement-backlog.md`, three learning tools, narrowly defined critical
   reminders, privacy exclusions for parameters, results, paths, prompts,
-  exception text, details, and tracebacks, and a 73-tool inventory
+  exception text, details, and tracebacks, and an earlier 73-tool inventory
   (`60` generic + `10` HVDC + `3` learning).
 - Added a separate ten-tool HVDC domain layer with read-only XML evidence
   scanning, deterministic LCC/VSC/MMC classification, profile mappings,

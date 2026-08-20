@@ -62,6 +62,24 @@ def test_production_mmc_asset_set_is_exact_and_audited():
     ]
     acceptance = json.loads((ASSET_ROOT / "acceptance.json").read_text(encoding="utf-8"))
     assert [window["name"] for window in acceptance["windows"]] == ["precharge_ready", "forward_steady", "power_reversal", "reverse_steady"]
+    assert {
+        window["name"]: window["expected"]["channels"]
+        for window in acceptance["windows"]
+    } == {
+        "precharge_ready": ["vdc_pole_to_pole"],
+        "forward_steady": ["p_ac_p"],
+        "power_reversal": ["p_ac_p"],
+        "reverse_steady": ["p_ac_p"],
+    }
+    assert {
+        check.name: list(check.expected["channels"])
+        for check in parsed.acceptance_checks
+    } == {
+        "precharge_ready": ["vdc_pole_to_pole"],
+        "forward_steady": ["p_ac_p"],
+        "power_reversal": ["p_ac_p"],
+        "reverse_steady": ["p_ac_p"],
+    }
     controls = json.loads((ASSET_ROOT / "controls.json").read_text(encoding="utf-8"))
     assert controls["bandwidth_hz"] == {"pll": 10.0, "outer": 20.0, "energy": 40.0, "circulating": 60.0, "inner": 120.0}
     golden = json.loads((ASSET_ROOT / "golden.json").read_text(encoding="utf-8"))

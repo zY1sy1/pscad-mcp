@@ -7,6 +7,7 @@ import pytest
 from pscad_mcp.hvdc.builders.mmc.acceptance import (
     AVM_LIMITATIONS,
     AcceptanceState,
+    CheckResult,
     ac_power_tracking_check,
     arm_current_check,
     capacitance_consistency_check,
@@ -137,9 +138,75 @@ def test_acceptance_reports_missing_without_zero_fill_and_avm_limitations():
 
 def test_acceptance_passes_only_when_every_required_window_is_observed():
     samples = {"vdc": {"units": "kV", "time": [0.0, 0.5, 1.0], "values": [1.0, 2.0, 3.0]}}
-    report = evaluate_acceptance(samples, CHECKS)
+    report = evaluate_acceptance(
+        samples,
+        CHECKS,
+        golden={
+            "source": {"status": "independently_reviewed", "builder_generated": False},
+            "channels": {"vdc": samples["vdc"]},
+        },
+        physical_checks=(arm_current_check(9.0, 3.0, 0.2, 4.7, 1.7),),
+    )
     assert report.verdict == "PASS"
     assert all(result.passed for result in report.checks)
+
+
+def test_reviewed_golden_without_independent_physical_evidence_cannot_pass():
+    samples = _series()
+    report = evaluate_acceptance(
+        samples,
+        CHECKS,
+        golden={
+            "source": {"status": "independently_reviewed", "builder_generated": False},
+            "channels": {"vdc": samples["vdc"]},
+        },
+    )
+
+    assert report.verdict == "INCOMPLETE_ANALYSIS"
+    physical = next(result for result in report.checks if result.name == "physical_contract")
+    assert physical.state == AcceptanceState.MISSING.value
+    assert physical.passed is False
+
+
+def test_physical_evidence_must_be_unique_check_results():
+    physical = arm_current_check(9.0, 3.0, 0.2, 4.7, 2.3)
+    report = evaluate_acceptance(
+        _series(),
+        CHECKS,
+        golden={
+            "source": {"status": "independently_reviewed", "builder_generated": False},
+            "channels": {"vdc": _series()["vdc"]},
+        },
+        physical_checks=(physical, physical),
+    )
+
+    assert report.verdict == "INCOMPLETE_ANALYSIS"
+    contract = next(result for result in report.checks if result.name == "physical_contract")
+    assert contract.state == AcceptanceState.INVALID.value
+    assert contract.passed is False
+
+
+def test_physical_evidence_with_missing_state_cannot_pass():
+    report = evaluate_acceptance(
+        _series(),
+        CHECKS,
+        golden={
+            "source": {"status": "independently_reviewed", "builder_generated": False},
+            "channels": {"vdc": _series()["vdc"]},
+        },
+        physical_checks=(CheckResult("arm_current", AcceptanceState.MISSING.value, True),),
+    )
+
+    assert report.verdict == "INCOMPLETE_ANALYSIS"
+    contract = next(result for result in report.checks if result.name == "physical_contract")
+    assert contract.passed is False
+    assert contract.state == AcceptanceState.MISSING.value
+
+
+def test_acceptance_requires_a_reviewed_golden_reference_before_pass():
+    report = evaluate_acceptance(_series(), CHECKS)
+    assert report.verdict == "INCOMPLETE_ANALYSIS"
+    assert any(result.name == "golden" and result.state == AcceptanceState.MISSING.value for result in report.checks)
 
 
 def test_acceptance_rejects_nonfinite_values_and_no_extrapolation():

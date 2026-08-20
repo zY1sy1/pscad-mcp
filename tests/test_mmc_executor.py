@@ -1,11 +1,17 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
+from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 
+import pytest
+
+from pscad_mcp.core.backend.base import BackendError
 from pscad_mcp.hvdc.builders.mmc import executor as executor_module
-from pscad_mcp.hvdc.builders.mmc.executor import execute_build
+from pscad_mcp.hvdc.builders.mmc.executor import MmcExecutor, execute_build
 from pscad_mcp.hvdc.builders.mmc.models import MmcBuildPlan, MmcPlanOperation
 
 from tests.mmc_builder_fakes import RecordingMmcService
@@ -118,3 +124,32 @@ def test_executor_does_not_publish_when_independent_graph_validation_fails(tmp_p
     assert record.error["code"] == "MMC_STRUCTURE_INVALID"
     assert "save_project_as" not in [call[0] for call in service.calls]
     assert not Path(plan.target_path).exists()
+
+
+def test_existing_unreadable_library_target_is_an_asset_mismatch(tmp_path, monkeypatch):
+    plan = replace(
+        _plan(tmp_path),
+        asset_hashes={"library/cigre_mmc.pslx": hashlib.sha256(b"library").hexdigest()},
+    )
+    target = tmp_path / ".pscad-mcp" / "mmc-libraries" / "cigre_mmc.pslx"
+    target.parent.mkdir(parents=True)
+    target.write_bytes(b"library")
+    asset_set = SimpleNamespace(
+        companion_library="library/cigre_mmc.pslx",
+        library_bytes=b"library",
+        files={},
+    )
+    original_hash = executor_module._sha256_file
+
+    def unreadable(path: Path) -> str:
+        if Path(path) == target:
+            raise BackendError("MMC_OUTPUT_INCOMPLETE", "cannot read target", "hvdc", "hash_mmc_project", {})
+        return original_hash(path)
+
+    monkeypatch.setattr(executor_module, "_sha256_file", unreadable)
+    executor = MmcExecutor(plan, RecordingMmcService(), tmp_path, asset_set=asset_set, build_id="asset-read-failure")
+
+    with pytest.raises(BackendError) as raised:
+        asyncio.run(executor._materialize_library(plan.operations[0]))
+
+    assert raised.value.code == "MMC_ASSET_MISMATCH"

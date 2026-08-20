@@ -413,7 +413,7 @@ def _parse_sequence(value: Any, outputs: set[str]) -> tuple[MmcSequencePhase, ..
     return tuple(parsed)
 
 
-def _parse_acceptance(value: Any) -> tuple[MmcAcceptanceCheck, ...]:
+def _parse_acceptance(value: Any, output_units: Mapping[str, str]) -> tuple[MmcAcceptanceCheck, ...]:
     records = _sequence(value, "acceptance_checks")
     if len(records) != len(_ACCEPTANCE_NAMES):
         raise _invalid("acceptance_checks must contain exactly four required windows.", context="acceptance_checks")
@@ -428,6 +428,32 @@ def _parse_acceptance(value: Any) -> tuple[MmcAcceptanceCheck, ...]:
             raise _invalid("acceptance windows must be precharge_ready, forward_steady, power_reversal, reverse_steady.", context=context)
         if check["required"] is not True:
             raise _invalid(f"{context}.required must be true for the fixed acceptance contract.", context=context)
+        expected = _object(check["expected"], f"{context}.expected")
+        if "channels" not in expected:
+            raise _invalid(f"{context}.expected requires channels.", context=context)
+        channels = tuple(
+            _text(channel, f"{context}.expected.channels[{channel_index}]")
+            for channel_index, channel in enumerate(
+                _sequence(expected["channels"], f"{context}.expected.channels")
+            )
+        )
+        if not channels:
+            raise _invalid(f"{context}.expected.channels must not be empty.", context=context)
+        if len(set(channels)) != len(channels):
+            raise _invalid(f"{context}.expected.channels must be unique.", context=context)
+        units = _text(check["units"], f"{context}.units")
+        for channel in channels:
+            declared_units = output_units.get(channel)
+            if declared_units is None:
+                raise _invalid(f"{context}.expected.channels references an unknown output selector.", context=context, channel=channel)
+            if declared_units != units:
+                raise _invalid(
+                    f"{context}.expected.channels units must match {units}.",
+                    context=context,
+                    channel=channel,
+                    expected_units=units,
+                    observed_units=declared_units,
+                )
         window = _sequence(check["comparison_window"], f"{context}.comparison_window")
         if len(window) != 2:
             raise _invalid(f"{context}.comparison_window requires two numbers.", context=context)
@@ -435,7 +461,7 @@ def _parse_acceptance(value: Any) -> tuple[MmcAcceptanceCheck, ...]:
         end = float(_number(window[1], f"{context}.comparison_window[1]", positive=True))
         if end <= start:
             raise _invalid(f"{context}.comparison_window must be increasing.", context=context)
-        parsed.append(MmcAcceptanceCheck(name=name, kind=_text(check["kind"], f"{context}.kind"), required=True, expected=_json_value(check["expected"], f"{context}.expected"), units=_text(check["units"], f"{context}.units"), comparison_window=(start, end), severity=None if check.get("severity") is None else _text(check["severity"], f"{context}.severity"), rationale=None if check.get("rationale") is None else _text(check["rationale"], f"{context}.rationale")))
+        parsed.append(MmcAcceptanceCheck(name=name, kind=_text(check["kind"], f"{context}.kind"), required=True, expected=_json_value(expected, f"{context}.expected"), units=units, comparison_window=(start, end), severity=None if check.get("severity") is None else _text(check["severity"], f"{context}.severity"), rationale=None if check.get("rationale") is None else _text(check["rationale"], f"{context}.rationale")))
     return tuple(parsed)
 
 
@@ -498,7 +524,10 @@ def parse_blueprint(data: Mapping[str, Any]) -> MmcBlueprint:
     if control.role not in {"link", "system"}:
         raise _invalid("control_contract.role must be link or system.", context="control_contract")
     sequence = _parse_sequence(blueprint["sequence"], output_ids_set)
-    acceptance = _parse_acceptance(blueprint["acceptance_checks"])
+    acceptance = _parse_acceptance(
+        blueprint["acceptance_checks"],
+        {output.logical_id: output.units for output in outputs},
+    )
     provenance = _json_value(blueprint.get("provenance", {}), "provenance")
     topology = None if blueprint.get("topology") is None else _text(blueprint["topology"], "topology")
     model = None if blueprint.get("model") is None else _text(blueprint["model"], "model")

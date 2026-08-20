@@ -147,6 +147,7 @@ class MmcExecutor:
         self._simulation_active = False
         self._publication_created = False
         self._publication_hash: str | None = None
+        self.output_file: str | None = None
 
     def _journal_payload(self, state: str | None = None) -> dict[str, Any]:
         return {
@@ -208,6 +209,7 @@ class MmcExecutor:
             except BaseException:
                 pass
             self.error = _error("MMC_BUILD_FAILED", "The MMC build was interrupted.", "execute_mmc_build").to_dict()
+            self._quarantine_candidate()
             self._record(MmcBuildState.INTERRUPTED, reason="cancelled")
             return self._record_value(MmcBuildState.INTERRUPTED)
         except BaseException as caught:
@@ -266,9 +268,31 @@ class MmcExecutor:
         target = self.workspace_root / ".pscad-mcp" / "mmc-libraries" / Path(operation.target).name
         if target.is_symlink() or (target.exists() and not target.is_file()):
             raise _error("MMC_ASSET_MISMATCH", "The workspace MMC library target is not a regular file.", "materialize_mmc_library", path=str(target))
+
+        def verify_target() -> None:
+            try:
+                observed_hash = _sha256_file(target)
+            except (BackendError, OSError) as error:
+                raise _error(
+                    "MMC_ASSET_MISMATCH",
+                    "The workspace MMC library could not be verified against the planned asset.",
+                    "materialize_mmc_library",
+                    path=str(target),
+                    expected=expected,
+                    upstream_code=error.code if isinstance(error, BackendError) else type(error).__name__,
+                ) from error
+            if observed_hash != expected:
+                raise _error(
+                    "MMC_ASSET_MISMATCH",
+                    "The workspace MMC library differs from the planned asset.",
+                    "materialize_mmc_library",
+                    path=str(target),
+                    expected=expected,
+                    observed=observed_hash,
+                )
+
         if target.is_file():
-            if _sha256_file(target) != expected:
-                raise _error("MMC_ASSET_MISMATCH", "The workspace MMC library differs from the planned asset.", "materialize_mmc_library", path=str(target), expected=expected)
+            verify_target()
         else:
             target.parent.mkdir(parents=True, exist_ok=True)
             temporary: Path | None = None
@@ -283,6 +307,7 @@ class MmcExecutor:
             finally:
                 if temporary is not None and temporary.exists():
                     temporary.unlink()
+            verify_target()
         self.library_file = target
         loader = getattr(self.service, "load_projects", None)
         if not callable(loader):
@@ -484,6 +509,95 @@ class MmcExecutor:
         self.journal.write(self._journal_payload())
 
     async def _acceptance_output(self) -> Any:
+        discover = getattr(self.service, "discover_output_files", None)
+        read_output = getattr(self.service, "read_output_file", None)
+        if callable(discover) or callable(read_output):
+            if not callable(discover) or not callable(read_output):
+                raise _error(
+                    "MMC_OUTPUT_INCOMPLETE",
+                    "The PSCAD service does not expose both output discovery and reading capabilities.",
+                    "read_mmc_output",
+                )
+            if self.staging_file is None:
+                raise _error(
+                    "MMC_OUTPUT_INCOMPLETE",
+                    "The staging PSCX path is not available for output discovery.",
+                    "discover_mmc_output",
+                )
+            paths = await discover(
+                str(self.staging_file.resolve()),
+                started_after=self._run_started_after if self._run_started_after is not None else time.time(),
+                max_files=32,
+            )
+            if not isinstance(paths, (list, tuple)):
+                raise _error(
+                    "MMC_OUTPUT_INCOMPLETE",
+                    "The PSCAD service returned an invalid output-file list.",
+                    "discover_mmc_output",
+                )
+            candidates: list[str] = []
+            staging_root = self.staging_path.resolve()
+            for path in paths:
+                if not isinstance(path, str) or not path:
+                    continue
+                candidate = Path(path).expanduser()
+                if not candidate.is_absolute():
+                    candidate = self.staging_path / candidate
+                if candidate.is_symlink():
+                    raise _error(
+                        "MMC_OUTPUT_INCOMPLETE",
+                        "The PSCAD output file is not a regular file owned by the staging directory.",
+                        "discover_mmc_output",
+                        reason="output_not_regular",
+                        path=str(candidate),
+                    )
+                resolved = candidate.resolve()
+                try:
+                    resolved.relative_to(staging_root)
+                except ValueError as error:
+                    raise _error(
+                        "MMC_OUTPUT_INCOMPLETE",
+                        "The PSCAD output file is outside the builder-owned staging directory.",
+                        "discover_mmc_output",
+                        reason="output_outside_staging",
+                        path=str(resolved),
+                    ) from error
+                if resolved.suffix.casefold() not in {".out", ".psout"}:
+                    raise _error(
+                        "MMC_OUTPUT_INCOMPLETE",
+                        "The PSCAD output file has an unsupported suffix.",
+                        "discover_mmc_output",
+                        reason="output_suffix_invalid",
+                        path=str(resolved),
+                    )
+                if resolved.is_symlink() or not resolved.is_file():
+                    raise _error(
+                        "MMC_OUTPUT_INCOMPLETE",
+                        "The PSCAD output file is not a regular file owned by the staging directory.",
+                        "discover_mmc_output",
+                        reason="output_not_regular",
+                        path=str(resolved),
+                    )
+                candidates.append(str(resolved))
+            if not candidates:
+                raise _error(
+                    "MMC_OUTPUT_INCOMPLETE",
+                    "No PSCAD output file was created after the MMC simulation.",
+                    "discover_mmc_output",
+                    project_name=self.project_name,
+                )
+            candidates = sorted(set(candidates), key=str.casefold)
+            if len(candidates) != 1:
+                raise _error(
+                    "MMC_OUTPUT_INCOMPLETE",
+                    "Multiple PSCAD output files were created for the MMC simulation.",
+                    "discover_mmc_output",
+                    reason="output_ambiguous",
+                    candidates=candidates,
+                )
+            self.output_file = candidates[0]
+            return await read_output(self.output_file, max_samples=1_000_000, summary_only=False)
+
         getter = getattr(self.service, "get_project_output", None)
         if not callable(getter):
             raise _error("MMC_OUTPUT_INCOMPLETE", "The PSCAD service does not expose an output reader.", "read_mmc_output")
@@ -501,6 +615,19 @@ class MmcExecutor:
             result = {"verdict": "PASS", "source": "executor-test-double"}
         else:
             result = {"verdict": "INCOMPLETE_ANALYSIS", "source": "executor", "reason": "verified_asset_set_required"}
+        if self.output_file is not None:
+            result = dict(result)
+            result["output_file"] = self.output_file
+            try:
+                result["output_sha256"] = _sha256_file(Path(self.output_file))
+            except BackendError as error:
+                raise _error(
+                    "MMC_OUTPUT_INCOMPLETE",
+                    "The selected PSCAD output file could not be hashed for acceptance evidence.",
+                    "read_mmc_output",
+                    output_file=self.output_file,
+                    upstream_code=error.code,
+                ) from error
         self.result = result
         if result.get("verdict") != "PASS":
             raise _error("MMC_ACCEPTANCE_FAILED", "The MMC acceptance contract did not pass.", "evaluate_mmc_acceptance", acceptance=result)
@@ -523,7 +650,14 @@ class MmcExecutor:
         await loader([str(self.target_path.resolve())])
         validation = self._validate_graph(self.target_path)
         await self.service.build_project(self.target_path.stem)
-        self._record(MmcBuildState.PUBLISHED, target_path=str(self.target_path), final_compile_smoke=True, final_project_sha256=self._publication_hash, validation=validation)
+        self._record(
+            MmcBuildState.PUBLISHED,
+            target_path=str(self.target_path),
+            final_project_name=self.target_path.stem,
+            final_compile_smoke=True,
+            final_project_sha256=self._publication_hash,
+            validation=validation,
+        )
 
     def _quarantine_candidate(self) -> None:
         if not self._publication_created or self.target_path is None or not self.target_path.exists():

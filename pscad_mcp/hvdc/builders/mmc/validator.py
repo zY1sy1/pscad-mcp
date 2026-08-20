@@ -140,7 +140,18 @@ def validate_project_graph(graph: MmcProjectGraph, blueprint: MmcBlueprint) -> d
         "valid": not findings,
         "code": None if not findings else findings[0]["code"],
         "findings": findings,
-        "observed": {"project_name": graph.project_name, "component_count": len(graph.components), "net_count": len(graph.nets), "output_count": len(graph.outputs)},
+        "observed": {
+            "project_name": graph.project_name,
+            "component_count": len(graph.components),
+            "net_count": len(graph.nets),
+            "output_count": len(graph.outputs),
+            "arm_count": len(actual_arms),
+            "expected_arm_count": len(expected_arms),
+            "phase_midpoint_count": len(observed_midpoints),
+            "positive_dc_terminal_count": sum("positive_bus" in logical_id for logical_id in component_map),
+            "negative_dc_terminal_count": sum("negative_bus" in logical_id for logical_id in component_map),
+            "required_output_count": len(expected_output_ids),
+        },
     }
     return report
 

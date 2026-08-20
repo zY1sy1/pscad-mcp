@@ -172,6 +172,132 @@ _BUILTIN_PROFILES: dict[str, dict[str, Any]] = {
 }
 
 
+_MMC_FIXED_RESULT_CHANNELS = (
+    ("vdc_pole_to_pole", "Main/VDC_P2P", "kV", "dc_voltage_pole_to_pole"),
+    ("vdc_pole_to_ground", "Main/VDC_PG", "kV", "dc_voltage_pole_to_ground"),
+    ("dc_current_positive", "Main/DC_POS/I", "kA", "dc_conductor_current"),
+    ("dc_current_negative", "Main/DC_NEG/I", "kA", "dc_conductor_current"),
+    ("p_ac_p", "Main/STATION_P/P_AC", "MW", "station_ac_active_power"),
+    ("q_ac_p", "Main/STATION_P/Q_AC", "MVAr", "station_ac_reactive_power"),
+    ("p_dc_p", "Main/STATION_P/P_DC", "MW", "station_dc_power"),
+    ("ac_voltage_p", "Main/STATION_P/V_AC", "kV", "ac_voltage"),
+    ("ac_current_p", "Main/STATION_P/I_AC", "kA", "ac_current"),
+    ("p_ac_vdc", "Main/STATION_VDC/P_AC", "MW", "station_ac_active_power"),
+    ("q_ac_vdc", "Main/STATION_VDC/Q_AC", "MVAr", "station_ac_reactive_power"),
+    ("p_dc_vdc", "Main/STATION_VDC/P_DC", "MW", "station_dc_power"),
+    ("ac_voltage_vdc", "Main/STATION_VDC/V_AC", "kV", "ac_voltage"),
+    ("ac_current_vdc", "Main/STATION_VDC/I_AC", "kA", "ac_current"),
+    ("circ_p_a", "Main/STATION_P/CIRC_A", "kA", "circulating_current"),
+    ("circ_p_b", "Main/STATION_P/CIRC_B", "kA", "circulating_current"),
+    ("circ_p_c", "Main/STATION_P/CIRC_C", "kA", "circulating_current"),
+    ("circ_vdc_a", "Main/STATION_VDC/CIRC_A", "kA", "circulating_current"),
+    ("circ_vdc_b", "Main/STATION_VDC/CIRC_B", "kA", "circulating_current"),
+    ("circ_vdc_c", "Main/STATION_VDC/CIRC_C", "kA", "circulating_current"),
+    ("energy_diff_p_a", "Main/STATION_P/ENERGY_DIFF_A", "MJ", "arm_energy_difference"),
+    ("energy_diff_p_b", "Main/STATION_P/ENERGY_DIFF_B", "MJ", "arm_energy_difference"),
+    ("energy_diff_p_c", "Main/STATION_P/ENERGY_DIFF_C", "MJ", "arm_energy_difference"),
+    ("energy_diff_vdc_a", "Main/STATION_VDC/ENERGY_DIFF_A", "MJ", "arm_energy_difference"),
+    ("energy_diff_vdc_b", "Main/STATION_VDC/ENERGY_DIFF_B", "MJ", "arm_energy_difference"),
+    ("energy_diff_vdc_c", "Main/STATION_VDC/ENERGY_DIFF_C", "MJ", "arm_energy_difference"),
+    ("pll_frequency_p", "Main/STATION_P/PLL_FREQUENCY", "Hz", "pll_frequency"),
+    ("pll_lock_p", "Main/STATION_P/PLL_LOCK", "1", "pll_lock"),
+    ("pll_frequency_vdc", "Main/STATION_VDC/PLL_FREQUENCY", "Hz", "pll_frequency"),
+    ("pll_lock_vdc", "Main/STATION_VDC/PLL_LOCK", "1", "pll_lock"),
+    ("p_order", "Main/COMMAND/P_ORDER", "MW", "active_power_command"),
+    ("q_order", "Main/COMMAND/Q_ORDER", "MVAr", "reactive_power_command"),
+    ("vdc_order", "Main/COMMAND/VDC_ORDER", "kV", "dc_voltage_command"),
+    ("mod_unclipped_p", "Main/STATION_P/MODULATION_UNCLIPPED", "1", "modulation_index_unclipped"),
+    ("mod_clipped_p", "Main/STATION_P/MODULATION_CLIPPED", "1", "modulation_index_clipped"),
+    ("mod_margin_p", "Main/STATION_P/MODULATION_MARGIN", "1", "modulation_margin"),
+    ("sat_p", "Main/STATION_P/SATURATION", "1", "controller_saturation"),
+    ("sat_duration_p", "Main/STATION_P/SATURATION_DURATION", "s", "controller_saturation_duration"),
+    ("mod_unclipped_vdc", "Main/STATION_VDC/MODULATION_UNCLIPPED", "1", "modulation_index_unclipped"),
+    ("mod_clipped_vdc", "Main/STATION_VDC/MODULATION_CLIPPED", "1", "modulation_index_clipped"),
+    ("mod_margin_vdc", "Main/STATION_VDC/MODULATION_MARGIN", "1", "modulation_margin"),
+    ("sat_vdc", "Main/STATION_VDC/SATURATION", "1", "controller_saturation"),
+    ("sat_duration_vdc", "Main/STATION_VDC/SATURATION_DURATION", "s", "controller_saturation_duration"),
+    ("sequence_state", "Main/SEQUENCE/STATE", "1", "sequence_state"),
+    ("arm_current_p_a_upper", "Main/STATION_P/A_UPPER/I", "kA", "arm_current"),
+    ("arm_current_p_a_lower", "Main/STATION_P/A_LOWER/I", "kA", "arm_current"),
+    ("arm_current_p_b_upper", "Main/STATION_P/B_UPPER/I", "kA", "arm_current"),
+    ("arm_current_p_b_lower", "Main/STATION_P/B_LOWER/I", "kA", "arm_current"),
+    ("arm_current_p_c_upper", "Main/STATION_P/C_UPPER/I", "kA", "arm_current"),
+    ("arm_current_p_c_lower", "Main/STATION_P/C_LOWER/I", "kA", "arm_current"),
+    ("arm_current_vdc_a_upper", "Main/STATION_VDC/A_UPPER/I", "kA", "arm_current"),
+    ("arm_current_vdc_a_lower", "Main/STATION_VDC/A_LOWER/I", "kA", "arm_current"),
+    ("arm_current_vdc_b_upper", "Main/STATION_VDC/B_UPPER/I", "kA", "arm_current"),
+    ("arm_current_vdc_b_lower", "Main/STATION_VDC/B_LOWER/I", "kA", "arm_current"),
+    ("arm_current_vdc_c_upper", "Main/STATION_VDC/C_UPPER/I", "kA", "arm_current"),
+    ("arm_current_vdc_c_lower", "Main/STATION_VDC/C_LOWER/I", "kA", "arm_current"),
+    ("arm_energy_p_a_upper", "Main/STATION_P/A_UPPER/ENERGY", "MJ", "arm_energy"),
+    ("arm_energy_p_a_lower", "Main/STATION_P/A_LOWER/ENERGY", "MJ", "arm_energy"),
+    ("arm_energy_p_b_upper", "Main/STATION_P/B_UPPER/ENERGY", "MJ", "arm_energy"),
+    ("arm_energy_p_b_lower", "Main/STATION_P/B_LOWER/ENERGY", "MJ", "arm_energy"),
+    ("arm_energy_p_c_upper", "Main/STATION_P/C_UPPER/ENERGY", "MJ", "arm_energy"),
+    ("arm_energy_p_c_lower", "Main/STATION_P/C_LOWER/ENERGY", "MJ", "arm_energy"),
+    ("arm_energy_vdc_a_upper", "Main/STATION_VDC/A_UPPER/ENERGY", "MJ", "arm_energy"),
+    ("arm_energy_vdc_a_lower", "Main/STATION_VDC/A_LOWER/ENERGY", "MJ", "arm_energy"),
+    ("arm_energy_vdc_b_upper", "Main/STATION_VDC/B_UPPER/ENERGY", "MJ", "arm_energy"),
+    ("arm_energy_vdc_b_lower", "Main/STATION_VDC/B_LOWER/ENERGY", "MJ", "arm_energy"),
+    ("arm_energy_vdc_c_upper", "Main/STATION_VDC/C_UPPER/ENERGY", "MJ", "arm_energy"),
+    ("arm_energy_vdc_c_lower", "Main/STATION_VDC/C_LOWER/ENERGY", "MJ", "arm_energy"),
+    ("cap_v_p_a_upper", "Main/STATION_P/A_UPPER/V_CAP_EQ", "kV", "equivalent_capacitor_voltage"),
+    ("cap_v_p_a_lower", "Main/STATION_P/A_LOWER/V_CAP_EQ", "kV", "equivalent_capacitor_voltage"),
+    ("cap_v_p_b_upper", "Main/STATION_P/B_UPPER/V_CAP_EQ", "kV", "equivalent_capacitor_voltage"),
+    ("cap_v_p_b_lower", "Main/STATION_P/B_LOWER/V_CAP_EQ", "kV", "equivalent_capacitor_voltage"),
+    ("cap_v_p_c_upper", "Main/STATION_P/C_UPPER/V_CAP_EQ", "kV", "equivalent_capacitor_voltage"),
+    ("cap_v_p_c_lower", "Main/STATION_P/C_LOWER/V_CAP_EQ", "kV", "equivalent_capacitor_voltage"),
+    ("cap_v_vdc_a_upper", "Main/STATION_VDC/A_UPPER/V_CAP_EQ", "kV", "equivalent_capacitor_voltage"),
+    ("cap_v_vdc_a_lower", "Main/STATION_VDC/A_LOWER/V_CAP_EQ", "kV", "equivalent_capacitor_voltage"),
+    ("cap_v_vdc_b_upper", "Main/STATION_VDC/B_UPPER/V_CAP_EQ", "kV", "equivalent_capacitor_voltage"),
+    ("cap_v_vdc_b_lower", "Main/STATION_VDC/B_LOWER/V_CAP_EQ", "kV", "equivalent_capacitor_voltage"),
+    ("cap_v_vdc_c_upper", "Main/STATION_VDC/C_UPPER/V_CAP_EQ", "kV", "equivalent_capacitor_voltage"),
+    ("cap_v_vdc_c_lower", "Main/STATION_VDC/C_LOWER/V_CAP_EQ", "kV", "equivalent_capacitor_voltage"),
+)
+
+
+_BUILTIN_PROFILES["cigre_b4_p2p_avm_v1"] = {
+    "profile_version": 2,
+    "required_assets": ["controller", "converter", "dc_line", "pole"],
+    "mappings": [],
+    "project_fingerprints": [
+        {
+            "project_stem": "MMC_STAGE_A",
+            "pscad_version": "4.6.2",
+            "definitions": [
+                "cigre_mmc_avm_v1:MMCAverageArm",
+                "cigre_mmc_avm_v1:MMCStationControl",
+                "cigre_mmc_avm_v1:MMCEnergyControl",
+                "cigre_mmc_avm_v1:MMCInitialization",
+            ],
+        }
+    ],
+    "command_bindings": [],
+    "result_channels": [
+        {"canonical": canonical, "path": path, "units": units, "location": "Main"}
+        for canonical, path, units, _role in _MMC_FIXED_RESULT_CHANNELS
+    ],
+    "metric_roles": {
+        canonical: role
+        for canonical, _path, _units, role in _MMC_FIXED_RESULT_CHANNELS
+    },
+    "sequences": [
+        {"name": name, "order": order}
+        for order, name in enumerate(
+            (
+                "blocked_precharge",
+                "ready_to_deblock",
+                "forward_ramp",
+                "forward_steady",
+                "power_reversal",
+                "reverse_steady",
+            ),
+            start=1,
+        )
+    ],
+}
+
+
 _PROFILE_NAME = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
 _SOURCE_KINDS = {"label", "datalabel", "text", "meter", "ammeter", "voltmeter", "multimeter", "graph", "measurement", "control", "parameter"}
 

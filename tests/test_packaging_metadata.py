@@ -28,6 +28,18 @@ def test_project_packages_recursive_lcc_asset_set():
     assert "assets/lcc/*/library/*.pslx" in patterns
 
 
+def test_project_packages_recursive_mmc_asset_set_without_dropping_lcc_assets():
+    path = Path(__file__).parents[1] / "pyproject.toml"
+    document = tomllib.loads(path.read_text(encoding="utf-8"))
+    patterns = document["tool"]["setuptools"]["package-data"]["pscad_mcp"]
+
+    assert "assets/mmc/*/*.json" in patterns
+    assert "assets/mmc/*/*.md" in patterns
+    assert "assets/mmc/*/library/*.pslx" in patterns
+    assert "assets/lcc/*/*.json" in patterns
+    assert "assets/lcc/*/library/*.pslx" in patterns
+
+
 def test_runtime_version_matches_project_metadata():
     path = Path(__file__).parents[1] / "pyproject.toml"
     document = tomllib.loads(path.read_text(encoding="utf-8"))

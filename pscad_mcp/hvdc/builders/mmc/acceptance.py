@@ -450,8 +450,90 @@ def reverse_steady_check(power_samples: Sequence[float], current_samples: Sequen
     )
 
 
+def _physical_contract_result(physical_checks: Sequence[CheckResult]) -> CheckResult:
+    """Require independently computed physical evidence before a PASS verdict."""
+
+    if not physical_checks:
+        return _record_result(
+            "physical_contract",
+            AcceptanceState.MISSING,
+            False,
+            reason="independent physical acceptance evidence is required",
+        )
+    if any(not isinstance(check, CheckResult) for check in physical_checks):
+        return _record_result(
+            "physical_contract",
+            AcceptanceState.INVALID,
+            False,
+            reason="physical evidence must contain CheckResult records",
+        )
+    names = [check.name for check in physical_checks]
+    if any(not isinstance(name, str) or not name.strip() for name in names):
+        return _record_result(
+            "physical_contract",
+            AcceptanceState.INVALID,
+            False,
+            reason="physical evidence check names must be non-empty strings",
+        )
+    if len(set(names)) != len(names) or "physical_contract" in names:
+        return _record_result(
+            "physical_contract",
+            AcceptanceState.INVALID,
+            False,
+            reason="physical evidence check names must be unique",
+        )
+    if any(not isinstance(check.passed, bool) for check in physical_checks):
+        return _record_result(
+            "physical_contract",
+            AcceptanceState.INVALID,
+            False,
+            reason="physical evidence pass flags must be boolean",
+        )
+    missing = [check.name for check in physical_checks if check.state == AcceptanceState.MISSING.value]
+    if missing:
+        return _record_result(
+            "physical_contract",
+            AcceptanceState.MISSING,
+            False,
+            observed={"check_count": len(physical_checks), "checks": names, "missing": missing},
+            expected={"all_required_checks_observed": True},
+            reason="one or more physical checks have missing evidence",
+        )
+    invalid = [
+        check.name
+        for check in physical_checks
+        if check.state not in {AcceptanceState.OBSERVED.value, AcceptanceState.DERIVED.value}
+    ]
+    if invalid:
+        return _record_result(
+            "physical_contract",
+            AcceptanceState.INVALID,
+            False,
+            observed={"check_count": len(physical_checks), "checks": names, "invalid": invalid},
+            expected={"allowed_states": [AcceptanceState.OBSERVED.value, AcceptanceState.DERIVED.value]},
+            reason="physical checks must be observed or derived",
+        )
+    failed = [check.name for check in physical_checks if check.required and not check.passed]
+    if failed:
+        return _record_result(
+            "physical_contract",
+            AcceptanceState.DERIVED,
+            False,
+            observed={"check_count": len(physical_checks), "checks": names, "failed_required": failed},
+            expected={"all_required_checks_passed": True},
+            reason="one or more required physical checks failed",
+        )
+    return _record_result(
+        "physical_contract",
+        AcceptanceState.DERIVED,
+        True,
+        observed={"check_count": len(physical_checks), "checks": names},
+        expected={"all_required_checks_passed": True},
+    )
+
+
 def evaluate_acceptance(samples: Mapping[str, Any] | Sequence[Mapping[str, Any]], checks: Sequence[MmcAcceptanceCheck], *, golden: Mapping[str, Any] | None = None, physical_checks: Sequence[CheckResult] = ()) -> MmcAcceptanceReport:
-    """Evaluate required windows and optional independent checks."""
+    """Evaluate windows, reviewed golden data, and independent physical checks."""
 
     required_units: dict[str, str] = {}
     for check in checks:
@@ -467,7 +549,7 @@ def evaluate_acceptance(samples: Mapping[str, Any] | Sequence[Mapping[str, Any]]
         results.append(_record_result("acceptance_contract", AcceptanceState.INVALID, False, reason="the fixed acceptance contract requires four named windows"))
     for check in checks:
         channels = check.expected.get("channels", ()) if isinstance(check.expected, Mapping) else ()
-        channels = tuple(channels) if isinstance(channels, Sequence) and not isinstance(channels, (str, bytes, bytearray)) else tuple(normalized)
+        channels = tuple(channels) if isinstance(channels, Sequence) and not isinstance(channels, (str, bytes, bytearray)) else ()
         channel_results = [normalized.get(channel) for channel in channels if isinstance(channel, str)]
         if not channel_results or any(sample is None or sample.state == AcceptanceState.MISSING.value for sample in channel_results):
             results.append(_record_result(check.name, AcceptanceState.MISSING, not check.required, required=check.required, expected=check.expected, reason="required channel is missing; no zero was substituted"))
@@ -483,8 +565,12 @@ def evaluate_acceptance(samples: Mapping[str, Any] | Sequence[Mapping[str, Any]]
             results.append(_record_result(check.name, AcceptanceState.INVALID, not check.required, required=check.required, expected=check.expected, reason="required channels are not aligned"))
             continue
         results.append(_record_result(check.name, AcceptanceState.OBSERVED, True, required=check.required, observed={"channels": list(channels), "window": list(check.comparison_window)}, expected=check.expected))
+    physical_contract = _physical_contract_result(physical_checks)
     results.extend(physical_checks)
-    if golden is not None:
+    results.append(physical_contract)
+    if golden is None:
+        results.append(_record_result("golden", AcceptanceState.MISSING, False, reason="an independently reviewed golden reference is required before acceptance can pass"))
+    else:
         if not isinstance(golden, Mapping):
             golden_result = _record_result("golden", AcceptanceState.INVALID, False, reason="golden evidence must be an object")
         elif isinstance(golden.get("source"), Mapping) and golden["source"].get("builder_generated") is True:

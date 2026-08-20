@@ -93,10 +93,10 @@ def valid_blueprint() -> dict:
             {"name": "reverse_steady", "order": 6, "entry_condition": "reverse", "exit_condition": "complete", "duration_s": 0.5, "outputs": ["p_ac_p"]},
         ],
         "acceptance_checks": [
-            {"name": "precharge_ready", "kind": "window", "required": True, "expected": {"finite": True}, "units": "s", "comparison_window": [0.0, 0.1]},
-            {"name": "forward_steady", "kind": "window", "required": True, "expected": {"power_mw": 1000.0}, "units": "MW", "comparison_window": [0.6, 1.0]},
-            {"name": "power_reversal", "kind": "window", "required": True, "expected": {"direction": "negative"}, "units": "MW", "comparison_window": [1.0, 1.5]},
-            {"name": "reverse_steady", "kind": "window", "required": True, "expected": {"power_mw": -1000.0}, "units": "MW", "comparison_window": [1.5, 2.0]},
+            {"name": "precharge_ready", "kind": "window", "required": True, "expected": {"finite": True, "channels": ["vdc_pole_to_pole"]}, "units": "kV", "comparison_window": [0.0, 0.1]},
+            {"name": "forward_steady", "kind": "window", "required": True, "expected": {"power_mw": 1000.0, "channels": ["p_ac_p"]}, "units": "MW", "comparison_window": [0.6, 1.0]},
+            {"name": "power_reversal", "kind": "window", "required": True, "expected": {"direction": "negative", "channels": ["p_ac_p"]}, "units": "MW", "comparison_window": [1.0, 1.5]},
+            {"name": "reverse_steady", "kind": "window", "required": True, "expected": {"power_mw": -1000.0, "channels": ["p_ac_p"]}, "units": "MW", "comparison_window": [1.5, 2.0]},
         ],
     }
 
@@ -173,6 +173,20 @@ def test_schema_requires_positive_steps_and_exact_acceptance_windows():
     value = valid_blueprint()
     value["acceptance_checks"] = value["acceptance_checks"][:-1]
     assert_invalid(value, fragment="four")
+
+
+def test_schema_requires_declared_same_unit_acceptance_channels():
+    value = valid_blueprint()
+    del value["acceptance_checks"][0]["expected"]["channels"]
+    assert_invalid(value, fragment="channels")
+
+    value = valid_blueprint()
+    value["acceptance_checks"][1]["expected"]["channels"] = ["unknown_output"]
+    assert_invalid(value, fragment="unknown output")
+
+    value = valid_blueprint()
+    value["acceptance_checks"][0]["expected"]["channels"] = ["p_ac_p"]
+    assert_invalid(value, fragment="units")
 
 
 def test_schema_rejects_wrong_equation_and_output_unit():

@@ -92,6 +92,11 @@ def test_validator_accepts_valid_graph_and_rejects_duplicate_output_selector(tmp
     graph = read_project_graph(path)
     report = validate_project_graph(graph, BLUEPRINT)
     assert report["valid"] is True
+    assert report["observed"]["arm_count"] == 12
+    assert report["observed"]["phase_midpoint_count"] == 6
+    assert report["observed"]["positive_dc_terminal_count"] == 2
+    assert report["observed"]["negative_dc_terminal_count"] == 2
+    assert report["observed"]["output_count"] == len(BLUEPRINT.outputs)
 
     outputs = root.find(f".//{tag('canvas')}")
     assert outputs is not None

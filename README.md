@@ -1,6 +1,6 @@
 # PSCAD MCP for Codex and GitHub Copilot CLI
 
-`pscad-mcp` is a Windows Model Context Protocol (MCP) server for PSCAD automation. It uses `mhrc.automation` for PSCAD 4.6.x and `mhi.pscad` for PSCAD 5.x behind one stable 60-tool generic service contract, plus separate HVDC, silent-learning, and fixed CIGRE LCC domain layers. The current inventory is 77 tools.
+`pscad-mcp` is a Windows Model Context Protocol (MCP) server for PSCAD automation. It uses `mhrc.automation` for PSCAD 4.6.x and `mhi.pscad` for PSCAD 5.x behind one stable 60-tool generic service contract, plus separate HVDC, silent-learning, fixed CIGRE LCC, and fixed MMC Stage A domain layers. The current inventory is 81 tools.
 
 中文安装、配置、安全和验收说明：[docs/zh-CN/README.md](docs/zh-CN/README.md)
 
@@ -61,9 +61,9 @@ external process.
 
 ## Tool coverage
 
-The complete inventory is 77 = 60 generic tools, 10 HVDC tools, 3 learning
-tools, and 4 fixed CIGRE LCC tools. The generic 60-tool contract keeps its
-existing names and default return shapes.
+The complete inventory is 81 = 60 generic tools, 10 HVDC tools, 3 learning
+tools, 4 fixed CIGRE LCC tools, and 4 fixed MMC Stage A tools. The generic
+60-tool contract keeps its existing names and default return shapes.
 
 The server currently exposes tool groups for:
 
@@ -86,7 +86,7 @@ asset or mapping. Topology and metrics are marked as observed, derived, or
 unresolved; missing channels produce `INCOMPLETE_ANALYSIS` rather than zeros.
 
 Built-in profiles include `lcc_bipolar_generic`, `vsc_2level_generic`,
-`mmc_bipolar_generic`, and `hvdc_breaker_difforder`. A scenario can only use
+`mmc_bipolar_generic`, `cigre_b4_p2p_avm_v1`, and `hvdc_breaker_difforder`. A scenario can only use
 controls already mapped in the project; inserting fault components or
 rewiring a canvas returns `HVDC_CAPABILITY_UNAVAILABLE`. Mutating scenario
 parameters and registering a user profile require `confirm=true` and remain
@@ -109,7 +109,8 @@ poll with `get_lcc_build_status`, then call `validate_lcc_model` on the saved
 case. The four capability levels are `planned`, `built`, `simulated`, and
 `accepted`; structural success, compilation, or a mocked/synthetic waveform
 does not imply acceptance. `poles=2`, user-rated designs, PSCAD 5.x, fault or
-commutation-failure acceptance, and MMC construction are unavailable.
+commutation-failure acceptance and Stage C arbitrary-rating design are
+unavailable. The fixed MMC Stage A builder is described below.
 
 Planning fails closed unless the attached PSCAD service supplies live
 4.6.2 definition inventory; the packaged catalog is not treated as live
@@ -122,6 +123,46 @@ LCC acceptance.
 Licensed acceptance has not passed for the PSCAD 4.6.2 implementation branch,
 so the feature must not be described as an autonomously constructed
 accepted CIGRE LCC model until the opt-in real acceptance test passes.
+
+### Fixed CIGRE-derived MMC Stage A builder
+
+The MMC layer exposes four tools: `plan_mmc_model`, `build_mmc_model`,
+`get_mmc_build_status`, and `validate_mmc_model`. It targets only the fixed
+`cigre_b4_p2p_avm_v1` two-terminal, symmetrical-monopole, half-bridge
+average-value benchmark for licensed PSCAD 4.6.2: nominal 640 kV
+pole-to-pole voltage, approximately 1000 MW transfer, two stations, and
+twelve visible average arms. It is CIGRE B4-derived rather than a claim that
+the complete CIGRE DC grid is implemented.
+
+Planning is read-only. A build requires the exact plan hash and
+`confirm=true`, writes only inside `PSCAD_MCP_WORKSPACE`, stages candidates
+under `.pscad-mcp/mmc-builds`, and publishes only after saved-graph,
+compile/run, output, and acceptance postconditions. The status vocabulary is
+`designed`, `planned`, `built`, `simulated`, and `accepted`; structural or
+compilation success alone is not acceptance. The packaged golden file is an
+independently reviewed reference placeholder, so licensed MMC acceptance is
+not claimed until the opt-in PSCAD test passes.
+
+This is an average-value model. Individual submodule balance, semiconductor
+switching stress, switching harmonics/EMI, thermal design, DC-fault blocking,
+grid-forming behavior, and multi-terminal coordination are explicitly
+`not_modeled`. The Stage C `design_mmc_model` tool and arbitrary-rating
+publication workflow are intentionally not registered in this Stage A
+release.
+
+When the licensed PSCAD 4.6.2 environment and independently reviewed reference
+output are available, the opt-in gate is:
+
+```powershell
+$env:PSCAD_MCP_MMC_ACCEPTANCE = "1"
+$env:PSCAD_MCP_BACKEND = "legacy"
+$env:PSCAD_MCP_VERSION = "4.6.2"
+$env:PSCAD_MCP_WORKSPACE = "D:\PSCAD-Workspace"
+& .\.venv\Scripts\python.exe -m pytest tests\test_mmc_real_acceptance.py -q -s
+```
+
+The normal deterministic suite leaves this gate disabled; a skipped or
+unavailable licensed run is not an `accepted` result.
 
 Read-only HVDC inspection may scan an existing absolute `.pscx` source such as
 `C:\\PSCADFiles\\Breaker\\TEST1\\difforder_new.pscx`; all scenario mutations
@@ -228,6 +269,7 @@ PSCAD_MCP_LEARNING_DB=<optional absolute SQLite path>
 PSCAD_MCP_LEARNING_BACKLOG=<optional absolute Markdown path>
 PSCAD_MCP_LEARNING_RETENTION_DAYS=90       # 1 through 3650
 PSCAD_MCP_LEARNING_MAX_EVENTS=20000       # 100 through 1000000
+PSCAD_MCP_MMC_ACCEPTANCE=0                # opt-in licensed Stage A gate
 ```
 
 Successful operation remains silent. Ordinary improvement evidence waits for
