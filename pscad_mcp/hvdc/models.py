@@ -55,6 +55,17 @@ class HvdcAsset:
 
 
 @dataclass(frozen=True)
+class HvdcReturnPath:
+    mode: str
+    segments: tuple[HvdcSourceRef, ...] = ()
+    endpoints: tuple[HvdcSourceRef, ...] = ()
+    closed: bool = False
+    confidence: float = 0.0
+    evidence: tuple[str, ...] = ()
+    unresolved_questions: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class HvdcTopologySummary:
     family: str
     polarity: str
@@ -62,6 +73,12 @@ class HvdcTopologySummary:
     breaker_protection_present: bool
     dc_line_present: bool
     confidence: float
+    return_mode: str = "unknown"
+    return_path_status: str = "incomplete"
+    return_path: tuple[HvdcReturnPath, ...] = ()
+    pole_roles: dict[str, HvdcSourceRef] = field(default_factory=dict)
+    neutral_assets: tuple[HvdcSourceRef, ...] = ()
+    mode_evidence: tuple[str, ...] = ()
     evidence: tuple[str, ...] = ()
     unresolved_questions: tuple[str, ...] = ()
 

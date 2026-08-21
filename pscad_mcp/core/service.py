@@ -115,6 +115,10 @@ _ERROR_GUIDANCE: dict[str, tuple[bool, str]] = {
         False,
         "Inspect the evidence and provide an explicit HVDC profile.",
     ),
+    "HVDC_RETURN_PATH_UNRESOLVED": (
+        False,
+        "Inspect the return-path evidence and provide a project-qualified profile.",
+    ),
     "HVDC_MAPPING_MISSING": (
         False,
         "Add or configure the missing mapped channels/components before retrying.",
