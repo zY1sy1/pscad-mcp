@@ -1,0 +1,5 @@
+<project version="4.6.2"><canvas name="Main">
+<component id="r" name="Rectifier" definition="Rectifier"/><component id="i" name="Inverter" definition="Inverter"/><component id="p" name="PositivePole" definition="PositivePole"><parameter name="status" value="open"/></component><component id="n" name="NegativePole" definition="NegativePole"/>
+<component id="rn" name="RectifierNeutral" definition="NeutralBus"/><component id="in" name="InverterNeutral" definition="NeutralBus"/><component id="e" name="EarthElectrode" definition="EarthElectrode"/><component id="l" name="EarthReturnLine" definition="EarthReturnLine"/><component id="sw" name="EarthReturnSwitch" definition="EarthReturnSwitch"><parameter name="status" value="closed"/></component>
+<connection from_component="rn" to_component="e"/><connection from_component="e" to_component="l"/><connection from_component="l" to_component="sw"/><connection from_component="sw" to_component="in"/>
+</canvas></project>

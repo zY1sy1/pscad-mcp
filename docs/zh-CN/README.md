@@ -201,6 +201,11 @@ VSC 两电平和 MMC 通用 Profile 现在提供显式测量选择器和单位�
 直流量、P/Q、PLL/dq、桥臂电流、子模块电容电压和环流。通用 Profile 在注册
 项目级结果选择器或命令绑定前仍保持只读。
 
+`lcc_bipolar_earth_return_v1` 是独立的只读 LCC 双极 inspect/validate Profile，
+用于审计正负极、中性点和大地回线证据。它不提供 command bindings，也不会切换
+大地回线/金属回线；证据不足时返回 `HVDC_RETURN_PATH_UNRESOLVED` 或
+`INCOMPLETE_ANALYSIS`。第一阶段不代表 VSC/MMC 回流拓扑支持。
+
 基于轮询的 EMTDC 控制现在使用有界轮询间隔，并检测仿真时钟停滞。定时事件带有
 稳定 ID，重复 ID 会在分发前被拒绝。Legacy 和 Modern 后端只有在加载工程显式
 提供对应能力时才会声明定时调度、仿真时钟或输出通道能力，否则安全失败。

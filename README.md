@@ -92,6 +92,13 @@ rewiring a canvas returns `HVDC_CAPABILITY_UNAVAILABLE`. Mutating scenario
 parameters and registering a user profile require `confirm=true` and remain
 subject to `PSCAD_MCP_WORKSPACE` path policy.
 
+`lcc_bipolar_earth_return_v1` is a standalone, read-only inspect/validate
+profile for LCC bipolar projects. It verifies positive/negative poles and
+earth-return evidence (or reports `HVDC_RETURN_PATH_UNRESOLVED`); it provides
+no command bindings and never switches return modes. Evidence gaps remain
+`INCOMPLETE_ANALYSIS`/unresolved rather than being inferred. This first phase
+does not extend VSC/MMC topology support.
+
 ### Fixed CIGRE LCC builder
 
 The LCC layer exposes four tools: `plan_lcc_model`, `build_lcc_model`,

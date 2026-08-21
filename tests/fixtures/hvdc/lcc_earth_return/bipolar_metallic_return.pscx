@@ -1,0 +1,5 @@
+<project version="4.6.2"><canvas name="Main">
+<component id="r" name="Rectifier" definition="Rectifier"/><component id="i" name="Inverter" definition="Inverter"/><component id="p" name="PositivePole" definition="PositivePole"/><component id="n" name="NegativePole" definition="NegativePole"/>
+<component id="rn" name="RectifierNeutral" definition="NeutralBus"/><component id="in" name="InverterNeutral" definition="NeutralBus"/><component id="ml" name="MetallicReturnLine" definition="MetallicReturnLine"/><component id="sw" name="MetallicReturnSwitch" definition="MetallicReturnSwitch"><parameter name="status" value="closed"/></component>
+<connection from_component="rn" to_component="ml"/><connection from_component="ml" to_component="sw"/><connection from_component="sw" to_component="in"/>
+</canvas></project>

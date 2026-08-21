@@ -6,6 +6,7 @@ from pathlib import Path
 import xml.etree.ElementTree as ET
 
 from .models import (
+    HvdcConnectionRecord,
     HvdcComponentRecord,
     HvdcLabelRecord,
     HvdcProjectEvidence,
@@ -104,6 +105,47 @@ def _scope_name(scope: ET.Element, fallback: str) -> str:
     if _local_name(scope.tag) in {"definition", "canvas", "schematic"}:
         return _text(scope.attrib.get("name") or scope.attrib.get("id")) or fallback
     return fallback
+
+
+def _connection_records(
+    root: ET.Element,
+    project_path: Path,
+    default_canvas: str,
+) -> tuple[HvdcConnectionRecord, ...]:
+    records: list[HvdcConnectionRecord] = []
+    for index, element in enumerate(root.iter()):
+        if _local_name(element.tag) not in {"connection", "wire", "link"}:
+            continue
+        source_component = _text(
+            element.attrib.get("from_component")
+            or element.attrib.get("source_component")
+            or element.attrib.get("from")
+        )
+        target_component = _text(
+            element.attrib.get("to_component")
+            or element.attrib.get("target_component")
+            or element.attrib.get("to")
+        )
+        if not source_component or not target_component:
+            continue
+        source_port = _text(element.attrib.get("from_port") or element.attrib.get("source_port"))
+        target_port = _text(element.attrib.get("to_port") or element.attrib.get("target_port"))
+        canvas_name = default_canvas
+        parent_canvas = next((parent for parent in root.iter() if element in list(parent)), None)
+        if parent_canvas is not None:
+            canvas_name = _text(parent_canvas.attrib.get("name") or parent_canvas.attrib.get("id")) or default_canvas
+        records.append(
+            HvdcConnectionRecord(
+                connection_id=_text(element.attrib.get("id")) or f"connection-{index}",
+                source_component_id=source_component,
+                source_port=source_port,
+                target_component_id=target_component,
+                target_port=target_port,
+                source=HvdcSourceRef(str(project_path), canvas_name),
+                evidence=(element.tag,),
+            )
+        )
+    return tuple(records)
 
 
 def _reachable_scopes(root: ET.Element, initial: list[ET.Element], canvas_name: str) -> list[tuple[ET.Element, str]]:
@@ -229,5 +271,6 @@ def scan_project(path: str | Path, canvas_name: str = "Main") -> HvdcProjectEvid
         definitions=definitions,
         components=tuple(components),
         labels=tuple(labels),
+        connections=_connection_records(root, project_path, canvas_name),
         warnings=tuple(warnings),
     )
