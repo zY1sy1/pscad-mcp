@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+import re
 from typing import Any
 
 from ....core.backend.base import BackendError
@@ -55,3 +56,34 @@ class ParametricLccBuilderService:
 
 
 __all__ = ["ParametricLccBuilderService"]
+
+
+def validate_parametric_acceptance_report(report: dict[str, Any]) -> dict[str, Any]:
+    """Validate the bounded, persisted evidence contract for opt-in acceptance."""
+    required = {"schema_version", "status", "workspace", "assets", "build", "modes"}
+    missing = sorted(required - set(report))
+    if missing:
+        raise ValueError(f"acceptance report is missing fields: {missing}")
+    if report.get("schema_version") != 1:
+        raise ValueError("acceptance report schema_version must be 1")
+    if report.get("status") not in {"PASS", "FAIL", "INCOMPLETE_ANALYSIS"}:
+        raise ValueError("acceptance report status is invalid")
+    workspace = report.get("workspace")
+    if not isinstance(workspace, str) or not Path(workspace).is_absolute():
+        raise ValueError("acceptance report workspace must be absolute")
+    assets = report.get("assets")
+    if not isinstance(assets, dict) or any(not isinstance(value, str) or re.fullmatch(r"[0-9a-f]{64}", value) is None for value in assets.values()):
+        raise ValueError("acceptance report assets must contain SHA-256 hashes")
+    modes = report.get("modes")
+    if not isinstance(modes, list) or any(not isinstance(item, dict) or not isinstance(item.get("mode"), str) for item in modes):
+        raise ValueError("acceptance report modes must be a list of mode reports")
+    if report["status"] == "PASS":
+        build = report.get("build")
+        if not isinstance(build, dict) or build.get("state") != "published" or not isinstance(build.get("final_project_sha256"), str) or re.fullmatch(r"[0-9a-f]{64}", build["final_project_sha256"]) is None:
+            raise ValueError("PASS acceptance reports require final project evidence")
+        if not modes or any(item.get("status") != "PASS" or item.get("compile") is not True or item.get("waveform") is not True for item in modes):
+            raise ValueError("PASS acceptance reports require compile, waveform, and mode evidence")
+    return {"valid": True, "status": report["status"], "mode_count": len(modes)}
+
+
+__all__.append("validate_parametric_acceptance_report")
