@@ -1,0 +1,12 @@
+{
+  "name": "lcc_bipole_parametric_v1",
+  "topology": "lcc",
+  "poles": 2,
+  "terminals": 3,
+  "required_assets": ["positive_pole", "negative_pole", "neutral_bus", "earth_return", "metallic_return"],
+  "return_paths": ["earth_return", "metallic_return"],
+  "schema_version": 1,
+  "components": [],
+  "nets": [],
+  "outputs": []
+}

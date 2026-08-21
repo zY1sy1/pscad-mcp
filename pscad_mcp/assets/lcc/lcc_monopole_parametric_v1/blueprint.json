@@ -1,0 +1,12 @@
+{
+  "name": "lcc_monopole_parametric_v1",
+  "topology": "lcc",
+  "poles": 1,
+  "terminals": 2,
+  "required_assets": ["positive_pole", "earth_return"],
+  "return_paths": ["earth_return", "metallic_return"],
+  "schema_version": 1,
+  "components": [],
+  "nets": [],
+  "outputs": []
+}

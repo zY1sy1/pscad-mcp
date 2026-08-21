@@ -348,6 +348,35 @@ def load_packaged_asset_set(name: str = _SUPPORTED_NAME) -> LccAssetSet:
         return load_asset_set(materialized)
 
 
+def load_parametric_blueprint(name: str) -> dict[str, Any]:
+    """Load a packaged parametric topology contract without mutating state."""
+    if name not in {"lcc_monopole_parametric_v1", "lcc_bipole_parametric_v1"}:
+        raise _asset_error("LCC_BLUEPRINT_NOT_FOUND", f"Parametric blueprint '{name}' was not found.", "load_parametric_blueprint", blueprint=name)
+    resource = resources.files("pscad_mcp").joinpath("assets", "lcc", name, "blueprint.json")
+    if not resource.is_file():
+        raise _asset_error("LCC_BLUEPRINT_NOT_FOUND", f"Parametric blueprint '{name}' is not available.", "load_parametric_blueprint", blueprint=name)
+    try:
+        value = json.loads(resource.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise _asset_error("LCC_ASSET_MISMATCH", "Parametric blueprint is not valid JSON.", "load_parametric_blueprint", blueprint=name) from error
+    if not isinstance(value, dict) or value.get("name") != name:
+        raise _asset_error("LCC_ASSET_MISMATCH", "Parametric blueprint identity mismatch.", "load_parametric_blueprint", blueprint=name)
+    return value
+
+
+def load_parametric_catalog() -> dict[str, Any]:
+    resource = resources.files("pscad_mcp").joinpath("assets", "lcc", "lcc_parametric_catalog_v1.json")
+    if not resource.is_file():
+        raise _asset_error("LCC_ASSET_MISMATCH", "Parametric catalog is not available.", "load_parametric_catalog")
+    try:
+        value = json.loads(resource.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise _asset_error("LCC_ASSET_MISMATCH", "Parametric catalog is not valid JSON.", "load_parametric_catalog") from error
+    if not isinstance(value, dict):
+        raise _asset_error("LCC_ASSET_MISMATCH", "Parametric catalog must be an object.", "load_parametric_catalog")
+    return value
+
+
 def materialize_library(asset_set: LccAssetSet, workspace_root: str | Path) -> Path:
     """Atomically copy the verified companion library into a workspace."""
 

@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "name": "lcc_parametric_catalog_v1",
+  "pscad_version": "4.6.2",
+  "identity": "lcc_parametric_catalog_v1",
+  "definitions": {},
+  "derived_parameters": {
+    "overlap_angle_deg": {"default": 20.0, "units": "deg", "formula": "reviewed catalog default", "asset": "catalog"},
+    "min_extinction_angle_deg": {"default": 18.0, "units": "deg", "formula": "reviewed catalog default", "asset": "catalog"}
+  }
+}
