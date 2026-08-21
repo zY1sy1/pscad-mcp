@@ -42,7 +42,10 @@ async def dispatch_timed_events(
     mode: str,
     liveness_deadline_s: float | None = None,
     write_event: Any | None = None,
-    poll_interval_s: float = 0.01,
+    # Keep the default cadence short enough for callers that only yield to the
+    # event loop (rather than sleeping for a wall-clock interval) to observe
+    # timely writes, while retaining a positive delay to avoid a busy loop.
+    poll_interval_s: float = 0.0005,
     max_stalled_polls: int = 100,
 ) -> list[dict[str, Any]]:
     if poll_interval_s <= 0 or not math.isfinite(float(poll_interval_s)):
