@@ -1,12 +1,12 @@
 # PSCAD MCP 中文使用与验收说明
 
-本项目把 PSCAD 自动化封装为 77 个 MCP 工具，其中原有通用服务契约保持 60 个工具，并增加 HVDC、静默学习与固定 CIGRE LCC 领域工具，可供 Codex、GitHub Copilot CLI 等支持 stdio MCP 的客户端调用。项目采用双后端：
+本项目把 PSCAD 自动化封装为 83 个 MCP 工具，其中原有通用服务契约保持 60 个工具，并增加 HVDC、静默学习、固定 CIGRE LCC 与参数化 LCC 领域工具，可供 Codex、GitHub Copilot CLI 等支持 stdio MCP 的客户端调用。项目采用双后端：
 
 - PSCAD 4.6.x：`mhrc.automation`，当前已在本机 PSCAD 4.6.2 x64 许可环境做真实验收；
 - PSCAD 5.x：`mhi.pscad` 3.1.x，当前完成契约测试，但由于本机没有 PSCAD 5.x，不能声称端到端真实验收通过；
 - 结果文件：`mhi.psout` 1.3.x。
 
-完整工具库存为 77 = 60 个通用工具 + 10 个 HVDC 工具 + 3 个学习工具 + 4 个固定 CIGRE LCC 工具；原有 60 个通用工具的名称和默认返回形状保持不变。
+完整工具库存为 83 = 60 个通用工具 + 10 个 HVDC 工具 + 3 个学习工具 + 4 个固定 CIGRE LCC 工具 + 6 个参数化 LCC 工具；原有 60 个通用工具的名称和默认返回形状保持不变。
 
 Legacy PSCAD 4.6.2 后端只支持启动新的受管 Automation 实例，不能附加到用户普通方式打开的 GUI。受管窗口默认可见；默认检测到已有 PSCAD 进程时会在启动前返回 `EXTERNAL_PSCAD_PRESENT`。`repair_connection` 使用连接时缓存的进程归属：自有实例会先正常退出，外部进程不会被终止。
 

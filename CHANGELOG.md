@@ -6,6 +6,11 @@ All notable changes to this project are documented here.
 
 ### Changed
 
+- Added parameterized LCC foundation records, deterministic rating derivation,
+  monopole/bipole topology contracts, operating-mode schedule validation,
+  read-only template auditing, lifecycle service composition, and six guarded
+  parametric LCC MCP tools. Licensed PSCAD acceptance remains opt-in.
+
 - Added four fixed CIGRE LCC builder tools for deterministic planning,
   staged construction, structural validation, and acceptance reporting. The
   first release is limited to the single-pole PSCAD 4.6.2 benchmark and does
@@ -13,8 +18,9 @@ All notable changes to this project are documented here.
 - LCC planning now fails closed without live PSCAD definition inventory;
   output-channel creation, final-project identity, waveform ownership, asset
   fingerprints, and acceptance-report evidence are checked explicitly.
-- The MCP inventory is now 74 tools: the original 60 generic tools, ten HVDC
-  tools, and four LCC builder tools.
+- The MCP inventory is now 83 tools: the original 60 generic tools, ten HVDC
+  tools, three learning tools, four fixed LCC tools, and six parametric LCC
+  tools.
 
 - HVDC strict control now supports explicit backend timing and output-channel
   provider hooks, bounded simulation-clock polling, stalled-clock detection,
