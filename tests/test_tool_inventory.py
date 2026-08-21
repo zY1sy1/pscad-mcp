@@ -25,14 +25,23 @@ LCC_TOOLS = {
     "get_lcc_build_status",
     "validate_lcc_model",
 }
+PARAMETRIC_LCC_TOOLS = {
+    "derive_lcc_parameters",
+    "audit_lcc_template",
+    "plan_parametric_lcc_model",
+    "build_parametric_lcc_model",
+    "get_parametric_lcc_build_status",
+    "validate_lcc_operating_modes",
+}
 
 
 def test_server_preserves_the_exact_60_generic_tools_and_adds_hvdc_tools():
     tools = create_server()._tool_manager.list_tools()
     names = [tool.name for tool in tools]
 
-    assert len(set(names)) == 77
-    assert len(set(names) - HVDC_TOOLS - LEARNING_TOOLS - LCC_TOOLS) == 60
+    assert len(set(names)) == 83
+    assert len(set(names) - HVDC_TOOLS - LEARNING_TOOLS - LCC_TOOLS - PARAMETRIC_LCC_TOOLS) == 60
     assert HVDC_TOOLS <= set(names)
     assert LEARNING_TOOLS <= set(names)
     assert LCC_TOOLS <= set(names)
+    assert PARAMETRIC_LCC_TOOLS <= set(names)
