@@ -15,6 +15,13 @@ from .models import (
     LccOutputSpec,
     LccRoute,
 )
+from .parametric_models import (
+    LccModeEvent,
+    LccModeRequest,
+    LccRatings,
+    LccTemplateMapping,
+    ParametricLccRequest,
+)
 
 
 _TOP_LEVEL_KEYS = {
@@ -74,6 +81,37 @@ _OUTPUT_KEYS = {
 _CANVAS_KEYS = {"name", "width", "height", "grid"}
 _MEASUREMENT_KEYS = {"logical_id", "kind", "component", "port", "channels"}
 _ASSERTION_KEYS = {"kind", "logical_id", "expected", "message"}
+_PARAMETRIC_TOP_LEVEL_KEYS = {
+    "topology",
+    "ratings",
+    "engineering_overrides",
+    "operation_modes",
+    "mode_requests",
+    "template_mappings",
+}
+_PARAMETRIC_RATING_KEYS = {
+    "rated_power_mw",
+    "dc_voltage_kv",
+    "dc_current_ka",
+    "ac_voltage_kv",
+    "frequency_hz",
+    "scr",
+    "escr",
+}
+_PARAMETRIC_MODE_KEYS = {"mode", "events"}
+_PARAMETRIC_EVENT_KEYS = {"event_id", "time_s", "target", "value"}
+_PARAMETRIC_TEMPLATE_KEYS = {"role", "definition", "ports", "parameters", "confidence", "source"}
+_SUPPORTED_TOPOLOGIES = {"monopolar", "bipolar"}
+_SUPPORTED_OPERATION_MODES = {
+    "bipolar_run",
+    "monopolar_earth_return",
+    "monopolar_metallic_return",
+    "metallic_return",
+    "positive_pole_outage",
+    "negative_pole_outage",
+    "pole_outage",
+    "scheduled_switching",
+}
 
 
 def _invalid(message: str, **details: Any) -> BackendError:
@@ -457,6 +495,243 @@ def _parse_named_records(value: Any, allowed: set[str], context: str) -> tuple[d
         _keys(record, allowed, record_context)
         parsed.append({key: _json_value(item, f"{record_context}.{key}") for key, item in record.items()})
     return tuple(parsed)
+
+
+def _parametric_invalid(code: str, message: str, **details: Any) -> BackendError:
+    return BackendError(code, message, "hvdc", "parse_parametric_request", details)
+
+
+def _parametric_object(value: Any, context: str, code: str) -> Mapping[str, Any]:
+    if not isinstance(value, Mapping):
+        raise _parametric_invalid(code, f"{context} must be an object.", context=context)
+    return value
+
+
+def _parametric_keys(value: Mapping[str, Any], allowed: set[str], context: str, code: str) -> None:
+    non_string = [key for key in value if not isinstance(key, str)]
+    if non_string:
+        raise _parametric_invalid(
+            code,
+            f"{context} keys must be strings.",
+            context=context,
+            keys=[repr(key) for key in non_string],
+        )
+    unknown = sorted(key for key in value if key not in allowed)
+    if unknown:
+        raise _parametric_invalid(
+            code,
+            f"{context} contains unknown field(s): {', '.join(unknown)}.",
+            context=context,
+            unknown=unknown,
+        )
+
+
+def _parametric_number(value: Any, context: str, code: str, *, positive: bool = False) -> int | float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise _parametric_invalid(code, f"{context} must be a number.", context=context)
+    try:
+        finite = math.isfinite(float(value))
+    except (OverflowError, ValueError):
+        finite = False
+    if not finite:
+        raise _parametric_invalid(code, f"{context} must be finite.", context=context)
+    if positive and value <= 0:
+        raise _parametric_invalid(code, f"{context} must be positive.", context=context)
+    return value
+
+
+def _parametric_text(value: Any, context: str, code: str) -> str:
+    if not isinstance(value, str):
+        raise _parametric_invalid(code, f"{context} must be a string.", context=context)
+    result = value.strip()
+    if not result:
+        raise _parametric_invalid(code, f"{context} must not be empty.", context=context)
+    return result
+
+
+def _parse_parametric_ratings(value: Any) -> LccRatings:
+    ratings = _parametric_object(value, "ratings", "LCC_RATING_INVALID")
+    _parametric_keys(ratings, _PARAMETRIC_RATING_KEYS, "ratings", "LCC_RATING_INVALID")
+    required = {"rated_power_mw", "dc_voltage_kv", "dc_current_ka", "ac_voltage_kv", "frequency_hz", "scr"}
+    missing = sorted(required - set(ratings))
+    if missing:
+        raise _parametric_invalid(
+            "LCC_RATING_INVALID",
+            f"ratings requires {', '.join(missing)}.",
+            context="ratings",
+        )
+    payload: dict[str, Any] = {}
+    for key in required:
+        payload[key] = _parametric_number(ratings[key], f"ratings.{key}", "LCC_RATING_INVALID", positive=True)
+    if "escr" in ratings:
+        payload["escr"] = _parametric_number(ratings["escr"], "ratings.escr", "LCC_RATING_INVALID", positive=True)
+    try:
+        return LccRatings(**payload)
+    except (TypeError, ValueError) as error:
+        raise _parametric_invalid("LCC_RATING_INVALID", str(error), context="ratings") from error
+
+
+def _parse_parametric_event(value: Any, index: int) -> LccModeEvent:
+    context = f"mode_requests[{index}]"
+    event = _parametric_object(value, context, "LCC_OPERATING_MODE_INVALID")
+    _parametric_keys(event, _PARAMETRIC_EVENT_KEYS, context, "LCC_OPERATING_MODE_INVALID")
+    required = {"event_id", "time_s", "target", "value"}
+    missing = sorted(required - set(event))
+    if missing:
+        raise _parametric_invalid(
+            "LCC_OPERATING_MODE_INVALID",
+            f"{context} requires {', '.join(missing)}.",
+            context=context,
+        )
+    try:
+        return LccModeEvent(
+            event_id=_parametric_text(event["event_id"], f"{context}.event_id", "LCC_OPERATING_MODE_INVALID"),
+            time_s=_parametric_number(event["time_s"], f"{context}.time_s", "LCC_OPERATING_MODE_INVALID"),
+            target=_parametric_text(event["target"], f"{context}.target", "LCC_OPERATING_MODE_INVALID"),
+            value=_json_value(event["value"], f"{context}.value"),
+        )
+    except (TypeError, ValueError) as error:
+        raise _parametric_invalid("LCC_OPERATING_MODE_INVALID", str(error), context=context) from error
+
+
+def _parse_parametric_mode_request(value: Any, index: int, supported_modes: set[str]) -> LccModeRequest:
+    context = f"mode_requests[{index}]"
+    request = _parametric_object(value, context, "LCC_OPERATING_MODE_INVALID")
+    _parametric_keys(request, _PARAMETRIC_MODE_KEYS, context, "LCC_OPERATING_MODE_INVALID")
+    required = {"mode", "events"}
+    missing = sorted(required - set(request))
+    if missing:
+        raise _parametric_invalid(
+            "LCC_OPERATING_MODE_INVALID",
+            f"{context} requires {', '.join(missing)}.",
+            context=context,
+        )
+    mode = _parametric_text(request["mode"], f"{context}.mode", "LCC_OPERATING_MODE_INVALID")
+    if mode not in supported_modes:
+        raise _parametric_invalid(
+            "LCC_OPERATING_MODE_INVALID",
+            f"{context}.mode is not supported.",
+            context=context,
+            mode=mode,
+        )
+    events_value = _sequence(request["events"], f"{context}.events")
+    if not events_value:
+        raise _parametric_invalid("LCC_OPERATING_MODE_INVALID", f"{context}.events must not be empty.", context=context)
+    events = tuple(_parse_parametric_event(value, event_index) for event_index, value in enumerate(events_value))
+    previous_time: float | None = None
+    for event in events:
+        if event.time_s < 0:
+            raise _parametric_invalid(
+                "LCC_OPERATING_MODE_INVALID",
+                f"{context}.events contains a negative time.",
+                context=context,
+                event_id=event.event_id,
+            )
+        if previous_time is not None and event.time_s <= previous_time:
+            raise _parametric_invalid(
+                "LCC_OPERATING_MODE_INVALID",
+                f"{context}.events must be strictly increasing.",
+                context=context,
+                event_id=event.event_id,
+            )
+        previous_time = event.time_s
+    try:
+        return LccModeRequest(mode=mode, events=events)
+    except (TypeError, ValueError) as error:
+        raise _parametric_invalid("LCC_OPERATING_MODE_INVALID", str(error), context=context) from error
+
+
+def _parse_parametric_template_mapping(value: Any, index: int) -> LccTemplateMapping:
+    context = f"template_mappings[{index}]"
+    mapping = _parametric_object(value, context, "LCC_OPERATING_MODE_INVALID")
+    _parametric_keys(mapping, _PARAMETRIC_TEMPLATE_KEYS, context, "LCC_OPERATING_MODE_INVALID")
+    required = {"role", "definition"}
+    missing = sorted(required - set(mapping))
+    if missing:
+        raise _parametric_invalid(
+            "LCC_OPERATING_MODE_INVALID",
+            f"{context} requires {', '.join(missing)}.",
+            context=context,
+        )
+    kwargs: dict[str, Any] = {
+        "role": _parametric_text(mapping["role"], f"{context}.role", "LCC_OPERATING_MODE_INVALID"),
+        "definition": _parametric_text(mapping["definition"], f"{context}.definition", "LCC_OPERATING_MODE_INVALID"),
+    }
+    if "ports" in mapping:
+        kwargs["ports"] = tuple(_parametric_text(port, f"{context}.ports", "LCC_OPERATING_MODE_INVALID") for port in _sequence(mapping["ports"], f"{context}.ports"))
+    if "parameters" in mapping:
+        kwargs["parameters"] = tuple(
+            _parametric_text(parameter, f"{context}.parameters", "LCC_OPERATING_MODE_INVALID")
+            for parameter in _sequence(mapping["parameters"], f"{context}.parameters")
+        )
+    if "confidence" in mapping:
+        kwargs["confidence"] = _parametric_number(mapping["confidence"], f"{context}.confidence", "LCC_OPERATING_MODE_INVALID")
+    if "source" in mapping:
+        kwargs["source"] = _parametric_text(mapping["source"], f"{context}.source", "LCC_OPERATING_MODE_INVALID")
+    try:
+        return LccTemplateMapping(**kwargs)
+    except (TypeError, ValueError) as error:
+        raise _parametric_invalid("LCC_OPERATING_MODE_INVALID", str(error), context=context) from error
+
+
+def parse_parametric_request(data: Mapping[str, Any]) -> ParametricLccRequest:
+    request = _parametric_object(data, "parametric_request", "LCC_OPERATING_MODE_INVALID")
+    _parametric_keys(request, _PARAMETRIC_TOP_LEVEL_KEYS, "parametric_request", "LCC_OPERATING_MODE_INVALID")
+    required = {"topology", "ratings"}
+    missing = sorted(required - set(request))
+    if missing:
+        raise _parametric_invalid(
+            "LCC_OPERATING_MODE_INVALID",
+            f"parametric_request requires {', '.join(missing)}.",
+            context="parametric_request",
+        )
+    topology = _parametric_text(request["topology"], "topology", "LCC_OPERATING_MODE_INVALID")
+    if topology not in _SUPPORTED_TOPOLOGIES:
+        raise _parametric_invalid(
+            "LCC_OPERATING_MODE_INVALID",
+            "topology is not supported.",
+            context="topology",
+            topology=topology,
+        )
+    ratings = _parse_parametric_ratings(request["ratings"])
+    engineering_overrides = request.get("engineering_overrides", {})
+    if not isinstance(engineering_overrides, Mapping):
+        raise _parametric_invalid(
+            "LCC_OPERATING_MODE_INVALID",
+            "engineering_overrides must be an object.",
+            context="engineering_overrides",
+        )
+    operation_modes_value = request.get("operation_modes", ())
+    operation_modes = tuple(
+        _parametric_text(mode, "operation_modes", "LCC_OPERATING_MODE_INVALID")
+        for mode in _sequence(operation_modes_value, "operation_modes")
+    )
+    for mode in operation_modes:
+        if mode not in _SUPPORTED_OPERATION_MODES:
+            raise _parametric_invalid(
+                "LCC_OPERATING_MODE_INVALID",
+                "operation_modes contains an unsupported mode.",
+                context="operation_modes",
+                mode=mode,
+            )
+    mode_requests_value = request.get("mode_requests", ())
+    mode_requests = tuple(
+        _parse_parametric_mode_request(mode_request, mode_index, set(operation_modes) or _SUPPORTED_OPERATION_MODES)
+        for mode_index, mode_request in enumerate(_sequence(mode_requests_value, "mode_requests"))
+    )
+    template_mappings_value = request.get("template_mappings", ())
+    template_mappings = tuple(
+        _parse_parametric_template_mapping(mapping, mapping_index)
+        for mapping_index, mapping in enumerate(_sequence(template_mappings_value, "template_mappings"))
+    )
+    return ParametricLccRequest(
+        topology=topology,
+        ratings=ratings,
+        engineering_overrides={key: _json_value(value, f"engineering_overrides.{key}") for key, value in engineering_overrides.items()},
+        operation_modes=operation_modes,
+        mode_requests=mode_requests,
+        template_mappings=template_mappings,
+    )
 
 
 def parse_blueprint(data: Mapping[str, Any]) -> LccBlueprint:
