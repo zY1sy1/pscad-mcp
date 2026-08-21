@@ -399,6 +399,17 @@ class HvdcDomainService:
         errors: list[dict[str, Any]] = []
         if result["topology"]["family"] == "unknown":
             errors.append({"code": "HVDC_TOPOLOGY_AMBIGUOUS", "message": "Topology family is unknown.", "evidence": result["topology"]["evidence"]})
+        constraints = loaded.get("topology_constraints", {})
+        topology = result["topology"]
+        if constraints.get("family") and topology.get("family") != constraints["family"]:
+            errors.append({"code": "HVDC_TOPOLOGY_AMBIGUOUS", "message": "Project family does not satisfy the selected profile."})
+        if constraints.get("polarity") and topology.get("polarity") != constraints["polarity"]:
+            errors.append({"code": "HVDC_TOPOLOGY_AMBIGUOUS", "message": "Project polarity does not satisfy the selected profile."})
+        if constraints.get("return_mode") == "earth_return":
+            if topology.get("return_path_status") == "ambiguous":
+                errors.append({"code": "HVDC_TOPOLOGY_AMBIGUOUS", "message": "Earth-return and metallic-return evidence conflict."})
+            elif topology.get("return_path_status") != "verified" or topology.get("return_mode") != "earth_return":
+                errors.append({"code": "HVDC_RETURN_PATH_UNRESOLVED", "message": "The earth-return path is not verified."})
         if missing_assets:
             errors.append({"code": "HVDC_MAPPING_MISSING", "message": "Required HVDC assets are missing.", "missing_assets": missing_assets})
         if result.get("mapping_conflicts"):

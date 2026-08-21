@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import re
 
-from .models import HvdcAsset, HvdcProjectEvidence, HvdcTopologySummary
+from .models import HvdcAsset, HvdcProjectEvidence, HvdcSourceRef, HvdcTopologySummary
+from .return_paths import analyze_return_paths
 
 
 def _tokens(values: list[str] | tuple[str, ...]) -> set[str]:
@@ -26,7 +27,7 @@ def classify_topology(evidence: HvdcProjectEvidence) -> HvdcTopologySummary:
     joined = " ".join(names + labels)
     evidence_terms = names + labels
     scores = {
-        "lcc": _score(evidence_terms, ("rectcc", "rectpole", "inverterpole", "invctrl", "rectifier_ac")),
+        "lcc": _score(evidence_terms, ("rectcc", "rectpole", "inverterpole", "invctrl", "rectifier_ac", "rectifier", "inverter")),
         "vsc_2level": _score(evidence_terms, ("vsc", "igbt", "pll", "dq", "twolevel", "2level")),
         "mmc": _score(evidence_terms, ("mmc", "submodule", "sub_module", "arm", "sm", "circulating")),
     }
@@ -50,15 +51,42 @@ def classify_topology(evidence: HvdcProjectEvidence) -> HvdcTopologySummary:
     else:
         family = best_family
         confidence = min(1.0, best_score / 5)
-    pole_tokens = sum(_contains(name, ("pole", "bipolar", "positive", "negative")) for name in names + labels)
-    polarity = "bipolar" if pole_tokens >= 2 else "monopolar" if pole_tokens == 1 else "unknown"
+    pole_roles: dict[str, HvdcSourceRef] = {}
+    neutral_assets: list[HvdcSourceRef] = []
+    for component in evidence.components:
+        value = f"{component.name} {component.definition} {' '.join(component.labels)}".casefold()
+        if re.search(r"positive|pole[ _-]?1|pole[ _-]?p", value):
+            pole_roles.setdefault("positive", component.source)
+        if re.search(r"negative|pole[ _-]?2|pole[ _-]?n", value):
+            pole_roles.setdefault("negative", component.source)
+        if re.search(r"neutral|midpoint|groundbus", value):
+            neutral_assets.append(component.source)
+    pole_tokens = len(pole_roles)
+    generic_poles = sum(1 for value in names + labels if re.search(r"pole", value, re.IGNORECASE))
+    polarity = "bipolar" if pole_tokens >= 2 or generic_poles >= 2 else "monopolar" if pole_tokens == 1 or generic_poles == 1 else "unknown"
     breaker = _contains(joined, ("breaker", "loadbreaker", "protection", "diff"))
     line = _contains(joined, ("transline", "trans_line", "dc_line", "line", "tl1", "tl2"))
+    paths = analyze_return_paths(evidence)
+    verified = [path for path in paths if path.closed]
+    if len(verified) == 1:
+        return_mode = verified[0].mode
+        path_status = "verified"
+    elif len(verified) > 1:
+        return_mode = "unknown"
+        path_status = "ambiguous"
+    elif any(path.evidence for path in paths):
+        return_mode = "unknown"
+        path_status = "ambiguous" if all(path.evidence for path in paths) else "incomplete"
+    else:
+        return_mode = "unknown"
+        path_status = "incomplete"
     unresolved = []
     if family == "unknown":
         unresolved.append("HVDC topology family needs explicit profile evidence or additional component definitions.")
     if polarity == "unknown":
         unresolved.append("Pole polarity could not be established from project evidence.")
+    if path_status != "verified":
+        unresolved.append("LCC return path could not be verified from explicit connection and switch evidence.")
     return HvdcTopologySummary(
         family=family,
         polarity=polarity,
@@ -66,6 +94,12 @@ def classify_topology(evidence: HvdcProjectEvidence) -> HvdcTopologySummary:
         breaker_protection_present=breaker,
         dc_line_present=line,
         confidence=confidence,
+        return_mode=return_mode,
+        return_path_status=path_status,
+        return_path=tuple(paths),
+        pole_roles=pole_roles,
+        neutral_assets=tuple(neutral_assets),
+        mode_evidence=tuple(item for path in paths for item in path.evidence),
         evidence=tuple(sorted({name for name in names if _contains(name, ("rect", "inverter", "vsc", "mmc", "breaker", "line", "tl"))} | ({f"explicit topology override: {explicit_family}"} if explicit_family else set()))),
         unresolved_questions=tuple(unresolved),
     )
@@ -79,6 +113,18 @@ def extract_assets(evidence: HvdcProjectEvidence) -> list[HvdcAsset]:
         kinds: list[str] = []
         if "pole" in lowered:
             kinds.append("pole")
+        if "positive" in lowered and "pole" in lowered:
+            kinds.append("positive_pole")
+        if "negative" in lowered and "pole" in lowered:
+            kinds.append("negative_pole")
+        if "neutral" in lowered:
+            kinds.append("neutral_bus")
+        if any(token in lowered for token in ("earth electrode", "earthelectrode", "ground electrode")):
+            kinds.append("earth_electrode")
+        if "earth return" in lowered or "earthreturn" in lowered:
+            kinds.append("earth_return")
+        if "metallic return" in lowered or "metallicreturn" in lowered:
+            kinds.append("metallic_return")
         if "rect" in lowered:
             kinds.append("rectifier")
         if "inverter" in lowered:

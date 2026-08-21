@@ -196,6 +196,42 @@ def calculate_metrics(samples: dict[str, Any], metrics: list[str] | None = None,
         return _missing(metric_name, sources, time)
 
     for name in requested:
+        if name == "pole_current_imbalance":
+            positive = channels.get("positive_pole_current", [])
+            negative = channels.get("negative_pole_current", [])
+            count = min(len(positive), len(negative))
+            result.append(
+                _metric(name, max(abs(abs(positive[i]) - abs(negative[i])) for i in range(count)), "kA",
+                        ("positive_pole_current", "negative_pole_current"), time,
+                        "maximum absolute pole-magnitude difference", "derived")
+                if count else unavailable(name, ("positive_pole_current", "negative_pole_current"))
+            )
+            continue
+        if name == "pole_voltage_imbalance":
+            positive = channels.get("positive_pole_voltage", [])
+            negative = channels.get("negative_pole_voltage", [])
+            count = min(len(positive), len(negative))
+            result.append(
+                _metric(name, max(abs(abs(positive[i]) - abs(negative[i])) for i in range(count)), "kV",
+                        ("positive_pole_voltage", "negative_pole_voltage"), time,
+                        "maximum absolute pole-magnitude difference", "derived")
+                if count else unavailable(name, ("positive_pole_voltage", "negative_pole_voltage"))
+            )
+            continue
+        if name == "return_current_closure_error":
+            positive = channels.get("positive_pole_current", [])
+            negative = channels.get("negative_pole_current", [])
+            earth = channels.get("earth_return_current", [])
+            metallic = channels.get("metallic_return_current", [])
+            if not earth and not metallic:
+                result.append(unavailable(name, ("positive_pole_current", "negative_pole_current", "earth_return_current", "metallic_return_current")))
+            else:
+                count = min(len(positive), len(negative), len(earth) or len(metallic))
+                ret = earth if earth else metallic
+                result.append(_metric(name, max(abs(positive[i] - negative[i] - ret[i]) for i in range(count)), "kA",
+                                      ("positive_pole_current", "negative_pole_current", "earth_return_current" if earth else "metallic_return_current"), time,
+                                      "maximum algebraic return-current closure error", "derived") if count else unavailable(name, ("positive_pole_current", "negative_pole_current", "earth_return_current")))
+            continue
         if name in {"voltage_imbalance", "current_imbalance", "pole_imbalance"}:
             prefix = "dc_voltage" if name == "voltage_imbalance" else "dc_current"
             positive, negative = channels.get(f"{prefix}_positive", []), channels.get(f"{prefix}_negative", [])

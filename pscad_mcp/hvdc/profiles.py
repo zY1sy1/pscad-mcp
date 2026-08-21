@@ -87,6 +87,42 @@ _BUILTIN_PROFILES: dict[str, dict[str, Any]] = {
             {"canonical": "dq_voltage", "aliases": ["dq voltage", "vd vq"], "source_kinds": ["label", "control"], "unit_family": "voltage", "direction": "measurement", "units": "kV"},
         ],
     },
+    "lcc_bipolar_earth_return_v1": {
+        "profile_version": 2,
+        "required_assets": ["positive_pole", "negative_pole", "neutral_bus", "earth_electrode", "earth_return"],
+        "topology_constraints": {"family": "lcc", "polarity": "bipolar", "return_mode": "earth_return"},
+        "mappings": [
+            {"canonical": name, "aliases": aliases, "source_kinds": ["label", "datalabel", "meter", "measurement"], "unit_family": family, "direction": "measurement", "units": units}
+            for name, aliases, family, units in [
+                ("positive_pole_voltage", ["positive pole voltage", "Vpos"], "voltage", "kV"),
+                ("negative_pole_voltage", ["negative pole voltage", "Vneg"], "voltage", "kV"),
+                ("positive_pole_current", ["positive pole current", "Ipos"], "current", "kA"),
+                ("negative_pole_current", ["negative pole current", "Ineg"], "current", "kA"),
+                ("earth_return_current", ["earth return current", "Iearth"], "current", "kA"),
+                ("metallic_return_current", ["metallic return current", "Imetal"], "current", "kA"),
+                ("earth_return_switch_status", ["earth return switch status", "EarthReturnSwitch"], "boolean", None),
+                ("metallic_return_switch_status", ["metallic return switch status", "MetallicReturnSwitch"], "boolean", None),
+                ("positive_pole_status", ["positive pole status"], "boolean", None),
+                ("negative_pole_status", ["negative pole status"], "boolean", None),
+                ("rectifier_neutral_voltage", ["rectifier neutral voltage"], "voltage", "kV"),
+                ("inverter_neutral_voltage", ["inverter neutral voltage"], "voltage", "kV"),
+                ("dc_power", ["dc power", "Pdc"], "power", "MW"),
+                ("dc_voltage", ["dc voltage", "Vdc"], "voltage", "kV"),
+            ]
+        ],
+        "project_fingerprints": [],
+        "command_bindings": [],
+        "result_channels": [{"canonical": name, "path": name, "units": units} for name, units in [
+            ("positive_pole_voltage", "kV"), ("negative_pole_voltage", "kV"), ("positive_pole_current", "kA"),
+            ("negative_pole_current", "kA"), ("earth_return_current", "kA"), ("metallic_return_current", "kA"),
+            ("earth_return_switch_status", None), ("metallic_return_switch_status", None), ("positive_pole_status", None),
+            ("negative_pole_status", None), ("rectifier_neutral_voltage", "kV"), ("inverter_neutral_voltage", "kV"),
+            ("dc_power", "MW"), ("dc_voltage", "kV")]],
+        "metric_roles": {"positive_pole_voltage": "positive_pole_voltage", "negative_pole_voltage": "negative_pole_voltage", "positive_pole_current": "positive_pole_current", "negative_pole_current": "negative_pole_current", "earth_return_current": "earth_return_current", "earth_return_switch_status": "earth_return_switch_status", "earth_return_current_peak": "earth_return_current", "pole_current_imbalance": "positive_pole_current"},
+        "return_path_rules": ["explicit neutral-to-neutral connection", "earth electrode asset", "closed earth return switch"],
+        "mode_rules": ["earth return switch closed", "metallic return switch open"],
+        "sequences": [],
+    },
     "vsc_2level_generic": {
         "profile_version": 2,
         "required_assets": ["controller"],
@@ -215,6 +251,13 @@ def _validate_unique_canonicals(items: Any, field: str, name: str) -> list[dict[
 
 
 def _validate_profile_v2(profile: dict[str, Any], name: str) -> None:
+    constraints = profile.get("topology_constraints", {})
+    if not isinstance(constraints, dict):
+        raise _invalid("'topology_constraints' must be an object.", name)
+    for key in ("family", "polarity", "return_mode"):
+        value = constraints.get(key)
+        if value is not None and (not isinstance(value, str) or not value.strip()):
+            raise _invalid(f"topology_constraints.{key} must be a non-empty string.", name)
     fingerprints = profile.get("project_fingerprints", [])
     if not isinstance(fingerprints, list) or any(not isinstance(item, dict) for item in fingerprints):
         raise _invalid("'project_fingerprints' must be a list of objects.", name)

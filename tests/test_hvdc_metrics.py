@@ -347,3 +347,30 @@ def test_empty_or_unaligned_channels_never_fabricate_zero_metrics():
     assert all(item["value"] is None for item in result["metrics"])
     assert all(item["status"] in {"missing", "invalid"} for item in result["metrics"])
     assert result["verdict"] == "INCOMPLETE_ANALYSIS"
+
+
+def test_earth_return_metrics_are_unit_aware():
+    result = calculate_metrics(
+        {"time": [0.0, 1.0, 2.0], "channels": {
+            "positive_pole_current": [1.0, 2.0, 1.0],
+            "negative_pole_current": [1.0, 1.0, 1.0],
+            "earth_return_current": [0.0, 1.0, 0.5],
+        }},
+        ["earth_return_current_peak", "pole_current_imbalance"],
+    )
+    by_name = {item["name"]: item for item in result["metrics"]}
+    assert by_name["earth_return_current_peak"]["value"] == 1.0
+    assert by_name["earth_return_current_peak"]["units"] == "kA"
+    assert by_name["pole_current_imbalance"]["value"] == 1.0
+
+
+def test_return_closure_requires_explicit_directional_channels():
+    result = calculate_metrics(
+        {"time": [0.0, 1.0], "channels": {
+            "positive_pole_current": [1.0, 1.0],
+            "negative_pole_current": [1.0, 1.0],
+        }},
+        ["return_current_closure_error"],
+    )
+    assert result["metrics"][0]["status"] == "missing"
+    assert result["verdict"] == "INCOMPLETE_ANALYSIS"
