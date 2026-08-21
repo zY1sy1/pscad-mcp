@@ -79,6 +79,24 @@ def test_plan_model_fails_closed_without_live_inventory(tmp_path):
     assert list(tmp_path.iterdir()) == []
 
 
+def test_plan_model_uses_async_live_inventory_bridge(tmp_path):
+    class LiveInventoryService:
+        path_policy = PathPolicy(str(tmp_path))
+
+        async def get_lcc_inventory(self, catalog):
+            assert catalog["pscad_version"] == "4.6.2"
+            return INVENTORY
+
+    service = LccBuilderService(
+        LiveInventoryService(),
+        asset_loader=lambda name: _asset_set(),
+    )
+
+    plan = service.plan_model("CIGRE_LCC")
+
+    assert plan["pscad_version"] == "4.6.2"
+
+
 def test_explicit_workspace_root_controls_the_builder_path_policy(tmp_path):
     service_workspace = tmp_path / "service-workspace"
     explicit_workspace = tmp_path / "explicit-workspace"

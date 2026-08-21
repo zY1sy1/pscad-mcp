@@ -101,6 +101,23 @@ class LccBuilderService:
         candidate = getattr(self.pscad_service, "lcc_inventory", None)
         if candidate is not None:
             return candidate() if callable(candidate) else candidate
+        bridge = getattr(self.pscad_service, "get_lcc_inventory", None)
+        if callable(bridge):
+            try:
+                return _run_coroutine_sync(
+                    lambda: bridge(asset_set.catalog)
+                )
+            except BackendError:
+                raise
+            except BaseException as error:
+                raise _service_error(
+                    "LCC_DEFINITION_MISSING",
+                    "Live PSCAD definition inventory could not be read.",
+                    "plan_lcc_model",
+                    reason="live_inventory_read_failed",
+                    required_version=asset_set.pscad_version,
+                    exception=type(error).__name__,
+                ) from error
         raise _service_error(
             "LCC_DEFINITION_MISSING",
             "Live PSCAD definition inventory is required before LCC planning; the packaged catalog is not live evidence.",

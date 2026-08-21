@@ -6,7 +6,7 @@ import asyncio
 import math
 import os
 import re
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import asdict
 import inspect
 from pathlib import Path
@@ -688,6 +688,55 @@ class PscadService:
 
     async def get_project_definitions(self, project_name: str) -> list[str]:
         return await self.backend.project_definitions(project_name)
+
+    async def get_lcc_inventory(self, catalog: Mapping[str, Any]) -> dict[str, Any]:
+        """Return live Master evidence plus declared packaged companion assets."""
+
+        if not isinstance(catalog, Mapping):
+            raise BackendError(
+                "INVALID_ARGUMENT",
+                "The LCC catalog must be a mapping.",
+                "service",
+                "get_lcc_inventory",
+            )
+        inventory = await self.backend.lcc_definition_inventory(catalog)
+        if not isinstance(inventory, Mapping):
+            raise BackendError(
+                "UNEXPECTED_RESPONSE",
+                "The PSCAD backend returned an invalid LCC definition inventory.",
+                getattr(self.backend, "name", "service"),
+                "get_lcc_inventory",
+            )
+        definitions_value = inventory.get("definitions", {})
+        definitions = dict(definitions_value) if isinstance(definitions_value, Mapping) else {}
+        catalog_value = catalog.get("definitions", ())
+        if isinstance(catalog_value, Mapping):
+            catalog_items = list(catalog_value.items())
+        elif isinstance(catalog_value, Sequence) and not isinstance(catalog_value, (str, bytes, bytearray)):
+            catalog_items = []
+            for item in catalog_value:
+                if isinstance(item, Mapping):
+                    name = item.get("scoped_name", item.get("definition", item.get("name")))
+                    catalog_items.append((name, item))
+        else:
+            catalog_items = []
+        for scoped_name, item in catalog_items:
+            if not isinstance(scoped_name, str) or ":" not in scoped_name:
+                continue
+            scope = scoped_name.split(":", 1)[0]
+            if scope.casefold() == "master" or scoped_name in definitions:
+                continue
+            if not isinstance(item, Mapping):
+                continue
+            definitions[scoped_name] = {
+                "ports": list(item.get("ports", ())) if isinstance(item.get("ports", ()), Sequence) else [],
+                "source": "packaged_companion",
+            }
+        return {
+            "pscad_version": inventory.get("pscad_version"),
+            "definitions": definitions,
+            "source": "live_pscad_plus_packaged_companion",
+        }
 
     async def list_simulation_sets(self, project_name: str) -> list[str]:
         return await self.backend.list_simulation_sets(project_name)
