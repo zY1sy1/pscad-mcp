@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import math
 from collections.abc import Mapping, Sequence
 from typing import Any
@@ -11,8 +13,96 @@ from .assets import load_parametric_catalog, load_parametric_provenance
 from .parametric_models import DerivedParameter, DerivedParameterReport, ParametricLccRequest
 
 
+_CATALOG_IDENTITY = "lcc_parametric_catalog_v1"
+_PROVENANCE_IDENTITY = "lcc_parametric_provenance_v1"
+_SCHEMA_VERSION = 1
+_DETAIL_STRING_LIMIT = 160
+_DETAIL_SEQUENCE_LIMIT = 16
+_DETAIL_PAYLOAD_LIMIT_BYTES = 2048
+_ERROR_MESSAGE_LIMIT = 256
+
+
+def _summary_sha256(value: Any) -> str:
+    try:
+        preview = json.dumps(
+            value,
+            allow_nan=False,
+            default=lambda item: {"type": type(item).__name__[:64]},
+            ensure_ascii=True,
+            sort_keys=True,
+        )
+    except (TypeError, ValueError, OverflowError):
+        preview = type(value).__name__
+    return hashlib.sha256(preview[:4096].encode("utf-8", errors="replace")).hexdigest()[:16]
+
+
+def _json_safe_detail(value: Any) -> Any:
+    if value is None or isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        if len(value) <= _DETAIL_STRING_LIMIT:
+            return value
+        return {
+            "type": "str",
+            "length": len(value),
+            "prefix": value[:_DETAIL_STRING_LIMIT],
+            "summary_sha256": _summary_sha256(value),
+        }
+    if isinstance(value, int):
+        if value.bit_length() <= 53:
+            return value
+        return {
+            "type": "int",
+            "bit_length": value.bit_length(),
+            "summary_sha256": _summary_sha256(value.bit_length()),
+        }
+    if isinstance(value, float):
+        if math.isfinite(value):
+            return value
+        return {"type": "float", "summary": "non-finite"}
+    if isinstance(value, Mapping):
+        return {
+            "type": "mapping",
+            "count": len(value),
+            "summary_sha256": _summary_sha256(value),
+        }
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        items = list(value[:_DETAIL_SEQUENCE_LIMIT])
+        if len(value) <= _DETAIL_SEQUENCE_LIMIT:
+            return [_json_safe_detail(item) for item in items]
+        return {
+            "type": "sequence",
+            "count": len(value),
+            "items": [_json_safe_detail(item) for item in items],
+            "summary_sha256": _summary_sha256(value),
+        }
+    return {"type": type(value).__name__[:64], "summary": "unsupported detail value"}
+
+
+def _bounded_error_details(details: Mapping[str, Any]) -> dict[str, Any]:
+    safe = {
+        str(key)[:_DETAIL_STRING_LIMIT]: _json_safe_detail(value)
+        for key, value in details.items()
+    }
+    encoded = json.dumps(safe, allow_nan=False, ensure_ascii=True, sort_keys=True).encode("utf-8")
+    if len(encoded) <= _DETAIL_PAYLOAD_LIMIT_BYTES:
+        return safe
+    return {
+        "details_truncated": True,
+        "detail_count": len(details),
+        "summary_sha256": hashlib.sha256(encoded).hexdigest()[:16],
+    }
+
+
 def _error(code: str, message: str, **details: Any) -> BackendError:
-    return BackendError(code, message, "hvdc", "derive_lcc_parameters", details)
+    bounded_message = message[:_ERROR_MESSAGE_LIMIT]
+    return BackendError(
+        code,
+        bounded_message,
+        "hvdc",
+        "derive_lcc_parameters",
+        _bounded_error_details(details),
+    )
 
 
 def _object(value: Any, name: str) -> Mapping[str, Any]:
@@ -34,18 +124,30 @@ def _catalog_data(catalog: Any) -> Mapping[str, Any]:
             catalog_type=type(value).__name__,
         )
     provenance = load_parametric_provenance()
-    if (
-        value.get("schema_version") != 1
-        or not isinstance(value.get("identity"), str)
-        or value.get("provenance_identity") != provenance.get("identity")
-    ):
+    if not isinstance(provenance, Mapping):
         raise _error(
             "LCC_PARAMETER_DERIVATION_FAILED",
-            "The parametric catalog identity or schema is invalid.",
-            schema_version=value.get("schema_version"),
-            identity=value.get("identity"),
-            provenance_identity=value.get("provenance_identity"),
+            "The versioned provenance must be an object.",
+            catalog_field="provenance",
+            observed_type=type(provenance).__name__,
         )
+    identity_checks = (
+        ("schema_version", value.get("schema_version"), _SCHEMA_VERSION),
+        ("identity", value.get("identity"), _CATALOG_IDENTITY),
+        ("provenance.schema_version", provenance.get("schema_version"), _SCHEMA_VERSION),
+        ("provenance.identity", provenance.get("identity"), _PROVENANCE_IDENTITY),
+        ("provenance_identity", value.get("provenance_identity"), _PROVENANCE_IDENTITY),
+    )
+    for field, observed, expected in identity_checks:
+        if observed != expected:
+            raise _error(
+                "LCC_PARAMETER_DERIVATION_FAILED",
+                "The parametric catalog or provenance identity/schema is invalid.",
+                catalog_field=field,
+                observed=observed,
+                expected=expected,
+            )
+    _validate_provenance_document(provenance)
     for field in (
         "rating_parameters",
         "derived_parameters",
@@ -56,6 +158,7 @@ def _catalog_data(catalog: Any) -> Mapping[str, Any]:
     ):
         _object(value.get(field), field)
     _validate_authoritative_catalog_structure(value, provenance)
+    _prevalidate_catalog_declarations(value)
     return value
 
 
@@ -91,6 +194,23 @@ def _provenance_entry(reference: Any, parameter: str) -> Mapping[str, Any]:
             asset=reference,
         )
     return _object(entries[entry_name], f"provenance.entries.{entry_name}")
+
+
+def _validate_provenance_document(provenance: Mapping[str, Any]) -> None:
+    entries = _object(provenance.get("entries"), "provenance.entries")
+    for name in sorted(entries):
+        entry = _object(entries[name], f"provenance.entries.{name}")
+        if not isinstance(entry.get("classification"), str):
+            raise _error(
+                "LCC_PARAMETER_DERIVATION_FAILED",
+                "A provenance entry is missing its classification.",
+                catalog_field=f"provenance.entries.{name}.classification",
+                observed_type=type(entry.get("classification")).__name__,
+            )
+        _object(
+            entry.get("machine_contract"),
+            f"provenance.entries.{name}.machine_contract",
+        )
 
 
 def _machine_contract(reference: Any, parameter: str) -> Mapping[str, Any]:
@@ -277,6 +397,126 @@ def _declaration_contract(
     return units, asset, tuple(constraints)
 
 
+def _prevalidate_engineering_declarations(catalog: Mapping[str, Any]) -> None:
+    declarations = _object(catalog.get("engineering_parameters"), "engineering_parameters")
+    for name in sorted(declarations):
+        declaration = _object(
+            declarations[name], f"engineering_parameters.{name}"
+        )
+        _declaration_contract(declaration, name)
+        if (
+            not isinstance(declaration.get("required"), bool)
+            or "default" not in declaration
+            or "formula" not in declaration
+        ):
+            raise _error(
+                "LCC_PARAMETER_DERIVATION_FAILED",
+                "Catalog engineering declaration is missing required/default/formula evidence.",
+                parameter=name,
+            )
+        default = declaration.get("default")
+        formula = declaration.get("formula")
+        if default is not None:
+            value = _finite_number(default, parameter=name)
+            if not isinstance(formula, str) or not formula:
+                raise _error(
+                    "LCC_PARAMETER_DERIVATION_FAILED",
+                    "A catalog default requires formula evidence.",
+                    parameter=name,
+                )
+            default_asset = declaration.get("default_asset")
+            default_contract = _machine_contract(default_asset, name)
+            values = _object(
+                default_contract.get("values"),
+                f"provenance.{default_asset}.values",
+            )
+            if values.get(name) != value:
+                raise _error(
+                    "LCC_PARAMETER_DERIVATION_FAILED",
+                    "Catalog default does not match its versioned provenance.",
+                    parameter=name,
+                    catalog_field=f"engineering_parameters.{name}.default",
+                    asset=default_asset,
+                )
+            _validate_constraints(
+                value,
+                declaration,
+                name,
+                code="LCC_PARAMETER_DERIVATION_FAILED",
+            )
+        elif formula is not None:
+            raise _error(
+                "LCC_PARAMETER_DERIVATION_FAILED",
+                "The catalog declares an unsupported engineering formula.",
+                parameter=name,
+                catalog_field=f"engineering_parameters.{name}.formula",
+            )
+
+
+def _prevalidate_relationship_declarations(catalog: Mapping[str, Any]) -> None:
+    relationships = _object(
+        catalog.get("feasibility_relationships"), "feasibility_relationships"
+    )
+    for name in sorted(relationships):
+        declaration = _object(
+            relationships[name], f"feasibility_relationships.{name}"
+        )
+        asset = declaration.get("asset")
+        observed_contract = {
+            key: value for key, value in declaration.items() if key != "asset"
+        }
+        _require_machine_contract(
+            asset,
+            observed_contract,
+            name,
+            relationship=name,
+        )
+
+
+def _prevalidate_return_declarations(catalog: Mapping[str, Any]) -> None:
+    requirements = _object(
+        catalog.get("return_asset_requirements"), "return_asset_requirements"
+    )
+    contract_assets = _object(
+        catalog.get("return_contract_assets"), "return_contract_assets"
+    )
+    for topology in sorted(requirements):
+        declaration = _object(
+            requirements[topology], f"return_asset_requirements.{topology}"
+        )
+        asset = declaration.get("asset")
+        if asset != contract_assets.get(topology):
+            raise _error(
+                "LCC_PARAMETER_DERIVATION_FAILED",
+                "Catalog return contract asset does not match the topology binding.",
+                topology=topology,
+                catalog_field=f"return_asset_requirements.{topology}.asset",
+                asset=asset,
+            )
+        observed_contract = {
+            key: value for key, value in declaration.items() if key != "asset"
+        }
+        _require_machine_contract(
+            asset,
+            observed_contract,
+            f"return_asset_requirements.{topology}",
+        )
+
+
+def _prevalidate_catalog_declarations(catalog: Mapping[str, Any]) -> None:
+    _validate_rating_contract(catalog)
+    rating_declarations = _object(catalog.get("rating_parameters"), "rating_parameters")
+    for name in sorted(rating_declarations):
+        declaration = _object(
+            rating_declarations[name], f"rating_parameters.{name}"
+        )
+        _declaration_contract(declaration, name)
+    _power_declaration_contract(catalog)
+    _prevalidate_engineering_declarations(catalog)
+    _prevalidate_relationship_declarations(catalog)
+    _prevalidate_return_declarations(catalog)
+
+
 def _validate_constraints(
     value: float,
     declaration: Mapping[str, Any],
@@ -357,7 +597,10 @@ def _normalize_override(name: str, raw: Any, declaration: Mapping[str, Any]) -> 
                 parameter=name,
                 units=supplied_units,
             )
-        value = _finite_number(raw["value"], parameter=name) * multiplier
+        value = _finite_number(
+            _finite_number(raw["value"], parameter=name) * multiplier,
+            parameter=name,
+        )
         formula = f"user value * {multiplier} {supplied_units}->{canonical_units}"
         return value, formula
     return _finite_number(raw, parameter=name), f"user value in catalog units ({canonical_units})"
@@ -382,6 +625,93 @@ def _validate_rating_contract(catalog: Mapping[str, Any]) -> None:
         asset,
         {"parameters": observed_parameters},
         "rating_parameters",
+    )
+
+
+def _power_declaration_contract(
+    catalog: Mapping[str, Any],
+) -> tuple[str, str, str, float, float]:
+    declarations = _object(catalog.get("derived_parameters"), "derived_parameters")
+    unexpected = sorted(set(declarations) - {"dc_power_mw"})
+    if unexpected:
+        raise _error(
+            "LCC_PARAMETER_DERIVATION_FAILED",
+            "The catalog contains unsupported derived parameter declarations.",
+            unknown_derived_parameters=unexpected,
+        )
+    declaration = _object(
+        declarations.get("dc_power_mw"), "derived_parameters.dc_power_mw"
+    )
+    formula = declaration.get("formula")
+    units = declaration.get("units")
+    asset = declaration.get("asset")
+    required_rating_names = {"rated_power_mw", "dc_voltage_kv", "dc_current_ka"}
+    expected_dependencies = {"dc_voltage_kv", "dc_current_ka"}
+    dependency_value = declaration.get("dependencies")
+    if (
+        isinstance(dependency_value, (str, bytes, bytearray))
+        or not isinstance(dependency_value, Sequence)
+        or any(not isinstance(item, str) for item in dependency_value)
+    ):
+        raise _error(
+            "LCC_PARAMETER_DERIVATION_FAILED",
+            "The dimensional power formula has invalid dependency declarations.",
+            parameter="dc_power_mw",
+            catalog_field="derived_parameters.dc_power_mw.dependencies",
+            observed_type=type(dependency_value).__name__,
+        )
+    dependency_names = tuple(dependency_value)
+    dependencies = set(dependency_names)
+    rating_declarations = _object(catalog.get("rating_parameters"), "rating_parameters")
+    missing_dependencies = sorted(
+        (expected_dependencies - dependencies)
+        | (required_rating_names - set(rating_declarations))
+    )
+    if missing_dependencies:
+        raise _error(
+            "LCC_PARAMETER_DERIVATION_FAILED",
+            "The dimensional power formula is missing declared catalog dependencies.",
+            missing_catalog_dependencies=missing_dependencies,
+        )
+    observed_power_contract = {
+        "formula": formula,
+        "dependencies": list(dependency_names),
+        "compared_to": declaration.get("compared_to"),
+    }
+    _require_machine_contract(asset, observed_power_contract, "dc_power_mw")
+    if (
+        formula != "dc_voltage_kv * dc_current_ka"
+        or not isinstance(units, str)
+        or not isinstance(asset, str)
+    ):
+        raise _error(
+            "LCC_PARAMETER_DERIVATION_FAILED",
+            "The sourced dimensional power formula is unavailable.",
+            parameter="dc_power_mw",
+        )
+    comparison_asset = declaration.get("comparison_asset")
+    relative_tolerance = _finite_number(
+        declaration.get("relative_tolerance"), parameter="dc_power_mw"
+    )
+    absolute_tolerance = _finite_number(
+        declaration.get("absolute_tolerance"), parameter="dc_power_mw"
+    )
+    _require_machine_contract(
+        comparison_asset,
+        {
+            "values": {
+                "relative_tolerance": relative_tolerance,
+                "absolute_tolerance": absolute_tolerance,
+            }
+        },
+        "dc_power_mw.comparison",
+    )
+    return (
+        formula,
+        units,
+        asset,
+        relative_tolerance,
+        absolute_tolerance,
     )
 
 
@@ -416,56 +746,14 @@ def _rating_parameters(request: ParametricLccRequest, catalog: Mapping[str, Any]
 
 
 def _derived_power(ratings: Mapping[str, float], catalog: Mapping[str, Any]) -> DerivedParameter:
-    declarations = _object(catalog["derived_parameters"], "derived_parameters")
-    declaration = _object(declarations.get("dc_power_mw"), "derived_parameters.dc_power_mw")
-    formula = declaration.get("formula")
-    units = declaration.get("units")
-    asset = declaration.get("asset")
-    required_rating_names = {"rated_power_mw", "dc_voltage_kv", "dc_current_ka"}
-    expected_dependencies = {"dc_voltage_kv", "dc_current_ka"}
-    dependency_value = declaration.get("dependencies")
-    dependencies = (
-        set(dependency_value)
-        if isinstance(dependency_value, Sequence) and not isinstance(dependency_value, (str, bytes, bytearray))
-        else set()
+    formula, units, asset, relative_tolerance, absolute_tolerance = (
+        _power_declaration_contract(catalog)
     )
-    rating_declarations = _object(catalog["rating_parameters"], "rating_parameters")
-    missing_dependencies = sorted(
-        (expected_dependencies - dependencies) | (required_rating_names - set(rating_declarations))
+    calculated = _finite_number(
+        ratings["dc_voltage_kv"] * ratings["dc_current_ka"],
+        parameter="dc_power_mw",
+        code="LCC_RATING_INVALID",
     )
-    if missing_dependencies:
-        raise _error(
-            "LCC_PARAMETER_DERIVATION_FAILED",
-            "The dimensional power formula is missing declared catalog dependencies.",
-            missing_catalog_dependencies=missing_dependencies,
-        )
-    observed_power_contract = {
-        "formula": formula,
-        "dependencies": list(dependency_value),
-        "compared_to": declaration.get("compared_to"),
-    }
-    _require_machine_contract(asset, observed_power_contract, "dc_power_mw")
-    if formula != "dc_voltage_kv * dc_current_ka" or not isinstance(units, str) or not isinstance(asset, str):
-        raise _error(
-            "LCC_PARAMETER_DERIVATION_FAILED",
-            "The sourced dimensional power formula is unavailable.",
-            parameter="dc_power_mw",
-        )
-    calculated = ratings["dc_voltage_kv"] * ratings["dc_current_ka"]
-    comparison_asset = declaration.get("comparison_asset")
-    comparison_contract = _machine_contract(comparison_asset, "dc_power_mw")
-    relative_tolerance = _finite_number(declaration.get("relative_tolerance"), parameter="dc_power_mw")
-    absolute_tolerance = _finite_number(declaration.get("absolute_tolerance"), parameter="dc_power_mw")
-    if comparison_contract.get("values") != {
-        "relative_tolerance": relative_tolerance,
-        "absolute_tolerance": absolute_tolerance,
-    }:
-        raise _error(
-            "LCC_PARAMETER_DERIVATION_FAILED",
-            "Power comparison tolerances do not match versioned provenance.",
-            parameter="dc_power_mw",
-            asset=comparison_asset,
-        )
     if not math.isclose(ratings["rated_power_mw"], calculated, rel_tol=relative_tolerance, abs_tol=absolute_tolerance):
         raise _error(
             "LCC_RATING_INCONSISTENT",
@@ -600,10 +888,20 @@ def _validate_relationships(
             if any(not isinstance(item, str) or item not in all_values for item in required_names):
                 raise _error("LCC_PARAMETER_DERIVATION_FAILED", "Relationship references a missing value.", relationship=name)
             constant = _finite_number(contract.get("constant_deg"), parameter=name)
-            commutation_upper = constant - sum(all_values[item] for item in subtract_names)
+            subtract_total = _finite_number(
+                sum(all_values[item] for item in subtract_names),
+                parameter=name,
+            )
+            commutation_upper = _finite_number(
+                constant - subtract_total,
+                parameter=name,
+            )
             minimum = all_values[minimum_name]
             user_maximum = all_values[user_maximum_name]
-            feasible_upper = min(user_maximum, commutation_upper)
+            feasible_upper = _finite_number(
+                min(user_maximum, commutation_upper),
+                parameter=name,
+            )
             valid = minimum <= feasible_upper
             observed = {
                 "commutation_upper": commutation_upper,

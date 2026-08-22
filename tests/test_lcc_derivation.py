@@ -1,9 +1,14 @@
 import copy
+import json
 
 import pytest
 
 from pscad_mcp.core.backend.base import BackendError
-from pscad_mcp.hvdc.builders.lcc.assets import load_parametric_catalog
+from pscad_mcp.hvdc.builders.lcc import derivation as derivation_module
+from pscad_mcp.hvdc.builders.lcc.assets import (
+    load_parametric_catalog,
+    load_parametric_provenance,
+)
 from pscad_mcp.hvdc.builders.lcc.derivation import derive_lcc_parameters
 from pscad_mcp.hvdc.builders.lcc.parametric_models import LccRatings, ParametricLccRequest
 
@@ -330,3 +335,81 @@ def test_required_return_topology_cannot_be_removed_from_both_catalog_bindings()
 
     assert raised.value.code == "LCC_PARAMETER_DERIVATION_FAILED"
     assert raised.value.details["missing_return_topologies"] == ["bipolar"]
+
+
+def test_catalog_identity_must_be_the_exact_versioned_identity():
+    catalog = copy.deepcopy(load_parametric_catalog())
+    catalog["identity"] = "looks_versioned_but_is_not_the_reviewed_catalog"
+
+    with pytest.raises(BackendError) as raised:
+        derive_lcc_parameters(request(), catalog)
+
+    assert raised.value.code == "LCC_PARAMETER_DERIVATION_FAILED"
+    assert raised.value.details["catalog_field"] == "identity"
+
+
+def test_provenance_schema_version_is_validated_before_catalog_use(monkeypatch):
+    provenance = copy.deepcopy(load_parametric_provenance())
+    provenance["schema_version"] = 2
+    monkeypatch.setattr(derivation_module, "load_parametric_provenance", lambda: provenance)
+
+    with pytest.raises(BackendError) as raised:
+        derive_lcc_parameters(request())
+
+    assert raised.value.code == "LCC_PARAMETER_DERIVATION_FAILED"
+    assert raised.value.details["catalog_field"] == "provenance.schema_version"
+
+
+def test_user_override_cannot_mask_a_tampered_catalog_default():
+    catalog = copy.deepcopy(load_parametric_catalog())
+    catalog["engineering_parameters"]["overlap_angle_deg"]["default"] = 21.0
+    overrides = {**COMPLETE_ENGINEERING_VALUES, "overlap_angle_deg": 20.0}
+
+    with pytest.raises(BackendError) as raised:
+        derive_lcc_parameters(request(engineering_overrides=overrides), catalog)
+
+    assert raised.value.code == "LCC_PARAMETER_DERIVATION_FAILED"
+    assert raised.value.details["parameter"] == "overlap_angle_deg"
+
+
+def test_unit_conversion_overflow_fails_closed():
+    overrides = {
+        **COMPLETE_ENGINEERING_VALUES,
+        "filter_capacitance_uf": {"value": 1e308, "units": "F"},
+    }
+
+    with pytest.raises(BackendError) as raised:
+        derive_lcc_parameters(request(engineering_overrides=overrides))
+
+    assert raised.value.code == "LCC_PARAMETER_DERIVATION_FAILED"
+    assert raised.value.details["parameter"] == "filter_capacitance_uf"
+
+
+def test_dimensional_power_overflow_uses_stable_rating_error():
+    overflowing = LccRatings(1e308, 1e308, 1e308, 500.0, 50.0, 3.0, 2.5)
+
+    with pytest.raises(BackendError) as raised:
+        derive_lcc_parameters(request(ratings=overflowing))
+
+    assert raised.value.code == "LCC_RATING_INVALID"
+    assert raised.value.details["parameter"] == "dc_power_mw"
+
+
+def test_derivation_error_payload_is_strict_json_safe_for_arbitrary_override_value():
+    overrides = {**COMPLETE_ENGINEERING_VALUES, "smoothing_reactor_mh": object()}
+
+    with pytest.raises(BackendError) as raised:
+        derive_lcc_parameters(request(engineering_overrides=overrides))
+
+    payload = json.dumps(raised.value.to_dict(), allow_nan=False)
+    assert len(payload.encode("utf-8")) <= 4096
+
+
+def test_derivation_error_payload_is_bounded_for_large_catalog_input():
+    overrides = {f"unknown_parameter_{index:04d}": index for index in range(1000)}
+
+    with pytest.raises(BackendError) as raised:
+        derive_lcc_parameters(request(engineering_overrides=overrides))
+
+    payload = json.dumps(raised.value.to_dict(), allow_nan=False)
+    assert len(payload.encode("utf-8")) <= 4096
