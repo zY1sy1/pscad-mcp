@@ -21,7 +21,12 @@ def _service() -> ParametricLccBuilderService:
     backend = pscad_manager.service
     if _service_instance is None or backend is not _service_backend:
         _service_backend = backend
-        _service_instance = ParametricLccBuilderService(backend)
+        path_policy = getattr(backend, "path_policy", None)
+        workspace_root = getattr(path_policy, "workspace_root", None)
+        _service_instance = ParametricLccBuilderService(
+            backend,
+            workspace_root=workspace_root,
+        )
     return _service_instance
 
 
