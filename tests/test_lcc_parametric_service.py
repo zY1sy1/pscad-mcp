@@ -15,7 +15,7 @@ def request():
             "smoothing_reactor_mh": 120.0,
             "filter_capacitance_uf": 60.0,
             "min_firing_angle_deg": 5.0,
-            "max_firing_angle_deg": 170.0,
+            "max_firing_angle_deg": 45.0,
         },
         operation_modes=("bipolar_run",),
         return_path_assets=("neutral_bus",),

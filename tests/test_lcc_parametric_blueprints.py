@@ -38,5 +38,5 @@ def test_return_asset_allowlist_matches_packaged_bipole_contract():
     bipole = load_parametric_blueprint("lcc_bipole_parametric_v1")
     allowed = catalog["return_asset_requirements"]["bipolar"]["allowed"]
 
-    assert allowed == provenance["entries"]["bipole_return_contract"]["machine_contract"]["allowed_assets"]
+    assert allowed == provenance["entries"]["bipole_return_contract"]["machine_contract"]["allowed"]
     assert set(allowed) <= set(bipole["required_assets"])

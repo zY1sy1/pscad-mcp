@@ -51,6 +51,7 @@ def _catalog_data(catalog: Any) -> Mapping[str, Any]:
         "derived_parameters",
         "engineering_parameters",
         "feasibility_relationships",
+        "return_contract_assets",
         "return_asset_requirements",
     ):
         _object(value.get(field), field)
@@ -281,8 +282,31 @@ def _normalize_override(name: str, raw: Any, declaration: Mapping[str, Any]) -> 
     return _finite_number(raw, parameter=name), f"user value in catalog units ({canonical_units})"
 
 
+def _validate_rating_contract(catalog: Mapping[str, Any]) -> None:
+    declarations = _object(catalog["rating_parameters"], "rating_parameters")
+    required_for_power = {"rated_power_mw", "dc_voltage_kv", "dc_current_ka"}
+    missing_power_inputs = sorted(required_for_power - set(declarations))
+    if missing_power_inputs:
+        raise _error(
+            "LCC_PARAMETER_DERIVATION_FAILED",
+            "The dimensional power formula is missing declared catalog dependencies.",
+            missing_catalog_dependencies=missing_power_inputs,
+        )
+    observed_parameters: dict[str, Any] = {}
+    for name, declaration_value in declarations.items():
+        declaration = _object(declaration_value, f"rating_parameters.{name}")
+        observed_parameters[name] = {"required": declaration.get("required")}
+    asset = catalog.get("rating_contract_asset")
+    _require_machine_contract(
+        asset,
+        {"parameters": observed_parameters},
+        "rating_parameters",
+    )
+
+
 def _rating_parameters(request: ParametricLccRequest, catalog: Mapping[str, Any]) -> tuple[list[DerivedParameter], dict[str, float]]:
     declarations = _object(catalog["rating_parameters"], "rating_parameters")
+    _validate_rating_contract(catalog)
     values: list[DerivedParameter] = []
     numeric: dict[str, float] = {}
     for name, declaration_value in declarations.items():
@@ -485,24 +509,26 @@ def _validate_relationships(
                 raise _error("LCC_PARAMETER_DERIVATION_FAILED", "Relationship references a missing value.", relationship=name)
             valid = all_values[left_name] < all_values[right_name]
             observed = {str(left_name): all_values[left_name], str(right_name): all_values[right_name]}
-        elif operator == "derived_value_in_closed_interval":
+        elif operator == "nonempty_upper_bounded_interval":
             subtract_names = contract.get("subtract")
             if isinstance(subtract_names, (str, bytes, bytearray)) or not isinstance(subtract_names, Sequence):
                 raise _error("LCC_PARAMETER_DERIVATION_FAILED", "Derived relationship operands are invalid.", relationship=name)
             minimum_name = contract.get("minimum")
-            maximum_name = contract.get("maximum")
-            required_names = [*subtract_names, minimum_name, maximum_name]
+            user_maximum_name = contract.get("user_maximum")
+            required_names = [*subtract_names, minimum_name, user_maximum_name]
             if any(not isinstance(item, str) or item not in all_values for item in required_names):
                 raise _error("LCC_PARAMETER_DERIVATION_FAILED", "Relationship references a missing value.", relationship=name)
             constant = _finite_number(contract.get("constant_deg"), parameter=name)
-            candidate = constant - sum(all_values[item] for item in subtract_names)
+            commutation_upper = constant - sum(all_values[item] for item in subtract_names)
             minimum = all_values[minimum_name]
-            maximum = all_values[maximum_name]
-            valid = minimum <= candidate <= maximum
+            user_maximum = all_values[user_maximum_name]
+            feasible_upper = min(user_maximum, commutation_upper)
+            valid = minimum <= feasible_upper
             observed = {
-                "candidate": candidate,
+                "commutation_upper": commutation_upper,
+                "feasible_upper": feasible_upper,
                 "minimum": minimum,
-                "maximum": maximum,
+                "user_maximum": user_maximum,
                 "subtract": {item: all_values[item] for item in subtract_names},
             }
             if valid:
@@ -514,11 +540,13 @@ def _validate_relationships(
                 derived.append(
                     DerivedParameter(
                         name=output,
-                        value=candidate,
+                        value=feasible_upper,
                         source="derived",
                         formula=formula,
                         units=units,
-                        constraints=(f"{minimum} <= value <= {maximum} {units}",),
+                        constraints=(
+                            f"{minimum} <= feasible firing angle <= {feasible_upper} {units}",
+                        ),
                         asset=asset,
                     )
                 )
@@ -537,26 +565,38 @@ def _validate_relationships(
 
 def _validate_return_assets(request: ParametricLccRequest, catalog: Mapping[str, Any]) -> None:
     requirements = _object(catalog["return_asset_requirements"], "return_asset_requirements")
+    contract_assets = _object(catalog["return_contract_assets"], "return_contract_assets")
+    authoritative_asset = contract_assets.get(request.topology)
     declaration_value = requirements.get(request.topology)
-    if declaration_value is None:
+    if authoritative_asset is None and declaration_value is None:
         return
+    if not isinstance(declaration_value, Mapping):
+        raise _error(
+            "LCC_PARAMETER_DERIVATION_FAILED",
+            "Required topology return contract is missing.",
+            topology=request.topology,
+            asset=authoritative_asset,
+        )
     declaration = _object(declaration_value, f"return_asset_requirements.{request.topology}")
-    return_contract = _machine_contract(declaration.get("asset"), f"return_asset_requirements.{request.topology}")
-    allowed_value = declaration.get("allowed")
+    return_asset = declaration.get("asset")
+    if return_asset != authoritative_asset:
+        raise _error(
+            "LCC_PARAMETER_DERIVATION_FAILED",
+            "Catalog return contract asset does not match the topology binding.",
+            topology=request.topology,
+            asset=authoritative_asset,
+            observed_asset=return_asset,
+        )
+    observed_contract = {key: value for key, value in declaration.items() if key != "asset"}
+    return_contract = _require_machine_contract(
+        return_asset,
+        observed_contract,
+        f"return_asset_requirements.{request.topology}",
+    )
+    allowed_value = return_contract.get("allowed")
     if isinstance(allowed_value, (str, bytes, bytearray)) or not isinstance(allowed_value, Sequence):
         raise _error("LCC_PARAMETER_DERIVATION_FAILED", "Catalog allowed return assets are invalid.", topology=request.topology)
     allowed = set(allowed_value)
-    provenance_allowed = return_contract.get("allowed_assets")
-    if (
-        isinstance(provenance_allowed, (str, bytes, bytearray))
-        or not isinstance(provenance_allowed, Sequence)
-        or allowed != set(provenance_allowed)
-    ):
-        raise _error(
-            "LCC_PARAMETER_DERIVATION_FAILED",
-            "Catalog return assets do not match versioned provenance.",
-            topology=request.topology,
-        )
     unknown = sorted(set(request.return_path_assets) - allowed)
     if unknown:
         raise _error(
@@ -565,8 +605,8 @@ def _validate_return_assets(request: ParametricLccRequest, catalog: Mapping[str,
             unknown_return_assets=unknown,
             allowed_return_assets=sorted(allowed),
         )
-    required = set(declaration.get("required", ()))
-    mode_requirements = _object(declaration.get("mode_requirements", {}), f"return_asset_requirements.{request.topology}.mode_requirements")
+    required = set(return_contract.get("required", ()))
+    mode_requirements = _object(return_contract.get("mode_requirements", {}), f"return_asset_requirements.{request.topology}.mode_requirements")
     for mode in request.operation_modes:
         mode_assets = mode_requirements.get(mode, ())
         if isinstance(mode_assets, (str, bytes, bytearray)) or not isinstance(mode_assets, Sequence):

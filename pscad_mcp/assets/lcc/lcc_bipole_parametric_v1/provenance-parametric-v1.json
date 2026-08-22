@@ -8,6 +8,21 @@
       "machine_contract": {"kind": "exclusive_minimum", "value": 0.0},
       "limitation": "This invariant declares no reviewed upper bound and no SCR or ESCR threshold."
     },
+    "rating_contract": {
+      "classification": "request_contract",
+      "statement": "The six base LCC ratings are required; ESCR is optional.",
+      "machine_contract": {
+        "parameters": {
+          "rated_power_mw": {"required": true},
+          "dc_voltage_kv": {"required": true},
+          "dc_current_ka": {"required": true},
+          "ac_voltage_kv": {"required": true},
+          "frequency_hz": {"required": true},
+          "scr": {"required": true},
+          "escr": {"required": false}
+        }
+      }
+    },
     "angle_domain_deg": {
       "classification": "basic_domain",
       "statement": "Control angles are represented in degrees in the open mathematical domain 0 < angle < 180.",
@@ -52,23 +67,31 @@
     "bipole_return_contract": {
       "classification": "packaged_structural_contract",
       "source_path": "pscad_mcp/assets/lcc/lcc_bipole_parametric_v1/blueprint.json",
-      "machine_contract": {"allowed_assets": ["neutral_bus", "earth_return", "metallic_return"]},
+      "machine_contract": {
+        "allowed": ["neutral_bus", "earth_return", "metallic_return"],
+        "required": ["neutral_bus"],
+        "mode_requirements": {
+          "monopolar_earth_return": ["earth_return"],
+          "monopolar_metallic_return": ["metallic_return"],
+          "metallic_return": ["metallic_return"]
+        }
+      },
       "limitation": "Asset identifiers are structural declarations, not proof of electrical acceptance."
     },
     "inverter_commutation_identity": {
       "classification": "physical_identity",
-      "statement": "For inverter LCC commutation angles in degrees, gamma = 180 - alpha - mu, equivalently alpha = 180 - gamma - mu.",
+      "statement": "For gamma >= gamma_min, alpha is bounded above by 180 - gamma_min - mu; feasibility requires the user firing-angle interval to intersect this upper-bounded interval.",
       "machine_contract": {
-        "operator": "derived_value_in_closed_interval",
-        "output": "inverter_firing_angle_deg",
+        "operator": "nonempty_upper_bounded_interval",
+        "output": "max_feasible_inverter_firing_angle_deg",
         "units": "deg",
-        "formula": "180 - min_extinction_angle_deg - overlap_angle_deg",
+        "formula": "min(max_firing_angle_deg, 180 - min_extinction_angle_deg - overlap_angle_deg)",
         "constant_deg": 180.0,
         "subtract": ["min_extinction_angle_deg", "overlap_angle_deg"],
         "minimum": "min_firing_angle_deg",
-        "maximum": "max_firing_angle_deg"
+        "user_maximum": "max_firing_angle_deg"
       },
-      "limitation": "This identity is a feasibility gate and does not prescribe empirical control margins."
+      "limitation": "The derived value is a maximum feasible bound, not an actual firing-angle operating point or an empirical control margin."
     }
   }
 }
