@@ -72,6 +72,24 @@ def test_audit_does_not_authorize_bare_local_names_or_wrong_namespace():
     assert not any(name.startswith("rectifier_") for name in report.roles)
 
 
+def test_audit_rejects_bare_rectpole_and_inverterpole_instances_independently(tmp_path):
+    payload = (FIXTURES / "monopole_template.pscx").read_text(encoding="utf-8")
+    payload = payload.replace("FixtureMonopole:RectPole", "RectPole")
+    payload = payload.replace("FixtureMonopole:InverterPole", "InverterPole")
+    source = tmp_path / "bare_instance_names.pscx"
+    source.write_text(payload, encoding="utf-8")
+
+    report = audit_lcc_template(source)
+
+    assert report.compatible is False
+    assert "rectifier_pole_definition" not in report.missing_contracts
+    assert "inverter_pole_definition" not in report.missing_contracts
+    assert "rectifier_valve_group" in report.missing_contracts
+    assert "inverter_valve_group" in report.missing_contracts
+    assert "rectifier_valve_group" not in report.roles
+    assert "inverter_valve_group" not in report.roles
+
+
 @pytest.mark.parametrize(
     ("payload", "reason"),
     [
