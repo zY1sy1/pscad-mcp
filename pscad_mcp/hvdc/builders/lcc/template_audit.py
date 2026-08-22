@@ -17,7 +17,11 @@ from ....core.backend.base import BackendError
 
 TEMPLATE_MAX_BYTES = 32 * 1024 * 1024
 _FORBIDDEN_XML_DECLARATION = re.compile(rb"<!\s*(?:DOCTYPE|ENTITY)\b", re.IGNORECASE)
-_AUTHORITATIVE_CONTRACT_SHA256 = "9e3b3bca5d46f7562d8b233f695a7d3da9e796c540ca0e9e2a99cee79042965d"
+_AUTHORITATIVE_CONTRACT_SHA256 = "70c0340cab292cf7f4625a9153721bd4a80aa0c3ddcbff3292029795ea55433d"
+_NAMESPACE_MAX_CHARS = 128
+_DEFINITION_MAX_CHARS = 256
+_ROLE_TEXT_MAX_CHARS = 64
+_COORDINATE_ABS_MAX = 10_000_000
 
 
 @dataclass(frozen=True)
@@ -47,8 +51,20 @@ def audit_lcc_template(
     source, payload = _read_template_once(path)
     fingerprint = hashlib.sha256(payload).hexdigest()
     root = _parse_template(payload)
+    if root.tag != "project":
+        raise BackendError(
+            "LCC_TEMPLATE_INCOMPATIBLE",
+            "Template root must be an unnamespaced PSCAD project element.",
+            "hvdc",
+            "audit_lcc_template",
+            {"reason": "invalid_project_root"},
+        )
 
-    namespace = _text(_attr(root, contracts["project_namespace_attribute"]))
+    namespace = _bounded_role_text(
+        _attr(root, contracts["project_namespace_attribute"]),
+        field="namespace",
+        maximum=_NAMESPACE_MAX_CHARS,
+    )
     definitions = _definition_index(root)
     main = _main_scope(root)
     components = _component_records(main)
@@ -182,10 +198,6 @@ def _raise_unreadable_template(error: OSError) -> NoReturn:
     ) from error
 
 
-def _name(tag: str) -> str:
-    return tag.rsplit("}", 1)[-1].casefold()
-
-
 def _attr(element: ET.Element, *names: str) -> str | None:
     wanted = {name.casefold() for name in names}
     for key, value in element.attrib.items():
@@ -198,10 +210,31 @@ def _text(value: str | None) -> str:
     return (value or "").strip()
 
 
+def _bounded_role_text(
+    value: str | None, *, field: str, maximum: int = _ROLE_TEXT_MAX_CHARS
+) -> str:
+    normalized = _text(value)
+    if len(normalized) > maximum:
+        raise BackendError(
+            "LCC_TEMPLATE_INCOMPATIBLE",
+            "Template role text exceeds its fixed limit.",
+            "hvdc",
+            "audit_lcc_template",
+            {
+                "reason": "role_text_too_long",
+                "field": field,
+                "actual_length": len(normalized),
+                "max_length": maximum,
+            },
+        )
+    return normalized
+
+
 def _definition_index(root: ET.Element) -> dict[str, list[ET.Element]]:
     result: dict[str, list[ET.Element]] = {}
     for definition in _top_level_definitions(root):
-        result.setdefault(_text(_attr(definition, "name", "id")), []).append(definition)
+        name = _bounded_role_text(_attr(definition, "name", "id"), field="definition_name")
+        result.setdefault(name, []).append(definition)
     return result
 
 
@@ -216,9 +249,7 @@ def _single_validated_definition(
         return None
     if not _port_contract_matches(definition, contract["ports"]):
         return None
-    counts = Counter(
-        component["definition"] for component in _component_records(definition)
-    )
+    counts = Counter(component["definition"] for component in _component_records(definition))
     if any(counts[name] < rule["minimum"] for name, rule in contract["internal_components"].items()):
         return None
     return definition
@@ -227,10 +258,10 @@ def _single_validated_definition(
 def _form_contract_matches(definition: ET.Element, expected: dict[str, Any]) -> bool:
     found: dict[str, list[ET.Element]] = {}
     for child in definition:
-        if _name(child.tag) != "form":
+        if child.tag != "form":
             continue
         for element in child.iter():
-            if _name(element.tag) == "parameter":
+            if element.tag == "parameter":
                 found.setdefault(_text(_attr(element, "name")), []).append(element)
     for name, contract in expected.items():
         candidates = found.get(name, [])
@@ -242,10 +273,10 @@ def _form_contract_matches(definition: ET.Element, expected: dict[str, Any]) -> 
 def _port_contract_matches(definition: ET.Element, expected: dict[str, Any]) -> bool:
     found: dict[str, list[ET.Element]] = {}
     for child in definition:
-        if _name(child.tag) != "svg":
+        if child.tag != "svg":
             continue
         for element in child.iter():
-            if _name(element.tag) == "port":
+            if element.tag == "port":
                 found.setdefault(_text(_attr(element, "name")), []).append(element)
     for name, contract in expected.items():
         candidates = found.get(name, [])
@@ -321,7 +352,9 @@ def _pole_evidence(component: dict[str, Any], discriminator: dict[str, Any]) -> 
         "discriminator": {"name": parameter, "value": component["parameters"].get(parameter, "")},
         "validated_contract": component["contract"]["contract_identity"],
     }
-    instance_id = _text(_attr(component["element"], "id"))
+    instance_id = _bounded_role_text(
+        _attr(component["element"], "id"), field="instance_id"
+    )
     if instance_id:
         evidence["instance_id"] = instance_id
     return evidence
@@ -338,9 +371,12 @@ def _raise_ambiguous(role: str, reason: str) -> NoReturn:
 def _integer(value: str, *, field: str) -> int:
     normalized = value.strip()
     try:
-        return int(normalized)
+        number = int(normalized)
     except ValueError as error:
         _raise_invalid_coordinate(field, normalized, error)
+    if abs(number) > _COORDINATE_ABS_MAX:
+        _raise_invalid_coordinate(field, normalized)
+    return number
 
 
 def _raise_invalid_coordinate(field: str, value: str, cause: Exception | None = None) -> NoReturn:
@@ -376,20 +412,23 @@ def _point(element: ET.Element, *, role: str) -> tuple[int, int]:
 def _parameters(element: ET.Element) -> dict[str, str]:
     result: dict[str, str] = {}
     direct_children = list(element)
-    parameters = [child for child in direct_children if _name(child.tag) == "param"]
+    parameters = [child for child in direct_children if child.tag == "param"]
     for child in direct_children:
-        if _name(child.tag) == "paramlist":
-            parameters.extend(parameter for parameter in list(child) if _name(parameter.tag) == "param")
+        if child.tag == "paramlist":
+            parameters.extend(parameter for parameter in list(child) if parameter.tag == "param")
     for parameter in parameters:
         name = _text(_attr(parameter, "name", "key"))
-        if name:
+        if name in {"Des", "Name"}:
             if name in result:
                 raise BackendError(
                     "LCC_TEMPLATE_INCOMPATIBLE", "Component contains duplicate parameters.",
                     "hvdc", "audit_lcc_template", {"parameter": name[:64], "reason": "duplicate_component_parameter"},
                 )
             value = _attr(parameter, "value")
-            result[name] = _text(value if value is not None else parameter.text)
+            result[name] = _bounded_role_text(
+                value if value is not None else parameter.text,
+                field=name,
+            )
     return result
 
 
@@ -406,41 +445,27 @@ def _main_scope(root: ET.Element) -> ET.Element:
 
 
 def _top_level_definitions(root: ET.Element) -> list[ET.Element]:
-    if _name(root.tag) == "definition":
-        return [root]
-    definitions: list[ET.Element] = []
-
-    def visit(element: ET.Element) -> None:
-        for child in element:
-            if _name(child.tag) == "definition":
-                definitions.append(child)
-            else:
-                visit(child)
-
-    visit(root)
-    return definitions
+    containers = [child for child in root if child.tag == "definitions"]
+    if len(containers) != 1:
+        return []
+    return [child for child in containers[0] if child.tag == "Definition"]
 
 
 def _component_elements(scope: ET.Element) -> list[ET.Element]:
-    components: list[ET.Element] = []
-
-    def visit(element: ET.Element) -> None:
-        for child in element:
-            child_name = _name(child.tag)
-            if child_name == "definition":
-                continue
-            if child_name in {"user", "component"}:
-                components.append(child)
-            visit(child)
-
-    visit(scope)
-    return components
+    schematics = [child for child in scope if child.tag == "schematic"]
+    if len(schematics) != 1:
+        return []
+    return [child for child in schematics[0] if child.tag == "User"]
 
 
 def _component_records(scope: ET.Element) -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
     for element in _component_elements(scope):
-        definition = _text(_attr(element, "definition", "defn", "type"))
+        definition = _bounded_role_text(
+            _attr(element, "definition", "defn", "type"),
+            field="definition",
+            maximum=_DEFINITION_MAX_CHARS,
+        )
         if definition:
             records.append({"definition": definition, "element": element, "parameters": _parameters(element)})
     return records
@@ -461,6 +486,8 @@ def _select_earth_electrode(
         return None, None
     if not anchors and len(grounds) > 1:
         return None, "multiple_exact_grounds_without_anchor"
+    if not anchors and contract["no_anchor_fallback"] != "single_exact_ground":
+        return None, None
     located = [{**component, "location": _point(component["element"], role="earth_electrode_ground")} for component in grounds]
     selected = located[0]
     evidence: dict[str, Any] = {
@@ -485,7 +512,9 @@ def _select_earth_electrode(
 
 def _component_location_evidence(component: dict[str, Any]) -> dict[str, Any]:
     result: dict[str, Any] = {"definition": component["definition"], "location": list(component["location"])}
-    instance_id = _text(_attr(component["element"], "id"))
+    instance_id = _bounded_role_text(
+        _attr(component["element"], "id"), field="instance_id"
+    )
     if instance_id:
         result["instance_id"] = instance_id
     return result

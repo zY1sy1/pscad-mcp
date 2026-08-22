@@ -26,7 +26,7 @@
       }
     },
     "instance_discriminator": {"parameter": "Des", "bipole_roles": {"RP1": "rectifier_positive_pole", "RP2": "rectifier_negative_pole", "IP1": "inverter_positive_pole", "IP2": "inverter_negative_pole"}},
-    "earth_electrode": {"contract_identity": "lcc_parametric_catalog_v1:earth_electrode", "ground_definition": "master:ground", "anchor_definition": "master:ammeter", "anchor_parameter": "Name", "anchor_value": "Ielectrode", "selection": "nearest_unique_euclidean_ground"}
+    "earth_electrode": {"contract_identity": "lcc_parametric_catalog_v1:earth_electrode", "ground_definition": "master:ground", "anchor_definition": "master:ammeter", "anchor_parameter": "Name", "anchor_value": "Ielectrode", "selection": "nearest_unique_euclidean_ground", "no_anchor_fallback": "single_exact_ground"}
   },
   "rating_parameters": {
     "rated_power_mw": {"units": "MW", "required": true, "constraints": [{"kind": "exclusive_minimum", "value": 0.0, "asset": "lcc_parametric_provenance_v1:positive_finite"}], "asset": "lcc_parametric_provenance_v1:positive_finite"},

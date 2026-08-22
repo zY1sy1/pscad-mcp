@@ -3,6 +3,7 @@ import hashlib
 from pathlib import Path
 
 import pytest
+import xml.etree.ElementTree as ET
 
 from pscad_mcp.core.backend.base import BackendError
 from pscad_mcp.hvdc.builders.lcc.assets import load_parametric_catalog
@@ -10,6 +11,14 @@ from pscad_mcp.hvdc.builders.lcc.template_audit import audit_lcc_template
 
 
 FIXTURES = Path(__file__).parent / "fixtures" / "lcc_parametric"
+
+
+def _mutated_monopole(tmp_path, mutate, name="mutated.pscx"):
+    tree = ET.parse(FIXTURES / "monopole_template.pscx")
+    mutate(tree.getroot())
+    source = tmp_path / name
+    tree.write(source, encoding="utf-8")
+    return source
 
 
 def test_audit_default_catalog_validates_real_bipole_roles_without_mutation():
@@ -39,6 +48,12 @@ def test_audit_accepts_one_strictly_validated_monopole_pair():
     assert report.roles["rectifier_valve_group"]["definition"] == "FixtureMonopole:RectPole"
     assert report.roles["inverter_valve_group"]["definition"] == "FixtureMonopole:InverterPole"
     assert report.roles["rectifier_valve_group"]["validated_contract"].endswith(":RectPole")
+    assert report.roles["earth_electrode"]["evidence"]["selection_reason"] == "single_exact_ground_without_anchor"
+
+
+def test_catalog_authoritatively_declares_single_ground_no_anchor_fallback():
+    contract = load_parametric_catalog()["template_role_contracts"]["earth_electrode"]
+    assert contract["no_anchor_fallback"] == "single_exact_ground"
 
 
 def test_audit_rejects_duplicate_bipole_discriminator():
@@ -55,6 +70,23 @@ def test_audit_does_not_authorize_bare_local_names_or_wrong_namespace():
     assert "rectifier_pole_definition" in report.missing_contracts
     assert "inverter_pole_definition" in report.missing_contracts
     assert not any(name.startswith("rectifier_") for name in report.roles)
+
+
+@pytest.mark.parametrize(
+    ("payload", "reason"),
+    [
+        ('<notproject name="x" />', "invalid_project_root"),
+        ('<project xmlns="urn:evil" name="x" />', "invalid_project_root"),
+        ('<evil:project xmlns:evil="urn:evil" name="x" />', "invalid_project_root"),
+    ],
+)
+def test_audit_rejects_non_exact_project_root(tmp_path, payload, reason):
+    source = tmp_path / "evil_root.pscx"
+    source.write_text(payload, encoding="utf-8")
+    with pytest.raises(BackendError) as raised:
+        audit_lcc_template(source)
+    assert raised.value.code == "LCC_TEMPLATE_INCOMPATIBLE"
+    assert raised.value.details == {"reason": reason}
 
 
 def test_audit_rejects_catalog_without_authoritative_contracts():
@@ -91,6 +123,82 @@ def test_audit_rejects_definition_with_wrong_port_or_internal_counts(tmp_path):
     assert report.missing_contracts == ("rectifier_pole_definition",)
 
 
+def test_audit_rejects_missing_required_form_parameter(tmp_path):
+    def mutate(root):
+        rectifier = next(item for item in root.iter("Definition") if item.get("name") == "RectPole")
+        rectifier.find("form").clear()
+
+    report = audit_lcc_template(_mutated_monopole(tmp_path, mutate))
+    assert report.compatible is False
+    assert report.missing_contracts == ("rectifier_pole_definition",)
+
+
+@pytest.mark.parametrize(
+    ("family", "port_name"),
+    [
+        ("RectPole", "KBR"), ("RectPole", "Tap"), ("RectPole", "DCP2"),
+        ("RectPole", "AOR"), ("RectPole", "DCP1"), ("RectPole", "AC"),
+        ("InverterPole", "KBI"), ("InverterPole", "GMES"), ("InverterPole", "DCP2"),
+        ("InverterPole", "AOI"), ("InverterPole", "DCP1"), ("InverterPole", "AC"),
+    ],
+)
+def test_audit_rejects_each_wrong_required_port(tmp_path, family, port_name):
+    def mutate(root):
+        definition = next(item for item in root.iter("Definition") if item.get("name") == family)
+        port = next(item for item in definition.find("svg").iter("port") if item.get("name") == port_name)
+        port.set("dim", "99")
+
+    report = audit_lcc_template(_mutated_monopole(tmp_path, mutate))
+    assert report.compatible is False
+    expected = "rectifier_pole_definition" if family == "RectPole" else "inverter_pole_definition"
+    assert expected in report.missing_contracts
+
+
+@pytest.mark.parametrize("definition", ["master:g6p200", "master:xfmr-3p2w"])
+def test_audit_rejects_each_insufficient_required_internal_component(tmp_path, definition):
+    def mutate(root):
+        rectifier = next(item for item in root.iter("Definition") if item.get("name") == "RectPole")
+        schematic = rectifier.find("schematic")
+        schematic.remove(next(item for item in schematic.findall("User") if item.get("defn") == definition))
+
+    report = audit_lcc_template(_mutated_monopole(tmp_path, mutate))
+    assert report.compatible is False
+    assert report.missing_contracts == ("rectifier_pole_definition",)
+
+
+def test_audit_does_not_count_users_outside_direct_definition_schematic(tmp_path):
+    def mutate(root):
+        rectifier = next(item for item in root.iter("Definition") if item.get("name") == "RectPole")
+        schematic = rectifier.find("schematic")
+        removed = [item for item in list(schematic) if item.get("defn") == "master:g6p200"]
+        for item in removed:
+            schematic.remove(item)
+        metadata = ET.SubElement(rectifier, "metadata")
+        for _ in range(2):
+            ET.SubElement(metadata, "User", defn="master:g6p200")
+
+    report = audit_lcc_template(_mutated_monopole(tmp_path, mutate))
+    assert report.compatible is False
+    assert report.missing_contracts == ("rectifier_pole_definition",)
+
+
+def test_audit_scans_only_direct_main_schematic_and_prunes_nested_definitions(tmp_path):
+    def mutate(root):
+        main = next(item for item in root.iter("Definition") if item.get("name") == "Main")
+        schematic = main.find("schematic")
+        rectifier = next(item for item in list(schematic) if item.get("defn") == "FixtureMonopole:RectPole")
+        schematic.remove(rectifier)
+        metadata = ET.SubElement(main, "metadata")
+        metadata.append(rectifier)
+        nested = ET.SubElement(schematic, "Definition", name="Nested")
+        nested_schematic = ET.SubElement(nested, "schematic")
+        ET.SubElement(nested_schematic, "User", defn="FixtureMonopole:RectPole", x="0", y="0")
+
+    report = audit_lcc_template(_mutated_monopole(tmp_path, mutate))
+    assert report.compatible is False
+    assert "rectifier_valve_group" in report.missing_contracts
+
+
 def test_audit_requires_exact_project_scoped_definition(tmp_path):
     payload = (FIXTURES / "monopole_template.pscx").read_text(encoding="utf-8")
     payload = payload.replace("FixtureMonopole:RectPole", "foreign:RectPole")
@@ -108,6 +216,30 @@ def test_audit_rejects_unknown_bipole_marker(tmp_path):
     report = audit_lcc_template(source)
     assert report.compatible is False
     assert report.missing_contracts == ("bipole_pole_discriminators",)
+
+
+@pytest.mark.parametrize("field", ["namespace", "Des", "instance_id"])
+def test_audit_rejects_unbounded_role_text_with_bounded_details(tmp_path, field):
+    huge = "x" * 10000
+
+    def mutate(root):
+        if field == "namespace":
+            root.set("name", huge)
+            return
+        main = next(item for item in root.iter("Definition") if item.get("name") == "Main")
+        instance = next(item for item in main.find("schematic").findall("User") if item.get("defn") == "FixtureMonopole:RectPole")
+        if field == "instance_id":
+            instance.set("id", huge)
+        else:
+            instance.find("paramlist/param").set("value", huge)
+
+    with pytest.raises(BackendError) as raised:
+        audit_lcc_template(_mutated_monopole(tmp_path, mutate))
+    assert raised.value.code == "LCC_TEMPLATE_INCOMPATIBLE"
+    assert raised.value.details["reason"] == "role_text_too_long"
+    assert raised.value.details["field"] == field
+    assert raised.value.details["actual_length"] == len(huge)
+    assert huge not in str(raised.value.details)
 
 
 def test_electrode_exact_anchor_selects_nearest_exact_ground():
