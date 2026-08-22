@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from ....core.backend.base import BackendError
+from .assets import load_parametric_catalog, validate_parametric_blueprint_asset
 from .catalog import LccCatalog, parse_catalog, require_definition, require_port, validate_parameters
 from .models import LccBlueprint, LccComponentSpec, LccNetSpec
 from .project_graph import GraphComponent, GraphNet, GraphPort, ProjectGraph
@@ -452,6 +453,91 @@ def validate_project_graph(
     return result
 
 
+def validate_parametric_topology_contract(
+    blueprint: Mapping[str, Any],
+    audit_roles: Mapping[str, Any] | Any,
+    catalog: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Validate an audited template against one exact logical topology asset."""
+
+    operation = "validate_parametric_lcc_topology"
+    catalog_value = load_parametric_catalog() if catalog is None else catalog
+    try:
+        if not isinstance(blueprint, Mapping) or not isinstance(blueprint.get("name"), str):
+            raise BackendError("LCC_BLUEPRINT_INVALID", "Parametric blueprint must be an identified object.", "hvdc", operation)
+        validated = validate_parametric_blueprint_asset(dict(blueprint), blueprint["name"], catalog_value)
+    except BackendError as error:
+        if error.code == "LCC_BLUEPRINT_INVALID":
+            raise
+        raise BackendError(
+            "LCC_BLUEPRINT_INVALID",
+            "Parametric blueprint does not match its versioned topology contract.",
+            "hvdc",
+            operation,
+            {"reason": error.code},
+        ) from error
+
+    if hasattr(audit_roles, "compatible") and getattr(audit_roles, "compatible") is not True:
+        raise BackendError("LCC_PROJECT_INVALID", "The template audit is not compatible.", "hvdc", operation)
+    observed = getattr(audit_roles, "roles", audit_roles)
+    if not isinstance(observed, Mapping):
+        raise BackendError("LCC_PROJECT_INVALID", "Template audit roles must be an object.", "hvdc", operation)
+    expected_roles = set(validated["template_roles"])
+    if set(observed) != expected_roles:
+        raise BackendError(
+            "LCC_PROJECT_INVALID",
+            "Template audit roles do not exactly match the blueprint.",
+            "hvdc",
+            operation,
+            {"missing": sorted(expected_roles - set(observed)), "unexpected": sorted(set(observed) - expected_roles)},
+        )
+
+    component_map = {
+        component["template_role"]: component
+        for component in validated["components"]
+        if component["kind"] == "template_role"
+    }
+    for role in sorted(expected_roles):
+        record = observed[role]
+        if not isinstance(record, Mapping):
+            raise BackendError("LCC_PROJECT_INVALID", "A template audit role is not an object.", "hvdc", operation, {"role": role})
+        evidence = record.get("evidence")
+        observed_contract = record.get("validated_contract")
+        if observed_contract is None and isinstance(evidence, Mapping):
+            observed_contract = evidence.get("validated_contract")
+        expected_contract = component_map[role]["contract_identity"]
+        expected_discriminator = component_map[role].get("discriminator")
+        if observed_contract != expected_contract:
+            raise BackendError("LCC_PROJECT_INVALID", "A template audit role has the wrong catalog contract.", "hvdc", operation, {"role": role})
+        definition = record.get("definition")
+        template_contracts = catalog_value.get("template_role_contracts", {})
+        if role == "earth_electrode":
+            expected_definition = template_contracts.get("earth_electrode", {}).get("ground_definition")
+            definition_matches = definition == expected_definition
+        else:
+            pole_contracts = template_contracts.get("pole_definitions", {})
+            family = "rectifier" if role.startswith("rectifier") else "inverter"
+            local_name = pole_contracts.get(family, {}).get("local_name")
+            definition_matches = (
+                isinstance(definition, str)
+                and isinstance(local_name, str)
+                and ":" in definition
+                and definition.rsplit(":", 1)[1] == local_name
+            )
+        if not definition_matches:
+            raise BackendError("LCC_PROJECT_INVALID", "A template audit role has the wrong exact definition.", "hvdc", operation, {"role": role})
+        if expected_discriminator is not None and record.get("discriminator") != expected_discriminator:
+            raise BackendError("LCC_PROJECT_INVALID", "A pole discriminator does not match the blueprint role.", "hvdc", operation, {"role": role})
+
+    return {
+        "valid": True,
+        "blueprint": validated["name"],
+        "template_roles": sorted(expected_roles),
+        "nets": sorted(item["logical_id"] for item in validated["nets"]),
+        "outputs": sorted(item["name"] for item in validated["outputs"]),
+    }
+
+
 def _name(tag: str) -> str:
     return tag.rsplit("}", 1)[-1].casefold()
 
@@ -726,4 +812,4 @@ def validate_companion_library(
     return result
 
 
-__all__ = ["validate_project_graph", "validate_companion_library"]
+__all__ = ["validate_project_graph", "validate_companion_library", "validate_parametric_topology_contract"]

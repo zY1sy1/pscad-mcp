@@ -10,7 +10,12 @@ from pathlib import Path
 from typing import Any
 
 from ....core.path_policy import PathPolicy, WorkspaceNotConfiguredError
-from .assets import LccAssetSet, canonical_json
+from .assets import (
+    LccAssetSet,
+    canonical_json,
+    load_parametric_catalog,
+    validate_parametric_blueprint_asset,
+)
 from .catalog import LccCatalog, LccDefinitionSpec, parse_catalog, require_definition, require_port, validate_parameters
 from .models import (
     LccAcceptanceCheck,
@@ -19,6 +24,7 @@ from .models import (
     LccNetSpec,
     LccPlanOperation,
 )
+from .parametric_models import DerivedParameterReport
 from .routing import absolute_port, route_intersects_rectangles, validate_orthogonal_route
 
 
@@ -241,6 +247,94 @@ def _operation_kind(component: LccComponentSpec) -> str:
     if role in {"measurement", "meter"} or "meter" in definition:
         return "place_measurement"
     return "place_power"
+
+
+def create_parametric_topology_plan(
+    blueprint: Mapping[str, Any],
+    derived_report: DerivedParameterReport,
+    catalog: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Map derived values only through declared logical role bindings.
+
+    This adapter is deliberately not an ``LccBuildPlan``: the reviewed PSCAD
+    parameter-write bindings do not exist yet, so the result remains a
+    deterministic, side-effect-free logical topology plan.
+    """
+
+    catalog_value = load_parametric_catalog() if catalog is None else catalog
+    if not isinstance(blueprint, Mapping):
+        raise _error("LCC_BLUEPRINT_INVALID", "Parametric blueprint must be an object.")
+    name = blueprint.get("name")
+    if not isinstance(name, str):
+        raise _error("LCC_BLUEPRINT_INVALID", "Parametric blueprint identity is missing.")
+    validated = validate_parametric_blueprint_asset(dict(blueprint), name, catalog_value)
+    if not isinstance(derived_report, DerivedParameterReport) or not derived_report.feasible:
+        raise _error("LCC_BLUEPRINT_INVALID", "A feasible DerivedParameterReport is required.")
+
+    topology = validated["parameter_topology"]
+    bindings = catalog_value.get("logical_parameter_bindings")
+    if not isinstance(bindings, Mapping):
+        raise _error("LCC_BLUEPRINT_INVALID", "Logical parameter bindings are missing from the catalog.")
+    template_roles = set(validated["template_roles"])
+    role_parameters: dict[str, dict[str, Any]] = {
+        role: {} for role in validated["template_roles"]
+    }
+    unresolved: list[dict[str, Any]] = []
+    observed_names: set[str] = set()
+    for parameter in sorted(derived_report.parameters, key=lambda item: item.name):
+        if parameter.name in observed_names:
+            raise _error("LCC_BLUEPRINT_INVALID", "Derived parameter identities must be unique.", parameter=parameter.name)
+        observed_names.add(parameter.name)
+        declaration = bindings.get(parameter.name)
+        if not isinstance(declaration, Mapping):
+            raise _error("LCC_BLUEPRINT_INVALID", "A derived parameter has no explicit catalog binding.", parameter=parameter.name)
+        roles_by_topology = declaration.get("roles_by_topology")
+        roles = roles_by_topology.get(topology) if isinstance(roles_by_topology, Mapping) else None
+        if (
+            not isinstance(roles, list)
+            or not roles
+            or any(not isinstance(role, str) or role not in template_roles for role in roles)
+            or parameter.units != declaration.get("units")
+        ):
+            raise _error("LCC_BLUEPRINT_INVALID", "A logical parameter binding does not match the topology or units.", parameter=parameter.name, topology=topology)
+        logical_parameter = declaration.get("logical_parameter")
+        template_parameter = declaration.get("template_parameter")
+        for role in roles:
+            role_parameters[role][parameter.name] = {
+                "value": parameter.value,
+                "units": parameter.units,
+                "logical_parameter": logical_parameter,
+                "template_parameter": template_parameter,
+            }
+        if declaration.get("binding_status") != "reviewed" or not isinstance(template_parameter, str) or not template_parameter:
+            unresolved.append(
+                {
+                    "parameter": parameter.name,
+                    "logical_parameter": logical_parameter,
+                    "roles": list(roles),
+                    "reason": "template_parameter_binding_unreviewed",
+                }
+            )
+
+    payload = {
+        "schema_version": 1,
+        "identity": "lcc_parametric_topology_plan_v1",
+        "blueprint": {
+            "identity": name,
+            "sha256": catalog_value["blueprint_hashes"][name],
+            "catalog_identity": catalog_value["identity"],
+            "provenance_identity": catalog_value["provenance_identity"],
+        },
+        "topology": topology,
+        "derived_report": derived_report.to_dict(),
+        "components": validated["components"],
+        "nets": validated["nets"],
+        "outputs": validated["outputs"],
+        "role_parameters": role_parameters,
+        "unresolved_bindings": unresolved,
+        "executable": not unresolved,
+    }
+    return {**payload, "plan_hash": hashlib.sha256(canonical_json(payload)).hexdigest()}
 
 
 def create_plan(

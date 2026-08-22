@@ -1,12 +1,38 @@
 {
+  "schema_version": 1,
   "name": "lcc_monopole_parametric_v1",
+  "identity": "lcc_monopole_parametric_v1",
+  "catalog_identity": "lcc_parametric_catalog_v1",
+  "provenance_identity": "lcc_parametric_provenance_v1",
+  "contract_kind": "template_role_topology",
   "topology": "lcc",
+  "parameter_topology": "monopolar",
   "poles": 1,
   "terminals": 2,
   "required_assets": ["positive_pole", "earth_return"],
   "return_paths": ["earth_return", "metallic_return"],
-  "schema_version": 1,
-  "components": [],
-  "nets": [],
-  "outputs": []
+  "template_roles": ["rectifier_valve_group", "inverter_valve_group", "earth_electrode"],
+  "components": [
+    {"logical_id": "rectifier_valve_group", "kind": "template_role", "template_role": "rectifier_valve_group", "contract_identity": "lcc_parametric_catalog_v1:RectPole", "discriminator": null, "ports": ["AC", "DCP1", "DCP2", "AOR", "KBR", "Tap"]},
+    {"logical_id": "inverter_valve_group", "kind": "template_role", "template_role": "inverter_valve_group", "contract_identity": "lcc_parametric_catalog_v1:InverterPole", "discriminator": null, "ports": ["AC", "DCP1", "DCP2", "AOI", "KBI", "GMES"]},
+    {"logical_id": "earth_electrode", "kind": "template_role", "template_role": "earth_electrode", "contract_identity": "lcc_parametric_catalog_v1:earth_electrode", "discriminator": null, "ports": ["A"]},
+    {"logical_id": "neutral_bus", "kind": "logical_junction", "ports": ["rectifier", "inverter", "earth", "metallic"]},
+    {"logical_id": "metallic_return_terminal", "kind": "logical_terminal", "ports": ["remote"]}
+  ],
+  "nets": [
+    {"logical_id": "dc_pole", "kind": "electrical_dc", "endpoints": [{"role": "rectifier_valve_group", "port": "DCP1"}, {"role": "inverter_valve_group", "port": "DCP1"}], "evidence": "template_connectivity_required"},
+    {"logical_id": "earth_return", "kind": "electrical_dc_return", "endpoints": [{"role": "rectifier_valve_group", "port": "DCP2"}, {"role": "inverter_valve_group", "port": "DCP2"}, {"role": "neutral_bus", "port": "earth"}, {"role": "earth_electrode", "port": "A"}], "evidence": "template_connectivity_required"},
+    {"logical_id": "metallic_return", "kind": "electrical_dc_return", "endpoints": [{"role": "neutral_bus", "port": "metallic"}, {"role": "metallic_return_terminal", "port": "remote"}], "evidence": "template_connectivity_required"}
+  ],
+  "outputs": [
+    {"name": "VDCRp1", "role": "rectifier_valve_group", "quantity": "dc_voltage", "pole": "positive", "units": "pu"},
+    {"name": "VDCIp1", "role": "inverter_valve_group", "quantity": "dc_voltage", "pole": "positive", "units": "pu"},
+    {"name": "CMRp1", "role": "rectifier_valve_group", "quantity": "dc_current", "pole": "positive", "units": "kA"},
+    {"name": "CMIp1", "role": "inverter_valve_group", "quantity": "dc_current", "pole": "positive", "units": "kA"},
+    {"name": "Ielectrode", "role": "earth_electrode", "quantity": "return_current", "pole": "neutral", "units": "kA"},
+    {"name": "PR", "role": "rectifier_valve_group", "quantity": "active_power", "pole": "aggregate", "units": "MW"},
+    {"name": "PI", "role": "inverter_valve_group", "quantity": "active_power", "pole": "aggregate", "units": "MW"},
+    {"name": "AORp1", "role": "rectifier_valve_group", "quantity": "firing_angle", "pole": "positive", "units": "deg"},
+    {"name": "AOIp1", "role": "inverter_valve_group", "quantity": "firing_angle", "pole": "positive", "units": "deg"}
+  ]
 }

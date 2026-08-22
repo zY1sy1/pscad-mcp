@@ -1,12 +1,48 @@
 {
+  "schema_version": 1,
   "name": "lcc_bipole_parametric_v1",
+  "identity": "lcc_bipole_parametric_v1",
+  "catalog_identity": "lcc_parametric_catalog_v1",
+  "provenance_identity": "lcc_parametric_provenance_v1",
+  "contract_kind": "template_role_topology",
   "topology": "lcc",
+  "parameter_topology": "bipolar",
   "poles": 2,
   "terminals": 3,
   "required_assets": ["positive_pole", "negative_pole", "neutral_bus", "earth_return", "metallic_return"],
   "return_paths": ["earth_return", "metallic_return"],
-  "schema_version": 1,
-  "components": [],
-  "nets": [],
-  "outputs": []
+  "template_roles": ["rectifier_positive_pole", "rectifier_negative_pole", "inverter_positive_pole", "inverter_negative_pole", "earth_electrode"],
+  "components": [
+    {"logical_id": "rectifier_positive_pole", "kind": "template_role", "template_role": "rectifier_positive_pole", "contract_identity": "lcc_parametric_catalog_v1:RectPole", "discriminator": {"name": "Des", "value": "RP1"}, "ports": ["AC", "DCP1", "DCP2", "AOR", "KBR", "Tap"]},
+    {"logical_id": "inverter_positive_pole", "kind": "template_role", "template_role": "inverter_positive_pole", "contract_identity": "lcc_parametric_catalog_v1:InverterPole", "discriminator": {"name": "Des", "value": "IP1"}, "ports": ["AC", "DCP1", "DCP2", "AOI", "KBI", "GMES"]},
+    {"logical_id": "rectifier_negative_pole", "kind": "template_role", "template_role": "rectifier_negative_pole", "contract_identity": "lcc_parametric_catalog_v1:RectPole", "discriminator": {"name": "Des", "value": "RP2"}, "ports": ["AC", "DCP1", "DCP2", "AOR", "KBR", "Tap"]},
+    {"logical_id": "inverter_negative_pole", "kind": "template_role", "template_role": "inverter_negative_pole", "contract_identity": "lcc_parametric_catalog_v1:InverterPole", "discriminator": {"name": "Des", "value": "IP2"}, "ports": ["AC", "DCP1", "DCP2", "AOI", "KBI", "GMES"]},
+    {"logical_id": "earth_electrode", "kind": "template_role", "template_role": "earth_electrode", "contract_identity": "lcc_parametric_catalog_v1:earth_electrode", "discriminator": null, "ports": ["A"]},
+    {"logical_id": "neutral_bus", "kind": "logical_junction", "ports": ["rp1", "ip1", "rp2", "ip2", "earth", "metallic"]},
+    {"logical_id": "metallic_return_terminal", "kind": "logical_terminal", "ports": ["remote"]}
+  ],
+  "nets": [
+    {"logical_id": "dc_positive", "kind": "electrical_dc", "endpoints": [{"role": "rectifier_positive_pole", "port": "DCP1"}, {"role": "inverter_positive_pole", "port": "DCP1"}], "evidence": "template_connectivity_required"},
+    {"logical_id": "dc_negative", "kind": "electrical_dc", "endpoints": [{"role": "rectifier_negative_pole", "port": "DCP1"}, {"role": "inverter_negative_pole", "port": "DCP1"}], "evidence": "template_connectivity_required"},
+    {"logical_id": "neutral_bus", "kind": "electrical_dc_neutral", "endpoints": [{"role": "rectifier_positive_pole", "port": "DCP2"}, {"role": "inverter_positive_pole", "port": "DCP2"}, {"role": "rectifier_negative_pole", "port": "DCP2"}, {"role": "inverter_negative_pole", "port": "DCP2"}], "evidence": "template_connectivity_required"},
+    {"logical_id": "earth_return", "kind": "electrical_dc_return", "endpoints": [{"role": "neutral_bus", "port": "earth"}, {"role": "earth_electrode", "port": "A"}], "evidence": "template_connectivity_required"},
+    {"logical_id": "metallic_return", "kind": "electrical_dc_return", "endpoints": [{"role": "neutral_bus", "port": "metallic"}, {"role": "metallic_return_terminal", "port": "remote"}], "evidence": "template_connectivity_required"}
+  ],
+  "outputs": [
+    {"name": "VDCRp1", "role": "rectifier_positive_pole", "quantity": "dc_voltage", "pole": "positive", "units": "pu"},
+    {"name": "VDCRp2", "role": "rectifier_negative_pole", "quantity": "dc_voltage", "pole": "negative", "units": "pu"},
+    {"name": "VDCIp1", "role": "inverter_positive_pole", "quantity": "dc_voltage", "pole": "positive", "units": "pu"},
+    {"name": "VDCIp2", "role": "inverter_negative_pole", "quantity": "dc_voltage", "pole": "negative", "units": "pu"},
+    {"name": "CMRp1", "role": "rectifier_positive_pole", "quantity": "dc_current", "pole": "positive", "units": "kA"},
+    {"name": "CMRp2", "role": "rectifier_negative_pole", "quantity": "dc_current", "pole": "negative", "units": "kA"},
+    {"name": "CMIp1", "role": "inverter_positive_pole", "quantity": "dc_current", "pole": "positive", "units": "kA"},
+    {"name": "CMIp2", "role": "inverter_negative_pole", "quantity": "dc_current", "pole": "negative", "units": "kA"},
+    {"name": "Ielectrode", "role": "earth_electrode", "quantity": "return_current", "pole": "neutral", "units": "kA"},
+    {"name": "PR", "role": "rectifier_positive_pole", "quantity": "active_power", "pole": "aggregate", "units": "MW"},
+    {"name": "PI", "role": "inverter_positive_pole", "quantity": "active_power", "pole": "aggregate", "units": "MW"},
+    {"name": "AORp1", "role": "rectifier_positive_pole", "quantity": "firing_angle", "pole": "positive", "units": "deg"},
+    {"name": "AORp2", "role": "rectifier_negative_pole", "quantity": "firing_angle", "pole": "negative", "units": "deg"},
+    {"name": "AOIp1", "role": "inverter_positive_pole", "quantity": "firing_angle", "pole": "positive", "units": "deg"},
+    {"name": "AOIp2", "role": "inverter_negative_pole", "quantity": "firing_angle", "pole": "negative", "units": "deg"}
+  ]
 }

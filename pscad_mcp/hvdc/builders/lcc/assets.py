@@ -20,6 +20,16 @@ from .schema import parse_blueprint
 _SUPPORTED_NAME = "cigre_lcc_monopole_v1"
 _SUPPORTED_PSCAD_VERSION = "4.6.2"
 _HASH_PATTERN = re.compile(r"^[0-9a-f]{64}$")
+_PARAMETRIC_NAMES = {
+    "lcc_monopole_parametric_v1": "monopolar",
+    "lcc_bipole_parametric_v1": "bipolar",
+}
+_PARAMETRIC_BLUEPRINT_KEYS = {
+    "schema_version", "name", "identity", "catalog_identity",
+    "provenance_identity", "contract_kind", "topology",
+    "parameter_topology", "poles", "terminals", "required_assets",
+    "return_paths", "template_roles", "components", "nets", "outputs",
+}
 
 
 @dataclass(frozen=True)
@@ -348,9 +358,165 @@ def load_packaged_asset_set(name: str = _SUPPORTED_NAME) -> LccAssetSet:
         return load_asset_set(materialized)
 
 
+def _record_ids(values: Any, key: str, field: str) -> list[str]:
+    if not isinstance(values, list) or not values:
+        raise _asset_error("LCC_BLUEPRINT_INVALID", f"{field} must be a non-empty array.", "load_parametric_blueprint", field=field)
+    result: list[str] = []
+    for index, value in enumerate(values):
+        if not isinstance(value, dict) or not isinstance(value.get(key), str) or not value[key]:
+            raise _asset_error("LCC_BLUEPRINT_INVALID", f"{field} entries require '{key}'.", "load_parametric_blueprint", field=field, index=index)
+        result.append(value[key])
+    if len(result) != len(set(result)):
+        raise _asset_error("LCC_BLUEPRINT_INVALID", f"{field} identities must be unique.", "load_parametric_blueprint", field=field)
+    return result
+
+
+def _text_list(value: Any, field: str, *, nonempty: bool = True) -> list[str]:
+    if not isinstance(value, list) or (nonempty and not value) or any(not isinstance(item, str) or not item for item in value):
+        raise _asset_error("LCC_BLUEPRINT_INVALID", f"{field} must be an array of non-empty strings.", "load_parametric_blueprint", field=field)
+    if len(value) != len(set(value)):
+        raise _asset_error("LCC_BLUEPRINT_INVALID", f"{field} values must be unique.", "load_parametric_blueprint", field=field)
+    return value
+
+
+def validate_parametric_catalog_asset(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise _asset_error("LCC_ASSET_MISMATCH", "Parametric catalog must be an object.", "load_parametric_catalog")
+    if (
+        value.get("schema_version") != 1
+        or isinstance(value.get("schema_version"), bool)
+        or value.get("name") != "lcc_parametric_catalog_v1"
+        or value.get("identity") != "lcc_parametric_catalog_v1"
+        or value.get("provenance_identity") != "lcc_parametric_provenance_v1"
+        or value.get("pscad_version") != _SUPPORTED_PSCAD_VERSION
+    ):
+        raise _asset_error("LCC_ASSET_MISMATCH", "Parametric catalog identity or provenance mismatch.", "load_parametric_catalog")
+    hashes = value.get("blueprint_hashes")
+    topologies = value.get("topology_contracts")
+    bindings = value.get("logical_parameter_bindings")
+    if not isinstance(hashes, dict) or set(hashes) != set(_PARAMETRIC_NAMES) or any(not isinstance(item, str) or not _HASH_PATTERN.fullmatch(item) for item in hashes.values()):
+        raise _asset_error("LCC_ASSET_MISMATCH", "Parametric blueprint hashes are invalid.", "load_parametric_catalog")
+    if not isinstance(topologies, dict) or set(topologies) != set(_PARAMETRIC_NAMES.values()):
+        raise _asset_error("LCC_ASSET_MISMATCH", "Parametric topology contracts are invalid.", "load_parametric_catalog")
+    if not isinstance(bindings, dict) or not bindings:
+        raise _asset_error("LCC_ASSET_MISMATCH", "Parametric logical parameter bindings are missing.", "load_parametric_catalog")
+    topology_roles: dict[str, set[str]] = {}
+    topology_keys = {"blueprint", "template_roles", "component_roles", "net_ids", "required_return_nets", "output_names"}
+    for topology, contract in topologies.items():
+        if not isinstance(contract, dict) or set(contract) != topology_keys or contract.get("blueprint") not in _PARAMETRIC_NAMES:
+            raise _asset_error("LCC_ASSET_MISMATCH", "A parametric topology contract has invalid fields.", "load_parametric_catalog", topology=topology)
+        for field in topology_keys - {"blueprint"}:
+            items = contract.get(field)
+            if not isinstance(items, list) or not items or any(not isinstance(item, str) or not item for item in items) or len(items) != len(set(items)):
+                raise _asset_error("LCC_ASSET_MISMATCH", "A parametric topology contract list is invalid.", "load_parametric_catalog", topology=topology, field=field)
+        if not set(contract["template_roles"]) < set(contract["component_roles"]):
+            raise _asset_error("LCC_ASSET_MISMATCH", "Template roles must be a strict subset of topology component roles.", "load_parametric_catalog", topology=topology)
+        if not set(contract["required_return_nets"]) <= set(contract["net_ids"]):
+            raise _asset_error("LCC_ASSET_MISMATCH", "Required return nets are not declared by the topology.", "load_parametric_catalog", topology=topology)
+        topology_roles[topology] = set(contract["template_roles"])
+    declared_parameter_names = set(value.get("rating_parameters", {})) | set(value.get("derived_parameters", {})) | set(value.get("engineering_parameters", {}))
+    relationships = value.get("feasibility_relationships", {})
+    if isinstance(relationships, dict):
+        declared_parameter_names.update(
+            item["output"]
+            for item in relationships.values()
+            if isinstance(item, dict) and isinstance(item.get("output"), str)
+        )
+    if set(bindings) != declared_parameter_names:
+        raise _asset_error("LCC_ASSET_MISMATCH", "Logical parameter bindings do not exactly cover derived report parameters.", "load_parametric_catalog")
+    for name, binding in bindings.items():
+        if (
+            not isinstance(name, str)
+            or not isinstance(binding, dict)
+            or set(binding) != {"logical_parameter", "units", "roles_by_topology", "template_parameter", "binding_status"}
+            or binding.get("logical_parameter") != name
+            or not isinstance(binding.get("units"), str)
+            or not binding["units"]
+            or binding.get("template_parameter") is not None
+            or binding.get("binding_status") != "unreviewed"
+            or not isinstance(binding.get("roles_by_topology"), dict)
+            or set(binding["roles_by_topology"]) != set(_PARAMETRIC_NAMES.values())
+        ):
+            raise _asset_error("LCC_ASSET_MISMATCH", "A logical parameter binding is invalid or falsely authorizes a template write.", "load_parametric_catalog", parameter=name)
+        for topology, roles in binding["roles_by_topology"].items():
+            if not isinstance(roles, list) or not roles or len(roles) != len(set(roles)) or any(role not in topology_roles[topology] for role in roles):
+                raise _asset_error("LCC_ASSET_MISMATCH", "A logical parameter binding references an undeclared template role.", "load_parametric_catalog", parameter=name, topology=topology)
+    return value
+
+
+def validate_parametric_blueprint_asset(value: Any, name: str, catalog: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Validate one immutable template-role topology asset and its catalog hash."""
+    if name not in _PARAMETRIC_NAMES:
+        raise _asset_error("LCC_BLUEPRINT_NOT_FOUND", f"Parametric blueprint '{name}' was not found.", "load_parametric_blueprint", blueprint=name)
+    catalog_value = validate_parametric_catalog_asset(load_parametric_catalog() if catalog is None else catalog)
+    if not isinstance(value, dict) or set(value) != _PARAMETRIC_BLUEPRINT_KEYS:
+        raise _asset_error("LCC_BLUEPRINT_INVALID", "Parametric blueprint schema fields are not exact.", "load_parametric_blueprint", blueprint=name)
+    topology = _PARAMETRIC_NAMES[name]
+    contract = catalog_value["topology_contracts"].get(topology)
+    if not isinstance(contract, dict):
+        raise _asset_error("LCC_BLUEPRINT_INVALID", "Parametric topology contract is missing.", "load_parametric_blueprint", blueprint=name)
+    expected_scalars = {
+        "schema_version": 1,
+        "name": name,
+        "identity": name,
+        "catalog_identity": catalog_value["identity"],
+        "provenance_identity": catalog_value["provenance_identity"],
+        "contract_kind": "template_role_topology",
+        "topology": "lcc",
+        "parameter_topology": topology,
+        "poles": 1 if topology == "monopolar" else 2,
+        "terminals": 2 if topology == "monopolar" else 3,
+    }
+    if any(type(value.get(field)) is not type(expected) or value.get(field) != expected for field, expected in expected_scalars.items()):
+        raise _asset_error("LCC_BLUEPRINT_INVALID", "Parametric blueprint identity or topology is invalid.", "load_parametric_blueprint", blueprint=name)
+    required_assets = _text_list(value.get("required_assets"), "required_assets")
+    returns = _text_list(value.get("return_paths"), "return_paths")
+    roles = _text_list(value.get("template_roles"), "template_roles")
+    component_ids = _record_ids(value.get("components"), "logical_id", "components")
+    net_ids = _record_ids(value.get("nets"), "logical_id", "nets")
+    output_names = _record_ids(value.get("outputs"), "name", "outputs")
+    expected_required = ["positive_pole", "earth_return"] if topology == "monopolar" else ["positive_pole", "negative_pole", "neutral_bus", "earth_return", "metallic_return"]
+    exact_contract = (
+        required_assets == expected_required
+        and returns == ["earth_return", "metallic_return"]
+        and roles == contract.get("template_roles")
+        and component_ids == contract.get("component_roles")
+        and net_ids == contract.get("net_ids")
+        and output_names == contract.get("output_names")
+        and set(contract.get("required_return_nets", ())) <= set(net_ids)
+    )
+    if not exact_contract:
+        raise _asset_error("LCC_BLUEPRINT_INVALID", "Parametric blueprint roles, nets, outputs, or return evidence do not match the catalog.", "load_parametric_blueprint", blueprint=name)
+    component_map = {item["logical_id"]: item for item in value["components"]}
+    for component in value["components"]:
+        kind = component.get("kind")
+        required_keys = {"logical_id", "kind", "ports"}
+        if kind == "template_role":
+            required_keys |= {"template_role", "contract_identity", "discriminator"}
+        if set(component) != required_keys or not isinstance(component.get("ports"), list) or not component["ports"]:
+            raise _asset_error("LCC_BLUEPRINT_INVALID", "Parametric component role contract is invalid.", "load_parametric_blueprint", logical_id=component.get("logical_id"))
+        if kind == "template_role" and component.get("template_role") not in roles:
+            raise _asset_error("LCC_BLUEPRINT_INVALID", "A component has an undeclared template role.", "load_parametric_blueprint", logical_id=component.get("logical_id"))
+        if kind not in {"template_role", "logical_junction", "logical_terminal"}:
+            raise _asset_error("LCC_BLUEPRINT_INVALID", "A component kind is not authorized by the topology contract.", "load_parametric_blueprint", logical_id=component.get("logical_id"))
+    for net in value["nets"]:
+        if set(net) != {"logical_id", "kind", "endpoints", "evidence"} or net.get("evidence") != "template_connectivity_required" or not isinstance(net.get("endpoints"), list) or len(net["endpoints"]) < 2:
+            raise _asset_error("LCC_BLUEPRINT_INVALID", "Parametric net evidence is invalid.", "load_parametric_blueprint", logical_id=net.get("logical_id"))
+        for endpoint in net["endpoints"]:
+            if not isinstance(endpoint, dict) or set(endpoint) != {"role", "port"} or endpoint.get("role") not in component_map or endpoint.get("port") not in component_map[endpoint["role"]]["ports"]:
+                raise _asset_error("LCC_BLUEPRINT_INVALID", "Parametric net endpoint is not declared by a role contract.", "load_parametric_blueprint", logical_id=net.get("logical_id"))
+    for output in value["outputs"]:
+        if set(output) != {"name", "role", "quantity", "pole", "units"} or output.get("role") not in roles or any(not isinstance(output.get(field), str) or not output[field] for field in ("name", "role", "quantity", "pole", "units")):
+            raise _asset_error("LCC_BLUEPRINT_INVALID", "Parametric output contract is invalid.", "load_parametric_blueprint", output=output.get("name"))
+    observed_hash = hashlib.sha256(canonical_json(value)).hexdigest()
+    if observed_hash != catalog_value["blueprint_hashes"][name]:
+        raise _asset_error("LCC_ASSET_MISMATCH", "Parametric blueprint does not match its catalog hash.", "load_parametric_blueprint", blueprint=name, expected=catalog_value["blueprint_hashes"][name], observed=observed_hash)
+    return value
+
+
 def load_parametric_blueprint(name: str) -> dict[str, Any]:
-    """Load a packaged parametric topology contract without mutating state."""
-    if name not in {"lcc_monopole_parametric_v1", "lcc_bipole_parametric_v1"}:
+    """Load a hash-verified template-role topology contract without mutation."""
+    if name not in _PARAMETRIC_NAMES:
         raise _asset_error("LCC_BLUEPRINT_NOT_FOUND", f"Parametric blueprint '{name}' was not found.", "load_parametric_blueprint", blueprint=name)
     resource = resources.files("pscad_mcp").joinpath("assets", "lcc", name, "blueprint.json")
     if not resource.is_file():
@@ -359,9 +525,7 @@ def load_parametric_blueprint(name: str) -> dict[str, Any]:
         value = json.loads(resource.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
         raise _asset_error("LCC_ASSET_MISMATCH", "Parametric blueprint is not valid JSON.", "load_parametric_blueprint", blueprint=name) from error
-    if not isinstance(value, dict) or value.get("name") != name:
-        raise _asset_error("LCC_ASSET_MISMATCH", "Parametric blueprint identity mismatch.", "load_parametric_blueprint", blueprint=name)
-    return value
+    return validate_parametric_blueprint_asset(value, name)
 
 
 def load_parametric_catalog() -> dict[str, Any]:
@@ -372,9 +536,7 @@ def load_parametric_catalog() -> dict[str, Any]:
         value = json.loads(resource.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
         raise _asset_error("LCC_ASSET_MISMATCH", "Parametric catalog is not valid JSON.", "load_parametric_catalog") from error
-    if not isinstance(value, dict):
-        raise _asset_error("LCC_ASSET_MISMATCH", "Parametric catalog must be an object.", "load_parametric_catalog")
-    return value
+    return validate_parametric_catalog_asset(value)
 
 
 def load_parametric_provenance() -> dict[str, Any]:

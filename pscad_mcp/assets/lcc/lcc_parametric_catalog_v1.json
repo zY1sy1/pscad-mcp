@@ -28,6 +28,45 @@
     "instance_discriminator": {"parameter": "Des", "bipole_roles": {"RP1": "rectifier_positive_pole", "RP2": "rectifier_negative_pole", "IP1": "inverter_positive_pole", "IP2": "inverter_negative_pole"}},
     "earth_electrode": {"contract_identity": "lcc_parametric_catalog_v1:earth_electrode", "ground_definition": "master:ground", "anchor_definition": "master:ammeter", "anchor_parameter": "Name", "anchor_value": "Ielectrode", "selection": "nearest_unique_euclidean_ground", "no_anchor_fallback": "single_exact_ground"}
   },
+  "blueprint_hashes": {
+    "lcc_monopole_parametric_v1": "76427f55abb59d6208013fd135cf788a4f0439e3aba64ab2d4fd23d968a04d7e",
+    "lcc_bipole_parametric_v1": "a1b47e27b29a372b5fc8188c094fdbfce70310331cc68e7b980860992bc14b84"
+  },
+  "topology_contracts": {
+    "monopolar": {
+      "blueprint": "lcc_monopole_parametric_v1",
+      "template_roles": ["rectifier_valve_group", "inverter_valve_group", "earth_electrode"],
+      "component_roles": ["rectifier_valve_group", "inverter_valve_group", "earth_electrode", "neutral_bus", "metallic_return_terminal"],
+      "net_ids": ["dc_pole", "earth_return", "metallic_return"],
+      "required_return_nets": ["earth_return", "metallic_return"],
+      "output_names": ["VDCRp1", "VDCIp1", "CMRp1", "CMIp1", "Ielectrode", "PR", "PI", "AORp1", "AOIp1"]
+    },
+    "bipolar": {
+      "blueprint": "lcc_bipole_parametric_v1",
+      "template_roles": ["rectifier_positive_pole", "rectifier_negative_pole", "inverter_positive_pole", "inverter_negative_pole", "earth_electrode"],
+      "component_roles": ["rectifier_positive_pole", "inverter_positive_pole", "rectifier_negative_pole", "inverter_negative_pole", "earth_electrode", "neutral_bus", "metallic_return_terminal"],
+      "net_ids": ["dc_positive", "dc_negative", "neutral_bus", "earth_return", "metallic_return"],
+      "required_return_nets": ["neutral_bus", "earth_return", "metallic_return"],
+      "output_names": ["VDCRp1", "VDCRp2", "VDCIp1", "VDCIp2", "CMRp1", "CMRp2", "CMIp1", "CMIp2", "Ielectrode", "PR", "PI", "AORp1", "AORp2", "AOIp1", "AOIp2"]
+    }
+  },
+  "logical_parameter_bindings": {
+    "rated_power_mw": {"logical_parameter": "rated_power_mw", "units": "MW", "roles_by_topology": {"monopolar": ["rectifier_valve_group", "inverter_valve_group"], "bipolar": ["rectifier_positive_pole", "rectifier_negative_pole", "inverter_positive_pole", "inverter_negative_pole"]}, "template_parameter": null, "binding_status": "unreviewed"},
+    "dc_voltage_kv": {"logical_parameter": "dc_voltage_kv", "units": "kV", "roles_by_topology": {"monopolar": ["rectifier_valve_group", "inverter_valve_group"], "bipolar": ["rectifier_positive_pole", "rectifier_negative_pole", "inverter_positive_pole", "inverter_negative_pole"]}, "template_parameter": null, "binding_status": "unreviewed"},
+    "dc_current_ka": {"logical_parameter": "dc_current_ka", "units": "kA", "roles_by_topology": {"monopolar": ["rectifier_valve_group", "inverter_valve_group"], "bipolar": ["rectifier_positive_pole", "rectifier_negative_pole", "inverter_positive_pole", "inverter_negative_pole"]}, "template_parameter": null, "binding_status": "unreviewed"},
+    "ac_voltage_kv": {"logical_parameter": "ac_voltage_kv", "units": "kV", "roles_by_topology": {"monopolar": ["rectifier_valve_group", "inverter_valve_group"], "bipolar": ["rectifier_positive_pole", "rectifier_negative_pole", "inverter_positive_pole", "inverter_negative_pole"]}, "template_parameter": null, "binding_status": "unreviewed"},
+    "frequency_hz": {"logical_parameter": "frequency_hz", "units": "Hz", "roles_by_topology": {"monopolar": ["rectifier_valve_group", "inverter_valve_group"], "bipolar": ["rectifier_positive_pole", "rectifier_negative_pole", "inverter_positive_pole", "inverter_negative_pole"]}, "template_parameter": null, "binding_status": "unreviewed"},
+    "scr": {"logical_parameter": "scr", "units": "1", "roles_by_topology": {"monopolar": ["rectifier_valve_group", "inverter_valve_group"], "bipolar": ["rectifier_positive_pole", "rectifier_negative_pole", "inverter_positive_pole", "inverter_negative_pole"]}, "template_parameter": null, "binding_status": "unreviewed"},
+    "escr": {"logical_parameter": "escr", "units": "1", "roles_by_topology": {"monopolar": ["rectifier_valve_group", "inverter_valve_group"], "bipolar": ["rectifier_positive_pole", "rectifier_negative_pole", "inverter_positive_pole", "inverter_negative_pole"]}, "template_parameter": null, "binding_status": "unreviewed"},
+    "dc_power_mw": {"logical_parameter": "dc_power_mw", "units": "MW", "roles_by_topology": {"monopolar": ["rectifier_valve_group", "inverter_valve_group"], "bipolar": ["rectifier_positive_pole", "rectifier_negative_pole", "inverter_positive_pole", "inverter_negative_pole"]}, "template_parameter": null, "binding_status": "unreviewed"},
+    "smoothing_reactor_mh": {"logical_parameter": "smoothing_reactor_mh", "units": "mH", "roles_by_topology": {"monopolar": ["rectifier_valve_group", "inverter_valve_group"], "bipolar": ["rectifier_positive_pole", "rectifier_negative_pole", "inverter_positive_pole", "inverter_negative_pole"]}, "template_parameter": null, "binding_status": "unreviewed"},
+    "filter_capacitance_uf": {"logical_parameter": "filter_capacitance_uf", "units": "uF", "roles_by_topology": {"monopolar": ["rectifier_valve_group", "inverter_valve_group"], "bipolar": ["rectifier_positive_pole", "rectifier_negative_pole", "inverter_positive_pole", "inverter_negative_pole"]}, "template_parameter": null, "binding_status": "unreviewed"},
+    "min_firing_angle_deg": {"logical_parameter": "min_firing_angle_deg", "units": "deg", "roles_by_topology": {"monopolar": ["rectifier_valve_group", "inverter_valve_group"], "bipolar": ["rectifier_positive_pole", "rectifier_negative_pole", "inverter_positive_pole", "inverter_negative_pole"]}, "template_parameter": null, "binding_status": "unreviewed"},
+    "max_firing_angle_deg": {"logical_parameter": "max_firing_angle_deg", "units": "deg", "roles_by_topology": {"monopolar": ["rectifier_valve_group", "inverter_valve_group"], "bipolar": ["rectifier_positive_pole", "rectifier_negative_pole", "inverter_positive_pole", "inverter_negative_pole"]}, "template_parameter": null, "binding_status": "unreviewed"},
+    "overlap_angle_deg": {"logical_parameter": "overlap_angle_deg", "units": "deg", "roles_by_topology": {"monopolar": ["rectifier_valve_group", "inverter_valve_group"], "bipolar": ["rectifier_positive_pole", "rectifier_negative_pole", "inverter_positive_pole", "inverter_negative_pole"]}, "template_parameter": null, "binding_status": "unreviewed"},
+    "min_extinction_angle_deg": {"logical_parameter": "min_extinction_angle_deg", "units": "deg", "roles_by_topology": {"monopolar": ["inverter_valve_group"], "bipolar": ["inverter_positive_pole", "inverter_negative_pole"]}, "template_parameter": null, "binding_status": "unreviewed"},
+    "max_feasible_inverter_firing_angle_deg": {"logical_parameter": "max_feasible_inverter_firing_angle_deg", "units": "deg", "roles_by_topology": {"monopolar": ["inverter_valve_group"], "bipolar": ["inverter_positive_pole", "inverter_negative_pole"]}, "template_parameter": null, "binding_status": "unreviewed"}
+  },
   "rating_parameters": {
     "rated_power_mw": {"units": "MW", "required": true, "constraints": [{"kind": "exclusive_minimum", "value": 0.0, "asset": "lcc_parametric_provenance_v1:positive_finite"}], "asset": "lcc_parametric_provenance_v1:positive_finite"},
     "dc_voltage_kv": {"units": "kV", "required": true, "constraints": [{"kind": "exclusive_minimum", "value": 0.0, "asset": "lcc_parametric_provenance_v1:positive_finite"}], "asset": "lcc_parametric_provenance_v1:positive_finite"},
