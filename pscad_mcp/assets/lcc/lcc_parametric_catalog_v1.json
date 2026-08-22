@@ -6,6 +6,28 @@
   "provenance_identity": "lcc_parametric_provenance_v1",
   "rating_contract_asset": "lcc_parametric_provenance_v1:rating_contract",
   "definitions": {},
+  "template_role_contracts": {
+    "schema_version": 1,
+    "authoritative": true,
+    "contract_identity": "lcc_parametric_catalog_v1:template_role_contracts",
+    "project_namespace_attribute": "name",
+    "pole_definitions": {
+      "rectifier": {
+        "local_name": "RectPole", "contract_identity": "lcc_parametric_catalog_v1:RectPole",
+        "form_parameters": {"Des": {"type": "Text"}},
+        "ports": {"KBR": {"model": "Transfer", "dim": 1, "mode": "Input", "type": "Real"}, "Tap": {"model": "Transfer", "dim": 1, "mode": "Input", "type": "Real"}, "DCP2": {"model": "Natural", "dim": 1, "type": "NonRemovable"}, "AOR": {"model": "Transfer", "dim": 1, "mode": "Input", "type": "Real"}, "DCP1": {"model": "Natural", "dim": 1, "type": "NonRemovable"}, "AC": {"model": "Natural", "dim": 3, "type": "NonRemovable"}},
+        "internal_components": {"master:g6p200": {"minimum": 2}, "master:xfmr-3p2w": {"minimum": 2}}
+      },
+      "inverter": {
+        "local_name": "InverterPole", "contract_identity": "lcc_parametric_catalog_v1:InverterPole",
+        "form_parameters": {"Des": {"type": "Text"}},
+        "ports": {"KBI": {"model": "Transfer", "dim": 1, "mode": "Input", "type": "Real"}, "GMES": {"model": "Transfer", "dim": 1, "mode": "Output", "type": "Real"}, "DCP2": {"model": "Natural", "dim": 1, "type": "NonRemovable"}, "AOI": {"model": "Transfer", "dim": 1, "mode": "Input", "type": "Real"}, "DCP1": {"model": "Natural", "dim": 1, "type": "NonRemovable"}, "AC": {"model": "Natural", "dim": 3, "type": "NonRemovable"}},
+        "internal_components": {"master:g6p200": {"minimum": 2}, "master:xfmr-3p2w": {"minimum": 2}}
+      }
+    },
+    "instance_discriminator": {"parameter": "Des", "bipole_roles": {"RP1": "rectifier_positive_pole", "RP2": "rectifier_negative_pole", "IP1": "inverter_positive_pole", "IP2": "inverter_negative_pole"}},
+    "earth_electrode": {"contract_identity": "lcc_parametric_catalog_v1:earth_electrode", "ground_definition": "master:ground", "anchor_definition": "master:ammeter", "anchor_parameter": "Name", "anchor_value": "Ielectrode", "selection": "nearest_unique_euclidean_ground"}
+  },
   "rating_parameters": {
     "rated_power_mw": {"units": "MW", "required": true, "constraints": [{"kind": "exclusive_minimum", "value": 0.0, "asset": "lcc_parametric_provenance_v1:positive_finite"}], "asset": "lcc_parametric_provenance_v1:positive_finite"},
     "dc_voltage_kv": {"units": "kV", "required": true, "constraints": [{"kind": "exclusive_minimum", "value": 0.0, "asset": "lcc_parametric_provenance_v1:positive_finite"}], "asset": "lcc_parametric_provenance_v1:positive_finite"},

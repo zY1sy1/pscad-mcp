@@ -1,0 +1,1 @@
+<project name="FixtureIncompatible"><definitions><Definition name="Main"><schematic><User id="1" defn="anything:RectPole" x="0" y="0"/><User id="2" defn="anything:InverterPole" x="10" y="0"/><User defn="master:ground" x="5" y="5"/></schematic></Definition></definitions></project>

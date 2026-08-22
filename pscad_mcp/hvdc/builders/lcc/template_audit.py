@@ -1,10 +1,12 @@
-"""Read-only audit of user-provided LCC PSCX templates."""
+"""Read-only, catalog-bound audit of user-provided LCC PSCX templates."""
 
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import re
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, NoReturn
@@ -14,10 +16,8 @@ from ....core.backend.base import BackendError
 
 
 TEMPLATE_MAX_BYTES = 32 * 1024 * 1024
-_FORBIDDEN_XML_DECLARATION = re.compile(
-    rb"<!\s*(?:DOCTYPE|ENTITY)\b",
-    flags=re.IGNORECASE,
-)
+_FORBIDDEN_XML_DECLARATION = re.compile(rb"<!\s*(?:DOCTYPE|ENTITY)\b", re.IGNORECASE)
+_AUTHORITATIVE_CONTRACT_SHA256 = "9e3b3bca5d46f7562d8b233f695a7d3da9e796c540ca0e9e2a99cee79042965d"
 
 
 @dataclass(frozen=True)
@@ -29,10 +29,104 @@ class TemplateAuditReport:
     fingerprint: str
 
     def to_dict(self) -> dict[str, Any]:
-        return {"compatible": self.compatible, "roles": self.roles, "missing_contracts": list(self.missing_contracts), "conflicts": list(self.conflicts), "fingerprint": self.fingerprint}
+        return {
+            "compatible": self.compatible,
+            "roles": self.roles,
+            "missing_contracts": list(self.missing_contracts),
+            "conflicts": list(self.conflicts),
+            "fingerprint": self.fingerprint,
+        }
 
 
-def audit_lcc_template(path: str | Path, catalog: dict[str, Any] | None = None) -> TemplateAuditReport:
+def audit_lcc_template(
+    path: str | Path, catalog: dict[str, Any] | None = None
+) -> TemplateAuditReport:
+    """Audit one immutable snapshot and authorize roles only through the v1 catalog."""
+
+    contracts = _validated_contracts(catalog)
+    source, payload = _read_template_once(path)
+    fingerprint = hashlib.sha256(payload).hexdigest()
+    root = _parse_template(payload)
+
+    namespace = _text(_attr(root, contracts["project_namespace_attribute"]))
+    definitions = _definition_index(root)
+    main = _main_scope(root)
+    components = _component_records(main)
+    roles: dict[str, Any] = {}
+    missing: list[str] = []
+
+    pole_contracts = contracts["pole_definitions"]
+    validated_definitions: dict[str, tuple[str, dict[str, Any]] | None] = {}
+    for family, contract in pole_contracts.items():
+        definition = _single_validated_definition(definitions, contract)
+        if definition is None or not namespace:
+            missing.append(f"{family}_pole_definition")
+            validated_definitions[family] = None
+        else:
+            full_scope = f"{namespace}:{contract['local_name']}"
+            validated_definitions[family] = (full_scope, contract)
+
+    rectifiers = _scoped_instances(components, validated_definitions["rectifier"])
+    inverters = _scoped_instances(components, validated_definitions["inverter"])
+    _assign_pole_roles(
+        roles, missing, rectifiers, inverters, contracts["instance_discriminator"]
+    )
+    if "rectifier_pole_definition" in missing:
+        missing = [item for item in missing if item != "rectifier_valve_group"]
+    if "inverter_pole_definition" in missing:
+        missing = [item for item in missing if item != "inverter_valve_group"]
+
+    earth_result, earth_conflict = _select_earth_electrode(
+        components, contracts["earth_electrode"]
+    )
+    if earth_conflict is not None:
+        _raise_ambiguous("earth_electrode", earth_conflict)
+    if earth_result is None:
+        missing.append("earth_electrode")
+    else:
+        roles["earth_electrode"] = earth_result
+
+    return TemplateAuditReport(
+        compatible=not missing,
+        roles=roles,
+        missing_contracts=tuple(sorted(set(missing))),
+        conflicts=(),
+        fingerprint=fingerprint,
+    )
+
+
+def _validated_contracts(catalog: dict[str, Any] | None) -> dict[str, Any]:
+    if catalog is None:
+        from .assets import load_parametric_catalog
+
+        catalog = load_parametric_catalog()
+    try:
+        contracts = catalog["template_role_contracts"]
+        encoded = json.dumps(
+            contracts, sort_keys=True, separators=(",", ":"), ensure_ascii=True
+        ).encode("ascii")
+        valid = (
+            catalog.get("identity") == "lcc_parametric_catalog_v1"
+            and catalog.get("schema_version") == 1
+            and isinstance(contracts, dict)
+            and contracts.get("schema_version") == 1
+            and contracts.get("authoritative") is True
+            and hashlib.sha256(encoded).hexdigest() == _AUTHORITATIVE_CONTRACT_SHA256
+        )
+    except (KeyError, TypeError, ValueError, UnicodeError):
+        valid = False
+    if not valid:
+        raise BackendError(
+            "LCC_ASSET_MISMATCH",
+            "Parametric catalog template role contracts are invalid.",
+            "hvdc",
+            "audit_lcc_template",
+            {"reason": "invalid_template_role_contracts"},
+        )
+    return contracts
+
+
+def _read_template_once(path: str | Path) -> tuple[Path, bytes]:
     try:
         source = Path(path).expanduser().resolve()
     except OSError as error:
@@ -46,11 +140,7 @@ def audit_lcc_template(path: str | Path, catalog: dict[str, Any] | None = None) 
                     "Template exceeds the audit size limit.",
                     "hvdc",
                     "audit_lcc_template",
-                    {
-                        "actual_bytes": actual_bytes,
-                        "max_bytes": TEMPLATE_MAX_BYTES,
-                        "reason": "template_too_large",
-                    },
+                    {"actual_bytes": actual_bytes, "max_bytes": TEMPLATE_MAX_BYTES, "reason": "template_too_large"},
                 )
             payload = stream.read(TEMPLATE_MAX_BYTES + 1)
     except BackendError:
@@ -63,100 +153,32 @@ def audit_lcc_template(path: str | Path, catalog: dict[str, Any] | None = None) 
             "Template exceeds the audit size limit.",
             "hvdc",
             "audit_lcc_template",
-            {
-                "actual_bytes": len(payload),
-                "max_bytes": TEMPLATE_MAX_BYTES,
-                "reason": "template_too_large",
-            },
+            {"actual_bytes": len(payload), "max_bytes": TEMPLATE_MAX_BYTES, "reason": "template_too_large"},
         )
-    fingerprint = hashlib.sha256(payload).hexdigest()
+    return source, payload
+
+
+def _parse_template(payload: bytes) -> ET.Element:
     if _FORBIDDEN_XML_DECLARATION.search(payload.replace(b"\x00", b"")):
         raise BackendError(
-            "LCC_TEMPLATE_INCOMPATIBLE",
-            "Template contains a forbidden XML declaration.",
-            "hvdc",
-            "audit_lcc_template",
-            {"reason": "forbidden_xml_declaration"},
+            "LCC_TEMPLATE_INCOMPATIBLE", "Template contains a forbidden XML declaration.",
+            "hvdc", "audit_lcc_template", {"reason": "forbidden_xml_declaration"},
         )
     try:
-        root = ET.fromstring(payload)
+        return ET.fromstring(payload)
     except (ET.ParseError, LookupError, ValueError) as error:
         raise BackendError(
-            "LCC_TEMPLATE_INCOMPATIBLE",
-            "Template is not valid PSCX XML.",
-            "hvdc",
-            "audit_lcc_template",
+            "LCC_TEMPLATE_INCOMPATIBLE", "Template is not valid PSCX XML.",
+            "hvdc", "audit_lcc_template",
             {"error_type": type(error).__name__, "reason": "invalid_xml"},
         ) from error
-    scope = _main_scope(root)
-    components = _component_records(scope)
-    roles: dict[str, Any] = {}
-    conflicts: list[str] = []
-    conflict_reasons: dict[str, str] = {}
-    missing: list[str] = []
-    legacy_bridges = _exact_components(components, "LCC12PulseBridge")
-    rectifiers = _exact_components(components, "RectPole")
-    inverters = _exact_components(components, "InverterPole")
-    if len(rectifiers) > 1 or len(legacy_bridges) > 1:
-        conflicts.append("rectifier_valve_group")
-        conflict_reasons["rectifier_valve_group"] = "multiple_exact_component_instances"
-    if len(inverters) > 1 or len(legacy_bridges) > 1:
-        conflicts.append("inverter_valve_group")
-        conflict_reasons["inverter_valve_group"] = "multiple_exact_component_instances"
-    rectifier = _single_definition(rectifiers) or _single_definition(legacy_bridges)
-    inverter = _single_definition(inverters) or _single_definition(legacy_bridges)
-    if rectifier is None:
-        missing.append("rectifier_valve_group")
-    else:
-        roles["rectifier_valve_group"] = {
-            "definition": rectifier,
-            "confidence": 1.0,
-            "source": str(source),
-        }
-    if inverter is None:
-        missing.append("inverter_valve_group")
-    else:
-        roles["inverter_valve_group"] = {
-            "definition": inverter,
-            "confidence": 1.0,
-            "source": str(source),
-        }
-    earth_result, earth_conflict = _select_earth_electrode(components, str(source))
-    if earth_conflict is not None:
-        conflicts.append("earth_electrode")
-        conflict_reasons["earth_electrode"] = earth_conflict
-    if earth_result is None:
-        if earth_conflict is None:
-            missing.append("earth_electrode")
-    else:
-        roles["earth_electrode"] = earth_result
-    if conflicts:
-        raise BackendError(
-            "LCC_TEMPLATE_AMBIGUOUS",
-            "Template contains ambiguous role candidates.",
-            "hvdc",
-            "audit_lcc_template",
-            {
-                "compatible": False,
-                "conflicts": sorted(set(conflicts)),
-                "roles": sorted(set(conflicts)),
-                "conflict_reasons": conflict_reasons,
-            },
-        )
-    compatible = not missing
-    return TemplateAuditReport(compatible, roles, tuple(sorted(set(missing))), tuple(sorted(conflicts)), fingerprint)
 
 
 def _raise_unreadable_template(error: OSError) -> NoReturn:
     raise BackendError(
-        "LCC_TEMPLATE_INCOMPATIBLE",
-        "Template could not be read.",
-        "hvdc",
-        "audit_lcc_template",
-        {
-            "error_type": type(error).__name__,
-            "reason": "template_unreadable",
-        },
+        "LCC_TEMPLATE_INCOMPATIBLE", "Template could not be read.",
+        "hvdc", "audit_lcc_template",
+        {"error_type": type(error).__name__, "reason": "template_unreadable"},
     ) from error
 
 
@@ -176,6 +198,143 @@ def _text(value: str | None) -> str:
     return (value or "").strip()
 
 
+def _definition_index(root: ET.Element) -> dict[str, list[ET.Element]]:
+    result: dict[str, list[ET.Element]] = {}
+    for definition in _top_level_definitions(root):
+        result.setdefault(_text(_attr(definition, "name", "id")), []).append(definition)
+    return result
+
+
+def _single_validated_definition(
+    definitions: dict[str, list[ET.Element]], contract: dict[str, Any]
+) -> ET.Element | None:
+    candidates = definitions.get(contract["local_name"], [])
+    if len(candidates) != 1:
+        return None
+    definition = candidates[0]
+    if not _form_contract_matches(definition, contract["form_parameters"]):
+        return None
+    if not _port_contract_matches(definition, contract["ports"]):
+        return None
+    counts = Counter(
+        component["definition"] for component in _component_records(definition)
+    )
+    if any(counts[name] < rule["minimum"] for name, rule in contract["internal_components"].items()):
+        return None
+    return definition
+
+
+def _form_contract_matches(definition: ET.Element, expected: dict[str, Any]) -> bool:
+    found: dict[str, list[ET.Element]] = {}
+    for child in definition:
+        if _name(child.tag) != "form":
+            continue
+        for element in child.iter():
+            if _name(element.tag) == "parameter":
+                found.setdefault(_text(_attr(element, "name")), []).append(element)
+    for name, contract in expected.items():
+        candidates = found.get(name, [])
+        if len(candidates) != 1 or _text(_attr(candidates[0], "type")) != contract["type"]:
+            return False
+    return True
+
+
+def _port_contract_matches(definition: ET.Element, expected: dict[str, Any]) -> bool:
+    found: dict[str, list[ET.Element]] = {}
+    for child in definition:
+        if _name(child.tag) != "svg":
+            continue
+        for element in child.iter():
+            if _name(element.tag) == "port":
+                found.setdefault(_text(_attr(element, "name")), []).append(element)
+    for name, contract in expected.items():
+        candidates = found.get(name, [])
+        if len(candidates) != 1:
+            return False
+        port = candidates[0]
+        for field, value in contract.items():
+            actual = _text(_attr(port, field))
+            if field == "dim":
+                if actual != str(value):
+                    return False
+            elif actual != value:
+                return False
+    return True
+
+
+def _scoped_instances(
+    components: list[dict[str, Any]], validated: tuple[str, dict[str, Any]] | None
+) -> list[dict[str, Any]]:
+    if validated is None:
+        return []
+    full_scope, contract = validated
+    return [
+        {**component, "contract": contract}
+        for component in components
+        if component["definition"] == full_scope
+    ]
+
+
+def _assign_pole_roles(
+    roles: dict[str, Any],
+    missing: list[str],
+    rectifiers: list[dict[str, Any]],
+    inverters: list[dict[str, Any]],
+    discriminator: dict[str, Any],
+) -> None:
+    counts = (len(rectifiers), len(inverters))
+    if counts == (1, 1):
+        roles["rectifier_valve_group"] = _pole_evidence(rectifiers[0], discriminator)
+        roles["inverter_valve_group"] = _pole_evidence(inverters[0], discriminator)
+        return
+    if counts == (2, 2):
+        expected = discriminator["bipole_roles"]
+        parameter = discriminator["parameter"]
+        records = rectifiers + inverters
+        markers = [component["parameters"].get(parameter) for component in records]
+        if any(marker not in expected for marker in markers):
+            missing.append("bipole_pole_discriminators")
+            return
+        if len(set(markers)) != 4:
+            _raise_ambiguous("pole_instances", "duplicate_or_missing_bipole_discriminator")
+        for component, marker in zip(records, markers, strict=True):
+            family = "rectifier" if component in rectifiers else "inverter"
+            if not marker.startswith("R" if family == "rectifier" else "I"):
+                missing.append("bipole_pole_discriminators")
+                roles.clear()
+                return
+            roles[expected[marker]] = _pole_evidence(component, discriminator)
+        return
+    if len(rectifiers) == 0:
+        missing.append("rectifier_valve_group")
+    if len(inverters) == 0:
+        missing.append("inverter_valve_group")
+    if len(rectifiers) > 0 and len(inverters) > 0:
+        _raise_ambiguous("pole_instances", "unsupported_pole_instance_cardinality")
+
+
+def _pole_evidence(component: dict[str, Any], discriminator: dict[str, Any]) -> dict[str, Any]:
+    parameter = discriminator["parameter"]
+    evidence: dict[str, Any] = {
+        "definition": component["definition"],
+        "location": list(_point(component["element"], role="pole_instance")),
+        "discriminator": {"name": parameter, "value": component["parameters"].get(parameter, "")},
+        "validated_contract": component["contract"]["contract_identity"],
+    }
+    instance_id = _text(_attr(component["element"], "id"))
+    if instance_id:
+        evidence["instance_id"] = instance_id
+    return evidence
+
+
+def _raise_ambiguous(role: str, reason: str) -> NoReturn:
+    raise BackendError(
+        "LCC_TEMPLATE_AMBIGUOUS", "Template contains ambiguous role candidates.",
+        "hvdc", "audit_lcc_template",
+        {"compatible": False, "conflicts": [role], "roles": [role], "conflict_reasons": {role: reason}},
+    )
+
+
 def _integer(value: str, *, field: str) -> int:
     normalized = value.strip()
     try:
@@ -186,16 +345,9 @@ def _integer(value: str, *, field: str) -> int:
 
 def _raise_invalid_coordinate(field: str, value: str, cause: Exception | None = None) -> NoReturn:
     error = BackendError(
-        "LCC_TEMPLATE_INCOMPATIBLE",
-        "Component coordinate is invalid.",
-        "hvdc",
-        "audit_lcc_template",
-        {
-            "field": field,
-            "reason": "invalid_component_coordinate",
-            "value_length": len(value),
-            "value_preview": value[:64],
-        },
+        "LCC_TEMPLATE_INCOMPATIBLE", "Component coordinate is invalid.",
+        "hvdc", "audit_lcc_template",
+        {"field": field, "reason": "invalid_component_coordinate", "value_length": len(value), "value_preview": value[:64]},
     )
     if cause is None:
         raise error
@@ -215,11 +367,8 @@ def _point(element: ET.Element, *, role: str) -> tuple[int, int]:
                 _raise_invalid_coordinate("location", raw.strip())
     if x is None or y is None or not x.strip() or not y.strip():
         raise BackendError(
-            "LCC_TEMPLATE_INCOMPATIBLE",
-            "A role component coordinate is missing.",
-            "hvdc",
-            "audit_lcc_template",
-            {"reason": "missing_component_coordinate", "role": role},
+            "LCC_TEMPLATE_INCOMPATIBLE", "A role component coordinate is missing.",
+            "hvdc", "audit_lcc_template", {"reason": "missing_component_coordinate", "role": role},
         )
     return _integer(x, field="x"), _integer(y, field="y")
 
@@ -230,22 +379,14 @@ def _parameters(element: ET.Element) -> dict[str, str]:
     parameters = [child for child in direct_children if _name(child.tag) == "param"]
     for child in direct_children:
         if _name(child.tag) == "paramlist":
-            parameters.extend(
-                parameter for parameter in list(child) if _name(parameter.tag) == "param"
-            )
+            parameters.extend(parameter for parameter in list(child) if _name(parameter.tag) == "param")
     for parameter in parameters:
         name = _text(_attr(parameter, "name", "key"))
         if name:
-            if name == "Name" and name in result:
+            if name in result:
                 raise BackendError(
-                    "LCC_TEMPLATE_INCOMPATIBLE",
-                    "Component contains duplicate Name parameters.",
-                    "hvdc",
-                    "audit_lcc_template",
-                    {
-                        "parameter": "Name",
-                        "reason": "duplicate_component_parameter",
-                    },
+                    "LCC_TEMPLATE_INCOMPATIBLE", "Component contains duplicate parameters.",
+                    "hvdc", "audit_lcc_template", {"parameter": name[:64], "reason": "duplicate_component_parameter"},
                 )
             value = _attr(parameter, "value")
             result[name] = _text(value if value is not None else parameter.text)
@@ -254,41 +395,13 @@ def _parameters(element: ET.Element) -> dict[str, str]:
 
 def _main_scope(root: ET.Element) -> ET.Element:
     definitions = _top_level_definitions(root)
-    main_definitions = [
-        definition
-        for definition in definitions
-        if _text(_attr(definition, "name", "id")).casefold() == "main"
-    ]
+    main_definitions = [definition for definition in definitions if _text(_attr(definition, "name", "id")).casefold() == "main"]
     if len(main_definitions) > 1:
-        raise BackendError(
-            "LCC_TEMPLATE_AMBIGUOUS",
-            "Template contains multiple Main definitions.",
-            "hvdc",
-            "audit_lcc_template",
-            {
-                "compatible": False,
-                "conflict_reasons": {"main_scope": "multiple_main_definitions"},
-                "conflicts": ["main_scope"],
-                "roles": ["main_scope"],
-            },
-        )
+        _raise_ambiguous("main_scope", "multiple_main_definitions")
     if main_definitions:
         return main_definitions[0]
     if len(definitions) > 1:
-        raise BackendError(
-            "LCC_TEMPLATE_AMBIGUOUS",
-            "Template has multiple definitions and no Main definition.",
-            "hvdc",
-            "audit_lcc_template",
-            {
-                "compatible": False,
-                "conflict_reasons": {
-                    "main_scope": "multiple_definitions_without_main"
-                },
-                "conflicts": ["main_scope"],
-                "roles": ["main_scope"],
-            },
-        )
+        _raise_ambiguous("main_scope", "multiple_definitions_without_main")
     return definitions[0] if definitions else root
 
 
@@ -328,38 +441,19 @@ def _component_records(scope: ET.Element) -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
     for element in _component_elements(scope):
         definition = _text(_attr(element, "definition", "defn", "type"))
-        if not definition:
-            continue
-        records.append(
-            {
-                "definition": definition,
-                "local_name": definition.rsplit(":", 1)[-1],
-                "element": element,
-                "parameters": _parameters(element),
-            }
-        )
+        if definition:
+            records.append({"definition": definition, "element": element, "parameters": _parameters(element)})
     return records
 
 
-def _exact_components(components: list[dict[str, Any]], local_name: str) -> list[dict[str, Any]]:
-    return [component for component in components if component["local_name"] == local_name]
-
-
-def _single_definition(components: list[dict[str, Any]]) -> str | None:
-    if len(components) == 1:
-        return components[0]["definition"]
-    return None
-
-
 def _select_earth_electrode(
-    components: list[dict[str, Any]], source: str
+    components: list[dict[str, Any]], contract: dict[str, Any]
 ) -> tuple[dict[str, Any] | None, str | None]:
-    grounds = [component for component in components if component["definition"] == "master:ground"]
+    grounds = [component for component in components if component["definition"] == contract["ground_definition"]]
     anchors = [
-        component
-        for component in components
-        if component["definition"] == "master:ammeter"
-        and component["parameters"].get("Name") == "Ielectrode"
+        component for component in components
+        if component["definition"] == contract["anchor_definition"]
+        and component["parameters"].get(contract["anchor_parameter"]) == contract["anchor_value"]
     ]
     if len(anchors) > 1:
         return None, "multiple_exact_ielectrode_anchors"
@@ -367,56 +461,34 @@ def _select_earth_electrode(
         return None, None
     if not anchors and len(grounds) > 1:
         return None, "multiple_exact_grounds_without_anchor"
-    grounds = [
-        {
-            **component,
-            "location": _point(component["element"], role="earth_electrode_ground"),
-        }
-        for component in grounds
-    ]
-    selected = grounds[0]
+    located = [{**component, "location": _point(component["element"], role="earth_electrode_ground")} for component in grounds]
+    selected = located[0]
     evidence: dict[str, Any] = {
-        "selected": {
-            "definition": selected["definition"],
-            "location": list(selected["location"]),
-        },
+        "selected": _component_location_evidence(selected),
         "selection_reason": "single_exact_ground_without_anchor",
+        "validated_contract": contract["contract_identity"],
     }
     if anchors:
-        anchor = {
-            **anchors[0],
-            "location": _point(
-                anchors[0]["element"], role="earth_electrode_anchor"
-            ),
-        }
-        ranked = [
-            (_distance_sq(anchor["location"], component["location"]), component)
-            for component in grounds
-        ]
-        ranked.sort(key=lambda item: item[0])
+        anchor = {**anchors[0], "location": _point(anchors[0]["element"], role="earth_electrode_anchor")}
+        ranked = sorted((_distance_sq(anchor["location"], item["location"]), item) for item in located)
         if len(ranked) > 1 and ranked[0][0] == ranked[1][0]:
             return None, "nearest_exact_ground_distance_tie"
         selected = ranked[0][1]
-        evidence["anchor"] = {
-            "definition": anchor["definition"],
-            "location": list(anchor["location"]),
-            "marker": {"name": "Name", "value": "Ielectrode"},
-        }
-        evidence["selected"] = {
-            "definition": selected["definition"],
-            "location": list(selected["location"]),
-        }
-        evidence["selection_reason"] = "nearest_exact_ground_to_ielectrode_anchor"
-        evidence["distance"] = _distance(anchor["location"], selected["location"])
-    return (
-        {
-            "definition": selected["definition"],
-            "confidence": 1.0,
-            "source": source,
-            "evidence": evidence,
-        },
-        None,
-    )
+        evidence.update({
+            "anchor": {**_component_location_evidence(anchor), "marker": {"name": contract["anchor_parameter"], "value": contract["anchor_value"]}},
+            "selected": _component_location_evidence(selected),
+            "selection_reason": "nearest_exact_ground_to_ielectrode_anchor",
+            "distance": _distance(anchor["location"], selected["location"]),
+        })
+    return ({"definition": selected["definition"], "evidence": evidence}, None)
+
+
+def _component_location_evidence(component: dict[str, Any]) -> dict[str, Any]:
+    result: dict[str, Any] = {"definition": component["definition"], "location": list(component["location"])}
+    instance_id = _text(_attr(component["element"], "id"))
+    if instance_id:
+        result["instance_id"] = instance_id
+    return result
 
 
 def _distance_sq(left: tuple[int, int], right: tuple[int, int]) -> int:
