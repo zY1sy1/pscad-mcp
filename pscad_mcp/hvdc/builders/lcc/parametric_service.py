@@ -20,6 +20,7 @@ from .template_audit import audit_lcc_template
 
 
 _PROJECT_NAME = re.compile(r"^[A-Za-z][A-Za-z0-9_]{0,63}$")
+_PLAN_HASH = re.compile(r"^[0-9a-f]{64}$", re.ASCII)
 _PLAN_MAX_BYTES = 256 * 1024
 _PLAN_CACHE_MAX_ITEMS = 64
 _PATH_MAX_CHARS = 4096
@@ -46,7 +47,13 @@ _ASSET_REVALIDATION_CODES = {
     "LCC_ASSET_MISMATCH",
     "LCC_BLUEPRINT_INVALID",
     "LCC_PARAMETER_DERIVATION_FAILED",
+    "LCC_PLAN_INVALID",
 }
+_WINDOWS_RESERVED_PROJECT_NAMES = frozenset(
+    {"CON", "PRN", "AUX", "NUL"}
+    | {f"COM{index}" for index in range(1, 10)}
+    | {f"LPT{index}" for index in range(1, 10)}
+)
 
 
 def _error(code: str, message: str, operation: str, **details: Any) -> BackendError:
@@ -348,6 +355,14 @@ class ParametricLccBuilderService:
                 field="project_name",
                 reason="unsafe_project_name",
             )
+        if project_name.upper() in _WINDOWS_RESERVED_PROJECT_NAMES:
+            raise _error(
+                "LCC_LAYOUT_INVALID",
+                "project_name is reserved by Windows.",
+                operation,
+                field="project_name",
+                reason="reserved_project_name",
+            )
         if self.workspace_root is None:
             raise _error(
                 "LCC_LAYOUT_INVALID",
@@ -355,6 +370,24 @@ class ParametricLccBuilderService:
                 operation,
                 reason="workspace_not_configured",
             )
+        try:
+            if self.workspace_root.exists() and not self.workspace_root.is_dir():
+                raise _error(
+                    "LCC_LAYOUT_INVALID",
+                    "The configured workspace root is not a directory.",
+                    operation,
+                    reason="workspace_not_directory",
+                )
+        except BackendError:
+            raise
+        except OSError as error:
+            raise _error(
+                "LCC_LAYOUT_INVALID",
+                "The configured workspace root could not be inspected.",
+                operation,
+                reason="workspace_unreadable",
+                error_type=type(error).__name__,
+            ) from error
         if not isinstance(folder, (str, Path)) or not Path(folder).expanduser().is_absolute():
             raise _error(
                 "LCC_LAYOUT_INVALID",
@@ -514,6 +547,13 @@ class ParametricLccBuilderService:
     ) -> dict[str, Any]:
         if not confirm:
             raise BackendError("CONFIRMATION_REQUIRED", "confirm=true is required.", "hvdc", "build_parametric_lcc_model")
+        if not isinstance(expected_plan_hash, str) or _PLAN_HASH.fullmatch(expected_plan_hash) is None:
+            raise _error(
+                "LCC_PLAN_STALE",
+                "The supplied plan hash is not a canonical SHA-256 value.",
+                "build_parametric_lcc_model",
+                reason="invalid_expected_plan_hash",
+            )
         try:
             plan = self._compose_plan(
                 request,

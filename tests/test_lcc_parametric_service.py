@@ -7,6 +7,7 @@ import pytest
 
 from pscad_mcp.core.backend.base import BackendError
 from pscad_mcp.hvdc.builders.lcc import parametric_service
+from pscad_mcp.hvdc.builders.lcc.assets import load_parametric_catalog
 from pscad_mcp.hvdc.builders.lcc.parametric_models import LccRatings, ParametricLccRequest
 from pscad_mcp.hvdc.builders.lcc.parametric_service import ParametricLccBuilderService
 
@@ -137,6 +138,23 @@ def test_plan_rejects_unsafe_project_name(tmp_path, project_name):
     assert project_name not in str(raised.value.details)
 
 
+@pytest.mark.parametrize(
+    "project_name",
+    ["CON", "con", "PrN", "AUX", "nul", "COM1", "com9", "LPT1", "lpt9"],
+)
+def test_plan_rejects_windows_reserved_device_project_names(tmp_path, project_name):
+    values = _inputs(tmp_path)
+    values["project_name"] = project_name
+    service = ParametricLccBuilderService(workspace_root=values["workspace"])
+    with pytest.raises(BackendError) as raised:
+        _plan(service, values)
+    assert raised.value.code == "LCC_LAYOUT_INVALID"
+    assert raised.value.details == {
+        "field": "project_name",
+        "reason": "reserved_project_name",
+    }
+
+
 def test_plan_requires_absolute_existing_pscx_source_and_absolute_owned_folder(tmp_path):
     values = _inputs(tmp_path)
     service = ParametricLccBuilderService(workspace_root=values["workspace"])
@@ -163,6 +181,17 @@ def test_plan_fails_closed_without_configured_workspace(tmp_path):
         _plan(service, values)
     assert raised.value.code == "LCC_LAYOUT_INVALID"
     assert raised.value.details == {"reason": "workspace_not_configured"}
+
+
+def test_plan_rejects_workspace_root_that_is_an_existing_file(tmp_path):
+    workspace_file = tmp_path / "workspace-file"
+    workspace_file.write_text("not a directory", encoding="utf-8")
+    values = _inputs(tmp_path)
+    service = ParametricLccBuilderService(workspace_root=workspace_file)
+    with pytest.raises(BackendError) as raised:
+        _plan(service, values)
+    assert raised.value.code == "LCC_LAYOUT_INVALID"
+    assert raised.value.details == {"reason": "workspace_not_directory"}
 
 
 def test_plan_rejects_existing_final_target(tmp_path):
@@ -192,6 +221,28 @@ def test_build_requires_confirmation_before_plan_and_configuration_checks(tmp_pa
         _build(service, values, "wrong", confirm=False)
     assert raised.value.code == "CONFIRMATION_REQUIRED"
     assert service._statuses == {}
+    assert not values["workspace"].exists()
+
+
+@pytest.mark.parametrize(
+    "expected_plan_hash",
+    [None, 1, "", "a" * 63, "a" * 65, "A" * 64, "g" * 64, "é" * 64, "a" * 10000],
+)
+def test_build_rejects_invalid_expected_hash_before_template_or_asset_revalidation(
+    tmp_path, monkeypatch, expected_plan_hash
+):
+    values = _inputs(tmp_path)
+    service = ParametricLccBuilderService(pscad_service=object(), workspace_root=values["workspace"])
+
+    def must_not_revalidate(*args, **kwargs):
+        raise AssertionError("template/assets must not be read for an invalid expected hash")
+
+    monkeypatch.setattr(service, "_compose_plan", must_not_revalidate)
+    with pytest.raises(BackendError) as raised:
+        _build(service, values, expected_plan_hash)
+    assert raised.value.code == "LCC_PLAN_STALE"
+    assert raised.value.details == {"reason": "invalid_expected_plan_hash"}
+    assert len(str(raised.value.details)) < 128
     assert not values["workspace"].exists()
 
 
@@ -282,6 +333,26 @@ def test_build_normalizes_damaged_packaged_asset_to_stale_before_writes(tmp_path
     assert raised.value.code == "LCC_PLAN_STALE"
     assert raised.value.details == {"reason": "asset_changed"}
     assert len(str(raised.value.details)) < 128
+    assert service._statuses == {}
+    assert not values["workspace"].exists()
+
+
+@pytest.mark.parametrize("damage", ["non_json", "oversized"])
+def test_build_normalizes_injected_catalog_canonicalization_failure_to_asset_stale(
+    tmp_path, damage
+):
+    values = _inputs(tmp_path)
+    catalog = copy.deepcopy(load_parametric_catalog())
+    service = ParametricLccBuilderService(
+        pscad_service=object(), workspace_root=values["workspace"], catalog=catalog
+    )
+    plan = _plan(service, values)
+    catalog["post_plan_damage"] = object() if damage == "non_json" else "x" * 300_000
+
+    with pytest.raises(BackendError) as raised:
+        _build(service, values, plan["plan_hash"])
+    assert raised.value.code == "LCC_PLAN_STALE"
+    assert raised.value.details == {"reason": "asset_changed"}
     assert service._statuses == {}
     assert not values["workspace"].exists()
 

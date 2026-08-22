@@ -7,7 +7,8 @@ from pscad_mcp.tools import lcc_parametric_tools
 
 
 def test_parametric_lcc_tools_are_registered():
-    names = {tool.name for tool in create_server()._tool_manager.list_tools()}
+    tools = create_server()._tool_manager.list_tools()
+    names = {tool.name for tool in tools}
     expected = {
         "derive_lcc_parameters",
         "audit_lcc_template",
@@ -18,6 +19,18 @@ def test_parametric_lcc_tools_are_registered():
     }
     assert expected <= names
     assert len(names) == 83
+    by_name = {tool.name: tool for tool in tools}
+    assert set(by_name["plan_parametric_lcc_model"].parameters["required"]) == {
+        "request", "template_path", "project_name", "folder",
+    }
+    assert set(by_name["build_parametric_lcc_model"].parameters["required"]) == {
+        "request", "expected_plan_hash", "template_path", "project_name", "folder",
+    }
+    for tool_name in ("plan_parametric_lcc_model", "build_parametric_lcc_model"):
+        properties = by_name[tool_name].parameters["properties"]
+        for field in ("template_path", "project_name", "folder"):
+            assert properties[field]["type"] == "string"
+            assert "default" not in properties[field]
 
 
 def test_parametric_service_uses_configured_workspace_path_policy(monkeypatch, tmp_path):

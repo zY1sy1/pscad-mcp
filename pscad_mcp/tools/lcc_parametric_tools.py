@@ -44,9 +44,9 @@ async def audit_lcc_template(template_path: str) -> dict[str, Any]:
 
 async def plan_parametric_lcc_model(
     request: dict[str, Any],
-    template_path: str | None = None,
-    project_name: str | None = None,
-    folder: str | None = None,
+    template_path: str,
+    project_name: str,
+    folder: str,
 ) -> dict[str, Any]:
     return _service().plan_parametric_model(
         _request(request),
@@ -59,9 +59,9 @@ async def plan_parametric_lcc_model(
 async def build_parametric_lcc_model(
     request: dict[str, Any],
     expected_plan_hash: str,
-    template_path: str | None = None,
-    project_name: str | None = None,
-    folder: str | None = None,
+    template_path: str,
+    project_name: str,
+    folder: str,
     confirm: bool = False,
 ) -> dict[str, Any]:
     return await _service().build_parametric_model(
