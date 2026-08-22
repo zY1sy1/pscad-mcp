@@ -37,9 +37,19 @@ def audit_lcc_template(path: str | Path, catalog: dict[str, Any] | None = None) 
     components = _component_records(scope)
     roles: dict[str, Any] = {}
     conflicts: list[str] = []
+    conflict_reasons: dict[str, str] = {}
     missing: list[str] = []
-    rectifier = _unique_definition(components, "RectPole") or _unique_definition(components, "LCC12PulseBridge")
-    inverter = _unique_definition(components, "InverterPole") or _unique_definition(components, "LCC12PulseBridge")
+    legacy_bridges = _exact_components(components, "LCC12PulseBridge")
+    rectifiers = _exact_components(components, "RectPole")
+    inverters = _exact_components(components, "InverterPole")
+    if len(rectifiers) > 1 or len(legacy_bridges) > 1:
+        conflicts.append("rectifier_valve_group")
+        conflict_reasons["rectifier_valve_group"] = "multiple_exact_component_instances"
+    if len(inverters) > 1 or len(legacy_bridges) > 1:
+        conflicts.append("inverter_valve_group")
+        conflict_reasons["inverter_valve_group"] = "multiple_exact_component_instances"
+    rectifier = _single_definition(rectifiers) or _single_definition(legacy_bridges)
+    inverter = _single_definition(inverters) or _single_definition(legacy_bridges)
     if rectifier is None:
         missing.append("rectifier_valve_group")
     else:
@@ -56,13 +66,28 @@ def audit_lcc_template(path: str | Path, catalog: dict[str, Any] | None = None) 
             "confidence": 1.0,
             "source": str(source),
         }
-    earth_result = _select_earth_electrode(components, str(source))
+    earth_result, earth_conflict = _select_earth_electrode(components, str(source))
+    if earth_conflict is not None:
+        conflicts.append("earth_electrode")
+        conflict_reasons["earth_electrode"] = earth_conflict
     if earth_result is None:
-        missing.append("earth_electrode")
+        if earth_conflict is None:
+            missing.append("earth_electrode")
     else:
         roles["earth_electrode"] = earth_result
     if conflicts:
-        raise BackendError("LCC_TEMPLATE_AMBIGUOUS", "Template contains ambiguous role candidates.", "hvdc", "audit_lcc_template", {"roles": conflicts})
+        raise BackendError(
+            "LCC_TEMPLATE_AMBIGUOUS",
+            "Template contains ambiguous role candidates.",
+            "hvdc",
+            "audit_lcc_template",
+            {
+                "compatible": False,
+                "conflicts": sorted(set(conflicts)),
+                "roles": sorted(set(conflicts)),
+                "conflict_reasons": conflict_reasons,
+            },
+        )
     compatible = not missing
     return TemplateAuditReport(compatible, roles, tuple(sorted(set(missing))), tuple(sorted(conflicts)), fingerprint)
 
@@ -151,32 +176,50 @@ def _component_records(scope: ET.Element) -> list[dict[str, Any]]:
     return records
 
 
-def _unique_definition(components: list[dict[str, Any]], local_name: str) -> str | None:
-    matches = sorted({component["definition"] for component in components if component["local_name"] == local_name})
-    if len(matches) == 1:
-        return matches[0]
+def _exact_components(components: list[dict[str, Any]], local_name: str) -> list[dict[str, Any]]:
+    return [component for component in components if component["local_name"] == local_name]
+
+
+def _single_definition(components: list[dict[str, Any]]) -> str | None:
+    if len(components) == 1:
+        return components[0]["definition"]
     return None
 
 
-def _select_earth_electrode(components: list[dict[str, Any]], source: str) -> dict[str, Any] | None:
-    grounds = [component for component in components if component["local_name"] == "ground" and component["definition"] == "master:ground"]
+def _select_earth_electrode(
+    components: list[dict[str, Any]], source: str
+) -> tuple[dict[str, Any] | None, str | None]:
+    grounds = [component for component in components if component["definition"] == "master:ground"]
     anchors = [
         component
         for component in components
-        if component["local_name"] == "ammeter" and component["parameters"].get("Name") == "Ielectrode"
+        if component["definition"] == "master:ammeter"
+        and component["parameters"].get("Name") == "Ielectrode"
     ]
+    if len(anchors) > 1:
+        return None, "multiple_exact_ielectrode_anchors"
     if not grounds:
-        return None
+        return None, None
+    if not anchors and len(grounds) > 1:
+        return None, "multiple_exact_grounds_without_anchor"
     selected = grounds[0]
     evidence: dict[str, Any] = {
         "selected": {
             "definition": selected["definition"],
             "location": list(selected["location"]),
-        }
+        },
+        "selection_reason": "single_exact_ground_without_anchor",
     }
     if anchors:
         anchor = anchors[0]
-        selected = min(grounds, key=lambda component: _distance_sq(anchor["location"], component["location"]))
+        ranked = [
+            (_distance_sq(anchor["location"], component["location"]), component)
+            for component in grounds
+        ]
+        ranked.sort(key=lambda item: item[0])
+        if len(ranked) > 1 and ranked[0][0] == ranked[1][0]:
+            return None, "nearest_exact_ground_distance_tie"
+        selected = ranked[0][1]
         evidence["anchor"] = {
             "definition": anchor["definition"],
             "location": list(anchor["location"]),
@@ -186,13 +229,17 @@ def _select_earth_electrode(components: list[dict[str, Any]], source: str) -> di
             "definition": selected["definition"],
             "location": list(selected["location"]),
         }
+        evidence["selection_reason"] = "nearest_exact_ground_to_ielectrode_anchor"
         evidence["distance"] = _distance(anchor["location"], selected["location"])
-    return {
-        "definition": selected["definition"],
-        "confidence": 1.0,
-        "source": source,
-        "evidence": evidence,
-    }
+    return (
+        {
+            "definition": selected["definition"],
+            "confidence": 1.0,
+            "source": source,
+            "evidence": evidence,
+        },
+        None,
+    )
 
 
 def _distance_sq(left: tuple[int, int], right: tuple[int, int]) -> int:
