@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import secrets
@@ -20,6 +21,7 @@ from .template_audit import audit_lcc_template
 
 _PROJECT_NAME = re.compile(r"^[A-Za-z][A-Za-z0-9_]{0,63}$")
 _PLAN_MAX_BYTES = 256 * 1024
+_PLAN_CACHE_MAX_ITEMS = 64
 _PATH_MAX_CHARS = 4096
 _TOPOLOGY_BLUEPRINTS = {
     "bipolar": ("lcc_bipole_parametric_v1",),
@@ -34,6 +36,16 @@ _REQUIRED_TEMPLATE_ROLES = {
         "earth_electrode",
     },
     "monopolar": {"rectifier_valve_group", "inverter_valve_group", "earth_electrode"},
+}
+_SOURCE_REVALIDATION_CODES = {
+    "LCC_TEMPLATE_AMBIGUOUS",
+    "LCC_TEMPLATE_INCOMPATIBLE",
+    "LCC_TEMPLATE_TOPOLOGY_MISMATCH",
+}
+_ASSET_REVALIDATION_CODES = {
+    "LCC_ASSET_MISMATCH",
+    "LCC_BLUEPRINT_INVALID",
+    "LCC_PARAMETER_DERIVATION_FAILED",
 }
 
 
@@ -88,6 +100,83 @@ def _canonical_bytes(value: Any, *, operation: str) -> bytes:
     return payload
 
 
+def _authoritative_return_contract(
+    catalog: dict[str, Any], provenance: dict[str, Any]
+) -> dict[str, Any]:
+    try:
+        identity = provenance["identity"]
+        asset = catalog["return_contract_assets"]["bipolar"]
+        requirements = catalog["return_asset_requirements"]["bipolar"]
+        entry_name = asset.removeprefix(f"{identity}:")
+        machine = provenance["entries"][entry_name]["machine_contract"]
+        catalog_contract = {
+            "allowed": requirements["allowed"],
+            "required": requirements["required"],
+            "mode_requirements": requirements["mode_requirements"],
+        }
+        valid = (
+            identity == "lcc_parametric_provenance_v1"
+            and catalog.get("provenance_identity") == identity
+            and asset == "lcc_parametric_provenance_v1:bipole_return_contract"
+            and isinstance(requirements.get("asset"), str)
+            and requirements["asset"] == asset
+            and machine == catalog_contract
+            and isinstance(machine["allowed"], list)
+            and all(isinstance(item, str) for item in machine["allowed"])
+        )
+    except (AttributeError, KeyError, TypeError):
+        valid = False
+        machine = {}
+    if not valid:
+        raise _error(
+            "LCC_ASSET_MISMATCH",
+            "The authoritative parametric return-path contract is invalid.",
+            "plan_parametric_lcc_model",
+            reason="authoritative_return_contract_invalid",
+        )
+    return machine
+
+
+def _validate_parametric_blueprint(
+    topology: str,
+    blueprint: dict[str, Any],
+    catalog: dict[str, Any],
+    provenance: dict[str, Any],
+) -> None:
+    machine = _authoritative_return_contract(catalog, provenance)
+    available_returns = [
+        item for item in machine["allowed"] if item in {"earth_return", "metallic_return"}
+    ]
+    if topology == "bipolar":
+        expected = {
+            "schema_version": 1,
+            "topology": "lcc",
+            "poles": 2,
+            "terminals": 3,
+            "required_assets": ["positive_pole", "negative_pole", *machine["allowed"]],
+            "return_paths": available_returns,
+        }
+    else:
+        expected = {
+            "schema_version": 1,
+            "topology": "lcc",
+            "poles": 1,
+            "terminals": 2,
+            "required_assets": ["positive_pole", "earth_return"],
+            "return_paths": available_returns,
+        }
+    for field, value in expected.items():
+        observed = blueprint.get(field)
+        if type(observed) is not type(value) or observed != value:
+            raise _error(
+                "LCC_BLUEPRINT_INVALID",
+                "The parametric topology blueprint does not match its authoritative contract.",
+                "plan_parametric_lcc_model",
+                field=field,
+                reason="blueprint_contract_mismatch",
+            )
+
+
 def _load_parametric_asset_snapshot(
     topology: str, catalog_override: Any = None
 ) -> dict[str, Any]:
@@ -122,7 +211,11 @@ def _load_parametric_asset_snapshot(
         catalog_source = "injected"
     if (
         catalog.get("identity") != "lcc_parametric_catalog_v1"
+        or type(catalog.get("schema_version")) is not int
+        or catalog["schema_version"] != 1
         or provenance.get("identity") != "lcc_parametric_provenance_v1"
+        or type(provenance.get("schema_version")) is not int
+        or provenance["schema_version"] != 1
         or blueprint.get("name") != blueprint_name
     ):
         raise _error(
@@ -131,6 +224,7 @@ def _load_parametric_asset_snapshot(
             "plan_parametric_lcc_model",
             reason="asset_identity_mismatch",
         )
+    _validate_parametric_blueprint(topology, blueprint, catalog, provenance)
     return {
         "catalog": catalog,
         "blueprint": blueprint,
@@ -156,6 +250,7 @@ class ParametricLccBuilderService:
         self.workspace_root = Path(workspace_root).expanduser().resolve() if workspace_root is not None else None
         self.catalog = catalog
         self._statuses: dict[str, dict[str, Any]] = {}
+        self._plans: dict[str, dict[str, Any]] = {}
 
     def derive_parameters(self, request: ParametricLccRequest) -> dict[str, Any]:
         return derive_lcc_parameters(request, self.catalog).to_dict()
@@ -394,7 +489,7 @@ class ParametricLccBuilderService:
         project_name: str | None = None,
         folder: str | Path | None = None,
     ) -> dict[str, Any]:
-        return self._compose_plan(
+        plan = self._compose_plan(
             request,
             template_path=template_path,
             project_name=project_name,
@@ -402,6 +497,10 @@ class ParametricLccBuilderService:
             operation="plan_parametric_lcc_model",
             enforce_target_absent=True,
         )
+        self._plans[plan["plan_hash"]] = copy.deepcopy(plan)
+        while len(self._plans) > _PLAN_CACHE_MAX_ITEMS:
+            self._plans.pop(next(iter(self._plans)))
+        return plan
 
     async def build_parametric_model(
         self,
@@ -415,14 +514,46 @@ class ParametricLccBuilderService:
     ) -> dict[str, Any]:
         if not confirm:
             raise BackendError("CONFIRMATION_REQUIRED", "confirm=true is required.", "hvdc", "build_parametric_lcc_model")
-        plan = self._compose_plan(
-            request,
-            template_path=template_path,
-            project_name=project_name,
-            folder=folder,
-            operation="build_parametric_lcc_model",
-            enforce_target_absent=False,
-        )
+        try:
+            plan = self._compose_plan(
+                request,
+                template_path=template_path,
+                project_name=project_name,
+                folder=folder,
+                operation="build_parametric_lcc_model",
+                enforce_target_absent=False,
+            )
+        except BackendError as error:
+            if error.code in _SOURCE_REVALIDATION_CODES:
+                raise _error(
+                    "LCC_PLAN_STALE",
+                    "The audited source template changed after planning.",
+                    "build_parametric_lcc_model",
+                    reason="source_changed",
+                ) from error
+            if error.code in _ASSET_REVALIDATION_CODES:
+                raise _error(
+                    "LCC_PLAN_STALE",
+                    "A parametric LCC asset changed after planning.",
+                    "build_parametric_lcc_model",
+                    reason="asset_changed",
+                ) from error
+            raise
+        previous = self._plans.get(expected_plan_hash) if isinstance(expected_plan_hash, str) else None
+        if previous is not None and previous["template"] != plan["template"]:
+            raise _error(
+                "LCC_PLAN_STALE",
+                "The audited source template changed after planning.",
+                "build_parametric_lcc_model",
+                reason="source_changed",
+            )
+        if previous is not None and previous["assets"] != plan["assets"]:
+            raise _error(
+                "LCC_PLAN_STALE",
+                "A parametric LCC asset changed after planning.",
+                "build_parametric_lcc_model",
+                reason="asset_changed",
+            )
         if not isinstance(expected_plan_hash, str) or not secrets.compare_digest(
             expected_plan_hash, plan["plan_hash"]
         ):

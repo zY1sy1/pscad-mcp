@@ -207,7 +207,34 @@ def test_build_rejects_stale_source_before_any_workspace_write(tmp_path):
     with pytest.raises(BackendError) as raised:
         _build(service, values, plan["plan_hash"])
     assert raised.value.code == "LCC_PLAN_STALE"
-    assert raised.value.details["reason"] == "deterministic_plan_changed"
+    assert raised.value.details["reason"] == "source_changed"
+    assert service._statuses == {}
+    assert not values["workspace"].exists()
+
+
+@pytest.mark.parametrize("change", ["incompatible", "unreadable"])
+def test_build_normalizes_template_reaudit_failures_to_stale_before_writes(tmp_path, change):
+    values = _inputs(tmp_path)
+    source = tmp_path / "source" / "bipole.pscx"
+    source.parent.mkdir()
+    source.write_bytes((FIXTURES / "bipole_template.pscx").read_bytes())
+    values["template_path"] = str(source.resolve())
+    service = ParametricLccBuilderService(pscad_service=object(), workspace_root=values["workspace"])
+    plan = _plan(service, values)
+    if change == "incompatible":
+        payload = source.read_text(encoding="utf-8")
+        source.write_text(
+            payload.replace("FixtureBipole:RectPole", "foreign:RectPole"),
+            encoding="utf-8",
+        )
+    else:
+        source.unlink()
+
+    with pytest.raises(BackendError) as raised:
+        _build(service, values, plan["plan_hash"])
+
+    assert raised.value.code == "LCC_PLAN_STALE"
+    assert raised.value.details == {"reason": "source_changed"}
     assert service._statuses == {}
     assert not values["workspace"].exists()
 
@@ -227,8 +254,144 @@ def test_build_rejects_stale_asset_snapshot_before_any_workspace_write(tmp_path,
     with pytest.raises(BackendError) as raised:
         _build(service, values, plan["plan_hash"])
     assert raised.value.code == "LCC_PLAN_STALE"
+    assert raised.value.details == {"reason": "asset_changed"}
     assert service._statuses == {}
     assert not values["workspace"].exists()
+
+
+def test_build_normalizes_damaged_packaged_asset_to_stale_before_writes(tmp_path, monkeypatch):
+    values = _inputs(tmp_path)
+    service = ParametricLccBuilderService(pscad_service=object(), workspace_root=values["workspace"])
+    plan = _plan(service, values)
+    original = parametric_service._asset_json
+
+    def damaged(relative):
+        if relative[-1] == "blueprint.json":
+            raise BackendError(
+                "LCC_ASSET_MISMATCH",
+                "damaged",
+                "hvdc",
+                "plan_parametric_lcc_model",
+                {"unbounded": "x" * 10000},
+            )
+        return original(relative)
+
+    monkeypatch.setattr(parametric_service, "_asset_json", damaged)
+    with pytest.raises(BackendError) as raised:
+        _build(service, values, plan["plan_hash"])
+    assert raised.value.code == "LCC_PLAN_STALE"
+    assert raised.value.details == {"reason": "asset_changed"}
+    assert len(str(raised.value.details)) < 128
+    assert service._statuses == {}
+    assert not values["workspace"].exists()
+
+
+@pytest.mark.parametrize(
+    ("filename", "field", "bad_value"),
+    [
+        ("lcc_parametric_catalog_v1.json", "schema_version", 99),
+        ("lcc_parametric_catalog_v1.json", "schema_version", True),
+        ("provenance-parametric-v1.json", "schema_version", 99),
+        ("provenance-parametric-v1.json", "schema_version", True),
+    ],
+)
+def test_plan_rejects_asset_schema_drift_with_specific_error(
+    tmp_path, monkeypatch, filename, field, bad_value
+):
+    values = _inputs(tmp_path)
+    service = ParametricLccBuilderService(workspace_root=values["workspace"])
+    original = parametric_service._asset_json
+
+    def malformed(relative):
+        value, digest = original(relative)
+        if relative[-1] == filename:
+            value = copy.deepcopy(value)
+            value[field] = bad_value
+        return value, digest
+
+    monkeypatch.setattr(parametric_service, "_asset_json", malformed)
+    with pytest.raises(BackendError) as raised:
+        _plan(service, values)
+    assert raised.value.code == "LCC_ASSET_MISMATCH"
+    assert raised.value.details == {"reason": "asset_identity_mismatch"}
+
+
+@pytest.mark.parametrize(
+    ("field", "bad_value"),
+    [
+        ("schema_version", 99),
+        ("topology", "not-lcc"),
+        ("poles", 99),
+        ("poles", True),
+        ("terminals", 99),
+        ("required_assets", ["positive_pole"]),
+        ("return_paths", ["earth_return"]),
+    ],
+)
+def test_plan_rejects_named_blueprint_with_malformed_authoritative_contract(
+    tmp_path, monkeypatch, field, bad_value
+):
+    values = _inputs(tmp_path)
+    service = ParametricLccBuilderService(workspace_root=values["workspace"])
+    original = parametric_service._asset_json
+
+    def malformed(relative):
+        value, digest = original(relative)
+        if relative[-1] == "blueprint.json":
+            value = copy.deepcopy(value)
+            value[field] = bad_value
+        return value, digest
+
+    monkeypatch.setattr(parametric_service, "_asset_json", malformed)
+    with pytest.raises(BackendError) as raised:
+        _plan(service, values)
+    assert raised.value.code == "LCC_BLUEPRINT_INVALID"
+    assert raised.value.details == {
+        "field": field,
+        "reason": "blueprint_contract_mismatch",
+    }
+    assert not values["workspace"].exists()
+
+
+def test_build_normalizes_malformed_blueprint_contract_to_stale(tmp_path, monkeypatch):
+    values = _inputs(tmp_path)
+    service = ParametricLccBuilderService(pscad_service=object(), workspace_root=values["workspace"])
+    plan = _plan(service, values)
+    original = parametric_service._asset_json
+
+    def malformed(relative):
+        value, digest = original(relative)
+        if relative[-1] == "blueprint.json":
+            value = copy.deepcopy(value)
+            value["terminals"] = 99
+        return value, digest
+
+    monkeypatch.setattr(parametric_service, "_asset_json", malformed)
+    with pytest.raises(BackendError) as raised:
+        _build(service, values, plan["plan_hash"])
+    assert raised.value.code == "LCC_PLAN_STALE"
+    assert raised.value.details == {"reason": "asset_changed"}
+    assert service._statuses == {}
+    assert not values["workspace"].exists()
+
+
+def test_monopolar_blueprint_contract_rejects_boolean_pole_count(tmp_path, monkeypatch):
+    values = _inputs(tmp_path, topology="monopolar")
+    service = ParametricLccBuilderService(workspace_root=values["workspace"])
+    original = parametric_service._asset_json
+
+    def malformed(relative):
+        value, digest = original(relative)
+        if relative[-1] == "blueprint.json":
+            value = copy.deepcopy(value)
+            value["poles"] = True
+        return value, digest
+
+    monkeypatch.setattr(parametric_service, "_asset_json", malformed)
+    with pytest.raises(BackendError) as raised:
+        _plan(service, values)
+    assert raised.value.code == "LCC_BLUEPRINT_INVALID"
+    assert raised.value.details["field"] == "poles"
 
 
 def test_build_checks_staleness_before_final_target_conflict(tmp_path):
