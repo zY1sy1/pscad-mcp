@@ -1,3 +1,4 @@
+import asyncio
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -45,3 +46,72 @@ def test_parametric_service_preserves_unconfigured_workspace_as_unavailable(monk
 
     assert service.pscad_service is backend
     assert service.workspace_root is None
+
+
+def _public_request():
+    return {
+        "topology": "bipolar",
+        "ratings": {
+            "rated_power_mw": 1, "dc_voltage_kv": 1, "dc_current_ka": 1,
+            "ac_voltage_kv": 1, "frequency_hz": 50, "scr": 1,
+        },
+        "engineering_overrides": {
+            "smoothing_reactor_mh": 1, "filter_capacitance_uf": 1,
+            "min_firing_angle_deg": 5, "max_firing_angle_deg": 45,
+        },
+        "return_path_assets": ["neutral_bus"],
+    }
+
+
+def test_plan_wrapper_forwards_template_and_owned_target_arguments(monkeypatch):
+    calls = []
+
+    class Service:
+        def plan_parametric_model(self, request, **kwargs):
+            calls.append((request, kwargs))
+            return {"plan_hash": "ok"}
+
+    monkeypatch.setattr(lcc_parametric_tools, "_service", lambda: Service())
+    result = asyncio.run(
+        lcc_parametric_tools.plan_parametric_lcc_model(
+            _public_request(),
+            template_path="D:/templates/source.pscx",
+            project_name="Case",
+            folder="D:/workspace/models",
+        )
+    )
+    assert result == {"plan_hash": "ok"}
+    assert calls[0][1] == {
+        "template_path": "D:/templates/source.pscx",
+        "project_name": "Case",
+        "folder": "D:/workspace/models",
+    }
+
+
+def test_build_wrapper_forwards_same_plan_inputs(monkeypatch):
+    calls = []
+
+    class Service:
+        async def build_parametric_model(self, request, **kwargs):
+            calls.append((request, kwargs))
+            return {"status": "accepted"}
+
+    monkeypatch.setattr(lcc_parametric_tools, "_service", lambda: Service())
+    result = asyncio.run(
+        lcc_parametric_tools.build_parametric_lcc_model(
+            _public_request(),
+            template_path="D:/templates/source.pscx",
+            project_name="Case",
+            folder="D:/workspace/models",
+            expected_plan_hash="abc",
+            confirm=True,
+        )
+    )
+    assert result == {"status": "accepted"}
+    assert calls[0][1] == {
+        "template_path": "D:/templates/source.pscx",
+        "project_name": "Case",
+        "folder": "D:/workspace/models",
+        "expected_plan_hash": "abc",
+        "confirm": True,
+    }

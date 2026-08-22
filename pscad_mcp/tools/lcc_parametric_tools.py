@@ -42,12 +42,36 @@ async def audit_lcc_template(template_path: str) -> dict[str, Any]:
     return _service().audit_template(template_path)
 
 
-async def plan_parametric_lcc_model(request: dict[str, Any]) -> dict[str, Any]:
-    return _service().plan_parametric_model(_request(request))
+async def plan_parametric_lcc_model(
+    request: dict[str, Any],
+    template_path: str | None = None,
+    project_name: str | None = None,
+    folder: str | None = None,
+) -> dict[str, Any]:
+    return _service().plan_parametric_model(
+        _request(request),
+        template_path=template_path,
+        project_name=project_name,
+        folder=folder,
+    )
 
 
-async def build_parametric_lcc_model(request: dict[str, Any], expected_plan_hash: str, confirm: bool = False) -> dict[str, Any]:
-    return await _service().build_parametric_model(_request(request), expected_plan_hash=expected_plan_hash, confirm=confirm)
+async def build_parametric_lcc_model(
+    request: dict[str, Any],
+    expected_plan_hash: str,
+    template_path: str | None = None,
+    project_name: str | None = None,
+    folder: str | None = None,
+    confirm: bool = False,
+) -> dict[str, Any]:
+    return await _service().build_parametric_model(
+        _request(request),
+        template_path=template_path,
+        project_name=project_name,
+        folder=folder,
+        expected_plan_hash=expected_plan_hash,
+        confirm=confirm,
+    )
 
 
 async def get_parametric_lcc_build_status(build_id: str) -> dict[str, Any]:
