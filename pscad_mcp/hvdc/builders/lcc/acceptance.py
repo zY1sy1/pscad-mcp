@@ -799,7 +799,11 @@ def _physical_terminal_power_loss(
     passed = (
         rectifier_mean > 0.0
         and inverter_mean > 0.0
-        and all(_float_at_least(value, 0.0) for value in loss_values)
+        and _float_at_least(rectifier_mean, inverter_mean)
+        and all(
+            _float_at_least(rectifier_value, inverter_value)
+            for rectifier_value, inverter_value in zip(rectifier, inverter)
+        )
     )
 
     if max_loss is not None:

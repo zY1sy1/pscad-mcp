@@ -1,5 +1,6 @@
 import hashlib
 import json
+import math
 
 import pytest
 
@@ -460,6 +461,30 @@ def test_terminal_power_loss_fails_when_power_flow_invariant_is_violated():
 
     assert result["verdict"] == "FAIL"
     assert result["physical_checks"][0]["observed"]["loss"] < 0.0
+
+
+def test_terminal_power_order_uses_original_operand_scale_for_cancellation():
+    samples = _real_style_samples()
+    samples["channels"]["Main/PR"]["values"] = [0.3] * len(TIME)
+    samples["channels"]["Main/PI"]["values"] = [0.1 + 0.2] * len(TIME)
+
+    result = evaluate_acceptance(samples, {}, _loss_contract())
+
+    assert result["verdict"] == "PASS"
+    assert result["physical_checks"][0]["observed"]["loss"] < 0.0
+
+
+def test_terminal_power_order_rejects_more_than_policy_ulps_on_original_scale():
+    inverter = 0.3
+    for _ in range(COMPARISON_POLICY["max_ulps"] + 1):
+        inverter = math.nextafter(inverter, math.inf)
+    samples = _real_style_samples()
+    samples["channels"]["Main/PR"]["values"] = [0.3] * len(TIME)
+    samples["channels"]["Main/PI"]["values"] = [inverter] * len(TIME)
+
+    result = evaluate_acceptance(samples, {}, _loss_contract())
+
+    assert result["verdict"] == "FAIL"
 
 
 def test_legacy_terminal_power_balance_retains_opposite_sign_semantics():
