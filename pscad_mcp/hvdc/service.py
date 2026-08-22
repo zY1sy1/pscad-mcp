@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from copy import deepcopy
 from dataclasses import asdict
 from pathlib import Path
 import threading
@@ -537,6 +538,20 @@ class HvdcDomainService:
             else {}
         )
         normalized_samples = dict(resolution["samples"])
+        if profile.get("profile_version", 1) == 2 and isinstance(normalized_samples.get("channels"), list):
+            canonical_channels: list[Any] = []
+            for channel in normalized_samples["channels"]:
+                if not isinstance(channel, Mapping):
+                    canonical_channels.append(channel)
+                    continue
+                canonical_channel = dict(channel)
+                # v2 resolution has already proven the original PSCAD path
+                # against an exact selector. Metrics consume its canonical
+                # name; retaining path would make the generic normalizer pick
+                # the pre-resolution source identifier instead.
+                canonical_channel.pop("path", None)
+                canonical_channels.append(canonical_channel)
+            normalized_samples["channels"] = canonical_channels
         recovery_baselines: dict[str, Any] = {}
         for source in (
             analysis_baselines,
@@ -546,6 +561,22 @@ class HvdcDomainService:
                 recovery_baselines.update(source)
         normalized_samples["recovery_baselines"] = recovery_baselines
         record["recovery_baselines"] = dict(recovery_baselines)
+        analysis_bands = (
+            analysis.get("recovery_bands", {})
+            if isinstance(analysis, Mapping)
+            else {}
+        )
+        recovery_bands: dict[str, Any] = {}
+        for source in (
+            analysis_bands,
+            record.get("recovery_bands", {}),
+        ):
+            if isinstance(source, Mapping):
+                recovery_bands.update(deepcopy(dict(source)))
+        # Only validated scenario/record configuration is authoritative. Raw
+        # result samples cannot approve their own acceptance tolerance.
+        normalized_samples["recovery_bands"] = deepcopy(recovery_bands)
+        record["recovery_bands"] = deepcopy(recovery_bands)
         configured_metrics = (
             analysis.get("metrics") if isinstance(analysis, Mapping) else None
         )

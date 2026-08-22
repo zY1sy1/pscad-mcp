@@ -16,6 +16,7 @@ from pscad_mcp.hvdc.builders.lcc.modes import (
 from pscad_mcp.hvdc.metrics import calculate_metrics
 from pscad_mcp.hvdc.models import HvdcComponentRecord, HvdcProjectEvidence, HvdcSourceRef
 from pscad_mcp.hvdc.service import HvdcDomainService
+from pscad_mcp.hvdc.scenarios import validate_scenario
 
 
 MODE_BINDINGS = {
@@ -400,7 +401,7 @@ def test_lcc_mode_metrics_cover_closure_imbalance_recovery_and_mismatch():
     metrics = {item["name"]: item for item in result["metrics"]}
     assert metrics["return_current_closure_error"]["value"] == pytest.approx(0.0)
     assert metrics["pole_current_imbalance"]["value"] == pytest.approx(0.2)
-    assert metrics["mode_transition_recovery_time_s"]["value"] == pytest.approx(1.0)
+    assert metrics["mode_transition_recovery_time_s"]["value"] == pytest.approx(2.0)
     assert metrics["mode_mismatch"]["value"] == pytest.approx(0.25)
 
 
@@ -425,7 +426,7 @@ def test_transition_recovery_detects_falling_edge_and_recovers_to_zero_target():
     result = calculate_metrics(samples, ["mode_transition_recovery_time_s"])
 
     assert result["verdict"] == "PASS"
-    assert result["metrics"][0]["value"] == pytest.approx(1.0)
+    assert result["metrics"][0]["value"] == pytest.approx(2.0)
 
 
 def test_transition_recovery_is_incomplete_without_approved_voltage_band():
@@ -438,6 +439,64 @@ def test_transition_recovery_is_incomplete_without_approved_voltage_band():
     result = calculate_metrics(samples, ["mode_transition_recovery_time_s"])
 
     assert result["verdict"] == "INCOMPLETE_ANALYSIS"
+
+
+def test_transition_recovery_uses_command_edge_while_status_delay_stays_in_mismatch():
+    samples = {
+        "channels": [
+            {"path": "mode_command", "units": "state", "domain": [0, 1, 2, 3, 4], "values": [1, 0, 0, 0, 0]},
+            {"path": "mode_status", "units": "state", "domain": [0, 1, 2, 3, 4], "values": [1, 1, 1, 0, 0]},
+            {"path": "dc_voltage", "units": "kV", "domain": [0, 1, 2, 3, 4], "values": [500, 450, 490, 500, 500]},
+        ],
+        "recovery_bands": {"dc_voltage": {"absolute": 5.0, "units": "kV"}},
+    }
+
+    result = calculate_metrics(samples, ["mode_transition_recovery_time_s", "mode_mismatch"])
+    by_name = {item["name"]: item for item in result["metrics"]}
+
+    assert by_name["mode_transition_recovery_time_s"]["value"] == pytest.approx(2.0)
+    assert by_name["mode_mismatch"]["value"] == pytest.approx(0.4)
+
+
+def test_transition_recovery_can_use_explicit_approved_voltage_baseline():
+    samples = {
+        "channels": [
+            {"path": "mode_command", "units": "state", "domain": [0, 1, 2, 3], "values": [0, 1, 1, 1]},
+            {"path": "dc_voltage", "units": "kV", "domain": [0, 1, 2, 3], "values": [480, 450, 490, 500]},
+        ],
+        "recovery_baselines": {"dc_voltage": 500.0},
+        "recovery_bands": {"dc_voltage": {"absolute": 5.0, "units": "kV"}},
+    }
+
+    result = calculate_metrics(samples, ["mode_transition_recovery_time_s"])
+
+    assert result["verdict"] == "PASS"
+    assert result["metrics"][0]["value"] == pytest.approx(2.0)
+
+
+@pytest.mark.parametrize("recovery_bands", [
+    [],
+    {"": {"absolute": 5.0, "units": "kV"}},
+    {"dc_voltage": 5.0},
+    {"dc_voltage": {"absolute": 5.0}},
+    {"dc_voltage": {"absolute": True, "units": "kV"}},
+    {"dc_voltage": {"absolute": 0.0, "units": "kV"}},
+    {"dc_voltage": {"absolute": float("nan"), "units": "kV"}},
+    {"dc_voltage": {"absolute": 5.0, "units": ""}},
+    {"dc_voltage": {"absolute": 5.0, "units": "kV", "unknown": 1}},
+])
+def test_scenario_recovery_band_contract_is_strictly_validated(recovery_bands):
+    result = validate_scenario({
+        "name": "band-contract",
+        "profile": "lcc_bipolar_generic",
+        "project": "case",
+        "parameter_changes": [],
+        "events": [],
+        "analysis": {"recovery_bands": recovery_bands},
+    })
+
+    assert result["valid"] is False
+    assert result["errors"][0]["field"].startswith("analysis.recovery_bands")
 
 
 def _scenario_profile(project_stem="derived"):
@@ -550,6 +609,94 @@ async def _wait_scenario_terminal(service, scenario_id):
             return result
         await asyncio.sleep(0.001)
     raise AssertionError("scenario did not reach a terminal state")
+
+
+def _recovery_sample_records(profile):
+    values = {
+        "mode_command": [1, 0, 0, 0, 0],
+        "mode_status": [1, 1, 1, 0, 0],
+        "dc_voltage": [500, 450, 490, 500, 500],
+        "positive_pole_current": [1, 1, 1, 1, 1],
+        "negative_pole_current": [1, 1, 1, 1, 1],
+        "metallic_return_current": [0, 0, 0, 0, 0],
+    }
+    return [
+        {
+            "path": selector["path"],
+            "call_id": selector["call_id"],
+            "units": selector["units"],
+            "domain": [0, 1, 2, 3, 4],
+            "values": values[selector["canonical"]],
+        }
+        for selector in profile["result_channels"]
+    ]
+
+
+def test_scenario_approved_recovery_band_reaches_real_analyze_path(monkeypatch, tmp_path):
+    source = tmp_path / "source.pscx"
+    derived = tmp_path / "derived.pscx"
+    _write_scenario_project(source)
+    _write_scenario_project(derived)
+    profile = _scenario_profile("source")
+    backend = ScenarioLccBackend(profile)
+    service = HvdcDomainService(backend, path_policy=PathPolicy(workspace_root=str(tmp_path)))
+    monkeypatch.setattr("pscad_mcp.hvdc.scenarios.load_profile", lambda *args, **kwargs: profile)
+    monkeypatch.setattr("pscad_mcp.hvdc.service.load_profile", lambda *args, **kwargs: profile)
+    approved_band = {"dc_voltage": {"absolute": 5.0, "units": "kV"}}
+    scenario = {
+        "name": "approved-recovery-band",
+        "profile": "strict_lcc_test",
+        "project": str(source),
+        "derived_project": str(derived),
+        "parameter_changes": [],
+        "events": [],
+        "analysis": {"recovery_bands": approved_band},
+        "run": {"timeout_s": 1.0},
+    }
+
+    async def exercise():
+        started = await service.run_scenario(str(source), scenario, confirm=True)
+        scenario_id = started["scenario_id"]
+        terminal = await _wait_scenario_terminal(service, scenario_id)
+        service._scenarios[scenario_id]["samples"] = {
+            "channels": _recovery_sample_records(profile),
+        }
+        analyzed = await service.analyze_results(
+            scenario_id,
+            ["mode_transition_recovery_time_s", "mode_mismatch"],
+        )
+        return scenario_id, terminal, analyzed
+
+    scenario_id, terminal, analyzed = asyncio.run(exercise())
+    by_name = {item["name"]: item for item in analyzed["metrics"]}
+
+    assert terminal["status"] == "completed", terminal["error"]
+    assert service._scenarios[scenario_id]["analysis"]["recovery_bands"] == approved_band
+    assert service._scenarios[scenario_id]["recovery_bands"] == approved_band
+    assert by_name["mode_transition_recovery_time_s"]["value"] == pytest.approx(2.0)
+    assert by_name["mode_mismatch"]["value"] == pytest.approx(0.4)
+
+
+def test_analyze_results_rejects_sample_injected_recovery_band(monkeypatch, tmp_path):
+    profile = _scenario_profile()
+    service = HvdcDomainService(ScenarioLccBackend(profile), path_policy=PathPolicy(workspace_root=str(tmp_path)))
+    monkeypatch.setattr("pscad_mcp.hvdc.service.load_profile", lambda *args, **kwargs: profile)
+    service._scenarios["sample-only"] = {
+        "scenario_id": "sample-only",
+        "profile": "strict_lcc_test",
+        "analysis": {},
+        "samples": {
+            "channels": _recovery_sample_records(profile),
+            "recovery_bands": {"dc_voltage": {"absolute": 5.0, "units": "kV"}},
+        },
+        "warnings": [],
+        "audit": {},
+    }
+
+    result = asyncio.run(service.analyze_results("sample-only", ["mode_transition_recovery_time_s"]))
+
+    assert result["verdict"] == "INCOMPLETE_ANALYSIS"
+    assert result["metrics"][0]["status"] == "invalid"
 
 
 def test_real_scenario_lcc_switching_preflights_before_each_write_class(monkeypatch, tmp_path):

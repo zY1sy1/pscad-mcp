@@ -227,6 +227,57 @@ def validate_scenario(scenario: Mapping[str, Any], *, workspace_root: str | Path
                             field=f"analysis.recovery_baselines.{channel}",
                         )
                     )
+        recovery_bands = analysis.get("recovery_bands", {})
+        if not isinstance(recovery_bands, Mapping):
+            errors.append(
+                _error(
+                    "HVDC_SCENARIO_INVALID",
+                    "analysis.recovery_bands must be an object.",
+                    field="analysis.recovery_bands",
+                )
+            )
+        else:
+            for channel, band in recovery_bands.items():
+                field = f"analysis.recovery_bands.{channel}"
+                if not isinstance(channel, str) or not channel.strip():
+                    errors.append(
+                        _error(
+                            "HVDC_SCENARIO_INVALID",
+                            "Recovery bands require non-empty channel names.",
+                            field=field,
+                        )
+                    )
+                    continue
+                if not isinstance(band, Mapping):
+                    errors.append(
+                        _error(
+                            "HVDC_SCENARIO_INVALID",
+                            "Each recovery band must be an object with absolute and units fields.",
+                            field=field,
+                        )
+                    )
+                    continue
+                unknown = sorted(str(key) for key in set(band) - {"absolute", "units"})
+                absolute = band.get("absolute")
+                units = band.get("units")
+                if (
+                    unknown
+                    or set(band) != {"absolute", "units"}
+                    or isinstance(absolute, bool)
+                    or not isinstance(absolute, (int, float))
+                    or not math.isfinite(float(absolute))
+                    or float(absolute) <= 0
+                    or not isinstance(units, str)
+                    or not units.strip()
+                ):
+                    errors.append(
+                        _error(
+                            "HVDC_SCENARIO_INVALID",
+                            "Recovery bands require exactly a positive finite absolute value and non-empty units.",
+                            field=field,
+                            unknown_fields=unknown,
+                        )
+                    )
     return {"valid": not errors, "errors": errors, "warnings": []}
 
 
@@ -1021,6 +1072,9 @@ async def run_scenario(
     recovery_baselines = dict(analysis.get("recovery_baselines", {}))
     if "recovery_baselines" in analysis:
         analysis["recovery_baselines"] = dict(recovery_baselines)
+    recovery_bands = deepcopy(analysis.get("recovery_bands", {}))
+    if "recovery_bands" in analysis:
+        analysis["recovery_bands"] = deepcopy(recovery_bands)
     record: dict[str, Any] = {
         "scenario_id": scenario_id,
         "project_name": project_name,
@@ -1036,6 +1090,7 @@ async def run_scenario(
         "analysis": analysis,
         "run": deepcopy(normalized.get("run", {})),
         "recovery_baselines": recovery_baselines,
+        "recovery_bands": recovery_bands,
         "output_files": explicit_outputs,
         "output_discovery": "pending",
         "timing_basis": {"kind": "pending", "mode": preflight.get("timing_mode")},

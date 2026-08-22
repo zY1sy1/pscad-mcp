@@ -272,10 +272,10 @@ def calculate_metrics(samples: dict[str, Any], metrics: list[str] | None = None,
                                           "maximum algebraic return-current closure error", "derived") if count else unavailable(name, tuple(expected_units)))
             continue
         if name == "mode_transition_recovery_time_s":
-            status = channels.get("mode_status", [])
+            command = channels.get("mode_command", [])
             response = channels.get("dc_voltage", [])
-            expected_units = {"mode_status": "state", "dc_voltage": "kV"}
-            count = min(len(status), len(response), len(time))
+            expected_units = {"mode_command": "state", "dc_voltage": "kV"}
+            count = min(len(command), len(response), len(time))
             if not count:
                 result.append(unavailable(name, tuple(expected_units)))
             elif not lcc_units_valid(expected_units):
@@ -300,10 +300,12 @@ def calculate_metrics(samples: dict[str, Any], metrics: list[str] | None = None,
                     ))
                     continue
                 transition_index = next(
-                    (index for index in range(1, count) if status[index] != status[index - 1]),
+                    (index for index in range(1, count) if command[index] != command[index - 1]),
                     None,
                 )
-                baseline = response[transition_index - 1] if transition_index is not None else None
+                baseline = recovery_baselines.get("dc_voltage")
+                if baseline is None and transition_index is not None:
+                    baseline = response[transition_index - 1]
                 recovery_index = None if transition_index is None else next(
                     (
                         index
@@ -313,7 +315,7 @@ def calculate_metrics(samples: dict[str, Any], metrics: list[str] | None = None,
                     None,
                 )
                 if transition_index is None or recovery_index is None:
-                    result.append(_invalid(name, tuple(expected_units), time, "A mode-status edge and sustained dc-voltage recovery to its pre-event baseline are both required."))
+                    result.append(_invalid(name, tuple(expected_units), time, "A mode-command edge and sustained dc-voltage recovery to its approved or pre-command baseline are both required."))
                 else:
                     result.append(_metric(
                         name,
@@ -321,7 +323,7 @@ def calculate_metrics(samples: dict[str, Any], metrics: list[str] | None = None,
                         "s",
                         tuple(expected_units),
                         time,
-                        "EMTDC time from mode-status edge to sustained dc-voltage recovery within the approved pre-event baseline band",
+                        "EMTDC time from mode-command edge to sustained dc-voltage recovery within the approved baseline band",
                         "derived",
                     ))
             continue
