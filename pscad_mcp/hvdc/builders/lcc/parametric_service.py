@@ -47,7 +47,6 @@ _ASSET_REVALIDATION_CODES = {
     "LCC_ASSET_MISMATCH",
     "LCC_BLUEPRINT_INVALID",
     "LCC_PARAMETER_DERIVATION_FAILED",
-    "LCC_PLAN_INVALID",
 }
 _WINDOWS_RESERVED_PROJECT_NAMES = frozenset(
     {"CON", "PRN", "AUX", "NUL"}
@@ -212,9 +211,20 @@ def _load_parametric_asset_snapshot(
                 reason="catalog_not_object",
             )
         catalog = catalog_override
-        catalog_hash = hashlib.sha256(
-            _canonical_bytes(catalog, operation="plan_parametric_lcc_model")
-        ).hexdigest()
+        try:
+            catalog_payload = _canonical_bytes(
+                catalog, operation="plan_parametric_lcc_model"
+            )
+        except BackendError as error:
+            if error.code != "LCC_PLAN_INVALID":
+                raise
+            raise _error(
+                "LCC_ASSET_MISMATCH",
+                "The injected parametric catalog cannot be fingerprinted safely.",
+                "plan_parametric_lcc_model",
+                reason="catalog_canonicalization_invalid",
+            ) from error
+        catalog_hash = hashlib.sha256(catalog_payload).hexdigest()
         catalog_source = "injected"
     if (
         catalog.get("identity") != "lcc_parametric_catalog_v1"

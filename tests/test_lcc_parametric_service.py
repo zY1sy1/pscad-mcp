@@ -1,6 +1,7 @@
 import asyncio
 import copy
 import hashlib
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -8,7 +9,11 @@ import pytest
 from pscad_mcp.core.backend.base import BackendError
 from pscad_mcp.hvdc.builders.lcc import parametric_service
 from pscad_mcp.hvdc.builders.lcc.assets import load_parametric_catalog
-from pscad_mcp.hvdc.builders.lcc.parametric_models import LccRatings, ParametricLccRequest
+from pscad_mcp.hvdc.builders.lcc.parametric_models import (
+    LccRatings,
+    LccTemplateMapping,
+    ParametricLccRequest,
+)
 from pscad_mcp.hvdc.builders.lcc.parametric_service import ParametricLccBuilderService
 
 
@@ -353,6 +358,46 @@ def test_build_normalizes_injected_catalog_canonicalization_failure_to_asset_sta
         _build(service, values, plan["plan_hash"])
     assert raised.value.code == "LCC_PLAN_STALE"
     assert raised.value.details == {"reason": "asset_changed"}
+    assert service._statuses == {}
+    assert not values["workspace"].exists()
+
+
+@pytest.mark.parametrize("damage", ["non_json", "oversized"])
+def test_plan_reports_injected_catalog_canonicalization_as_asset_mismatch(tmp_path, damage):
+    values = _inputs(tmp_path)
+    catalog = copy.deepcopy(load_parametric_catalog())
+    catalog["invalid_catalog_payload"] = object() if damage == "non_json" else "x" * 300_000
+    service = ParametricLccBuilderService(workspace_root=values["workspace"], catalog=catalog)
+
+    with pytest.raises(BackendError) as raised:
+        _plan(service, values)
+
+    assert raised.value.code == "LCC_ASSET_MISMATCH"
+    assert raised.value.details == {"reason": "catalog_canonicalization_invalid"}
+
+
+def test_build_preserves_oversized_request_as_plan_invalid_not_asset_stale(tmp_path):
+    values = _inputs(tmp_path)
+    service = ParametricLccBuilderService(pscad_service=object(), workspace_root=values["workspace"])
+    plan = _plan(service, values)
+    values["request"] = replace(
+        values["request"],
+        template_mappings=(
+            LccTemplateMapping(
+                role="evidence",
+                definition="FixtureBipole:RectPole",
+                source="x" * 300_000,
+            ),
+        ),
+    )
+
+    with pytest.raises(BackendError) as raised:
+        _build(service, values, plan["plan_hash"])
+
+    assert raised.value.code == "LCC_PLAN_INVALID"
+    assert raised.value.details["reason"] == "plan_too_large"
+    assert raised.value.details["max_bytes"] == parametric_service._PLAN_MAX_BYTES
+    assert "x" * 100 not in str(raised.value.details)
     assert service._statuses == {}
     assert not values["workspace"].exists()
 
