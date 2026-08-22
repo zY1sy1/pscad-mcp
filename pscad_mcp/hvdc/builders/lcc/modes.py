@@ -199,13 +199,6 @@ def validate_lcc_schedule(
             raise _error("LCC_OPERATING_MODE_INVALID", "Duplicate event_id.", event_id=event.event_id)
         if event.time_s <= previous:
             raise _error("LCC_OPERATING_MODE_INVALID", "Event times must be strictly increasing.", event_id=event.event_id)
-        if event.target in SUPPORTED_MODES:
-            raise _error(
-                "LCC_OPERATING_MODE_INVALID",
-                "An operating-mode name is not a writable command target.",
-                target=event.target,
-                reason="mode_name_is_not_command",
-            )
         binding = bindings.get(event.target)
         if binding is None:
             raise _error(
@@ -249,7 +242,14 @@ async def preflight_lcc_switching(
 ) -> dict[str, Any]:
     """Resolve all strict switching evidence without performing a write."""
 
-    schedule = validate_lcc_schedule(events, command_bindings=profile.get("command_bindings", ()))
+    try:
+        schedule = validate_lcc_schedule(events, command_bindings=profile.get("command_bindings", ()))
+    except BackendError as error:
+        raise _switching_unavailable(
+            "The LCC schedule is not authorized by exact writable command bindings.",
+            reason="schedule_binding_validation_failed",
+            source_code=error.code,
+        ) from error
     requests = [event.to_dict() for event in schedule]
     try:
         resolved = resolve_requested_commands(evidence, profile, requests)
@@ -273,7 +273,12 @@ async def preflight_lcc_switching(
             reason="timing_capability_inspection_failed",
             error_type=type(error).__name__,
         ) from error
-    if not isinstance(capabilities, Mapping) or capabilities.get("native_schedule") is not True or capabilities.get("simulation_clock") is not True:
+    if (
+        not isinstance(capabilities, Mapping)
+        or capabilities.get("native_schedule") is not True
+        or capabilities.get("simulation_clock") is not True
+        or capabilities.get("time_basis") != "EMTDC"
+    ):
         observed = dict(capabilities) if isinstance(capabilities, Mapping) else {}
         raise _switching_unavailable(
             "Strict LCC switching requires both a native EMTDC scheduler and a verified simulation clock.",
@@ -281,6 +286,7 @@ async def preflight_lcc_switching(
             capabilities={
                 "native_schedule": observed.get("native_schedule") is True,
                 "simulation_clock": observed.get("simulation_clock") is True,
+                "time_basis": observed.get("time_basis"),
             },
         )
     native_provider = getattr(backend, "schedule_timed_controls", None)
@@ -306,6 +312,14 @@ async def preflight_lcc_switching(
         raise _switching_unavailable(
             "The EMTDC simulation-clock provider returned an invalid value.",
             reason="simulation_clock_invalid",
+        )
+    past_events = [event.event_id for event in schedule if event.time_s < observed_time_s]
+    if past_events:
+        raise _switching_unavailable(
+            "LCC event times must not precede the current EMTDC simulation time; equality is allowed.",
+            reason="event_time_precedes_simulation_clock",
+            observed_time_s=observed_time_s,
+            event_ids=past_events,
         )
     try:
         timing_mode = await select_timing_mode(backend, project_name)
@@ -356,6 +370,7 @@ async def preflight_lcc_switching(
     return {
         "events": bound_events,
         "timing_mode": timing_mode,
+        "observed_time_s": observed_time_s,
         "output_channels_verified": required,
     }
 
@@ -378,10 +393,20 @@ async def execute_lcc_schedule(
             "execute_lcc_schedule",
             _bounded_json({"project_name": project_name}),
         )
+    validation_events = [
+        {
+            key: event[key]
+            for key in ("event_id", "time_s", "target", "value")
+            if key in event
+        }
+        if isinstance(event, Mapping)
+        else event
+        for event in events
+    ]
     preflight = await preflight_lcc_switching(
         backend,
         project_name,
-        events,
+        validation_events,
         evidence=evidence,
         profile=profile,
         required_output_channels=required_output_channels,

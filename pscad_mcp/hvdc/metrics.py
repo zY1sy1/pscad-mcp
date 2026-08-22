@@ -272,29 +272,29 @@ def calculate_metrics(samples: dict[str, Any], metrics: list[str] | None = None,
             continue
         if name == "mode_transition_recovery_time_s":
             command = channels.get("mode_command", [])
-            response = channels.get("dc_voltage", [])
-            expected_units = {"mode_command": "state", "dc_voltage": "kV"}
-            count = min(len(command), len(response), len(time))
+            status = channels.get("mode_status", [])
+            expected_units = {"mode_command": "state", "mode_status": "state"}
+            count = min(len(command), len(status), len(time))
             if not count:
                 result.append(unavailable(name, tuple(expected_units)))
             elif not lcc_units_valid(expected_units):
                 result.append(invalid_lcc_units(name, expected_units))
-            elif "dc_voltage" not in recovery_baselines:
-                result.append(_invalid(name, tuple(expected_units), time, "Mode transition recovery requires an explicit dc_voltage recovery baseline."))
             else:
-                transition_index = _first_crossing(command)
-                baseline = recovery_baselines["dc_voltage"]
-                tolerance = max(abs(baseline) * 0.01, 1e-12)
+                transition_index = next(
+                    (index for index in range(1, count) if command[index] != command[index - 1]),
+                    None,
+                )
+                target = command[transition_index] if transition_index is not None else None
                 recovery_index = None if transition_index is None else next(
                     (
                         index
                         for index in range(transition_index, count)
-                        if all(abs(value - baseline) <= tolerance for value in response[index:count])
+                        if all(value == target for value in status[index:count])
                     ),
                     None,
                 )
                 if transition_index is None or recovery_index is None:
-                    result.append(_invalid(name, tuple(expected_units), time, "A command transition and sustained 1% response recovery are both required."))
+                    result.append(_invalid(name, tuple(expected_units), time, "A command value change and sustained status recovery to its target are both required."))
                 else:
                     result.append(_metric(
                         name,
@@ -302,7 +302,7 @@ def calculate_metrics(samples: dict[str, Any], metrics: list[str] | None = None,
                         "s",
                         tuple(expected_units),
                         time,
-                        "EMTDC time from mode-command transition to sustained 1% dc-voltage recovery",
+                        "EMTDC time from mode-command value change to sustained status recovery at the target value",
                         "derived",
                     ))
             continue

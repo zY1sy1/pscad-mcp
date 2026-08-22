@@ -4,6 +4,7 @@ import json
 import pytest
 
 from pscad_mcp.core.backend.base import BackendError
+from pscad_mcp.core.path_policy import PathPolicy
 from pscad_mcp.hvdc.builders.lcc.modes import (
     derive_mode_copies,
     execute_lcc_schedule,
@@ -13,6 +14,7 @@ from pscad_mcp.hvdc.builders.lcc.modes import (
 )
 from pscad_mcp.hvdc.metrics import calculate_metrics
 from pscad_mcp.hvdc.models import HvdcComponentRecord, HvdcProjectEvidence, HvdcSourceRef
+from pscad_mcp.hvdc.service import HvdcDomainService
 
 
 MODE_BINDINGS = {
@@ -47,6 +49,11 @@ COMMAND_BINDINGS = [{
     "allowed_values": [0, 1],
     "semantics": "active_high",
     "read_back": True,
+}]
+
+MODE_COMMAND_BINDING = [{
+    **COMMAND_BINDINGS[0],
+    "canonical": "metallic_return",
 }]
 
 
@@ -109,9 +116,11 @@ def _profile():
 
 
 class StrictBackend:
-    def __init__(self, *, native=True, clock=True, channels=None):
+    def __init__(self, *, native=True, clock=True, channels=None, now=0.0, time_basis="EMTDC"):
         self.native = native
         self.clock = clock
+        self.now = now
+        self.time_basis = time_basis
         self.channels = channels if channels is not None else [
             {"path": "Main/mode_status", "call_id": 1, "units": "state"},
             {"path": "Main/Ireturn", "call_id": 2, "units": "kA"},
@@ -119,13 +128,17 @@ class StrictBackend:
         self.scheduled = []
 
     async def get_timed_control_capabilities(self, project_name):
-        return {"native_schedule": self.native, "simulation_clock": self.clock}
+        return {
+            "native_schedule": self.native,
+            "simulation_clock": self.clock,
+            "time_basis": self.time_basis,
+        }
 
     async def get_output_channels(self, project_name):
         return list(self.channels)
 
     async def get_simulation_time(self, project_name):
-        return 0.0
+        return self.now
 
     async def schedule_timed_controls(self, project_name, events):
         self.scheduled.extend(dict(event) for event in events)
@@ -178,6 +191,15 @@ def test_schedule_requires_exact_writable_command_binding():
     with pytest.raises(BackendError) as raised:
         validate_lcc_schedule([_event()], command_bindings=[])
     assert raised.value.code == "LCC_OPERATING_MODE_INVALID"
+
+
+def test_mode_name_is_authorized_when_it_has_an_exact_command_binding():
+    schedule = validate_lcc_schedule(
+        [_event(target="metallic_return")],
+        command_bindings=MODE_COMMAND_BINDING,
+    )
+
+    assert schedule[0].target == "metallic_return"
 
 
 def test_schedule_errors_are_bounded_and_json_safe():
@@ -242,6 +264,68 @@ def test_preflight_fails_closed_when_strict_switching_evidence_is_incomplete(nat
 
     assert raised.value.code == "LCC_SWITCHING_UNAVAILABLE"
     assert backend.scheduled == []
+
+
+def test_preflight_requires_exact_emtdc_time_basis():
+    backend = StrictBackend(time_basis="wall_clock")
+
+    with pytest.raises(BackendError) as raised:
+        asyncio.run(preflight_lcc_switching(
+            backend,
+            "case",
+            [_event()],
+            evidence=_evidence(),
+            profile=_profile(),
+            required_output_channels=("mode_status", "return_current"),
+        ))
+
+    assert raised.value.code == "LCC_SWITCHING_UNAVAILABLE"
+    assert backend.scheduled == []
+
+
+def test_preflight_reports_missing_exact_binding_as_switching_unavailable():
+    profile = _profile()
+    profile["command_bindings"] = []
+    backend = StrictBackend()
+
+    with pytest.raises(BackendError) as raised:
+        asyncio.run(preflight_lcc_switching(
+            backend,
+            "case",
+            [_event()],
+            evidence=_evidence(),
+            profile=profile,
+            required_output_channels=("mode_status", "return_current"),
+        ))
+
+    assert raised.value.code == "LCC_SWITCHING_UNAVAILABLE"
+    assert backend.scheduled == []
+
+
+def test_preflight_rejects_past_emtdc_events_but_allows_equal_time_boundary():
+    backend = StrictBackend(now=1.0)
+
+    with pytest.raises(BackendError) as raised:
+        asyncio.run(preflight_lcc_switching(
+            backend,
+            "case",
+            [_event(time_s=0.999)],
+            evidence=_evidence(),
+            profile=_profile(),
+            required_output_channels=("mode_status", "return_current"),
+        ))
+    assert raised.value.code == "LCC_SWITCHING_UNAVAILABLE"
+    assert backend.scheduled == []
+
+    result = asyncio.run(preflight_lcc_switching(
+        backend,
+        "case",
+        [_event(time_s=1.0)],
+        evidence=_evidence(),
+        profile=_profile(),
+        required_output_channels=("mode_status", "return_current"),
+    ))
+    assert result["observed_time_s"] == 1.0
 
 
 @pytest.mark.parametrize("missing_provider", ["schedule_timed_controls", "get_simulation_time"])
@@ -310,7 +394,7 @@ def test_lcc_mode_metrics_cover_closure_imbalance_recovery_and_mismatch():
     metrics = {item["name"]: item for item in result["metrics"]}
     assert metrics["return_current_closure_error"]["value"] == pytest.approx(0.0)
     assert metrics["pole_current_imbalance"]["value"] == pytest.approx(0.2)
-    assert metrics["mode_transition_recovery_time_s"]["value"] == pytest.approx(2.0)
+    assert metrics["mode_transition_recovery_time_s"]["value"] == pytest.approx(1.0)
     assert metrics["mode_mismatch"]["value"] == pytest.approx(0.25)
 
 
@@ -323,3 +407,215 @@ def test_lcc_mode_metrics_are_incomplete_for_missing_units_or_samples(channels):
 
     assert result["verdict"] == "INCOMPLETE_ANALYSIS"
     assert any(item["status"] in {"missing", "invalid"} for item in result["metrics"])
+
+
+def test_transition_recovery_detects_falling_edge_and_recovers_to_zero_target():
+    samples = _sampled_channels(
+        ("mode_command", "state", [1, 0, 0, 0]),
+        ("mode_status", "state", [1, 1, 1, 0]),
+    )
+
+    result = calculate_metrics(samples, ["mode_transition_recovery_time_s"])
+
+    assert result["verdict"] == "PASS"
+    assert result["metrics"][0]["value"] == pytest.approx(2.0)
+
+
+def _scenario_profile(project_stem="derived"):
+    required_channels = [
+        ("positive_pole_current", "kA"),
+        ("negative_pole_current", "kA"),
+        ("metallic_return_current", "kA"),
+        ("mode_command", "state"),
+        ("mode_status", "state"),
+        ("dc_voltage", "kV"),
+    ]
+    return {
+        "profile_version": 2,
+        "required_assets": [],
+        "mappings": [],
+        "topology_constraints": {"family": "lcc"},
+        "project_fingerprints": [{
+            "project_stem": project_stem,
+            "pscad_version": "4.6.2",
+            "definitions": ["master:const"],
+        }],
+        "command_bindings": MODE_COMMAND_BINDING,
+        "result_channels": [
+            {
+                "canonical": name,
+                "path": f"Main/{name}",
+                "call_id": index,
+                "units": units,
+            }
+            for index, (name, units) in enumerate(required_channels, 1)
+        ],
+        "metric_roles": {},
+        "sequences": [],
+    }
+
+
+class ScenarioLccBackend:
+    def __init__(self, profile, *, time_basis="EMTDC"):
+        self.profile = profile
+        self.time_basis = time_basis
+        self.calls = []
+        self.parameters = {17: {"Value": 0}}
+        self.settings = {"PlotType": "OUT"}
+
+    async def get_timed_control_capabilities(self, project_name):
+        self.calls.append("capabilities")
+        return {
+            "native_schedule": True,
+            "simulation_clock": True,
+            "time_basis": self.time_basis,
+        }
+
+    async def get_simulation_time(self, project_name):
+        self.calls.append("simulation_clock")
+        return 0.0
+
+    async def get_output_channels(self, project_name):
+        self.calls.append("output_channels")
+        return [
+            {"path": item["path"], "call_id": item["call_id"], "units": item["units"]}
+            for item in self.profile["result_channels"]
+        ]
+
+    async def get_project_settings(self, project_name):
+        self.calls.append("project_settings")
+        return dict(self.settings)
+
+    async def get_component_parameters(self, project_name, component_id):
+        self.calls.append("parameter_read")
+        return dict(self.parameters[component_id])
+
+    async def set_component_parameters(self, project_name, component_id, values):
+        self.calls.append("parameter_write")
+        self.parameters[component_id].update(values)
+
+    async def schedule_timed_controls(self, project_name, events):
+        self.calls.append("native_schedule")
+        return [
+            {"status": "registered", "observed_time_s": event["time_s"]}
+            for event in events
+        ]
+
+    async def run_project(self, project_name):
+        self.calls.append("run_project")
+
+    async def get_run_status(self, project_name):
+        return {"status": "completed", "progress": 100.0}
+
+    async def get_project_output(self, project_name, structured=False):
+        return []
+
+
+def _write_scenario_project(path):
+    path.write_text(
+        """<project name='derived' version='4.6.2'>
+        <definition name='Main'><canvas name='Main'>
+        <component id='17' name='return selector' definition='master:const'>
+        <parameter name='Value' value='0'/></component>
+        </canvas></definition><definition name='master:const'/></project>""",
+        encoding="utf-8",
+    )
+
+
+async def _wait_scenario_terminal(service, scenario_id):
+    for _ in range(200):
+        result = await service.scenario_status(scenario_id)
+        if result["status"] in {"completed", "failed", "timed_out"}:
+            return result
+        await asyncio.sleep(0.001)
+    raise AssertionError("scenario did not reach a terminal state")
+
+
+def test_real_scenario_lcc_switching_preflights_before_each_write_class(monkeypatch, tmp_path):
+    source = tmp_path / "source.pscx"
+    derived = tmp_path / "derived.pscx"
+    _write_scenario_project(source)
+    _write_scenario_project(derived)
+    profile = _scenario_profile()
+    backend = ScenarioLccBackend(profile)
+    service = HvdcDomainService(backend, path_policy=PathPolicy(workspace_root=str(tmp_path)))
+    monkeypatch.setattr("pscad_mcp.hvdc.scenarios.load_profile", lambda *args, **kwargs: profile)
+    scenario = {
+        "name": "strict-lcc-switch",
+        "profile": "strict_lcc_test",
+        "project": str(source),
+        "derived_project": str(derived),
+        "parameter_changes": [{"target": "metallic_return", "value": 0}],
+        "events": [{"event_id": "e1", "time_s": 1.0, "target": "metallic_return", "value": 1}],
+        "run": {"timeout_s": 1.0},
+    }
+
+    async def exercise():
+        started = await service.run_scenario(str(source), scenario, confirm=True)
+        return await _wait_scenario_terminal(service, started["scenario_id"])
+
+    terminal = asyncio.run(exercise())
+
+    assert terminal["status"] == "completed", terminal["error"]
+    parameter_write = backend.calls.index("parameter_write")
+    native_schedule = backend.calls.index("native_schedule")
+    assert all(backend.calls.index(item) < parameter_write for item in (
+        "capabilities", "simulation_clock", "output_channels",
+    ))
+    assert max(index for index, item in enumerate(backend.calls) if item == "capabilities" and index < native_schedule) > parameter_write
+    assert max(index for index, item in enumerate(backend.calls) if item == "simulation_clock" and index < native_schedule) > parameter_write
+    assert max(index for index, item in enumerate(backend.calls) if item == "output_channels" and index < native_schedule) > parameter_write
+
+
+def test_real_scenario_lcc_switching_fails_before_writes_when_time_basis_is_not_emtdc(monkeypatch, tmp_path):
+    source = tmp_path / "source.pscx"
+    derived = tmp_path / "derived.pscx"
+    _write_scenario_project(source)
+    _write_scenario_project(derived)
+    profile = _scenario_profile()
+    backend = ScenarioLccBackend(profile, time_basis="wall_clock")
+    service = HvdcDomainService(backend, path_policy=PathPolicy(workspace_root=str(tmp_path)))
+    monkeypatch.setattr("pscad_mcp.hvdc.scenarios.load_profile", lambda *args, **kwargs: profile)
+    scenario = {
+        "name": "strict-lcc-switch",
+        "profile": "strict_lcc_test",
+        "project": str(source),
+        "derived_project": str(derived),
+        "operating_mode": "scheduled_switching",
+        "parameter_changes": [],
+        "events": [{"event_id": "e1", "time_s": 1.0, "target": "metallic_return", "value": 1}],
+    }
+
+    with pytest.raises(BackendError) as raised:
+        asyncio.run(service.run_scenario(str(source), scenario, confirm=True))
+
+    assert raised.value.code == "LCC_SWITCHING_UNAVAILABLE"
+    assert "parameter_write" not in backend.calls
+    assert "native_schedule" not in backend.calls
+
+
+def test_real_scenario_mode_target_cannot_bypass_strict_lcc_branch_without_family_contract(monkeypatch, tmp_path):
+    source = tmp_path / "source.pscx"
+    derived = tmp_path / "derived.pscx"
+    _write_scenario_project(source)
+    _write_scenario_project(derived)
+    profile = _scenario_profile()
+    profile["topology_constraints"] = {}
+    backend = ScenarioLccBackend(profile)
+    service = HvdcDomainService(backend, path_policy=PathPolicy(workspace_root=str(tmp_path)))
+    monkeypatch.setattr("pscad_mcp.hvdc.scenarios.load_profile", lambda *args, **kwargs: profile)
+    scenario = {
+        "name": "unqualified-lcc-switch",
+        "profile": "strict_lcc_test",
+        "project": str(source),
+        "derived_project": str(derived),
+        "parameter_changes": [],
+        "events": [{"event_id": "e1", "time_s": 1.0, "target": "metallic_return", "value": 1}],
+    }
+
+    with pytest.raises(BackendError) as raised:
+        asyncio.run(service.run_scenario(str(source), scenario, confirm=True))
+
+    assert raised.value.code == "LCC_SWITCHING_UNAVAILABLE"
+    assert "parameter_write" not in backend.calls
+    assert "native_schedule" not in backend.calls
