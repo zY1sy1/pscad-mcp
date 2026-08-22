@@ -31,7 +31,10 @@ def _loss_contract(**overrides):
 
 def _threshold_digest(check):
     threshold_contract = {
+        "name": check["name"].strip(),
         "kind": check["kind"],
+        "required": check.get("required", True),
+        "window": [float(value) for value in check["window"]] if check.get("window") is not None else None,
         "direction_convention": check["direction_convention"],
         "rectifier_power_channel": check["rectifier_power_channel"],
         "inverter_power_channel": check["inverter_power_channel"],
@@ -245,6 +248,49 @@ def test_terminal_power_loss_rejects_threshold_tamper_against_approved_digest():
 
     assert raised.value.code == "LCC_ACCEPTANCE_INVALID"
     assert raised.value.details["field"] == "approved_source.threshold_contract_sha256"
+
+
+@pytest.mark.parametrize(
+    ("field", "tampered_value"),
+    [
+        ("name", "renamed_terminal_loss"),
+        ("required", False),
+        ("window", [0.8, 0.9]),
+        ("direction_convention", "opposite_signs"),
+        ("rectifier_power_channel", "Main/OTHER_PR"),
+        ("inverter_power_channel", "Main/OTHER_PI"),
+        ("units", "kW"),
+        ("max_percent", 4.0),
+    ],
+)
+def test_every_terminal_loss_judgement_field_is_bound_to_approval(field, tampered_value):
+    approved_contract = _loss_contract(max_loss=60.0, window=[0.8, 1.0])
+    source = _approved_source(approved_contract["physical_checks"][0])
+    tampered_contract = json.loads(json.dumps(approved_contract))
+    tampered_contract["physical_checks"][0]["approved_source"] = source
+    tampered_contract["physical_checks"][0][field] = tampered_value
+
+    with pytest.raises(BackendError) as raised:
+        evaluate_acceptance(
+            _real_style_samples(),
+            {},
+            tampered_contract,
+            trusted_threshold_sources=_trusted_registry(source),
+        )
+
+    assert raised.value.code == "LCC_ACCEPTANCE_INVALID"
+    expected_field = "direction_convention" if field == "direction_convention" else "approved_source.threshold_contract_sha256"
+    assert raised.value.details["field"] == expected_field
+
+
+def test_terminal_power_loss_rejects_unknown_future_judgement_field():
+    contract = _loss_contract(aggregation="mean")
+
+    with pytest.raises(BackendError) as raised:
+        evaluate_acceptance(_real_style_samples(), {}, contract)
+
+    assert raised.value.code == "LCC_ACCEPTANCE_INVALID"
+    assert raised.value.details["field"] == "physical terminal loss check"
 
 
 def test_arbitrary_well_formed_hash_cannot_pass_without_trusted_registry():

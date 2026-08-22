@@ -584,6 +584,19 @@ _APPROVED_SOURCE_FIELDS = {
     "review_status",
     "threshold_contract_sha256",
 }
+_TERMINAL_POWER_LOSS_FIELDS = {
+    "approved_source",
+    "direction_convention",
+    "inverter_power_channel",
+    "kind",
+    "max_loss",
+    "max_percent",
+    "name",
+    "rectifier_power_channel",
+    "required",
+    "units",
+    "window",
+}
 _MAX_PROVENANCE_TEXT = 512
 
 
@@ -625,9 +638,22 @@ def _validated_approved_source(source: Any, *, field_prefix: str) -> dict[str, s
     return approved
 
 
-def _threshold_contract_sha256(check: Mapping[str, Any]) -> str:
-    canonical = {
+def _canonical_terminal_power_loss_check(check: Mapping[str, Any]) -> dict[str, Any]:
+    if any(key not in _TERMINAL_POWER_LOSS_FIELDS for key in check):
+        raise _invalid(
+            "physical terminal loss check contains unsupported fields.",
+            field="physical terminal loss check",
+            allowed_fields=sorted(_TERMINAL_POWER_LOSS_FIELDS),
+        )
+    raw_window = check.get("window")
+    window = None
+    if raw_window is not None:
+        window = list(_validated_window(raw_window, field="window"))
+    return {
+        "name": _text(check.get("name"), "name"),
         "kind": _text(check.get("kind"), "kind"),
+        "required": _required(check),
+        "window": window,
         "direction_convention": _text(check.get("direction_convention"), "direction_convention"),
         "rectifier_power_channel": _text(check.get("rectifier_power_channel"), "rectifier_power_channel"),
         "inverter_power_channel": _text(check.get("inverter_power_channel"), "inverter_power_channel"),
@@ -637,6 +663,10 @@ def _threshold_contract_sha256(check: Mapping[str, Any]) -> str:
         if check.get("max_percent") is None
         else _finite_float(check["max_percent"], "max_percent"),
     }
+
+
+def _threshold_contract_sha256(check: Mapping[str, Any]) -> str:
+    canonical = _canonical_terminal_power_loss_check(check)
     encoded = json.dumps(canonical, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
 
@@ -684,20 +714,27 @@ def _physical_terminal_power_loss(
     samples: Mapping[str, _Channel],
     trusted_threshold_sources: Any = None,
 ) -> tuple[str, dict[str, Any]]:
-    convention = _text(check.get("direction_convention"), "direction_convention")
+    canonical = _canonical_terminal_power_loss_check(check)
+    convention = canonical["direction_convention"]
     if convention != _POSITIVE_TERMINAL_POWER_CONVENTION:
         raise _invalid(
             "unsupported terminal power direction convention.",
             field="direction_convention",
         )
-    units = _text(check.get("units"), "units")
-    rectifier_name = _text(check.get("rectifier_power_channel"), "rectifier_power_channel")
-    inverter_name = _text(check.get("inverter_power_channel"), "inverter_power_channel")
-    rectifier_time, rectifier = _window(_channel(samples, rectifier_name), check.get("window"), units)
-    inverter_time, inverter = _window(_channel(samples, inverter_name), check.get("window"), units)
+    units = canonical["units"]
+    rectifier_name = canonical["rectifier_power_channel"]
+    inverter_name = canonical["inverter_power_channel"]
+    max_loss = canonical["max_loss"]
+    max_percent = canonical["max_percent"]
+    approved_source = None
+    if max_loss is not None or max_percent is not None:
+        approved_source = _approved_threshold_source(check, trusted_threshold_sources)
+
+    rectifier_time, rectifier = _window(_channel(samples, rectifier_name), canonical["window"], units)
+    inverter_time, inverter = _window(_channel(samples, inverter_name), canonical["window"], units)
     _require_identical_domains(
         [(rectifier_name, rectifier_time), (inverter_name, inverter_time)],
-        check=check.get("name"),
+        check=canonical["name"],
     )
 
     rectifier_mean = _mean(rectifier)
@@ -707,15 +744,10 @@ def _physical_terminal_power_loss(
     loss_percent = None if rectifier_mean == 0.0 else loss / rectifier_mean * 100.0
     passed = rectifier_mean > 0.0 and inverter_mean > 0.0 and all(value >= 0.0 for value in loss_values)
 
-    max_loss = check.get("max_loss")
-    max_percent = check.get("max_percent")
-    approved_source = None
-    if max_loss is not None or max_percent is not None:
-        approved_source = _approved_threshold_source(check, trusted_threshold_sources)
     if max_loss is not None:
-        passed = passed and loss <= _finite_float(max_loss, "max_loss")
+        passed = passed and loss <= max_loss
     if max_percent is not None:
-        passed = passed and loss_percent is not None and loss_percent <= _finite_float(max_percent, "max_percent")
+        passed = passed and loss_percent is not None and loss_percent <= max_percent
 
     payload: dict[str, Any] = {
         "observed": {
