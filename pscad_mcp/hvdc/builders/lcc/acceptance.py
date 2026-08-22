@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import bisect
 import math
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
@@ -250,6 +251,17 @@ def _optional_text(value: Any, field: str) -> str | None:
     return _text(value, field)
 
 
+def _optional_units(value: Any, field: str) -> str | None:
+    """Normalize exporter blank unit cells without weakening typed metadata."""
+
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise _invalid(f"{field} must be a string or null.", field=field)
+    normalized = value.strip()
+    return normalized or None
+
+
 def _required(value: Mapping[str, Any]) -> bool:
     required = value.get("required", True)
     if not isinstance(required, bool):
@@ -292,7 +304,7 @@ def _canonical_channels(payload: Any, label: str) -> dict[str, _Channel]:
         if isinstance(raw_value, Mapping):
             values = raw_value.get("values", raw_value.get("samples"))
             time = raw_value.get("time", raw_value.get("domain", global_time))
-            units = _optional_text(raw_value.get("units"), f"{label}.{name}.units")
+            units = _optional_units(raw_value.get("units"), f"{label}.{name}.units")
         else:
             values = raw_value
             time = global_time
@@ -343,6 +355,7 @@ _UNIT_TO_SI = {
     "kVAr": ("reactive_power", 1_000.0),
     "MVAr": ("reactive_power", 1_000_000.0),
     "deg": ("angle", 1.0),
+    "pu": ("per_unit", 1.0),
 }
 
 
@@ -560,6 +573,118 @@ def _physical_power_balance(check: Mapping[str, Any], samples: Mapping[str, _Cha
     )
 
 
+_POSITIVE_TERMINAL_POWER_CONVENTION = "rectifier_input_positive_inverter_output_positive"
+_APPROVED_SOURCE_FIELDS = {
+    "kind",
+    "artifact_sha256",
+    "locator",
+    "review_id",
+    "review_status",
+}
+_MAX_PROVENANCE_TEXT = 512
+
+
+def _approved_threshold_source(check: Mapping[str, Any]) -> dict[str, str]:
+    source = check.get("approved_source")
+    if source is None:
+        raise _EvidenceError("missing approved threshold source")
+    if not isinstance(source, Mapping):
+        raise _invalid("approved_source must be a mapping.", field="approved_source")
+    if set(source) != _APPROVED_SOURCE_FIELDS:
+        raise _invalid(
+            "approved_source fields do not match the required schema.",
+            field="approved_source",
+            required_fields=sorted(_APPROVED_SOURCE_FIELDS),
+        )
+    approved: dict[str, str] = {}
+    for field in sorted(_APPROVED_SOURCE_FIELDS):
+        value = source[field]
+        if (
+            not isinstance(value, str)
+            or not value.strip()
+            or len(value) > _MAX_PROVENANCE_TEXT
+            or len(value.strip()) > _MAX_PROVENANCE_TEXT
+        ):
+            raise _invalid(
+                "approved_source contains an invalid text field.",
+                field=f"approved_source.{field}",
+                max_length=_MAX_PROVENANCE_TEXT,
+            )
+        approved[field] = value.strip()
+    if re.fullmatch(r"[0-9a-fA-F]{64}", approved["artifact_sha256"]) is None:
+        raise _invalid(
+            "approved_source artifact_sha256 must be a 64-character hexadecimal digest.",
+            field="approved_source.artifact_sha256",
+        )
+    if approved["review_status"] != "approved":
+        raise _invalid(
+            "approved_source review_status must be approved.",
+            field="approved_source.review_status",
+        )
+    return approved
+
+
+def _physical_terminal_power_loss(
+    check: Mapping[str, Any],
+    samples: Mapping[str, _Channel],
+) -> tuple[str, dict[str, Any]]:
+    convention = _text(check.get("direction_convention"), "direction_convention")
+    if convention != _POSITIVE_TERMINAL_POWER_CONVENTION:
+        raise _invalid(
+            "unsupported terminal power direction convention.",
+            direction_convention=convention,
+        )
+    units = _text(check.get("units"), "units")
+    rectifier_name = _text(check.get("rectifier_power_channel"), "rectifier_power_channel")
+    inverter_name = _text(check.get("inverter_power_channel"), "inverter_power_channel")
+    rectifier_time, rectifier = _window(_channel(samples, rectifier_name), check.get("window"), units)
+    inverter_time, inverter = _window(_channel(samples, inverter_name), check.get("window"), units)
+    _require_identical_domains(
+        [(rectifier_name, rectifier_time), (inverter_name, inverter_time)],
+        check=check.get("name"),
+    )
+
+    rectifier_mean = _mean(rectifier)
+    inverter_mean = _mean(inverter)
+    loss_values = [left - right for left, right in zip(rectifier, inverter)]
+    loss = rectifier_mean - inverter_mean
+    if rectifier_mean <= 0.0:
+        raise _EvidenceError(
+            "invalid terminal power loss baseline",
+            channel=rectifier_name,
+            details={"reason_detail": "rectifier mean must be positive"},
+        )
+    loss_percent = loss / rectifier_mean * 100.0
+    passed = all(value >= 0.0 for value in loss_values)
+
+    max_loss = check.get("max_loss")
+    max_percent = check.get("max_percent")
+    approved_source = None
+    if max_loss is not None or max_percent is not None:
+        approved_source = _approved_threshold_source(check)
+    if max_loss is not None:
+        passed = passed and loss <= _finite_float(max_loss, "max_loss")
+    if max_percent is not None:
+        passed = passed and loss_percent <= _finite_float(max_percent, "max_percent")
+
+    payload: dict[str, Any] = {
+        "observed": {
+            "rectifier_power_mean": rectifier_mean,
+            "inverter_power_mean": inverter_mean,
+            "loss": loss,
+            "loss_percent": loss_percent,
+            "loss_min": min(loss_values),
+            "loss_max": max(loss_values),
+            "units": units,
+            "direction_convention": convention,
+        },
+        "passed": passed,
+    }
+    if approved_source is not None:
+        payload["approved_source"] = approved_source
+    return "derived", payload
+
+
 def _physical_angle(check: Mapping[str, Any], samples: Mapping[str, _Channel]) -> tuple[str, dict[str, Any]]:
     name = _text(check.get("channel"), "channel")
     units = _text(check.get("units"), "units")
@@ -623,6 +748,7 @@ _PHYSICAL_DISPATCH = {
     "dc_magnitude_polarity": _physical_dc,
     "pdc_product": _physical_pdc,
     "terminal_power_balance": _physical_power_balance,
+    "terminal_power_loss": _physical_terminal_power_loss,
     "angle_interval": _physical_angle,
     "ripple": _physical_ripple,
     "steady_state_control_error": _physical_control_error,
@@ -827,7 +953,24 @@ def _evaluate_physical(samples: Mapping[str, _Channel], contract: Mapping[str, A
             status, payload = dispatch(check, samples)
             record["status"] = status
             record["observed"] = payload["observed"]
-            expected = {key: check[key] for key in ("min", "max", "target", "max_abs", "max_percent", "loss_allowance", "polarity") if key in check}
+            expected = {
+                key: check[key]
+                for key in (
+                    "min",
+                    "max",
+                    "target",
+                    "max_abs",
+                    "max_loss",
+                    "max_percent",
+                    "loss_allowance",
+                    "polarity",
+                    "direction_convention",
+                    "approved_source",
+                )
+                if key in check
+            }
+            if "approved_source" in payload:
+                expected["approved_source"] = payload["approved_source"]
             if expected:
                 record["expected"] = expected
             record["outcome"] = PASS if payload["passed"] else FAIL
