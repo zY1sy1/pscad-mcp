@@ -361,6 +361,15 @@ _UNIT_TO_SI = {
 }
 
 
+def _finite_derived(value: float, operation: str) -> float:
+    if not math.isfinite(value):
+        raise _EvidenceError(
+            "non-finite derived value",
+            details={"operation": operation},
+        )
+    return value
+
+
 def _convert(values: Sequence[float], from_units: str | None, to_units: str, channel: str) -> list[float]:
     if from_units not in _UNIT_TO_SI or to_units not in _UNIT_TO_SI:
         raise _EvidenceError("unit mismatch", channel=channel, details={"expected_units": to_units, "observed_units": from_units})
@@ -368,7 +377,10 @@ def _convert(values: Sequence[float], from_units: str | None, to_units: str, cha
     to_kind, to_scale = _UNIT_TO_SI[to_units]
     if from_kind != to_kind:
         raise _EvidenceError("unit mismatch", channel=channel, details={"expected_units": to_units, "observed_units": from_units})
-    return [value * from_scale / to_scale for value in values]
+    if from_units == to_units:
+        return list(values)
+    scale = _finite_derived(from_scale / to_scale, "unit scale conversion")
+    return [_finite_derived(value * scale, "unit conversion") for value in values]
 
 
 def _validated_window(window: Any, *, field: str, channel: str | None = None) -> tuple[float, float]:
@@ -388,7 +400,9 @@ def _convert_power_from_watts(values: Sequence[float], to_units: str) -> list[fl
     if to_units not in _UNIT_TO_SI or _UNIT_TO_SI[to_units][0] != "power":
         raise _EvidenceError("unit mismatch", details={"expected_units": to_units})
     scale = _UNIT_TO_SI[to_units][1]
-    return [value / scale for value in values]
+    if scale == 1.0:
+        return [_finite_derived(value, "power conversion") for value in values]
+    return [_finite_derived(value / scale, "power conversion") for value in values]
 
 
 def _window(channel: _Channel, window: Sequence[Any] | None, units: str | None = None) -> tuple[list[float], list[float]]:
@@ -438,7 +452,11 @@ def _require_identical_domains(
 
 
 def _mean(values: Sequence[float]) -> float:
-    return sum(values) / len(values)
+    try:
+        total = math.fsum(values)
+    except (OverflowError, ValueError) as error:
+        raise _EvidenceError("non-finite derived value", details={"operation": "mean"}) from error
+    return _finite_derived(total / len(values), "mean")
 
 
 def _rms(values: Sequence[float]) -> float:
@@ -576,6 +594,13 @@ def _physical_power_balance(check: Mapping[str, Any], samples: Mapping[str, _Cha
 
 
 _POSITIVE_TERMINAL_POWER_CONVENTION = "rectifier_input_positive_inverter_output_positive"
+_TERMINAL_POWER_UNITS = frozenset({"W", "kW", "MW"})
+_FLOAT_COMPARISON_POLICY = {
+    "kind": "max_ulps",
+    "max_ulps": 16,
+    "rel_tol": 0.0,
+    "abs_tol": 0.0,
+}
 _APPROVED_SOURCE_FIELDS = {
     "kind",
     "artifact_sha256",
@@ -598,6 +623,22 @@ _TERMINAL_POWER_LOSS_FIELDS = {
     "window",
 }
 _MAX_PROVENANCE_TEXT = 512
+
+
+def _float_at_most(observed: float, limit: float) -> bool:
+    """Compare a bound with 16 ULPs and zero relative/absolute engineering tolerance."""
+
+    observed = _finite_derived(observed, "floating-point comparison")
+    edge = _finite_derived(limit, "floating-point comparison")
+    if observed <= edge:
+        return True
+    for _ in range(_FLOAT_COMPARISON_POLICY["max_ulps"]):
+        edge = math.nextafter(edge, math.inf)
+    return observed <= edge
+
+
+def _float_at_least(observed: float, limit: float) -> bool:
+    return _float_at_most(limit, observed)
 
 
 def _validated_approved_source(source: Any, *, field_prefix: str) -> dict[str, str]:
@@ -662,6 +703,7 @@ def _canonical_terminal_power_loss_check(check: Mapping[str, Any]) -> dict[str, 
         "max_percent": None
         if check.get("max_percent") is None
         else _finite_float(check["max_percent"], "max_percent"),
+        "comparison_policy": dict(_FLOAT_COMPARISON_POLICY),
     }
 
 
@@ -729,6 +771,11 @@ def _physical_terminal_power_loss(
     approved_source = None
     if max_loss is not None or max_percent is not None:
         approved_source = _approved_threshold_source(check, trusted_threshold_sources)
+    if units not in _TERMINAL_POWER_UNITS:
+        raise _EvidenceError(
+            "unit mismatch",
+            details={"expected_kind": "power", "observed_units": units},
+        )
 
     rectifier_time, rectifier = _window(_channel(samples, rectifier_name), canonical["window"], units)
     inverter_time, inverter = _window(_channel(samples, inverter_name), canonical["window"], units)
@@ -739,15 +786,26 @@ def _physical_terminal_power_loss(
 
     rectifier_mean = _mean(rectifier)
     inverter_mean = _mean(inverter)
-    loss_values = [left - right for left, right in zip(rectifier, inverter)]
-    loss = rectifier_mean - inverter_mean
-    loss_percent = None if rectifier_mean == 0.0 else loss / rectifier_mean * 100.0
-    passed = rectifier_mean > 0.0 and inverter_mean > 0.0 and all(value >= 0.0 for value in loss_values)
+    loss_values = [
+        _finite_derived(left - right, "terminal power loss")
+        for left, right in zip(rectifier, inverter)
+    ]
+    loss = _mean(loss_values)
+    if rectifier_mean == 0.0:
+        loss_percent = None
+    else:
+        ratio = _finite_derived(loss / rectifier_mean, "terminal loss ratio")
+        loss_percent = _finite_derived(ratio * 100.0, "terminal loss percent")
+    passed = (
+        rectifier_mean > 0.0
+        and inverter_mean > 0.0
+        and all(_float_at_least(value, 0.0) for value in loss_values)
+    )
 
     if max_loss is not None:
-        passed = passed and loss <= max_loss
+        passed = passed and _float_at_most(loss, max_loss)
     if max_percent is not None:
-        passed = passed and loss_percent is not None and loss_percent <= max_percent
+        passed = passed and loss_percent is not None and _float_at_most(loss_percent, max_percent)
 
     payload: dict[str, Any] = {
         "observed": {
@@ -761,6 +819,7 @@ def _physical_terminal_power_loss(
             "direction_convention": convention,
         },
         "passed": passed,
+        "comparison_policy": dict(_FLOAT_COMPARISON_POLICY),
     }
     if approved_source is not None:
         payload["approved_source"] = approved_source
@@ -1033,6 +1092,8 @@ def _evaluate_physical(
 ) -> None:
     for index, check in enumerate(_physical_declarations(contract)):
         record = _check_base(check, index)
+        if record["kind"] == "terminal_power_loss":
+            record["comparison_policy"] = dict(_FLOAT_COMPARISON_POLICY)
         dispatch = _PHYSICAL_DISPATCH.get(record["kind"])
         if dispatch is None:
             raise _invalid("unsupported physical check kind.", kind=record["kind"])
@@ -1047,6 +1108,8 @@ def _evaluate_physical(
                 status, payload = dispatch(check, samples)
             record["status"] = status
             record["observed"] = payload["observed"]
+            if "comparison_policy" in payload:
+                record["comparison_policy"] = payload["comparison_policy"]
             expected = {
                 key: check[key]
                 for key in (

@@ -9,6 +9,12 @@ from pscad_mcp.hvdc.builders.lcc.acceptance import evaluate_acceptance
 
 TIME = [0.8, 0.9, 1.0]
 CONVENTION = "rectifier_input_positive_inverter_output_positive"
+COMPARISON_POLICY = {
+    "kind": "max_ulps",
+    "max_ulps": 16,
+    "rel_tol": 0.0,
+    "abs_tol": 0.0,
+}
 
 
 def _channel(values, units):
@@ -41,6 +47,7 @@ def _threshold_digest(check):
         "units": check["units"],
         "max_loss": float(check["max_loss"]) if check.get("max_loss") is not None else None,
         "max_percent": float(check["max_percent"]) if check.get("max_percent") is not None else None,
+        "comparison_policy": COMPARISON_POLICY,
     }
     encoded = json.dumps(
         threshold_contract,
@@ -120,22 +127,64 @@ def test_referenced_gamma_with_blank_units_is_incomplete():
 
 
 def test_per_unit_values_support_same_unit_conversion():
+    samples = {
+        "time": TIME,
+        "channels": {"Main/IDC": _channel([1.0, 1.0, 1.0], "pu")},
+    }
+    contract = {
+        "physical_checks": [
+            {
+                "name": "dc_current_pu",
+                "kind": "dc_magnitude_polarity",
+                "channel": "Main/IDC",
+                "units": "pu",
+                "min": 1.0,
+                "max": 1.0,
+            }
+        ]
+    }
     result = evaluate_acceptance(
-        _real_style_samples(power_units="pu"),
+        samples,
         {},
-        _loss_contract(units="pu"),
+        contract,
     )
 
     assert result["verdict"] == "PASS"
     assert result["physical_checks"][0]["observed"]["units"] == "pu"
 
 
+@pytest.mark.parametrize("units", ["pu", "kV", "kA"])
+def test_terminal_power_loss_rejects_non_power_dimensions(units):
+    result = evaluate_acceptance(
+        _real_style_samples(power_units=units),
+        {},
+        _loss_contract(units=units),
+    )
+
+    assert result["verdict"] == "INCOMPLETE_ANALYSIS"
+    assert result["errors"][0]["reason"] == "unit mismatch"
+
+
 @pytest.mark.parametrize("requested_units", ["kV", "kA"])
 def test_per_unit_values_cannot_convert_to_physical_units_without_base(requested_units):
+    samples = {
+        "time": TIME,
+        "channels": {"Main/PU": _channel([1.0, 1.0, 1.0], "pu")},
+    }
+    contract = {
+        "physical_checks": [
+            {
+                "name": "pu_without_base",
+                "kind": "dc_magnitude_polarity",
+                "channel": "Main/PU",
+                "units": requested_units,
+            }
+        ]
+    }
     result = evaluate_acceptance(
-        _real_style_samples(power_units="pu"),
+        samples,
         {},
-        _loss_contract(units=requested_units),
+        contract,
     )
 
     assert result["verdict"] == "INCOMPLETE_ANALYSIS"
@@ -170,6 +219,7 @@ def test_terminal_power_loss_threshold_without_approved_source_is_incomplete(thr
     assert result["verdict"] == "INCOMPLETE_ANALYSIS"
     check = result["physical_checks"][0]
     assert check["outcome"] == "INCOMPLETE_ANALYSIS"
+    assert check["comparison_policy"] == COMPARISON_POLICY
     assert result["errors"][0]["reason"] == "missing approved threshold source"
     json.dumps(result)
 
@@ -189,7 +239,59 @@ def test_terminal_power_loss_threshold_with_approved_source_is_enforced():
 
     assert result["verdict"] == "PASS"
     assert result["physical_checks"][0]["expected"]["approved_source"] == source
+    assert result["physical_checks"][0]["comparison_policy"] == COMPARISON_POLICY
     assert trusted == trusted_before
+
+
+@pytest.mark.parametrize(
+    ("rectifier", "inverter", "threshold", "expected_verdict"),
+    [
+        (1028.7, 977.9, 50.8, "PASS"),
+        (1.3, 1.0, 0.3, "PASS"),
+        (1.30000000000001, 1.0, 0.3, "FAIL"),
+    ],
+)
+def test_terminal_power_loss_uses_fixed_ulp_boundary_policy(rectifier, inverter, threshold, expected_verdict):
+    samples = _real_style_samples()
+    samples["channels"]["Main/PR"]["values"] = [rectifier] * len(TIME)
+    samples["channels"]["Main/PI"]["values"] = [inverter] * len(TIME)
+    contract = _loss_contract(max_loss=threshold)
+    source = _approved_source(contract["physical_checks"][0])
+    contract["physical_checks"][0]["approved_source"] = source
+
+    result = evaluate_acceptance(
+        samples,
+        {},
+        contract,
+        trusted_threshold_sources=_trusted_registry(source),
+    )
+
+    assert result["verdict"] == expected_verdict
+    assert result["physical_checks"][0]["comparison_policy"] == COMPARISON_POLICY
+
+
+def test_terminal_power_loss_overflow_is_incomplete_and_strict_json_safe():
+    samples = _real_style_samples()
+    samples["channels"]["Main/PR"] = _channel([1e308, 1e308, 1e308], "MW")
+    samples["channels"]["Main/PI"] = _channel([1e308, 1e308, 1e308], "MW")
+
+    result = evaluate_acceptance(samples, {}, _loss_contract())
+
+    assert result["verdict"] == "INCOMPLETE_ANALYSIS"
+    assert result["errors"][0]["reason"] == "non-finite derived value"
+    json.dumps(result, allow_nan=False)
+
+
+def test_terminal_power_loss_unit_conversion_overflow_is_incomplete_and_json_safe():
+    samples = _real_style_samples(power_units="MW")
+    samples["channels"]["Main/PR"]["values"] = [1e308] * len(TIME)
+    samples["channels"]["Main/PI"]["values"] = [1e307] * len(TIME)
+
+    result = evaluate_acceptance(samples, {}, _loss_contract(units="W"))
+
+    assert result["verdict"] == "INCOMPLETE_ANALYSIS"
+    assert result["errors"][0]["reason"] == "non-finite derived value"
+    json.dumps(result, allow_nan=False)
 
 
 @pytest.mark.parametrize("threshold", [{"max_loss": 50.0}, {"max_percent": 4.9}])

@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from pscad_mcp.hvdc.builders.lcc.executor import execute_build as _execute_build
+from pscad_mcp.hvdc.builders.lcc.executor import LccExecutor
 from pscad_mcp.hvdc.builders.lcc.assets import load_packaged_asset_set
 from pscad_mcp.hvdc.builders.lcc.models import (
     LccBlueprint,
@@ -132,6 +133,35 @@ def test_execute_build_verifies_mutations_and_publishes_after_acceptance(tmp_pat
     assert journal_payload["state"] == "published"
     assert journal_payload["plan"]["plan_hash"] == "plan-hash"
     assert journal_payload["target_path"] == str(Path(_plan(tmp_path).target_path))
+
+
+def test_executor_forwards_trusted_threshold_registry_to_acceptance(tmp_path, monkeypatch):
+    registry = {"review": {"review_id": "review"}}
+    captured = {}
+
+    def fake_evaluate(samples, golden, contract, trusted_threshold_sources=None):
+        captured["samples"] = samples
+        captured["trusted_threshold_sources"] = trusted_threshold_sources
+        return {"verdict": "PASS"}
+
+    monkeypatch.setattr("pscad_mcp.hvdc.builders.lcc.executor.evaluate_acceptance", fake_evaluate)
+    asset_set = type("Asset", (), {"golden": {}, "acceptance": {}})()
+    executor = LccExecutor(
+        _plan(tmp_path),
+        RecordingPscadService(),
+        tmp_path,
+        asset_set=asset_set,
+        trusted_threshold_sources=registry,
+    )
+
+    async def acceptance_output():
+        return {"time": [0.0], "channels": {}}
+
+    executor._acceptance_output = acceptance_output
+    operation = next(operation for operation in executor.plan.operations if operation.kind == "accept")
+    asyncio.run(executor._accept(operation))
+
+    assert captured["trusted_threshold_sources"] is registry
 
 
 def test_execute_build_rejects_unverified_companion_library_before_loading(tmp_path):

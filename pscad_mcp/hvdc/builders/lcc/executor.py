@@ -155,6 +155,7 @@ class LccExecutor:
         poll_interval_s: float = 0.05,
         timeout_s: float = 300.0,
         allow_test_double: bool = False,
+        trusted_threshold_sources: Any = None,
     ) -> None:
         self.plan = plan
         self.service = service
@@ -165,6 +166,7 @@ class LccExecutor:
         self.poll_interval_s = max(0.0, float(poll_interval_s))
         self.timeout_s = float(timeout_s)
         self.allow_test_double = bool(allow_test_double)
+        self.trusted_threshold_sources = trusted_threshold_sources
         self.project_name = Path(plan.staging_path or "LCC_LCC.staging").stem
         self.staging_path = Path(plan.staging_path or self.workspace_root / ".pscad-mcp" / "lcc-builds" / f"{self.project_name}.staging")
         self.target_path = Path(plan.target_path) if plan.target_path else None
@@ -845,7 +847,12 @@ class LccExecutor:
         self._operation_started(operation)
         output = await self._acceptance_output()
         if self.asset_set is not None:
-            result = evaluate_acceptance(output, self.asset_set.golden, self.asset_set.acceptance)
+            result = evaluate_acceptance(
+                output,
+                self.asset_set.golden,
+                self.asset_set.acceptance,
+                self.trusted_threshold_sources,
+            )
         elif self.allow_test_double and isinstance(output, dict) and isinstance(output.get("verdict"), str):
             result = dict(output)
         elif self.allow_test_double:
@@ -986,6 +993,7 @@ async def execute_build(
     poll_interval_s: float = 0.05,
     timeout_s: float = 300.0,
     allow_test_double: bool = False,
+    trusted_threshold_sources: Any = None,
 ) -> LccBuildRecord:
     """Execute one plan and return a JSON-safe terminal record."""
 
@@ -999,6 +1007,7 @@ async def execute_build(
         poll_interval_s=poll_interval_s,
         timeout_s=timeout_s,
         allow_test_double=allow_test_double,
+        trusted_threshold_sources=trusted_threshold_sources,
     ).run()
 
 
