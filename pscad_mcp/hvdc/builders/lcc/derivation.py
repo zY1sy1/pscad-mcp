@@ -6,6 +6,7 @@ import hashlib
 import json
 import math
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, field
 from typing import Any
 
 from ....core.backend.base import BackendError
@@ -20,6 +21,18 @@ _DETAIL_STRING_LIMIT = 160
 _DETAIL_SEQUENCE_LIMIT = 16
 _DETAIL_PAYLOAD_LIMIT_BYTES = 2048
 _ERROR_MESSAGE_LIMIT = 256
+
+
+@dataclass
+class _DerivationContext:
+    catalog: Mapping[str, Any]
+    provenance: Mapping[str, Any]
+    entries: Mapping[str, Any]
+    machine_contracts: dict[str, Mapping[str, Any]] = field(default_factory=dict)
+    declaration_contracts: dict[
+        int, tuple[str, str, tuple[Mapping[str, Any], ...]]
+    ] = field(default_factory=dict)
+    power_contract: tuple[str, str, str, float, float] | None = None
 
 
 def _summary_sha256(value: Any) -> str:
@@ -115,7 +128,7 @@ def _object(value: Any, name: str) -> Mapping[str, Any]:
     return value
 
 
-def _catalog_data(catalog: Any) -> Mapping[str, Any]:
+def _derivation_context(catalog: Any) -> _DerivationContext:
     value = load_parametric_catalog() if catalog is None else catalog
     if not isinstance(value, Mapping):
         raise _error(
@@ -147,7 +160,7 @@ def _catalog_data(catalog: Any) -> Mapping[str, Any]:
                 observed=observed,
                 expected=expected,
             )
-    _validate_provenance_document(provenance)
+    entries = _validate_provenance_document(provenance)
     for field in (
         "rating_parameters",
         "derived_parameters",
@@ -157,9 +170,10 @@ def _catalog_data(catalog: Any) -> Mapping[str, Any]:
         "return_asset_requirements",
     ):
         _object(value.get(field), field)
-    _validate_authoritative_catalog_structure(value, provenance)
-    _prevalidate_catalog_declarations(value)
-    return value
+    context = _DerivationContext(value, provenance, entries)
+    _validate_authoritative_catalog_structure(context)
+    _prevalidate_catalog_declarations(context)
+    return context
 
 
 def _finite_number(value: Any, *, parameter: str, code: str = "LCC_PARAMETER_DERIVATION_FAILED") -> float:
@@ -174,10 +188,11 @@ def _finite_number(value: Any, *, parameter: str, code: str = "LCC_PARAMETER_DER
     return result
 
 
-def _provenance_entry(reference: Any, parameter: str) -> Mapping[str, Any]:
-    provenance = load_parametric_provenance()
-    identity = provenance.get("identity")
-    entries = _object(provenance.get("entries"), "provenance.entries")
+def _provenance_entry(
+    context: _DerivationContext, reference: Any, parameter: str
+) -> Mapping[str, Any]:
+    identity = context.provenance.get("identity")
+    entries = context.entries
     if not isinstance(reference, str) or ":" not in reference:
         raise _error(
             "LCC_PARAMETER_DERIVATION_FAILED",
@@ -196,7 +211,9 @@ def _provenance_entry(reference: Any, parameter: str) -> Mapping[str, Any]:
     return _object(entries[entry_name], f"provenance.entries.{entry_name}")
 
 
-def _validate_provenance_document(provenance: Mapping[str, Any]) -> None:
+def _validate_provenance_document(
+    provenance: Mapping[str, Any],
+) -> Mapping[str, Any]:
     entries = _object(provenance.get("entries"), "provenance.entries")
     for name in sorted(entries):
         entry = _object(entries[name], f"provenance.entries.{name}")
@@ -211,21 +228,31 @@ def _validate_provenance_document(provenance: Mapping[str, Any]) -> None:
             entry.get("machine_contract"),
             f"provenance.entries.{name}.machine_contract",
         )
+    return entries
 
 
-def _machine_contract(reference: Any, parameter: str) -> Mapping[str, Any]:
-    entry = _provenance_entry(reference, parameter)
-    return _object(entry.get("machine_contract"), f"provenance.{reference}.machine_contract")
+def _machine_contract(
+    context: _DerivationContext, reference: Any, parameter: str
+) -> Mapping[str, Any]:
+    if isinstance(reference, str) and reference in context.machine_contracts:
+        return context.machine_contracts[reference]
+    entry = _provenance_entry(context, reference, parameter)
+    contract = _object(
+        entry.get("machine_contract"), f"provenance.{reference}.machine_contract"
+    )
+    context.machine_contracts[reference] = contract
+    return contract
 
 
 def _require_machine_contract(
+    context: _DerivationContext,
     reference: Any,
     observed: Mapping[str, Any],
     parameter: str,
     *,
     relationship: str | None = None,
 ) -> Mapping[str, Any]:
-    expected = _machine_contract(reference, parameter)
+    expected = _machine_contract(context, reference, parameter)
     if dict(observed) != dict(expected):
         details: dict[str, Any] = {
             "parameter": parameter,
@@ -244,10 +271,12 @@ def _require_machine_contract(
 
 
 def _validate_authoritative_catalog_structure(
-    catalog: Mapping[str, Any], provenance: Mapping[str, Any]
+    context: _DerivationContext,
 ) -> None:
+    catalog = context.catalog
+    provenance = context.provenance
     structure_asset = provenance.get("catalog_structure_contract_asset")
-    contract = _machine_contract(structure_asset, "catalog_structure")
+    contract = _machine_contract(context, structure_asset, "catalog_structure")
     required_relationships = _object(
         contract.get("required_relationships"),
         f"provenance.{structure_asset}.required_relationships",
@@ -335,13 +364,17 @@ def _resolve_provenance_multiplier(value: Any, parameter: str) -> float:
     return _finite_number(value, parameter=parameter)
 
 
-def _validate_unit_contract(declaration: Mapping[str, Any], parameter: str) -> None:
+def _validate_unit_contract(
+    context: _DerivationContext,
+    declaration: Mapping[str, Any],
+    parameter: str,
+) -> None:
     multipliers_value = declaration.get("unit_multipliers")
     unit_asset = declaration.get("unit_asset")
     if multipliers_value is None and unit_asset is None:
         return
     multipliers = _object(multipliers_value, f"engineering_parameters.{parameter}.unit_multipliers")
-    contract = _machine_contract(unit_asset, parameter)
+    contract = _machine_contract(context, unit_asset, parameter)
     parameters = _object(contract.get("parameters"), f"provenance.{unit_asset}.parameters")
     expected_parameter = _object(parameters.get(parameter), f"provenance.{unit_asset}.{parameter}")
     expected_multipliers = _object(expected_parameter.get("multipliers"), f"provenance.{unit_asset}.{parameter}.multipliers")
@@ -369,8 +402,14 @@ def _validate_unit_contract(declaration: Mapping[str, Any], parameter: str) -> N
 
 
 def _declaration_contract(
-    declaration: Mapping[str, Any], parameter: str
+    context: _DerivationContext,
+    declaration: Mapping[str, Any],
+    parameter: str,
 ) -> tuple[str, str, tuple[Mapping[str, Any], ...]]:
+    cache_key = id(declaration)
+    cached = context.declaration_contracts.get(cache_key)
+    if cached is not None:
+        return cached
     units = declaration.get("units")
     asset = declaration.get("asset")
     constraints_value = declaration.get("constraints")
@@ -385,25 +424,33 @@ def _declaration_contract(
             "Catalog parameter declaration is incomplete.",
             parameter=parameter,
         )
-    _provenance_entry(asset, parameter)
-    _validate_unit_contract(declaration, parameter)
+    _provenance_entry(context, asset, parameter)
+    _validate_unit_contract(context, declaration, parameter)
     constraints: list[Mapping[str, Any]] = []
     for constraint in constraints_value:
         constraint_declaration = _object(constraint, f"{parameter}.constraints")
         constraint_asset = constraint_declaration.get("asset")
         observed_contract = {key: value for key, value in constraint_declaration.items() if key != "asset"}
-        _require_machine_contract(constraint_asset, observed_contract, parameter)
+        _require_machine_contract(
+            context,
+            constraint_asset,
+            observed_contract,
+            parameter,
+        )
         constraints.append(constraint_declaration)
-    return units, asset, tuple(constraints)
+    result = units, asset, tuple(constraints)
+    context.declaration_contracts[cache_key] = result
+    return result
 
 
-def _prevalidate_engineering_declarations(catalog: Mapping[str, Any]) -> None:
+def _prevalidate_engineering_declarations(context: _DerivationContext) -> None:
+    catalog = context.catalog
     declarations = _object(catalog.get("engineering_parameters"), "engineering_parameters")
     for name in sorted(declarations):
         declaration = _object(
             declarations[name], f"engineering_parameters.{name}"
         )
-        _declaration_contract(declaration, name)
+        declaration_contract = _declaration_contract(context, declaration, name)
         if (
             not isinstance(declaration.get("required"), bool)
             or "default" not in declaration
@@ -425,7 +472,7 @@ def _prevalidate_engineering_declarations(catalog: Mapping[str, Any]) -> None:
                     parameter=name,
                 )
             default_asset = declaration.get("default_asset")
-            default_contract = _machine_contract(default_asset, name)
+            default_contract = _machine_contract(context, default_asset, name)
             values = _object(
                 default_contract.get("values"),
                 f"provenance.{default_asset}.values",
@@ -439,10 +486,12 @@ def _prevalidate_engineering_declarations(catalog: Mapping[str, Any]) -> None:
                     asset=default_asset,
                 )
             _validate_constraints(
+                context,
                 value,
                 declaration,
                 name,
                 code="LCC_PARAMETER_DERIVATION_FAILED",
+                declaration_contract=declaration_contract,
             )
         elif formula is not None:
             raise _error(
@@ -453,7 +502,8 @@ def _prevalidate_engineering_declarations(catalog: Mapping[str, Any]) -> None:
             )
 
 
-def _prevalidate_relationship_declarations(catalog: Mapping[str, Any]) -> None:
+def _prevalidate_relationship_declarations(context: _DerivationContext) -> None:
+    catalog = context.catalog
     relationships = _object(
         catalog.get("feasibility_relationships"), "feasibility_relationships"
     )
@@ -466,6 +516,7 @@ def _prevalidate_relationship_declarations(catalog: Mapping[str, Any]) -> None:
             key: value for key, value in declaration.items() if key != "asset"
         }
         _require_machine_contract(
+            context,
             asset,
             observed_contract,
             name,
@@ -473,7 +524,8 @@ def _prevalidate_relationship_declarations(catalog: Mapping[str, Any]) -> None:
         )
 
 
-def _prevalidate_return_declarations(catalog: Mapping[str, Any]) -> None:
+def _prevalidate_return_declarations(context: _DerivationContext) -> None:
+    catalog = context.catalog
     requirements = _object(
         catalog.get("return_asset_requirements"), "return_asset_requirements"
     )
@@ -497,34 +549,43 @@ def _prevalidate_return_declarations(catalog: Mapping[str, Any]) -> None:
             key: value for key, value in declaration.items() if key != "asset"
         }
         _require_machine_contract(
+            context,
             asset,
             observed_contract,
             f"return_asset_requirements.{topology}",
         )
 
 
-def _prevalidate_catalog_declarations(catalog: Mapping[str, Any]) -> None:
-    _validate_rating_contract(catalog)
+def _prevalidate_catalog_declarations(context: _DerivationContext) -> None:
+    catalog = context.catalog
+    _validate_rating_contract(context)
     rating_declarations = _object(catalog.get("rating_parameters"), "rating_parameters")
     for name in sorted(rating_declarations):
         declaration = _object(
             rating_declarations[name], f"rating_parameters.{name}"
         )
-        _declaration_contract(declaration, name)
-    _power_declaration_contract(catalog)
-    _prevalidate_engineering_declarations(catalog)
-    _prevalidate_relationship_declarations(catalog)
-    _prevalidate_return_declarations(catalog)
+        _declaration_contract(context, declaration, name)
+    _power_declaration_contract(context)
+    _prevalidate_engineering_declarations(context)
+    _prevalidate_relationship_declarations(context)
+    _prevalidate_return_declarations(context)
 
 
 def _validate_constraints(
+    context: _DerivationContext,
     value: float,
     declaration: Mapping[str, Any],
     parameter: str,
     *,
     code: str,
+    declaration_contract: tuple[
+        str, str, tuple[Mapping[str, Any], ...]
+    ]
+    | None = None,
 ) -> tuple[str, ...]:
-    units, _, constraints = _declaration_contract(declaration, parameter)
+    units, _, constraints = declaration_contract or _declaration_contract(
+        context, declaration, parameter
+    )
     evidence: list[str] = []
     for constraint in constraints:
         kind = constraint.get("kind")
@@ -579,7 +640,6 @@ def _normalize_override(name: str, raw: Any, declaration: Mapping[str, Any]) -> 
                 unknown_fields=unknown_fields,
             )
         supplied_units = raw["units"]
-        _provenance_entry(declaration.get("unit_asset"), name)
         multipliers = _object(declaration.get("unit_multipliers"), f"engineering_parameters.{name}.unit_multipliers")
         if not isinstance(supplied_units, str) or supplied_units not in multipliers:
             raise _error(
@@ -606,7 +666,8 @@ def _normalize_override(name: str, raw: Any, declaration: Mapping[str, Any]) -> 
     return _finite_number(raw, parameter=name), f"user value in catalog units ({canonical_units})"
 
 
-def _validate_rating_contract(catalog: Mapping[str, Any]) -> None:
+def _validate_rating_contract(context: _DerivationContext) -> None:
+    catalog = context.catalog
     declarations = _object(catalog["rating_parameters"], "rating_parameters")
     required_for_power = {"rated_power_mw", "dc_voltage_kv", "dc_current_ka"}
     missing_power_inputs = sorted(required_for_power - set(declarations))
@@ -622,6 +683,7 @@ def _validate_rating_contract(catalog: Mapping[str, Any]) -> None:
         observed_parameters[name] = {"required": declaration.get("required")}
     asset = catalog.get("rating_contract_asset")
     _require_machine_contract(
+        context,
         asset,
         {"parameters": observed_parameters},
         "rating_parameters",
@@ -629,8 +691,11 @@ def _validate_rating_contract(catalog: Mapping[str, Any]) -> None:
 
 
 def _power_declaration_contract(
-    catalog: Mapping[str, Any],
+    context: _DerivationContext,
 ) -> tuple[str, str, str, float, float]:
+    if context.power_contract is not None:
+        return context.power_contract
+    catalog = context.catalog
     declarations = _object(catalog.get("derived_parameters"), "derived_parameters")
     unexpected = sorted(set(declarations) - {"dc_power_mw"})
     if unexpected:
@@ -678,7 +743,12 @@ def _power_declaration_contract(
         "dependencies": list(dependency_names),
         "compared_to": declaration.get("compared_to"),
     }
-    _require_machine_contract(asset, observed_power_contract, "dc_power_mw")
+    _require_machine_contract(
+        context,
+        asset,
+        observed_power_contract,
+        "dc_power_mw",
+    )
     if (
         formula != "dc_voltage_kv * dc_current_ka"
         or not isinstance(units, str)
@@ -697,6 +767,7 @@ def _power_declaration_contract(
         declaration.get("absolute_tolerance"), parameter="dc_power_mw"
     )
     _require_machine_contract(
+        context,
         comparison_asset,
         {
             "values": {
@@ -706,18 +777,23 @@ def _power_declaration_contract(
         },
         "dc_power_mw.comparison",
     )
-    return (
+    result = (
         formula,
         units,
         asset,
         relative_tolerance,
         absolute_tolerance,
     )
+    context.power_contract = result
+    return result
 
 
-def _rating_parameters(request: ParametricLccRequest, catalog: Mapping[str, Any]) -> tuple[list[DerivedParameter], dict[str, float]]:
+def _rating_parameters(
+    request: ParametricLccRequest,
+    context: _DerivationContext,
+) -> tuple[list[DerivedParameter], dict[str, float]]:
+    catalog = context.catalog
     declarations = _object(catalog["rating_parameters"], "rating_parameters")
-    _validate_rating_contract(catalog)
     values: list[DerivedParameter] = []
     numeric: dict[str, float] = {}
     for name, declaration_value in declarations.items():
@@ -728,8 +804,16 @@ def _rating_parameters(request: ParametricLccRequest, catalog: Mapping[str, Any]
                 raise _error("LCC_RATING_INVALID", "A required rating is missing.", parameter=name)
             continue
         normalized = _finite_number(value, parameter=name, code="LCC_RATING_INVALID")
-        constraints = _validate_constraints(normalized, declaration, name, code="LCC_RATING_INVALID")
-        units, asset, _ = _declaration_contract(declaration, name)
+        declaration_contract = _declaration_contract(context, declaration, name)
+        constraints = _validate_constraints(
+            context,
+            normalized,
+            declaration,
+            name,
+            code="LCC_RATING_INVALID",
+            declaration_contract=declaration_contract,
+        )
+        units, asset, _ = declaration_contract
         numeric[name] = normalized
         values.append(
             DerivedParameter(
@@ -745,9 +829,11 @@ def _rating_parameters(request: ParametricLccRequest, catalog: Mapping[str, Any]
     return values, numeric
 
 
-def _derived_power(ratings: Mapping[str, float], catalog: Mapping[str, Any]) -> DerivedParameter:
+def _derived_power(
+    ratings: Mapping[str, float], context: _DerivationContext
+) -> DerivedParameter:
     formula, units, asset, relative_tolerance, absolute_tolerance = (
-        _power_declaration_contract(catalog)
+        _power_declaration_contract(context)
     )
     calculated = _finite_number(
         ratings["dc_voltage_kv"] * ratings["dc_current_ka"],
@@ -774,7 +860,11 @@ def _derived_power(ratings: Mapping[str, float], catalog: Mapping[str, Any]) -> 
     )
 
 
-def _engineering_parameters(request: ParametricLccRequest, catalog: Mapping[str, Any]) -> tuple[list[DerivedParameter], dict[str, float]]:
+def _engineering_parameters(
+    request: ParametricLccRequest,
+    context: _DerivationContext,
+) -> tuple[list[DerivedParameter], dict[str, float]]:
+    catalog = context.catalog
     declarations = _object(catalog["engineering_parameters"], "engineering_parameters")
     overrides = dict(request.engineering_overrides)
     unknown = sorted(set(overrides) - set(declarations))
@@ -790,7 +880,8 @@ def _engineering_parameters(request: ParametricLccRequest, catalog: Mapping[str,
     missing: list[str] = []
     for name in sorted(declarations):
         declaration = _object(declarations[name], f"engineering_parameters.{name}")
-        units, asset, _ = _declaration_contract(declaration, name)
+        declaration_contract = _declaration_contract(context, declaration, name)
+        units, asset, _ = declaration_contract
         if "required" not in declaration or "default" not in declaration or "formula" not in declaration:
             raise _error(
                 "LCC_PARAMETER_DERIVATION_FAILED",
@@ -811,18 +902,7 @@ def _engineering_parameters(request: ParametricLccRequest, catalog: Mapping[str,
                 )
             formula = formula_value
             source = "default"
-            default_asset = declaration.get("default_asset")
-            default_contract = _machine_contract(default_asset, name)
-            observed_defaults = default_contract.get("values")
-            if not isinstance(observed_defaults, Mapping) or observed_defaults.get(name) != value:
-                raise _error(
-                    "LCC_PARAMETER_DERIVATION_FAILED",
-                    "Catalog default does not match its versioned legacy provenance.",
-                    parameter=name,
-                    value=value,
-                    asset=default_asset,
-                )
-            asset = default_asset
+            asset = declaration.get("default_asset")
         elif declaration["formula"] is not None:
             raise _error(
                 "LCC_PARAMETER_DERIVATION_FAILED",
@@ -835,7 +915,14 @@ def _engineering_parameters(request: ParametricLccRequest, catalog: Mapping[str,
             continue
         else:
             continue
-        constraints = _validate_constraints(value, declaration, name, code="LCC_PARAMETER_DERIVATION_FAILED")
+        constraints = _validate_constraints(
+            context,
+            value,
+            declaration,
+            name,
+            code="LCC_PARAMETER_DERIVATION_FAILED",
+            declaration_contract=declaration_contract,
+        )
         numeric[name] = value
         parameters.append(
             DerivedParameter(
@@ -858,8 +945,11 @@ def _engineering_parameters(request: ParametricLccRequest, catalog: Mapping[str,
 
 
 def _validate_relationships(
-    ratings: Mapping[str, float], engineering: Mapping[str, float], catalog: Mapping[str, Any]
+    ratings: Mapping[str, float],
+    engineering: Mapping[str, float],
+    context: _DerivationContext,
 ) -> list[DerivedParameter]:
+    catalog = context.catalog
     relationships = _object(catalog["feasibility_relationships"], "feasibility_relationships")
     all_values = {**ratings, **engineering}
     derived: list[DerivedParameter] = []
@@ -869,8 +959,7 @@ def _validate_relationships(
         valid = False
         observed: dict[str, Any]
         asset = declaration.get("asset")
-        observed_contract = {key: value for key, value in declaration.items() if key != "asset"}
-        contract = _require_machine_contract(asset, observed_contract, name, relationship=name)
+        contract = _machine_contract(context, asset, name)
         if operator == "less_than":
             left_name = declaration.get("left")
             right_name = declaration.get("right")
@@ -942,7 +1031,10 @@ def _validate_relationships(
     return derived
 
 
-def _validate_return_assets(request: ParametricLccRequest, catalog: Mapping[str, Any]) -> None:
+def _validate_return_assets(
+    request: ParametricLccRequest, context: _DerivationContext
+) -> None:
+    catalog = context.catalog
     requirements = _object(catalog["return_asset_requirements"], "return_asset_requirements")
     contract_assets = _object(catalog["return_contract_assets"], "return_contract_assets")
     authoritative_asset = contract_assets.get(request.topology)
@@ -966,10 +1058,9 @@ def _validate_return_assets(request: ParametricLccRequest, catalog: Mapping[str,
             asset=authoritative_asset,
             observed_asset=return_asset,
         )
-    observed_contract = {key: value for key, value in declaration.items() if key != "asset"}
-    return_contract = _require_machine_contract(
+    return_contract = _machine_contract(
+        context,
         return_asset,
-        observed_contract,
         f"return_asset_requirements.{request.topology}",
     )
     allowed_value = return_contract.get("allowed")
@@ -1006,12 +1097,12 @@ def derive_lcc_parameters(request: ParametricLccRequest, catalog: Any = None) ->
     """Derive catalog-sourced values without accessing PSCAD or writing files."""
     if not isinstance(request, ParametricLccRequest):
         raise _error("LCC_PARAMETER_DERIVATION_FAILED", "request must be ParametricLccRequest")
-    catalog_data = _catalog_data(catalog)
-    rating_parameters, ratings = _rating_parameters(request, catalog_data)
-    derived_power = _derived_power(ratings, catalog_data)
-    engineering_parameters, engineering = _engineering_parameters(request, catalog_data)
-    relationship_parameters = _validate_relationships(ratings, engineering, catalog_data)
-    _validate_return_assets(request, catalog_data)
+    context = _derivation_context(catalog)
+    rating_parameters, ratings = _rating_parameters(request, context)
+    derived_power = _derived_power(ratings, context)
+    engineering_parameters, engineering = _engineering_parameters(request, context)
+    relationship_parameters = _validate_relationships(ratings, engineering, context)
+    _validate_return_assets(request, context)
     parameters = rating_parameters + [derived_power] + engineering_parameters + relationship_parameters
     return DerivedParameterReport(
         parameters=tuple(sorted(parameters, key=lambda item: item.name)),

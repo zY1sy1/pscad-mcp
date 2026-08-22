@@ -413,3 +413,46 @@ def test_derivation_error_payload_is_bounded_for_large_catalog_input():
 
     payload = json.dumps(raised.value.to_dict(), allow_nan=False)
     assert len(payload.encode("utf-8")) <= 4096
+
+
+def test_successful_derivation_loads_one_provenance_snapshot(monkeypatch):
+    real_loader = derivation_module.load_parametric_provenance
+    calls = 0
+
+    def counting_loader():
+        nonlocal calls
+        calls += 1
+        return real_loader()
+
+    monkeypatch.setattr(
+        derivation_module,
+        "load_parametric_provenance",
+        counting_loader,
+    )
+
+    derive_lcc_parameters(request())
+
+    assert calls == 1
+
+
+def test_structured_failure_uses_the_same_single_provenance_snapshot(monkeypatch):
+    real_loader = derivation_module.load_parametric_provenance
+    calls = 0
+
+    def counting_loader():
+        nonlocal calls
+        calls += 1
+        return real_loader()
+
+    monkeypatch.setattr(
+        derivation_module,
+        "load_parametric_provenance",
+        counting_loader,
+    )
+    overrides = {**COMPLETE_ENGINEERING_VALUES, "smoothing_reactor_mh": -1.0}
+
+    with pytest.raises(BackendError) as raised:
+        derive_lcc_parameters(request(engineering_overrides=overrides))
+
+    assert raised.value.code == "LCC_PARAMETER_DERIVATION_FAILED"
+    assert calls == 1
