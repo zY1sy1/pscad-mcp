@@ -158,15 +158,15 @@ def calculate_metrics(samples: dict[str, Any], metrics: list[str] | None = None,
     profile = profile or {}
     roles = profile.get("metric_roles", {}) if isinstance(profile, Mapping) else {}
     selectors = {item.get("canonical"): item for item in profile.get("result_channels", []) if isinstance(item, Mapping)} if isinstance(profile, Mapping) else {}
-    units = {name: selectors.get(name, {}).get("units") for name in channels}
+    channel_unit_map = {name: selectors.get(name, {}).get("units") for name in channels}
     if isinstance(samples.get("channels"), list):
-        units.update({str(item.get("path") or item.get("name")): item.get("units", "") for item in samples["channels"] if isinstance(item, Mapping)})
+        channel_unit_map.update({str(item.get("path") or item.get("name")): item.get("units", "") for item in samples["channels"] if isinstance(item, Mapping)})
     def source(role: str, fallback: str) -> str:
         value = roles.get(role) if isinstance(roles, Mapping) else None
         return str(value) if isinstance(value, str) else fallback
 
     def channel_units(channel: str, fallback: str | None = None) -> str | None:
-        configured = units.get(channel)
+        configured = channel_unit_map.get(channel)
         if configured not in (None, ""):
             return str(configured)
         lowered = channel.casefold()
@@ -183,6 +183,7 @@ def calculate_metrics(samples: dict[str, Any], metrics: list[str] | None = None,
         return fallback
     requested = metrics or ["dc_voltage_peak", "dc_current_peak", "dc_power"]
     result: list[dict[str, Any]] = []
+    legacy_named_channels = isinstance(samples.get("channels"), dict)
 
     def unavailable(metric_name: str, source_channels: Iterable[str]) -> dict[str, Any]:
         sources = tuple(source_channels)
@@ -195,28 +196,56 @@ def calculate_metrics(samples: dict[str, Any], metrics: list[str] | None = None,
             )
         return _missing(metric_name, sources, time)
 
+    def lcc_units_valid(expected: Mapping[str, str]) -> bool:
+        return all(
+            (
+                isinstance(channel_unit_map.get(channel), str)
+                and str(channel_unit_map[channel]).strip().casefold() == unit.casefold()
+            )
+            or (
+                legacy_named_channels
+                and channel_units(channel) is not None
+                and str(channel_units(channel)).casefold() == unit.casefold()
+            )
+            for channel, unit in expected.items()
+        )
+
+    def invalid_lcc_units(metric_name: str, expected: Mapping[str, str]) -> dict[str, Any]:
+        return _invalid(
+            metric_name,
+            tuple(expected),
+            time,
+            "LCC operating-mode metrics require explicit units on every source channel.",
+        )
+
     for name in requested:
         if name == "pole_current_imbalance":
             positive = channels.get("positive_pole_current", [])
             negative = channels.get("negative_pole_current", [])
             count = min(len(positive), len(negative))
-            result.append(
+            if count and not lcc_units_valid({"positive_pole_current": "kA", "negative_pole_current": "kA"}):
+                result.append(invalid_lcc_units(name, {"positive_pole_current": "kA", "negative_pole_current": "kA"}))
+            else:
+                result.append(
                 _metric(name, max(abs(abs(positive[i]) - abs(negative[i])) for i in range(count)), "kA",
                         ("positive_pole_current", "negative_pole_current"), time,
                         "maximum absolute pole-magnitude difference", "derived")
                 if count else unavailable(name, ("positive_pole_current", "negative_pole_current"))
-            )
+                )
             continue
         if name == "pole_voltage_imbalance":
             positive = channels.get("positive_pole_voltage", [])
             negative = channels.get("negative_pole_voltage", [])
             count = min(len(positive), len(negative))
-            result.append(
+            if count and not lcc_units_valid({"positive_pole_voltage": "kV", "negative_pole_voltage": "kV"}):
+                result.append(invalid_lcc_units(name, {"positive_pole_voltage": "kV", "negative_pole_voltage": "kV"}))
+            else:
+                result.append(
                 _metric(name, max(abs(abs(positive[i]) - abs(negative[i])) for i in range(count)), "kV",
                         ("positive_pole_voltage", "negative_pole_voltage"), time,
                         "maximum absolute pole-magnitude difference", "derived")
                 if count else unavailable(name, ("positive_pole_voltage", "negative_pole_voltage"))
-            )
+                )
             continue
         if name == "return_current_closure_error":
             positive = channels.get("positive_pole_current", [])
@@ -228,9 +257,75 @@ def calculate_metrics(samples: dict[str, Any], metrics: list[str] | None = None,
             else:
                 count = min(len(positive), len(negative), len(earth) or len(metallic))
                 ret = earth if earth else metallic
-                result.append(_metric(name, max(abs(positive[i] - negative[i] - ret[i]) for i in range(count)), "kA",
-                                      ("positive_pole_current", "negative_pole_current", "earth_return_current" if earth else "metallic_return_current"), time,
-                                      "maximum algebraic return-current closure error", "derived") if count else unavailable(name, ("positive_pole_current", "negative_pole_current", "earth_return_current")))
+                return_name = "earth_return_current" if earth else "metallic_return_current"
+                expected_units = {
+                    "positive_pole_current": "kA",
+                    "negative_pole_current": "kA",
+                    return_name: "kA",
+                }
+                if count and not lcc_units_valid(expected_units):
+                    result.append(invalid_lcc_units(name, expected_units))
+                else:
+                    result.append(_metric(name, max(abs(positive[i] - negative[i] - ret[i]) for i in range(count)), "kA",
+                                          tuple(expected_units), time,
+                                          "maximum algebraic return-current closure error", "derived") if count else unavailable(name, tuple(expected_units)))
+            continue
+        if name == "mode_transition_recovery_time_s":
+            command = channels.get("mode_command", [])
+            response = channels.get("dc_voltage", [])
+            expected_units = {"mode_command": "state", "dc_voltage": "kV"}
+            count = min(len(command), len(response), len(time))
+            if not count:
+                result.append(unavailable(name, tuple(expected_units)))
+            elif not lcc_units_valid(expected_units):
+                result.append(invalid_lcc_units(name, expected_units))
+            elif "dc_voltage" not in recovery_baselines:
+                result.append(_invalid(name, tuple(expected_units), time, "Mode transition recovery requires an explicit dc_voltage recovery baseline."))
+            else:
+                transition_index = _first_crossing(command)
+                baseline = recovery_baselines["dc_voltage"]
+                tolerance = max(abs(baseline) * 0.01, 1e-12)
+                recovery_index = None if transition_index is None else next(
+                    (
+                        index
+                        for index in range(transition_index, count)
+                        if all(abs(value - baseline) <= tolerance for value in response[index:count])
+                    ),
+                    None,
+                )
+                if transition_index is None or recovery_index is None:
+                    result.append(_invalid(name, tuple(expected_units), time, "A command transition and sustained 1% response recovery are both required."))
+                else:
+                    result.append(_metric(
+                        name,
+                        time[recovery_index] - time[transition_index],
+                        "s",
+                        tuple(expected_units),
+                        time,
+                        "EMTDC time from mode-command transition to sustained 1% dc-voltage recovery",
+                        "derived",
+                    ))
+            continue
+        if name == "mode_mismatch":
+            command = channels.get("mode_command", [])
+            status = channels.get("mode_status", [])
+            expected_units = {"mode_command": "state", "mode_status": "state"}
+            count = min(len(command), len(status))
+            if not count:
+                result.append(unavailable(name, tuple(expected_units)))
+            elif not lcc_units_valid(expected_units):
+                result.append(invalid_lcc_units(name, expected_units))
+            else:
+                mismatch = sum(1 for index in range(count) if command[index] != status[index]) / count
+                result.append(_metric(
+                    name,
+                    mismatch,
+                    "ratio",
+                    tuple(expected_units),
+                    time,
+                    "fraction of aligned samples whose observed mode differs from the command",
+                    "derived",
+                ))
             continue
         if name in {"voltage_imbalance", "current_imbalance", "pole_imbalance"}:
             prefix = "dc_voltage" if name == "voltage_imbalance" else "dc_current"
@@ -343,7 +438,7 @@ def calculate_metrics(samples: dict[str, Any], metrics: list[str] | None = None,
             voltage_name, current_name = source("dc_voltage", "dc_voltage"), source("dc_current", "dc_current")
             voltage, current = channels.get(voltage_name, []), channels.get(current_name, [])
             count = min(len(voltage), len(current))
-            valid_units = {str(units.get(voltage_name, "")).casefold(), str(units.get(current_name, "")).casefold()} >= {"kv", "ka"}
+            valid_units = {str(channel_unit_map.get(voltage_name, "")).casefold(), str(channel_unit_map.get(current_name, "")).casefold()} >= {"kv", "ka"}
             if count and (valid_units or not profile_provided):
                 result.append(_metric(name, max(voltage[index] * current[index] for index in range(count)), "MW", (voltage_name, current_name), time, "pointwise Vdc * Idc peak", "derived"))
             elif count and profile_provided:

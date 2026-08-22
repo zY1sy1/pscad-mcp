@@ -106,6 +106,16 @@ async def verify_required_result_selectors(
     if profile.get("profile_version", 1) != 2 or not required:
         return {"verified": True, "required": []}
 
+    return await verify_exact_result_selectors(backend, project_name, required)
+
+
+async def verify_exact_result_selectors(
+    backend: Any,
+    project_name: str,
+    required: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    """Verify exact result selectors without inferring aliases or metric roles."""
+
     provider = next(
         (
             getattr(backend, name, None)
@@ -145,7 +155,8 @@ async def verify_required_result_selectors(
     normalized = [dict(item) for item in observed if isinstance(item, Mapping)]
     matches: list[dict[str, Any]] = []
     missing: list[dict[str, Any]] = []
-    for selector in required:
+    for selector_value in required:
+        selector = dict(selector_value)
         selector_path = str(selector.get("path", "")).casefold()
         candidates = [
             item
