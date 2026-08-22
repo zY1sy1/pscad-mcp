@@ -1,3 +1,4 @@
+import hashlib
 import json
 
 import pytest
@@ -7,13 +8,7 @@ from pscad_mcp.hvdc.builders.lcc.acceptance import evaluate_acceptance
 
 
 TIME = [0.8, 0.9, 1.0]
-APPROVED_SOURCE = {
-    "kind": "reviewed_acceptance_limit",
-    "artifact_sha256": "a" * 64,
-    "locator": "HVDC_Bipolar_1000MW_500kV acceptance review, terminal loss",
-    "review_id": "LCC-ACCEPT-001",
-    "review_status": "approved",
-}
+CONVENTION = "rectifier_input_positive_inverter_output_positive"
 
 
 def _channel(values, units):
@@ -28,10 +23,44 @@ def _loss_contract(**overrides):
         "rectifier_power_channel": "Main/PR",
         "inverter_power_channel": "Main/PI",
         "units": "MW",
-        "direction_convention": "rectifier_input_positive_inverter_output_positive",
+        "direction_convention": CONVENTION,
     }
     check.update(overrides)
     return {"physical_checks": [check]}
+
+
+def _threshold_digest(check):
+    threshold_contract = {
+        "kind": check["kind"],
+        "direction_convention": check["direction_convention"],
+        "rectifier_power_channel": check["rectifier_power_channel"],
+        "inverter_power_channel": check["inverter_power_channel"],
+        "units": check["units"],
+        "max_loss": float(check["max_loss"]) if check.get("max_loss") is not None else None,
+        "max_percent": float(check["max_percent"]) if check.get("max_percent") is not None else None,
+    }
+    encoded = json.dumps(
+        threshold_contract,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _approved_source(check):
+    return {
+        "kind": "reviewed_acceptance_limit",
+        "artifact_sha256": "a" * 64,
+        "locator": "HVDC_Bipolar_1000MW_500kV acceptance review, terminal loss",
+        "review_id": "LCC-ACCEPT-001",
+        "review_status": "approved",
+        "threshold_contract_sha256": _threshold_digest(check),
+    }
+
+
+def _trusted_registry(source):
+    return {source["review_id"]: dict(source)}
 
 
 def _real_style_samples(*, gamma_units="deg", power_units="MW"):
@@ -127,7 +156,7 @@ def test_terminal_power_loss_invariant_passes_without_numeric_threshold():
 
     assert result["verdict"] == "PASS"
     assert result["physical_checks"][0]["expected"] == {
-        "direction_convention": "rectifier_input_positive_inverter_output_positive"
+        "direction_convention": CONVENTION
     }
 
 
@@ -143,46 +172,136 @@ def test_terminal_power_loss_threshold_without_approved_source_is_incomplete(thr
 
 
 def test_terminal_power_loss_threshold_with_approved_source_is_enforced():
+    contract = _loss_contract(max_loss=51.0, max_percent=5.0)
+    source = _approved_source(contract["physical_checks"][0])
+    contract["physical_checks"][0]["approved_source"] = source
+    trusted = _trusted_registry(source)
+    trusted_before = json.loads(json.dumps(trusted))
     result = evaluate_acceptance(
         _real_style_samples(),
         {},
-        _loss_contract(max_loss=51.0, max_percent=5.0, approved_source=APPROVED_SOURCE),
+        contract,
+        trusted_threshold_sources=trusted,
     )
 
     assert result["verdict"] == "PASS"
-    assert result["physical_checks"][0]["expected"]["approved_source"] == APPROVED_SOURCE
+    assert result["physical_checks"][0]["expected"]["approved_source"] == source
+    assert trusted == trusted_before
 
 
 @pytest.mark.parametrize("threshold", [{"max_loss": 50.0}, {"max_percent": 4.9}])
 def test_terminal_power_loss_approved_threshold_violation_fails(threshold):
+    contract = _loss_contract(**threshold)
+    source = _approved_source(contract["physical_checks"][0])
+    contract["physical_checks"][0]["approved_source"] = source
     result = evaluate_acceptance(
         _real_style_samples(),
         {},
-        _loss_contract(**threshold, approved_source=APPROVED_SOURCE),
+        contract,
+        trusted_threshold_sources=_trusted_registry(source),
     )
 
     assert result["verdict"] == "FAIL"
     assert result["physical_checks"][0]["outcome"] == "FAIL"
 
 
-@pytest.mark.parametrize(
-    "tampered_source",
-    [
-        {**APPROVED_SOURCE, "artifact_sha256": "not-a-sha256"},
-        {**APPROVED_SOURCE, "review_status": "draft"},
-        {key: value for key, value in APPROVED_SOURCE.items() if key != "review_id"},
-    ],
-)
-def test_terminal_power_loss_rejects_tampered_or_unapproved_source(tampered_source):
+@pytest.mark.parametrize("field", ["artifact_sha256", "locator", "review_status"])
+def test_terminal_power_loss_rejects_tampered_or_unapproved_source(field):
+    contract = _loss_contract(max_loss=60.0)
+    source = _approved_source(contract["physical_checks"][0])
+    trusted = _trusted_registry(source)
+    tampered_source = dict(source)
+    tampered_source[field] = {
+        "artifact_sha256": "b" * 64,
+        "locator": "tampered locator",
+        "review_status": "draft",
+    }[field]
+    contract["physical_checks"][0]["approved_source"] = tampered_source
+
     with pytest.raises(BackendError) as raised:
         evaluate_acceptance(
             _real_style_samples(),
             {},
-            _loss_contract(max_loss=60.0, approved_source=tampered_source),
+            contract,
+            trusted_threshold_sources=trusted,
         )
 
     assert raised.value.code == "LCC_ACCEPTANCE_INVALID"
     json.dumps(raised.value.details)
+
+
+def test_terminal_power_loss_rejects_threshold_tamper_against_approved_digest():
+    approved_contract = _loss_contract(max_loss=51.0)
+    source = _approved_source(approved_contract["physical_checks"][0])
+    tampered_contract = _loss_contract(max_loss=60.0, approved_source=source)
+
+    with pytest.raises(BackendError) as raised:
+        evaluate_acceptance(
+            _real_style_samples(),
+            {},
+            tampered_contract,
+            trusted_threshold_sources=_trusted_registry(source),
+        )
+
+    assert raised.value.code == "LCC_ACCEPTANCE_INVALID"
+    assert raised.value.details["field"] == "approved_source.threshold_contract_sha256"
+
+
+def test_arbitrary_well_formed_hash_cannot_pass_without_trusted_registry():
+    contract = _loss_contract(max_loss=60.0)
+    source = _approved_source(contract["physical_checks"][0])
+    source["artifact_sha256"] = "f" * 64
+    contract["physical_checks"][0]["approved_source"] = source
+
+    result = evaluate_acceptance(_real_style_samples(), {}, contract)
+
+    assert result["verdict"] == "INCOMPLETE_ANALYSIS"
+    assert result["errors"][0]["reason"] == "missing trusted threshold source registry"
+    assert "approved_source" not in result["physical_checks"][0].get("expected", {})
+
+
+def test_untrusted_100k_source_text_is_not_echoed_without_registry():
+    huge = "x" * 100_000
+    contract = _loss_contract(
+        max_loss=60.0,
+        approved_source={
+            "kind": huge,
+            "artifact_sha256": "a" * 64,
+            "locator": huge,
+            "review_id": huge,
+            "review_status": "approved",
+            "threshold_contract_sha256": "b" * 64,
+        },
+    )
+
+    result = evaluate_acceptance(_real_style_samples(), {}, contract)
+    serialized = json.dumps(result)
+
+    assert result["verdict"] == "INCOMPLETE_ANALYSIS"
+    assert huge not in serialized
+    assert len(serialized) < 20_000
+
+
+def test_no_threshold_does_not_echo_arbitrary_approved_source():
+    huge = "x" * 100_000
+    contract = _loss_contract(approved_source={"untrusted": huge})
+
+    result = evaluate_acceptance(_real_style_samples(), {}, contract)
+    serialized = json.dumps(result)
+
+    assert result["verdict"] == "PASS"
+    assert "approved_source" not in result["physical_checks"][0].get("expected", {})
+    assert huge not in serialized
+
+
+def test_positive_direction_convention_rejects_negative_inverter_power():
+    samples = _real_style_samples()
+    samples["channels"]["Main/PI"]["values"] = [-977.9] * len(TIME)
+
+    result = evaluate_acceptance(samples, {}, _loss_contract())
+
+    assert result["verdict"] == "FAIL"
+    assert result["physical_checks"][0]["observed"]["inverter_power_mean"] < 0.0
 
 
 def test_terminal_power_loss_fails_when_power_flow_invariant_is_violated():

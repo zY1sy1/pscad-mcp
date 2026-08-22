@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import bisect
+import hashlib
+import json
 import math
 import re
 from collections.abc import Mapping, Sequence
@@ -580,20 +582,18 @@ _APPROVED_SOURCE_FIELDS = {
     "locator",
     "review_id",
     "review_status",
+    "threshold_contract_sha256",
 }
 _MAX_PROVENANCE_TEXT = 512
 
 
-def _approved_threshold_source(check: Mapping[str, Any]) -> dict[str, str]:
-    source = check.get("approved_source")
-    if source is None:
-        raise _EvidenceError("missing approved threshold source")
+def _validated_approved_source(source: Any, *, field_prefix: str) -> dict[str, str]:
     if not isinstance(source, Mapping):
-        raise _invalid("approved_source must be a mapping.", field="approved_source")
+        raise _invalid(f"{field_prefix} must be a mapping.", field=field_prefix)
     if set(source) != _APPROVED_SOURCE_FIELDS:
         raise _invalid(
-            "approved_source fields do not match the required schema.",
-            field="approved_source",
+            f"{field_prefix} fields do not match the required schema.",
+            field=field_prefix,
             required_fields=sorted(_APPROVED_SOURCE_FIELDS),
         )
     approved: dict[str, str] = {}
@@ -602,24 +602,79 @@ def _approved_threshold_source(check: Mapping[str, Any]) -> dict[str, str]:
         if (
             not isinstance(value, str)
             or not value.strip()
+            or value != value.strip()
             or len(value) > _MAX_PROVENANCE_TEXT
-            or len(value.strip()) > _MAX_PROVENANCE_TEXT
         ):
             raise _invalid(
-                "approved_source contains an invalid text field.",
-                field=f"approved_source.{field}",
+                f"{field_prefix} contains an invalid text field.",
+                field=f"{field_prefix}.{field}",
                 max_length=_MAX_PROVENANCE_TEXT,
             )
-        approved[field] = value.strip()
-    if re.fullmatch(r"[0-9a-fA-F]{64}", approved["artifact_sha256"]) is None:
-        raise _invalid(
-            "approved_source artifact_sha256 must be a 64-character hexadecimal digest.",
-            field="approved_source.artifact_sha256",
-        )
+        approved[field] = value
+    for digest_field in ("artifact_sha256", "threshold_contract_sha256"):
+        if re.fullmatch(r"[0-9a-fA-F]{64}", approved[digest_field]) is None:
+            raise _invalid(
+                f"{field_prefix} {digest_field} must be a 64-character hexadecimal digest.",
+                field=f"{field_prefix}.{digest_field}",
+            )
     if approved["review_status"] != "approved":
         raise _invalid(
-            "approved_source review_status must be approved.",
-            field="approved_source.review_status",
+            f"{field_prefix} review_status must be approved.",
+            field=f"{field_prefix}.review_status",
+        )
+    return approved
+
+
+def _threshold_contract_sha256(check: Mapping[str, Any]) -> str:
+    canonical = {
+        "kind": _text(check.get("kind"), "kind"),
+        "direction_convention": _text(check.get("direction_convention"), "direction_convention"),
+        "rectifier_power_channel": _text(check.get("rectifier_power_channel"), "rectifier_power_channel"),
+        "inverter_power_channel": _text(check.get("inverter_power_channel"), "inverter_power_channel"),
+        "units": _text(check.get("units"), "units"),
+        "max_loss": None if check.get("max_loss") is None else _finite_float(check["max_loss"], "max_loss"),
+        "max_percent": None
+        if check.get("max_percent") is None
+        else _finite_float(check["max_percent"], "max_percent"),
+    }
+    encoded = json.dumps(canonical, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _approved_threshold_source(
+    check: Mapping[str, Any],
+    trusted_threshold_sources: Any,
+) -> dict[str, str]:
+    source = check.get("approved_source")
+    if source is None:
+        raise _EvidenceError("missing approved threshold source")
+    if trusted_threshold_sources is None:
+        raise _EvidenceError("missing trusted threshold source registry")
+    if not isinstance(trusted_threshold_sources, Mapping):
+        raise _invalid("trusted_threshold_sources must be a mapping.", field="trusted_threshold_sources")
+
+    approved = _validated_approved_source(source, field_prefix="approved_source")
+    expected_digest = _threshold_contract_sha256(check)
+    if approved["threshold_contract_sha256"].casefold() != expected_digest:
+        raise _invalid(
+            "approved_source is not bound to this threshold contract.",
+            field="approved_source.threshold_contract_sha256",
+        )
+    review_id = approved["review_id"]
+    trusted_source = trusted_threshold_sources.get(review_id)
+    if trusted_source is None:
+        raise _invalid(
+            "approved_source review_id is not present in the trusted registry.",
+            field="approved_source.review_id",
+        )
+    trusted = _validated_approved_source(
+        trusted_source,
+        field_prefix="trusted_threshold_sources entry",
+    )
+    if trusted != approved:
+        raise _invalid(
+            "approved_source does not exactly match the trusted registry entry.",
+            field="approved_source",
         )
     return approved
 
@@ -627,12 +682,13 @@ def _approved_threshold_source(check: Mapping[str, Any]) -> dict[str, str]:
 def _physical_terminal_power_loss(
     check: Mapping[str, Any],
     samples: Mapping[str, _Channel],
+    trusted_threshold_sources: Any = None,
 ) -> tuple[str, dict[str, Any]]:
     convention = _text(check.get("direction_convention"), "direction_convention")
     if convention != _POSITIVE_TERMINAL_POWER_CONVENTION:
         raise _invalid(
             "unsupported terminal power direction convention.",
-            direction_convention=convention,
+            field="direction_convention",
         )
     units = _text(check.get("units"), "units")
     rectifier_name = _text(check.get("rectifier_power_channel"), "rectifier_power_channel")
@@ -648,24 +704,18 @@ def _physical_terminal_power_loss(
     inverter_mean = _mean(inverter)
     loss_values = [left - right for left, right in zip(rectifier, inverter)]
     loss = rectifier_mean - inverter_mean
-    if rectifier_mean <= 0.0:
-        raise _EvidenceError(
-            "invalid terminal power loss baseline",
-            channel=rectifier_name,
-            details={"reason_detail": "rectifier mean must be positive"},
-        )
-    loss_percent = loss / rectifier_mean * 100.0
-    passed = all(value >= 0.0 for value in loss_values)
+    loss_percent = None if rectifier_mean == 0.0 else loss / rectifier_mean * 100.0
+    passed = rectifier_mean > 0.0 and inverter_mean > 0.0 and all(value >= 0.0 for value in loss_values)
 
     max_loss = check.get("max_loss")
     max_percent = check.get("max_percent")
     approved_source = None
     if max_loss is not None or max_percent is not None:
-        approved_source = _approved_threshold_source(check)
+        approved_source = _approved_threshold_source(check, trusted_threshold_sources)
     if max_loss is not None:
         passed = passed and loss <= _finite_float(max_loss, "max_loss")
     if max_percent is not None:
-        passed = passed and loss_percent <= _finite_float(max_percent, "max_percent")
+        passed = passed and loss_percent is not None and loss_percent <= _finite_float(max_percent, "max_percent")
 
     payload: dict[str, Any] = {
         "observed": {
@@ -943,14 +993,26 @@ def _physical_declarations(contract: Mapping[str, Any]) -> list[Mapping[str, Any
     return declarations
 
 
-def _evaluate_physical(samples: Mapping[str, _Channel], contract: Mapping[str, Any], result: dict[str, Any]) -> None:
+def _evaluate_physical(
+    samples: Mapping[str, _Channel],
+    contract: Mapping[str, Any],
+    result: dict[str, Any],
+    trusted_threshold_sources: Any = None,
+) -> None:
     for index, check in enumerate(_physical_declarations(contract)):
         record = _check_base(check, index)
         dispatch = _PHYSICAL_DISPATCH.get(record["kind"])
         if dispatch is None:
             raise _invalid("unsupported physical check kind.", kind=record["kind"])
         try:
-            status, payload = dispatch(check, samples)
+            if record["kind"] == "terminal_power_loss":
+                status, payload = _physical_terminal_power_loss(
+                    check,
+                    samples,
+                    trusted_threshold_sources,
+                )
+            else:
+                status, payload = dispatch(check, samples)
             record["status"] = status
             record["observed"] = payload["observed"]
             expected = {
@@ -965,7 +1027,6 @@ def _evaluate_physical(samples: Mapping[str, _Channel], contract: Mapping[str, A
                     "loss_allowance",
                     "polarity",
                     "direction_convention",
-                    "approved_source",
                 )
                 if key in check
             }
@@ -1090,11 +1151,17 @@ def _final_verdict(result: Mapping[str, Any]) -> str:
     return PASS
 
 
-def evaluate_acceptance(samples: Any, golden: Any, contract: Any) -> dict[str, Any]:
+def evaluate_acceptance(
+    samples: Any,
+    golden: Any,
+    contract: Any,
+    trusted_threshold_sources: Any = None,
+) -> dict[str, Any]:
     """Evaluate contract-declared golden and physical evidence.
 
     Normal missing or unusable evidence is returned as INCOMPLETE_ANALYSIS.
     Malformed API arguments or malformed contract fields raise BackendError.
+    Numeric terminal-loss thresholds require a caller-owned trusted source registry.
     """
 
     if not isinstance(contract, Mapping):
@@ -1122,7 +1189,12 @@ def evaluate_acceptance(samples: Any, golden: Any, contract: Any) -> dict[str, A
         golden_channels = _canonical_channels(golden, "golden")
         result["canonical"]["sample_channels"] = sorted(sample_channels)
         _evaluate_golden(sample_channels, golden_channels, contract, result)
-        _evaluate_physical(sample_channels, contract, result)
+        _evaluate_physical(
+            sample_channels,
+            contract,
+            result,
+            trusted_threshold_sources,
+        )
         _require_manifest_check_evidence(contract, result)
     except _EvidenceError as error:
         result["errors"].append(_error_record(error.reason, channel=error.channel, details=error.details))
