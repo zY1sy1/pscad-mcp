@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -32,24 +33,30 @@ class TemplateAuditReport:
 
 
 def audit_lcc_template(path: str | Path, catalog: dict[str, Any] | None = None) -> TemplateAuditReport:
-    source = Path(path).expanduser().resolve()
-    if not source.is_file():
-        raise BackendError("LCC_TEMPLATE_INCOMPATIBLE", "Template file does not exist.", "hvdc", "audit_lcc_template", {"path": str(source)})
-    actual_bytes = source.stat().st_size
-    if actual_bytes > TEMPLATE_MAX_BYTES:
-        raise BackendError(
-            "LCC_TEMPLATE_INCOMPATIBLE",
-            "Template exceeds the audit size limit.",
-            "hvdc",
-            "audit_lcc_template",
-            {
-                "actual_bytes": actual_bytes,
-                "max_bytes": TEMPLATE_MAX_BYTES,
-                "reason": "template_too_large",
-            },
-        )
-    with source.open("rb") as stream:
-        payload = stream.read(TEMPLATE_MAX_BYTES + 1)
+    try:
+        source = Path(path).expanduser().resolve()
+    except OSError as error:
+        _raise_unreadable_template(error)
+    try:
+        with source.open("rb") as stream:
+            actual_bytes = os.fstat(stream.fileno()).st_size
+            if actual_bytes > TEMPLATE_MAX_BYTES:
+                raise BackendError(
+                    "LCC_TEMPLATE_INCOMPATIBLE",
+                    "Template exceeds the audit size limit.",
+                    "hvdc",
+                    "audit_lcc_template",
+                    {
+                        "actual_bytes": actual_bytes,
+                        "max_bytes": TEMPLATE_MAX_BYTES,
+                        "reason": "template_too_large",
+                    },
+                )
+            payload = stream.read(TEMPLATE_MAX_BYTES + 1)
+    except BackendError:
+        raise
+    except OSError as error:
+        _raise_unreadable_template(error)
     if len(payload) > TEMPLATE_MAX_BYTES:
         raise BackendError(
             "LCC_TEMPLATE_INCOMPATIBLE",
@@ -73,8 +80,14 @@ def audit_lcc_template(path: str | Path, catalog: dict[str, Any] | None = None) 
         )
     try:
         root = ET.fromstring(payload)
-    except ET.ParseError as error:
-        raise BackendError("LCC_TEMPLATE_INCOMPATIBLE", "Template is not valid PSCX XML.", "hvdc", "audit_lcc_template", {}) from error
+    except (ET.ParseError, LookupError, ValueError) as error:
+        raise BackendError(
+            "LCC_TEMPLATE_INCOMPATIBLE",
+            "Template is not valid PSCX XML.",
+            "hvdc",
+            "audit_lcc_template",
+            {"error_type": type(error).__name__, "reason": "invalid_xml"},
+        ) from error
     scope = _main_scope(root)
     components = _component_records(scope)
     roles: dict[str, Any] = {}
@@ -134,6 +147,19 @@ def audit_lcc_template(path: str | Path, catalog: dict[str, Any] | None = None) 
     return TemplateAuditReport(compatible, roles, tuple(sorted(set(missing))), tuple(sorted(conflicts)), fingerprint)
 
 
+def _raise_unreadable_template(error: OSError) -> NoReturn:
+    raise BackendError(
+        "LCC_TEMPLATE_INCOMPATIBLE",
+        "Template could not be read.",
+        "hvdc",
+        "audit_lcc_template",
+        {
+            "error_type": type(error).__name__,
+            "reason": "template_unreadable",
+        },
+    ) from error
+
+
 def _name(tag: str) -> str:
     return tag.rsplit("}", 1)[-1].casefold()
 
@@ -150,11 +176,7 @@ def _text(value: str | None) -> str:
     return (value or "").strip()
 
 
-def _integer(value: str | None, default: int | None = None, *, field: str) -> int:
-    if value is None or not value.strip():
-        if default is not None:
-            return default
-        raise BackendError("LCC_TEMPLATE_INCOMPATIBLE", "Component coordinates are missing.", "hvdc", "audit_lcc_template", {})
+def _integer(value: str, *, field: str) -> int:
     normalized = value.strip()
     try:
         return int(normalized)
@@ -180,7 +202,7 @@ def _raise_invalid_coordinate(field: str, value: str, cause: Exception | None = 
     raise error from cause
 
 
-def _point(element: ET.Element) -> tuple[int, int]:
+def _point(element: ET.Element, *, role: str) -> tuple[int, int]:
     x = _attr(element, "x", "left")
     y = _attr(element, "y", "top")
     if x is None or y is None:
@@ -191,7 +213,15 @@ def _point(element: ET.Element) -> tuple[int, int]:
                 x, y = parts
             else:
                 _raise_invalid_coordinate("location", raw.strip())
-    return _integer(x, 0, field="x"), _integer(y, 0, field="y")
+    if x is None or y is None or not x.strip() or not y.strip():
+        raise BackendError(
+            "LCC_TEMPLATE_INCOMPATIBLE",
+            "A role component coordinate is missing.",
+            "hvdc",
+            "audit_lcc_template",
+            {"reason": "missing_component_coordinate", "role": role},
+        )
+    return _integer(x, field="x"), _integer(y, field="y")
 
 
 def _parameters(element: ET.Element) -> dict[str, str]:
@@ -206,19 +236,30 @@ def _parameters(element: ET.Element) -> dict[str, str]:
     for parameter in parameters:
         name = _text(_attr(parameter, "name", "key"))
         if name:
+            if name == "Name" and name in result:
+                raise BackendError(
+                    "LCC_TEMPLATE_INCOMPATIBLE",
+                    "Component contains duplicate Name parameters.",
+                    "hvdc",
+                    "audit_lcc_template",
+                    {
+                        "parameter": "Name",
+                        "reason": "duplicate_component_parameter",
+                    },
+                )
             value = _attr(parameter, "value")
             result[name] = _text(value if value is not None else parameter.text)
     return result
 
 
 def _main_scope(root: ET.Element) -> ET.Element:
-    scopes = [
-        element
-        for element in root.iter()
-        if _name(element.tag) == "definition"
-        and _text(_attr(element, "name", "id")).casefold() == "main"
+    definitions = _top_level_definitions(root)
+    main_definitions = [
+        definition
+        for definition in definitions
+        if _text(_attr(definition, "name", "id")).casefold() == "main"
     ]
-    if len(scopes) > 1:
+    if len(main_definitions) > 1:
         raise BackendError(
             "LCC_TEMPLATE_AMBIGUOUS",
             "Template contains multiple Main definitions.",
@@ -231,15 +272,56 @@ def _main_scope(root: ET.Element) -> ET.Element:
                 "roles": ["main_scope"],
             },
         )
-    return scopes[0] if scopes else root
+    if main_definitions:
+        return main_definitions[0]
+    if len(definitions) > 1:
+        raise BackendError(
+            "LCC_TEMPLATE_AMBIGUOUS",
+            "Template has multiple definitions and no Main definition.",
+            "hvdc",
+            "audit_lcc_template",
+            {
+                "compatible": False,
+                "conflict_reasons": {
+                    "main_scope": "multiple_definitions_without_main"
+                },
+                "conflicts": ["main_scope"],
+                "roles": ["main_scope"],
+            },
+        )
+    return definitions[0] if definitions else root
+
+
+def _top_level_definitions(root: ET.Element) -> list[ET.Element]:
+    if _name(root.tag) == "definition":
+        return [root]
+    definitions: list[ET.Element] = []
+
+    def visit(element: ET.Element) -> None:
+        for child in element:
+            if _name(child.tag) == "definition":
+                definitions.append(child)
+            else:
+                visit(child)
+
+    visit(root)
+    return definitions
 
 
 def _component_elements(scope: ET.Element) -> list[ET.Element]:
-    return [
-        element
-        for element in scope.iter()
-        if _name(element.tag) == "user" or _name(element.tag) == "component"
-    ]
+    components: list[ET.Element] = []
+
+    def visit(element: ET.Element) -> None:
+        for child in element:
+            child_name = _name(child.tag)
+            if child_name == "definition":
+                continue
+            if child_name in {"user", "component"}:
+                components.append(child)
+            visit(child)
+
+    visit(scope)
+    return components
 
 
 def _component_records(scope: ET.Element) -> list[dict[str, Any]]:
@@ -252,7 +334,7 @@ def _component_records(scope: ET.Element) -> list[dict[str, Any]]:
             {
                 "definition": definition,
                 "local_name": definition.rsplit(":", 1)[-1],
-                "location": _point(element),
+                "element": element,
                 "parameters": _parameters(element),
             }
         )
@@ -285,6 +367,13 @@ def _select_earth_electrode(
         return None, None
     if not anchors and len(grounds) > 1:
         return None, "multiple_exact_grounds_without_anchor"
+    grounds = [
+        {
+            **component,
+            "location": _point(component["element"], role="earth_electrode_ground"),
+        }
+        for component in grounds
+    ]
     selected = grounds[0]
     evidence: dict[str, Any] = {
         "selected": {
@@ -294,7 +383,12 @@ def _select_earth_electrode(
         "selection_reason": "single_exact_ground_without_anchor",
     }
     if anchors:
-        anchor = anchors[0]
+        anchor = {
+            **anchors[0],
+            "location": _point(
+                anchors[0]["element"], role="earth_electrode_anchor"
+            ),
+        }
         ranked = [
             (_distance_sq(anchor["location"], component["location"]), component)
             for component in grounds

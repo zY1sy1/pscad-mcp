@@ -9,7 +9,7 @@ from pscad_mcp.hvdc.builders.lcc.template_audit import audit_lcc_template
 
 def test_audit_reports_exact_roles_without_mutation(tmp_path):
     source = tmp_path / "template.pscx"
-    original = '<project><component definition="cigre_lcc_v1:LCC12PulseBridge"/><component definition="master:ground"/></project>'
+    original = '<project><component definition="cigre_lcc_v1:LCC12PulseBridge"/><component definition="master:ground" x="0" y="0"/></project>'
     source.write_text(original, encoding="utf-8")
     report = audit_lcc_template(source)
     assert report.compatible is True
@@ -81,7 +81,7 @@ def test_audit_rejects_duplicate_exact_role_instances(tmp_path, ambiguous_compon
             f"{ambiguous_components}"
             '<component definition="model:RectPole"/>'
             '<component definition="model:InverterPole"/>'
-            '<component definition="master:ground"/>'
+            '<component definition="master:ground" x="0" y="0"/>'
             "</project>"
         ),
         encoding="utf-8",
@@ -329,7 +329,7 @@ def test_audit_accepts_one_main_definition_with_named_canvas_and_schematic(tmp_p
         '<project><definitions><Definition name="Main">'
         '<canvas name="Main"><schematic name="Main">'
         '<component definition="model:LCC12PulseBridge"/>'
-        '<component definition="master:ground"/>'
+        '<component definition="master:ground" x="0" y="0"/>'
         '</schematic></canvas></Definition></definitions></project>',
         encoding="utf-8",
     )
@@ -337,3 +337,185 @@ def test_audit_accepts_one_main_definition_with_named_canvas_and_schematic(tmp_p
     report = audit_lcc_template(source)
 
     assert report.compatible is True
+
+
+def test_audit_does_not_scan_components_inside_nested_definition(tmp_path):
+    source = tmp_path / "nested_definition.pscx"
+    source.write_text(
+        '<project><definitions><Definition name="Main"><schematic>'
+        '<component definition="model:RectPole"/>'
+        '<component definition="model:InverterPole"/>'
+        '<component definition="master:ground" x="0" y="0"/>'
+        '<Definition name="Nested"><schematic>'
+        '<component definition="model:RectPole"/>'
+        '<component definition="master:ground" x="100" y="100"/>'
+        '</schematic></Definition>'
+        '</schematic></Definition></definitions></project>',
+        encoding="utf-8",
+    )
+
+    report = audit_lcc_template(source)
+
+    assert report.compatible is True
+    assert report.roles["rectifier_valve_group"]["definition"] == "model:RectPole"
+    assert report.roles["earth_electrode"]["evidence"]["selected"]["location"] == [0, 0]
+
+
+def test_audit_rejects_cross_definition_role_stitching_without_main(tmp_path):
+    source = tmp_path / "cross_definition.pscx"
+    source.write_text(
+        '<project><definitions>'
+        '<Definition name="Rectifier"><component definition="model:RectPole"/></Definition>'
+        '<Definition name="Inverter"><component definition="model:InverterPole"/>'
+        '<component definition="master:ground" x="0" y="0"/></Definition>'
+        '</definitions></project>',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(BackendError) as raised:
+        audit_lcc_template(source)
+
+    assert raised.value.code == "LCC_TEMPLATE_AMBIGUOUS"
+    assert raised.value.details == {
+        "compatible": False,
+        "conflict_reasons": {"main_scope": "multiple_definitions_without_main"},
+        "conflicts": ["main_scope"],
+        "roles": ["main_scope"],
+    }
+
+
+@pytest.mark.parametrize(
+    "ground, anchor, expected_role",
+    [
+        ('<component definition="master:ground"/>', "", "earth_electrode_ground"),
+        (
+            '<component definition="master:ground" x="0" y="0"/>',
+            '<component definition="master:ammeter"><param name="Name" value="Ielectrode"/></component>',
+            "earth_electrode_anchor",
+        ),
+    ],
+)
+def test_audit_rejects_missing_coordinates_needed_for_electrode_role(
+    tmp_path, ground, anchor, expected_role
+):
+    source = tmp_path / "missing_role_coordinate.pscx"
+    source.write_text(
+        '<project><component definition="model:LCC12PulseBridge"/>'
+        f"{ground}{anchor}</project>",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(BackendError) as raised:
+        audit_lcc_template(source)
+
+    assert raised.value.code == "LCC_TEMPLATE_INCOMPATIBLE"
+    assert raised.value.details == {
+        "reason": "missing_component_coordinate",
+        "role": expected_role,
+    }
+
+
+def test_audit_uses_one_open_and_does_not_pre_stat_path(tmp_path, monkeypatch):
+    source = tmp_path / "single_open.pscx"
+    source.write_text(
+        '<project><component definition="model:LCC12PulseBridge"/>'
+        '<component definition="master:ground" x="0" y="0"/></project>',
+        encoding="utf-8",
+    )
+    original_open = Path.open
+    original_stat = Path.stat
+    source_text = str(source.resolve())
+    open_count = 0
+
+    def counted_open(path, *args, **kwargs):
+        nonlocal open_count
+        if str(path) == source_text:
+            open_count += 1
+        return original_open(path, *args, **kwargs)
+
+    def guarded_stat(path, *args, **kwargs):
+        if str(path) == source_text:
+            raise AssertionError("Path.stat must not be used before opening the template")
+        return original_stat(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", counted_open)
+    monkeypatch.setattr(Path, "stat", guarded_stat)
+
+    report = audit_lcc_template(source)
+
+    assert report.compatible is True
+    assert open_count == 1
+
+
+@pytest.mark.parametrize("error_type", [FileNotFoundError, PermissionError, OSError])
+def test_audit_normalizes_template_open_errors(tmp_path, monkeypatch, error_type):
+    source = tmp_path / "unreadable.pscx"
+    source.write_text("<project/>", encoding="utf-8")
+
+    def fail_open(*args, **kwargs):
+        raise error_type("unbounded operating-system message")
+
+    monkeypatch.setattr(Path, "open", fail_open)
+
+    with pytest.raises(BackendError) as raised:
+        audit_lcc_template(source)
+
+    assert raised.value.code == "LCC_TEMPLATE_INCOMPATIBLE"
+    assert raised.value.details == {
+        "error_type": error_type.__name__,
+        "reason": "template_unreadable",
+    }
+
+
+def test_audit_normalizes_path_resolution_oserror(tmp_path, monkeypatch):
+    source = tmp_path / "resolution_failure.pscx"
+
+    def fail_resolve(*args, **kwargs):
+        raise PermissionError("unbounded path resolution message")
+
+    monkeypatch.setattr(Path, "resolve", fail_resolve)
+
+    with pytest.raises(BackendError) as raised:
+        audit_lcc_template(source)
+
+    assert raised.value.code == "LCC_TEMPLATE_INCOMPATIBLE"
+    assert raised.value.details == {
+        "error_type": "PermissionError",
+        "reason": "template_unreadable",
+    }
+
+
+def test_audit_wraps_unknown_xml_encoding_as_incompatible(tmp_path):
+    source = tmp_path / "unknown_encoding.pscx"
+    source.write_bytes(b'<?xml version="1.0" encoding="not-a-codec"?><project/>')
+
+    with pytest.raises(BackendError) as raised:
+        audit_lcc_template(source)
+
+    assert raised.value.code == "LCC_TEMPLATE_INCOMPATIBLE"
+    assert raised.value.details == {
+        "error_type": "LookupError",
+        "reason": "invalid_xml",
+    }
+
+
+def test_audit_rejects_duplicate_name_parameters_without_overwrite(tmp_path):
+    source = tmp_path / "duplicate_name.pscx"
+    source.write_text(
+        '<project><component definition="model:LCC12PulseBridge"/>'
+        '<component definition="master:ground" x="0" y="0"/>'
+        '<component definition="master:ammeter" x="0" y="0"><paramlist>'
+        '<param name="Name" value="ignored"/>'
+        '<param name="Name" value="Ielectrode"/>'
+        '</paramlist></component></project>',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(BackendError) as raised:
+        audit_lcc_template(source)
+
+    assert raised.value.code == "LCC_TEMPLATE_INCOMPATIBLE"
+    assert raised.value.details == {
+        "parameter": "Name",
+        "reason": "duplicate_component_parameter",
+    }
