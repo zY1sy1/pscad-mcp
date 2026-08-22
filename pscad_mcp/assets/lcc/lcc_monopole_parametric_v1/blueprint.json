@@ -27,8 +27,8 @@
   "outputs": [
     {"name": "VDCRp1", "role": "rectifier_valve_group", "quantity": "dc_voltage", "pole": "positive", "units": "pu"},
     {"name": "VDCIp1", "role": "inverter_valve_group", "quantity": "dc_voltage", "pole": "positive", "units": "pu"},
-    {"name": "CMRp1", "role": "rectifier_valve_group", "quantity": "dc_current", "pole": "positive", "units": "kA"},
-    {"name": "CMIp1", "role": "inverter_valve_group", "quantity": "dc_current", "pole": "positive", "units": "kA"},
+    {"name": "CMRp1", "role": "rectifier_valve_group", "quantity": "dc_current", "pole": "positive", "units": "pu"},
+    {"name": "CMIp1", "role": "inverter_valve_group", "quantity": "dc_current", "pole": "positive", "units": "pu"},
     {"name": "Ielectrode", "role": "earth_electrode", "quantity": "return_current", "pole": "neutral", "units": "kA"},
     {"name": "PR", "role": "rectifier_valve_group", "quantity": "active_power", "pole": "aggregate", "units": "MW"},
     {"name": "PI", "role": "inverter_valve_group", "quantity": "active_power", "pole": "aggregate", "units": "MW"},

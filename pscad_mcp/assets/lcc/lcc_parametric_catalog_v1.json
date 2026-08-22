@@ -4,6 +4,7 @@
   "pscad_version": "4.6.2",
   "identity": "lcc_parametric_catalog_v1",
   "provenance_identity": "lcc_parametric_provenance_v1",
+  "provenance_sha256": "0affa8d88326ae44902ba36cb12f83e6eba05391b65ea1591199e5e023533e22",
   "rating_contract_asset": "lcc_parametric_provenance_v1:rating_contract",
   "definitions": {},
   "template_role_contracts": {
@@ -29,8 +30,8 @@
     "earth_electrode": {"contract_identity": "lcc_parametric_catalog_v1:earth_electrode", "ground_definition": "master:ground", "anchor_definition": "master:ammeter", "anchor_parameter": "Name", "anchor_value": "Ielectrode", "selection": "nearest_unique_euclidean_ground", "no_anchor_fallback": "single_exact_ground"}
   },
   "blueprint_hashes": {
-    "lcc_monopole_parametric_v1": "76427f55abb59d6208013fd135cf788a4f0439e3aba64ab2d4fd23d968a04d7e",
-    "lcc_bipole_parametric_v1": "a1b47e27b29a372b5fc8188c094fdbfce70310331cc68e7b980860992bc14b84"
+    "lcc_monopole_parametric_v1": "addaab98ac2d4d66ba52607e7dc81c0b3df6c65dd7664cb6366fa7c38dca6d47",
+    "lcc_bipole_parametric_v1": "4bbde518fa234da37114e39616d2971f2a8d84f7902a5863a0f96640bc4f6351"
   },
   "topology_contracts": {
     "monopolar": {

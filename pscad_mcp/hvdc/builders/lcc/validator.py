@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import xml.etree.ElementTree as ET
 from collections import Counter
 from collections.abc import Mapping, Sequence
@@ -456,6 +457,7 @@ def validate_project_graph(
 def validate_parametric_topology_contract(
     blueprint: Mapping[str, Any],
     audit_roles: Mapping[str, Any] | Any,
+    project_path: str | Path,
     catalog: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Validate an audited template against one exact logical topology asset."""
@@ -529,12 +531,87 @@ def validate_parametric_topology_contract(
         if expected_discriminator is not None and record.get("discriminator") != expected_discriminator:
             raise BackendError("LCC_PROJECT_INVALID", "A pole discriminator does not match the blueprint role.", "hvdc", operation, {"role": role})
 
+    expected_fingerprint = getattr(audit_roles, "fingerprint", None)
+    try:
+        project_payload = Path(project_path).expanduser().resolve().read_bytes()
+        project_root = ET.fromstring(project_payload)
+    except (OSError, ET.ParseError) as error:
+        raise BackendError("LCC_PROJECT_INVALID", "Unable to read parametric project evidence.", "hvdc", operation) from error
+    if (
+        not isinstance(expected_fingerprint, str)
+        or hashlib.sha256(project_payload).hexdigest() != expected_fingerprint
+    ):
+        raise BackendError("LCC_PROJECT_INVALID", "Project graph evidence does not match the audited template snapshot.", "hvdc", operation)
+    main_definitions = [
+        element for element in project_root.iter()
+        if element.tag.rsplit("}", 1)[-1].casefold() == "definition"
+        and (element.attrib.get("name") or "").strip() == "Main"
+    ]
+    if len(main_definitions) != 1:
+        raise BackendError("LCC_PROJECT_INVALID", "Project evidence requires one exact Main definition.", "hvdc", operation)
+    schematics = [
+        element for element in main_definitions[0].iter()
+        if element.tag.rsplit("}", 1)[-1].casefold() == "schematic"
+    ]
+    if len(schematics) != 1:
+        raise BackendError("LCC_PROJECT_INVALID", "Project evidence requires one exact Main schematic.", "hvdc", operation)
+    scope = schematics[0]
+
+    observed_nets: list[str] = []
+    for wire in scope.iter():
+        if wire.tag.rsplit("}", 1)[-1].casefold() != "wire":
+            continue
+        name = (wire.attrib.get("name") or "").strip()
+        vertices = [
+            vertex for vertex in wire.iter()
+            if vertex is not wire and vertex.tag.rsplit("}", 1)[-1].casefold() == "vertex"
+        ]
+        if not name or len(vertices) < 2:
+            raise BackendError("LCC_PROJECT_INVALID", "Every structural wire requires one logical net name and at least two vertices.", "hvdc", operation)
+        observed_nets.append(name)
+    if len(observed_nets) != len(set(observed_nets)):
+        raise BackendError("LCC_PROJECT_INVALID", "Structural net evidence contains duplicate logical names.", "hvdc", operation)
+
+    observed_outputs: dict[str, str] = {}
+    for component in scope.iter():
+        if component.tag.rsplit("}", 1)[-1].casefold() != "user" or (component.attrib.get("defn") or "").casefold() != "master:pgb":
+            continue
+        parameters = {
+            (item.attrib.get("name") or "").strip(): (item.attrib.get("value") or "").strip()
+            for item in component.iter()
+            if item.tag.rsplit("}", 1)[-1].casefold() == "param"
+        }
+        name = parameters.get("Name", "")
+        units = parameters.get("Units")
+        if not name or units is None or name in observed_outputs:
+            raise BackendError("LCC_PROJECT_INVALID", "Audited pgb output channels require unique names and explicit units.", "hvdc", operation)
+        observed_outputs[name] = units
+
+    expected_nets = {item["logical_id"] for item in validated["nets"]}
+    expected_outputs = {item["name"]: item["units"] for item in validated["outputs"]}
+    if set(observed_nets) != expected_nets:
+        raise BackendError(
+            "LCC_PROJECT_INVALID",
+            "Observed structural nets do not exactly match the blueprint.",
+            "hvdc",
+            operation,
+            {"missing": sorted(expected_nets - set(observed_nets)), "unexpected": sorted(set(observed_nets) - expected_nets)},
+        )
+    if observed_outputs != expected_outputs:
+        raise BackendError(
+            "LCC_PROJECT_INVALID",
+            "Observed audited output channels do not exactly match the blueprint names and units.",
+            "hvdc",
+            operation,
+            {"missing": sorted(set(expected_outputs) - set(observed_outputs)), "unexpected": sorted(set(observed_outputs) - set(expected_outputs))},
+        )
+
     return {
         "valid": True,
         "blueprint": validated["name"],
         "template_roles": sorted(expected_roles),
-        "nets": sorted(item["logical_id"] for item in validated["nets"]),
-        "outputs": sorted(item["name"] for item in validated["outputs"]),
+        "structural_nets": sorted(observed_nets),
+        "audited_output_channels": sorted(observed_outputs),
     }
 
 

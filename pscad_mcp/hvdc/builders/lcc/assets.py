@@ -30,6 +30,17 @@ _PARAMETRIC_BLUEPRINT_KEYS = {
     "parameter_topology", "poles", "terminals", "required_assets",
     "return_paths", "template_roles", "components", "nets", "outputs",
 }
+_PARAMETRIC_CATALOG_KEYS = {
+    "schema_version", "name", "pscad_version", "identity",
+    "provenance_identity", "provenance_sha256", "rating_contract_asset",
+    "definitions", "template_role_contracts", "blueprint_hashes",
+    "topology_contracts", "logical_parameter_bindings", "rating_parameters",
+    "derived_parameters", "engineering_parameters", "feasibility_relationships",
+    "return_contract_assets", "return_asset_requirements",
+}
+_PARAMETRIC_PROVENANCE_KEYS = {
+    "schema_version", "identity", "catalog_structure_contract_asset", "entries",
+}
 
 
 @dataclass(frozen=True)
@@ -382,12 +393,16 @@ def _text_list(value: Any, field: str, *, nonempty: bool = True) -> list[str]:
 def validate_parametric_catalog_asset(value: Any) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise _asset_error("LCC_ASSET_MISMATCH", "Parametric catalog must be an object.", "load_parametric_catalog")
+    if set(value) != _PARAMETRIC_CATALOG_KEYS:
+        raise _asset_error("LCC_ASSET_MISMATCH", "Parametric catalog schema fields are not exact.", "load_parametric_catalog")
     if (
         value.get("schema_version") != 1
         or isinstance(value.get("schema_version"), bool)
         or value.get("name") != "lcc_parametric_catalog_v1"
         or value.get("identity") != "lcc_parametric_catalog_v1"
         or value.get("provenance_identity") != "lcc_parametric_provenance_v1"
+        or not isinstance(value.get("provenance_sha256"), str)
+        or not _HASH_PATTERN.fullmatch(value["provenance_sha256"])
         or value.get("pscad_version") != _SUPPORTED_PSCAD_VERSION
     ):
         raise _asset_error("LCC_ASSET_MISMATCH", "Parametric catalog identity or provenance mismatch.", "load_parametric_catalog")
@@ -403,7 +418,8 @@ def validate_parametric_catalog_asset(value: Any) -> dict[str, Any]:
     topology_roles: dict[str, set[str]] = {}
     topology_keys = {"blueprint", "template_roles", "component_roles", "net_ids", "required_return_nets", "output_names"}
     for topology, contract in topologies.items():
-        if not isinstance(contract, dict) or set(contract) != topology_keys or contract.get("blueprint") not in _PARAMETRIC_NAMES:
+        expected_blueprint = next(name for name, declared_topology in _PARAMETRIC_NAMES.items() if declared_topology == topology)
+        if not isinstance(contract, dict) or set(contract) != topology_keys or contract.get("blueprint") != expected_blueprint:
             raise _asset_error("LCC_ASSET_MISMATCH", "A parametric topology contract has invalid fields.", "load_parametric_catalog", topology=topology)
         for field in topology_keys - {"blueprint"}:
             items = contract.get(field)
@@ -441,6 +457,86 @@ def validate_parametric_catalog_asset(value: Any) -> dict[str, Any]:
         for topology, roles in binding["roles_by_topology"].items():
             if not isinstance(roles, list) or not roles or len(roles) != len(set(roles)) or any(role not in topology_roles[topology] for role in roles):
                 raise _asset_error("LCC_ASSET_MISMATCH", "A logical parameter binding references an undeclared template role.", "load_parametric_catalog", parameter=name, topology=topology)
+    return value
+
+
+def _provenance_references(value: Any, identity: str) -> set[str]:
+    references: set[str] = set()
+    if isinstance(value, dict):
+        for item in value.values():
+            references.update(_provenance_references(item, identity))
+    elif isinstance(value, list):
+        for item in value:
+            references.update(_provenance_references(item, identity))
+    elif isinstance(value, str) and value.startswith(f"{identity}:"):
+        references.add(value.split(":", 1)[1])
+    return references
+
+
+def validate_parametric_provenance_asset(value: Any, catalog: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Validate provenance schema, hash, and catalog machine bindings."""
+
+    catalog_value = validate_parametric_catalog_asset(load_parametric_catalog() if catalog is None else catalog)
+    if not isinstance(value, dict) or set(value) != _PARAMETRIC_PROVENANCE_KEYS:
+        raise _asset_error("LCC_ASSET_MISMATCH", "Parametric provenance schema fields are not exact.", "load_parametric_provenance")
+    identity = catalog_value["provenance_identity"]
+    entries = value.get("entries")
+    if (
+        value.get("schema_version") != 1
+        or isinstance(value.get("schema_version"), bool)
+        or value.get("identity") != identity
+        or value.get("catalog_structure_contract_asset") != f"{identity}:catalog_structure_contract"
+        or not isinstance(entries, dict)
+        or not entries
+    ):
+        raise _asset_error("LCC_ASSET_MISMATCH", "Parametric provenance identity or structure is invalid.", "load_parametric_provenance")
+    allowed_entry_keys = {"classification", "statement", "machine_contract", "limitation", "source_path"}
+    for name, entry in entries.items():
+        if (
+            not isinstance(name, str)
+            or not isinstance(entry, dict)
+            or not {"classification", "machine_contract"} <= set(entry)
+            or not set(entry) <= allowed_entry_keys
+            or not isinstance(entry.get("classification"), str)
+            or not isinstance(entry.get("machine_contract"), dict)
+            or not entry["machine_contract"]
+            or not any(isinstance(entry.get(field), str) and entry[field] for field in ("statement", "limitation", "source_path"))
+        ):
+            raise _asset_error("LCC_ASSET_MISMATCH", "A parametric provenance entry has invalid fields.", "load_parametric_provenance", entry=name)
+    references = _provenance_references(catalog_value, identity)
+    references.add("catalog_structure_contract")
+    if set(entries) != references:
+        raise _asset_error("LCC_ASSET_MISMATCH", "Parametric provenance entries do not exactly match catalog references.", "load_parametric_provenance")
+    observed_hash = hashlib.sha256(canonical_json(value)).hexdigest()
+    if observed_hash != catalog_value["provenance_sha256"]:
+        raise _asset_error("LCC_ASSET_MISMATCH", "Parametric provenance does not match its catalog hash.", "load_parametric_provenance", expected=catalog_value["provenance_sha256"], observed=observed_hash)
+
+    structure_machine = entries["catalog_structure_contract"]["machine_contract"]
+    expected_structure = {
+        "required_relationships": {
+            name: declaration["asset"]
+            for name, declaration in catalog_value["feasibility_relationships"].items()
+        },
+        "required_return_contracts": dict(catalog_value["return_contract_assets"]),
+    }
+    rating_machine = entries["rating_contract"]["machine_contract"]
+    expected_rating = {
+        "parameters": {
+            name: {"required": declaration["required"]}
+            for name, declaration in catalog_value["rating_parameters"].items()
+        }
+    }
+    if structure_machine != expected_structure or rating_machine != expected_rating:
+        raise _asset_error("LCC_ASSET_MISMATCH", "Parametric provenance machine contracts do not bind the catalog structure.", "load_parametric_provenance")
+    for topology, asset in catalog_value["return_contract_assets"].items():
+        entry_name = asset.split(":", 1)[1]
+        requirement = catalog_value["return_asset_requirements"][topology]
+        expected_return = {
+            key: requirement[key]
+            for key in ("allowed", "required", "mode_requirements")
+        }
+        if entries[entry_name]["machine_contract"] != expected_return:
+            raise _asset_error("LCC_ASSET_MISMATCH", "A provenance return machine contract does not bind the catalog.", "load_parametric_provenance", topology=topology)
     return value
 
 
@@ -549,9 +645,7 @@ def load_parametric_provenance() -> dict[str, Any]:
         value = json.loads(resource.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
         raise _asset_error("LCC_ASSET_MISMATCH", "Parametric provenance is not valid JSON.", "load_parametric_provenance") from error
-    if not isinstance(value, dict) or value.get("identity") != "lcc_parametric_provenance_v1":
-        raise _asset_error("LCC_ASSET_MISMATCH", "Parametric provenance identity mismatch.", "load_parametric_provenance")
-    return value
+    return validate_parametric_provenance_asset(value)
 
 
 def materialize_library(asset_set: LccAssetSet, workspace_root: str | Path) -> Path:
