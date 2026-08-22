@@ -4,8 +4,80 @@
   "pscad_version": "4.6.2",
   "identity": "lcc_parametric_catalog_v1",
   "definitions": {},
+  "rating_parameters": {
+    "rated_power_mw": {"units": "MW", "minimum": 1.0, "maximum": 10000.0, "required": true, "asset": "lcc_parametric_catalog_v1:rating_ranges"},
+    "dc_voltage_kv": {"units": "kV", "minimum": 10.0, "maximum": 1200.0, "required": true, "asset": "lcc_parametric_catalog_v1:rating_ranges"},
+    "dc_current_ka": {"units": "kA", "minimum": 0.01, "maximum": 20.0, "required": true, "asset": "lcc_parametric_catalog_v1:rating_ranges"},
+    "ac_voltage_kv": {"units": "kV", "minimum": 10.0, "maximum": 1200.0, "required": true, "asset": "lcc_parametric_catalog_v1:rating_ranges"},
+    "frequency_hz": {"units": "Hz", "minimum": 45.0, "maximum": 65.0, "required": true, "asset": "lcc_parametric_catalog_v1:rating_ranges"},
+    "scr": {"units": "1", "minimum": 1.0, "maximum": 20.0, "required": true, "asset": "lcc_parametric_catalog_v1:rating_ranges"},
+    "escr": {"units": "1", "minimum": 1.0, "maximum": 20.0, "required": false, "asset": "lcc_parametric_catalog_v1:rating_ranges"}
+  },
   "derived_parameters": {
-    "overlap_angle_deg": {"default": 20.0, "units": "deg", "formula": "reviewed catalog default", "asset": "catalog"},
-    "min_extinction_angle_deg": {"default": 18.0, "units": "deg", "formula": "reviewed catalog default", "asset": "catalog"}
+    "dc_power_mw": {
+      "units": "MW",
+      "required": true,
+      "formula": "dc_voltage_kv * dc_current_ka",
+      "asset": "lcc_parametric_catalog_v1:dimensional_identity",
+      "relative_tolerance": 1e-6,
+      "absolute_tolerance": 1e-6
+    }
+  },
+  "engineering_parameters": {
+    "smoothing_reactor_mh": {
+      "units": "mH", "minimum": 1.0, "maximum": 1000.0, "required": true,
+      "default": null, "formula": null, "asset": "lcc_parametric_catalog_v1:engineering_ranges",
+      "unit_multipliers": {"mH": 1.0, "H": 1000.0}
+    },
+    "filter_capacitance_uf": {
+      "units": "uF", "minimum": 1.0, "maximum": 1000.0, "required": true,
+      "default": null, "formula": null, "asset": "lcc_parametric_catalog_v1:engineering_ranges",
+      "unit_multipliers": {"uF": 1.0, "F": 1000000.0}
+    },
+    "min_firing_angle_deg": {
+      "units": "deg", "minimum": 0.0, "maximum": 45.0, "required": true,
+      "default": null, "formula": null, "asset": "lcc_parametric_catalog_v1:control_ranges",
+      "unit_multipliers": {"deg": 1.0, "rad": 57.29577951308232}
+    },
+    "max_firing_angle_deg": {
+      "units": "deg", "minimum": 20.0, "maximum": 90.0, "required": true,
+      "default": null, "formula": null, "asset": "lcc_parametric_catalog_v1:control_ranges",
+      "unit_multipliers": {"deg": 1.0, "rad": 57.29577951308232}
+    },
+    "overlap_angle_deg": {
+      "units": "deg", "minimum": 0.0, "maximum": 60.0, "required": true,
+      "default": 20.0, "formula": "reviewed catalog default", "asset": "lcc_parametric_catalog_v1:control_defaults",
+      "unit_multipliers": {"deg": 1.0, "rad": 57.29577951308232}
+    },
+    "min_extinction_angle_deg": {
+      "units": "deg", "minimum": 5.0, "maximum": 40.0, "required": true,
+      "default": 18.0, "formula": "reviewed catalog default", "asset": "lcc_parametric_catalog_v1:control_defaults",
+      "unit_multipliers": {"deg": 1.0, "rad": 57.29577951308232}
+    }
+  },
+  "feasibility_relationships": {
+    "escr_not_greater_than_scr": {
+      "operator": "less_than_or_equal", "left": "escr", "right": "scr",
+      "asset": "lcc_parametric_catalog_v1:rating_relationships"
+    },
+    "commutation_angle_budget": {
+      "operator": "sum_less_than", "parameters": ["overlap_angle_deg", "min_extinction_angle_deg"], "limit": 90.0,
+      "asset": "lcc_parametric_catalog_v1:control_relationships"
+    },
+    "firing_angle_interval": {
+      "operator": "sum_less_than_parameter", "parameters": ["min_firing_angle_deg", "overlap_angle_deg"], "right": "max_firing_angle_deg",
+      "asset": "lcc_parametric_catalog_v1:control_relationships"
+    }
+  },
+  "return_asset_requirements": {
+    "bipolar": {
+      "required": ["neutral_bus"],
+      "mode_requirements": {
+        "monopolar_earth_return": ["earth_electrode"],
+        "monopolar_metallic_return": ["metallic_return_conductor"],
+        "metallic_return": ["metallic_return_conductor"]
+      },
+      "asset": "lcc_bipole_parametric_v1:return_contract"
+    }
   }
 }

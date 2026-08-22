@@ -253,6 +253,7 @@ class ParametricLccRequest(_JsonRecord):
     operation_modes: tuple[str, ...] = ()
     mode_requests: tuple[LccModeRequest, ...] = ()
     template_mappings: tuple[LccTemplateMapping, ...] = ()
+    return_path_assets: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "topology", _require_text(self.topology, f"{type(self).__name__}.topology"))
@@ -262,6 +263,7 @@ class ParametricLccRequest(_JsonRecord):
             raise TypeError(f"{type(self).__name__}.ratings must be LccRatings")
         object.__setattr__(self, "engineering_overrides", _freeze(self.engineering_overrides))
         object.__setattr__(self, "operation_modes", _require_text_tuple(self.operation_modes, f"{type(self).__name__}.operation_modes"))
+        object.__setattr__(self, "return_path_assets", _require_text_tuple(self.return_path_assets, f"{type(self).__name__}.return_path_assets"))
         if isinstance(self.mode_requests, (str, bytes, bytearray)) or not isinstance(self.mode_requests, Sequence):
             raise TypeError(f"{type(self).__name__}.mode_requests must be a sequence")
         parsed_requests: list[LccModeRequest] = []

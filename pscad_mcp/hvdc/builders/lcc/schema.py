@@ -86,6 +86,7 @@ _PARAMETRIC_TOP_LEVEL_KEYS = {
     "ratings",
     "engineering_overrides",
     "operation_modes",
+    "return_path_assets",
     "mode_requests",
     "template_mappings",
 }
@@ -714,6 +715,16 @@ def parse_parametric_request(data: Mapping[str, Any]) -> ParametricLccRequest:
                 context="operation_modes",
                 mode=mode,
             )
+    return_path_assets = tuple(
+        _parametric_text(asset, "return_path_assets", "LCC_OPERATING_MODE_INVALID")
+        for asset in _sequence(request.get("return_path_assets", ()), "return_path_assets")
+    )
+    if len(set(return_path_assets)) != len(return_path_assets):
+        raise _parametric_invalid(
+            "LCC_OPERATING_MODE_INVALID",
+            "return_path_assets must contain unique explicit asset identifiers.",
+            context="return_path_assets",
+        )
     mode_requests_value = request.get("mode_requests", ())
     mode_requests = tuple(
         _parse_parametric_mode_request(mode_request, mode_index, set(operation_modes) or _SUPPORTED_OPERATION_MODES)
@@ -729,6 +740,7 @@ def parse_parametric_request(data: Mapping[str, Any]) -> ParametricLccRequest:
         ratings=ratings,
         engineering_overrides={key: _json_value(value, f"engineering_overrides.{key}") for key, value in engineering_overrides.items()},
         operation_modes=operation_modes,
+        return_path_assets=return_path_assets,
         mode_requests=mode_requests,
         template_mappings=template_mappings,
     )

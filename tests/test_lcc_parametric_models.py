@@ -30,6 +30,7 @@ VALID_REQUEST = {
     },
     "engineering_overrides": {"smoothing_reactor_mh": 120.0},
     "operation_modes": ["bipolar_run", "monopolar_earth_return"],
+    "return_path_assets": ["neutral_bus", "earth_electrode"],
     "mode_requests": [
         {
             "mode": "bipolar_run",
@@ -61,12 +62,14 @@ def test_parametric_records_are_frozen_and_json_safe():
         ),
         engineering_overrides={"smoothing_reactor_mh": 120.0},
         operation_modes=("bipolar_run", "monopolar_earth_return"),
+        return_path_assets=("neutral_bus", "earth_electrode"),
     )
 
     payload = request.to_dict()
 
     assert payload["topology"] == "bipolar"
     assert payload["ratings"]["dc_current_ka"] == 2.4
+    assert payload["return_path_assets"] == ["neutral_bus", "earth_electrode"]
     assert json.loads(json.dumps(payload))["engineering_overrides"]["smoothing_reactor_mh"] == 120.0
 
     with pytest.raises(FrozenInstanceError):
@@ -147,3 +150,10 @@ def test_parametric_parser_preserves_blueprint_behavior():
     }
 
     assert parse_blueprint(candidate).name == "cigre_lcc_monopole_v1"
+
+
+def test_parametric_parser_rejects_duplicate_return_asset_evidence():
+    candidate = copy.deepcopy(VALID_REQUEST)
+    candidate["return_path_assets"] = ["neutral_bus", "neutral_bus"]
+
+    _assert_request_invalid(candidate, "LCC_OPERATING_MODE_INVALID")

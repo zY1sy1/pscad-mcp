@@ -8,7 +8,18 @@ from pscad_mcp.hvdc.builders.lcc.parametric_service import ParametricLccBuilderS
 
 
 def request():
-    return ParametricLccRequest("bipolar", LccRatings(1200.0, 500.0, 2.4, 500.0, 50.0, 3.0), {"smoothing_reactor_mh": 120.0}, ("bipolar_run",))
+    return ParametricLccRequest(
+        topology="bipolar",
+        ratings=LccRatings(1200.0, 500.0, 2.4, 500.0, 50.0, 3.0),
+        engineering_overrides={
+            "smoothing_reactor_mh": 120.0,
+            "filter_capacitance_uf": 60.0,
+            "min_firing_angle_deg": 5.0,
+            "max_firing_angle_deg": 45.0,
+        },
+        operation_modes=("bipolar_run",),
+        return_path_assets=("neutral_bus",),
+    )
 
 
 def test_plan_is_deterministic():
