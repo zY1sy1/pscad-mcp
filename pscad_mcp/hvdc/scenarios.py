@@ -592,16 +592,13 @@ async def _orchestrate_scenario(service: Any, record: dict[str, Any], normalized
     preflight = record.get("preflight", {})
     timing_mode = preflight.get("timing_mode") if isinstance(preflight, Mapping) else None
     if events and timing_mode == "native":
-        lcc_switching = normalized.get("_lcc_switching")
-        if isinstance(lcc_switching, Mapping):
+        lcc_switching_token = normalized.get("_lcc_switching_token")
+        if lcc_switching_token is not None:
             acknowledgements = list(await execute_lcc_schedule(
                 backend,
                 target_project,
-                events,
-                evidence=lcc_switching["evidence"],
-                profile=lcc_switching["profile"],
-                required_output_channels=lcc_switching["required_output_channels"],
-                confirm=lcc_switching.get("confirm") is True,
+                lcc_switching_token,
+                confirm=normalized.get("_lcc_switching_confirm") is True,
             ))
         else:
             acknowledgements = await backend.schedule_timed_controls(target_project, events)
@@ -905,13 +902,25 @@ async def run_scenario(
             for item in normalized.get("events", [])
             if isinstance(item, Mapping)
         ]
-        implicit_lcc_schedule = bool(event_modes) and all(
-            mode in LCC_OPERATING_MODES for mode in event_modes
-        )
+        lcc_event_modes = [mode for mode in event_modes if mode in LCC_OPERATING_MODES]
+        implicit_lcc_schedule = bool(lcc_event_modes)
         lcc_switching_requested = (
             normalized.get("operating_mode") == "scheduled_switching"
             or implicit_lcc_schedule
         )
+        mixed_event_targets = [mode for mode in event_modes if mode not in LCC_OPERATING_MODES]
+        if lcc_event_modes and mixed_event_targets:
+            raise BackendError(
+                "LCC_SWITCHING_UNAVAILABLE",
+                "LCC operating-mode events cannot be mixed with auxiliary or wall-clock event targets.",
+                "hvdc",
+                "run_hvdc_scenario",
+                {
+                    "reason": "mixed_schedule_not_supported",
+                    "lcc_modes": sorted(set(lcc_event_modes)),
+                    "other_targets": sorted(set(mixed_event_targets)),
+                },
+            )
         if lcc_switching_requested and (
             not isinstance(topology_constraints, Mapping)
             or topology_constraints.get("family") != "lcc"
@@ -953,12 +962,8 @@ async def run_scenario(
                 profile=profile_data,
                 required_output_channels=required_output_channels,
             )
-            normalized["_lcc_switching"] = {
-                "evidence": evidence,
-                "profile": profile_data,
-                "required_output_channels": tuple(required_output_channels),
-                "confirm": confirm,
-            }
+            normalized["_lcc_switching_token"] = lcc_preflight
+            normalized["_lcc_switching_confirm"] = confirm
         preflight = await preflight_scenario(
             service,
             project_name,
@@ -968,9 +973,9 @@ async def run_scenario(
         )
         if lcc_preflight is not None:
             preflight["lcc_switching"] = {
-                "timing_mode": lcc_preflight["timing_mode"],
-                "observed_time_s": lcc_preflight["observed_time_s"],
-                "output_channels_verified": list(lcc_preflight["output_channels_verified"]),
+                "timing_mode": lcc_preflight.timing_mode,
+                "observed_time_s": lcc_preflight.observed_time_s,
+                "output_channels_verified": list(lcc_preflight.output_channels_verified),
             }
         resolved_commands = list(preflight.get("resolved_commands", []))
         request_index = 0

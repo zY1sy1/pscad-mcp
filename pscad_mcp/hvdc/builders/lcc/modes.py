@@ -24,6 +24,38 @@ class ModeCopy:
     plan: Any
 
 
+_TOKEN_SEAL = object()
+
+
+@dataclass(frozen=True, init=False)
+class LccSwitchingToken:
+    """Immutable result of the final, write-free strict switching preflight."""
+
+    project_name: str
+    events: tuple[Mapping[str, Any], ...]
+    timing_mode: str
+    observed_time_s: float
+    output_channels_verified: tuple[str, ...]
+    _seal: object
+
+
+def _switching_token(
+    project_name: str,
+    events: Sequence[Mapping[str, Any]],
+    *,
+    observed_time_s: float,
+    output_channels_verified: Sequence[str],
+) -> LccSwitchingToken:
+    token = object.__new__(LccSwitchingToken)
+    object.__setattr__(token, "project_name", project_name)
+    object.__setattr__(token, "events", _freeze(tuple(events)))
+    object.__setattr__(token, "timing_mode", "native")
+    object.__setattr__(token, "observed_time_s", observed_time_s)
+    object.__setattr__(token, "output_channels_verified", tuple(output_channels_verified))
+    object.__setattr__(token, "_seal", _TOKEN_SEAL)
+    return token
+
+
 def _bounded_json(value: Any, *, depth: int = 0) -> Any:
     if depth >= 5:
         return "<depth-limit>"
@@ -239,7 +271,7 @@ async def preflight_lcc_switching(
     evidence: Any,
     profile: Mapping[str, Any],
     required_output_channels: Sequence[str],
-) -> dict[str, Any]:
+) -> LccSwitchingToken:
     """Resolve all strict switching evidence without performing a write."""
 
     try:
@@ -367,22 +399,19 @@ async def preflight_lcc_switching(
         "read_back": binding.get("read_back", False),
         "semantics": binding.get("semantics"),
     } for event, binding in zip(schedule, resolved))
-    return {
-        "events": bound_events,
-        "timing_mode": timing_mode,
-        "observed_time_s": observed_time_s,
-        "output_channels_verified": required,
-    }
+    return _switching_token(
+        project_name,
+        bound_events,
+        observed_time_s=observed_time_s,
+        output_channels_verified=required,
+    )
 
 
 async def execute_lcc_schedule(
     backend: Any,
     project_name: str,
-    events: Sequence[Mapping[str, Any] | LccModeEvent],
+    token: LccSwitchingToken,
     *,
-    evidence: Any,
-    profile: Mapping[str, Any],
-    required_output_channels: Sequence[str],
     confirm: bool,
 ) -> tuple[dict[str, Any], ...]:
     if confirm is not True:
@@ -393,30 +422,22 @@ async def execute_lcc_schedule(
             "execute_lcc_schedule",
             _bounded_json({"project_name": project_name}),
         )
-    validation_events = [
-        {
-            key: event[key]
-            for key in ("event_id", "time_s", "target", "value")
-            if key in event
-        }
-        if isinstance(event, Mapping)
-        else event
-        for event in events
-    ]
-    preflight = await preflight_lcc_switching(
-        backend,
-        project_name,
-        validation_events,
-        evidence=evidence,
-        profile=profile,
-        required_output_channels=required_output_channels,
-    )
+    if (
+        not isinstance(token, LccSwitchingToken)
+        or getattr(token, "_seal", None) is not _TOKEN_SEAL
+        or token.project_name != project_name
+        or token.timing_mode != "native"
+    ):
+        raise _switching_unavailable(
+            "Native LCC schedule dispatch requires the immutable token returned by final preflight.",
+            reason="preflight_token_invalid",
+        )
     try:
         dispatched = await dispatch_timed_events(
             backend,
             project_name,
-            preflight["events"],
-            mode=preflight["timing_mode"],
+            token.events,
+            mode=token.timing_mode,
         )
     except BackendError as error:
         raise _switching_unavailable(

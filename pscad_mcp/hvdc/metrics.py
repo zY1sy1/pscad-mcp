@@ -184,6 +184,7 @@ def calculate_metrics(samples: dict[str, Any], metrics: list[str] | None = None,
     requested = metrics or ["dc_voltage_peak", "dc_current_peak", "dc_power"]
     result: list[dict[str, Any]] = []
     legacy_named_channels = isinstance(samples.get("channels"), dict)
+    recovery_bands = samples.get("recovery_bands", {})
 
     def unavailable(metric_name: str, source_channels: Iterable[str]) -> dict[str, Any]:
         sources = tuple(source_channels)
@@ -271,30 +272,48 @@ def calculate_metrics(samples: dict[str, Any], metrics: list[str] | None = None,
                                           "maximum algebraic return-current closure error", "derived") if count else unavailable(name, tuple(expected_units)))
             continue
         if name == "mode_transition_recovery_time_s":
-            command = channels.get("mode_command", [])
             status = channels.get("mode_status", [])
-            expected_units = {"mode_command": "state", "mode_status": "state"}
-            count = min(len(command), len(status), len(time))
+            response = channels.get("dc_voltage", [])
+            expected_units = {"mode_status": "state", "dc_voltage": "kV"}
+            count = min(len(status), len(response), len(time))
             if not count:
                 result.append(unavailable(name, tuple(expected_units)))
             elif not lcc_units_valid(expected_units):
                 result.append(invalid_lcc_units(name, expected_units))
             else:
+                band = recovery_bands.get("dc_voltage") if isinstance(recovery_bands, Mapping) else None
+                absolute_band = band.get("absolute") if isinstance(band, Mapping) else None
+                band_units = band.get("units") if isinstance(band, Mapping) else None
+                if (
+                    isinstance(absolute_band, bool)
+                    or not isinstance(absolute_band, (int, float))
+                    or not math.isfinite(float(absolute_band))
+                    or float(absolute_band) <= 0
+                    or not isinstance(band_units, str)
+                    or band_units.casefold() != "kv"
+                ):
+                    result.append(_invalid(
+                        name,
+                        tuple(expected_units),
+                        time,
+                        "Mode transition recovery requires an approved positive absolute dc_voltage band in kV.",
+                    ))
+                    continue
                 transition_index = next(
-                    (index for index in range(1, count) if command[index] != command[index - 1]),
+                    (index for index in range(1, count) if status[index] != status[index - 1]),
                     None,
                 )
-                target = command[transition_index] if transition_index is not None else None
+                baseline = response[transition_index - 1] if transition_index is not None else None
                 recovery_index = None if transition_index is None else next(
                     (
                         index
                         for index in range(transition_index, count)
-                        if all(value == target for value in status[index:count])
+                        if all(abs(value - baseline) <= float(absolute_band) for value in response[index:count])
                     ),
                     None,
                 )
                 if transition_index is None or recovery_index is None:
-                    result.append(_invalid(name, tuple(expected_units), time, "A command value change and sustained status recovery to its target are both required."))
+                    result.append(_invalid(name, tuple(expected_units), time, "A mode-status edge and sustained dc-voltage recovery to its pre-event baseline are both required."))
                 else:
                     result.append(_metric(
                         name,
@@ -302,7 +321,7 @@ def calculate_metrics(samples: dict[str, Any], metrics: list[str] | None = None,
                         "s",
                         tuple(expected_units),
                         time,
-                        "EMTDC time from mode-command value change to sustained status recovery at the target value",
+                        "EMTDC time from mode-status edge to sustained dc-voltage recovery within the approved pre-event baseline band",
                         "derived",
                     ))
             continue

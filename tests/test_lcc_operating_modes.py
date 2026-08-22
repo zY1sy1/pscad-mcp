@@ -6,6 +6,7 @@ import pytest
 from pscad_mcp.core.backend.base import BackendError
 from pscad_mcp.core.path_policy import PathPolicy
 from pscad_mcp.hvdc.builders.lcc.modes import (
+    LccSwitchingToken,
     derive_mode_copies,
     execute_lcc_schedule,
     mode_acceptance_contract,
@@ -236,10 +237,13 @@ def test_preflight_resolves_exact_bindings_timing_and_output_before_execute():
         required_output_channels=("mode_status", "return_current"),
     ))
 
-    assert result["timing_mode"] == "native"
-    assert result["events"][0]["component_id"] == "17"
-    assert result["events"][0]["parameter_name"] == "Value"
-    assert result["output_channels_verified"] == ("mode_status", "return_current")
+    assert isinstance(result, LccSwitchingToken)
+    assert result.timing_mode == "native"
+    assert result.events[0]["component_id"] == "17"
+    assert result.events[0]["parameter_name"] == "Value"
+    assert result.output_channels_verified == ("mode_status", "return_current")
+    with pytest.raises(TypeError):
+        result.events[0]["component_id"] = "99"
     assert backend.scheduled == []
 
 
@@ -325,7 +329,7 @@ def test_preflight_rejects_past_emtdc_events_but_allows_equal_time_boundary():
         profile=_profile(),
         required_output_channels=("mode_status", "return_current"),
     ))
-    assert result["observed_time_s"] == 1.0
+    assert result.observed_time_s == 1.0
 
 
 @pytest.mark.parametrize("missing_provider", ["schedule_timed_controls", "get_simulation_time"])
@@ -355,12 +359,14 @@ def test_execute_requires_confirmation_and_only_registers_native_emtdc_schedule_
         "required_output_channels": ("mode_status", "return_current"),
     }
 
+    token = asyncio.run(preflight_lcc_switching(backend, "case", [_event()], **kwargs))
+
     with pytest.raises(BackendError) as raised:
-        asyncio.run(execute_lcc_schedule(backend, "case", [_event()], confirm=False, **kwargs))
+        asyncio.run(execute_lcc_schedule(backend, "case", token, confirm=False))
     assert raised.value.code == "LCC_CONFIRMATION_REQUIRED"
     assert backend.scheduled == []
 
-    result = asyncio.run(execute_lcc_schedule(backend, "case", [_event()], confirm=True, **kwargs))
+    result = asyncio.run(execute_lcc_schedule(backend, "case", token, confirm=True))
     assert result[0]["mode"] == "native"
     assert result[0]["requested_time_s"] == 1.0
     assert backend.scheduled[0]["time_s"] == 1.0
@@ -370,7 +376,7 @@ def _sampled_channels(*channels):
     return {"channels": [
         {"path": name, "units": units, "domain": [0.0, 1.0, 2.0, 3.0], "values": values}
         for name, units, values in channels
-    ], "recovery_baselines": {"dc_voltage": 500.0}}
+    ], "recovery_bands": {"dc_voltage": {"absolute": 5.0, "units": "kV"}}}
 
 
 def test_lcc_mode_metrics_cover_closure_imbalance_recovery_and_mismatch():
@@ -380,7 +386,7 @@ def test_lcc_mode_metrics_cover_closure_imbalance_recovery_and_mismatch():
         ("earth_return_current", "kA", [0.0, 0.2, 0.0, 0.0]),
         ("mode_command", "state", [0, 1, 1, 1]),
         ("mode_status", "state", [0, 0, 1, 1]),
-        ("dc_voltage", "kV", [500.0, 450.0, 490.0, 500.0]),
+        ("dc_voltage", "kV", [500.0, 500.0, 450.0, 500.0]),
     )
 
     result = calculate_metrics(samples, [
@@ -412,13 +418,26 @@ def test_lcc_mode_metrics_are_incomplete_for_missing_units_or_samples(channels):
 def test_transition_recovery_detects_falling_edge_and_recovers_to_zero_target():
     samples = _sampled_channels(
         ("mode_command", "state", [1, 0, 0, 0]),
-        ("mode_status", "state", [1, 1, 1, 0]),
+        ("mode_status", "state", [1, 1, 0, 0]),
+        ("dc_voltage", "kV", [500.0, 500.0, 450.0, 500.0]),
     )
 
     result = calculate_metrics(samples, ["mode_transition_recovery_time_s"])
 
     assert result["verdict"] == "PASS"
-    assert result["metrics"][0]["value"] == pytest.approx(2.0)
+    assert result["metrics"][0]["value"] == pytest.approx(1.0)
+
+
+def test_transition_recovery_is_incomplete_without_approved_voltage_band():
+    samples = _sampled_channels(
+        ("mode_status", "state", [1, 1, 0, 0]),
+        ("dc_voltage", "kV", [500.0, 500.0, 450.0, 500.0]),
+    )
+    samples.pop("recovery_bands")
+
+    result = calculate_metrics(samples, ["mode_transition_recovery_time_s"])
+
+    assert result["verdict"] == "INCOMPLETE_ANALYSIS"
 
 
 def _scenario_profile(project_stem="derived"):
@@ -456,18 +475,20 @@ def _scenario_profile(project_stem="derived"):
 
 
 class ScenarioLccBackend:
-    def __init__(self, profile, *, time_basis="EMTDC"):
+    def __init__(self, profile, *, time_basis="EMTDC", fail_capabilities_after_write=False):
         self.profile = profile
         self.time_basis = time_basis
         self.calls = []
         self.parameters = {17: {"Value": 0}}
         self.settings = {"PlotType": "OUT"}
+        self.fail_capabilities_after_write = fail_capabilities_after_write
 
     async def get_timed_control_capabilities(self, project_name):
         self.calls.append("capabilities")
+        changed_after_write = self.fail_capabilities_after_write and "parameter_write" in self.calls
         return {
-            "native_schedule": True,
-            "simulation_clock": True,
+            "native_schedule": not changed_after_write,
+            "simulation_clock": not changed_after_write,
             "time_basis": self.time_basis,
         }
 
@@ -537,7 +558,7 @@ def test_real_scenario_lcc_switching_preflights_before_each_write_class(monkeypa
     _write_scenario_project(source)
     _write_scenario_project(derived)
     profile = _scenario_profile()
-    backend = ScenarioLccBackend(profile)
+    backend = ScenarioLccBackend(profile, fail_capabilities_after_write=True)
     service = HvdcDomainService(backend, path_policy=PathPolicy(workspace_root=str(tmp_path)))
     monkeypatch.setattr("pscad_mcp.hvdc.scenarios.load_profile", lambda *args, **kwargs: profile)
     scenario = {
@@ -562,9 +583,9 @@ def test_real_scenario_lcc_switching_preflights_before_each_write_class(monkeypa
     assert all(backend.calls.index(item) < parameter_write for item in (
         "capabilities", "simulation_clock", "output_channels",
     ))
-    assert max(index for index, item in enumerate(backend.calls) if item == "capabilities" and index < native_schedule) > parameter_write
-    assert max(index for index, item in enumerate(backend.calls) if item == "simulation_clock" and index < native_schedule) > parameter_write
-    assert max(index for index, item in enumerate(backend.calls) if item == "output_channels" and index < native_schedule) > parameter_write
+    assert all(item not in backend.calls[parameter_write + 1:native_schedule] for item in (
+        "capabilities", "simulation_clock", "output_channels",
+    ))
 
 
 def test_real_scenario_lcc_switching_fails_before_writes_when_time_basis_is_not_emtdc(monkeypatch, tmp_path):
@@ -617,5 +638,41 @@ def test_real_scenario_mode_target_cannot_bypass_strict_lcc_branch_without_famil
         asyncio.run(service.run_scenario(str(source), scenario, confirm=True))
 
     assert raised.value.code == "LCC_SWITCHING_UNAVAILABLE"
+    assert "parameter_write" not in backend.calls
+    assert "native_schedule" not in backend.calls
+
+
+def test_real_scenario_mixed_lcc_and_aux_wallclock_schedule_is_rejected_before_writes(monkeypatch, tmp_path):
+    source = tmp_path / "source.pscx"
+    derived = tmp_path / "derived.pscx"
+    _write_scenario_project(source)
+    _write_scenario_project(derived)
+    profile = _scenario_profile()
+    backend = ScenarioLccBackend(profile)
+    service = HvdcDomainService(backend, path_policy=PathPolicy(workspace_root=str(tmp_path)))
+    monkeypatch.setattr("pscad_mcp.hvdc.scenarios.load_profile", lambda *args, **kwargs: profile)
+    scenario = {
+        "name": "mixed-lcc-switch",
+        "profile": "strict_lcc_test",
+        "project": str(source),
+        "derived_project": str(derived),
+        "parameter_changes": [],
+        "events": [
+            {"event_id": "e1", "time_s": 1.0, "target": "metallic_return", "value": 1},
+            {
+                "event_id": "aux",
+                "time_s": 2.0,
+                "target": "auxiliary_command",
+                "value": 1,
+                "wall_clock_s": 1_775_000_000.0,
+            },
+        ],
+    }
+
+    with pytest.raises(BackendError) as raised:
+        asyncio.run(service.run_scenario(str(source), scenario, confirm=True))
+
+    assert raised.value.code == "LCC_SWITCHING_UNAVAILABLE"
+    assert raised.value.details["reason"] == "mixed_schedule_not_supported"
     assert "parameter_write" not in backend.calls
     assert "native_schedule" not in backend.calls
