@@ -303,3 +303,30 @@ def test_bipole_return_requirements_are_bound_to_machine_provenance(tamper):
 
     assert raised.value.code == "LCC_PARAMETER_DERIVATION_FAILED"
     assert raised.value.details["asset"] == "lcc_parametric_provenance_v1:bipole_return_contract"
+
+
+@pytest.mark.parametrize(
+    "relationship",
+    ["firing_angle_interval", "inverter_commutation_interval"],
+)
+def test_required_relationship_inventory_cannot_be_removed_from_catalog(relationship):
+    catalog = copy.deepcopy(load_parametric_catalog())
+    catalog["feasibility_relationships"].pop(relationship)
+
+    with pytest.raises(BackendError) as raised:
+        derive_lcc_parameters(request(), catalog)
+
+    assert raised.value.code == "LCC_PARAMETER_DERIVATION_FAILED"
+    assert raised.value.details["missing_relationships"] == [relationship]
+
+
+def test_required_return_topology_cannot_be_removed_from_both_catalog_bindings():
+    catalog = copy.deepcopy(load_parametric_catalog())
+    catalog["return_contract_assets"].pop("bipolar")
+    catalog["return_asset_requirements"].pop("bipolar")
+
+    with pytest.raises(BackendError) as raised:
+        derive_lcc_parameters(request(), catalog)
+
+    assert raised.value.code == "LCC_PARAMETER_DERIVATION_FAILED"
+    assert raised.value.details["missing_return_topologies"] == ["bipolar"]

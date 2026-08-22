@@ -55,6 +55,7 @@ def _catalog_data(catalog: Any) -> Mapping[str, Any]:
         "return_asset_requirements",
     ):
         _object(value.get(field), field)
+    _validate_authoritative_catalog_structure(value, provenance)
     return value
 
 
@@ -120,6 +121,86 @@ def _require_machine_contract(
             **details,
         )
     return expected
+
+
+def _validate_authoritative_catalog_structure(
+    catalog: Mapping[str, Any], provenance: Mapping[str, Any]
+) -> None:
+    structure_asset = provenance.get("catalog_structure_contract_asset")
+    contract = _machine_contract(structure_asset, "catalog_structure")
+    required_relationships = _object(
+        contract.get("required_relationships"),
+        f"provenance.{structure_asset}.required_relationships",
+    )
+    required_return_contracts = _object(
+        contract.get("required_return_contracts"),
+        f"provenance.{structure_asset}.required_return_contracts",
+    )
+
+    relationships = _object(
+        catalog.get("feasibility_relationships"), "feasibility_relationships"
+    )
+    missing_relationships = sorted(set(required_relationships) - set(relationships))
+    unexpected_relationships = sorted(set(relationships) - set(required_relationships))
+    mismatched_relationship_assets = sorted(
+        name
+        for name in set(required_relationships) & set(relationships)
+        if not isinstance(relationships[name], Mapping)
+        or relationships[name].get("asset") != required_relationships[name]
+    )
+    if missing_relationships or unexpected_relationships or mismatched_relationship_assets:
+        raise _error(
+            "LCC_PARAMETER_DERIVATION_FAILED",
+            "Catalog feasibility relationship inventory does not match versioned provenance.",
+            asset=structure_asset,
+            missing_relationships=missing_relationships,
+            unexpected_relationships=unexpected_relationships,
+            mismatched_relationship_assets=mismatched_relationship_assets,
+        )
+
+    contract_assets = _object(catalog.get("return_contract_assets"), "return_contract_assets")
+    requirements = _object(catalog.get("return_asset_requirements"), "return_asset_requirements")
+    expected_topologies = set(required_return_contracts)
+    missing_contract_topologies = sorted(expected_topologies - set(contract_assets))
+    missing_requirement_topologies = sorted(expected_topologies - set(requirements))
+    missing_return_topologies = sorted(
+        expected_topologies - (set(contract_assets) | set(requirements))
+    )
+    unexpected_contract_topologies = sorted(set(contract_assets) - expected_topologies)
+    unexpected_requirement_topologies = sorted(set(requirements) - expected_topologies)
+    mismatched_return_contracts = sorted(
+        topology
+        for topology in expected_topologies & set(contract_assets) & set(requirements)
+        if contract_assets[topology] != required_return_contracts[topology]
+        or not isinstance(requirements[topology], Mapping)
+        or requirements[topology].get("asset") != required_return_contracts[topology]
+    )
+    if (
+        missing_contract_topologies
+        or missing_requirement_topologies
+        or unexpected_contract_topologies
+        or unexpected_requirement_topologies
+        or mismatched_return_contracts
+    ):
+        single_missing = sorted(
+            set(missing_contract_topologies) | set(missing_requirement_topologies)
+        )
+        missing_asset = (
+            required_return_contracts.get(single_missing[0])
+            if len(single_missing) == 1
+            else structure_asset
+        )
+        raise _error(
+            "LCC_PARAMETER_DERIVATION_FAILED",
+            "Catalog return-topology contract inventory does not match versioned provenance.",
+            asset=missing_asset,
+            missing_return_topologies=missing_return_topologies,
+            missing_contract_topologies=missing_contract_topologies,
+            missing_requirement_topologies=missing_requirement_topologies,
+            unexpected_contract_topologies=unexpected_contract_topologies,
+            unexpected_requirement_topologies=unexpected_requirement_topologies,
+            mismatched_return_contracts=mismatched_return_contracts,
+        )
 
 
 def _resolve_provenance_multiplier(value: Any, parameter: str) -> float:

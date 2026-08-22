@@ -1,6 +1,7 @@
 {
   "schema_version": 1,
   "identity": "lcc_parametric_provenance_v1",
+  "catalog_structure_contract_asset": "lcc_parametric_provenance_v1:catalog_structure_contract",
   "entries": {
     "positive_finite": {
       "classification": "physical_invariant",
@@ -20,6 +21,19 @@
           "frequency_hz": {"required": true},
           "scr": {"required": true},
           "escr": {"required": false}
+        }
+      }
+    },
+    "catalog_structure_contract": {
+      "classification": "catalog_structure_contract",
+      "statement": "The versioned catalog must retain every required feasibility relationship and bipolar return-topology contract binding.",
+      "machine_contract": {
+        "required_relationships": {
+          "firing_angle_interval": "lcc_parametric_provenance_v1:strict_order",
+          "inverter_commutation_interval": "lcc_parametric_provenance_v1:inverter_commutation_identity"
+        },
+        "required_return_contracts": {
+          "bipolar": "lcc_parametric_provenance_v1:bipole_return_contract"
         }
       }
     },
