@@ -91,6 +91,81 @@ def _provenance_entry(reference: Any, parameter: str) -> Mapping[str, Any]:
     return _object(entries[entry_name], f"provenance.entries.{entry_name}")
 
 
+def _machine_contract(reference: Any, parameter: str) -> Mapping[str, Any]:
+    entry = _provenance_entry(reference, parameter)
+    return _object(entry.get("machine_contract"), f"provenance.{reference}.machine_contract")
+
+
+def _require_machine_contract(
+    reference: Any,
+    observed: Mapping[str, Any],
+    parameter: str,
+    *,
+    relationship: str | None = None,
+) -> Mapping[str, Any]:
+    expected = _machine_contract(reference, parameter)
+    if dict(observed) != dict(expected):
+        details: dict[str, Any] = {
+            "parameter": parameter,
+            "asset": reference,
+            "observed_contract": dict(observed),
+            "expected_contract": dict(expected),
+        }
+        if relationship is not None:
+            details["relationship"] = relationship
+        raise _error(
+            "LCC_PARAMETER_DERIVATION_FAILED",
+            "Catalog declaration does not match versioned provenance semantics.",
+            **details,
+        )
+    return expected
+
+
+def _resolve_provenance_multiplier(value: Any, parameter: str) -> float:
+    if isinstance(value, Mapping):
+        if dict(value) != {"expression": "180 / pi"}:
+            raise _error(
+                "LCC_PARAMETER_DERIVATION_FAILED",
+                "Provenance unit conversion expression is unsupported.",
+                parameter=parameter,
+            )
+        return 180.0 / math.pi
+    return _finite_number(value, parameter=parameter)
+
+
+def _validate_unit_contract(declaration: Mapping[str, Any], parameter: str) -> None:
+    multipliers_value = declaration.get("unit_multipliers")
+    unit_asset = declaration.get("unit_asset")
+    if multipliers_value is None and unit_asset is None:
+        return
+    multipliers = _object(multipliers_value, f"engineering_parameters.{parameter}.unit_multipliers")
+    contract = _machine_contract(unit_asset, parameter)
+    parameters = _object(contract.get("parameters"), f"provenance.{unit_asset}.parameters")
+    expected_parameter = _object(parameters.get(parameter), f"provenance.{unit_asset}.{parameter}")
+    expected_multipliers = _object(expected_parameter.get("multipliers"), f"provenance.{unit_asset}.{parameter}.multipliers")
+    observed_units = declaration.get("units")
+    if observed_units != expected_parameter.get("canonical_units") or set(multipliers) != set(expected_multipliers):
+        raise _error(
+            "LCC_PARAMETER_DERIVATION_FAILED",
+            "Catalog unit declaration does not match versioned provenance.",
+            parameter=parameter,
+            asset=unit_asset,
+        )
+    for units, expected_value in expected_multipliers.items():
+        observed = _finite_number(multipliers[units], parameter=parameter)
+        expected = _resolve_provenance_multiplier(expected_value, parameter)
+        if observed != expected:
+            raise _error(
+                "LCC_PARAMETER_DERIVATION_FAILED",
+                "Catalog unit multiplier does not match versioned provenance.",
+                parameter=parameter,
+                units=units,
+                observed=observed,
+                expected=expected,
+                asset=unit_asset,
+            )
+
+
 def _declaration_contract(
     declaration: Mapping[str, Any], parameter: str
 ) -> tuple[str, str, tuple[Mapping[str, Any], ...]]:
@@ -109,10 +184,13 @@ def _declaration_contract(
             parameter=parameter,
         )
     _provenance_entry(asset, parameter)
+    _validate_unit_contract(declaration, parameter)
     constraints: list[Mapping[str, Any]] = []
     for constraint in constraints_value:
         constraint_declaration = _object(constraint, f"{parameter}.constraints")
-        _provenance_entry(constraint_declaration.get("asset"), parameter)
+        constraint_asset = constraint_declaration.get("asset")
+        observed_contract = {key: value for key, value in constraint_declaration.items() if key != "asset"}
+        _require_machine_contract(constraint_asset, observed_contract, parameter)
         constraints.append(constraint_declaration)
     return units, asset, tuple(constraints)
 
@@ -256,19 +334,24 @@ def _derived_power(ratings: Mapping[str, float], catalog: Mapping[str, Any]) -> 
             "The dimensional power formula is missing declared catalog dependencies.",
             missing_catalog_dependencies=missing_dependencies,
         )
+    observed_power_contract = {
+        "formula": formula,
+        "dependencies": list(dependency_value),
+        "compared_to": declaration.get("compared_to"),
+    }
+    _require_machine_contract(asset, observed_power_contract, "dc_power_mw")
     if formula != "dc_voltage_kv * dc_current_ka" or not isinstance(units, str) or not isinstance(asset, str):
         raise _error(
             "LCC_PARAMETER_DERIVATION_FAILED",
             "The sourced dimensional power formula is unavailable.",
             parameter="dc_power_mw",
         )
-    _provenance_entry(asset, "dc_power_mw")
     calculated = ratings["dc_voltage_kv"] * ratings["dc_current_ka"]
     comparison_asset = declaration.get("comparison_asset")
-    comparison_provenance = _provenance_entry(comparison_asset, "dc_power_mw")
+    comparison_contract = _machine_contract(comparison_asset, "dc_power_mw")
     relative_tolerance = _finite_number(declaration.get("relative_tolerance"), parameter="dc_power_mw")
     absolute_tolerance = _finite_number(declaration.get("absolute_tolerance"), parameter="dc_power_mw")
-    if comparison_provenance.get("values") != {
+    if comparison_contract.get("values") != {
         "relative_tolerance": relative_tolerance,
         "absolute_tolerance": absolute_tolerance,
     }:
@@ -336,8 +419,8 @@ def _engineering_parameters(request: ParametricLccRequest, catalog: Mapping[str,
             formula = formula_value
             source = "default"
             default_asset = declaration.get("default_asset")
-            default_provenance = _provenance_entry(default_asset, name)
-            observed_defaults = default_provenance.get("values")
+            default_contract = _machine_contract(default_asset, name)
+            observed_defaults = default_contract.get("values")
             if not isinstance(observed_defaults, Mapping) or observed_defaults.get(name) != value:
                 raise _error(
                     "LCC_PARAMETER_DERIVATION_FAILED",
@@ -381,15 +464,20 @@ def _engineering_parameters(request: ParametricLccRequest, catalog: Mapping[str,
     return parameters, numeric
 
 
-def _validate_relationships(ratings: Mapping[str, float], engineering: Mapping[str, float], catalog: Mapping[str, Any]) -> None:
+def _validate_relationships(
+    ratings: Mapping[str, float], engineering: Mapping[str, float], catalog: Mapping[str, Any]
+) -> list[DerivedParameter]:
     relationships = _object(catalog["feasibility_relationships"], "feasibility_relationships")
     all_values = {**ratings, **engineering}
+    derived: list[DerivedParameter] = []
     for name in sorted(relationships):
         declaration = _object(relationships[name], f"feasibility_relationships.{name}")
         operator = declaration.get("operator")
         valid = False
         observed: dict[str, Any]
-        _provenance_entry(declaration.get("asset"), name)
+        asset = declaration.get("asset")
+        observed_contract = {key: value for key, value in declaration.items() if key != "asset"}
+        contract = _require_machine_contract(asset, observed_contract, name, relationship=name)
         if operator == "less_than":
             left_name = declaration.get("left")
             right_name = declaration.get("right")
@@ -397,6 +485,43 @@ def _validate_relationships(ratings: Mapping[str, float], engineering: Mapping[s
                 raise _error("LCC_PARAMETER_DERIVATION_FAILED", "Relationship references a missing value.", relationship=name)
             valid = all_values[left_name] < all_values[right_name]
             observed = {str(left_name): all_values[left_name], str(right_name): all_values[right_name]}
+        elif operator == "derived_value_in_closed_interval":
+            subtract_names = contract.get("subtract")
+            if isinstance(subtract_names, (str, bytes, bytearray)) or not isinstance(subtract_names, Sequence):
+                raise _error("LCC_PARAMETER_DERIVATION_FAILED", "Derived relationship operands are invalid.", relationship=name)
+            minimum_name = contract.get("minimum")
+            maximum_name = contract.get("maximum")
+            required_names = [*subtract_names, minimum_name, maximum_name]
+            if any(not isinstance(item, str) or item not in all_values for item in required_names):
+                raise _error("LCC_PARAMETER_DERIVATION_FAILED", "Relationship references a missing value.", relationship=name)
+            constant = _finite_number(contract.get("constant_deg"), parameter=name)
+            candidate = constant - sum(all_values[item] for item in subtract_names)
+            minimum = all_values[minimum_name]
+            maximum = all_values[maximum_name]
+            valid = minimum <= candidate <= maximum
+            observed = {
+                "candidate": candidate,
+                "minimum": minimum,
+                "maximum": maximum,
+                "subtract": {item: all_values[item] for item in subtract_names},
+            }
+            if valid:
+                output = contract.get("output")
+                formula = contract.get("formula")
+                units = contract.get("units")
+                if not isinstance(output, str) or not isinstance(formula, str) or not isinstance(units, str):
+                    raise _error("LCC_PARAMETER_DERIVATION_FAILED", "Derived relationship output is invalid.", relationship=name)
+                derived.append(
+                    DerivedParameter(
+                        name=output,
+                        value=candidate,
+                        source="derived",
+                        formula=formula,
+                        units=units,
+                        constraints=(f"{minimum} <= value <= {maximum} {units}",),
+                        asset=asset,
+                    )
+                )
         else:
             raise _error("LCC_PARAMETER_DERIVATION_FAILED", "Catalog relationship operator is unsupported.", relationship=name, operator=operator)
         if not valid:
@@ -407,6 +532,7 @@ def _validate_relationships(ratings: Mapping[str, float], engineering: Mapping[s
                 asset=declaration.get("asset"),
                 observed=observed,
             )
+    return derived
 
 
 def _validate_return_assets(request: ParametricLccRequest, catalog: Mapping[str, Any]) -> None:
@@ -415,12 +541,12 @@ def _validate_return_assets(request: ParametricLccRequest, catalog: Mapping[str,
     if declaration_value is None:
         return
     declaration = _object(declaration_value, f"return_asset_requirements.{request.topology}")
-    return_provenance = _provenance_entry(declaration.get("asset"), f"return_asset_requirements.{request.topology}")
+    return_contract = _machine_contract(declaration.get("asset"), f"return_asset_requirements.{request.topology}")
     allowed_value = declaration.get("allowed")
     if isinstance(allowed_value, (str, bytes, bytearray)) or not isinstance(allowed_value, Sequence):
         raise _error("LCC_PARAMETER_DERIVATION_FAILED", "Catalog allowed return assets are invalid.", topology=request.topology)
     allowed = set(allowed_value)
-    provenance_allowed = return_provenance.get("allowed_assets")
+    provenance_allowed = return_contract.get("allowed_assets")
     if (
         isinstance(provenance_allowed, (str, bytes, bytearray))
         or not isinstance(provenance_allowed, Sequence)
@@ -465,9 +591,9 @@ def derive_lcc_parameters(request: ParametricLccRequest, catalog: Any = None) ->
     rating_parameters, ratings = _rating_parameters(request, catalog_data)
     derived_power = _derived_power(ratings, catalog_data)
     engineering_parameters, engineering = _engineering_parameters(request, catalog_data)
-    _validate_relationships(ratings, engineering, catalog_data)
+    relationship_parameters = _validate_relationships(ratings, engineering, catalog_data)
     _validate_return_assets(request, catalog_data)
-    parameters = rating_parameters + [derived_power] + engineering_parameters
+    parameters = rating_parameters + [derived_power] + engineering_parameters + relationship_parameters
     return DerivedParameterReport(
         parameters=tuple(sorted(parameters, key=lambda item: item.name)),
         feasible=True,

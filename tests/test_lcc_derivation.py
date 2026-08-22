@@ -12,7 +12,7 @@ COMPLETE_ENGINEERING_VALUES = {
     "smoothing_reactor_mh": 120.0,
     "filter_capacitance_uf": 60.0,
     "min_firing_angle_deg": 5.0,
-    "max_firing_angle_deg": 45.0,
+    "max_firing_angle_deg": 170.0,
 }
 
 
@@ -45,6 +45,10 @@ def test_default_catalog_derives_power_and_preserves_catalog_evidence_for_user_o
     assert parameters["smoothing_reactor_mh"].units == "mH"
     assert parameters["smoothing_reactor_mh"].asset == "lcc_parametric_provenance_v1:positive_finite"
     assert parameters["overlap_angle_deg"].source == "default"
+    assert parameters["inverter_firing_angle_deg"].value == pytest.approx(142.0)
+    assert parameters["inverter_firing_angle_deg"].formula == (
+        "180 - min_extinction_angle_deg - overlap_angle_deg"
+    )
     assert report.feasible is True
     assert list(report.diagnostics) == sorted(report.diagnostics)
 
@@ -113,7 +117,8 @@ def test_unsupported_or_out_of_range_overrides_fail_closed(overrides, detail_key
     "overrides",
     [
         {**COMPLETE_ENGINEERING_VALUES, "overlap_angle_deg": 180.0},
-        {**COMPLETE_ENGINEERING_VALUES, "min_firing_angle_deg": 45.0, "max_firing_angle_deg": 45.0},
+        {**COMPLETE_ENGINEERING_VALUES, "min_firing_angle_deg": 170.0, "max_firing_angle_deg": 170.0},
+        {**COMPLETE_ENGINEERING_VALUES, "overlap_angle_deg": 179.0, "min_extinction_angle_deg": 179.0},
     ],
 )
 def test_impossible_catalog_angle_relationships_fail_closed(overrides):
@@ -123,6 +128,7 @@ def test_impossible_catalog_angle_relationships_fail_closed(overrides):
     assert raised.value.details["relationship"] in {
         "angle_domain_deg",
         "firing_angle_interval",
+        "inverter_commutation_interval",
     }
 
 
@@ -193,3 +199,43 @@ def test_catalog_missing_power_inputs_or_formula_dependencies_fails_structured(c
         derive_lcc_parameters(request(), catalog)
     assert raised.value.code == "LCC_PARAMETER_DERIVATION_FAILED"
     assert raised.value.details["missing_catalog_dependencies"] == missing
+
+
+@pytest.mark.parametrize(
+    "tamper",
+    [
+        lambda catalog: catalog["engineering_parameters"]["smoothing_reactor_mh"]["constraints"][0].update({"value": 1.0}),
+        lambda catalog: catalog["engineering_parameters"]["overlap_angle_deg"]["constraints"][0].update({"maximum": 179.0}),
+        lambda catalog: catalog["engineering_parameters"]["smoothing_reactor_mh"]["unit_multipliers"].update({"H": 999.0}),
+        lambda catalog: catalog["engineering_parameters"]["filter_capacitance_uf"]["unit_multipliers"].update({"F": 999.0}),
+        lambda catalog: catalog["engineering_parameters"]["overlap_angle_deg"]["unit_multipliers"].update({"rad": 57.0}),
+        lambda catalog: catalog["feasibility_relationships"]["firing_angle_interval"].update({"left": "overlap_angle_deg"}),
+    ],
+)
+def test_catalog_contract_must_exactly_match_machine_provenance(tamper):
+    catalog = copy.deepcopy(load_parametric_catalog())
+    tamper(catalog)
+
+    with pytest.raises(BackendError) as raised:
+        derive_lcc_parameters(request(), catalog)
+
+    assert raised.value.code == "LCC_PARAMETER_DERIVATION_FAILED"
+    assert "asset" in raised.value.details
+
+
+def test_inverter_commutation_identity_must_match_machine_provenance():
+    catalog = copy.deepcopy(load_parametric_catalog())
+    catalog["feasibility_relationships"]["inverter_commutation_interval"] = {
+        "operator": "derived_value_in_closed_interval",
+        "constant_deg": 179.0,
+        "subtract": ["min_extinction_angle_deg", "overlap_angle_deg"],
+        "minimum": "min_firing_angle_deg",
+        "maximum": "max_firing_angle_deg",
+        "asset": "lcc_parametric_provenance_v1:inverter_commutation_identity",
+    }
+
+    with pytest.raises(BackendError) as raised:
+        derive_lcc_parameters(request(), catalog)
+
+    assert raised.value.code == "LCC_PARAMETER_DERIVATION_FAILED"
+    assert raised.value.details["relationship"] == "inverter_commutation_interval"

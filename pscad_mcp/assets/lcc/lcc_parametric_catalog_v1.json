@@ -20,6 +20,7 @@
       "required": true,
       "formula": "dc_voltage_kv * dc_current_ka",
       "dependencies": ["dc_voltage_kv", "dc_current_ka"],
+      "compared_to": "rated_power_mw",
       "asset": "lcc_parametric_provenance_v1:dimensional_identity",
       "comparison_asset": "lcc_parametric_provenance_v1:floating_point_comparison",
       "relative_tolerance": 1e-6,
@@ -64,6 +65,17 @@
     "firing_angle_interval": {
       "operator": "less_than", "left": "min_firing_angle_deg", "right": "max_firing_angle_deg",
       "asset": "lcc_parametric_provenance_v1:strict_order"
+    },
+    "inverter_commutation_interval": {
+      "operator": "derived_value_in_closed_interval",
+      "output": "inverter_firing_angle_deg",
+      "units": "deg",
+      "formula": "180 - min_extinction_angle_deg - overlap_angle_deg",
+      "constant_deg": 180.0,
+      "subtract": ["min_extinction_angle_deg", "overlap_angle_deg"],
+      "minimum": "min_firing_angle_deg",
+      "maximum": "max_firing_angle_deg",
+      "asset": "lcc_parametric_provenance_v1:inverter_commutation_identity"
     }
   },
   "return_asset_requirements": {
