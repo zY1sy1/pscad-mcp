@@ -456,3 +456,16 @@ def test_structured_failure_uses_the_same_single_provenance_snapshot(monkeypatch
 
     assert raised.value.code == "LCC_PARAMETER_DERIVATION_FAILED"
     assert calls == 1
+
+
+def test_shared_declaration_mapping_cannot_reuse_another_parameter_contract():
+    catalog = copy.deepcopy(load_parametric_catalog())
+    catalog["engineering_parameters"]["smoothing_reactor_mh"] = catalog[
+        "engineering_parameters"
+    ]["filter_capacitance_uf"]
+
+    with pytest.raises(BackendError) as raised:
+        derive_lcc_parameters(request(), catalog)
+
+    assert raised.value.code == "LCC_PARAMETER_DERIVATION_FAILED"
+    assert raised.value.details["parameter"] == "smoothing_reactor_mh"

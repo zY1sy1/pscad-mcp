@@ -30,7 +30,7 @@ class _DerivationContext:
     entries: Mapping[str, Any]
     machine_contracts: dict[str, Mapping[str, Any]] = field(default_factory=dict)
     declaration_contracts: dict[
-        int, tuple[str, str, tuple[Mapping[str, Any], ...]]
+        tuple[int, str], tuple[str, str, tuple[Mapping[str, Any], ...]]
     ] = field(default_factory=dict)
     power_contract: tuple[str, str, str, float, float] | None = None
 
@@ -406,7 +406,7 @@ def _declaration_contract(
     declaration: Mapping[str, Any],
     parameter: str,
 ) -> tuple[str, str, tuple[Mapping[str, Any], ...]]:
-    cache_key = id(declaration)
+    cache_key = (id(declaration), parameter)
     cached = context.declaration_contracts.get(cache_key)
     if cached is not None:
         return cached
