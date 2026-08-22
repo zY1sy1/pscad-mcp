@@ -14,7 +14,11 @@ FIXTURES = Path(__file__).parent / "fixtures" / "lcc_parametric"
 
 
 def _mutated_monopole(tmp_path, mutate, name="mutated.pscx"):
-    tree = ET.parse(FIXTURES / "monopole_template.pscx")
+    return _mutated_fixture(tmp_path, "monopole_template.pscx", mutate, name)
+
+
+def _mutated_fixture(tmp_path, fixture, mutate, name="mutated.pscx"):
+    tree = ET.parse(FIXTURES / fixture)
     mutate(tree.getroot())
     source = tmp_path / name
     tree.write(source, encoding="utf-8")
@@ -212,9 +216,12 @@ def test_audit_scans_only_direct_main_schematic_and_prunes_nested_definitions(tm
         nested_schematic = ET.SubElement(nested, "schematic")
         ET.SubElement(nested_schematic, "User", defn="FixtureMonopole:RectPole", x="0", y="0")
 
-    report = audit_lcc_template(_mutated_monopole(tmp_path, mutate))
-    assert report.compatible is False
-    assert "rectifier_valve_group" in report.missing_contracts
+    with pytest.raises(BackendError) as raised:
+        audit_lcc_template(_mutated_monopole(tmp_path, mutate))
+    assert raised.value.code == "LCC_TEMPLATE_AMBIGUOUS"
+    assert raised.value.details["conflict_reasons"] == {
+        "pole_instances": "unsupported_pole_instance_cardinality"
+    }
 
 
 def test_audit_requires_exact_project_scoped_definition(tmp_path):
@@ -222,9 +229,43 @@ def test_audit_requires_exact_project_scoped_definition(tmp_path):
     payload = payload.replace("FixtureMonopole:RectPole", "foreign:RectPole")
     source = tmp_path / "foreign_scope.pscx"
     source.write_text(payload, encoding="utf-8")
-    report = audit_lcc_template(source)
-    assert report.compatible is False
-    assert "rectifier_valve_group" in report.missing_contracts
+    with pytest.raises(BackendError) as raised:
+        audit_lcc_template(source)
+    assert raised.value.code == "LCC_TEMPLATE_AMBIGUOUS"
+    assert raised.value.details["conflict_reasons"] == {
+        "pole_instances": "unsupported_pole_instance_cardinality"
+    }
+
+
+@pytest.mark.parametrize("rectifier_count,inverter_count", [(2, 0), (0, 2), (2, 1), (1, 2), (1, 0), (0, 1)])
+def test_audit_rejects_every_asymmetric_or_multi_pole_cardinality(
+    tmp_path, rectifier_count, inverter_count
+):
+    def mutate(root):
+        main = next(item for item in root.iter("Definition") if item.get("name") == "Main")
+        schematic = main.find("schematic")
+        rectifiers = [item for item in list(schematic) if item.get("defn") == "FixtureBipole:RectPole"]
+        inverters = [item for item in list(schematic) if item.get("defn") == "FixtureBipole:InverterPole"]
+        for item in rectifiers[rectifier_count:]:
+            schematic.remove(item)
+        for item in inverters[inverter_count:]:
+            schematic.remove(item)
+
+    source = _mutated_fixture(
+        tmp_path, "bipole_template.pscx", mutate, "bad_cardinality.pscx"
+    )
+
+    with pytest.raises(BackendError) as raised:
+        audit_lcc_template(source)
+    assert raised.value.code == "LCC_TEMPLATE_AMBIGUOUS"
+    assert raised.value.details == {
+        "compatible": False,
+        "conflicts": ["pole_instances"],
+        "roles": ["pole_instances"],
+        "conflict_reasons": {
+            "pole_instances": "unsupported_pole_instance_cardinality"
+        },
+    }
 
 
 def test_audit_rejects_unknown_bipole_marker(tmp_path):
@@ -266,6 +307,24 @@ def test_electrode_exact_anchor_selects_nearest_exact_ground():
     assert evidence["anchor"] == {"definition": "master:ammeter", "instance_id": "3003", "location": [350, 200], "marker": {"name": "Name", "value": "Ielectrode"}}
     assert evidence["selected"] == {"definition": "master:ground", "instance_id": "3001", "location": [400, 200]}
     assert evidence["distance"] == 50.0
+
+
+def test_electrode_equal_nearest_ground_distance_is_stable_ambiguity(tmp_path):
+    def mutate(root):
+        main = next(item for item in root.iter("Definition") if item.get("name") == "Main")
+        grounds = [item for item in main.find("schematic").findall("User") if item.get("defn") == "master:ground"]
+        grounds[1].set("x", "300")
+
+    source = _mutated_fixture(
+        tmp_path, "bipole_template.pscx", mutate, "ground_tie.pscx"
+    )
+
+    with pytest.raises(BackendError) as raised:
+        audit_lcc_template(source)
+    assert raised.value.code == "LCC_TEMPLATE_AMBIGUOUS"
+    assert raised.value.details["conflict_reasons"] == {
+        "earth_electrode": "nearest_exact_ground_distance_tie"
+    }
 
 
 def test_audit_rejects_unsafe_xml_and_bounds_coordinate_evidence(tmp_path):

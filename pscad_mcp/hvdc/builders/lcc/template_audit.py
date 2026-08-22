@@ -84,9 +84,10 @@ def audit_lcc_template(
 
     rectifiers = _scoped_instances(components, validated_definitions["rectifier"])
     inverters = _scoped_instances(components, validated_definitions["inverter"])
-    _assign_pole_roles(
-        roles, missing, rectifiers, inverters, contracts["instance_discriminator"]
-    )
+    if all(validated_definitions.values()):
+        _assign_pole_roles(
+            roles, missing, rectifiers, inverters, contracts["instance_discriminator"]
+        )
     if "rectifier_pole_definition" in missing:
         missing = [item for item in missing if item != "rectifier_valve_group"]
     if "inverter_pole_definition" in missing:
@@ -336,12 +337,10 @@ def _assign_pole_roles(
                 return
             roles[expected[marker]] = _pole_evidence(component, discriminator)
         return
-    if len(rectifiers) == 0:
-        missing.append("rectifier_valve_group")
-    if len(inverters) == 0:
-        missing.append("inverter_valve_group")
-    if len(rectifiers) > 0 and len(inverters) > 0:
-        _raise_ambiguous("pole_instances", "unsupported_pole_instance_cardinality")
+    if counts == (0, 0):
+        missing.extend(("rectifier_valve_group", "inverter_valve_group"))
+        return
+    _raise_ambiguous("pole_instances", "unsupported_pole_instance_cardinality")
 
 
 def _pole_evidence(component: dict[str, Any], discriminator: dict[str, Any]) -> dict[str, Any]:
@@ -497,7 +496,13 @@ def _select_earth_electrode(
     }
     if anchors:
         anchor = {**anchors[0], "location": _point(anchors[0]["element"], role="earth_electrode_anchor")}
-        ranked = sorted((_distance_sq(anchor["location"], item["location"]), item) for item in located)
+        ranked = sorted(
+            (
+                (_distance_sq(anchor["location"], item["location"]), item)
+                for item in located
+            ),
+            key=lambda ranked_item: ranked_item[0],
+        )
         if len(ranked) > 1 and ranked[0][0] == ranked[1][0]:
             return None, "nearest_exact_ground_distance_tie"
         selected = ranked[0][1]
