@@ -40,10 +40,26 @@ class ParametricLccBuilderService:
         plan = self.plan_parametric_model(request)
         if expected_plan_hash != plan["plan_hash"]:
             raise BackendError("LCC_PLAN_STALE", "The supplied plan hash is stale.", "hvdc", "build_parametric_lcc_model", {"expected_plan_hash": expected_plan_hash, "observed_plan_hash": plan["plan_hash"]})
-        build_id = hashlib.sha256(plan["plan_hash"].encode()).hexdigest()[:24]
-        status = {"build_id": build_id, "status": "validated", "plan_hash": plan["plan_hash"], "evidence": {"derived": plan["derived"]}}
-        self._statuses[build_id] = status
-        return status
+        missing = []
+        if self.pscad_service is None:
+            missing.append("pscad_service")
+        if self.workspace_root is None:
+            missing.append("workspace_root")
+        if missing:
+            raise BackendError(
+                "LCC_BUILD_UNAVAILABLE",
+                "The real PSCAD parametric LCC build lifecycle is unavailable.",
+                "hvdc",
+                "build_parametric_lcc_model",
+                {"reason": "lifecycle_configuration_missing", "missing": missing},
+            )
+        raise BackendError(
+            "LCC_BUILD_UNAVAILABLE",
+            "The real PSCAD parametric LCC build lifecycle is not implemented.",
+            "hvdc",
+            "build_parametric_lcc_model",
+            {"reason": "real_lifecycle_not_implemented", "missing": []},
+        )
 
     def get_status(self, build_id: str) -> dict[str, Any]:
         if build_id not in self._statuses:
