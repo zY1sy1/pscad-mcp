@@ -49,7 +49,10 @@ def test_audit_accepts_real_template_roles_and_electrode_evidence(tmp_path):
     assert report.roles["rectifier_valve_group"]["definition"] == "HVDC_Bipolar_1000MW_500kV:RectPole"
     assert report.roles["inverter_valve_group"]["definition"] == "HVDC_Bipolar_1000MW_500kV:InverterPole"
     assert report.roles["earth_electrode"]["definition"] == "master:ground"
-    assert report.roles["earth_electrode"]["evidence"]["anchor"]["parameters"]["Name"] == "Ielectrode"
+    assert report.roles["earth_electrode"]["evidence"]["anchor"]["marker"] == {
+        "name": "Name",
+        "value": "Ielectrode",
+    }
     assert report.roles["earth_electrode"]["evidence"]["selected"]["location"] == [738, 432]
 
 
@@ -170,3 +173,167 @@ def test_audit_accepts_single_ground_without_anchor_with_explicit_evidence(tmp_p
     evidence = report.roles["earth_electrode"]["evidence"]
     assert evidence["selection_reason"] == "single_exact_ground_without_anchor"
     assert evidence["selected"]["location"] == [10, 20]
+
+
+def test_audit_rejects_template_larger_than_32_mib_before_parsing(tmp_path):
+    source = tmp_path / "oversized.pscx"
+    with source.open("wb") as stream:
+        stream.truncate(32 * 1024 * 1024 + 1)
+
+    with pytest.raises(BackendError) as raised:
+        audit_lcc_template(source)
+
+    assert raised.value.code == "LCC_TEMPLATE_INCOMPATIBLE"
+    assert raised.value.details == {
+        "actual_bytes": 32 * 1024 * 1024 + 1,
+        "max_bytes": 32 * 1024 * 1024,
+        "reason": "template_too_large",
+    }
+
+
+@pytest.mark.parametrize(
+    "declaration",
+    [
+        '<!DOCTYPE project [<!ENTITY bridge "model:LCC12PulseBridge">]>',
+        '<!ENTITY bridge "model:LCC12PulseBridge">',
+    ],
+)
+def test_audit_rejects_dtd_and_entity_declarations_before_xml_parsing(tmp_path, declaration):
+    source = tmp_path / "unsafe.pscx"
+    source.write_text(
+        declaration
+        + '<project><component definition="model:LCC12PulseBridge"/>'
+        '<component definition="master:ground"/></project>',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(BackendError) as raised:
+        audit_lcc_template(source)
+
+    assert raised.value.code == "LCC_TEMPLATE_INCOMPATIBLE"
+    assert raised.value.details == {"reason": "forbidden_xml_declaration"}
+
+
+def test_audit_wraps_invalid_coordinate_with_bounded_details(tmp_path):
+    source = tmp_path / "invalid_coordinate.pscx"
+    malicious_coordinate = "not-an-integer-" + ("x" * 10_000)
+    source.write_text(
+        '<project><component definition="model:LCC12PulseBridge"/>'
+        f'<component definition="master:ground" x="{malicious_coordinate}" y="0"/></project>',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(BackendError) as raised:
+        audit_lcc_template(source)
+
+    assert raised.value.code == "LCC_TEMPLATE_INCOMPATIBLE"
+    assert raised.value.details["reason"] == "invalid_component_coordinate"
+    assert raised.value.details["field"] == "x"
+    assert raised.value.details["value_length"] == len(malicious_coordinate)
+    assert len(raised.value.details["value_preview"]) <= 64
+    assert malicious_coordinate not in str(raised.value.details)
+
+
+def test_audit_rejects_malformed_combined_coordinate(tmp_path):
+    source = tmp_path / "invalid_location.pscx"
+    source.write_text(
+        '<project><component definition="model:LCC12PulseBridge"/>'
+        '<component definition="master:ground" location="not-a-point"/></project>',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(BackendError) as raised:
+        audit_lcc_template(source)
+
+    assert raised.value.code == "LCC_TEMPLATE_INCOMPATIBLE"
+    assert raised.value.details == {
+        "field": "location",
+        "reason": "invalid_component_coordinate",
+        "value_length": len("not-a-point"),
+        "value_preview": "not-a-point",
+    }
+
+
+def test_audit_emits_fixed_electrode_evidence_and_ignores_nested_parameters(tmp_path):
+    source = tmp_path / "bounded_evidence.pscx"
+    nested_parameters = "".join(
+        f'<param name="untrusted_{index}" value="{index}"/>' for index in range(100)
+    )
+    source.write_text(
+        '<project><component definition="model:LCC12PulseBridge"/>'
+        '<component definition="master:ground" x="0" y="0"/>'
+        '<component definition="master:ammeter" x="0" y="0">'
+        '<paramlist><param name="Name" value="Ielectrode"/></paramlist>'
+        f'<metadata>{nested_parameters}</metadata>'
+        '</component></project>',
+        encoding="utf-8",
+    )
+
+    report = audit_lcc_template(source)
+
+    assert report.roles["earth_electrode"]["evidence"]["anchor"] == {
+        "definition": "master:ammeter",
+        "location": [0, 0],
+        "marker": {"name": "Name", "value": "Ielectrode"},
+    }
+
+
+def test_audit_does_not_use_nested_name_parameter_as_electrode_anchor(tmp_path):
+    source = tmp_path / "nested_anchor.pscx"
+    source.write_text(
+        '<project><component definition="model:LCC12PulseBridge"/>'
+        '<component definition="master:ground" x="0" y="0"/>'
+        '<component definition="master:ground" x="100" y="0"/>'
+        '<component definition="master:ammeter" x="0" y="0">'
+        '<metadata><param name="Name" value="Ielectrode"/></metadata>'
+        '</component></project>',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(BackendError) as raised:
+        audit_lcc_template(source)
+
+    assert raised.value.code == "LCC_TEMPLATE_AMBIGUOUS"
+    assert raised.value.details["conflict_reasons"]["earth_electrode"] == (
+        "multiple_exact_grounds_without_anchor"
+    )
+
+
+def test_audit_rejects_multiple_top_level_main_definitions(tmp_path):
+    source = tmp_path / "duplicate_main.pscx"
+    source.write_text(
+        '<project><definitions>'
+        '<Definition name="Main"><schematic><component definition="model:LCC12PulseBridge"/>'
+        '<component definition="master:ground"/></schematic></Definition>'
+        '<Definition name="Main"><canvas><component definition="model:LCC12PulseBridge"/>'
+        '<component definition="master:ground"/></canvas></Definition>'
+        '</definitions></project>',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(BackendError) as raised:
+        audit_lcc_template(source)
+
+    assert raised.value.code == "LCC_TEMPLATE_AMBIGUOUS"
+    assert raised.value.details == {
+        "compatible": False,
+        "conflict_reasons": {"main_scope": "multiple_main_definitions"},
+        "conflicts": ["main_scope"],
+        "roles": ["main_scope"],
+    }
+
+
+def test_audit_accepts_one_main_definition_with_named_canvas_and_schematic(tmp_path):
+    source = tmp_path / "nested_main_scopes.pscx"
+    source.write_text(
+        '<project><definitions><Definition name="Main">'
+        '<canvas name="Main"><schematic name="Main">'
+        '<component definition="model:LCC12PulseBridge"/>'
+        '<component definition="master:ground"/>'
+        '</schematic></canvas></Definition></definitions></project>',
+        encoding="utf-8",
+    )
+
+    report = audit_lcc_template(source)
+
+    assert report.compatible is True

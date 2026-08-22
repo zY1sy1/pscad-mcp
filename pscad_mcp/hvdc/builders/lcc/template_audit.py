@@ -3,12 +3,20 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn
 import xml.etree.ElementTree as ET
 
 from ....core.backend.base import BackendError
+
+
+TEMPLATE_MAX_BYTES = 32 * 1024 * 1024
+_FORBIDDEN_XML_DECLARATION = re.compile(
+    rb"<!\s*(?:DOCTYPE|ENTITY)\b",
+    flags=re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)
@@ -27,8 +35,42 @@ def audit_lcc_template(path: str | Path, catalog: dict[str, Any] | None = None) 
     source = Path(path).expanduser().resolve()
     if not source.is_file():
         raise BackendError("LCC_TEMPLATE_INCOMPATIBLE", "Template file does not exist.", "hvdc", "audit_lcc_template", {"path": str(source)})
-    payload = source.read_bytes()
+    actual_bytes = source.stat().st_size
+    if actual_bytes > TEMPLATE_MAX_BYTES:
+        raise BackendError(
+            "LCC_TEMPLATE_INCOMPATIBLE",
+            "Template exceeds the audit size limit.",
+            "hvdc",
+            "audit_lcc_template",
+            {
+                "actual_bytes": actual_bytes,
+                "max_bytes": TEMPLATE_MAX_BYTES,
+                "reason": "template_too_large",
+            },
+        )
+    with source.open("rb") as stream:
+        payload = stream.read(TEMPLATE_MAX_BYTES + 1)
+    if len(payload) > TEMPLATE_MAX_BYTES:
+        raise BackendError(
+            "LCC_TEMPLATE_INCOMPATIBLE",
+            "Template exceeds the audit size limit.",
+            "hvdc",
+            "audit_lcc_template",
+            {
+                "actual_bytes": len(payload),
+                "max_bytes": TEMPLATE_MAX_BYTES,
+                "reason": "template_too_large",
+            },
+        )
     fingerprint = hashlib.sha256(payload).hexdigest()
+    if _FORBIDDEN_XML_DECLARATION.search(payload.replace(b"\x00", b"")):
+        raise BackendError(
+            "LCC_TEMPLATE_INCOMPATIBLE",
+            "Template contains a forbidden XML declaration.",
+            "hvdc",
+            "audit_lcc_template",
+            {"reason": "forbidden_xml_declaration"},
+        )
     try:
         root = ET.fromstring(payload)
     except ET.ParseError as error:
@@ -108,12 +150,34 @@ def _text(value: str | None) -> str:
     return (value or "").strip()
 
 
-def _integer(value: str | None, default: int | None = None) -> int:
+def _integer(value: str | None, default: int | None = None, *, field: str) -> int:
     if value is None or not value.strip():
         if default is not None:
             return default
         raise BackendError("LCC_TEMPLATE_INCOMPATIBLE", "Component coordinates are missing.", "hvdc", "audit_lcc_template", {})
-    return int(value.strip())
+    normalized = value.strip()
+    try:
+        return int(normalized)
+    except ValueError as error:
+        _raise_invalid_coordinate(field, normalized, error)
+
+
+def _raise_invalid_coordinate(field: str, value: str, cause: Exception | None = None) -> NoReturn:
+    error = BackendError(
+        "LCC_TEMPLATE_INCOMPATIBLE",
+        "Component coordinate is invalid.",
+        "hvdc",
+        "audit_lcc_template",
+        {
+            "field": field,
+            "reason": "invalid_component_coordinate",
+            "value_length": len(value),
+            "value_preview": value[:64],
+        },
+    )
+    if cause is None:
+        raise error
+    raise error from cause
 
 
 def _point(element: ET.Element) -> tuple[int, int]:
@@ -125,19 +189,25 @@ def _point(element: ET.Element) -> tuple[int, int]:
             parts = raw.replace("(", "").replace(")", "").split(",")
             if len(parts) == 2:
                 x, y = parts
-    return _integer(x, 0), _integer(y, 0)
+            else:
+                _raise_invalid_coordinate("location", raw.strip())
+    return _integer(x, 0, field="x"), _integer(y, 0, field="y")
 
 
 def _parameters(element: ET.Element) -> dict[str, str]:
     result: dict[str, str] = {}
-    for child in element.iter():
-        if _name(child.tag) not in {"param", "parameter"}:
-            continue
-        name = _text(_attr(child, "name", "key"))
-        if not name:
-            continue
-        value = _attr(child, "value")
-        result[name] = _text(value if value is not None else child.text)
+    direct_children = list(element)
+    parameters = [child for child in direct_children if _name(child.tag) == "param"]
+    for child in direct_children:
+        if _name(child.tag) == "paramlist":
+            parameters.extend(
+                parameter for parameter in list(child) if _name(parameter.tag) == "param"
+            )
+    for parameter in parameters:
+        name = _text(_attr(parameter, "name", "key"))
+        if name:
+            value = _attr(parameter, "value")
+            result[name] = _text(value if value is not None else parameter.text)
     return result
 
 
@@ -145,9 +215,22 @@ def _main_scope(root: ET.Element) -> ET.Element:
     scopes = [
         element
         for element in root.iter()
-        if _name(element.tag) in {"definition", "canvas", "schematic"}
+        if _name(element.tag) == "definition"
         and _text(_attr(element, "name", "id")).casefold() == "main"
     ]
+    if len(scopes) > 1:
+        raise BackendError(
+            "LCC_TEMPLATE_AMBIGUOUS",
+            "Template contains multiple Main definitions.",
+            "hvdc",
+            "audit_lcc_template",
+            {
+                "compatible": False,
+                "conflict_reasons": {"main_scope": "multiple_main_definitions"},
+                "conflicts": ["main_scope"],
+                "roles": ["main_scope"],
+            },
+        )
     return scopes[0] if scopes else root
 
 
@@ -223,7 +306,7 @@ def _select_earth_electrode(
         evidence["anchor"] = {
             "definition": anchor["definition"],
             "location": list(anchor["location"]),
-            "parameters": dict(anchor["parameters"]),
+            "marker": {"name": "Name", "value": "Ielectrode"},
         }
         evidence["selected"] = {
             "definition": selected["definition"],
