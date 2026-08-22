@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "identity": "lcc_parametric_provenance_v1",
+  "entries": {
+    "positive_finite": {
+      "classification": "physical_invariant",
+      "statement": "Ratings, inductance, capacitance, SCR, and ESCR used by this derivation must be finite and strictly positive.",
+      "limitation": "This invariant declares no reviewed upper bound and no SCR or ESCR threshold."
+    },
+    "angle_domain_deg": {
+      "classification": "basic_domain",
+      "statement": "Control angles are represented in degrees in the open mathematical domain 0 < angle < 180.",
+      "limitation": "This is a representation domain, not an acceptable operating range."
+    },
+    "strict_order": {
+      "classification": "structural_invariant",
+      "statement": "A declared minimum firing angle must be strictly less than its declared maximum firing angle."
+    },
+    "dimensional_identity": {
+      "classification": "dimensional_identity",
+      "statement": "dc_power_mw = dc_voltage_kv * dc_current_ka because kV multiplied by kA yields MW."
+    },
+    "unit_conversions": {
+      "classification": "dimensional_identity",
+      "statement": "H to mH and F to uF use SI decimal-prefix multipliers; rad to deg uses 180/pi."
+    },
+    "floating_point_comparison": {
+      "classification": "implementation_policy",
+      "values": {"relative_tolerance": 1e-6, "absolute_tolerance": 1e-6},
+      "limitation": "These tolerances handle floating-point comparison only and are not engineering acceptance margins."
+    },
+    "legacy_catalog_defaults": {
+      "classification": "legacy_catalog_default",
+      "source_path": "pscad_mcp/assets/lcc/lcc_parametric_catalog_v1.json",
+      "values": {"overlap_angle_deg": 20.0, "min_extinction_angle_deg": 18.0},
+      "limitation": "These inherited defaults are default values only and do not establish allowable ranges."
+    },
+    "bipole_return_contract": {
+      "classification": "packaged_structural_contract",
+      "source_path": "pscad_mcp/assets/lcc/lcc_bipole_parametric_v1/blueprint.json",
+      "allowed_assets": ["neutral_bus", "earth_return", "metallic_return"],
+      "limitation": "Asset identifiers are structural declarations, not proof of electrical acceptance."
+    }
+  }
+}

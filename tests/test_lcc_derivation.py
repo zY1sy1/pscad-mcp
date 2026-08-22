@@ -22,7 +22,7 @@ def request(**changes):
         ratings=LccRatings(1200.0, 500.0, 2.4, 500.0, 50.0, 3.0, 2.5),
         engineering_overrides=COMPLETE_ENGINEERING_VALUES,
         operation_modes=("bipolar_run", "monopolar_earth_return"),
-        return_path_assets=("neutral_bus", "earth_electrode"),
+        return_path_assets=("neutral_bus", "earth_return"),
     )
     values.update(changes)
     return ParametricLccRequest(**values)
@@ -40,10 +40,10 @@ def test_default_catalog_derives_power_and_preserves_catalog_evidence_for_user_o
     assert parameters["dc_power_mw"].source == "derived"
     assert parameters["dc_power_mw"].formula == "dc_voltage_kv * dc_current_ka"
     assert parameters["dc_power_mw"].units == "MW"
-    assert parameters["dc_power_mw"].asset == "lcc_parametric_catalog_v1:dimensional_identity"
+    assert parameters["dc_power_mw"].asset == "lcc_parametric_provenance_v1:dimensional_identity"
     assert parameters["smoothing_reactor_mh"].source == "user"
     assert parameters["smoothing_reactor_mh"].units == "mH"
-    assert parameters["smoothing_reactor_mh"].asset == "lcc_parametric_catalog_v1:engineering_ranges"
+    assert parameters["smoothing_reactor_mh"].asset == "lcc_parametric_provenance_v1:positive_finite"
     assert parameters["overlap_angle_deg"].source == "default"
     assert report.feasible is True
     assert list(report.diagnostics) == sorted(report.diagnostics)
@@ -63,18 +63,21 @@ def test_override_units_are_normalized_only_by_catalog_conversion():
     assert parameter.source == "user"
 
 
-@pytest.mark.parametrize(
-    "ratings, code",
-    [
-        (LccRatings(1000.0, 500.0, 2.4, 500.0, 50.0, 3.0, 2.5), "LCC_RATING_INCONSISTENT"),
-        (LccRatings(1200.0, 500.0, 2.4, 500.0, 50.0, 0.5, 0.4), "LCC_RATING_INVALID"),
-        (LccRatings(1200.0, 500.0, 2.4, 500.0, 50.0, 3.0, 3.5), "LCC_RATING_INVALID"),
-    ],
-)
-def test_rating_feasibility_is_catalog_driven(ratings, code):
+def test_power_identity_is_catalog_driven():
     with pytest.raises(BackendError) as raised:
-        derive_lcc_parameters(request(ratings=ratings))
-    assert raised.value.code == code
+        derive_lcc_parameters(
+            request(ratings=LccRatings(1000.0, 500.0, 2.4, 500.0, 50.0, 3.0, 2.5))
+        )
+    assert raised.value.code == "LCC_RATING_INCONSISTENT"
+
+
+def test_scr_and_escr_do_not_gain_unreviewed_thresholds_or_ordering():
+    report = derive_lcc_parameters(
+        request(ratings=LccRatings(1200.0, 500.0, 2.4, 500.0, 50.0, 0.5, 3.5))
+    )
+    parameters = _parameters(report)
+    assert parameters["scr"].value == pytest.approx(0.5)
+    assert parameters["escr"].value == pytest.approx(3.5)
 
 
 @pytest.mark.parametrize(
@@ -95,7 +98,7 @@ def test_required_values_without_reviewed_defaults_fail_closed(overrides, missin
     "overrides, detail_key",
     [
         ({**COMPLETE_ENGINEERING_VALUES, "unknown": 1.0}, "unknown"),
-        ({**COMPLETE_ENGINEERING_VALUES, "smoothing_reactor_mh": 5000.0}, "parameter"),
+        ({**COMPLETE_ENGINEERING_VALUES, "smoothing_reactor_mh": -1.0}, "parameter"),
         ({**COMPLETE_ENGINEERING_VALUES, "smoothing_reactor_mh": {"value": 0.12, "units": "kg"}}, "units"),
     ],
 )
@@ -109,8 +112,8 @@ def test_unsupported_or_out_of_range_overrides_fail_closed(overrides, detail_key
 @pytest.mark.parametrize(
     "overrides",
     [
-        {**COMPLETE_ENGINEERING_VALUES, "overlap_angle_deg": 50.0, "min_extinction_angle_deg": 40.0},
-        {**COMPLETE_ENGINEERING_VALUES, "min_firing_angle_deg": 30.0, "max_firing_angle_deg": 45.0},
+        {**COMPLETE_ENGINEERING_VALUES, "overlap_angle_deg": 180.0},
+        {**COMPLETE_ENGINEERING_VALUES, "min_firing_angle_deg": 45.0, "max_firing_angle_deg": 45.0},
     ],
 )
 def test_impossible_catalog_angle_relationships_fail_closed(overrides):
@@ -118,16 +121,38 @@ def test_impossible_catalog_angle_relationships_fail_closed(overrides):
         derive_lcc_parameters(request(engineering_overrides=overrides))
     assert raised.value.code == "LCC_PARAMETER_DERIVATION_FAILED"
     assert raised.value.details["relationship"] in {
-        "commutation_angle_budget",
+        "angle_domain_deg",
         "firing_angle_interval",
     }
+
+
+def test_large_positive_values_and_nonstandard_angle_sum_are_not_rejected_by_invented_limits():
+    overrides = {
+        **COMPLETE_ENGINEERING_VALUES,
+        "smoothing_reactor_mh": 5000.0,
+        "filter_capacitance_uf": 5000.0,
+        "overlap_angle_deg": 80.0,
+        "min_extinction_angle_deg": 80.0,
+        "max_firing_angle_deg": 170.0,
+    }
+    report = derive_lcc_parameters(request(engineering_overrides=overrides))
+    assert report.feasible is True
 
 
 def test_bipolar_modes_do_not_substitute_for_explicit_return_asset_evidence():
     with pytest.raises(BackendError) as raised:
         derive_lcc_parameters(request(return_path_assets=()))
     assert raised.value.code == "LCC_PARAMETER_DERIVATION_FAILED"
-    assert raised.value.details["missing_return_assets"] == ["earth_electrode", "neutral_bus"]
+    assert raised.value.details["missing_return_assets"] == ["earth_return", "neutral_bus"]
+
+
+def test_return_asset_evidence_rejects_catalog_undeclared_names():
+    with pytest.raises(BackendError) as raised:
+        derive_lcc_parameters(
+            request(return_path_assets=("neutral_bus", "earth_return", "looks_like_a_return"))
+        )
+    assert raised.value.code == "LCC_PARAMETER_DERIVATION_FAILED"
+    assert raised.value.details["unknown_return_assets"] == ["looks_like_a_return"]
 
 
 def test_derivation_does_not_write_to_filesystem(tmp_path, monkeypatch):
@@ -145,3 +170,26 @@ def test_catalog_controls_supported_names_ranges_and_required_values():
         derive_lcc_parameters(request(), catalog)
     assert raised.value.code == "LCC_PARAMETER_DERIVATION_FAILED"
     assert raised.value.details["unknown"] == ["filter_capacitance_uf"]
+
+
+@pytest.mark.parametrize(
+    ("catalog_change", "missing"),
+    [
+        (lambda catalog: catalog["rating_parameters"].pop("rated_power_mw"), ["rated_power_mw"]),
+        (lambda catalog: catalog["rating_parameters"].pop("dc_voltage_kv"), ["dc_voltage_kv"]),
+        (lambda catalog: catalog["rating_parameters"].pop("dc_current_ka"), ["dc_current_ka"]),
+        (
+            lambda catalog: catalog["derived_parameters"]["dc_power_mw"].update(
+                {"dependencies": ["dc_voltage_kv"]}
+            ),
+            ["dc_current_ka"],
+        ),
+    ],
+)
+def test_catalog_missing_power_inputs_or_formula_dependencies_fails_structured(catalog_change, missing):
+    catalog = copy.deepcopy(load_parametric_catalog())
+    catalog_change(catalog)
+    with pytest.raises(BackendError) as raised:
+        derive_lcc_parameters(request(), catalog)
+    assert raised.value.code == "LCC_PARAMETER_DERIVATION_FAILED"
+    assert raised.value.details["missing_catalog_dependencies"] == missing

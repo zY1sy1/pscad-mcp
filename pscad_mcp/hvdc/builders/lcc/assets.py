@@ -377,6 +377,21 @@ def load_parametric_catalog() -> dict[str, Any]:
     return value
 
 
+def load_parametric_provenance() -> dict[str, Any]:
+    resource = resources.files("pscad_mcp").joinpath(
+        "assets", "lcc", "lcc_bipole_parametric_v1", "provenance-parametric-v1.json"
+    )
+    if not resource.is_file():
+        raise _asset_error("LCC_ASSET_MISMATCH", "Parametric provenance is not available.", "load_parametric_provenance")
+    try:
+        value = json.loads(resource.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise _asset_error("LCC_ASSET_MISMATCH", "Parametric provenance is not valid JSON.", "load_parametric_provenance") from error
+    if not isinstance(value, dict) or value.get("identity") != "lcc_parametric_provenance_v1":
+        raise _asset_error("LCC_ASSET_MISMATCH", "Parametric provenance identity mismatch.", "load_parametric_provenance")
+    return value
+
+
 def materialize_library(asset_set: LccAssetSet, workspace_root: str | Path) -> Path:
     """Atomically copy the verified companion library into a workspace."""
 

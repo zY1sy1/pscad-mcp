@@ -30,7 +30,7 @@ VALID_REQUEST = {
     },
     "engineering_overrides": {"smoothing_reactor_mh": 120.0},
     "operation_modes": ["bipolar_run", "monopolar_earth_return"],
-    "return_path_assets": ["neutral_bus", "earth_electrode"],
+    "return_path_assets": ["neutral_bus", "earth_return"],
     "mode_requests": [
         {
             "mode": "bipolar_run",
@@ -62,14 +62,14 @@ def test_parametric_records_are_frozen_and_json_safe():
         ),
         engineering_overrides={"smoothing_reactor_mh": 120.0},
         operation_modes=("bipolar_run", "monopolar_earth_return"),
-        return_path_assets=("neutral_bus", "earth_electrode"),
+        return_path_assets=("neutral_bus", "earth_return"),
     )
 
     payload = request.to_dict()
 
     assert payload["topology"] == "bipolar"
     assert payload["ratings"]["dc_current_ka"] == 2.4
-    assert payload["return_path_assets"] == ["neutral_bus", "earth_electrode"]
+    assert payload["return_path_assets"] == ["neutral_bus", "earth_return"]
     assert json.loads(json.dumps(payload))["engineering_overrides"]["smoothing_reactor_mh"] == 120.0
 
     with pytest.raises(FrozenInstanceError):
