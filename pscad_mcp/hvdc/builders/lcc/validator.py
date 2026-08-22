@@ -454,6 +454,226 @@ def validate_project_graph(
     return result
 
 
+def _parametric_project_error(message: str, **details: Any) -> BackendError:
+    details = {
+        "template_audit_compatible": True,
+        "topology_execution_valid": False,
+        **details,
+    }
+    return BackendError(
+        "LCC_PROJECT_INVALID",
+        message,
+        "hvdc",
+        "validate_parametric_lcc_topology",
+        details,
+    )
+
+
+def _xml_local(element: ET.Element) -> str:
+    return element.tag.rsplit("}", 1)[-1].casefold()
+
+
+def _xml_integer(value: str | None, context: str) -> int:
+    try:
+        return int((value or "").strip())
+    except ValueError as error:
+        raise _parametric_project_error("Project graph coordinate is invalid.", context=context) from error
+
+
+def _component_port_positions(
+    project_root: ET.Element,
+    scope: ET.Element,
+    audit_roles: Mapping[str, Any],
+    blueprint: Mapping[str, Any],
+) -> dict[str, tuple[int, int]]:
+    definitions = {
+        (element.attrib.get("name") or "").strip(): element
+        for element in project_root.iter()
+        if _xml_local(element) == "definition" and (element.attrib.get("name") or "").strip()
+    }
+    users_by_id = {
+        (element.attrib.get("id") or "").strip(): element
+        for element in scope.iter()
+        if _xml_local(element) == "user" and (element.attrib.get("id") or "").strip()
+    }
+    logical_users: dict[str, ET.Element] = {}
+    for element in scope.iter():
+        if _xml_local(element) != "user":
+            continue
+        logical_id = (element.attrib.get("logical_id") or "").strip()
+        if not logical_id:
+            continue
+        if logical_id in logical_users:
+            raise _parametric_project_error("Logical topology component identity is duplicated.", logical_id=logical_id)
+        logical_users[logical_id] = element
+
+    component_contracts = {
+        component["logical_id"]: component for component in blueprint["components"]
+    }
+    required_endpoints = {
+        (endpoint["role"], endpoint["port"])
+        for net in blueprint["nets"]
+        for endpoint in net["endpoints"]
+    }
+    positions: dict[str, tuple[int, int]] = {}
+    for role, port_name in sorted(required_endpoints):
+        contract = component_contracts[role]
+        if contract["kind"] == "template_role":
+            record = audit_roles[role]
+            selected = record.get("evidence", {}).get("selected") if role == "earth_electrode" and isinstance(record.get("evidence"), Mapping) else None
+            instance_record = selected if isinstance(selected, Mapping) else record
+            location = instance_record.get("location")
+            if not isinstance(location, list) or len(location) != 2 or any(isinstance(item, bool) or not isinstance(item, int) for item in location):
+                raise _parametric_project_error("Audited role location is unavailable.", role=role)
+            instance_id = str(instance_record.get("instance_id", ""))
+            instance = users_by_id.get(instance_id)
+            if instance is None or (instance.attrib.get("orient") or "0").strip() != "0":
+                raise _parametric_project_error("Audited role instance or orientation is unsupported.", role=role)
+            if role == "earth_electrode":
+                if port_name != "A":
+                    raise _parametric_project_error("Earth electrode port contract is invalid.", role=role, port=port_name)
+                offset = (0, 0)
+            else:
+                definition_name = str(record.get("definition", "")).rsplit(":", 1)[-1]
+                definition = definitions.get(definition_name)
+                port_records = [
+                    item for item in definition.iter()
+                    if _xml_local(item) == "port" and (item.attrib.get("name") or "").strip() == port_name
+                ] if definition is not None else []
+                if len(port_records) != 1:
+                    raise _parametric_project_error("Template definition port geometry is unavailable.", role=role, port=port_name)
+                offset = (
+                    _xml_integer(port_records[0].attrib.get("x"), f"{role}.{port_name}.x"),
+                    _xml_integer(port_records[0].attrib.get("y"), f"{role}.{port_name}.y"),
+                )
+            position = (location[0] + offset[0], location[1] + offset[1])
+        else:
+            instance = logical_users.get(role)
+            if instance is None or (instance.attrib.get("orient") or "0").strip() != "0":
+                raise _parametric_project_error("Logical topology endpoint component is unavailable.", role=role)
+            ports = [
+                item for item in instance.iter()
+                if _xml_local(item) == "port" and (item.attrib.get("name") or "").strip() == port_name
+            ]
+            if len(ports) != 1:
+                raise _parametric_project_error("Logical topology endpoint port is unavailable.", role=role, port=port_name)
+            position = (
+                _xml_integer(instance.attrib.get("x"), f"{role}.x") + _xml_integer(ports[0].attrib.get("x"), f"{role}.{port_name}.x"),
+                _xml_integer(instance.attrib.get("y"), f"{role}.y") + _xml_integer(ports[0].attrib.get("y"), f"{role}.{port_name}.y"),
+            )
+        positions[f"{role}.{port_name}"] = position
+    if len(set(positions.values())) != len(positions):
+        raise _parametric_project_error("Distinct topology endpoints collapse to the same graph coordinate.")
+    return positions
+
+
+def _wire_segments(scope: ET.Element, expected_names: set[str]) -> dict[str, list[tuple[tuple[int, int], tuple[int, int]]]]:
+    result: dict[str, list[tuple[tuple[int, int], tuple[int, int]]]] = {name: [] for name in expected_names}
+    for wire in scope.iter():
+        if _xml_local(wire) != "wire":
+            continue
+        name = (wire.attrib.get("name") or "").strip()
+        if not name:
+            continue
+        if name not in expected_names:
+            raise _parametric_project_error("Project graph contains an unexpected managed structural net.", net=name)
+        origin = (
+            _xml_integer(wire.attrib.get("x") or "0", f"{name}.x"),
+            _xml_integer(wire.attrib.get("y") or "0", f"{name}.y"),
+        )
+        vertices = [
+            (
+                origin[0] + _xml_integer(vertex.attrib.get("x"), f"{name}.vertex.x"),
+                origin[1] + _xml_integer(vertex.attrib.get("y"), f"{name}.vertex.y"),
+            )
+            for vertex in wire.iter()
+            if vertex is not wire and _xml_local(vertex) == "vertex"
+        ]
+        if len(vertices) < 2:
+            raise _parametric_project_error("Managed structural wire requires at least two vertices.", net=name)
+        for left, right in zip(vertices, vertices[1:]):
+            if left == right or (left[0] != right[0] and left[1] != right[1]):
+                raise _parametric_project_error("Managed structural wire must contain non-zero orthogonal segments.", net=name)
+            result[name].append((left, right))
+    return result
+
+
+def _point_on_segment(point: tuple[int, int], segment: tuple[tuple[int, int], tuple[int, int]]) -> bool:
+    left, right = segment
+    return (
+        left[0] == right[0] == point[0]
+        and min(left[1], right[1]) <= point[1] <= max(left[1], right[1])
+    ) or (
+        left[1] == right[1] == point[1]
+        and min(left[0], right[0]) <= point[0] <= max(left[0], right[0])
+    )
+
+
+def _segments_touch(
+    first: tuple[tuple[int, int], tuple[int, int]],
+    second: tuple[tuple[int, int], tuple[int, int]],
+) -> bool:
+    return any(_point_on_segment(point, other) for point, other in (
+        (first[0], second), (first[1], second), (second[0], first), (second[1], first)
+    )) or (
+        first[0][0] == first[1][0]
+        and second[0][1] == second[1][1]
+        and min(second[0][0], second[1][0]) <= first[0][0] <= max(second[0][0], second[1][0])
+        and min(first[0][1], first[1][1]) <= second[0][1] <= max(first[0][1], first[1][1])
+    ) or (
+        first[0][1] == first[1][1]
+        and second[0][0] == second[1][0]
+        and min(first[0][0], first[1][0]) <= second[0][0] <= max(first[0][0], first[1][0])
+        and min(second[0][1], second[1][1]) <= first[0][1] <= max(second[0][1], second[1][1])
+    )
+
+
+def _validate_managed_net_graph(
+    scope: ET.Element,
+    blueprint: Mapping[str, Any],
+    endpoint_positions: Mapping[str, tuple[int, int]],
+) -> list[str]:
+    net_contracts = {net["logical_id"]: net for net in blueprint["nets"]}
+    segments = _wire_segments(scope, set(net_contracts))
+    for name, records in segments.items():
+        if not records:
+            raise _parametric_project_error("Managed structural net has no wire evidence.", net=name)
+    names = sorted(segments)
+    for index, name in enumerate(names):
+        for other_name in names[index + 1:]:
+            if any(_segments_touch(left, right) for left in segments[name] for right in segments[other_name]):
+                raise _parametric_project_error("Distinct managed structural nets touch or short together.", left=name, right=other_name)
+
+    for name, contract in net_contracts.items():
+        expected = {
+            f"{endpoint['role']}.{endpoint['port']}": endpoint_positions[f"{endpoint['role']}.{endpoint['port']}"]
+            for endpoint in contract["endpoints"]
+        }
+        records = segments[name]
+        touching: dict[int, set[int]] = {index: set() for index in range(len(records))}
+        for index, first in enumerate(records):
+            for other_index in range(index + 1, len(records)):
+                if _segments_touch(first, records[other_index]):
+                    touching[index].add(other_index)
+                    touching[other_index].add(index)
+        endpoint_segments = {
+            endpoint: {index for index, segment in enumerate(records) if _point_on_segment(point, segment)}
+            for endpoint, point in expected.items()
+        }
+        if any(not indexes for indexes in endpoint_segments.values()):
+            raise _parametric_project_error("A managed structural net does not reach every contracted endpoint.", net=name)
+        connected = set(next(iter(endpoint_segments.values())))
+        frontier = list(connected)
+        while frontier:
+            current = frontier.pop()
+            for neighbour in touching[current] - connected:
+                connected.add(neighbour)
+                frontier.append(neighbour)
+        if len(connected) != len(records) or any(not (indexes & connected) for indexes in endpoint_segments.values()):
+            raise _parametric_project_error("A managed structural net contains disconnected or decorative wire segments.", net=name)
+    return names
+
+
 def validate_parametric_topology_contract(
     blueprint: Mapping[str, Any],
     audit_roles: Mapping[str, Any] | Any,
@@ -557,20 +777,12 @@ def validate_parametric_topology_contract(
         raise BackendError("LCC_PROJECT_INVALID", "Project evidence requires one exact Main schematic.", "hvdc", operation)
     scope = schematics[0]
 
-    observed_nets: list[str] = []
-    for wire in scope.iter():
-        if wire.tag.rsplit("}", 1)[-1].casefold() != "wire":
-            continue
-        name = (wire.attrib.get("name") or "").strip()
-        vertices = [
-            vertex for vertex in wire.iter()
-            if vertex is not wire and vertex.tag.rsplit("}", 1)[-1].casefold() == "vertex"
-        ]
-        if not name or len(vertices) < 2:
-            raise BackendError("LCC_PROJECT_INVALID", "Every structural wire requires one logical net name and at least two vertices.", "hvdc", operation)
-        observed_nets.append(name)
-    if len(observed_nets) != len(set(observed_nets)):
-        raise BackendError("LCC_PROJECT_INVALID", "Structural net evidence contains duplicate logical names.", "hvdc", operation)
+    endpoint_positions = _component_port_positions(
+        project_root, scope, observed, validated
+    )
+    observed_nets = _validate_managed_net_graph(
+        scope, validated, endpoint_positions
+    )
 
     observed_outputs: dict[str, str] = {}
     for component in scope.iter():
@@ -587,16 +799,7 @@ def validate_parametric_topology_contract(
             raise BackendError("LCC_PROJECT_INVALID", "Audited pgb output channels require unique names and explicit units.", "hvdc", operation)
         observed_outputs[name] = units
 
-    expected_nets = {item["logical_id"] for item in validated["nets"]}
     expected_outputs = {item["name"]: item["units"] for item in validated["outputs"]}
-    if set(observed_nets) != expected_nets:
-        raise BackendError(
-            "LCC_PROJECT_INVALID",
-            "Observed structural nets do not exactly match the blueprint.",
-            "hvdc",
-            operation,
-            {"missing": sorted(expected_nets - set(observed_nets)), "unexpected": sorted(set(observed_nets) - expected_nets)},
-        )
     if observed_outputs != expected_outputs:
         raise BackendError(
             "LCC_PROJECT_INVALID",
@@ -608,6 +811,8 @@ def validate_parametric_topology_contract(
 
     return {
         "valid": True,
+        "template_audit_compatible": True,
+        "topology_execution_valid": True,
         "blueprint": validated["name"],
         "template_roles": sorted(expected_roles),
         "structural_nets": sorted(observed_nets),

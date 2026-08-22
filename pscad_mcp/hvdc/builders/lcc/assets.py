@@ -24,6 +24,34 @@ _PARAMETRIC_NAMES = {
     "lcc_monopole_parametric_v1": "monopolar",
     "lcc_bipole_parametric_v1": "bipolar",
 }
+_PARAMETRIC_NET_ENDPOINTS = {
+    "monopolar": {
+        "dc_pole": (("rectifier_valve_group", "DCP1"), ("inverter_valve_group", "DCP1")),
+        "earth_return": (
+            ("rectifier_valve_group", "DCP2"),
+            ("inverter_valve_group", "DCP2"),
+            ("neutral_bus", "earth"),
+            ("earth_electrode", "A"),
+        ),
+        "metallic_return": (("neutral_bus", "metallic"), ("metallic_return_terminal", "remote")),
+    },
+    "bipolar": {
+        "dc_positive": (("rectifier_positive_pole", "DCP1"), ("inverter_positive_pole", "DCP1")),
+        "dc_negative": (("rectifier_negative_pole", "DCP1"), ("inverter_negative_pole", "DCP1")),
+        "neutral_bus": (
+            ("rectifier_positive_pole", "DCP2"),
+            ("inverter_positive_pole", "DCP2"),
+            ("rectifier_negative_pole", "DCP2"),
+            ("inverter_negative_pole", "DCP2"),
+            ("neutral_bus", "rp1"),
+            ("neutral_bus", "ip1"),
+            ("neutral_bus", "rp2"),
+            ("neutral_bus", "ip2"),
+        ),
+        "earth_return": (("neutral_bus", "earth"), ("earth_electrode", "A")),
+        "metallic_return": (("neutral_bus", "metallic"), ("metallic_return_terminal", "remote")),
+    },
+}
 _PARAMETRIC_BLUEPRINT_KEYS = {
     "schema_version", "name", "identity", "catalog_identity",
     "provenance_identity", "contract_kind", "topology",
@@ -511,32 +539,81 @@ def validate_parametric_provenance_asset(value: Any, catalog: dict[str, Any] | N
     if observed_hash != catalog_value["provenance_sha256"]:
         raise _asset_error("LCC_ASSET_MISMATCH", "Parametric provenance does not match its catalog hash.", "load_parametric_provenance", expected=catalog_value["provenance_sha256"], observed=observed_hash)
 
-    structure_machine = entries["catalog_structure_contract"]["machine_contract"]
-    expected_structure = {
+    expected_machines: dict[str, Any] = {}
+    expected_machines["catalog_structure_contract"] = {
         "required_relationships": {
             name: declaration["asset"]
             for name, declaration in catalog_value["feasibility_relationships"].items()
         },
         "required_return_contracts": dict(catalog_value["return_contract_assets"]),
     }
-    rating_machine = entries["rating_contract"]["machine_contract"]
-    expected_rating = {
+    expected_machines["rating_contract"] = {
         "parameters": {
             name: {"required": declaration["required"]}
             for name, declaration in catalog_value["rating_parameters"].items()
         }
     }
-    if structure_machine != expected_structure or rating_machine != expected_rating:
-        raise _asset_error("LCC_ASSET_MISMATCH", "Parametric provenance machine contracts do not bind the catalog structure.", "load_parametric_provenance")
+    positive_declaration = catalog_value["rating_parameters"]["rated_power_mw"]["constraints"][0]
+    expected_machines["positive_finite"] = {
+        "kind": positive_declaration["kind"],
+        "value": positive_declaration["value"],
+    }
+    angle_declaration = catalog_value["engineering_parameters"]["min_firing_angle_deg"]["constraints"][0]
+    expected_machines["angle_domain_deg"] = {
+        key: angle_declaration[key] for key in ("kind", "minimum", "maximum")
+    }
+    power = catalog_value["derived_parameters"]["dc_power_mw"]
+    expected_machines["dimensional_identity"] = {
+        key: power[key] for key in ("formula", "dependencies", "compared_to")
+    }
+    expected_machines["floating_point_comparison"] = {
+        "values": {
+            "relative_tolerance": power["relative_tolerance"],
+            "absolute_tolerance": power["absolute_tolerance"],
+        }
+    }
+    relationships = catalog_value["feasibility_relationships"]
+    expected_machines["strict_order"] = {
+        key: relationships["firing_angle_interval"][key]
+        for key in ("operator", "left", "right")
+    }
+    expected_machines["inverter_commutation_identity"] = {
+        key: item
+        for key, item in relationships["inverter_commutation_interval"].items()
+        if key != "asset"
+    }
+    engineering = catalog_value["engineering_parameters"]
+    expected_machines["legacy_catalog_defaults"] = {
+        "values": {
+            name: declaration["default"]
+            for name, declaration in engineering.items()
+            if declaration.get("default_asset") == f"{identity}:legacy_catalog_defaults"
+        }
+    }
+    unit_parameters: dict[str, Any] = {}
+    for name, declaration in engineering.items():
+        if declaration.get("unit_asset") != f"{identity}:unit_conversions":
+            continue
+        multipliers = dict(declaration["unit_multipliers"])
+        if "rad" in multipliers:
+            multipliers["rad"] = {"expression": "180 / pi"}
+        unit_parameters[name] = {
+            "canonical_units": declaration["units"],
+            "multipliers": multipliers,
+        }
+    expected_machines["unit_conversions"] = {"parameters": unit_parameters}
     for topology, asset in catalog_value["return_contract_assets"].items():
         entry_name = asset.split(":", 1)[1]
         requirement = catalog_value["return_asset_requirements"][topology]
-        expected_return = {
+        expected_machines[entry_name] = {
             key: requirement[key]
             for key in ("allowed", "required", "mode_requirements")
         }
-        if entries[entry_name]["machine_contract"] != expected_return:
-            raise _asset_error("LCC_ASSET_MISMATCH", "A provenance return machine contract does not bind the catalog.", "load_parametric_provenance", topology=topology)
+    if set(expected_machines) != set(entries) or any(
+        entries[name]["machine_contract"] != machine
+        for name, machine in expected_machines.items()
+    ):
+        raise _asset_error("LCC_ASSET_MISMATCH", "Parametric provenance machine contracts do not exactly bind every catalog declaration.", "load_parametric_provenance")
     return value
 
 
@@ -601,8 +678,14 @@ def validate_parametric_blueprint_asset(value: Any, name: str, catalog: dict[str
         for endpoint in net["endpoints"]:
             if not isinstance(endpoint, dict) or set(endpoint) != {"role", "port"} or endpoint.get("role") not in component_map or endpoint.get("port") not in component_map[endpoint["role"]]["ports"]:
                 raise _asset_error("LCC_BLUEPRINT_INVALID", "Parametric net endpoint is not declared by a role contract.", "load_parametric_blueprint", logical_id=net.get("logical_id"))
+        observed_endpoints = tuple(
+            (endpoint["role"], endpoint["port"])
+            for endpoint in net["endpoints"]
+        )
+        if observed_endpoints != _PARAMETRIC_NET_ENDPOINTS[topology][net["logical_id"]]:
+            raise _asset_error("LCC_BLUEPRINT_INVALID", "Parametric net endpoints do not match the exact pole and return contract.", "load_parametric_blueprint", logical_id=net.get("logical_id"))
     for output in value["outputs"]:
-        if set(output) != {"name", "role", "quantity", "pole", "units"} or output.get("role") not in roles or any(not isinstance(output.get(field), str) or not output[field] for field in ("name", "role", "quantity", "pole", "units")):
+        if set(output) != {"name", "role", "quantity", "pole", "terminal", "units"} or output.get("role") not in roles or any(not isinstance(output.get(field), str) or not output[field] for field in ("name", "role", "quantity", "pole", "terminal", "units")):
             raise _asset_error("LCC_BLUEPRINT_INVALID", "Parametric output contract is invalid.", "load_parametric_blueprint", output=output.get("name"))
     observed_hash = hashlib.sha256(canonical_json(value)).hexdigest()
     if observed_hash != catalog_value["blueprint_hashes"][name]:

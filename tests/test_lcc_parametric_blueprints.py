@@ -75,7 +75,9 @@ def test_bipole_declares_exact_real_template_roles_returns_and_baseline_outputs(
         "CMRp1", "CMRp2", "CMIp1", "CMIp2",
         "Ielectrode", "PR", "PI",
         "AORp1", "AORp2", "AOIp1", "AOIp2",
+        "VacR", "Vac (rms)", "VacI", "VacI (rms)", "QR", "QI",
     }
+    assert len(bipole["outputs"]) == 21
     current_units = {
         item["name"]: item["units"]
         for item in bipole["outputs"]
@@ -127,6 +129,29 @@ def test_parametric_blueprint_loader_rejects_schema_drift_and_missing_structure(
         assert raised.value.code == "LCC_BLUEPRINT_INVALID"
 
 
+def test_parametric_blueprint_rejects_rehashed_pole_and_return_endpoint_drift():
+    catalog = load_parametric_catalog()
+    blueprint = load_parametric_blueprint("lcc_bipole_parametric_v1")
+    nets = {item["logical_id"]: item for item in blueprint["nets"]}
+    nets["dc_positive"]["endpoints"][0] = {
+        "role": "rectifier_negative_pole",
+        "port": "DCP1",
+    }
+    nets["earth_return"]["endpoints"][0] = {
+        "role": "neutral_bus",
+        "port": "metallic",
+    }
+    catalog["blueprint_hashes"]["lcc_bipole_parametric_v1"] = hashlib.sha256(
+        canonical_json(blueprint)
+    ).hexdigest()
+
+    with pytest.raises(BackendError) as raised:
+        validate_parametric_blueprint_asset(
+            blueprint, "lcc_bipole_parametric_v1", catalog
+        )
+    assert raised.value.code == "LCC_BLUEPRINT_INVALID"
+
+
 def test_parametric_catalog_loader_rejects_undeclared_roles_and_contract_fields():
     catalog = load_parametric_catalog()
     bad_role = copy.deepcopy(catalog)
@@ -172,6 +197,22 @@ def test_parametric_provenance_loader_rejects_schema_hash_and_machine_binding_dr
     ).hexdigest()
     with pytest.raises(BackendError) as raised:
         validate_parametric_provenance_asset(changed_machine, changed_catalog)
+    assert raised.value.code == "LCC_ASSET_MISMATCH"
+
+
+@pytest.mark.parametrize("entry,mutate", [
+    ("positive_finite", lambda machine: machine.update({"value": -1.0})),
+    ("dimensional_identity", lambda machine: machine.update({"formula": "rated_power_mw"})),
+    ("unit_conversions", lambda machine: machine["parameters"]["smoothing_reactor_mh"]["multipliers"].update({"H": 1.0})),
+])
+def test_parametric_provenance_rejects_rehashed_core_machine_contract_drift(entry, mutate):
+    catalog = load_parametric_catalog()
+    provenance = load_parametric_provenance()
+    mutate(provenance["entries"][entry]["machine_contract"])
+    catalog["provenance_sha256"] = hashlib.sha256(canonical_json(provenance)).hexdigest()
+
+    with pytest.raises(BackendError) as raised:
+        validate_parametric_provenance_asset(provenance, catalog)
     assert raised.value.code == "LCC_ASSET_MISMATCH"
 
 
@@ -320,19 +361,87 @@ def _template_with_evidence(tmp_path, blueprint, fixture="bipole_template.pscx",
     return path
 
 
-def test_parametric_validator_accepts_exact_observed_nets_and_output_channels(tmp_path):
+def _connected_bipole_template(tmp_path, blueprint):
+    source = _template_with_evidence(tmp_path, blueprint, wires=False, outputs=True)
+    tree = ET.parse(source)
+    root = tree.getroot()
+    definitions = {
+        item.attrib.get("name"): item
+        for item in root.iter()
+        if item.tag.rsplit("}", 1)[-1].casefold() == "definition"
+    }
+    for name in ("RectPole", "InverterPole"):
+        for port in definitions[name].iter("port"):
+            if port.attrib.get("name") == "DCP1":
+                port.attrib.update({"x": "0", "y": "-90"})
+            elif port.attrib.get("name") == "DCP2":
+                port.attrib.update({"x": "0", "y": "90"})
+    schematic = next(item for item in definitions["Main"].iter() if item.tag == "schematic")
+    neutral = ET.SubElement(schematic, "User", {"logical_id": "neutral_bus", "x": "400", "y": "300", "orient": "0"})
+    for name, x, y in (("rp1", -10, -110), ("ip1", 10, -110), ("rp2", -10, 90), ("ip2", 10, 90), ("earth", 0, 0), ("metallic", 0, 20)):
+        ET.SubElement(neutral, "port", {"name": name, "x": str(x), "y": str(y)})
+    terminal = ET.SubElement(schematic, "User", {"logical_id": "metallic_return_terminal", "x": "500", "y": "320", "orient": "0"})
+    ET.SubElement(terminal, "port", {"name": "remote", "x": "0", "y": "0"})
+
+    def add_wire(name, points):
+        wire = ET.SubElement(schematic, "Wire", {"classid": "WireOrthogonal", "name": name, "x": "0", "y": "0"})
+        for x, y in points:
+            ET.SubElement(wire, "vertex", {"x": str(x), "y": str(y)})
+
+    add_wire("dc_positive", [(100, 10), (700, 10)])
+    add_wire("dc_negative", [(100, 210), (700, 210)])
+    add_wire("neutral_bus", [(100, 190), (700, 190)])
+    add_wire("neutral_bus", [(50, 190), (100, 190)])
+    add_wire("neutral_bus", [(50, 190), (50, 390)])
+    add_wire("neutral_bus", [(50, 390), (100, 390)])
+    add_wire("neutral_bus", [(100, 390), (700, 390)])
+    add_wire("earth_return", [(400, 300), (750, 300), (750, 200), (400, 200)])
+    add_wire("metallic_return", [(400, 320), (500, 320)])
+    tree.write(source, encoding="utf-8")
+    return source
+
+
+def test_parametric_validator_rejects_decorative_disconnected_named_wires(tmp_path):
     blueprint = load_parametric_blueprint("lcc_bipole_parametric_v1")
     source = _template_with_evidence(tmp_path, blueprint)
-    result = validate_parametric_topology_contract(
-        blueprint, audit_lcc_template(source), source
-    )
+    with pytest.raises(BackendError) as raised:
+        validate_parametric_topology_contract(
+            blueprint, audit_lcc_template(source), source
+        )
+    assert raised.value.code == "LCC_PROJECT_INVALID"
+
+
+def test_parametric_validator_accepts_connected_endpoint_graph_and_output_channels(tmp_path):
+    blueprint = load_parametric_blueprint("lcc_bipole_parametric_v1")
+    source = _connected_bipole_template(tmp_path, blueprint)
+    result = validate_parametric_topology_contract(blueprint, audit_lcc_template(source), source)
     assert result == {
         "valid": True,
+        "template_audit_compatible": True,
+        "topology_execution_valid": True,
         "blueprint": "lcc_bipole_parametric_v1",
         "template_roles": sorted(blueprint["template_roles"]),
         "structural_nets": sorted(item["logical_id"] for item in blueprint["nets"]),
         "audited_output_channels": sorted(item["name"] for item in blueprint["outputs"]),
     }
+
+
+def test_parametric_validator_rejects_disconnected_decorative_segment_on_real_net(tmp_path):
+    blueprint = load_parametric_blueprint("lcc_bipole_parametric_v1")
+    source = _connected_bipole_template(tmp_path, blueprint)
+    tree = ET.parse(source)
+    schematic = next(
+        item for item in tree.getroot().iter()
+        if item.tag == "schematic" and any(child.attrib.get("logical_id") == "neutral_bus" for child in item)
+    )
+    decorative = ET.SubElement(schematic, "Wire", {"name": "dc_positive", "x": "0", "y": "0"})
+    ET.SubElement(decorative, "vertex", {"x": "900", "y": "900"})
+    ET.SubElement(decorative, "vertex", {"x": "910", "y": "900"})
+    tree.write(source, encoding="utf-8")
+
+    with pytest.raises(BackendError) as raised:
+        validate_parametric_topology_contract(blueprint, audit_lcc_template(source), source)
+    assert raised.value.code == "LCC_PROJECT_INVALID"
 
 
 @pytest.mark.parametrize("wires,outputs", [(False, True), (True, False)])
@@ -438,3 +547,5 @@ def test_parametric_validator_rejects_role_only_fixture_without_graph_evidence(n
     with pytest.raises(BackendError) as raised:
         validate_parametric_topology_contract(blueprint, audit, FIXTURES / fixture)
     assert raised.value.code == "LCC_PROJECT_INVALID"
+    assert raised.value.details["template_audit_compatible"] is True
+    assert raised.value.details["topology_execution_valid"] is False

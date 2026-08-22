@@ -30,8 +30,8 @@
     "earth_electrode": {"contract_identity": "lcc_parametric_catalog_v1:earth_electrode", "ground_definition": "master:ground", "anchor_definition": "master:ammeter", "anchor_parameter": "Name", "anchor_value": "Ielectrode", "selection": "nearest_unique_euclidean_ground", "no_anchor_fallback": "single_exact_ground"}
   },
   "blueprint_hashes": {
-    "lcc_monopole_parametric_v1": "addaab98ac2d4d66ba52607e7dc81c0b3df6c65dd7664cb6366fa7c38dca6d47",
-    "lcc_bipole_parametric_v1": "4bbde518fa234da37114e39616d2971f2a8d84f7902a5863a0f96640bc4f6351"
+    "lcc_monopole_parametric_v1": "de326570c362fdb14c1012a7a5643586e751a97d58669373f536b5ecf9597911",
+    "lcc_bipole_parametric_v1": "2b79f9f8e47e95dc976fbd27ab57308878879d367b58953f795179f4648aff58"
   },
   "topology_contracts": {
     "monopolar": {
@@ -48,7 +48,7 @@
       "component_roles": ["rectifier_positive_pole", "inverter_positive_pole", "rectifier_negative_pole", "inverter_negative_pole", "earth_electrode", "neutral_bus", "metallic_return_terminal"],
       "net_ids": ["dc_positive", "dc_negative", "neutral_bus", "earth_return", "metallic_return"],
       "required_return_nets": ["neutral_bus", "earth_return", "metallic_return"],
-      "output_names": ["VDCRp1", "VDCRp2", "VDCIp1", "VDCIp2", "CMRp1", "CMRp2", "CMIp1", "CMIp2", "Ielectrode", "PR", "PI", "AORp1", "AORp2", "AOIp1", "AOIp2"]
+      "output_names": ["VacR", "Vac (rms)", "VacI", "VacI (rms)", "VDCRp1", "VDCRp2", "VDCIp1", "VDCIp2", "CMRp1", "CMRp2", "CMIp1", "CMIp2", "Ielectrode", "PR", "QR", "QI", "PI", "AORp1", "AORp2", "AOIp1", "AOIp2"]
     }
   },
   "logical_parameter_bindings": {

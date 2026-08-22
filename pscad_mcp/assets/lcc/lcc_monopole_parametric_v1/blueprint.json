@@ -25,14 +25,14 @@
     {"logical_id": "metallic_return", "kind": "electrical_dc_return", "endpoints": [{"role": "neutral_bus", "port": "metallic"}, {"role": "metallic_return_terminal", "port": "remote"}], "evidence": "template_connectivity_required"}
   ],
   "outputs": [
-    {"name": "VDCRp1", "role": "rectifier_valve_group", "quantity": "dc_voltage", "pole": "positive", "units": "pu"},
-    {"name": "VDCIp1", "role": "inverter_valve_group", "quantity": "dc_voltage", "pole": "positive", "units": "pu"},
-    {"name": "CMRp1", "role": "rectifier_valve_group", "quantity": "dc_current", "pole": "positive", "units": "pu"},
-    {"name": "CMIp1", "role": "inverter_valve_group", "quantity": "dc_current", "pole": "positive", "units": "pu"},
-    {"name": "Ielectrode", "role": "earth_electrode", "quantity": "return_current", "pole": "neutral", "units": "kA"},
-    {"name": "PR", "role": "rectifier_valve_group", "quantity": "active_power", "pole": "aggregate", "units": "MW"},
-    {"name": "PI", "role": "inverter_valve_group", "quantity": "active_power", "pole": "aggregate", "units": "MW"},
-    {"name": "AORp1", "role": "rectifier_valve_group", "quantity": "firing_angle", "pole": "positive", "units": "deg"},
-    {"name": "AOIp1", "role": "inverter_valve_group", "quantity": "firing_angle", "pole": "positive", "units": "deg"}
+    {"name": "VDCRp1", "role": "rectifier_valve_group", "quantity": "dc_voltage", "pole": "positive", "terminal": "rectifier", "units": "pu"},
+    {"name": "VDCIp1", "role": "inverter_valve_group", "quantity": "dc_voltage", "pole": "positive", "terminal": "inverter", "units": "pu"},
+    {"name": "CMRp1", "role": "rectifier_valve_group", "quantity": "dc_current", "pole": "positive", "terminal": "rectifier", "units": "pu"},
+    {"name": "CMIp1", "role": "inverter_valve_group", "quantity": "dc_current", "pole": "positive", "terminal": "inverter", "units": "pu"},
+    {"name": "Ielectrode", "role": "earth_electrode", "quantity": "return_current", "pole": "neutral", "terminal": "return", "units": "kA"},
+    {"name": "PR", "role": "rectifier_valve_group", "quantity": "active_power", "pole": "aggregate", "terminal": "rectifier", "units": "MW"},
+    {"name": "PI", "role": "inverter_valve_group", "quantity": "active_power", "pole": "aggregate", "terminal": "inverter", "units": "MW"},
+    {"name": "AORp1", "role": "rectifier_valve_group", "quantity": "firing_angle", "pole": "positive", "terminal": "rectifier", "units": "deg"},
+    {"name": "AOIp1", "role": "inverter_valve_group", "quantity": "firing_angle", "pole": "positive", "terminal": "inverter", "units": "deg"}
   ]
 }
