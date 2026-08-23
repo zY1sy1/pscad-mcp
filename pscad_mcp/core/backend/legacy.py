@@ -1830,11 +1830,58 @@ class LegacyBackend:
         self, project_name: str, canvas_name: str = "Main"
     ) -> tuple[Any, list[Any]]:
         canvas = await self._canvas(project_name, canvas_name)
+
+        # The PSCAD 4.6.2 Automation Library models UserCanvas as a
+        # ComponentCommand.  Its ``find_all()``/``list_components()`` path
+        # consequently appends the canvas definition name as a component id;
+        # on some 4.6.2 builds that malformed command reaches XML
+        # serialization with a ``None`` attribute and fails before PSCAD can
+        # answer.  Build the list-components command from the canvas scope so
+        # that only project/definition are sent.  Keep the old path for test
+        # doubles and older library variants which do not expose that scope.
+        response = await self._legacy_scoped_list_components(canvas)
+        user_cmp = getattr(canvas, "user_cmp", None)
+        if isinstance(response, ET.Element) and callable(user_cmp):
+            components = []
+            for node in response.iter():
+                if str(node.tag).split("}")[-1].casefold() != "user":
+                    continue
+                raw_id = node.get("id")
+                if raw_id is None:
+                    continue
+                try:
+                    component = await self.executor.run_safe(
+                        user_cmp, raw_id
+                    )
+                except (TypeError, ValueError):
+                    continue
+                if self._is_user_component(component):
+                    components.append(component)
+            return canvas, components
+
         canvas_objects = await self.executor.run_safe(canvas.find_all)
         components = [
             item for item in canvas_objects if self._is_user_component(item)
         ]
         return canvas, components
+
+    async def _legacy_scoped_list_components(self, canvas: Any) -> ET.Element | None:
+        """List a legacy canvas without the Automation Library's bad id scope."""
+        pscad = getattr(canvas, "_pscad", None)
+        command_factory = getattr(pscad, "command", None)
+        scope_values = getattr(canvas, "_scope", None)
+        if not callable(command_factory) or not isinstance(scope_values, MappingABC):
+            return None
+        if any(value is None for value in scope_values.values()):
+            return None
+
+        command = command_factory("list-components")
+        scope_name = getattr(canvas, "_scope_name", "UserCanvas")
+        scope = command.scope(scope_name)
+        for key, value in scope_values.items():
+            ET.SubElement(scope, str(key)).set("name", str(value))
+        response = await self.executor.run_safe(command.execute)
+        return response if isinstance(response, ET.Element) else None
 
     async def _component_proxy(
         self, project_name: str, component_id: int
