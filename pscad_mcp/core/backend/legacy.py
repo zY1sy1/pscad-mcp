@@ -1073,6 +1073,82 @@ class LegacyBackend:
         values = await self.executor.run_safe(method)
         return [str(value) for value in values]
 
+    async def lcc_definition_inventory(self, catalog: Mapping[str, Any]) -> dict[str, Any]:
+        """Read the requested Master definitions from the installed 4.6.2 library.
+
+        Companion-library definitions are intentionally left to the service
+        boundary, which may add only the packaged companion asset metadata.
+        This backend method therefore reports live PSCAD evidence only.
+        """
+
+        if not isinstance(catalog, Mapping):
+            raise BackendError(
+                "INVALID_ARGUMENT",
+                "The LCC catalog must be a mapping.",
+                self.name,
+                "lcc_definition_inventory",
+            )
+        values = catalog.get("definitions", ())
+        if isinstance(values, Mapping):
+            entries = list(values.items())
+        elif isinstance(values, Sequence) and not isinstance(values, (str, bytes, bytearray)):
+            entries = []
+            for item in values:
+                if isinstance(item, Mapping):
+                    name = item.get("scoped_name", item.get("definition", item.get("name")))
+                    entries.append((name, item))
+        else:
+            entries = []
+
+        master_path = self.definition_paths.get("master")
+        if master_path is None or not master_path.is_file():
+            master_path = await self._discover_master_library()
+            if master_path is not None:
+                self.definition_paths["master"] = master_path
+        if master_path is None or not master_path.is_file():
+            raise BackendError(
+                "CAPABILITY_UNAVAILABLE",
+                "The installed PSCAD Master Library could not be located for LCC inventory.",
+                self.name,
+                "lcc_definition_inventory",
+            )
+
+        definitions: dict[str, dict[str, Any]] = {}
+        for scoped_name, _item in entries:
+            if not isinstance(scoped_name, str) or ":" not in scoped_name:
+                continue
+            scope, definition_name = scoped_name.split(":", 1)
+            if scope.casefold() != "master":
+                continue
+            try:
+                metadata = await asyncio.to_thread(
+                    read_definition_metadata, master_path, definition_name
+                )
+            except (OSError, ET.ParseError, KeyError) as error:
+                raise BackendError(
+                    "LCC_DEFINITION_MISSING",
+                    f"Live PSCAD Master definition '{scoped_name}' could not be read.",
+                    self.name,
+                    "lcc_definition_inventory",
+                    {"definition": scoped_name, "path": str(master_path)},
+                ) from error
+            definitions[scoped_name] = {
+                "ports": [
+                    {
+                        "name": port.name,
+                        "dimension": port.dim,
+                        "kind": port.type,
+                    }
+                    for port in metadata.ports
+                ],
+                "source": "live_master",
+            }
+        return {
+            "pscad_version": self.version,
+            "definitions": definitions,
+            "source": "pscad_live",
+        }
+
     @staticmethod
     def _settings_values_match(expected: Any, actual: Any) -> bool:
         if isinstance(expected, bool) or isinstance(actual, bool):

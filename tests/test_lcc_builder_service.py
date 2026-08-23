@@ -79,6 +79,24 @@ def test_plan_model_fails_closed_without_live_inventory(tmp_path):
     assert list(tmp_path.iterdir()) == []
 
 
+def test_plan_model_uses_async_live_inventory_bridge(tmp_path):
+    class LiveInventoryService:
+        path_policy = PathPolicy(str(tmp_path))
+
+        async def get_lcc_inventory(self, catalog):
+            assert catalog["pscad_version"] == "4.6.2"
+            return INVENTORY
+
+    service = LccBuilderService(
+        LiveInventoryService(),
+        asset_loader=lambda name: _asset_set(),
+    )
+
+    plan = service.plan_model("CIGRE_LCC")
+
+    assert plan["pscad_version"] == "4.6.2"
+
+
 def test_explicit_workspace_root_controls_the_builder_path_policy(tmp_path):
     service_workspace = tmp_path / "service-workspace"
     explicit_workspace = tmp_path / "explicit-workspace"
@@ -164,6 +182,52 @@ def test_valid_build_returns_without_waiting_and_status_is_json_safe(tmp_path):
     assert not (tmp_path / ".pscad-mcp" / "lcc-build.lock").exists()
 
 
+def test_builder_service_forwards_injected_threshold_registry_to_executor(tmp_path):
+    registry = {"review": {"review_id": "review"}}
+    captured = {}
+
+    async def recording_executor(
+        plan,
+        service,
+        workspace_root,
+        *,
+        asset_set,
+        build_id,
+        journal,
+        trusted_threshold_sources,
+    ):
+        captured["registry"] = trusted_threshold_sources
+        return await _successful_executor(
+            plan,
+            service,
+            workspace_root,
+            asset_set=asset_set,
+            build_id=build_id,
+            journal=journal,
+        )
+
+    pscad = SimpleNamespace(path_policy=PathPolicy(str(tmp_path)))
+    service = LccBuilderService(
+        pscad,
+        inventory=INVENTORY,
+        asset_loader=lambda name: _asset_set(),
+        executor_factory=recording_executor,
+        trusted_threshold_sources=registry,
+    )
+    plan = service.plan_model("CIGRE_LCC")
+
+    async def scenario():
+        started = await service.build_model("CIGRE_LCC", plan["plan_hash"], confirm=True)
+        for _ in range(10):
+            await asyncio.sleep(0)
+            if service.get_build_status(started["build_id"])["state"] == "published":
+                break
+
+    asyncio.run(scenario())
+
+    assert captured["registry"] is registry
+
+
 def test_unknown_build_id_is_not_found(tmp_path):
     service = _service(tmp_path)
 
@@ -240,3 +304,43 @@ def test_validation_reads_supplied_waveform_and_preserves_incomplete_acceptance(
     assert result["acceptance"]["verdict"] == "INCOMPLETE_ANALYSIS"
     assert [call[0] for call in pscad.calls] == ["read_output_file"]
     assert pscad.calls[0][1][0] == str(output_path.resolve())
+
+
+def test_validation_forwards_injected_threshold_registry_to_acceptance(tmp_path, monkeypatch):
+    registry = {"review": {"review_id": "review"}}
+    captured = {}
+    pscad = OutputReadingService()
+    pscad.path_policy = PathPolicy(str(tmp_path))
+    service = LccBuilderService(
+        pscad,
+        workspace_root=tmp_path,
+        inventory=INVENTORY,
+        asset_loader=lambda name: _asset_set(),
+        trusted_threshold_sources=registry,
+    )
+    project_path = tmp_path / "CIGRE_LCC.pscx"
+    output_path = tmp_path / "CIGRE_LCC.out"
+    project_path.write_text("<project />", encoding="utf-8")
+    output_path.write_text("placeholder", encoding="utf-8")
+    monkeypatch.setattr(
+        "pscad_mcp.hvdc.builders.lcc.service.read_project_graph",
+        lambda *args, **kwargs: object(),
+    )
+    monkeypatch.setattr(
+        "pscad_mcp.hvdc.builders.lcc.service.validate_project_graph",
+        lambda *args, **kwargs: {"valid": True, "errors": [], "warnings": []},
+    )
+
+    def fake_acceptance(samples, golden, contract, trusted_threshold_sources=None):
+        captured["registry"] = trusted_threshold_sources
+        return {"verdict": "PASS"}
+
+    monkeypatch.setattr(
+        "pscad_mcp.hvdc.builders.lcc.service.evaluate_acceptance",
+        fake_acceptance,
+    )
+
+    result = service.validate_model("CIGRE_LCC", output_file=str(output_path))
+
+    assert result["accepted"] is True
+    assert captured["registry"] is registry

@@ -1,0 +1,159 @@
+{
+  "schema_version": 1,
+  "name": "lcc_parametric_catalog_v1",
+  "pscad_version": "4.6.2",
+  "identity": "lcc_parametric_catalog_v1",
+  "provenance_identity": "lcc_parametric_provenance_v1",
+  "provenance_sha256": "0affa8d88326ae44902ba36cb12f83e6eba05391b65ea1591199e5e023533e22",
+  "rating_contract_asset": "lcc_parametric_provenance_v1:rating_contract",
+  "definitions": {},
+  "template_role_contracts": {
+    "schema_version": 1,
+    "authoritative": true,
+    "contract_identity": "lcc_parametric_catalog_v1:template_role_contracts",
+    "project_namespace_attribute": "name",
+    "pole_definitions": {
+      "rectifier": {
+        "local_name": "RectPole", "contract_identity": "lcc_parametric_catalog_v1:RectPole",
+        "form_parameters": {"Des": {"type": "Text"}},
+        "ports": {"KBR": {"model": "Transfer", "dim": 1, "mode": "Input", "type": "Real"}, "Tap": {"model": "Transfer", "dim": 1, "mode": "Input", "type": "Real"}, "DCP2": {"model": "Natural", "dim": 1, "type": "NonRemovable"}, "AOR": {"model": "Transfer", "dim": 1, "mode": "Input", "type": "Real"}, "DCP1": {"model": "Natural", "dim": 1, "type": "NonRemovable"}, "AC": {"model": "Natural", "dim": 3, "type": "NonRemovable"}},
+        "internal_components": {"master:g6p200": {"minimum": 2}, "master:xfmr-3p2w": {"minimum": 2}}
+      },
+      "inverter": {
+        "local_name": "InverterPole", "contract_identity": "lcc_parametric_catalog_v1:InverterPole",
+        "form_parameters": {"Des": {"type": "Text"}},
+        "ports": {"KBI": {"model": "Transfer", "dim": 1, "mode": "Input", "type": "Real"}, "GMES": {"model": "Transfer", "dim": 1, "mode": "Output", "type": "Real"}, "DCP2": {"model": "Natural", "dim": 1, "type": "NonRemovable"}, "AOI": {"model": "Transfer", "dim": 1, "mode": "Input", "type": "Real"}, "DCP1": {"model": "Natural", "dim": 1, "type": "NonRemovable"}, "AC": {"model": "Natural", "dim": 3, "type": "NonRemovable"}},
+        "internal_components": {"master:g6p200": {"minimum": 2}, "master:xfmr-3p2w": {"minimum": 2}}
+      }
+    },
+    "instance_discriminator": {"parameter": "Des", "bipole_roles": {"RP1": "rectifier_positive_pole", "RP2": "rectifier_negative_pole", "IP1": "inverter_positive_pole", "IP2": "inverter_negative_pole"}},
+    "earth_electrode": {"contract_identity": "lcc_parametric_catalog_v1:earth_electrode", "ground_definition": "master:ground", "anchor_definition": "master:ammeter", "anchor_parameter": "Name", "anchor_value": "Ielectrode", "selection": "nearest_unique_euclidean_ground", "no_anchor_fallback": "single_exact_ground"}
+  },
+  "blueprint_hashes": {
+    "lcc_monopole_parametric_v1": "de326570c362fdb14c1012a7a5643586e751a97d58669373f536b5ecf9597911",
+    "lcc_bipole_parametric_v1": "2b79f9f8e47e95dc976fbd27ab57308878879d367b58953f795179f4648aff58"
+  },
+  "topology_contracts": {
+    "monopolar": {
+      "blueprint": "lcc_monopole_parametric_v1",
+      "template_roles": ["rectifier_valve_group", "inverter_valve_group", "earth_electrode"],
+      "component_roles": ["rectifier_valve_group", "inverter_valve_group", "earth_electrode", "neutral_bus", "metallic_return_terminal"],
+      "net_ids": ["dc_pole", "earth_return", "metallic_return"],
+      "required_return_nets": ["earth_return", "metallic_return"],
+      "output_names": ["VDCRp1", "VDCIp1", "CMRp1", "CMIp1", "Ielectrode", "PR", "PI", "AORp1", "AOIp1"]
+    },
+    "bipolar": {
+      "blueprint": "lcc_bipole_parametric_v1",
+      "template_roles": ["rectifier_positive_pole", "rectifier_negative_pole", "inverter_positive_pole", "inverter_negative_pole", "earth_electrode"],
+      "component_roles": ["rectifier_positive_pole", "inverter_positive_pole", "rectifier_negative_pole", "inverter_negative_pole", "earth_electrode", "neutral_bus", "metallic_return_terminal"],
+      "net_ids": ["dc_positive", "dc_negative", "neutral_bus", "earth_return", "metallic_return"],
+      "required_return_nets": ["neutral_bus", "earth_return", "metallic_return"],
+      "output_names": ["VacR", "Vac (rms)", "VacI", "VacI (rms)", "VDCRp1", "VDCRp2", "VDCIp1", "VDCIp2", "CMRp1", "CMRp2", "CMIp1", "CMIp2", "Ielectrode", "PR", "QR", "QI", "PI", "AORp1", "AORp2", "AOIp1", "AOIp2"]
+    }
+  },
+  "logical_parameter_bindings": {
+    "rated_power_mw": {"logical_parameter": "rated_power_mw", "units": "MW", "roles_by_topology": {"monopolar": ["rectifier_valve_group", "inverter_valve_group"], "bipolar": ["rectifier_positive_pole", "rectifier_negative_pole", "inverter_positive_pole", "inverter_negative_pole"]}, "template_parameter": null, "binding_status": "unreviewed"},
+    "dc_voltage_kv": {"logical_parameter": "dc_voltage_kv", "units": "kV", "roles_by_topology": {"monopolar": ["rectifier_valve_group", "inverter_valve_group"], "bipolar": ["rectifier_positive_pole", "rectifier_negative_pole", "inverter_positive_pole", "inverter_negative_pole"]}, "template_parameter": null, "binding_status": "unreviewed"},
+    "dc_current_ka": {"logical_parameter": "dc_current_ka", "units": "kA", "roles_by_topology": {"monopolar": ["rectifier_valve_group", "inverter_valve_group"], "bipolar": ["rectifier_positive_pole", "rectifier_negative_pole", "inverter_positive_pole", "inverter_negative_pole"]}, "template_parameter": null, "binding_status": "unreviewed"},
+    "ac_voltage_kv": {"logical_parameter": "ac_voltage_kv", "units": "kV", "roles_by_topology": {"monopolar": ["rectifier_valve_group", "inverter_valve_group"], "bipolar": ["rectifier_positive_pole", "rectifier_negative_pole", "inverter_positive_pole", "inverter_negative_pole"]}, "template_parameter": null, "binding_status": "unreviewed"},
+    "frequency_hz": {"logical_parameter": "frequency_hz", "units": "Hz", "roles_by_topology": {"monopolar": ["rectifier_valve_group", "inverter_valve_group"], "bipolar": ["rectifier_positive_pole", "rectifier_negative_pole", "inverter_positive_pole", "inverter_negative_pole"]}, "template_parameter": null, "binding_status": "unreviewed"},
+    "scr": {"logical_parameter": "scr", "units": "1", "roles_by_topology": {"monopolar": ["rectifier_valve_group", "inverter_valve_group"], "bipolar": ["rectifier_positive_pole", "rectifier_negative_pole", "inverter_positive_pole", "inverter_negative_pole"]}, "template_parameter": null, "binding_status": "unreviewed"},
+    "escr": {"logical_parameter": "escr", "units": "1", "roles_by_topology": {"monopolar": ["rectifier_valve_group", "inverter_valve_group"], "bipolar": ["rectifier_positive_pole", "rectifier_negative_pole", "inverter_positive_pole", "inverter_negative_pole"]}, "template_parameter": null, "binding_status": "unreviewed"},
+    "dc_power_mw": {"logical_parameter": "dc_power_mw", "units": "MW", "roles_by_topology": {"monopolar": ["rectifier_valve_group", "inverter_valve_group"], "bipolar": ["rectifier_positive_pole", "rectifier_negative_pole", "inverter_positive_pole", "inverter_negative_pole"]}, "template_parameter": null, "binding_status": "unreviewed"},
+    "smoothing_reactor_mh": {"logical_parameter": "smoothing_reactor_mh", "units": "mH", "roles_by_topology": {"monopolar": ["rectifier_valve_group", "inverter_valve_group"], "bipolar": ["rectifier_positive_pole", "rectifier_negative_pole", "inverter_positive_pole", "inverter_negative_pole"]}, "template_parameter": null, "binding_status": "unreviewed"},
+    "filter_capacitance_uf": {"logical_parameter": "filter_capacitance_uf", "units": "uF", "roles_by_topology": {"monopolar": ["rectifier_valve_group", "inverter_valve_group"], "bipolar": ["rectifier_positive_pole", "rectifier_negative_pole", "inverter_positive_pole", "inverter_negative_pole"]}, "template_parameter": null, "binding_status": "unreviewed"},
+    "min_firing_angle_deg": {"logical_parameter": "min_firing_angle_deg", "units": "deg", "roles_by_topology": {"monopolar": ["rectifier_valve_group", "inverter_valve_group"], "bipolar": ["rectifier_positive_pole", "rectifier_negative_pole", "inverter_positive_pole", "inverter_negative_pole"]}, "template_parameter": null, "binding_status": "unreviewed"},
+    "max_firing_angle_deg": {"logical_parameter": "max_firing_angle_deg", "units": "deg", "roles_by_topology": {"monopolar": ["rectifier_valve_group", "inverter_valve_group"], "bipolar": ["rectifier_positive_pole", "rectifier_negative_pole", "inverter_positive_pole", "inverter_negative_pole"]}, "template_parameter": null, "binding_status": "unreviewed"},
+    "overlap_angle_deg": {"logical_parameter": "overlap_angle_deg", "units": "deg", "roles_by_topology": {"monopolar": ["rectifier_valve_group", "inverter_valve_group"], "bipolar": ["rectifier_positive_pole", "rectifier_negative_pole", "inverter_positive_pole", "inverter_negative_pole"]}, "template_parameter": null, "binding_status": "unreviewed"},
+    "min_extinction_angle_deg": {"logical_parameter": "min_extinction_angle_deg", "units": "deg", "roles_by_topology": {"monopolar": ["inverter_valve_group"], "bipolar": ["inverter_positive_pole", "inverter_negative_pole"]}, "template_parameter": null, "binding_status": "unreviewed"},
+    "max_feasible_inverter_firing_angle_deg": {"logical_parameter": "max_feasible_inverter_firing_angle_deg", "units": "deg", "roles_by_topology": {"monopolar": ["inverter_valve_group"], "bipolar": ["inverter_positive_pole", "inverter_negative_pole"]}, "template_parameter": null, "binding_status": "unreviewed"}
+  },
+  "rating_parameters": {
+    "rated_power_mw": {"units": "MW", "required": true, "constraints": [{"kind": "exclusive_minimum", "value": 0.0, "asset": "lcc_parametric_provenance_v1:positive_finite"}], "asset": "lcc_parametric_provenance_v1:positive_finite"},
+    "dc_voltage_kv": {"units": "kV", "required": true, "constraints": [{"kind": "exclusive_minimum", "value": 0.0, "asset": "lcc_parametric_provenance_v1:positive_finite"}], "asset": "lcc_parametric_provenance_v1:positive_finite"},
+    "dc_current_ka": {"units": "kA", "required": true, "constraints": [{"kind": "exclusive_minimum", "value": 0.0, "asset": "lcc_parametric_provenance_v1:positive_finite"}], "asset": "lcc_parametric_provenance_v1:positive_finite"},
+    "ac_voltage_kv": {"units": "kV", "required": true, "constraints": [{"kind": "exclusive_minimum", "value": 0.0, "asset": "lcc_parametric_provenance_v1:positive_finite"}], "asset": "lcc_parametric_provenance_v1:positive_finite"},
+    "frequency_hz": {"units": "Hz", "required": true, "constraints": [{"kind": "exclusive_minimum", "value": 0.0, "asset": "lcc_parametric_provenance_v1:positive_finite"}], "asset": "lcc_parametric_provenance_v1:positive_finite"},
+    "scr": {"units": "1", "required": true, "constraints": [{"kind": "exclusive_minimum", "value": 0.0, "asset": "lcc_parametric_provenance_v1:positive_finite"}], "asset": "lcc_parametric_provenance_v1:positive_finite"},
+    "escr": {"units": "1", "required": false, "constraints": [{"kind": "exclusive_minimum", "value": 0.0, "asset": "lcc_parametric_provenance_v1:positive_finite"}], "asset": "lcc_parametric_provenance_v1:positive_finite"}
+  },
+  "derived_parameters": {
+    "dc_power_mw": {
+      "units": "MW",
+      "required": true,
+      "formula": "dc_voltage_kv * dc_current_ka",
+      "dependencies": ["dc_voltage_kv", "dc_current_ka"],
+      "compared_to": "rated_power_mw",
+      "asset": "lcc_parametric_provenance_v1:dimensional_identity",
+      "comparison_asset": "lcc_parametric_provenance_v1:floating_point_comparison",
+      "relative_tolerance": 1e-6,
+      "absolute_tolerance": 1e-6
+    }
+  },
+  "engineering_parameters": {
+    "smoothing_reactor_mh": {
+      "units": "mH", "required": true, "default": null, "formula": null,
+      "constraints": [{"kind": "exclusive_minimum", "value": 0.0, "asset": "lcc_parametric_provenance_v1:positive_finite"}], "asset": "lcc_parametric_provenance_v1:positive_finite",
+      "unit_multipliers": {"mH": 1.0, "H": 1000.0}, "unit_asset": "lcc_parametric_provenance_v1:unit_conversions"
+    },
+    "filter_capacitance_uf": {
+      "units": "uF", "required": true, "default": null, "formula": null,
+      "constraints": [{"kind": "exclusive_minimum", "value": 0.0, "asset": "lcc_parametric_provenance_v1:positive_finite"}], "asset": "lcc_parametric_provenance_v1:positive_finite",
+      "unit_multipliers": {"uF": 1.0, "F": 1000000.0}, "unit_asset": "lcc_parametric_provenance_v1:unit_conversions"
+    },
+    "min_firing_angle_deg": {
+      "units": "deg", "required": true, "default": null, "formula": null,
+      "constraints": [{"kind": "open_interval", "minimum": 0.0, "maximum": 180.0, "asset": "lcc_parametric_provenance_v1:angle_domain_deg"}], "asset": "lcc_parametric_provenance_v1:angle_domain_deg",
+      "unit_multipliers": {"deg": 1.0, "rad": 57.29577951308232}, "unit_asset": "lcc_parametric_provenance_v1:unit_conversions"
+    },
+    "max_firing_angle_deg": {
+      "units": "deg", "required": true, "default": null, "formula": null,
+      "constraints": [{"kind": "open_interval", "minimum": 0.0, "maximum": 180.0, "asset": "lcc_parametric_provenance_v1:angle_domain_deg"}], "asset": "lcc_parametric_provenance_v1:angle_domain_deg",
+      "unit_multipliers": {"deg": 1.0, "rad": 57.29577951308232}, "unit_asset": "lcc_parametric_provenance_v1:unit_conversions"
+    },
+    "overlap_angle_deg": {
+      "units": "deg", "required": true, "default": 20.0, "formula": "inherited catalog default",
+      "constraints": [{"kind": "open_interval", "minimum": 0.0, "maximum": 180.0, "asset": "lcc_parametric_provenance_v1:angle_domain_deg"}], "asset": "lcc_parametric_provenance_v1:angle_domain_deg",
+      "default_asset": "lcc_parametric_provenance_v1:legacy_catalog_defaults",
+      "unit_multipliers": {"deg": 1.0, "rad": 57.29577951308232}, "unit_asset": "lcc_parametric_provenance_v1:unit_conversions"
+    },
+    "min_extinction_angle_deg": {
+      "units": "deg", "required": true, "default": 18.0, "formula": "inherited catalog default",
+      "constraints": [{"kind": "open_interval", "minimum": 0.0, "maximum": 180.0, "asset": "lcc_parametric_provenance_v1:angle_domain_deg"}], "asset": "lcc_parametric_provenance_v1:angle_domain_deg",
+      "default_asset": "lcc_parametric_provenance_v1:legacy_catalog_defaults",
+      "unit_multipliers": {"deg": 1.0, "rad": 57.29577951308232}, "unit_asset": "lcc_parametric_provenance_v1:unit_conversions"
+    }
+  },
+  "feasibility_relationships": {
+    "firing_angle_interval": {
+      "operator": "less_than", "left": "min_firing_angle_deg", "right": "max_firing_angle_deg",
+      "asset": "lcc_parametric_provenance_v1:strict_order"
+    },
+    "inverter_commutation_interval": {
+      "operator": "nonempty_upper_bounded_interval",
+      "output": "max_feasible_inverter_firing_angle_deg",
+      "units": "deg",
+      "formula": "min(max_firing_angle_deg, 180 - min_extinction_angle_deg - overlap_angle_deg)",
+      "constant_deg": 180.0,
+      "subtract": ["min_extinction_angle_deg", "overlap_angle_deg"],
+      "minimum": "min_firing_angle_deg",
+      "user_maximum": "max_firing_angle_deg",
+      "asset": "lcc_parametric_provenance_v1:inverter_commutation_identity"
+    }
+  },
+  "return_contract_assets": {
+    "bipolar": "lcc_parametric_provenance_v1:bipole_return_contract"
+  },
+  "return_asset_requirements": {
+    "bipolar": {
+      "allowed": ["neutral_bus", "earth_return", "metallic_return"],
+      "required": ["neutral_bus"],
+      "mode_requirements": {
+        "monopolar_earth_return": ["earth_return"],
+        "monopolar_metallic_return": ["metallic_return"],
+        "metallic_return": ["metallic_return"]
+      },
+      "asset": "lcc_parametric_provenance_v1:bipole_return_contract"
+    }
+  }
+}

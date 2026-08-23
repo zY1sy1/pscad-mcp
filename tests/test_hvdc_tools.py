@@ -22,7 +22,7 @@ EXPECTED = {
 def test_hvdc_tools_are_registered_without_removing_generic_tools():
     names = {tool.name for tool in create_server()._tool_manager.list_tools()}
     assert EXPECTED <= names
-    assert len(names) == 77
+    assert len(names) == 83
 
 
 def test_inspect_hvdc_project_is_json_safe(tmp_path):

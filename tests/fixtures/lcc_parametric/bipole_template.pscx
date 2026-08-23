@@ -1,0 +1,22 @@
+<project name="FixtureBipole" version="4.6.2" Target="EMTDC">
+  <definitions>
+    <Definition classid="UserCmpDefn" name="RectPole" id="1101">
+      <form><parameter type="Text" name="Des" desc="Operator Designation" /></form>
+      <svg><port model="Transfer" name="KBR" dim="1" mode="Input" type="Real" internal="false" /><port model="Transfer" name="Tap" dim="1" mode="Input" type="Real" internal="false" /><port model="Natural" name="DCP2" dim="1" mode="Electrical" type="NonRemovable" internal="false" /><port model="Transfer" name="AOR" dim="1" mode="Input" type="Real" internal="false" /><port model="Natural" name="DCP1" dim="1" mode="Electrical" type="NonRemovable" internal="false" /><port model="Natural" name="AC" dim="3" mode="Electrical" type="NonRemovable" internal="false" /></svg>
+      <schematic><User id="1111" defn="master:g6p200" /><User id="1112" defn="master:g6p200" /><User id="1121" defn="master:xfmr-3p2w" /><User id="1122" defn="master:xfmr-3p2w" /></schematic>
+    </Definition>
+    <Definition classid="UserCmpDefn" name="InverterPole" id="1201">
+      <form><parameter type="Text" name="Des" desc="Operator Designation" /></form>
+      <svg><port model="Transfer" name="KBI" dim="1" mode="Input" type="Real" /><port model="Transfer" name="GMES" dim="1" mode="Output" type="Real" /><port model="Natural" name="DCP2" dim="1" mode="" type="NonRemovable" /><port model="Transfer" name="AOI" dim="1" mode="Input" type="Real" /><port model="Natural" name="DCP1" dim="1" mode="" type="NonRemovable" /><port model="Natural" name="AC" dim="3" mode="" type="NonRemovable" /></svg>
+      <schematic><User id="1211" defn="master:g6p200" /><User id="1212" defn="master:g6p200" /><User id="1221" defn="master:xfmr-3p2w" /><User id="1222" defn="master:xfmr-3p2w" /></schematic>
+    </Definition>
+    <Definition classid="UserCmpDefn" name="Main" id="1301"><schematic>
+      <User id="2001" defn="FixtureBipole:RectPole" x="100" y="100"><paramlist><param name="Des" value="RP1" /></paramlist></User>
+      <User id="2002" defn="FixtureBipole:RectPole" x="100" y="300"><paramlist><param name="Des" value="RP2" /></paramlist></User>
+      <User id="2003" defn="FixtureBipole:InverterPole" x="700" y="100"><paramlist><param name="Des" value="IP1" /></paramlist></User>
+      <User id="2004" defn="FixtureBipole:InverterPole" x="700" y="300"><paramlist><param name="Des" value="IP2" /></paramlist></User>
+      <User id="3001" defn="master:ground" x="400" y="200" /><User id="3002" defn="master:ground" x="900" y="200" />
+      <User id="3003" defn="master:ammeter" x="350" y="200"><paramlist><param name="Name" value="Ielectrode" /></paramlist></User>
+    </schematic></Definition>
+  </definitions>
+</project>

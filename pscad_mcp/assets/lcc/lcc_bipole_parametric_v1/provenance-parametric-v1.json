@@ -1,0 +1,111 @@
+{
+  "schema_version": 1,
+  "identity": "lcc_parametric_provenance_v1",
+  "catalog_structure_contract_asset": "lcc_parametric_provenance_v1:catalog_structure_contract",
+  "entries": {
+    "positive_finite": {
+      "classification": "physical_invariant",
+      "statement": "Ratings, inductance, capacitance, SCR, and ESCR used by this derivation must be finite and strictly positive.",
+      "machine_contract": {"kind": "exclusive_minimum", "value": 0.0},
+      "limitation": "This invariant declares no reviewed upper bound and no SCR or ESCR threshold."
+    },
+    "rating_contract": {
+      "classification": "request_contract",
+      "statement": "The six base LCC ratings are required; ESCR is optional.",
+      "machine_contract": {
+        "parameters": {
+          "rated_power_mw": {"required": true},
+          "dc_voltage_kv": {"required": true},
+          "dc_current_ka": {"required": true},
+          "ac_voltage_kv": {"required": true},
+          "frequency_hz": {"required": true},
+          "scr": {"required": true},
+          "escr": {"required": false}
+        }
+      }
+    },
+    "catalog_structure_contract": {
+      "classification": "catalog_structure_contract",
+      "statement": "The versioned catalog must retain every required feasibility relationship and bipolar return-topology contract binding.",
+      "machine_contract": {
+        "required_relationships": {
+          "firing_angle_interval": "lcc_parametric_provenance_v1:strict_order",
+          "inverter_commutation_interval": "lcc_parametric_provenance_v1:inverter_commutation_identity"
+        },
+        "required_return_contracts": {
+          "bipolar": "lcc_parametric_provenance_v1:bipole_return_contract"
+        }
+      }
+    },
+    "angle_domain_deg": {
+      "classification": "basic_domain",
+      "statement": "Control angles are represented in degrees in the open mathematical domain 0 < angle < 180.",
+      "machine_contract": {"kind": "open_interval", "minimum": 0.0, "maximum": 180.0},
+      "limitation": "This is a representation domain, not an acceptable operating range."
+    },
+    "strict_order": {
+      "classification": "structural_invariant",
+      "statement": "A declared minimum firing angle must be strictly less than its declared maximum firing angle.",
+      "machine_contract": {"operator": "less_than", "left": "min_firing_angle_deg", "right": "max_firing_angle_deg"}
+    },
+    "dimensional_identity": {
+      "classification": "dimensional_identity",
+      "statement": "dc_power_mw = dc_voltage_kv * dc_current_ka because kV multiplied by kA yields MW.",
+      "machine_contract": {"formula": "dc_voltage_kv * dc_current_ka", "dependencies": ["dc_voltage_kv", "dc_current_ka"], "compared_to": "rated_power_mw"}
+    },
+    "unit_conversions": {
+      "classification": "dimensional_identity",
+      "statement": "H to mH and F to uF use SI decimal-prefix multipliers; rad to deg uses 180/pi.",
+      "machine_contract": {
+        "parameters": {
+          "smoothing_reactor_mh": {"canonical_units": "mH", "multipliers": {"mH": 1.0, "H": 1000.0}},
+          "filter_capacitance_uf": {"canonical_units": "uF", "multipliers": {"uF": 1.0, "F": 1000000.0}},
+          "min_firing_angle_deg": {"canonical_units": "deg", "multipliers": {"deg": 1.0, "rad": {"expression": "180 / pi"}}},
+          "max_firing_angle_deg": {"canonical_units": "deg", "multipliers": {"deg": 1.0, "rad": {"expression": "180 / pi"}}},
+          "overlap_angle_deg": {"canonical_units": "deg", "multipliers": {"deg": 1.0, "rad": {"expression": "180 / pi"}}},
+          "min_extinction_angle_deg": {"canonical_units": "deg", "multipliers": {"deg": 1.0, "rad": {"expression": "180 / pi"}}}
+        }
+      }
+    },
+    "floating_point_comparison": {
+      "classification": "implementation_policy",
+      "machine_contract": {"values": {"relative_tolerance": 1e-6, "absolute_tolerance": 1e-6}},
+      "limitation": "These tolerances handle floating-point comparison only and are not engineering acceptance margins."
+    },
+    "legacy_catalog_defaults": {
+      "classification": "legacy_catalog_default",
+      "source_path": "pscad_mcp/assets/lcc/lcc_parametric_catalog_v1.json",
+      "machine_contract": {"values": {"overlap_angle_deg": 20.0, "min_extinction_angle_deg": 18.0}},
+      "limitation": "These inherited defaults are default values only and do not establish allowable ranges."
+    },
+    "bipole_return_contract": {
+      "classification": "packaged_structural_contract",
+      "source_path": "pscad_mcp/assets/lcc/lcc_bipole_parametric_v1/blueprint.json",
+      "machine_contract": {
+        "allowed": ["neutral_bus", "earth_return", "metallic_return"],
+        "required": ["neutral_bus"],
+        "mode_requirements": {
+          "monopolar_earth_return": ["earth_return"],
+          "monopolar_metallic_return": ["metallic_return"],
+          "metallic_return": ["metallic_return"]
+        }
+      },
+      "limitation": "Asset identifiers are structural declarations, not proof of electrical acceptance."
+    },
+    "inverter_commutation_identity": {
+      "classification": "physical_identity",
+      "statement": "For gamma >= gamma_min, alpha is bounded above by 180 - gamma_min - mu; feasibility requires the user firing-angle interval to intersect this upper-bounded interval.",
+      "machine_contract": {
+        "operator": "nonempty_upper_bounded_interval",
+        "output": "max_feasible_inverter_firing_angle_deg",
+        "units": "deg",
+        "formula": "min(max_firing_angle_deg, 180 - min_extinction_angle_deg - overlap_angle_deg)",
+        "constant_deg": 180.0,
+        "subtract": ["min_extinction_angle_deg", "overlap_angle_deg"],
+        "minimum": "min_firing_angle_deg",
+        "user_maximum": "max_firing_angle_deg"
+      },
+      "limitation": "The derived value is a maximum feasible bound, not an actual firing-angle operating point or an empirical control margin."
+    }
+  }
+}

@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import bisect
+import hashlib
+import json
 import math
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
@@ -250,6 +253,17 @@ def _optional_text(value: Any, field: str) -> str | None:
     return _text(value, field)
 
 
+def _optional_units(value: Any, field: str) -> str | None:
+    """Normalize exporter blank unit cells without weakening typed metadata."""
+
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise _invalid(f"{field} must be a string or null.", field=field)
+    normalized = value.strip()
+    return normalized or None
+
+
 def _required(value: Mapping[str, Any]) -> bool:
     required = value.get("required", True)
     if not isinstance(required, bool):
@@ -292,7 +306,7 @@ def _canonical_channels(payload: Any, label: str) -> dict[str, _Channel]:
         if isinstance(raw_value, Mapping):
             values = raw_value.get("values", raw_value.get("samples"))
             time = raw_value.get("time", raw_value.get("domain", global_time))
-            units = _optional_text(raw_value.get("units"), f"{label}.{name}.units")
+            units = _optional_units(raw_value.get("units"), f"{label}.{name}.units")
         else:
             values = raw_value
             time = global_time
@@ -343,7 +357,17 @@ _UNIT_TO_SI = {
     "kVAr": ("reactive_power", 1_000.0),
     "MVAr": ("reactive_power", 1_000_000.0),
     "deg": ("angle", 1.0),
+    "pu": ("per_unit", 1.0),
 }
+
+
+def _finite_derived(value: float, operation: str) -> float:
+    if not math.isfinite(value):
+        raise _EvidenceError(
+            "non-finite derived value",
+            details={"operation": operation},
+        )
+    return value
 
 
 def _convert(values: Sequence[float], from_units: str | None, to_units: str, channel: str) -> list[float]:
@@ -353,7 +377,10 @@ def _convert(values: Sequence[float], from_units: str | None, to_units: str, cha
     to_kind, to_scale = _UNIT_TO_SI[to_units]
     if from_kind != to_kind:
         raise _EvidenceError("unit mismatch", channel=channel, details={"expected_units": to_units, "observed_units": from_units})
-    return [value * from_scale / to_scale for value in values]
+    if from_units == to_units:
+        return list(values)
+    scale = _finite_derived(from_scale / to_scale, "unit scale conversion")
+    return [_finite_derived(value * scale, "unit conversion") for value in values]
 
 
 def _validated_window(window: Any, *, field: str, channel: str | None = None) -> tuple[float, float]:
@@ -373,7 +400,9 @@ def _convert_power_from_watts(values: Sequence[float], to_units: str) -> list[fl
     if to_units not in _UNIT_TO_SI or _UNIT_TO_SI[to_units][0] != "power":
         raise _EvidenceError("unit mismatch", details={"expected_units": to_units})
     scale = _UNIT_TO_SI[to_units][1]
-    return [value / scale for value in values]
+    if scale == 1.0:
+        return [_finite_derived(value, "power conversion") for value in values]
+    return [_finite_derived(value / scale, "power conversion") for value in values]
 
 
 def _window(channel: _Channel, window: Sequence[Any] | None, units: str | None = None) -> tuple[list[float], list[float]]:
@@ -423,7 +452,11 @@ def _require_identical_domains(
 
 
 def _mean(values: Sequence[float]) -> float:
-    return sum(values) / len(values)
+    try:
+        total = math.fsum(values)
+    except (OverflowError, ValueError) as error:
+        raise _EvidenceError("non-finite derived value", details={"operation": "mean"}) from error
+    return _finite_derived(total / len(values), "mean")
 
 
 def _rms(values: Sequence[float]) -> float:
@@ -560,6 +593,243 @@ def _physical_power_balance(check: Mapping[str, Any], samples: Mapping[str, _Cha
     )
 
 
+_POSITIVE_TERMINAL_POWER_CONVENTION = "rectifier_input_positive_inverter_output_positive"
+_TERMINAL_POWER_UNITS = frozenset({"W", "kW", "MW"})
+_FLOAT_COMPARISON_POLICY = {
+    "kind": "max_ulps",
+    "max_ulps": 16,
+    "rel_tol": 0.0,
+    "abs_tol": 0.0,
+}
+_APPROVED_SOURCE_FIELDS = {
+    "kind",
+    "artifact_sha256",
+    "locator",
+    "review_id",
+    "review_status",
+    "threshold_contract_sha256",
+}
+_TERMINAL_POWER_LOSS_FIELDS = {
+    "approved_source",
+    "direction_convention",
+    "inverter_power_channel",
+    "kind",
+    "max_loss",
+    "max_percent",
+    "name",
+    "rectifier_power_channel",
+    "required",
+    "units",
+    "window",
+}
+_MAX_PROVENANCE_TEXT = 512
+
+
+def _float_at_most(observed: float, limit: float) -> bool:
+    """Compare a bound with 16 ULPs and zero relative/absolute engineering tolerance."""
+
+    observed = _finite_derived(observed, "floating-point comparison")
+    edge = _finite_derived(limit, "floating-point comparison")
+    if observed <= edge:
+        return True
+    for _ in range(_FLOAT_COMPARISON_POLICY["max_ulps"]):
+        edge = math.nextafter(edge, math.inf)
+    return observed <= edge
+
+
+def _float_at_least(observed: float, limit: float) -> bool:
+    return _float_at_most(limit, observed)
+
+
+def _validated_approved_source(source: Any, *, field_prefix: str) -> dict[str, str]:
+    if not isinstance(source, Mapping):
+        raise _invalid(f"{field_prefix} must be a mapping.", field=field_prefix)
+    if set(source) != _APPROVED_SOURCE_FIELDS:
+        raise _invalid(
+            f"{field_prefix} fields do not match the required schema.",
+            field=field_prefix,
+            required_fields=sorted(_APPROVED_SOURCE_FIELDS),
+        )
+    approved: dict[str, str] = {}
+    for field in sorted(_APPROVED_SOURCE_FIELDS):
+        value = source[field]
+        if (
+            not isinstance(value, str)
+            or not value.strip()
+            or value != value.strip()
+            or len(value) > _MAX_PROVENANCE_TEXT
+        ):
+            raise _invalid(
+                f"{field_prefix} contains an invalid text field.",
+                field=f"{field_prefix}.{field}",
+                max_length=_MAX_PROVENANCE_TEXT,
+            )
+        approved[field] = value
+    for digest_field in ("artifact_sha256", "threshold_contract_sha256"):
+        if re.fullmatch(r"[0-9a-fA-F]{64}", approved[digest_field]) is None:
+            raise _invalid(
+                f"{field_prefix} {digest_field} must be a 64-character hexadecimal digest.",
+                field=f"{field_prefix}.{digest_field}",
+            )
+    if approved["review_status"] != "approved":
+        raise _invalid(
+            f"{field_prefix} review_status must be approved.",
+            field=f"{field_prefix}.review_status",
+        )
+    return approved
+
+
+def _canonical_terminal_power_loss_check(check: Mapping[str, Any]) -> dict[str, Any]:
+    if any(key not in _TERMINAL_POWER_LOSS_FIELDS for key in check):
+        raise _invalid(
+            "physical terminal loss check contains unsupported fields.",
+            field="physical terminal loss check",
+            allowed_fields=sorted(_TERMINAL_POWER_LOSS_FIELDS),
+        )
+    raw_window = check.get("window")
+    window = None
+    if raw_window is not None:
+        window = list(_validated_window(raw_window, field="window"))
+    return {
+        "name": _text(check.get("name"), "name"),
+        "kind": _text(check.get("kind"), "kind"),
+        "required": _required(check),
+        "window": window,
+        "direction_convention": _text(check.get("direction_convention"), "direction_convention"),
+        "rectifier_power_channel": _text(check.get("rectifier_power_channel"), "rectifier_power_channel"),
+        "inverter_power_channel": _text(check.get("inverter_power_channel"), "inverter_power_channel"),
+        "units": _text(check.get("units"), "units"),
+        "max_loss": None if check.get("max_loss") is None else _finite_float(check["max_loss"], "max_loss"),
+        "max_percent": None
+        if check.get("max_percent") is None
+        else _finite_float(check["max_percent"], "max_percent"),
+        "comparison_policy": dict(_FLOAT_COMPARISON_POLICY),
+    }
+
+
+def _threshold_contract_sha256(check: Mapping[str, Any]) -> str:
+    canonical = _canonical_terminal_power_loss_check(check)
+    encoded = json.dumps(canonical, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _approved_threshold_source(
+    check: Mapping[str, Any],
+    trusted_threshold_sources: Any,
+) -> dict[str, str]:
+    source = check.get("approved_source")
+    if source is None:
+        raise _EvidenceError("missing approved threshold source")
+    if trusted_threshold_sources is None:
+        raise _EvidenceError("missing trusted threshold source registry")
+    if not isinstance(trusted_threshold_sources, Mapping):
+        raise _invalid("trusted_threshold_sources must be a mapping.", field="trusted_threshold_sources")
+
+    approved = _validated_approved_source(source, field_prefix="approved_source")
+    expected_digest = _threshold_contract_sha256(check)
+    if approved["threshold_contract_sha256"].casefold() != expected_digest:
+        raise _invalid(
+            "approved_source is not bound to this threshold contract.",
+            field="approved_source.threshold_contract_sha256",
+        )
+    review_id = approved["review_id"]
+    trusted_source = trusted_threshold_sources.get(review_id)
+    if trusted_source is None:
+        raise _invalid(
+            "approved_source review_id is not present in the trusted registry.",
+            field="approved_source.review_id",
+        )
+    trusted = _validated_approved_source(
+        trusted_source,
+        field_prefix="trusted_threshold_sources entry",
+    )
+    if trusted != approved:
+        raise _invalid(
+            "approved_source does not exactly match the trusted registry entry.",
+            field="approved_source",
+        )
+    return approved
+
+
+def _physical_terminal_power_loss(
+    check: Mapping[str, Any],
+    samples: Mapping[str, _Channel],
+    trusted_threshold_sources: Any = None,
+) -> tuple[str, dict[str, Any]]:
+    canonical = _canonical_terminal_power_loss_check(check)
+    convention = canonical["direction_convention"]
+    if convention != _POSITIVE_TERMINAL_POWER_CONVENTION:
+        raise _invalid(
+            "unsupported terminal power direction convention.",
+            field="direction_convention",
+        )
+    units = canonical["units"]
+    rectifier_name = canonical["rectifier_power_channel"]
+    inverter_name = canonical["inverter_power_channel"]
+    max_loss = canonical["max_loss"]
+    max_percent = canonical["max_percent"]
+    approved_source = None
+    if max_loss is not None or max_percent is not None:
+        approved_source = _approved_threshold_source(check, trusted_threshold_sources)
+    if units not in _TERMINAL_POWER_UNITS:
+        raise _EvidenceError(
+            "unit mismatch",
+            details={"expected_kind": "power", "observed_units": units},
+        )
+
+    rectifier_time, rectifier = _window(_channel(samples, rectifier_name), canonical["window"], units)
+    inverter_time, inverter = _window(_channel(samples, inverter_name), canonical["window"], units)
+    _require_identical_domains(
+        [(rectifier_name, rectifier_time), (inverter_name, inverter_time)],
+        check=canonical["name"],
+    )
+
+    rectifier_mean = _mean(rectifier)
+    inverter_mean = _mean(inverter)
+    loss_values = [
+        _finite_derived(left - right, "terminal power loss")
+        for left, right in zip(rectifier, inverter)
+    ]
+    loss = _mean(loss_values)
+    if rectifier_mean == 0.0:
+        loss_percent = None
+    else:
+        ratio = _finite_derived(loss / rectifier_mean, "terminal loss ratio")
+        loss_percent = _finite_derived(ratio * 100.0, "terminal loss percent")
+    passed = (
+        rectifier_mean > 0.0
+        and inverter_mean > 0.0
+        and _float_at_least(rectifier_mean, inverter_mean)
+        and all(
+            _float_at_least(rectifier_value, inverter_value)
+            for rectifier_value, inverter_value in zip(rectifier, inverter)
+        )
+    )
+
+    if max_loss is not None:
+        passed = passed and _float_at_most(loss, max_loss)
+    if max_percent is not None:
+        passed = passed and loss_percent is not None and _float_at_most(loss_percent, max_percent)
+
+    payload: dict[str, Any] = {
+        "observed": {
+            "rectifier_power_mean": rectifier_mean,
+            "inverter_power_mean": inverter_mean,
+            "loss": loss,
+            "loss_percent": loss_percent,
+            "loss_min": min(loss_values),
+            "loss_max": max(loss_values),
+            "units": units,
+            "direction_convention": convention,
+        },
+        "passed": passed,
+        "comparison_policy": dict(_FLOAT_COMPARISON_POLICY),
+    }
+    if approved_source is not None:
+        payload["approved_source"] = approved_source
+    return "derived", payload
+
+
 def _physical_angle(check: Mapping[str, Any], samples: Mapping[str, _Channel]) -> tuple[str, dict[str, Any]]:
     name = _text(check.get("channel"), "channel")
     units = _text(check.get("units"), "units")
@@ -623,6 +893,7 @@ _PHYSICAL_DISPATCH = {
     "dc_magnitude_polarity": _physical_dc,
     "pdc_product": _physical_pdc,
     "terminal_power_balance": _physical_power_balance,
+    "terminal_power_loss": _physical_terminal_power_loss,
     "angle_interval": _physical_angle,
     "ripple": _physical_ripple,
     "steady_state_control_error": _physical_control_error,
@@ -817,17 +1088,49 @@ def _physical_declarations(contract: Mapping[str, Any]) -> list[Mapping[str, Any
     return declarations
 
 
-def _evaluate_physical(samples: Mapping[str, _Channel], contract: Mapping[str, Any], result: dict[str, Any]) -> None:
+def _evaluate_physical(
+    samples: Mapping[str, _Channel],
+    contract: Mapping[str, Any],
+    result: dict[str, Any],
+    trusted_threshold_sources: Any = None,
+) -> None:
     for index, check in enumerate(_physical_declarations(contract)):
         record = _check_base(check, index)
+        if record["kind"] == "terminal_power_loss":
+            record["comparison_policy"] = dict(_FLOAT_COMPARISON_POLICY)
         dispatch = _PHYSICAL_DISPATCH.get(record["kind"])
         if dispatch is None:
             raise _invalid("unsupported physical check kind.", kind=record["kind"])
         try:
-            status, payload = dispatch(check, samples)
+            if record["kind"] == "terminal_power_loss":
+                status, payload = _physical_terminal_power_loss(
+                    check,
+                    samples,
+                    trusted_threshold_sources,
+                )
+            else:
+                status, payload = dispatch(check, samples)
             record["status"] = status
             record["observed"] = payload["observed"]
-            expected = {key: check[key] for key in ("min", "max", "target", "max_abs", "max_percent", "loss_allowance", "polarity") if key in check}
+            if "comparison_policy" in payload:
+                record["comparison_policy"] = payload["comparison_policy"]
+            expected = {
+                key: check[key]
+                for key in (
+                    "min",
+                    "max",
+                    "target",
+                    "max_abs",
+                    "max_loss",
+                    "max_percent",
+                    "loss_allowance",
+                    "polarity",
+                    "direction_convention",
+                )
+                if key in check
+            }
+            if "approved_source" in payload:
+                expected["approved_source"] = payload["approved_source"]
             if expected:
                 record["expected"] = expected
             record["outcome"] = PASS if payload["passed"] else FAIL
@@ -947,11 +1250,17 @@ def _final_verdict(result: Mapping[str, Any]) -> str:
     return PASS
 
 
-def evaluate_acceptance(samples: Any, golden: Any, contract: Any) -> dict[str, Any]:
+def evaluate_acceptance(
+    samples: Any,
+    golden: Any,
+    contract: Any,
+    trusted_threshold_sources: Any = None,
+) -> dict[str, Any]:
     """Evaluate contract-declared golden and physical evidence.
 
     Normal missing or unusable evidence is returned as INCOMPLETE_ANALYSIS.
     Malformed API arguments or malformed contract fields raise BackendError.
+    Numeric terminal-loss thresholds require a caller-owned trusted source registry.
     """
 
     if not isinstance(contract, Mapping):
@@ -979,7 +1288,12 @@ def evaluate_acceptance(samples: Any, golden: Any, contract: Any) -> dict[str, A
         golden_channels = _canonical_channels(golden, "golden")
         result["canonical"]["sample_channels"] = sorted(sample_channels)
         _evaluate_golden(sample_channels, golden_channels, contract, result)
-        _evaluate_physical(sample_channels, contract, result)
+        _evaluate_physical(
+            sample_channels,
+            contract,
+            result,
+            trusted_threshold_sources,
+        )
         _require_manifest_check_evidence(contract, result)
     except _EvidenceError as error:
         result["errors"].append(_error_record(error.reason, channel=error.channel, details=error.details))

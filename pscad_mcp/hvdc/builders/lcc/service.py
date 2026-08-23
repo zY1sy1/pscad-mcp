@@ -79,6 +79,7 @@ class LccBuilderService:
         inventory: Any = None,
         asset_loader: Callable[[str], LccAssetSet] = load_packaged_asset_set,
         executor_factory: Callable[..., Any] = execute_build,
+        trusted_threshold_sources: Any = None,
     ) -> None:
         self.pscad_service = pscad_service
         if workspace_root is not None:
@@ -91,6 +92,7 @@ class LccBuilderService:
         self.inventory = inventory
         self.asset_loader = asset_loader
         self.executor_factory = executor_factory
+        self.trusted_threshold_sources = trusted_threshold_sources
         self._tasks: dict[str, asyncio.Task[Any]] = {}
         self._records: dict[str, LccBuildRecord | dict[str, Any]] = {}
         self._leases: dict[str, WorkspaceBuildLease] = {}
@@ -101,6 +103,23 @@ class LccBuilderService:
         candidate = getattr(self.pscad_service, "lcc_inventory", None)
         if candidate is not None:
             return candidate() if callable(candidate) else candidate
+        bridge = getattr(self.pscad_service, "get_lcc_inventory", None)
+        if callable(bridge):
+            try:
+                return _run_coroutine_sync(
+                    lambda: bridge(asset_set.catalog)
+                )
+            except BackendError:
+                raise
+            except BaseException as error:
+                raise _service_error(
+                    "LCC_DEFINITION_MISSING",
+                    "Live PSCAD definition inventory could not be read.",
+                    "plan_lcc_model",
+                    reason="live_inventory_read_failed",
+                    required_version=asset_set.pscad_version,
+                    exception=type(error).__name__,
+                ) from error
         raise _service_error(
             "LCC_DEFINITION_MISSING",
             "Live PSCAD definition inventory is required before LCC planning; the packaged catalog is not live evidence.",
@@ -236,13 +255,18 @@ class LccBuilderService:
         lease: WorkspaceBuildLease,
     ) -> LccBuildRecord:
         try:
+            executor_kwargs = {
+                "asset_set": asset_set,
+                "build_id": build_id,
+                "journal": journal,
+            }
+            if self.trusted_threshold_sources is not None:
+                executor_kwargs["trusted_threshold_sources"] = self.trusted_threshold_sources
             record = await self.executor_factory(
                 plan,
                 self.pscad_service,
                 self.workspace_root,
-                asset_set=asset_set,
-                build_id=build_id,
-                journal=journal,
+                **executor_kwargs,
             )
         except asyncio.CancelledError:
             record = LccBuildRecord(
@@ -373,7 +397,12 @@ class LccBuilderService:
                 output_file=str(waveform_path),
                 exception=type(error).__name__,
             ) from error
-        acceptance = evaluate_acceptance(samples, asset_set.golden, asset_set.acceptance)
+        acceptance = evaluate_acceptance(
+            samples,
+            asset_set.golden,
+            asset_set.acceptance,
+            self.trusted_threshold_sources,
+        )
         acceptance["status"] = "evaluated"
         result["output_file"] = str(waveform_path)
         result["acceptance"] = acceptance

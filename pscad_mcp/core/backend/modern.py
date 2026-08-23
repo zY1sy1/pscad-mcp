@@ -20,6 +20,7 @@ from .base import (
     RunState,
     SimulationSetInfo,
     SimulationTaskInfo,
+    JsonDict,
 )
 from .run_control import (
     STOPPED_RUN_STATUSES,
@@ -327,6 +328,14 @@ class ModernBackend:
             await self._project(project_name), "definitions"
         )
         return [str(value) for value in values]
+
+    async def lcc_definition_inventory(self, catalog: Mapping[str, Any]) -> JsonDict:
+        raise BackendError(
+            "CAPABILITY_UNAVAILABLE",
+            "The modern PSCAD backend does not expose the 4.6.2 LCC definition inventory contract.",
+            self.name,
+            "lcc_definition_inventory",
+        )
 
     async def get_settings(self, project_name: str) -> dict[str, Any]:
         values = await self.adapter.call(self._app, "settings")
