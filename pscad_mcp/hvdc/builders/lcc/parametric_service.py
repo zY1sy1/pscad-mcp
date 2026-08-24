@@ -664,6 +664,32 @@ class ParametricLccBuilderService:
                 "build_parametric_lcc_model",
                 {"reason": "real_lifecycle_not_implemented", "missing": []},
             )
+        if self._uses_default_executor:
+            required_methods = {
+                "load_projects",
+                "set_project_settings",
+                "save_project_as",
+                "read_output_file",
+            }
+            if callable(getattr(self.pscad_service, "run_project", None)) or callable(
+                getattr(self.pscad_service, "run_simulation_set", None)
+            ):
+                required_methods.discard("run_project")
+            else:
+                required_methods.add("run_project")
+            missing_methods = sorted(
+                name for name in required_methods if not callable(getattr(self.pscad_service, name, None))
+            )
+            if missing_methods:
+                # Keep this pre-lease so an unlicensed or partial service cannot
+                # leave a build lock behind.
+                raise BackendError(
+                    "LCC_BUILD_UNAVAILABLE",
+                    "The PSCAD service does not expose the project lifecycle capabilities required by the real parametric executor.",
+                    "hvdc",
+                    "build_parametric_lcc_model",
+                    {"reason": "real_lifecycle_not_implemented", "missing": missing_methods},
+                )
         if self._uses_default_executor and not callable(
             getattr(self.pscad_service, "load_projects", None)
         ):

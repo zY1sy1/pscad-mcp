@@ -7,11 +7,13 @@ deterministic selector and value; it never guesses paths from component names.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import math
 import os
 import re
 import tempfile
+import time
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any
@@ -285,6 +287,82 @@ def apply_template_bindings(plan: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _lifecycle_config(plan: dict[str, Any]) -> dict[str, Any]:
+    """Return bounded lifecycle options without allowing arbitrary backend calls."""
+    value = plan.get("lifecycle", plan.get("pscad", {}))
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise _error(
+            "LCC_BUILD_UNAVAILABLE",
+            "The parametric plan lifecycle configuration is invalid.",
+            "execute_parametric_lcc_build",
+            reason="lifecycle_config_invalid",
+        )
+    return value
+
+
+def _timeout(value: Any, default: float, *, field: str) -> float:
+    if value is None:
+        return default
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(float(value)) or float(value) <= 0:
+        raise _error(
+            "LCC_BUILD_UNAVAILABLE",
+            f"The lifecycle {field} must be a finite positive number.",
+            "execute_parametric_lcc_build",
+            reason="lifecycle_timeout_invalid",
+            field=field,
+        )
+    return min(float(value), 86_400.0)
+
+
+def _status_value(response: Any) -> str | None:
+    if isinstance(response, dict):
+        for key in ("status", "state", "result"):
+            value = response.get(key)
+            if isinstance(value, str):
+                return value.casefold()
+    if isinstance(response, str):
+        value = response.casefold()
+        if any(token in value for token in ("failed", "failure", "error", "compile")):
+            return "failed"
+        if any(token in value for token in ("running", "started", "queued")):
+            return "running"
+        if any(token in value for token in ("complete", "success", "built")):
+            return "completed"
+    return None
+
+
+def _output_candidates(staging: Path, explicit: Any) -> list[Path]:
+    values: list[Any] = []
+    if explicit is not None:
+        values.append(explicit)
+    # PSCAD writes $(Namespace).out beside the loaded project.  Restrict
+    # discovery to the builder-owned staging directory and bounded suffixes.
+    values.extend(sorted(staging.parent.glob("*.out"), key=lambda path: str(path).casefold()))
+    values.extend(sorted(staging.parent.glob("*.psout"), key=lambda path: str(path).casefold()))
+    candidates: list[Path] = []
+    root = staging.parent.resolve()
+    for value in values:
+        if not isinstance(value, (str, Path)) or not str(value):
+            continue
+        candidate = Path(value).expanduser()
+        if not candidate.is_absolute():
+            candidate = root / candidate
+        if candidate.is_symlink():
+            continue
+        try:
+            resolved = candidate.resolve()
+            resolved.relative_to(root)
+        except (OSError, ValueError):
+            continue
+        if not resolved.is_file() or resolved.suffix.casefold() not in {".out", ".psout"}:
+            continue
+        if resolved not in candidates:
+            candidates.append(resolved)
+    return candidates
+
+
 async def execute_parametric_template(
     plan: dict[str, Any],
     pscad_service: Any,
@@ -293,23 +371,87 @@ async def execute_parametric_template(
     build_id: str = "lcc-parametric-build",
     journal: Any = None,
 ) -> dict[str, Any]:
-    """Stage, load, and optionally run an explicitly bound PSCX template."""
+    """Execute an explicitly bound template through the PscadService boundary.
+
+    This function intentionally does not access a backend implementation.  It
+    only uses the public service methods needed for a real project lifecycle;
+    absent a licensed service or a terminal output file it returns a structured
+    failure and leaves the staging evidence in place.
+    """
 
     evidence = apply_template_bindings(plan)
+    config = _lifecycle_config(plan)
     loader = getattr(pscad_service, "load_projects", None)
-    if not callable(loader):
+    settings_writer = getattr(pscad_service, "set_project_settings", None)
+    saver = getattr(pscad_service, "save_project_as", None)
+    runner = getattr(pscad_service, "run_simulation_set", None)
+    run_project = getattr(pscad_service, "run_project", None)
+    reader = getattr(pscad_service, "read_output_file", None)
+    if not callable(loader) or not callable(settings_writer) or not callable(saver) or not callable(reader) or not (callable(runner) or callable(run_project)):
         raise _error(
             "LCC_BUILD_UNAVAILABLE",
-            "The PSCAD service does not expose project loading.",
+            "The PSCAD service does not expose the required project lifecycle APIs.",
             "execute_parametric_lcc_build",
-            reason="pscad_load_unavailable",
+            reason="pscad_lifecycle_unavailable",
         )
+    staging = Path(evidence["staging_path"]).resolve()
+    project = plan.get("project", {}) if isinstance(plan.get("project", {}), dict) else {}
+    project_name = config.get("project_name") or project.get("name") or staging.stem
+    if not isinstance(project_name, str) or not project_name:
+        raise _error("LCC_BUILD_UNAVAILABLE", "The staged project name is invalid.", "execute_parametric_lcc_build", reason="project_name_invalid")
+    settings = config.get("settings", config.get("project_settings", {}))
+    if settings is None:
+        settings = {}
+    if not isinstance(settings, dict):
+        raise _error("LCC_BUILD_UNAVAILABLE", "The project settings payload is invalid.", "execute_parametric_lcc_build", reason="project_settings_invalid")
+    simulation_set = config.get("simulation_set")
+    explicit_output = config.get("output_file", config.get("output_path"))
+    run_timeout = _timeout(config.get("run_timeout_s", config.get("timeout_s")), 900.0, field="run_timeout_s")
+    poll_interval = _timeout(config.get("poll_interval_s"), 0.25, field="poll_interval_s")
     await loader([evidence["staging_path"]])
+    await settings_writer(project_name, settings)
+    # Save-as is the public persistence boundary.  The destination is the
+    # already-created staging file; no final target is touched here.
+    await saver(project_name, staging.name, str(staging.parent), confirm=True)
+    started = time.monotonic()
+    try:
+        response = (
+            await runner(project_name, simulation_set)
+            if isinstance(simulation_set, str) and simulation_set and callable(runner)
+            else await run_project(project_name)
+        )
+    except BaseException as error:
+        raise _error(
+            "LCC_COMPILE_FAILED",
+            "PSCAD failed to compile or start the staged project.",
+            "execute_parametric_lcc_build",
+            reason="compile_or_start_failed",
+            exception=type(error).__name__,
+        ) from error
+    status = _status_value(response)
+    if status == "failed":
+        raise _error("LCC_COMPILE_FAILED", "PSCAD reported a compile or run failure.", "execute_parametric_lcc_build", reason="compile_failed")
+    if status == "completed" and not _output_candidates(staging, explicit_output):
+        raise _error("LCC_OUTPUT_MISSING", "PSCAD completed without producing an output file.", "execute_parametric_lcc_build", reason="output_missing")
+    while True:
+        candidates = _output_candidates(staging, explicit_output)
+        if candidates:
+            break
+        if time.monotonic() - started >= run_timeout:
+            raise _error("LCC_RUN_TIMED_OUT", "The PSCAD run did not produce output before the timeout.", "execute_parametric_lcc_build", reason="run_timeout", timeout_s=run_timeout)
+        await asyncio.sleep(min(poll_interval, 1.0))
+    if len(candidates) != 1:
+        raise _error("LCC_OUTPUT_MISSING", "The staged PSCAD run did not produce one unambiguous output file.", "execute_parametric_lcc_build", reason="output_ambiguous", candidates=[str(path) for path in candidates])
+    output_file = candidates[0]
+    try:
+        output = await reader(str(output_file), max_samples=1_000_000, summary_only=False)
+    except BaseException as error:
+        raise _error("LCC_OUTPUT_MISSING", "The staged PSCAD output file could not be read.", "execute_parametric_lcc_build", reason="output_read_failed", path=str(output_file), exception=type(error).__name__) from error
     record = {
         "build_id": build_id,
         "state": "validated",
         "workspace": str(Path(workspace_root).expanduser().resolve()),
-        "result": {"template": evidence, "backend_loaded": True},
+        "result": {"template": evidence, "backend_loaded": True, "project_name": project_name, "output_file": str(output_file), "output": output, "run_response": response},
         "error": None,
     }
     if journal is not None:
