@@ -160,6 +160,16 @@ def derive_mode_copies(base_plan: Any, modes: Sequence[str]) -> tuple[ModeCopy, 
         plan["topology"] = {**deepcopy(dict(topology)), **deepcopy(dict(contract["topology_overrides"]))}
         plan["control_commands"] = deepcopy(list(contract["control_overrides"]))
         plan["operating_mode"] = mode
+        evidence_root = base_plan.get("evidence_root")
+        if evidence_root is not None:
+            if not isinstance(evidence_root, str) or not evidence_root.strip() or not evidence_root.startswith(("/", "\\")) and ":" not in evidence_root[:3]:
+                raise _error(
+                    "LCC_OPERATING_MODE_INVALID",
+                    "evidence_root must be an absolute path when supplied.",
+                    mode=mode,
+                    reason="evidence_root_invalid",
+                )
+            plan["evidence_directory"] = f"{evidence_root.rstrip('/\\\\')}/{mode}"
         copies.append(ModeCopy(mode, _freeze(plan)))
     return tuple(copies)
 
