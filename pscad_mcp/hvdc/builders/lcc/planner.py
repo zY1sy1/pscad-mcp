@@ -323,7 +323,7 @@ def create_parametric_topology_plan(
                     "template_parameter": template_parameter,
                 }
         parameter_bindings: list[dict[str, Any]] = []
-        for role in roles:
+        for role in binding_roles:
             candidates = reviewed_by_key.get((parameter.name, role), [])
             for candidate in candidates:
                 selector = candidate.get("selector")
