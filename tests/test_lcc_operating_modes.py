@@ -156,6 +156,15 @@ def test_mode_copies_apply_explicit_overrides_and_are_deeply_isolated():
     assert copies[0].plan["topology"]["return_path"] == "balanced"
     assert copies[1].plan["topology"]["return_path"] == "metallic"
     assert copies[1].plan["control_commands"][0]["value"] == 1
+
+
+def test_mode_copies_allocate_independent_evidence_directories():
+    base = _base_plan()
+    base["evidence_root"] = "C:/workspace/lcc-evidence"
+    copies = derive_mode_copies(base, ("bipolar_run", "metallic_return"))
+    assert copies[0].plan["evidence_directory"].endswith("lcc-evidence/bipolar_run")
+    assert copies[1].plan["evidence_directory"].endswith("lcc-evidence/metallic_return")
+    assert copies[0].plan["evidence_directory"] != copies[1].plan["evidence_directory"]
     assert base["topology"]["return_path"] == "earth"
     with pytest.raises(TypeError):
         copies[0].plan["topology"]["return_path"] = "mutated"

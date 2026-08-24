@@ -68,6 +68,15 @@
     "min_extinction_angle_deg": {"logical_parameter": "min_extinction_angle_deg", "units": "deg", "roles_by_topology": {"monopolar": ["inverter_valve_group"], "bipolar": ["inverter_positive_pole", "inverter_negative_pole"]}, "template_parameter": null, "binding_status": "unreviewed"},
     "max_feasible_inverter_firing_angle_deg": {"logical_parameter": "max_feasible_inverter_firing_angle_deg", "units": "deg", "roles_by_topology": {"monopolar": ["inverter_valve_group"], "bipolar": ["inverter_positive_pole", "inverter_negative_pole"]}, "template_parameter": null, "binding_status": "unreviewed"}
   },
+  "template_bindings": [
+    {"logical_parameter": "frequency_hz", "role": "main_control", "selector": "/project/definitions/Definition[@name='Main']/form/category[@name='Global Substitutions']/parameter[@name='Freq']/value", "attribute": "text", "units": "Hz", "binding_status": "reviewed"},
+    {"logical_parameter": "dc_voltage_kv", "role": "rectifier_valve_group", "selector": "/project/definitions/Definition[@name='RectPole']/schematic/User[@id='1601952104']/paramlist/param[@name='V2']", "attribute": "value", "units": "kV", "binding_status": "reviewed"},
+    {"logical_parameter": "dc_voltage_kv", "role": "inverter_valve_group", "selector": "/project/definitions/Definition[@name='InverterPole']/schematic/User[@id='723463851']/paramlist/param[@name='V2']", "attribute": "value", "units": "kV", "binding_status": "reviewed"},
+    {"logical_parameter": "ac_voltage_kv", "role": "rectifier_valve_group", "selector": "/project/definitions/Definition[@name='RectPole']/schematic/User[@id='1601952104']/paramlist/param[@name='V1']", "attribute": "value", "units": "kV", "binding_status": "reviewed"},
+    {"logical_parameter": "ac_voltage_kv", "role": "inverter_valve_group", "selector": "/project/definitions/Definition[@name='InverterPole']/schematic/User[@id='723463851']/paramlist/param[@name='V1']", "attribute": "value", "units": "kV", "binding_status": "reviewed"},
+    {"logical_parameter": "frequency_hz", "role": "rectifier_valve_group", "selector": "/project/definitions/Definition[@name='RectPole']/schematic/User[@id='822897092']/paramlist/param[@name='FR']", "attribute": "value", "units": "Hz", "binding_status": "reviewed"},
+    {"logical_parameter": "frequency_hz", "role": "inverter_valve_group", "selector": "/project/definitions/Definition[@name='InverterPole']/schematic/User[@id='332752164']/paramlist/param[@name='FR']", "attribute": "value", "units": "Hz", "binding_status": "reviewed"}
+  ],
   "rating_parameters": {
     "rated_power_mw": {"units": "MW", "required": true, "constraints": [{"kind": "exclusive_minimum", "value": 0.0, "asset": "lcc_parametric_provenance_v1:positive_finite"}], "asset": "lcc_parametric_provenance_v1:positive_finite"},
     "dc_voltage_kv": {"units": "kV", "required": true, "constraints": [{"kind": "exclusive_minimum", "value": 0.0, "asset": "lcc_parametric_provenance_v1:positive_finite"}], "asset": "lcc_parametric_provenance_v1:positive_finite"},

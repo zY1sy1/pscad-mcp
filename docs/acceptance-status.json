@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "updated_at": "2026-08-24T22:00:00+08:00",
+  "policy": "A licensed PASS applies only to the named scope and commit. It must not be inherited by another builder, domain workflow, or later commit.",
+  "scopes": [
+    {
+      "scope": "legacy_core_462",
+      "implementation_status": "MERGED",
+      "licensed_status": "PASS_HISTORICAL",
+      "evidence": {
+        "report_path": null,
+        "sha256": null,
+        "commit": null
+      },
+      "note": "The managed PSCAD 4.6.2 Legacy core workflow was accepted historically, but no single durable machine-readable report is committed. Rerun scripts/run_legacy_acceptance.ps1 for a release claim."
+    },
+    {
+      "scope": "fixed_cigre_lcc",
+      "implementation_status": "MERGED",
+      "licensed_status": "INCOMPLETE_ANALYSIS",
+      "evidence": {
+        "report_path": "D:/PSCAD-Workspace/lcc-integrated-acceptance/lcc-acceptance-20260824-220227-235894/lcc-acceptance-report.json",
+        "sha256": "163ce64248f4f57dc6576f3bcf60938881845126c6e55babdec46960ced5dc50",
+        "commit": null
+      },
+      "attempt": {
+        "timestamp": "2026-08-24T22:02:27+08:00",
+        "failure_stage": "definition_inventory",
+        "failure_code": "LCC_DEFINITION_MISSING",
+        "missing_definition": "master:three_phase_source",
+        "template": "C:/Users/335/Desktop/moxing/HVDC_Bipolar_1000MW_500kV.pscx",
+        "build_evidence": false,
+        "output_evidence": false,
+        "project_hash": null,
+        "output_hash": null
+      },
+      "note": "The latest licensed attempt failed safely during definition inventory because the installed Master Library does not expose master:three_phase_source. No project write, build, or output evidence exists; this scope must not be reported as PASS."
+    },
+    {
+      "scope": "parametric_lcc",
+      "implementation_status": "INTEGRATION_BRANCH",
+      "licensed_status": "NOT_RUN_ON_INTEGRATED_COMMIT",
+      "evidence": {
+        "report_path": null,
+        "sha256": null,
+        "commit": "bea7b919970a1e323e2b7a14de55cc2f356f3545"
+      },
+      "note": "Real-template execution is integrated on codex/integrate-outstanding-work and has passed non-licensed regression only."
+    },
+    {
+      "scope": "hvdc_scenarios",
+      "implementation_status": "MERGED",
+      "licensed_status": "PARTIAL",
+      "evidence": {
+        "report_path": null,
+        "sha256": null,
+        "commit": null
+      },
+      "note": "Real compile and output evidence exists for reference projects, while strict timed control remains fail-closed without approved writable command bindings and complete selector evidence."
+    },
+    {
+      "scope": "mmc_stage_a",
+      "implementation_status": "NOT_INTEGRATED",
+      "licensed_status": "NOT_INTEGRATED",
+      "evidence": {
+        "report_path": null,
+        "sha256": null,
+        "commit": "8872a96f72c039ebca1925b8e6a6cfa8763e7d19"
+      },
+      "note": "MMC Stage A remains on codex/mmc-autonomous-builder and has no licensed acceptance claim."
+    }
+  ]
+}

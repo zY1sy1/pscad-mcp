@@ -280,6 +280,18 @@ def create_parametric_topology_plan(
         role: {} for role in validated["template_roles"]
     }
     unresolved: list[dict[str, Any]] = []
+    plan_bindings: list[dict[str, Any]] = []
+    template_bindings = catalog_value.get("template_bindings", ())
+    if not isinstance(template_bindings, Sequence) or isinstance(template_bindings, (str, bytes, bytearray)):
+        template_bindings = ()
+    reviewed_by_key: dict[tuple[str, str], list[Mapping[str, Any]]] = defaultdict(list)
+    for declaration in template_bindings:
+        if not isinstance(declaration, Mapping):
+            continue
+        logical = declaration.get("logical_parameter")
+        role = declaration.get("role")
+        if isinstance(logical, str) and isinstance(role, str):
+            reviewed_by_key[(logical, role)].append(declaration)
     observed_names: set[str] = set()
     for parameter in sorted(derived_report.parameters, key=lambda item: item.name):
         if parameter.name in observed_names:
@@ -299,14 +311,53 @@ def create_parametric_topology_plan(
             raise _error("LCC_BLUEPRINT_INVALID", "A logical parameter binding does not match the topology or units.", parameter=parameter.name, topology=topology)
         logical_parameter = declaration.get("logical_parameter")
         template_parameter = declaration.get("template_parameter")
-        for role in roles:
-            role_parameters[role][parameter.name] = {
-                "value": parameter.value,
-                "units": parameter.units,
-                "logical_parameter": logical_parameter,
-                "template_parameter": template_parameter,
-            }
-        if declaration.get("binding_status") != "reviewed" or not isinstance(template_parameter, str) or not template_parameter:
+        binding_roles = list(roles)
+        if reviewed_by_key.get((parameter.name, "main_control")):
+            binding_roles.append("main_control")
+        for role in binding_roles:
+            if role in role_parameters:
+                role_parameters[role][parameter.name] = {
+                    "value": parameter.value,
+                    "units": parameter.units,
+                    "logical_parameter": logical_parameter,
+                    "template_parameter": template_parameter,
+                }
+        parameter_bindings: list[dict[str, Any]] = []
+        for role in binding_roles:
+            candidates = reviewed_by_key.get((parameter.name, role), [])
+            for candidate in candidates:
+                selector = candidate.get("selector")
+                attribute = candidate.get("attribute")
+                units = candidate.get("units")
+                if (
+                    candidate.get("binding_status") == "reviewed"
+                    and isinstance(selector, str)
+                    and isinstance(attribute, str)
+                    and isinstance(units, str)
+                    and units == parameter.units
+                ):
+                    expected = candidate.get("expected_match_count", 1)
+                    if isinstance(expected, bool) or not isinstance(expected, int) or expected <= 0:
+                        raise _error(
+                            "LCC_PARAMETER_BINDING_UNAVAILABLE",
+                            "A reviewed template binding must declare a positive expected match count.",
+                            logical_parameter=parameter.name,
+                        )
+                    parameter_bindings.append(
+                        {
+                            "logical_parameter": parameter.name,
+                            "role": role,
+                            "selector": selector,
+                            "attribute": attribute,
+                            "units": units,
+                            "derived_value": parameter.value,
+                            "value": parameter.value,
+                            "expected_match_count": expected,
+                        }
+                    )
+        if parameter_bindings:
+            plan_bindings.extend(parameter_bindings)
+        if not parameter_bindings:
             unresolved.append(
                 {
                     "parameter": parameter.name,
@@ -331,6 +382,10 @@ def create_parametric_topology_plan(
         "nets": validated["nets"],
         "outputs": validated["outputs"],
         "role_parameters": role_parameters,
+        "bindings": sorted(
+            plan_bindings,
+            key=lambda item: (item["logical_parameter"], item["role"], item["selector"]),
+        ),
         "unresolved_bindings": unresolved,
         "executable": not unresolved,
     }

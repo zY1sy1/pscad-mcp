@@ -1,6 +1,7 @@
 import asyncio
 import copy
 import hashlib
+import shutil
 from dataclasses import replace
 from pathlib import Path
 
@@ -548,3 +549,96 @@ def test_build_fails_explicitly_when_real_executor_is_not_connected(tmp_path, ps
     assert raised.value.details["reason"] in {"lifecycle_configuration_missing", "real_lifecycle_not_implemented"}
     assert service._statuses == {}
     assert not values["workspace"].exists()
+
+
+def test_build_with_configured_executor_stages_template_and_tracks_status(tmp_path):
+    values = _inputs(tmp_path)
+    calls = {}
+
+    async def fake_executor(plan, pscad_service, workspace_root, *, build_id, journal):
+        calls["pscad_service"] = pscad_service
+        calls["workspace_root"] = Path(workspace_root)
+        staging = Path(plan["project"]["staging_path"])
+        staging.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(plan["template"]["path"], staging)
+        record = {
+            "build_id": build_id,
+            "state": "published",
+            "plan_hash": plan["plan_hash"],
+            "target_path": plan["project"]["target_path"],
+            "staging_path": str(staging),
+            "result": {"staged_sha256": hashlib.sha256(staging.read_bytes()).hexdigest()},
+        }
+        journal.write(record)
+        return record
+
+    pscad_service = object()
+    service = ParametricLccBuilderService(
+        pscad_service=pscad_service,
+        workspace_root=values["workspace"],
+        executor_factory=fake_executor,
+    )
+    plan = _plan(service, values)
+
+    async def scenario():
+        started = await service.build_parametric_model(
+            values["request"],
+            template_path=values["template_path"],
+            project_name=values["project_name"],
+            folder=values["folder"],
+            expected_plan_hash=plan["plan_hash"],
+            confirm=True,
+        )
+        assert started["state"] == "validated"
+        for _ in range(20):
+            status = service.get_status(started["build_id"])
+            if status["state"] == "published":
+                return started, status
+            await asyncio.sleep(0)
+        return started, service.get_status(started["build_id"])
+
+    started, status = asyncio.run(scenario())
+    build_id = started["build_id"]
+    assert status["state"] == "published"
+    assert Path(status["staging_path"]).is_file()
+    assert status["result"]["staged_sha256"] == hashlib.sha256(
+        Path(status["staging_path"]).read_bytes()
+    ).hexdigest()
+    assert calls["pscad_service"] is pscad_service
+    assert calls["workspace_root"] == values["workspace"].resolve()
+
+
+def test_configured_executor_failure_is_contained_and_releases_lease(tmp_path):
+    values = _inputs(tmp_path)
+
+    async def failing_executor(plan, pscad_service, workspace_root, *, build_id, journal):
+        raise RuntimeError("executor unavailable")
+
+    service = ParametricLccBuilderService(
+        pscad_service=object(),
+        workspace_root=values["workspace"],
+        executor_factory=failing_executor,
+    )
+    plan = _plan(service, values)
+
+    async def scenario():
+        started = await service.build_parametric_model(
+            values["request"],
+            template_path=values["template_path"],
+            project_name=values["project_name"],
+            folder=values["folder"],
+            expected_plan_hash=plan["plan_hash"],
+            confirm=True,
+        )
+        for _ in range(20):
+            status = service.get_status(started["build_id"])
+            if status["state"] == "failed":
+                return status
+            await asyncio.sleep(0)
+        return service.get_status(started["build_id"])
+
+    status = asyncio.run(scenario())
+
+    assert status["state"] == "failed"
+    assert status["error"]["code"] == "LCC_BUILD_FAILED"
+    assert not (values["workspace"] / ".pscad-mcp" / "lcc-build.lock").exists()

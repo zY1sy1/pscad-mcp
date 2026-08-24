@@ -19,6 +19,16 @@ def test_acceptance_config_requires_absolute_legacy_462_workspace():
     assert config["backend"] == "legacy"
 
 
+def test_acceptance_config_keeps_parametric_template_explicit_and_absolute():
+    config = acceptance_config({
+        "PSCAD_MCP_BACKEND": "legacy",
+        "PSCAD_MCP_VERSION": "4.6.2",
+        "PSCAD_MCP_WORKSPACE": "C:/workspace",
+        "PSCAD_MCP_LCC_TEMPLATE": "C:/templates/HVDC_Bipolar_1000MW_500kV.pscx",
+    })
+    assert config["template"] == Path("C:/templates/HVDC_Bipolar_1000MW_500kV.pscx").resolve()
+
+
 def test_evidence_directory_is_timestamped_and_owned(tmp_path):
     directory = evidence_directory(tmp_path, now=datetime(2026, 8, 19, 12, 34, 56, 123456))
 
