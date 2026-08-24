@@ -61,6 +61,27 @@ PSCAD 5.x、故障或换相失败验收、MMC 构建均不可用。
 当前实现的 PSCAD 4.6.2 授权验收尚未通过；在 opt-in 实机验收
 通过前，不得把该功能描述为已自治构建并验收的 CIGRE LCC 模型。
 
+### 参数化 LCC 真实模板执行边界
+
+参数化 LCC 现在支持额定值推导、真实 PSCX 模板的只读绑定审核、确定性
+selector 计划、staging 原子写入，以及通过 `PscadService` 的加载、工程设置、
+另存、运行和 `.out/.psout` 读取生命周期。每项写入都会记录源模板哈希、staging
+哈希、修改路径和读回值；源模板不会被修改，最终目标也不会在编译和输出证据
+齐备前创建。`bipolar_run`、`monopolar_earth_return` 和
+`monopolar_metallic_return` 使用独立的模式证据目录，并且切换必须通过 EMTDC
+simulation-clock 和精确可读回 command binding。
+
+交付状态必须分开理解：上述能力已实现，非许可回归测试已通过，项目虚拟环境
+可安装；本工作树没有已提交的参数化 licensed PSCAD `PASS` 报告。没有
+`PSCAD_MCP_LCC_ACCEPTANCE=1`、绝对 `PSCAD_MCP_WORKSPACE`、PSCAD 4.6.2
+legacy 服务和批准模板路径时，执行只返回 `LCC_BUILD_UNAVAILABLE` 或
+`INCOMPLETE_ANALYSIS`，不会把 mock/fake 运行写成真实验收。
+
+启用真实验收时，应将源模板复制到时间戳隔离目录，并核对 source/template/
+catalog/provenance/final project 哈希、编译状态、输出文件哈希、每个模式的
+selector/单位和结构及稳态验收结果；只有报告最终状态为 `PASS` 才能称为真实
+PSCAD 验收完成。
+
 ## Windows 安装
 
 以下命令从仓库根目录执行，并通过变量保留路径可移植性：

@@ -6,6 +6,17 @@ All notable changes to this project are documented here.
 
 ### Changed
 
+- Parameterized LCC execution now carries reviewed real-template selectors through
+  deterministic plans, validates bindings before acquiring a workspace lease,
+  stages PSCX changes atomically, and records bounded source/staging/read-back
+  evidence. The PSCAD lifecycle remains fail-closed without licensed compile,
+  run, and output evidence; no real parameterized `PASS` is claimed here.
+- Added bounded parameterized LCC acceptance gates for compile/project hashes,
+  `.out`/`.psout` hashes, exact Gamma/Alpha, pole voltage/current, neutral and
+  return-current selectors, units, and derived-parameter evidence. Operating-mode
+  copies receive independent evidence directories and strict EMTDC-time switching
+  remains required.
+
 - Added parameterized LCC foundation records, deterministic rating derivation,
   monopole/bipole topology contracts, operating-mode schedule validation,
   read-only template auditing, lifecycle service composition, and six guarded

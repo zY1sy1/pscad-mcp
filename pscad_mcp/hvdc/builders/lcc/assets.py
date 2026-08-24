@@ -62,7 +62,7 @@ _PARAMETRIC_CATALOG_KEYS = {
     "schema_version", "name", "pscad_version", "identity",
     "provenance_identity", "provenance_sha256", "rating_contract_asset",
     "definitions", "template_role_contracts", "blueprint_hashes",
-    "topology_contracts", "logical_parameter_bindings", "rating_parameters",
+    "topology_contracts", "logical_parameter_bindings", "template_bindings", "rating_parameters",
     "derived_parameters", "engineering_parameters", "feasibility_relationships",
     "return_contract_assets", "return_asset_requirements",
 }
@@ -437,12 +437,15 @@ def validate_parametric_catalog_asset(value: Any) -> dict[str, Any]:
     hashes = value.get("blueprint_hashes")
     topologies = value.get("topology_contracts")
     bindings = value.get("logical_parameter_bindings")
+    template_bindings = value.get("template_bindings")
     if not isinstance(hashes, dict) or set(hashes) != set(_PARAMETRIC_NAMES) or any(not isinstance(item, str) or not _HASH_PATTERN.fullmatch(item) for item in hashes.values()):
         raise _asset_error("LCC_ASSET_MISMATCH", "Parametric blueprint hashes are invalid.", "load_parametric_catalog")
     if not isinstance(topologies, dict) or set(topologies) != set(_PARAMETRIC_NAMES.values()):
         raise _asset_error("LCC_ASSET_MISMATCH", "Parametric topology contracts are invalid.", "load_parametric_catalog")
     if not isinstance(bindings, dict) or not bindings:
         raise _asset_error("LCC_ASSET_MISMATCH", "Parametric logical parameter bindings are missing.", "load_parametric_catalog")
+    if not isinstance(template_bindings, list) or not template_bindings:
+        raise _asset_error("LCC_ASSET_MISMATCH", "Reviewed template bindings are missing.", "load_parametric_catalog")
     topology_roles: dict[str, set[str]] = {}
     topology_keys = {"blueprint", "template_roles", "component_roles", "net_ids", "required_return_nets", "output_names"}
     for topology, contract in topologies.items():
@@ -485,6 +488,34 @@ def validate_parametric_catalog_asset(value: Any) -> dict[str, Any]:
         for topology, roles in binding["roles_by_topology"].items():
             if not isinstance(roles, list) or not roles or len(roles) != len(set(roles)) or any(role not in topology_roles[topology] for role in roles):
                 raise _asset_error("LCC_ASSET_MISMATCH", "A logical parameter binding references an undeclared template role.", "load_parametric_catalog", parameter=name, topology=topology)
+    selectors: set[str] = set()
+    for index, binding in enumerate(template_bindings):
+        if (
+            not isinstance(binding, dict)
+            or set(binding) != {"logical_parameter", "role", "selector", "attribute", "units", "binding_status"}
+            or not isinstance(binding.get("logical_parameter"), str)
+            or binding["logical_parameter"] not in declared_parameter_names
+            or not isinstance(binding.get("role"), str)
+            or not isinstance(binding.get("selector"), str)
+            or len(binding["selector"]) > 512
+            or not binding["selector"].startswith("/project/definitions/")
+            or ".." in binding["selector"]
+            or "|" in binding["selector"]
+            or binding.get("attribute") not in {"value", "text"}
+            or not isinstance(binding.get("units"), str)
+            or not binding["units"]
+            or binding.get("binding_status") != "reviewed"
+        ):
+            raise _asset_error("LCC_ASSET_MISMATCH", "A reviewed template binding is invalid.", "load_parametric_catalog", index=index)
+        valid_roles = set().union(*(topology_roles.values())) | {"main_control"}
+        if binding["role"] not in valid_roles:
+            raise _asset_error("LCC_ASSET_MISMATCH", "A reviewed template binding references an unknown role.", "load_parametric_catalog", index=index)
+        if binding["selector"] in selectors:
+            raise _asset_error("LCC_ASSET_MISMATCH", "Reviewed template binding selectors must be unique.", "load_parametric_catalog", index=index)
+        selectors.add(binding["selector"])
+        declared_units = bindings[binding["logical_parameter"]]["units"]
+        if binding["units"] != declared_units:
+            raise _asset_error("LCC_ASSET_MISMATCH", "A reviewed template binding has inconsistent units.", "load_parametric_catalog", index=index)
     return value
 
 

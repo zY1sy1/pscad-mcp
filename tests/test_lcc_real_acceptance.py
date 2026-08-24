@@ -53,6 +53,7 @@ def acceptance_config(environ: dict[str, str] | None = None) -> dict[str, object
         "version": version,
         "x64": _env_bool("PSCAD_MCP_X64", True) if environ is None else values.get("PSCAD_MCP_X64", "true").casefold() in {"1", "true", "yes", "on"},
         "workspace": workspace,
+        "template": None if not values.get("PSCAD_MCP_LCC_TEMPLATE") else Path(values["PSCAD_MCP_LCC_TEMPLATE"]).expanduser().resolve(),
     }
 
 

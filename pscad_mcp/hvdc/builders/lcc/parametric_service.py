@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import copy
 import hashlib
 import json
@@ -14,8 +15,11 @@ from typing import Any
 from ....core.backend.base import BackendError
 from ....core.path_policy import PathPolicy, WorkspaceNotConfiguredError
 from .derivation import derive_lcc_parameters
+from .journal import AtomicJournal, WorkspaceBuildLease
 from .modes import derive_mode_copies, validate_lcc_schedule
 from .parametric_models import ParametricLccRequest
+from .parametric_executor import execute_parametric_template, validate_template_bindings
+from .planner import create_parametric_topology_plan
 from .template_audit import audit_lcc_template
 
 
@@ -262,12 +266,23 @@ def _load_parametric_asset_snapshot(
 
 
 class ParametricLccBuilderService:
-    def __init__(self, pscad_service: Any = None, *, workspace_root: str | Path | None = None, catalog: Any = None) -> None:
+    def __init__(
+        self,
+        pscad_service: Any = None,
+        *,
+        workspace_root: str | Path | None = None,
+        catalog: Any = None,
+        executor_factory: Any = None,
+    ) -> None:
         self.pscad_service = pscad_service
         self.workspace_root = Path(workspace_root).expanduser().resolve() if workspace_root is not None else None
         self.catalog = catalog
+        self.executor_factory = execute_parametric_template if executor_factory is None else executor_factory
+        self._uses_default_executor = executor_factory is None
         self._statuses: dict[str, dict[str, Any]] = {}
         self._plans: dict[str, dict[str, Any]] = {}
+        self._tasks: dict[str, asyncio.Task[Any]] = {}
+        self._leases: dict[str, WorkspaceBuildLease] = {}
 
     def derive_parameters(self, request: ParametricLccRequest) -> dict[str, Any]:
         return derive_lcc_parameters(request, self.catalog).to_dict()
@@ -502,13 +517,19 @@ class ParametricLccBuilderService:
             enforce_target_absent=enforce_target_absent,
         )
         assets = _load_parametric_asset_snapshot(request.topology, self.catalog)
-        derived = derive_lcc_parameters(request, assets["catalog"]).to_dict()
+        derived_report = derive_lcc_parameters(request, assets["catalog"])
+        derived = derived_report.to_dict()
+        topology_plan = create_parametric_topology_plan(
+            assets["blueprint"], derived_report, assets["catalog"]
+        )
         audited = audit_lcc_template(source, assets["catalog"]).to_dict()
         self._validate_topology(request, audited, operation=operation)
         payload = {
             "schema_version": 1,
             "request": request.to_dict(),
             "derived": derived,
+            "topology_plan": topology_plan,
+            "bindings": copy.deepcopy(topology_plan.get("bindings", [])),
             "template": {
                 "path": str(source),
                 "fingerprint": audited["fingerprint"],
@@ -635,13 +656,207 @@ class ParametricLccBuilderService:
                 "build_parametric_lcc_model",
                 {"reason": "lifecycle_configuration_missing", "missing": missing},
             )
-        raise BackendError(
-            "LCC_BUILD_UNAVAILABLE",
-            "The real PSCAD parametric LCC build lifecycle is not implemented.",
-            "hvdc",
-            "build_parametric_lcc_model",
-            {"reason": "real_lifecycle_not_implemented", "missing": []},
-        )
+        if not callable(self.executor_factory):
+            raise BackendError(
+                "LCC_BUILD_UNAVAILABLE",
+                "The real PSCAD parametric LCC build lifecycle is not implemented.",
+                "hvdc",
+                "build_parametric_lcc_model",
+                {"reason": "real_lifecycle_not_implemented", "missing": []},
+            )
+        if self._uses_default_executor:
+            required_methods = {
+                "load_projects",
+                "set_project_settings",
+                "save_project_as",
+                "read_output_file",
+            }
+            if callable(getattr(self.pscad_service, "run_project", None)) or callable(
+                getattr(self.pscad_service, "run_simulation_set", None)
+            ):
+                required_methods.discard("run_project")
+            else:
+                required_methods.add("run_project")
+            missing_methods = sorted(
+                name for name in required_methods if not callable(getattr(self.pscad_service, name, None))
+            )
+            if missing_methods:
+                # Keep this pre-lease so an unlicensed or partial service cannot
+                # leave a build lock behind.
+                raise BackendError(
+                    "LCC_BUILD_UNAVAILABLE",
+                    "The PSCAD service does not expose the project lifecycle capabilities required by the real parametric executor.",
+                    "hvdc",
+                    "build_parametric_lcc_model",
+                    {"reason": "real_lifecycle_not_implemented", "missing": missing_methods},
+                )
+        if self._uses_default_executor and not callable(
+            getattr(self.pscad_service, "load_projects", None)
+        ):
+            raise BackendError(
+                "LCC_BUILD_UNAVAILABLE",
+                "The PSCAD service does not expose the project-loading capability required by the real parametric executor.",
+                "hvdc",
+                "build_parametric_lcc_model",
+                {"reason": "real_lifecycle_not_implemented", "missing": ["load_projects"]},
+            )
+        # Binding validation is deliberately completed before acquiring the
+        # workspace lease or scheduling a task that can call PSCAD. Custom
+        # executors own their own contract and are retained for test/fake
+        # lifecycle integration.
+        if self._uses_default_executor:
+            if not plan.get("topology_plan", {}).get("executable", False):
+                raise _error(
+                    "LCC_PARAMETER_BINDING_UNAVAILABLE",
+                    "The parameterized LCC plan contains unresolved template bindings.",
+                    "build_parametric_lcc_model",
+                    reason="bindings_unresolved",
+                )
+            validate_template_bindings(plan)
+
+        build_id = secrets.token_hex(16)
+        lease = WorkspaceBuildLease.acquire(self.workspace_root, build_id)
+        journal = AtomicJournal(self.workspace_root, build_id)
+        initial = {
+            "build_id": build_id,
+            "state": "validated",
+            "plan_hash": plan["plan_hash"],
+            "target_path": plan["project"]["target_path"],
+            "staging_path": plan["project"]["staging_path"],
+            "workspace": str(self.workspace_root),
+            "plan": copy.deepcopy(plan),
+            "error": None,
+            "result": None,
+        }
+        try:
+            journal.write(initial)
+            self._statuses[build_id] = initial
+            self._leases[build_id] = lease
+            task = asyncio.create_task(
+                self._run_executor(build_id, plan, journal, lease)
+            )
+            self._tasks[build_id] = task
+            task.add_done_callback(lambda completed: self._task_done(build_id, completed))
+        except BaseException:
+            self._statuses.pop(build_id, None)
+            self._leases.pop(build_id, None)
+            lease.release(lease.token)
+            raise
+        return {key: value for key, value in initial.items() if key != "plan"}
+
+    async def _run_executor(
+        self,
+        build_id: str,
+        plan: dict[str, Any],
+        journal: AtomicJournal,
+        lease: WorkspaceBuildLease,
+    ) -> dict[str, Any]:
+        try:
+            result = await self.executor_factory(
+                plan,
+                self.pscad_service,
+                self.workspace_root,
+                build_id=build_id,
+                journal=journal,
+            )
+            if hasattr(result, "to_dict") and callable(result.to_dict):
+                result = result.to_dict()
+            if not isinstance(result, dict):
+                raise _error(
+                    "LCC_BUILD_FAILED",
+                    "The parametric LCC executor returned a non-object record.",
+                    "build_parametric_lcc_model",
+                    reason="executor_record_invalid",
+                )
+            record = copy.deepcopy(result)
+            record.update(
+                {
+                    "build_id": build_id,
+                    "plan_hash": plan["plan_hash"],
+                    "target_path": plan["project"]["target_path"],
+                    "staging_path": plan["project"]["staging_path"],
+                    "workspace": str(self.workspace_root),
+                    "plan": copy.deepcopy(plan),
+                }
+            )
+            state = record.get("state")
+            if not isinstance(state, str) or state not in {
+                "validated",
+                "published",
+                "failed",
+                "interrupted",
+            }:
+                raise _error(
+                    "LCC_BUILD_FAILED",
+                    "The parametric LCC executor returned an invalid state.",
+                    "build_parametric_lcc_model",
+                    reason="executor_record_invalid",
+                )
+            record.setdefault("error", None)
+            record.setdefault("result", None)
+        except asyncio.CancelledError:
+            record = self._terminal_record(
+                build_id,
+                plan,
+                state="interrupted",
+                workspace=self.workspace_root,
+                error=_error(
+                    "LCC_BUILD_FAILED",
+                    "The parametric LCC build was interrupted.",
+                    "build_parametric_lcc_model",
+                    reason="cancelled",
+                ).to_dict(),
+            )
+        except BaseException as error:
+            backend_error = error if isinstance(error, BackendError) else _error(
+                "LCC_BUILD_FAILED",
+                "The parametric LCC executor failed.",
+                "build_parametric_lcc_model",
+                exception=type(error).__name__,
+            )
+            record = self._terminal_record(
+                build_id,
+                plan,
+                state="failed",
+                workspace=self.workspace_root,
+                error=backend_error.to_dict(),
+            )
+        finally:
+            self._statuses[build_id] = record
+            try:
+                journal.write(record)
+            finally:
+                lease.release(lease.token)
+                self._leases.pop(build_id, None)
+        return record
+
+    @staticmethod
+    def _terminal_record(
+        build_id: str,
+        plan: dict[str, Any],
+        *,
+        state: str,
+        error: dict[str, Any] | None = None,
+        workspace: str | Path,
+    ) -> dict[str, Any]:
+        return {
+            "build_id": build_id,
+            "state": state,
+            "plan_hash": plan["plan_hash"],
+            "target_path": plan["project"]["target_path"],
+            "staging_path": plan["project"]["staging_path"],
+            "workspace": str(workspace),
+            "plan": copy.deepcopy(plan),
+            "error": error,
+            "result": None,
+        }
+
+    def _task_done(self, build_id: str, task: asyncio.Task[Any]) -> None:
+        try:
+            task.result()
+        except BaseException:
+            pass
+        self._tasks.pop(build_id, None)
 
     def get_status(self, build_id: str) -> dict[str, Any]:
         if build_id not in self._statuses:
