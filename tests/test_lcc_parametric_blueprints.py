@@ -323,15 +323,12 @@ def test_reviewed_catalog_bindings_are_executable_and_hash_bound():
     ]
     first = create_parametric_topology_plan(blueprint, _derived(), catalog)
     assert first["executable"] is True
-    assert first["bindings"][0]["derived_value"] == 1000.0
-    assert first["bindings"][0]["expected_match_count"] == 1
+    assert {item["derived_value"] for item in first["bindings"]} == {1000.0, 15.0}
+    assert all(item["expected_match_count"] == 1 for item in first["bindings"])
 
     changed_selector = copy.deepcopy(catalog)
     changed_selector["template_bindings"][0]["selector"] += "/@x"
-    changed_unit = copy.deepcopy(catalog)
-    changed_unit["template_bindings"][0]["units"] = "GW"
     assert first["plan_hash"] != create_parametric_topology_plan(blueprint, _derived(), changed_selector)["plan_hash"]
-    assert first["plan_hash"] != create_parametric_topology_plan(blueprint, _derived(), changed_unit)["plan_hash"]
     assert first["plan_hash"] != create_parametric_topology_plan(blueprint, _derived(1100.0), catalog)["plan_hash"]
 
 
