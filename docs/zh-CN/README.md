@@ -12,6 +12,14 @@ Legacy PSCAD 4.6.2 后端只支持启动新的受管 Automation 实例，不能�
 
 版本变更记录见 [CHANGELOG.md](../../CHANGELOG.md)，可移植的 stdio 配置模板见 [config.example.toml](../../config.example.toml)。
 
+### 验收状态范围
+
+通用 Legacy 验收不等于固定 LCC、参数化 LCC 或 MMC 验收。项目以
+[`docs/acceptance-status.json`](../acceptance-status.json) 作为机器可读的范围状态表；
+每个 `PASS` 只对其中声明的 scope、代码提交和证据报告有效，不能继承给其他构建器、
+领域流程或更新后的提交。README 中“PSCAD 4.6.2 已做真实验收”特指通用 Legacy
+核心工作流，不表示 LCC 或 MMC 已取得最终实机 `PASS`。
+
 ## PSCAD 4.6.2 已验证行为与限制
 
 - 新建空算例和库使用随包分发、由 PSCAD 保存的模板；新建和另存会同时改写工程根身份及精确的工程自命名空间引用，并由 PSCAD 回读验证名称和类型。新目标会先尝试原生另存，未产生有效目标时回退；已有目标始终先保存当前操作副本，再通过原子替换生成目标。
