@@ -19,11 +19,22 @@
       "implementation_status": "MERGED",
       "licensed_status": "INCOMPLETE_ANALYSIS",
       "evidence": {
-        "report_path": "D:/PSCAD-Workspace/lcc-acceptance/lcc-acceptance-20260822-014827-125784/lcc-acceptance-report.json",
-        "sha256": "98d21ceea86083468f3d25f6a5d6b7dc319efd274aa775b8e970894038023488",
+        "report_path": "D:/PSCAD-Workspace/lcc-integrated-acceptance/lcc-acceptance-20260824-220227-235894/lcc-acceptance-report.json",
+        "sha256": "163ce64248f4f57dc6576f3bcf60938881845126c6e55babdec46960ced5dc50",
         "commit": null
       },
-      "note": "The latest durable LCC report has empty build and validation evidence. Baseline PSCAD output files do not upgrade this scope to PASS."
+      "attempt": {
+        "timestamp": "2026-08-24T22:02:27+08:00",
+        "failure_stage": "definition_inventory",
+        "failure_code": "LCC_DEFINITION_MISSING",
+        "missing_definition": "master:three_phase_source",
+        "template": "C:/Users/335/Desktop/moxing/HVDC_Bipolar_1000MW_500kV.pscx",
+        "build_evidence": false,
+        "output_evidence": false,
+        "project_hash": null,
+        "output_hash": null
+      },
+      "note": "The latest licensed attempt failed safely during definition inventory because the installed Master Library does not expose master:three_phase_source. No project write, build, or output evidence exists; this scope must not be reported as PASS."
     },
     {
       "scope": "parametric_lcc",
