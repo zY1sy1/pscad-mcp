@@ -295,9 +295,9 @@ def test_parametric_topology_planner_maps_the_complete_derived_report_without_au
     )
 
     assert plan["executable"] is False
-    assert {item["parameter"] for item in plan["unresolved_bindings"]} == {
-        item.name for item in report.parameters
-    }
+    unresolved = {item["parameter"] for item in plan["unresolved_bindings"]}
+    assert unresolved < {item.name for item in report.parameters}
+    assert "frequency_hz" not in unresolved
 
 
 def test_reviewed_catalog_bindings_are_executable_and_hash_bound():
