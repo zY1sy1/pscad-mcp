@@ -1139,7 +1139,7 @@
             <param name="bg_color" value="15792890" />
             <param name="full_font" value="Tahoma, 9pt" />
             <param name="opacity" value="25" />
-          </paramlist><![CDATA[Angle Order 
+          </paramlist><![CDATA[Angle Order
 for rectifier]]></Sticky>
         <Sticky classid="Sticky" x="198" y="360" w="108" h="54" id="911549999">
           <paramlist>
@@ -1178,7 +1178,7 @@ at rectifier]]></Sticky>
             <param name="opacity" value="25" />
           </paramlist><![CDATA[
 RECTIFIER  CURRENT
-CONTROLS 
+CONTROLS
 ]]></Sticky>
         <Wire classid="WireOrthogonal" name="" id="100085774" x="846" y="306" w="10" h="46" orient="0">
           <vertex x="0" y="0" />
@@ -4334,7 +4334,7 @@ CONTROLS
             <param name="bg_color" value="15792890" />
             <param name="full_font" value="Tahoma, 12pt" />
             <param name="opacity" value="25" />
-          </paramlist><![CDATA[INVERTER  CONTROLS 
+          </paramlist><![CDATA[INVERTER  CONTROLS
 ]]></Sticky>
         <Wire classid="WireOrthogonal" name="" id="617645795" x="576" y="612" w="226" h="10" orient="0">
           <vertex x="0" y="0" />
@@ -4351,7 +4351,7 @@ CONTROLS
             <param name="full_font" value="Tahoma, 9pt" />
             <param name="opacity" value="25" />
           </paramlist><![CDATA[
-INVERTER  GAMMA CONTROLS 
+INVERTER  GAMMA CONTROLS
 ]]></Sticky>
         <Sticky classid="Sticky" x="198" y="144" w="180" h="54" id="1524260338">
           <paramlist>
@@ -4364,7 +4364,7 @@ INVERTER  GAMMA CONTROLS
             <param name="full_font" value="Tahoma, 9pt" />
             <param name="opacity" value="25" />
           </paramlist><![CDATA[
-INVERTER  CURRENT CONTROLS 
+INVERTER  CURRENT CONTROLS
 ]]></Sticky>
         <Sticky classid="Sticky" x="414" y="306" w="108" h="36" id="2036837434">
           <paramlist>
