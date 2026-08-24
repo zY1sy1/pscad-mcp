@@ -113,9 +113,10 @@ def _matches(root: ET.Element, selector: str) -> list[ET.Element]:
         ) from error
 
 
-def apply_template_bindings(plan: dict[str, Any]) -> dict[str, Any]:
-    """Copy a source PSCX and apply only explicit, unique XML bindings."""
-
+def _validated_binding_updates(
+    plan: dict[str, Any],
+) -> tuple[Path, bytes, Path, ET.Element, list[dict[str, Any]], list[str], list[dict[str, Any]]]:
+    """Validate source, binding declarations, and XML matches without writing."""
     source, payload = _source_and_payload(plan)
     try:
         project = plan["project"]
@@ -144,8 +145,10 @@ def apply_template_bindings(plan: dict[str, Any]) -> dict[str, Any]:
         )
     root = _parse(payload)
     modified: list[str] = []
+    read_back: list[dict[str, Any]] = []
+    updates: list[dict[str, Any]] = []
     seen: set[tuple[str, str]] = set()
-    seen_logical: set[str] = set()
+    seen_elements: set[int] = set()
     for binding in bindings:
         if not isinstance(binding, dict):
             raise _error(
@@ -166,7 +169,6 @@ def apply_template_bindings(plan: dict[str, Any]) -> dict[str, Any]:
             or not units
             or attribute not in _ALLOWED_ATTRIBUTES
             or not isinstance(selector, str)
-            or logical in seen_logical
             or (logical, selector) in seen
         ):
             raise _error(
@@ -176,7 +178,6 @@ def apply_template_bindings(plan: dict[str, Any]) -> dict[str, Any]:
                 reason="binding_invalid",
             )
         seen.add((logical, selector))
-        seen_logical.add(logical)
         if isinstance(value, bool) or isinstance(value, (int, float)) and not math.isfinite(float(value)):
             raise _error(
                 "LCC_PARAMETER_BINDING_UNAVAILABLE",
@@ -185,7 +186,15 @@ def apply_template_bindings(plan: dict[str, Any]) -> dict[str, Any]:
                 reason="binding_value_invalid",
             )
         matches = _matches(root, selector)
-        if len(matches) != 1:
+        expected_matches = binding.get("expected_match_count", 1)
+        if isinstance(expected_matches, bool) or not isinstance(expected_matches, int) or expected_matches <= 0:
+            raise _error(
+                "LCC_PARAMETER_BINDING_UNAVAILABLE",
+                "A template binding expected match count must be a positive integer.",
+                "execute_parametric_lcc_build",
+                reason="expected_match_count_invalid",
+            )
+        if len(matches) != expected_matches or len(matches) != 1:
             raise _error(
                 "LCC_PARAMETER_BINDING_UNAVAILABLE",
                 "A template binding must resolve to exactly one XML element.",
@@ -193,14 +202,58 @@ def apply_template_bindings(plan: dict[str, Any]) -> dict[str, Any]:
                 reason="binding_not_unique",
                 logical_parameter=logical,
                 matches=len(matches),
+                expected_match_count=expected_matches,
             )
         element = matches[0]
+        if id(element) in seen_elements:
+            raise _error(
+                "LCC_PARAMETER_BINDING_UNAVAILABLE",
+                "Multiple bindings cannot target the same XML element.",
+                "execute_parametric_lcc_build",
+                reason="binding_not_unique",
+                logical_parameter=logical,
+            )
+        seen_elements.add(id(element))
         if attribute == "value":
             element.set("value", str(value))
             modified.append(f"{selector}/@value")
+            observed_value = element.get("value")
         else:
             element.text = str(value)
             modified.append(f"{selector}/text()")
+            observed_value = element.text
+        updates.append({"element": element, "selector": selector, "attribute": attribute, "value": value})
+        read_back.append(
+            {
+                "logical_parameter": logical,
+                "role": binding.get("role"),
+                "selector": selector,
+                "attribute": attribute,
+                "units": units,
+                "expected_match_count": expected_matches,
+                "value": observed_value,
+            }
+        )
+    return source, payload, staging, root, updates, modified, read_back
+
+
+def validate_template_bindings(plan: dict[str, Any]) -> dict[str, Any]:
+    """Perform all binding and XML checks without touching staging or PSCAD."""
+
+    source, payload, staging, _root, _updates, modified, read_back = _validated_binding_updates(plan)
+    return {
+        "source_path": str(source),
+        "source_sha256": hashlib.sha256(payload).hexdigest(),
+        "staging_path": str(staging),
+        "modified_paths": modified,
+        "read_back": read_back,
+    }
+
+
+def apply_template_bindings(plan: dict[str, Any]) -> dict[str, Any]:
+    """Copy a source PSCX and apply only explicit, unique XML bindings."""
+
+    source, payload, staging, root, _updates, modified, read_back = _validated_binding_updates(plan)
     staging.parent.mkdir(parents=True, exist_ok=True)
     temporary: Path | None = None
     try:
@@ -228,6 +281,7 @@ def apply_template_bindings(plan: dict[str, Any]) -> dict[str, Any]:
         "staging_path": str(staging),
         "staging_sha256": hashlib.sha256(staged_payload).hexdigest(),
         "modified_paths": modified,
+        "read_back": read_back,
     }
 
 
@@ -263,4 +317,4 @@ async def execute_parametric_template(
     return record
 
 
-__all__ = ["apply_template_bindings", "execute_parametric_template"]
+__all__ = ["apply_template_bindings", "execute_parametric_template", "validate_template_bindings"]

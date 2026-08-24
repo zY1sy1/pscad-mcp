@@ -47,6 +47,17 @@ def test_apply_template_bindings_replaces_one_explicit_attribute_and_preserves_s
     assert evidence["modified_paths"] == [
         "/project/definitions/Definition/form/parameter[@name='Freq']/@value"
     ]
+    assert evidence["read_back"] == [
+        {
+            "logical_parameter": "frequency_hz",
+            "role": None,
+            "selector": "/project/definitions/Definition/form/parameter[@name='Freq']",
+            "attribute": "value",
+            "units": "Hz",
+            "expected_match_count": 1,
+            "value": "60.0 Hz",
+        }
+    ]
 
 
 @pytest.mark.parametrize(

@@ -18,7 +18,7 @@ from .derivation import derive_lcc_parameters
 from .journal import AtomicJournal, WorkspaceBuildLease
 from .modes import derive_mode_copies, validate_lcc_schedule
 from .parametric_models import ParametricLccRequest
-from .parametric_executor import execute_parametric_template
+from .parametric_executor import execute_parametric_template, validate_template_bindings
 from .planner import create_parametric_topology_plan
 from .template_audit import audit_lcc_template
 
@@ -529,6 +529,7 @@ class ParametricLccBuilderService:
             "request": request.to_dict(),
             "derived": derived,
             "topology_plan": topology_plan,
+            "bindings": copy.deepcopy(topology_plan.get("bindings", [])),
             "template": {
                 "path": str(source),
                 "fingerprint": audited["fingerprint"],
@@ -673,6 +674,19 @@ class ParametricLccBuilderService:
                 "build_parametric_lcc_model",
                 {"reason": "real_lifecycle_not_implemented", "missing": ["load_projects"]},
             )
+        # Binding validation is deliberately completed before acquiring the
+        # workspace lease or scheduling a task that can call PSCAD. Custom
+        # executors own their own contract and are retained for test/fake
+        # lifecycle integration.
+        if self._uses_default_executor:
+            if not plan.get("topology_plan", {}).get("executable", False):
+                raise _error(
+                    "LCC_PARAMETER_BINDING_UNAVAILABLE",
+                    "The parameterized LCC plan contains unresolved template bindings.",
+                    "build_parametric_lcc_model",
+                    reason="bindings_unresolved",
+                )
+            validate_template_bindings(plan)
 
         build_id = secrets.token_hex(16)
         lease = WorkspaceBuildLease.acquire(self.workspace_root, build_id)
