@@ -18,6 +18,8 @@ from .derivation import derive_lcc_parameters
 from .journal import AtomicJournal, WorkspaceBuildLease
 from .modes import derive_mode_copies, validate_lcc_schedule
 from .parametric_models import ParametricLccRequest
+from .parametric_executor import execute_parametric_template
+from .planner import create_parametric_topology_plan
 from .template_audit import audit_lcc_template
 
 
@@ -275,7 +277,8 @@ class ParametricLccBuilderService:
         self.pscad_service = pscad_service
         self.workspace_root = Path(workspace_root).expanduser().resolve() if workspace_root is not None else None
         self.catalog = catalog
-        self.executor_factory = executor_factory
+        self.executor_factory = execute_parametric_template if executor_factory is None else executor_factory
+        self._uses_default_executor = executor_factory is None
         self._statuses: dict[str, dict[str, Any]] = {}
         self._plans: dict[str, dict[str, Any]] = {}
         self._tasks: dict[str, asyncio.Task[Any]] = {}
@@ -514,13 +517,18 @@ class ParametricLccBuilderService:
             enforce_target_absent=enforce_target_absent,
         )
         assets = _load_parametric_asset_snapshot(request.topology, self.catalog)
-        derived = derive_lcc_parameters(request, assets["catalog"]).to_dict()
+        derived_report = derive_lcc_parameters(request, assets["catalog"])
+        derived = derived_report.to_dict()
+        topology_plan = create_parametric_topology_plan(
+            assets["blueprint"], derived_report, assets["catalog"]
+        )
         audited = audit_lcc_template(source, assets["catalog"]).to_dict()
         self._validate_topology(request, audited, operation=operation)
         payload = {
             "schema_version": 1,
             "request": request.to_dict(),
             "derived": derived,
+            "topology_plan": topology_plan,
             "template": {
                 "path": str(source),
                 "fingerprint": audited["fingerprint"],
@@ -654,6 +662,16 @@ class ParametricLccBuilderService:
                 "hvdc",
                 "build_parametric_lcc_model",
                 {"reason": "real_lifecycle_not_implemented", "missing": []},
+            )
+        if self._uses_default_executor and not callable(
+            getattr(self.pscad_service, "load_projects", None)
+        ):
+            raise BackendError(
+                "LCC_BUILD_UNAVAILABLE",
+                "The PSCAD service does not expose the project-loading capability required by the real parametric executor.",
+                "hvdc",
+                "build_parametric_lcc_model",
+                {"reason": "real_lifecycle_not_implemented", "missing": ["load_projects"]},
             )
 
         build_id = secrets.token_hex(16)
