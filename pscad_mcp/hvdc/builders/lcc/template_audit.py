@@ -22,6 +22,8 @@ _NAMESPACE_MAX_CHARS = 128
 _DEFINITION_MAX_CHARS = 256
 _ROLE_TEXT_MAX_CHARS = 64
 _COORDINATE_ABS_MAX = 10_000_000
+_UNIT_PATTERN = re.compile(r"\[([^\]]+)\]")
+_UNIT_SUFFIX_PATTERN = re.compile(r"(?:^|\s)([A-Za-z][A-Za-z0-9/]*)\s*$")
 
 
 @dataclass(frozen=True)
@@ -110,6 +112,126 @@ def audit_lcc_template(
         conflicts=(),
         fingerprint=fingerprint,
     )
+
+
+def audit_lcc_parameter_bindings(
+    path: str | Path, catalog: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    """Resolve the reviewed parameter directory against one immutable PSCX.
+
+    Selectors are absolute ElementTree paths recorded in the catalog.  This
+    routine deliberately does not infer paths from component names: every
+    selector must resolve to one element and its observed unit must match the
+    reviewed declaration.
+    """
+
+    if catalog is None:
+        from .assets import load_parametric_catalog
+
+        catalog = load_parametric_catalog()
+    bindings = catalog.get("template_bindings") if isinstance(catalog, dict) else None
+    if not isinstance(bindings, list) or not bindings:
+        raise BackendError(
+            "LCC_PARAMETER_BINDING_UNAVAILABLE",
+            "The catalog does not contain reviewed template bindings.",
+            "hvdc",
+            "audit_lcc_parameter_bindings",
+            {"reason": "bindings_missing"},
+        )
+    _, payload = _read_template_once(path)
+    root = _parse_template(payload)
+    seen: set[str] = set()
+    evidence: list[dict[str, Any]] = []
+    for index, binding in enumerate(bindings):
+        if not isinstance(binding, dict) or not {
+            "logical_parameter", "role", "selector", "attribute", "units", "binding_status"
+        } <= set(binding):
+            raise BackendError(
+                "LCC_PARAMETER_BINDING_UNAVAILABLE",
+                "A reviewed template binding is incomplete.",
+                "hvdc",
+                "audit_lcc_parameter_bindings",
+                {"reason": "binding_invalid", "index": index},
+            )
+        selector = binding["selector"]
+        if not isinstance(selector, str) or len(selector) > 512 or not selector.startswith("/project/definitions/") or ".." in selector or "|" in selector:
+            raise BackendError(
+                "LCC_PARAMETER_BINDING_UNAVAILABLE",
+                "A template binding selector is not an approved absolute path.",
+                "hvdc",
+                "audit_lcc_parameter_bindings",
+                {"reason": "selector_invalid", "index": index},
+            )
+        if selector in seen:
+            raise BackendError(
+                "LCC_PARAMETER_BINDING_UNAVAILABLE",
+                "Reviewed template binding selectors must be unique.",
+                "hvdc",
+                "audit_lcc_parameter_bindings",
+                {"reason": "duplicate_selector", "selector": selector[:512]},
+            )
+        seen.add(selector)
+        if binding.get("binding_status") != "reviewed" or binding.get("attribute") not in {"value", "text"}:
+            raise BackendError(
+                "LCC_PARAMETER_BINDING_UNAVAILABLE",
+                "Only reviewed bindings with writable attributes are executable.",
+                "hvdc",
+                "audit_lcc_parameter_bindings",
+                {"reason": "binding_invalid", "index": index},
+            )
+        try:
+            matches = list(root.findall("." + selector[len("/project") :]))
+        except SyntaxError as error:
+            raise BackendError(
+                "LCC_PARAMETER_BINDING_UNAVAILABLE",
+                "A template binding selector is not valid XPath.",
+                "hvdc",
+                "audit_lcc_parameter_bindings",
+                {"reason": "selector_invalid", "index": index},
+            ) from error
+        if len(matches) != 1:
+            raise BackendError(
+                "LCC_PARAMETER_BINDING_UNAVAILABLE",
+                "A template binding must resolve to exactly one XML element.",
+                "hvdc",
+                "audit_lcc_parameter_bindings",
+                {"reason": "binding_not_unique", "selector": selector[:512], "matches": len(matches)},
+            )
+        element = matches[0]
+        observed_unit = _element_unit(element)
+        if observed_unit != binding["units"]:
+            raise BackendError(
+                "LCC_PARAMETER_BINDING_UNAVAILABLE",
+                "A template parameter unit does not match its reviewed logical unit.",
+                "hvdc",
+                "audit_lcc_parameter_bindings",
+                {
+                    "reason": "unit_mismatch",
+                    "logical_parameter": str(binding["logical_parameter"])[:128],
+                    "expected_units": str(binding["units"])[:32],
+                    "observed_units": (observed_unit or "")[:32],
+                },
+            )
+        evidence.append({**binding, "matches": 1, "observed_units": observed_unit})
+    return {
+        "compatible": True,
+        "bindings": evidence,
+        "fingerprint": hashlib.sha256(payload).hexdigest(),
+    }
+
+
+def _element_unit(element: ET.Element) -> str | None:
+    declared = _attr(element, "unit", "units")
+    if declared:
+        return declared.strip()
+    for value in (_attr(element, "value"), element.text):
+        match = _UNIT_PATTERN.search(value or "")
+        if match:
+            return match.group(1).strip()
+        match = _UNIT_SUFFIX_PATTERN.search(value or "")
+        if match:
+            return match.group(1).strip()
+    return None
 
 
 def _validated_contracts(catalog: dict[str, Any] | None) -> dict[str, Any]:
