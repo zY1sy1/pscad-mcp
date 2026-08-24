@@ -406,20 +406,35 @@ async def execute_parametric_template(
         raise _error("LCC_BUILD_UNAVAILABLE", "The project settings payload is invalid.", "execute_parametric_lcc_build", reason="project_settings_invalid")
     simulation_set = config.get("simulation_set")
     explicit_output = config.get("output_file", config.get("output_path"))
+    compile_timeout = _timeout(config.get("compile_timeout_s"), 300.0, field="compile_timeout_s")
     run_timeout = _timeout(config.get("run_timeout_s", config.get("timeout_s")), 900.0, field="run_timeout_s")
     poll_interval = _timeout(config.get("poll_interval_s"), 0.25, field="poll_interval_s")
-    await loader([evidence["staging_path"]])
-    await settings_writer(project_name, settings)
+    try:
+        await asyncio.wait_for(loader([evidence["staging_path"]]), timeout=compile_timeout)
+        await asyncio.wait_for(settings_writer(project_name, settings), timeout=compile_timeout)
     # Save-as is the public persistence boundary.  The destination is the
     # already-created staging file; no final target is touched here.
-    await saver(project_name, staging.name, str(staging.parent), confirm=True)
+        await asyncio.wait_for(saver(project_name, staging.name, str(staging.parent), confirm=True), timeout=compile_timeout)
+    except asyncio.TimeoutError as error:
+        raise _error("LCC_COMPILE_FAILED", "PSCAD did not complete staging/compile before the timeout.", "execute_parametric_lcc_build", reason="compile_timeout", timeout_s=compile_timeout) from error
+    except BaseException as error:
+        raise _error(
+            "LCC_COMPILE_FAILED",
+            "PSCAD failed while loading, setting, or saving the staged project.",
+            "execute_parametric_lcc_build",
+            reason="compile_or_stage_failed",
+            exception=type(error).__name__,
+        ) from error
     started = time.monotonic()
     try:
-        response = (
-            await runner(project_name, simulation_set)
+        run_call = (
+            runner(project_name, simulation_set)
             if isinstance(simulation_set, str) and simulation_set and callable(runner)
-            else await run_project(project_name)
+            else run_project(project_name)
         )
+        response = await asyncio.wait_for(run_call, timeout=run_timeout)
+    except asyncio.TimeoutError as error:
+        raise _error("LCC_RUN_TIMED_OUT", "The PSCAD run did not return before the timeout.", "execute_parametric_lcc_build", reason="run_timeout", timeout_s=run_timeout) from error
     except BaseException as error:
         raise _error(
             "LCC_COMPILE_FAILED",
