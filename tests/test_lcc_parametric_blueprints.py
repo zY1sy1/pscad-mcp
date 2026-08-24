@@ -300,6 +300,41 @@ def test_parametric_topology_planner_maps_the_complete_derived_report_without_au
     }
 
 
+def test_reviewed_catalog_bindings_are_executable_and_hash_bound():
+    blueprint = load_parametric_blueprint("lcc_bipole_parametric_v1")
+    catalog = copy.deepcopy(load_parametric_catalog())
+    catalog["template_bindings"] = [
+        {
+            "logical_parameter": "rated_power_mw",
+            "role": "rectifier_positive_pole",
+            "selector": "/project/definitions/Definition[@name='RectPole']/power",
+            "attribute": "value",
+            "units": "MW",
+            "binding_status": "reviewed",
+        },
+        {
+            "logical_parameter": "min_firing_angle_deg",
+            "role": "inverter_positive_pole",
+            "selector": "/project/definitions/Definition[@name='InverterPole']/angle",
+            "attribute": "value",
+            "units": "deg",
+            "binding_status": "reviewed",
+        },
+    ]
+    first = create_parametric_topology_plan(blueprint, _derived(), catalog)
+    assert first["executable"] is True
+    assert first["bindings"][0]["derived_value"] == 1000.0
+    assert first["bindings"][0]["expected_match_count"] == 1
+
+    changed_selector = copy.deepcopy(catalog)
+    changed_selector["template_bindings"][0]["selector"] += "/@x"
+    changed_unit = copy.deepcopy(catalog)
+    changed_unit["template_bindings"][0]["units"] = "GW"
+    assert first["plan_hash"] != create_parametric_topology_plan(blueprint, _derived(), changed_selector)["plan_hash"]
+    assert first["plan_hash"] != create_parametric_topology_plan(blueprint, _derived(), changed_unit)["plan_hash"]
+    assert first["plan_hash"] != create_parametric_topology_plan(blueprint, _derived(1100.0), catalog)["plan_hash"]
+
+
 def _audit_roles(blueprint):
     components = {
         item.get("template_role"): item
