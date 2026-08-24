@@ -9,6 +9,7 @@ import math
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from ....core.backend.base import BackendError
@@ -1307,10 +1308,81 @@ def evaluate_acceptance(
     return result
 
 
+_PARAMETRIC_REQUIRED_SELECTORS = {
+    "gamma": "deg",
+    "alpha": "deg",
+    "vdc_positive": "kV",
+    "vdc_negative": "kV",
+    "idc_positive": "kA",
+    "idc_negative": "kA",
+    "neutral_current": "kA",
+    "return_current": "kA",
+}
+
+
+def validate_parametric_acceptance_contract(evidence: Any) -> dict[str, Any]:
+    """Validate bounded compile/output/channel evidence for a real LCC run.
+
+    Missing or unverifiable evidence is an incomplete analysis, never a pass.
+    The function deliberately records only hashes, selectors, units, and small
+    diagnostic lists; raw waveform payloads are outside this contract.
+    """
+
+    if not isinstance(evidence, Mapping):
+        raise _invalid("parametric acceptance evidence must be an object.")
+    status = evidence.get("status")
+    if status not in {PASS, FAIL, INCOMPLETE}:
+        raise _invalid("parametric acceptance evidence status is invalid.")
+    errors: list[dict[str, Any]] = []
+    compile_evidence = evidence.get("compile")
+    if not isinstance(compile_evidence, Mapping) or compile_evidence.get("status") != "succeeded":
+        errors.append({"reason": "compile_evidence_missing"})
+    project_hash = compile_evidence.get("project_sha256") if isinstance(compile_evidence, Mapping) else None
+    if not isinstance(project_hash, str) or re.fullmatch(r"[0-9a-f]{64}", project_hash) is None:
+        errors.append({"reason": "compile_project_hash_missing"})
+    output = evidence.get("output")
+    if not isinstance(output, Mapping) or not isinstance(output.get("path"), str) or Path(str(output.get("path"))).suffix.casefold() not in {".out", ".psout"}:
+        errors.append({"reason": "output_file_missing"})
+    output_hash = output.get("sha256") if isinstance(output, Mapping) else None
+    if not isinstance(output_hash, str) or re.fullmatch(r"[0-9a-f]{64}", output_hash) is None:
+        errors.append({"reason": "output_hash_missing"})
+    selectors = evidence.get("selectors")
+    observed: dict[str, Mapping[str, Any]] = {}
+    if not isinstance(selectors, Sequence) or isinstance(selectors, (str, bytes, bytearray)):
+        errors.append({"reason": "selectors_missing"})
+    else:
+        for item in selectors:
+            if not isinstance(item, Mapping) or not isinstance(item.get("name"), str) or not isinstance(item.get("selector"), str) or not isinstance(item.get("units"), str):
+                errors.append({"reason": "selector_evidence_invalid"})
+                continue
+            name = str(item["name"])
+            if name in observed:
+                errors.append({"reason": "selector_duplicate", "name": name})
+            observed[name] = item
+            expected_units = _PARAMETRIC_REQUIRED_SELECTORS.get(name)
+            if expected_units is None or item["units"] != expected_units:
+                errors.append({"reason": "selector_units_invalid", "name": name})
+    missing = sorted(set(_PARAMETRIC_REQUIRED_SELECTORS) - set(observed))
+    errors.extend({"reason": "selector_missing", "name": name} for name in missing)
+    derived = evidence.get("derived_parameters")
+    if not isinstance(derived, Mapping) or not derived:
+        errors.append({"reason": "derived_parameters_missing"})
+    result_status = PASS if not errors and status == PASS else (FAIL if status == FAIL and not errors else INCOMPLETE)
+    return {
+        "valid": not errors,
+        "status": result_status,
+        "errors": errors[:32],
+        "selector_count": len(observed),
+        "compile": {"status": compile_evidence.get("status") if isinstance(compile_evidence, Mapping) else None, "project_sha256": project_hash if isinstance(project_hash, str) else None},
+        "output": {"path": output.get("path") if isinstance(output, Mapping) else None, "sha256": output_hash if isinstance(output_hash, str) else None},
+    }
+
+
 __all__ = [
     "MAX_CHANNEL_SAMPLES",
     "align_positive_zero_crossing",
     "evaluate_acceptance",
     "interpolate_to_grid",
     "normalized_errors",
+    "validate_parametric_acceptance_contract",
 ]

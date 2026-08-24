@@ -11,6 +11,7 @@ from typing import Any
 
 from ....core.backend.base import BackendError
 from .assets import load_parametric_catalog, validate_parametric_blueprint_asset
+from .acceptance import validate_parametric_acceptance_contract
 from .catalog import LccCatalog, parse_catalog, require_definition, require_port, validate_parameters
 from .models import LccBlueprint, LccComponentSpec, LccNetSpec
 from .project_graph import GraphComponent, GraphNet, GraphPort, ProjectGraph
@@ -1094,4 +1095,9 @@ def validate_companion_library(
     return result
 
 
-__all__ = ["validate_project_graph", "validate_companion_library", "validate_parametric_topology_contract"]
+__all__ = [
+    "validate_project_graph",
+    "validate_companion_library",
+    "validate_parametric_topology_contract",
+    "validate_parametric_acceptance_contract",
+]
