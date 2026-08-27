@@ -1,3 +1,4 @@
+from collections.abc import Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
 
@@ -24,6 +25,15 @@ class ToolSpec:
             idempotentHint=self.idempotent,
             openWorldHint=self.open_world,
         )
+
+
+@dataclass(frozen=True)
+class ToolProfile:
+    label: str
+    groups: frozenset[str]
+
+    def includes(self, tool_name: str) -> bool:
+        return any(tool_name in TOOL_GROUPS[group] for group in self.groups)
 
 
 TOOL_GROUPS = MappingProxyType(
@@ -133,6 +143,18 @@ TOOL_GROUPS = MappingProxyType(
         ),
     }
 )
+
+
+def parse_tool_profile(environ: Mapping[str, str]) -> ToolProfile:
+    raw = environ.get("PSCAD_MCP_TOOL_PROFILE")
+    if raw is None or raw.strip().casefold() == "full":
+        return ToolProfile("full", frozenset(TOOL_GROUPS))
+    groups = frozenset(
+        part.strip().casefold() for part in raw.split(",") if part.strip()
+    )
+    if not groups or not groups <= TOOL_GROUPS.keys():
+        raise ValueError("INVALID_TOOL_PROFILE: PSCAD_MCP_TOOL_PROFILE")
+    return ToolProfile(",".join(sorted(groups)), groups)
 
 COMPATIBILITY_TOOL_NAMES = frozenset().union(*TOOL_GROUPS.values())
 FULL_TOOL_NAMES = COMPATIBILITY_TOOL_NAMES

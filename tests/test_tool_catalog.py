@@ -57,7 +57,9 @@ LEARNING_TOOL_NAMES = frozenset(
 
 
 def test_default_server_matches_the_full_tool_catalog():
-    names = {tool.name for tool in create_server()._tool_manager.list_tools()}
+    names = {
+        tool.name for tool in create_server(environ={})._tool_manager.list_tools()
+    }
 
     assert names == FULL_TOOL_NAMES
     assert COMPATIBILITY_TOOL_NAMES <= names
@@ -125,7 +127,10 @@ def test_every_catalog_tool_has_bounded_description_and_annotations():
 
 
 def test_fastmcp_exposes_catalog_metadata_for_every_tool():
-    by_name = {tool.name: tool for tool in create_server()._tool_manager.list_tools()}
+    by_name = {
+        tool.name: tool
+        for tool in create_server(environ={})._tool_manager.list_tools()
+    }
     for name, spec in TOOL_SPECS.items():
         tool = by_name[name]
         assert tool.description == spec.description
@@ -137,7 +142,10 @@ def test_fastmcp_exposes_catalog_metadata_for_every_tool():
 
 
 def test_catalog_descriptions_match_registered_function_docstrings():
-    by_name = {tool.name: tool for tool in create_server()._tool_manager.list_tools()}
+    by_name = {
+        tool.name: tool
+        for tool in create_server(environ={})._tool_manager.list_tools()
+    }
 
     assert len(by_name) == 83
     for name, spec in TOOL_SPECS.items():
@@ -153,7 +161,7 @@ def test_component_deletion_is_catalogued_as_destructive():
 
 def test_project_settings_metadata_accounts_for_parameter_grid_mutation():
     spec = TOOL_SPECS["get_project_settings"]
-    tool = create_server()._tool_manager.get_tool("get_project_settings")
+    tool = create_server(environ={})._tool_manager.get_tool("get_project_settings")
 
     assert spec.read_only is False
     assert spec.destructive is False
@@ -210,7 +218,10 @@ def test_failed_fastmcp_registration_does_not_reserve_the_tool_name(monkeypatch)
 
 
 def test_complex_inputs_have_model_facing_shape_examples():
-    by_name = {tool.name: tool for tool in create_server()._tool_manager.list_tools()}
+    by_name = {
+        tool.name: tool
+        for tool in create_server(environ={})._tool_manager.list_tools()
+    }
 
     expected_fields = {
         ("get_project_settings", "parameter_grid"): "action",

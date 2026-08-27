@@ -12,7 +12,8 @@ from mcp.types import CallToolResult
 from pscad_mcp.core.backend.base import BackendError
 from pscad_mcp.core.service import PscadService
 from pscad_mcp.tools import registration as tool_registration
-from pscad_mcp.tools.catalog import TOOL_SPECS, ToolSpec
+from pscad_mcp.tools.catalog import TOOL_SPECS, ToolSpec, parse_tool_profile
+from pscad_mcp.tools.learning_tools import record_goal_failure
 from pscad_mcp.tools.registration import register_tool
 from tests.backend_fakes import ImmediateExecutor
 
@@ -111,6 +112,37 @@ def test_native_same_name_tool_is_not_replaced_or_recorded(catalog_test_tool):
         register_tool(server, replacement_tool, recorder=recorder)
 
     assert server._tool_manager.get_tool("native_conflict") is original
+    assert getattr(server, "_pscad_registered_tool_names", set()) == set()
+    assert recorder.names == []
+    assert recorder.events == []
+
+
+def test_inactive_tool_has_no_registration_or_learning_side_effects(monkeypatch):
+    recorder = ScalarRecorder()
+    server = FastMCP("inactive-tool")
+    server._pscad_tool_profile = parse_tool_profile(
+        {"PSCAD_MCP_TOOL_PROFILE": "core"}
+    )
+
+    def unexpected_side_effect(*args, **kwargs):
+        raise AssertionError("inactive tool must return before registration work")
+
+    class UnexpectedCatalog:
+        def __contains__(self, name):
+            unexpected_side_effect(name)
+
+    monkeypatch.setattr(tool_registration, "TOOL_SPECS", UnexpectedCatalog())
+    monkeypatch.setattr(server._tool_manager, "get_tool", unexpected_side_effect)
+    monkeypatch.setattr(server, "add_tool", unexpected_side_effect)
+    monkeypatch.setattr(tool_registration.inspect, "signature", unexpected_side_effect)
+    monkeypatch.setattr(
+        tool_registration,
+        "get_type_hints",
+        unexpected_side_effect,
+    )
+
+    register_tool(server, record_goal_failure, recorder=recorder)
+
     assert getattr(server, "_pscad_registered_tool_names", set()) == set()
     assert recorder.names == []
     assert recorder.events == []

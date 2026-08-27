@@ -14,7 +14,8 @@ from tests.backend_fakes import ImmediateExecutor
 class TestToolBackendMatrix(unittest.TestCase):
     def test_generic_and_hvdc_tool_registration(self):
         names = {
-            tool.name for tool in create_server()._tool_manager.list_tools()
+            tool.name
+            for tool in create_server(environ={})._tool_manager.list_tools()
         }
         self.assertEqual(names, FULL_TOOL_NAMES)
 

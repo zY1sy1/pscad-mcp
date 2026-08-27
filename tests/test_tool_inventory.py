@@ -37,7 +37,7 @@ PARAMETRIC_LCC_TOOLS = {
 
 
 def test_server_preserves_the_compatibility_inventory():
-    tools = create_server()._tool_manager.list_tools()
+    tools = create_server(environ={})._tool_manager.list_tools()
     names = {tool.name for tool in tools}
 
     assert names == FULL_TOOL_NAMES

@@ -221,6 +221,9 @@ def register_tool(
     """Register an async tool while preserving structured backend failures."""
 
     name = function.__name__
+    profile = getattr(mcp, "_pscad_tool_profile", None)
+    if profile is not None and not profile.includes(name):
+        return
     if name not in TOOL_SPECS:
         raise ValueError(name)
     registered_names = getattr(mcp, "_pscad_registered_tool_names", None)
