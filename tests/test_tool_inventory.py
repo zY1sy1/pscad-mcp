@@ -33,15 +33,27 @@ PARAMETRIC_LCC_TOOLS = {
     "get_parametric_lcc_build_status",
     "validate_lcc_operating_modes",
 }
+TOPOLOGY_TOOLS = {
+    "inspect_project_topology",
+    "diagnose_project_topology",
+}
 
 
-def test_server_preserves_the_exact_60_generic_tools_and_adds_hvdc_tools():
+def test_server_preserves_the_exact_60_generic_tools_and_adds_domain_tools():
     tools = create_server()._tool_manager.list_tools()
     names = [tool.name for tool in tools]
 
-    assert len(set(names)) == 83
-    assert len(set(names) - HVDC_TOOLS - LEARNING_TOOLS - LCC_TOOLS - PARAMETRIC_LCC_TOOLS) == 60
+    assert len(set(names)) == 85
+    assert len(
+        set(names)
+        - HVDC_TOOLS
+        - LEARNING_TOOLS
+        - LCC_TOOLS
+        - PARAMETRIC_LCC_TOOLS
+        - TOPOLOGY_TOOLS
+    ) == 60
     assert HVDC_TOOLS <= set(names)
     assert LEARNING_TOOLS <= set(names)
     assert LCC_TOOLS <= set(names)
     assert PARAMETRIC_LCC_TOOLS <= set(names)
+    assert TOPOLOGY_TOOLS <= set(names)

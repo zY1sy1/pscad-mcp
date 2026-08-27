@@ -1,6 +1,6 @@
 # PSCAD MCP for Codex and GitHub Copilot CLI
 
-`pscad-mcp` is a Windows Model Context Protocol (MCP) server for PSCAD automation. It uses `mhrc.automation` for PSCAD 4.6.x and `mhi.pscad` for PSCAD 5.x behind one stable 60-tool generic service contract, plus separate HVDC, silent-learning, fixed CIGRE LCC, and parametric LCC domain layers. The current inventory is 83 tools.
+`pscad-mcp` is a Windows Model Context Protocol (MCP) server for PSCAD automation. It uses `mhrc.automation` for PSCAD 4.6.x and `mhi.pscad` for PSCAD 5.x behind one stable 60-tool generic service contract, plus read-only topology diagnostics and separate HVDC, silent-learning, fixed CIGRE LCC, and parametric LCC domain layers. The current inventory is 85 tools.
 
 中文安装、配置、安全和验收说明：[docs/zh-CN/README.md](docs/zh-CN/README.md)
 
@@ -61,9 +61,10 @@ external process.
 
 ## Tool coverage
 
-The complete inventory is 83 = 60 generic tools, 10 HVDC tools, 3 learning
-tools, 4 fixed CIGRE LCC tools, and 6 parametric LCC tools. The generic 60-tool contract keeps its
-existing names and default return shapes.
+The complete inventory is 85 = 60 generic tools, 2 topology tools, 10 HVDC
+tools, 3 learning tools, 4 fixed CIGRE LCC tools, and 6 parametric LCC tools.
+The generic 60-tool contract keeps its existing names and default return
+shapes.
 
 The server currently exposes tool groups for:
 
@@ -75,6 +76,14 @@ The server currently exposes tool groups for:
 - simulation-set operations
 - project creation, save, and build tasks
 - simulation output capture and file parsing
+
+The topology layer adds `inspect_project_topology` and
+`diagnose_project_topology`. Both tools are read-only. Phase 1 supports only
+the `generic` diagnostic ruleset. `mode="conservative"` reports confirmed
+topology, while `mode="infer"` may add explicit candidate edges; candidates
+are never promoted to confirmed nets or included in the confirmed topology
+hash. Licensed PSCAD 4.6.2 Legacy is the primary live target. PSCAD 5.x has
+contract coverage only and no real topology acceptance claim.
 
 The HVDC domain layer adds ten tools without changing the original generic
 inventory: `inspect_hvdc_project`, `get_hvdc_assets`, `get_hvdc_mappings`,

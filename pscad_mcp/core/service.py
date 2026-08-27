@@ -110,6 +110,14 @@ _ERROR_GUIDANCE: dict[str, tuple[bool, str]] = {
         True,
         "Call get_pscad_status, then repair_connection before retrying.",
     ),
+    "TOPOLOGY_SNAPSHOT_UNSTABLE": (
+        True,
+        "Stop editing the canvas, then retry the read-only topology capture.",
+    ),
+    "TOPOLOGY_SOURCE_INVALID": (
+        False,
+        "Verify the requested project and canvas expose readable topology data.",
+    ),
     "HVDC_PROFILE_NOT_FOUND": (
         False,
         "Call list_hvdc_profiles or register a workspace-scoped profile.",

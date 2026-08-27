@@ -4,7 +4,11 @@ import pytest
 
 from pscad_mcp.core.service import PscadService
 from pscad_mcp.topology.hashing import topology_sha256
-from pscad_mcp.topology.models import TopologySnapshot
+from pscad_mcp.topology.models import (
+    ProjectTopology,
+    TopologyComponent,
+    TopologySnapshot,
+)
 from pscad_mcp.topology.service import TopologyService
 from tests.topology_fakes import (
     ReadOnlyRecordingBackend,
@@ -109,4 +113,34 @@ async def test_diagnose_reports_validity_summary_hash_and_rule_timing():
         "case",
         "Main",
         mode="conservative",
+    )
+
+
+@pytest.mark.asyncio
+async def test_inspect_payload_bounds_large_collections():
+    components = tuple(
+        TopologyComponent(
+            key=f"Main:{index:04d}",
+            canvas_key="Main",
+            object_id=str(index),
+            definition="test:component",
+        )
+        for index in range(501)
+    )
+    topology = ProjectTopology("case", "4.6.2", components=components)
+    service = TopologyService(AsyncMock())
+    service.inspect = AsyncMock(return_value=topology)
+
+    payload = await service.inspect_payload("case", "Main")
+
+    assert payload["counts"]["components"] == 501
+    assert len(payload["components"]) == 500
+    assert payload["truncation"]["components"]["omitted_count"] == 1
+    assert (
+        len(
+            payload["truncation"]["components"][
+                "omitted_keys_sha256"
+            ]
+        )
+        == 64
     )

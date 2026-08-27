@@ -9,7 +9,7 @@ from typing import Any
 from ..core.backend.base import BackendError
 from .connectivity import build_connectivity
 from .diagnostics.generic import diagnose_generic, infer_candidate_edges
-from .hashing import topology_sha256
+from .hashing import canonical_sha256, topology_sha256
 from .models import DiagnosticReport, ProjectTopology
 from .providers.live import LiveSnapshotProvider
 from .providers.pscx import PscxSnapshotProvider
@@ -104,6 +104,93 @@ class TopologyService:
             ),
             timings_ms=tuple(sorted(timings.items())),
         )
+
+    async def inspect_payload(
+        self,
+        project_name: str,
+        canvas_name: str = "Main",
+        *,
+        mode: str = "conservative",
+    ) -> dict[str, Any]:
+        topology = await self.inspect(
+            project_name,
+            canvas_name,
+            mode=mode,
+        )
+        payload = topology.to_dict()
+        payload["topology_hash"] = topology_sha256(topology)
+        payload["counts"] = {
+            field: len(payload[field]) for field in _TOPOLOGY_COLLECTIONS
+        }
+        payload["truncation"] = _cap_collections(
+            payload,
+            _TOPOLOGY_COLLECTIONS,
+        )
+        return payload
+
+    async def diagnose_payload(
+        self,
+        project_name: str,
+        canvas_name: str = "Main",
+        *,
+        ruleset: str = "generic",
+        mode: str = "conservative",
+    ) -> dict[str, Any]:
+        report = await self.diagnose(
+            project_name,
+            canvas_name,
+            ruleset=ruleset,
+            mode=mode,
+        )
+        payload = report.to_dict()
+        payload["truncation"] = _cap_collections(payload, ("findings",))
+        return payload
+
+
+_TOPOLOGY_COLLECTIONS = (
+    "canvases",
+    "components",
+    "conductors",
+    "labels",
+    "boundary_links",
+    "nets",
+    "conflicts",
+    "unresolved",
+    "candidate_edges",
+)
+_PAYLOAD_COLLECTION_LIMIT = 500
+
+
+def _cap_collections(
+    payload: dict[str, Any], fields: tuple[str, ...]
+) -> dict[str, dict[str, Any]]:
+    truncation = {}
+    for field in fields:
+        values = payload[field]
+        if len(values) <= _PAYLOAD_COLLECTION_LIMIT:
+            continue
+        omitted = values[_PAYLOAD_COLLECTION_LIMIT:]
+        payload[field] = values[:_PAYLOAD_COLLECTION_LIMIT]
+        truncation[field] = {
+            "returned_count": _PAYLOAD_COLLECTION_LIMIT,
+            "omitted_count": len(omitted),
+            "omitted_keys_sha256": canonical_sha256(
+                tuple(_payload_stable_key(field, value) for value in omitted)
+            ),
+        }
+    return truncation
+
+
+def _payload_stable_key(field: str, value: Any) -> str:
+    if field == "unresolved":
+        return str(value)
+    if field == "conflicts":
+        return f"{value['field']}:{value['object_key']}"
+    if field == "candidate_edges":
+        return f"{value['left']}->{value['right']}"
+    if field == "findings":
+        return f"{value['code']}:{'|'.join(value['objects'])}"
+    return str(value["key"])
 
 
 def _validate_mode(mode: str) -> None:

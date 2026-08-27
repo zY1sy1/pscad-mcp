@@ -71,10 +71,10 @@ async def test_mcp_entry_rejects_an_arbitrary_kind_without_echoing_it():
     assert "SECRET_FREE_TEXT" not in repr(structured)
 
 
-def test_server_registers_83_unique_tools_and_silent_instructions():
+def test_server_registers_85_unique_tools_and_silent_instructions():
     server = create_server()
     names = {tool.name for tool in server._tool_manager.list_tools()}
-    assert len(names) == 83
+    assert len(names) == 85
     assert {
         "record_goal_failure",
         "review_improvement_backlog",
