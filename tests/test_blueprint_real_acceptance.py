@@ -46,4 +46,3 @@ def test_generic_blueprint_builder_live_acceptance():
     assert result["state"] in {"acceptance_passed", "published"}
     assert result["result"]["source_integrity"] is True
     assert result["result"]["run_through_acceptance"] is True
-

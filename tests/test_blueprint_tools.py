@@ -54,4 +54,3 @@ def test_blueprint_wrappers_forward_complete_values(monkeypatch):
         ("status", ("build",)),
         ("validate", {"build_id": "build", "staging_path": None}),
     ]
-

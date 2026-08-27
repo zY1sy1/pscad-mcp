@@ -32,4 +32,3 @@ async def test_live_inventory_fallback_uses_pscad_service_status_and_observed_de
     assert inventory.definitions["master:breaker"]["parameters"]["Name"] == {"resolved": True, "units": None}
     assert inventory.definitions["master:breaker"]["ports"]["A"]["dimension"] == 1
     assert inventory.components[0]["logical_id"] == "BRK"
-

@@ -290,4 +290,3 @@ The MCP update is complete only when:
 8. failed builds are quarantined and cannot be published;
 9. focused and full default test suites pass;
 10. licensed acceptance remains opt-in and is reported separately from default tests.
-

@@ -58,4 +58,3 @@ def test_atomic_json_write_replaces_complete_document(tmp_path):
 
     assert json.loads(path.read_text(encoding="utf-8")) == {"accepted": True, "state": "published"}
     assert list(path.parent.glob("*.pending")) == []
-
