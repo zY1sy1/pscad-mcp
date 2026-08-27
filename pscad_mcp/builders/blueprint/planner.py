@@ -72,6 +72,7 @@ def _resolved_operations(
     selectors: dict[str, int] = {}
     touched_sources: set[str] = set()
     result: list[BlueprintOperation] = []
+    existing_logical_ids = {component["logical_id"] for component in snapshot.components}
     override_targets = set(parameter_overrides)
     applied_overrides: set[str] = set()
     component_target_kinds = {"set_component_location", "rotate_component", "set_component_parameters"}
@@ -82,7 +83,12 @@ def _resolved_operations(
             touched_sources.add(source["logical_id"])
             selectors[operation.target] = source["id"]
             logical_id = arguments.get("logical_id")
-            if not isinstance(logical_id, str) or not logical_id or logical_id in produced_definitions:
+            if (
+                not isinstance(logical_id, str)
+                or not logical_id
+                or logical_id in produced_definitions
+                or logical_id in existing_logical_ids
+            ):
                 raise _error("BLUEPRINT_OPERATION_INVALID", "Clone operations require a unique logical_id.", operation_id=operation.operation_id)
             expected = arguments.get("expected_definition")
             if expected is not None and expected != source["definition"]:
@@ -94,8 +100,15 @@ def _resolved_operations(
             definition = arguments.get("definition") or arguments.get("expected_definition")
             if not isinstance(logical_id, str) or not logical_id or not isinstance(definition, str):
                 raise _error("BLUEPRINT_OPERATION_INVALID", "Create operations require logical_id and definition.", operation_id=operation.operation_id)
+            if logical_id in produced_definitions or logical_id in existing_logical_ids:
+                raise _error("BLUEPRINT_OPERATION_INVALID", "Created logical IDs must be unique.", operation_id=operation.operation_id, logical_id=logical_id)
             if definition not in snapshot.definitions:
                 raise _error("BLUEPRINT_DEFINITION_MISSING", "Create definition is not in the live inventory.", definition=definition)
+            parameters = arguments.get("parameters", {})
+            units = arguments.get("units", {})
+            if not isinstance(parameters, Mapping) or not isinstance(units, Mapping):
+                raise _error("BLUEPRINT_OPERATION_INVALID", "Create parameters and units must be objects.", operation_id=operation.operation_id)
+            _validate_parameters(snapshot, definition, parameters, units)
             produced_definitions[logical_id] = definition
         elif operation.kind in component_target_kinds and operation.target not in produced_definitions:
             source = _resolve_source(snapshot, operation.target)
@@ -241,12 +254,30 @@ def plan_from_dict(value: Any) -> BlueprintPlan:
     from .schema import parse_blueprint
 
     blueprint = parse_blueprint(original_blueprint)
-    resolved_value = {**dict(asset_blueprint), "operations": value["operations"]}
-    resolved_operations = parse_blueprint(resolved_value).operations
+    user_operations: list[dict[str, Any]] = []
+    resolved_arguments: list[Mapping[str, Any]] = []
+    for index, raw_operation in enumerate(value["operations"]):
+        if not isinstance(raw_operation, Mapping) or not isinstance(raw_operation.get("arguments"), Mapping):
+            raise _error("BLUEPRINT_PLAN_INVALID", "A persisted plan operation is invalid.", index=index)
+        arguments = dict(raw_operation["arguments"])
+        source_component_id = arguments.pop("source_component_id", None)
+        if raw_operation.get("kind") == "clone_component":
+            if not isinstance(source_component_id, int) or isinstance(source_component_id, bool) or source_component_id < 0:
+                raise _error("BLUEPRINT_PLAN_INVALID", "A resolved clone source ID is invalid.", index=index)
+        elif source_component_id is not None:
+            raise _error("BLUEPRINT_PLAN_INVALID", "Only clone operations may contain a resolved source ID.", index=index)
+        user_operations.append({**dict(raw_operation), "arguments": arguments})
+        resolved_arguments.append(raw_operation["arguments"])
+    resolved_value = {**dict(asset_blueprint), "operations": user_operations}
+    parsed_operations = parse_blueprint(resolved_value).operations
+    resolved_operations = tuple(
+        replace(operation, arguments=freeze(arguments))
+        for operation, arguments in zip(parsed_operations, resolved_arguments)
+    )
     mappings = ("asset_hashes", "source_manifest", "resolved_selectors", "parameter_overrides")
     if any(not isinstance(value[field], Mapping) for field in mappings):
         raise _error("BLUEPRINT_PLAN_INVALID", "Persisted plan mappings are invalid.")
-    if any(not isinstance(item, str) for item in value["warnings"] if isinstance(value["warnings"], list)) or not isinstance(value["warnings"], list):
+    if not isinstance(value["warnings"], list) or any(not isinstance(item, str) for item in value["warnings"]):
         raise _error("BLUEPRINT_PLAN_INVALID", "Persisted plan warnings are invalid.")
     plan = BlueprintPlan(
         str(value["plan_hash"]),

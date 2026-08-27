@@ -14,7 +14,12 @@ import uuid
 from ...core.backend.base import BackendError
 from ...core.path_policy import PathPolicy
 from ...core.service import ConfirmationRequired
-from .assets import BlueprintAsset, audit_source_package, load_blueprint_asset
+from .assets import (
+    BlueprintAsset,
+    audit_source_package,
+    load_blueprint_asset,
+    resolve_companion_project_files,
+)
 from .executor import execute_build
 from .inventory import InventorySnapshot, read_live_inventory
 from .journal import BuildJournal, WorkspaceBuildLease, next_state, write_json_atomic
@@ -67,7 +72,8 @@ class BlueprintBuilderService:
     ) -> BlueprintPlan:
         asset = self._load_asset(blueprint)
         audit = audit_source_package(asset.blueprint, source_package_path, self.path_policy)
-        await self.pscad_service.load_projects([audit.entry_point])
+        companions = resolve_companion_project_files(asset.blueprint, audit.root, self.path_policy)
+        await self.pscad_service.load_projects([audit.entry_point, *(str(path) for path in companions)])
         project_name = Path(audit.entry_point).stem
         inventory = await self.inventory_reader(
             self.pscad_service,
@@ -157,6 +163,7 @@ class BlueprintBuilderService:
         plan: BlueprintPlan,
         lease: WorkspaceBuildLease,
     ) -> BlueprintBuildRecord:
+        record = self._records[build_id]
         try:
             record = await self.executor_factory(
                 plan,
@@ -175,7 +182,12 @@ class BlueprintBuilderService:
                 "Blueprint orchestration failed.",
                 "build_pscad_project",
                 exception=type(caught).__name__,
+                exception_message=str(caught),
             )
+            if record.staging_path is not None:
+                quarantined = self._quarantine(record, error)
+                self._records[build_id] = quarantined
+                return quarantined
             current = self._records[build_id]
             failed = replace(
                 current,
@@ -189,32 +201,117 @@ class BlueprintBuilderService:
             self._leases.pop(build_id, None)
             lease.release(lease.token)
 
+    def _quarantine(self, record: BlueprintBuildRecord, error: BackendError) -> BlueprintBuildRecord:
+        staging = self.path_policy.resolve(str(record.staging_path), must_exist=True)
+        build_root = BuildJournal(self.workspace_root, record.build_id).build_root
+        expected_staging = build_root / "staging"
+        if staging != expected_staging.resolve():
+            raise _error(
+                "BLUEPRINT_PUBLICATION_REJECTED",
+                "Only builder-owned staging can be quarantined.",
+                "quarantine_blueprint_build",
+                staging_path=str(staging),
+            )
+        quarantine = build_root / "quarantine"
+        if quarantine.exists() or quarantine.is_symlink():
+            raise _error(
+                "BLUEPRINT_BUILD_CONFLICT",
+                "The blueprint quarantine target already exists.",
+                "quarantine_blueprint_build",
+                path=str(quarantine),
+            )
+        next_state(record.state, BlueprintBuildState.FAILED)
+        next_state(BlueprintBuildState.FAILED, BlueprintBuildState.QUARANTINED)
+        staging.replace(quarantine)
+        failure = {
+            "build_id": record.build_id,
+            "plan_hash": record.plan.plan_hash,
+            "state": "quarantined",
+            "error": error.to_dict(),
+        }
+        write_json_atomic(quarantine / "evidence" / "failure-report.json", failure)
+        manifest_path = quarantine / "evidence" / "manifest.json"
+        if manifest_path.is_file():
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest.update({"state": "quarantined", "published": False, "publication_scope": None})
+            write_json_atomic(manifest_path, manifest)
+        journal = BuildJournal(self.workspace_root, record.build_id)
+        failed_event = {"state": "failed", "error": error.to_dict()}
+        journal.append("error", failed_event)
+        journal.append("state", {"state": "quarantined"})
+        result = {
+            **dict(record.result or {}),
+            "published": False,
+            "publication_scope": None,
+            "publication_path": None,
+        }
+        evidence = {
+            **dict(record.evidence or {}),
+            "failure_report": "evidence/failure-report.json",
+        }
+        return replace(
+            record,
+            state=BlueprintBuildState.QUARANTINED,
+            history=freeze((*record.history, failed_event, {"state": "quarantined"})),
+            staging_path=str(quarantine),
+            error=freeze(error.to_dict()),
+            result=freeze(result),
+            evidence=freeze(evidence),
+        )
+
     def _publish(self, record: BlueprintBuildRecord) -> BlueprintBuildRecord:
         if record.staging_path is None or record.result is None:
             raise _error("BLUEPRINT_PUBLICATION_REJECTED", "Accepted staging evidence is missing.", "publish_blueprint_build")
         staging = self.path_policy.resolve(record.staging_path, must_exist=True)
         if staging.resolve() == Path(record.plan.source_path).resolve():
             raise _error("BLUEPRINT_PUBLICATION_REJECTED", "The source package cannot be a publication target.", "publish_blueprint_build")
-        publication = self.workspace_root / ".pscad-mcp" / "blueprint-publications" / f"{record.plan.target_name}-{record.build_id}"
-        if publication.exists() or publication.is_symlink():
-            raise _error("BLUEPRINT_PUBLICATION_REJECTED", "Publication target already exists.", "publish_blueprint_build")
         scope = record.plan.blueprint.publication.scope
         if scope == "physical_and_model" and not record.result.get("physical_acceptance"):
             raise _error("BLUEPRINT_PUBLICATION_REJECTED", "Physical publication requires trusted physical acceptance.", "publish_blueprint_build")
+
         evidence_root = staging / "evidence"
         manifest_path = evidence_root / "manifest.json"
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        manifest.update({"state": "published", "published": True, "publication_scope": scope})
-        write_json_atomic(manifest_path, manifest)
         included = sorted(record.plan.blueprint.publication.evidence_files)
-        publication_evidence = publication / "evidence"
-        publication_evidence.mkdir(parents=True)
+        sources: dict[str, Path] = {}
         for name in included:
             source = evidence_root / name
             if not source.is_file() or source.is_symlink() or source.resolve().parent != evidence_root.resolve():
-                shutil.rmtree(publication)
                 raise _error("BLUEPRINT_PUBLICATION_REJECTED", "A declared evidence file is missing or unsafe.", "publish_blueprint_build", evidence=name)
-            shutil.copy2(source, publication_evidence / name)
+            sources[name] = source
+
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as error:
+            raise _error(
+                "BLUEPRINT_PUBLICATION_REJECTED",
+                "The staging evidence manifest is missing or invalid.",
+                "publish_blueprint_build",
+            ) from error
+        accepted_manifest = dict(manifest)
+        manifest = {**accepted_manifest, "state": "published", "published": True, "publication_scope": scope}
+
+        publication_root = self.workspace_root / ".pscad-mcp" / "blueprint-publications"
+        control_root = publication_root.parent
+        try:
+            resolved_control = self.path_policy.resolve(str(control_root), must_exist=True)
+        except (OSError, ValueError) as error:
+            raise _error("BLUEPRINT_PUBLICATION_REJECTED", "The blueprint control root is outside the workspace.", "publish_blueprint_build") from error
+        if control_root.is_symlink() or not resolved_control.is_dir() or resolved_control != control_root:
+            raise _error("BLUEPRINT_PUBLICATION_REJECTED", "The blueprint control root is not a contained directory.", "publish_blueprint_build")
+        if publication_root.is_symlink():
+            raise _error("BLUEPRINT_PUBLICATION_REJECTED", "The publication root cannot be a symbolic link.", "publish_blueprint_build")
+        publication_root.mkdir(parents=True, exist_ok=True)
+        try:
+            publication_root = self.path_policy.resolve(str(publication_root), must_exist=True)
+        except (OSError, ValueError) as error:
+            raise _error("BLUEPRINT_PUBLICATION_REJECTED", "The publication root is outside the workspace.", "publish_blueprint_build") from error
+        if not publication_root.is_dir() or publication_root != control_root / "blueprint-publications":
+            raise _error("BLUEPRINT_PUBLICATION_REJECTED", "The publication root is not a contained directory.", "publish_blueprint_build")
+
+        publication = publication_root / f"{record.plan.target_name}-{record.build_id}"
+        pending = publication_root / f".{uuid.uuid4().hex}.pending"
+        if publication.exists() or publication.is_symlink():
+            raise _error("BLUEPRINT_PUBLICATION_REJECTED", "Publication target already exists.", "publish_blueprint_build")
         publication_manifest = {
             "build_id": record.build_id,
             "plan_hash": record.plan.plan_hash,
@@ -223,19 +320,53 @@ class BlueprintBuilderService:
             "source_package_included": False,
             "staging_project_included": False,
         }
-        write_json_atomic(publication / "publication-manifest.json", publication_manifest)
-        journal = BuildJournal(self.workspace_root, record.build_id)
-        next_state(record.state, BlueprintBuildState.PUBLISHED)
-        journal.append("state", {"state": "published", "publication_scope": scope})
-        result = {**dict(record.result), "published": True, "publication_scope": scope, "publication_path": str(publication)}
-        evidence = {**dict(record.evidence or {}), "publication_manifest": str(publication / "publication-manifest.json")}
-        return replace(
-            record,
-            state=BlueprintBuildState.PUBLISHED,
-            history=freeze((*record.history, {"state": "published"})),
-            result=freeze(result),
-            evidence=freeze(evidence),
-        )
+        final_created = False
+        manifest_committed = False
+        try:
+            next_state(record.state, BlueprintBuildState.PUBLISHED)
+            publication_evidence = pending / "evidence"
+            publication_evidence.mkdir(parents=True)
+            for name, source in sources.items():
+                destination = publication_evidence / name
+                if name == "manifest.json":
+                    destination.write_text(
+                        json.dumps(json_safe(manifest), ensure_ascii=True, sort_keys=True, allow_nan=False) + "\n",
+                        encoding="utf-8",
+                    )
+                else:
+                    shutil.copy2(source, destination)
+            (pending / "publication-manifest.json").write_text(
+                json.dumps(json_safe(publication_manifest), ensure_ascii=True, sort_keys=True, allow_nan=False) + "\n",
+                encoding="utf-8",
+            )
+            if publication.exists() or publication.is_symlink():
+                raise _error("BLUEPRINT_PUBLICATION_REJECTED", "Publication target appeared during publication.", "publish_blueprint_build")
+            pending.replace(publication)
+            final_created = True
+            write_json_atomic(manifest_path, manifest)
+            manifest_committed = True
+            journal = BuildJournal(self.workspace_root, record.build_id)
+            journal.append("state", {"state": "published", "publication_scope": scope})
+            result = {**dict(record.result), "published": True, "publication_scope": scope, "publication_path": str(publication)}
+            evidence = {**dict(record.evidence or {}), "publication_manifest": str(publication / "publication-manifest.json")}
+            return replace(
+                record,
+                state=BlueprintBuildState.PUBLISHED,
+                history=freeze((*record.history, {"state": "published"})),
+                result=freeze(result),
+                evidence=freeze(evidence),
+            )
+        except BaseException:
+            if pending.exists() and not pending.is_symlink():
+                shutil.rmtree(pending, ignore_errors=True)
+            if final_created and publication.exists() and not publication.is_symlink():
+                shutil.rmtree(publication, ignore_errors=True)
+            if manifest_committed:
+                try:
+                    write_json_atomic(manifest_path, accepted_manifest)
+                except BaseException:
+                    pass
+            raise
 
     def _status(self, record: BlueprintBuildRecord) -> dict[str, Any]:
         payload = record.to_dict()
@@ -305,13 +436,13 @@ class BlueprintBuilderService:
                 plan = plan_from_dict(json.loads(plan_path.read_text(encoding="utf-8")))
             except (OSError, json.JSONDecodeError, BackendError) as error:
                 raise _error("BLUEPRINT_VALIDATION_TARGET_INVALID", "Staging plan evidence is missing or invalid.", "validate_pscad_project_build") from error
-        messages: list[Mapping[str, Any]] = []
+        messages: list[Mapping[str, Any]] | None = None
         try:
             value = await self.pscad_service.get_project_output(plan.target_name, structured=True)
             if isinstance(value, list):
                 messages = [item for item in value if isinstance(item, Mapping)]
         except BaseException:
-            messages = []
+            messages = None
         report = validate_staging(
             plan,
             candidate,
@@ -320,4 +451,3 @@ class BlueprintBuilderService:
         )
         write_validation_report(candidate, report)
         return report
-

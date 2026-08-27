@@ -15,6 +15,7 @@ from .schema import parse_blueprint
 
 
 _DEFAULT_ASSET_ROOT = Path(__file__).parents[2] / "assets" / "blueprints"
+_PROJECT_SUFFIXES = frozenset({".pscx", ".pslx", ".pswx"})
 
 
 def _error(code: str, message: str, operation: str, **details: Any) -> BackendError:
@@ -79,6 +80,52 @@ class SourceAudit:
     package_hash: str
 
 
+def resolve_companion_project_files(
+    blueprint: Blueprint,
+    package_root: str | Path,
+    path_policy: PathPolicy,
+) -> tuple[Path, ...]:
+    """Resolve declared PSCAD companion files in blueprint order."""
+
+    root = path_policy.resolve(str(package_root), must_exist=True)
+    entry_point = path_policy.resolve_child(
+        str(root),
+        blueprint.source_package["entry_point"],
+    )
+    resolved: list[Path] = []
+    seen: set[Path] = {entry_point}
+    for requirement in blueprint.source_package["required"]:
+        if requirement["kind"] != "file":
+            continue
+        candidate = path_policy.resolve_child(str(root), requirement["path"])
+        if candidate in seen or candidate.suffix.casefold() not in _PROJECT_SUFFIXES:
+            continue
+        try:
+            candidate = path_policy.resolve_child(
+                str(root),
+                requirement["path"],
+                suffixes=_PROJECT_SUFFIXES,
+                must_exist=True,
+            )
+        except (OSError, ValueError) as error:
+            raise _error(
+                "BLUEPRINT_SOURCE_MISSING",
+                "A declared companion project file is missing or invalid.",
+                "resolve_companion_project_files",
+                path=requirement["path"],
+            ) from error
+        if not candidate.is_file() or candidate.is_symlink():
+            raise _error(
+                "BLUEPRINT_SOURCE_INVALID",
+                "A declared companion project must be a regular file.",
+                "resolve_companion_project_files",
+                path=requirement["path"],
+            )
+        seen.add(candidate)
+        resolved.append(candidate)
+    return tuple(resolved)
+
+
 def _read_json(path: Path, label: str) -> Any:
     try:
         return json.loads(path.read_text(encoding="utf-8"))
@@ -97,8 +144,13 @@ def load_blueprint_asset(
         return BlueprintAsset(blueprint, freeze({"blueprint.json": digest}), name=blueprint.identity.name)
     if not isinstance(value, str) or not value.strip() or Path(value).name != value:
         raise _error("BLUEPRINT_ASSET_NOT_FOUND", "Blueprint name must be a simple asset name.", "load_blueprint_asset", blueprint=value)
-    directory = (Path(asset_root) if asset_root is not None else _DEFAULT_ASSET_ROOT) / value
-    directory = directory.resolve()
+    root = (Path(asset_root) if asset_root is not None else _DEFAULT_ASSET_ROOT).resolve()
+    candidate = root / value
+    if candidate.is_symlink():
+        raise _error("BLUEPRINT_ASSET_INVALID", "Blueprint asset directories cannot be links.", "load_blueprint_asset", blueprint=value)
+    directory = candidate.resolve()
+    if directory != root and root not in directory.parents:
+        raise _error("BLUEPRINT_ASSET_INVALID", "Blueprint asset directory escapes the configured root.", "load_blueprint_asset", blueprint=value)
     blueprint_path = directory / "blueprint.json"
     if not blueprint_path.is_file():
         raise _error("BLUEPRINT_ASSET_NOT_FOUND", f"Blueprint asset '{value}' was not found.", "load_blueprint_asset", blueprint=value)
@@ -113,7 +165,9 @@ def load_blueprint_asset(
         )
     hashes: dict[str, str] = {}
     for path in sorted(directory.rglob("*"), key=lambda item: item.as_posix()):
-        if path.is_symlink() or not path.is_file():
+        if path.is_symlink():
+            raise _error("BLUEPRINT_ASSET_INVALID", "Blueprint assets cannot contain links.", "load_blueprint_asset", path=str(path))
+        if not path.is_file():
             continue
         hashes[path.relative_to(directory).as_posix()] = sha256_file(path)
     catalog_path = directory / "catalog.json"
@@ -168,4 +222,3 @@ def audit_source_package(blueprint: Blueprint, source_path: str, path_policy: Pa
                 )
     hashes = hash_tree(root)
     return SourceAudit(str(root), str(entry_point), freeze(hashes), manifest_hash(hashes))
-

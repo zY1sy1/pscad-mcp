@@ -82,3 +82,16 @@ def test_discover_output_dataset_requires_one_workspace_contained_dataset(tmp_pa
     with pytest.raises(BackendError) as raised:
         discover_output_dataset(tmp_path)
     assert raised.value.code == "BLUEPRINT_OUTPUT_AMBIGUOUS"
+
+
+def test_discover_output_dataset_can_require_exact_target_metadata(tmp_path):
+    expected = write_dataset(tmp_path, channels=1)
+    write_dataset(tmp_path / "other", channels=1)
+
+    dataset = discover_output_dataset(tmp_path, expected_metadata=expected)
+
+    assert dataset["metadata_file"] == str(expected.resolve())
+
+    with pytest.raises(BackendError) as raised:
+        discover_output_dataset(tmp_path, expected_metadata=tmp_path / "Missing.inf")
+    assert raised.value.code == "BLUEPRINT_OUTPUT_INVALID"

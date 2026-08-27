@@ -10,7 +10,8 @@ import time
 from typing import Any, Mapping
 
 from ...core.backend.base import BackendError
-from .assets import hash_tree, manifest_hash
+from ...core.path_policy import PathPolicy
+from .assets import hash_tree, manifest_hash, resolve_companion_project_files, sha256_file
 from .journal import BuildJournal, next_state, write_json_atomic
 from .models import (
     BlueprintBuildRecord,
@@ -71,11 +72,13 @@ class _Context:
     service: Any
     staging: Path
     project_file: Path
+    project_files: tuple[Path, ...]
     journal: BuildJournal
     history: list[dict[str, Any]]
     bindings: dict[str, int]
     state: BlueprintBuildState = BlueprintBuildState.PLANNED
     simulation_active: bool = False
+    settlement_exhausted: bool = False
 
     def transition(self, proposed: BlueprintBuildState, **details: Any) -> None:
         self.state = next_state(self.state, proposed)
@@ -144,7 +147,7 @@ async def _snapshot(context: _Context, component_id: int) -> Mapping[str, Any]:
     return matches[0]
 
 
-async def _apply_operation(context: _Context, operation: BlueprintOperation) -> None:
+async def _apply_operation(context: _Context, operation: BlueprintOperation) -> dict[str, Any]:
     context.verify_source(f"before:{operation.operation_id}")
     arguments = operation.arguments
     project = context.plan.target_name
@@ -204,7 +207,7 @@ async def _apply_operation(context: _Context, operation: BlueprintOperation) -> 
     elif operation.kind == "set_component_parameters":
         component_id = context.component_id(operation.target)
         parameters = dict(arguments["parameters"])
-        await context.service.set_component_parameters(project, component_id, parameters, confirm=True)
+        await context.service.set_component_parameters(project, component_id, parameters)
         read_parameters = await context.service.get_component_parameters(project, component_id)
         for name, value in parameters.items():
             _assert_equal(f"component parameter {name}", value, read_parameters.get(name), operation)
@@ -214,7 +217,13 @@ async def _apply_operation(context: _Context, operation: BlueprintOperation) -> 
         response = await context.service.create_wire(project, vertices, canvas_name=arguments.get("canvas", "Main"))
         if not isinstance(response, Mapping):
             raise _error("BLUEPRINT_READBACK_MISMATCH", "Wire creation returned invalid evidence.", "verify_blueprint_operation")
-        _assert_equal("wire vertices", vertices, response.get("vertices"), operation)
+        read_vertices = response.get("vertices")
+        if read_vertices is None:
+            read_vertices = response.get("endpoints")
+            expected_vertices = [vertices[0], vertices[-1]]
+        else:
+            expected_vertices = vertices
+        _assert_equal("wire vertices", expected_vertices, read_vertices, operation)
         observed = dict(response)
     elif operation.kind == "connect_ports":
         first = arguments["from"]
@@ -237,12 +246,17 @@ async def _apply_operation(context: _Context, operation: BlueprintOperation) -> 
         expected_to = {"component_id": second_id, "port": second["port"]}
         if not isinstance(response, Mapping):
             raise _error("BLUEPRINT_READBACK_MISMATCH", "Port connection returned invalid evidence.", "verify_blueprint_operation")
-        _assert_equal("connection source", expected_from, response.get("from"), operation)
-        _assert_equal("connection target", expected_to, response.get("to"), operation)
+        for label, expected in (("source", expected_from), ("target", expected_to)):
+            key = "from" if label == "source" else "to"
+            endpoint = response.get(key)
+            if not isinstance(endpoint, Mapping):
+                raise _error("BLUEPRINT_READBACK_MISMATCH", f"Connection {label} evidence is invalid.", "verify_blueprint_operation")
+            for name, value in expected.items():
+                _assert_equal(f"connection {label} {name}", value, endpoint.get(name), operation)
         observed = dict(response)
     elif operation.kind == "set_project_settings":
         settings = dict(arguments["settings"])
-        await context.service.set_project_settings(project, settings, confirm=True)
+        await context.service.set_project_settings(project, settings)
         read_settings = await context.service.get_project_settings(project)
         for name, value in settings.items():
             _assert_equal(f"project setting {name}", value, read_settings.get(name), operation)
@@ -266,14 +280,17 @@ async def _apply_operation(context: _Context, operation: BlueprintOperation) -> 
         raise _error("BLUEPRINT_OPERATION_INVALID", "Plan contains an unsupported operation.", "execute_blueprint_operation", kind=operation.kind)
     context.operation_event(operation, observed)
     context.verify_source(f"after:{operation.operation_id}")
+    return observed
 
 
 async def _reload(context: _Context) -> None:
     bridge = getattr(context.service, "reload_project", None)
     if callable(bridge):
         await bridge(context.plan.target_name, str(context.project_file))
+        if len(context.project_files) > 1:
+            await context.service.load_projects([str(path) for path in context.project_files[1:]])
     else:
-        await context.service.load_projects([str(context.project_file)])
+        await context.service.load_projects([str(path) for path in context.project_files])
 
 
 async def _verify_parameters_after_reload(context: _Context) -> None:
@@ -298,7 +315,23 @@ def _normalize_messages(value: Any) -> list[dict[str, Any]]:
     return []
 
 
-async def _simulate(context: _Context, timeout_s: float, poll_interval_s: float) -> None:
+def _output_snapshot(project_file: Path) -> dict[str, tuple[int, int, str]]:
+    candidates = [project_file.with_suffix(".inf"), *project_file.parent.glob(f"{project_file.stem}_*.out")]
+    snapshot: dict[str, tuple[int, int, str]] = {}
+    for path in sorted(candidates, key=lambda item: item.name.casefold()):
+        if not path.is_file() or path.is_symlink():
+            continue
+        stat = path.stat()
+        snapshot[path.name] = (stat.st_mtime_ns, stat.st_size, sha256_file(path))
+    return snapshot
+
+
+async def _simulate(
+    context: _Context,
+    timeout_s: float,
+    poll_interval_s: float,
+    settlement_timeout_s: float,
+) -> None:
     stop = getattr(context.service, "stop_simulation", None)
     if not callable(stop):
         raise _error("BLUEPRINT_BUILD_FAILED", "Simulation stop control is required for safe cleanup.", "run_blueprint_project")
@@ -319,10 +352,59 @@ async def _simulate(context: _Context, timeout_s: float, poll_interval_s: float)
             context.simulation_active = False
             return
         if time.monotonic() >= deadline:
-            await stop(context.plan.target_name)
-            context.simulation_active = False
+            await asyncio.shield(_stop_and_settle(context, "timeout", poll_interval_s, settlement_timeout_s))
             raise _error("BLUEPRINT_BUILD_TIMED_OUT", "PSCAD simulation did not reach a terminal state.", "run_blueprint_project", statuses=statuses, timeout_s=timeout_s)
         await asyncio.sleep(poll_interval_s)
+
+
+async def _stop_and_settle(
+    context: _Context,
+    reason: str,
+    poll_interval_s: float,
+    timeout_s: float,
+) -> None:
+    if not context.simulation_active:
+        return
+    stop = getattr(context.service, "stop_simulation", None)
+    status_reader = getattr(context.service, "get_run_status", None)
+    if not callable(stop) or not callable(status_reader):
+        raise _error("BLUEPRINT_BUILD_FAILED", "Simulation stop and status controls are required for settlement.", "settle_blueprint_simulation")
+    deadline = time.monotonic() + timeout_s
+    try:
+        await asyncio.wait_for(stop(context.plan.target_name), timeout=timeout_s)
+    except asyncio.TimeoutError as error:
+        context.settlement_exhausted = True
+        raise _error(
+            "BLUEPRINT_SETTLEMENT_TIMED_OUT",
+            "PSCAD simulation stop did not complete before the settlement deadline.",
+            "settle_blueprint_simulation",
+            reason=reason,
+            timeout_s=timeout_s,
+        ) from error
+    statuses: list[str] = []
+    while True:
+        status = _status_value(await status_reader(context.plan.target_name))
+        statuses.append(status)
+        if status in _SUCCESS or status in _FAILURE:
+            context.simulation_active = False
+            context.history.append({"simulation_settlement": {"reason": reason, "statuses": statuses}})
+            context.journal.append("simulation_settlement", {"reason": reason, "statuses": statuses})
+            return
+        if time.monotonic() >= deadline:
+            context.settlement_exhausted = True
+            context.journal.append(
+                "simulation_settlement_timeout",
+                {"reason": reason, "statuses": statuses, "timeout_s": timeout_s},
+            )
+            raise _error(
+                "BLUEPRINT_SETTLEMENT_TIMED_OUT",
+                "PSCAD simulation did not settle after the stop request.",
+                "settle_blueprint_simulation",
+                reason=reason,
+                statuses=statuses,
+                timeout_s=timeout_s,
+            )
+        await asyncio.sleep(max(poll_interval_s, 0.01))
 
 
 async def execute_build(
@@ -334,8 +416,11 @@ async def execute_build(
     journal: BuildJournal | None = None,
     poll_interval_s: float = 0.1,
     simulation_timeout_s: float = 300.0,
+    settlement_timeout_s: float = 30.0,
     trusted_source_classes: set[str] | frozenset[str] | None = None,
 ) -> BlueprintBuildRecord:
+    if simulation_timeout_s <= 0 or settlement_timeout_s <= 0 or poll_interval_s < 0:
+        raise ValueError("Blueprint simulation and settlement timeouts must be positive, and polling cannot be negative.")
     workspace = Path(workspace_root).expanduser().resolve()
     build_root = workspace / ".pscad-mcp" / "blueprint-builds" / build_id
     history: list[dict[str, Any]] = [{"state": BlueprintBuildState.PLANNED.value}]
@@ -350,6 +435,7 @@ async def execute_build(
     active_journal.append("state", history[0])
     staging = build_root / "staging"
     context: _Context | None = None
+    failure_state = BlueprintBuildState.FAILED
     try:
         shutil.copytree(plan.source_path, staging, symlinks=False)
         source_relative = Path(plan.source_entry_point).resolve().relative_to(Path(plan.source_path).resolve())
@@ -359,7 +445,19 @@ async def execute_build(
             if project_file.exists() or project_file.is_symlink():
                 raise _error("BLUEPRINT_BUILD_CONFLICT", "The target project file already exists in staging.", "build_pscad_project")
             copied_entry.replace(project_file)
-        context = _Context(build_id, plan, service, staging, project_file, active_journal, history, bindings)
+        companion_files = resolve_companion_project_files(plan.blueprint, staging, PathPolicy(str(workspace)))
+        project_files = (project_file, *companion_files)
+        context = _Context(
+            build_id,
+            plan,
+            service,
+            staging,
+            project_file,
+            project_files,
+            active_journal,
+            history,
+            bindings,
+        )
         context.verify_source("staging_created")
         evidence_dir = staging / "evidence"
         write_json_atomic(evidence_dir / "plan.json", plan.to_dict())
@@ -368,9 +466,14 @@ async def execute_build(
             {"package_hash": plan.source_package_hash, "files": dict(plan.source_manifest)},
         )
         context.transition(BlueprintBuildState.STAGING_CREATED, staging="staging")
-        await service.load_projects([str(project_file)])
+        await service.load_projects([str(path) for path in project_files])
+        operation_readbacks: dict[str, dict[str, Any]] = {}
         for operation in plan.operations:
-            await _apply_operation(context, operation)
+            operation_readbacks[operation.operation_id] = await _apply_operation(context, operation)
+        write_json_atomic(
+            evidence_dir / "runtime-bindings.json",
+            {"component_bindings": bindings, "operation_readbacks": operation_readbacks},
+        )
         context.transition(BlueprintBuildState.MUTATIONS_APPLIED)
         context.transition(BlueprintBuildState.STRUCTURE_VERIFIED, operation_readbacks=len(plan.operations))
         await service.save_project(plan.target_name, confirm=True)
@@ -383,10 +486,22 @@ async def execute_build(
         context.transition(BlueprintBuildState.PARAMETERS_VERIFIED)
         await service.build_project(plan.target_name)
         context.transition(BlueprintBuildState.COMPILED)
-        messages = _normalize_messages(await service.get_project_output(plan.target_name, structured=True))
-        await _simulate(context, simulation_timeout_s, poll_interval_s)
+        compile_messages = _normalize_messages(await service.get_project_output(plan.target_name, structured=True))
+        output_before_run = _output_snapshot(project_file)
+        await _simulate(context, simulation_timeout_s, poll_interval_s, settlement_timeout_s)
         context.transition(BlueprintBuildState.SIMULATED)
-        dataset = discover_output_dataset(staging)
+        output_after_run = _output_snapshot(project_file)
+        if not output_after_run or output_after_run == output_before_run:
+            raise _error(
+                "BLUEPRINT_OUTPUT_STALE",
+                "Target output evidence was not created or changed by this simulation.",
+                "run_blueprint_project",
+                before=sorted(output_before_run),
+                after=sorted(output_after_run),
+            )
+        run_messages = _normalize_messages(await service.get_project_output(plan.target_name, structured=True))
+        messages = [*compile_messages, *run_messages]
+        dataset = discover_output_dataset(staging, expected_metadata=project_file.with_suffix(".inf"))
         validation = validate_staging(
             plan,
             staging,
@@ -401,6 +516,7 @@ async def execute_build(
         evidence = {
             "plan": "evidence/plan.json",
             "source_manifest": "evidence/source-manifest.json",
+            "runtime_bindings": "evidence/runtime-bindings.json",
             "validation_report": report_path.relative_to(staging).as_posix(),
             "journal": "../journal.jsonl",
         }
@@ -423,18 +539,41 @@ async def execute_build(
         return _record(build_id, context.state, plan, history, bindings, staging, result=validation, evidence=evidence)
     except asyncio.CancelledError:
         error = _error("BLUEPRINT_BUILD_INTERRUPTED", "Blueprint build was interrupted.", "build_pscad_project")
+        failure_state = BlueprintBuildState.INTERRUPTED
     except BackendError as caught:
         error = caught
+        if caught.code == "BLUEPRINT_BUILD_TIMED_OUT":
+            failure_state = BlueprintBuildState.TIMED_OUT
     except BaseException as caught:
-        error = _error("BLUEPRINT_BUILD_FAILED", "Blueprint build failed.", "build_pscad_project", exception=type(caught).__name__, message=str(caught))
-    if context is not None and context.simulation_active:
-        stop = getattr(service, "stop_simulation", None)
-        if callable(stop):
-            try:
-                await stop(plan.target_name)
-            except BaseException:
-                pass
-    failure_event = {"state": BlueprintBuildState.FAILED.value, "error": error.to_dict()}
+        error = _error(
+            "BLUEPRINT_BUILD_FAILED",
+            "Blueprint build failed.",
+            "build_pscad_project",
+            exception=type(caught).__name__,
+            exception_message=str(caught),
+        )
+    if context is not None and context.simulation_active and not context.settlement_exhausted:
+        try:
+            await asyncio.shield(
+                _stop_and_settle(
+                    context,
+                    failure_state.value,
+                    poll_interval_s,
+                    settlement_timeout_s,
+                )
+            )
+        except BaseException as settlement_error:
+            error = _error(
+                "BLUEPRINT_BUILD_FAILED",
+                "Simulation settlement could not be confirmed.",
+                "settle_blueprint_simulation",
+                original_error=error.to_dict(),
+                settlement_exception=type(settlement_error).__name__,
+            )
+            failure_state = BlueprintBuildState.FAILED
+    current_state = context.state if context is not None else BlueprintBuildState.PLANNED
+    next_state(current_state, failure_state)
+    failure_event = {"state": failure_state.value, "error": error.to_dict()}
     history.append(failure_event)
     active_journal.append("error", failure_event)
     quarantine = build_root / "quarantine"
@@ -442,6 +581,7 @@ async def execute_build(
         staging.replace(quarantine)
     elif not quarantine.exists():
         quarantine.mkdir(parents=True, exist_ok=True)
+    next_state(failure_state, BlueprintBuildState.QUARANTINED)
     history.append({"state": BlueprintBuildState.QUARANTINED.value})
     active_journal.append("state", {"state": BlueprintBuildState.QUARANTINED.value})
     write_json_atomic(

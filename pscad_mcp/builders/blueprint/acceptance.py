@@ -226,7 +226,7 @@ def evaluate_acceptance(
     outputs_passed = all(result["passed"] for result in output_results if result["required"])
     rules_passed = all(result["passed"] for result in rule_results if result["required"])
     run_through = bool(structure_acceptance and parameters_acceptance and messages_acceptance and outputs_passed and rules_passed)
-    trusted = set(trusted_source_classes or {"engineering_accepted"})
+    trusted = set(trusted_source_classes or {"engineering_accepted"}) & {"engineering_accepted"}
     physical_rules = [result for result in rule_results if result["physical"]]
     physical = bool(
         run_through

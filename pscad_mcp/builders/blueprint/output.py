@@ -139,10 +139,23 @@ def read_output_dataset(path: str | Path) -> dict[str, Any]:
     }
 
 
-def discover_output_dataset(staging_root: str | Path) -> dict[str, Any]:
+def discover_output_dataset(
+    staging_root: str | Path,
+    *,
+    expected_metadata: str | Path | None = None,
+) -> dict[str, Any]:
     root = Path(staging_root).expanduser().resolve()
     if not root.is_dir():
         raise _error("BLUEPRINT_OUTPUT_INVALID", "Output staging path must be a directory.", path=str(root))
+    if expected_metadata is not None:
+        candidate = Path(expected_metadata).expanduser().resolve()
+        if root not in candidate.parents or candidate.is_symlink() or not candidate.is_file():
+            raise _error(
+                "BLUEPRINT_OUTPUT_INVALID",
+                "The expected target output metadata is missing or unsafe.",
+                path=str(candidate),
+            )
+        return read_output_dataset(candidate)
     candidates: list[Path] = []
     for path in sorted(root.rglob("*.inf"), key=lambda item: item.as_posix()):
         if path.is_symlink() or root not in path.resolve().parents:

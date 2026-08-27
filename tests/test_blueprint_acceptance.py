@@ -107,6 +107,17 @@ def test_provisional_or_model_observed_thresholds_cannot_pass_physical_acceptanc
     assert report["physical_acceptance"] is False
 
 
+def test_configured_trust_cannot_grant_physical_acceptance_to_provisional_rules():
+    report = evaluate_acceptance(
+        acceptance_contract(source_class="provisional", physical=True),
+        dataset(),
+        trusted_source_classes={"engineering_accepted", "provisional"},
+    )
+
+    assert report["run_through_acceptance"] is True
+    assert report["physical_acceptance"] is False
+
+
 @pytest.mark.parametrize("failure", ["missing", "units", "values", "structure", "messages"])
 def test_required_output_and_lifecycle_failures_block_run_through(failure):
     evidence = dataset()

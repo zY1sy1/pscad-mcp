@@ -112,3 +112,22 @@ def test_load_blueprint_asset_rejects_name_mismatch_and_missing_asset(tmp_path):
         load_blueprint_asset("missing", asset_root=tmp_path)
     assert missing.value.code == "BLUEPRINT_ASSET_NOT_FOUND"
 
+
+def test_load_blueprint_asset_rejects_linked_directory_escape(tmp_path):
+    asset_root = tmp_path / "assets"
+    asset_root.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    value = valid_blueprint()
+    value["identity"]["name"] = "linked"
+    (outside / "blueprint.json").write_text(json.dumps(value), encoding="utf-8")
+    linked = asset_root / "linked"
+    try:
+        linked.symlink_to(outside, target_is_directory=True)
+    except OSError as error:
+        pytest.skip(f"directory symlinks are unavailable: {error}")
+
+    with pytest.raises(BackendError) as raised:
+        load_blueprint_asset("linked", asset_root=asset_root)
+
+    assert raised.value.code == "BLUEPRINT_ASSET_INVALID"

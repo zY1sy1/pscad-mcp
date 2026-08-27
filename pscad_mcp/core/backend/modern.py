@@ -148,6 +148,9 @@ class ModernBackend:
     async def load_projects(self, filenames: Any) -> None:
         await self.adapter.call(self._app, "load", *filenames)
 
+    async def unload_project(self, project_name: str) -> None:
+        await self.adapter.call(await self._project(project_name), "unload")
+
     async def list_projects(self) -> list[ProjectInfo]:
         values = await self.adapter.call(self._app, "projects")
         return [self._project_info(value) for value in values]
@@ -1038,6 +1041,7 @@ class ModernBackend:
                     "name": str(getattr(value, "name", "")) or None,
                     "definition": str(getattr(value, "defn_name", "")) or None,
                     "location": list(location) if location is not None else None,
+                    "orientation": getattr(value, "orientation", getattr(value, "orient", None)),
                 }
             )
         return result

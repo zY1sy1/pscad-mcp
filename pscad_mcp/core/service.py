@@ -443,6 +443,49 @@ class PscadService:
         await self.backend.load_projects(resolved)
         return f"Loaded: {', '.join(resolved)}"
 
+    async def reload_project(self, project_name: str, filename: str) -> str:
+        resolved = self._resolve_path(
+            filename,
+            suffixes={".pscx"},
+            must_exist=True,
+            operation="reload_project",
+        )
+        if resolved.stem.casefold() != project_name.casefold():
+            raise BackendError(
+                "INVALID_ARGUMENT",
+                "Reloaded PSCX filename must match the project name.",
+                getattr(self.backend, "name", "backend"),
+                "reload_project",
+                {"project_name": project_name, "filename": str(resolved)},
+            )
+        unloader = getattr(self.backend, "unload_project", None)
+        if not callable(unloader):
+            raise BackendError(
+                "BLUEPRINT_RELOAD_UNAVAILABLE",
+                "The backend cannot unload the project before reloading it.",
+                getattr(self.backend, "name", "backend"),
+                "reload_project",
+                {"project_name": project_name},
+            )
+        await unloader(project_name)
+        await self.backend.load_projects([str(resolved)])
+        projects = await self.backend.list_projects()
+        matches = [
+            project
+            for project in projects
+            if str(project.get("name") if isinstance(project, Mapping) else getattr(project, "name", "")).casefold()
+            == project_name.casefold()
+        ]
+        if len(matches) != 1:
+            raise BackendError(
+                "BLUEPRINT_RELOAD_FAILED",
+                "The reloaded project is missing or ambiguous.",
+                getattr(self.backend, "name", "backend"),
+                "reload_project",
+                {"project_name": project_name, "matches": len(matches)},
+            )
+        return f"Project '{project_name}' reloaded."
+
     async def list_projects(self) -> list[dict[str, Any]]:
         return [asdict(item) for item in await self.backend.list_projects()]
 
@@ -882,6 +925,34 @@ class PscadService:
     async def get_output_channels(self, project_name: str) -> list[dict[str, Any]]:
         return [dict(item) for item in await self.backend.get_output_channels(project_name)]
 
+    async def create_output_channel(
+        self,
+        project_name: str,
+        path: str,
+        units: str,
+        *,
+        call_id: int | None = None,
+    ) -> dict[str, Any]:
+        creator = getattr(self.backend, "create_output_channel", None)
+        if callable(creator):
+            created = await creator(project_name, path, units, call_id=call_id)
+            if isinstance(created, Mapping):
+                return dict(created)
+        for channel in await self.get_output_channels(project_name):
+            if (
+                channel.get("path") == path
+                and channel.get("units") == units
+                and (call_id is None or channel.get("call_id") == call_id)
+            ):
+                return channel
+        raise BackendError(
+            "BLUEPRINT_OUTPUT_DECLARATION_UNAVAILABLE",
+            "The backend cannot create the declared output channel and no exact channel exists.",
+            getattr(self.backend, "name", "backend"),
+            "create_output_channel",
+            {"project_name": project_name, "path": path, "units": units, "call_id": call_id},
+        )
+
     async def read_output_file(
         self,
         file_path: str,
@@ -1112,6 +1183,45 @@ class PscadService:
             project_name, component_id
         )
         return {port.name: asdict(port) for port in ports}
+
+    async def get_component_snapshot(
+        self,
+        project_name: str,
+        component_id: int,
+        *,
+        canvas_name: str = "Main",
+    ) -> dict[str, Any]:
+        components = await self.list_canvas_components(
+            project_name,
+            canvas_name=canvas_name,
+        )
+        matches = [item for item in components if item.get("id") == component_id]
+        if len(matches) != 1:
+            raise BackendError(
+                "BLUEPRINT_READBACK_MISMATCH",
+                "Component snapshot is missing or ambiguous.",
+                getattr(self.backend, "name", "backend"),
+                "get_component_snapshot",
+                {"project_name": project_name, "component_id": component_id},
+            )
+        snapshot = dict(matches[0])
+        if snapshot.get("orientation") is None:
+            raise BackendError(
+                "BLUEPRINT_READBACK_UNAVAILABLE",
+                "The backend did not expose component orientation.",
+                getattr(self.backend, "name", "backend"),
+                "get_component_snapshot",
+                {"project_name": project_name, "component_id": component_id},
+            )
+        snapshot.update(
+            {
+                "canvas": canvas_name,
+                "location": await self.get_component_location(project_name, component_id),
+                "parameters": await self.get_component_parameters(project_name, component_id),
+                "ports": await self.get_component_ports(project_name, component_id),
+            }
+        )
+        return snapshot
 
     async def get_component_port(
         self, project_name: str, component_id: int, port_name: str

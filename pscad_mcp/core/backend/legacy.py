@@ -304,6 +304,24 @@ class LegacyBackend:
             if path.suffix.lower() in {".pslx", ".pscx"}:
                 self.definition_paths[path.stem] = path
 
+    async def unload_project(self, project_name: str) -> None:
+        project = await self._project(project_name)
+        unloader = getattr(project, "unload", None)
+        if callable(unloader):
+            await self.executor.run_safe(unloader)
+            return
+        app_unloader = getattr(self._require_app(), "unload", None)
+        if callable(app_unloader):
+            await self.executor.run_safe(app_unloader, project_name)
+            return
+        raise BackendError(
+            "BLUEPRINT_RELOAD_UNAVAILABLE",
+            "The legacy backend cannot unload the project before reloading it.",
+            self.name,
+            "unload_project",
+            {"project_name": project_name},
+        )
+
     async def list_projects(self) -> list[ProjectInfo]:
         values = await self.executor.run_safe(self._require_app().list_projects)
         return [self._project_info(value) for value in values]
@@ -3077,12 +3095,17 @@ class LegacyBackend:
                 if location_method is not None
                 else getattr(value, "location", None)
             )
+            component_id = self._component_id(value)
             result.append(
                 {
-                    "id": self._component_id(value),
+                    "id": component_id,
                     "name": str(name) if name else None,
                     "definition": str(definition),
                     "location": list(location) if location is not None else None,
+                    "orientation": await self._legacy_component_orientation(
+                        project_name,
+                        str(component_id),
+                    ),
                 }
             )
         known_ids = {item["id"] for item in result}
@@ -3109,6 +3132,7 @@ class LegacyBackend:
                     "name": node.get("name") or None,
                     "definition": class_id,
                     "location": list(location) if location is not None else None,
+                    "orientation": int(node.get("orient", "0")),
                 }
             )
         return result

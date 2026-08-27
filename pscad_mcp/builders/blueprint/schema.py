@@ -26,6 +26,7 @@ _OPERATION_KINDS = {
 }
 _SOURCE_CLASSES = {"engineering_accepted", "model_observed", "provisional", "implementation_policy"}
 _PUBLICATION_SCOPES = {"model_run_through_only", "physical_and_model", "evidence_only"}
+_ROTATION_DIRECTIONS = {"right", "left", "180"}
 
 
 def _error(message: str, *, code: str = "BLUEPRINT_SCHEMA_INVALID", path: str = "blueprint") -> BackendError:
@@ -79,6 +80,97 @@ def _json_finite(value: Any, path: str) -> None:
             _json_finite(item, f"{path}.{key}")
         return
     raise _error(f"{path} contains a non-JSON value.", path=path)
+
+
+def _location(value: Any, path: str) -> list[int]:
+    if (
+        not isinstance(value, list)
+        or len(value) != 2
+        or any(not isinstance(item, int) or isinstance(item, bool) for item in value)
+    ):
+        raise _error(f"{path} must contain two integers.", path=path)
+    return value
+
+
+def _operation_arguments(kind: str, value: Any, path: str) -> Mapping[str, Any]:
+    if kind == "clone_component":
+        arguments = _allowed(value, {"logical_id", "location"}, {"expected_definition", "canvas"}, path)
+        _non_empty_string(arguments["logical_id"], f"{path}.logical_id", identifier=True)
+        _location(arguments["location"], f"{path}.location")
+        for name in ("expected_definition", "canvas"):
+            if name in arguments:
+                _non_empty_string(arguments[name], f"{path}.{name}")
+    elif kind == "create_component":
+        arguments = _allowed(
+            value,
+            {"logical_id", "definition", "location"},
+            {"orientation", "canvas", "parameters", "units"},
+            path,
+        )
+        _non_empty_string(arguments["logical_id"], f"{path}.logical_id", identifier=True)
+        _non_empty_string(arguments["definition"], f"{path}.definition")
+        _location(arguments["location"], f"{path}.location")
+        orientation = arguments.get("orientation", 0)
+        if not isinstance(orientation, int) or isinstance(orientation, bool) or not 0 <= orientation <= 7:
+            raise _error(f"{path}.orientation must be an integer from 0 through 7.", path=f"{path}.orientation")
+        if "canvas" in arguments:
+            _non_empty_string(arguments["canvas"], f"{path}.canvas")
+        parameters = _mapping(arguments.get("parameters", {}), f"{path}.parameters")
+        units = _mapping(arguments.get("units", {}), f"{path}.units")
+        if not set(units) <= set(parameters):
+            raise _error(f"{path}.units may only name declared parameters.", path=f"{path}.units")
+    elif kind == "set_component_location":
+        arguments = _exact(value, {"location"}, path)
+        _location(arguments["location"], f"{path}.location")
+    elif kind == "rotate_component":
+        arguments = _exact(value, {"direction", "expected_orientation"}, path)
+        if arguments["direction"] not in _ROTATION_DIRECTIONS:
+            raise _error(f"{path}.direction is not supported.", path=f"{path}.direction")
+        orientation = arguments["expected_orientation"]
+        if not isinstance(orientation, int) or isinstance(orientation, bool) or orientation not in {0, 90, 180, 270}:
+            raise _error(f"{path}.expected_orientation is invalid.", path=f"{path}.expected_orientation")
+    elif kind == "set_component_parameters":
+        arguments = _allowed(value, {"parameters"}, {"units"}, path)
+        parameters = _mapping(arguments["parameters"], f"{path}.parameters")
+        if not parameters:
+            raise _error(f"{path}.parameters cannot be empty.", path=f"{path}.parameters")
+        units = _mapping(arguments.get("units", {}), f"{path}.units")
+        if not set(units) <= set(parameters):
+            raise _error(f"{path}.units may only name declared parameters.", path=f"{path}.units")
+    elif kind == "create_wire":
+        arguments = _allowed(value, {"vertices"}, {"canvas"}, path)
+        vertices = arguments["vertices"]
+        if not isinstance(vertices, list) or len(vertices) < 2:
+            raise _error(f"{path}.vertices must contain at least two points.", path=f"{path}.vertices")
+        parsed = [_location(point, f"{path}.vertices[{index}]") for index, point in enumerate(vertices)]
+        if any(left == right or (left[0] != right[0] and left[1] != right[1]) for left, right in zip(parsed, parsed[1:])):
+            raise _error(f"{path}.vertices must form non-zero orthogonal segments.", path=f"{path}.vertices")
+        if "canvas" in arguments:
+            _non_empty_string(arguments["canvas"], f"{path}.canvas")
+    elif kind == "connect_ports":
+        arguments = _allowed(value, {"from", "to"}, {"canvas"}, path)
+        for endpoint_name in ("from", "to"):
+            endpoint_path = f"{path}.{endpoint_name}"
+            endpoint = _exact(arguments[endpoint_name], {"logical_id", "port"}, endpoint_path)
+            _non_empty_string(endpoint["logical_id"], f"{endpoint_path}.logical_id", identifier=True)
+            _non_empty_string(endpoint["port"], f"{endpoint_path}.port")
+        if arguments["from"] == arguments["to"]:
+            raise _error(f"{path} cannot connect a port to itself.", path=path)
+        if "canvas" in arguments:
+            _non_empty_string(arguments["canvas"], f"{path}.canvas")
+    elif kind == "set_project_settings":
+        arguments = _exact(value, {"settings"}, path)
+        if not _mapping(arguments["settings"], f"{path}.settings"):
+            raise _error(f"{path}.settings cannot be empty.", path=f"{path}.settings")
+    else:
+        arguments = _allowed(value, {"path", "units"}, {"call_id"}, path)
+        _non_empty_string(arguments["path"], f"{path}.path")
+        _non_empty_string(arguments["units"], f"{path}.units")
+        call_id = arguments.get("call_id")
+        if call_id is not None and (not isinstance(call_id, int) or isinstance(call_id, bool) or call_id < 1):
+            raise _error(f"{path}.call_id must be a positive integer.", path=f"{path}.call_id")
+    _json_finite(arguments, path)
+    return arguments
 
 
 def _identity(value: Any) -> BlueprintIdentity:
@@ -148,15 +240,7 @@ def _operations(value: Any) -> tuple[BlueprintOperation, ...]:
             raise _error(f"{path}.kind is not supported.", path=f"{path}.kind")
         target = _non_empty_string(record["target"], f"{path}.target", identifier=True)
         operation_id = _non_empty_string(record["operation_id"], f"{path}.operation_id", identifier=True)
-        arguments = _mapping(record["arguments"], f"{path}.arguments")
-        _json_finite(arguments, f"{path}.arguments")
-        location = arguments.get("location")
-        if location is not None and (
-            not isinstance(location, list)
-            or len(location) != 2
-            or any(not isinstance(item, int) or isinstance(item, bool) for item in location)
-        ):
-            raise _error(f"{path}.arguments.location must contain two integers.", path=f"{path}.arguments.location")
+        arguments = _operation_arguments(kind, record["arguments"], f"{path}.arguments")
         operations.append(BlueprintOperation(sequence, kind, target, freeze(arguments), operation_id))
     sequences = [operation.sequence for operation in operations]
     identifiers = [operation.operation_id for operation in operations]

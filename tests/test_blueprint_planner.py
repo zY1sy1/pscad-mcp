@@ -8,7 +8,7 @@ import pytest
 
 from pscad_mcp.builders.blueprint.assets import hash_tree, load_blueprint_asset
 from pscad_mcp.builders.blueprint.inventory import normalize_inventory
-from pscad_mcp.builders.blueprint.planner import create_plan
+from pscad_mcp.builders.blueprint.planner import create_plan, plan_from_dict
 from pscad_mcp.core.backend.base import BackendError
 from pscad_mcp.core.path_policy import PathPolicy
 from test_blueprint_assets import write_source_package
@@ -91,6 +91,58 @@ def test_plan_is_deterministic_side_effect_free_and_binds_all_evidence(tmp_path)
     json.dumps(first.to_dict(), allow_nan=False)
 
 
+def test_plan_rejects_duplicate_created_logical_ids(tmp_path):
+    blueprint = valid_blueprint()
+    blueprint["operations"].append(
+        {
+            "sequence": 3,
+            "kind": "create_component",
+            "target": "duplicate",
+            "arguments": {
+                "logical_id": "breaker_copy",
+                "definition": "master:breaker",
+                "location": [30, 30],
+                "orientation": 0,
+                "canvas": "Main",
+                "parameters": {"Name": "DUPLICATE"},
+                "units": {},
+            },
+            "operation_id": "op-003",
+        }
+    )
+
+    with pytest.raises(BackendError) as raised:
+        plan(tmp_path, blueprint=blueprint)
+
+    assert raised.value.code == "BLUEPRINT_OPERATION_INVALID"
+
+
+def test_plan_validates_create_component_parameters_against_live_definition(tmp_path):
+    blueprint = valid_blueprint()
+    blueprint["operations"] = [
+        {
+            "sequence": 1,
+            "kind": "create_component",
+            "target": "created",
+            "arguments": {
+                "logical_id": "created",
+                "definition": "master:breaker",
+                "location": [30, 30],
+                "orientation": 0,
+                "canvas": "Main",
+                "parameters": {"Unknown": 1},
+                "units": {},
+            },
+            "operation_id": "op-001",
+        }
+    ]
+
+    with pytest.raises(BackendError) as raised:
+        plan(tmp_path, blueprint=blueprint)
+
+    assert raised.value.code == "BLUEPRINT_TARGET_UNRESOLVED"
+
+
 def test_plan_hash_changes_with_source_inventory_blueprint_or_overrides(tmp_path):
     baseline = plan(tmp_path)
     (tmp_path / "source-package" / "support" / "notes.txt").write_text("changed", encoding="utf-8")
@@ -164,3 +216,14 @@ def test_normalize_inventory_rejects_duplicate_component_ids_and_non_finite_valu
     with pytest.raises(BackendError) as finite_error:
         normalize_inventory(value)
     assert finite_error.value.code == "BLUEPRINT_INVENTORY_INVALID"
+
+
+@pytest.mark.parametrize("warnings", ["one warning", 17, ["valid", 3]])
+def test_plan_from_dict_rejects_invalid_warning_collections(tmp_path, warnings):
+    value = plan(tmp_path).to_dict()
+    value["warnings"] = warnings
+
+    with pytest.raises(BackendError) as raised:
+        plan_from_dict(value)
+
+    assert raised.value.code == "BLUEPRINT_PLAN_INVALID"

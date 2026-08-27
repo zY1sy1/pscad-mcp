@@ -112,7 +112,7 @@ async def read_live_inventory(service: Any, project_name: str, inspection_profil
         return normalize_inventory(await bridge(project_name, inspection_profile))
     components = await service.list_canvas_components(project_name, canvas_name="Main")
     definitions = await service.get_project_definitions(project_name)
-    status = await service.get_pscad_status()
+    status = await service.status()
     normalized_definitions = {
         name: {"ports": {}, "parameters": {}}
         for name in definitions
@@ -121,23 +121,47 @@ async def read_live_inventory(service: Any, project_name: str, inspection_profil
     for component in components:
         component_id = int(component["id"])
         parameters = await service.get_component_parameters(project_name, component_id)
-        ports = await service.get_component_ports(project_name, component_id)
+        observed_ports = await service.get_component_ports(project_name, component_id)
+        ports = {
+            name: {
+                "name": metadata.get("name", name),
+                "x": metadata.get("x"),
+                "y": metadata.get("y"),
+                "kind": metadata.get("kind", metadata.get("type")),
+                "dimension": metadata.get("dimension", metadata.get("dim")),
+            }
+            for name, metadata in observed_ports.items()
+        }
         location = await service.get_component_location(project_name, component_id)
+        definition_name = str(component.get("definition") or "unresolved")
+        definition = normalized_definitions.get(definition_name)
+        parameter_metadata = {name: {"resolved": True, "units": None} for name in parameters}
+        if definition is not None:
+            definition["parameters"].update(parameter_metadata)
+            definition["ports"].update(
+                {
+                    name: {
+                        key: value
+                        for key, value in metadata.items()
+                        if key not in {"name", "x", "y"}
+                    }
+                    for name, metadata in ports.items()
+                }
+            )
         normalized_components.append(
             {
                 "id": component_id,
                 "logical_id": str(component.get("logical_id") or component.get("name") or component_id),
                 "name": str(component.get("name") or component_id),
-                "definition": str(component.get("definition") or "unresolved"),
+                "definition": definition_name,
                 "canvas": str(component.get("canvas") or "Main"),
                 "location": [int(location["x"]), int(location["y"])],
                 "orientation": int(component.get("orientation", 0)),
                 "parameters": parameters,
-                "parameter_metadata": {name: {"resolved": True, "units": None} for name in parameters},
+                "parameter_metadata": parameter_metadata,
                 "ports": ports,
                 "resolved": component.get("definition") is not None,
             }
         )
     version = status.get("version") or status.get("pscad_version")
     return normalize_inventory({"pscad_version": version, "definitions": normalized_definitions, "components": normalized_components})
-

@@ -142,6 +142,7 @@ def test_parse_blueprint_rejects_unknown_or_non_integer_schema_versions(schema_v
         lambda value: value["operations"][0]["arguments"].update(value=float("nan")),
         lambda value: value["acceptance"]["rules"][0].update(source_class="invented"),
         lambda value: value["publication"].update(scope="physical_acceptance"),
+        lambda value: value["publication"]["evidence_files"].append("../source.pscx"),
         lambda value: value["source_package"].update(handling_policy="overwrite"),
     ],
 )
@@ -167,4 +168,51 @@ def test_parse_blueprint_rejects_duplicate_required_paths_and_output_channels():
 
     value = valid_blueprint()
     value["acceptance"]["outputs"].append(copy.deepcopy(value["acceptance"]["outputs"][0]))
+    assert_schema_error(value)
+
+
+@pytest.mark.parametrize(
+    "operation",
+    [
+        {
+            "sequence": 1,
+            "kind": "clone_component",
+            "target": "source_breaker",
+            "arguments": {"logical_id": "copy", "canvas": "Main"},
+            "operation_id": "op-invalid",
+        },
+        {
+            "sequence": 1,
+            "kind": "rotate_component",
+            "target": "source_breaker",
+            "arguments": {"direction": "diagonal", "expected_orientation": 45},
+            "operation_id": "op-invalid",
+        },
+        {
+            "sequence": 1,
+            "kind": "create_wire",
+            "target": "wire-1",
+            "arguments": {"canvas": "Main", "vertices": [[0, 0], [1, 1]]},
+            "operation_id": "op-invalid",
+        },
+        {
+            "sequence": 1,
+            "kind": "declare_output_channel",
+            "target": "channel-1",
+            "arguments": {"path": "Main/V", "units": "kV", "call_id": True},
+            "operation_id": "op-invalid",
+        },
+        {
+            "sequence": 1,
+            "kind": "set_project_settings",
+            "target": "project",
+            "arguments": {"settings": {}, "unexpected": True},
+            "operation_id": "op-invalid",
+        },
+    ],
+)
+def test_parse_blueprint_rejects_invalid_per_kind_operation_contracts(operation):
+    value = valid_blueprint()
+    value["operations"] = [operation]
+
     assert_schema_error(value)
