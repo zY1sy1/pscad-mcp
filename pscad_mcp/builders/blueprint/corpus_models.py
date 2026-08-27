@@ -348,3 +348,23 @@ class CorpusManifest:
             "project_count": self.project_count,
             "projects": [project.to_dict() for project in self.projects],
         }
+
+
+@dataclass(frozen=True)
+class BlueprintVerification:
+    project_id: str
+    blueprint_name: str
+    graph_signature: str
+    source_hash_verified: bool
+    operations_empty: bool
+    status: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "project_id": self.project_id,
+            "blueprint_name": self.blueprint_name,
+            "graph_signature": self.graph_signature,
+            "source_hash_verified": self.source_hash_verified,
+            "operations_empty": self.operations_empty,
+            "status": self.status,
+        }
