@@ -11,7 +11,11 @@ def test_changelog_describes_current_release_boundary():
     assert "pscad 5.x" in text
     assert "contract" in text
     assert "silent learning" in text
-    assert "83" in text
+    assert "90" in text
+    assert "dual-engine" in text
+    assert "parametric mmc" in text
+
+
 def test_readmes_document_the_fixed_lcc_builder_boundary():
     root = Path(__file__).parents[1]
     english = (root / "README.md").read_text(encoding="utf-8").lower()

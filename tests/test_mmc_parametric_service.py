@@ -5,6 +5,7 @@ import pytest
 
 from pscad_mcp.core.backend.base import BackendError
 from pscad_mcp.core.service import ConfirmationRequired
+from pscad_mcp.hvdc.builders.mmc import parametric_service as parametric_service_module
 from pscad_mcp.hvdc.builders.lcc.journal import WorkspaceBuildLease as LccLease
 from tests.mmc_parametric_fakes import (
     make_parametric_service,
@@ -49,6 +50,18 @@ def test_both_engines_publish_only_after_independent_acceptance(tmp_path: Path) 
     ).read_bytes()
     assert (tmp_path / "MMC_CASE_avm_scenario_source.pscx").read_bytes() == (
         tmp_path / "MMC_CASE_avm.pscx"
+    ).read_bytes()
+    published_library = tmp_path / "intermediate.pslx"
+    assert published_library.is_file()
+    assert published_library.read_bytes() == (
+        Path(plan["engine_plans"][0]["source_paths"]["library"])
+    ).read_bytes()
+    assert terminal["engines"][0]["final_library_path"] == str(published_library)
+    Path(
+        terminal["engines"][0]["candidate_result"]["library_path"]
+    ).write_text("candidate changed after publication", encoding="utf-8")
+    assert published_library.read_bytes() == (
+        Path(plan["engine_plans"][0]["source_paths"]["library"])
     ).read_bytes()
     assert service.recorded_engine_calls == [
         ("detailed_pwm", "pwm-0"),
@@ -232,3 +245,105 @@ def test_absolute_project_lookup_does_not_alias_a_cached_basename(
         service.recommend_simulation(str(unrelated))
 
     assert raised.value.code == "MMC_REQUEST_INVALID"
+
+
+def test_parent_rejects_pwm_library_that_differs_from_immutable_plan(
+    tmp_path: Path,
+) -> None:
+    service = make_parametric_service(tmp_path, pwm_verdict="TAMPERED_LIBRARY")
+
+    _, terminal = _build(
+        service, tmp_path, valid_request(model_fidelity="detailed_pwm")
+    )
+
+    assert terminal["state"] == "failed"
+    assert terminal["error"]["code"] == "MMC_POSTCONDITION_FAILED"
+    assert not (tmp_path / "MMC_CASE_pwm.pscx").exists()
+    assert not (tmp_path / "intermediate.pslx").exists()
+
+
+def test_parent_rechecks_published_pwm_library_after_final_compile(
+    tmp_path: Path,
+) -> None:
+    service = make_parametric_service(tmp_path)
+    original_load = service.pscad_service.load_projects
+
+    async def mutating_load(filenames: list[str]) -> str:
+        result = await original_load(filenames)
+        for filename in filenames:
+            path = Path(filename)
+            if path.name.casefold() == "intermediate.pslx" and path.parent == tmp_path:
+                path.write_text("mutated during final reload", encoding="utf-8")
+        return result
+
+    service.pscad_service.load_projects = mutating_load
+
+    _, terminal = _build(
+        service, tmp_path, valid_request(model_fidelity="detailed_pwm")
+    )
+
+    assert terminal["state"] == "failed"
+    assert terminal["error"]["code"] == "MMC_POSTCONDITION_FAILED"
+    assert not (tmp_path / "MMC_CASE_pwm.pscx").exists()
+    assert not (tmp_path / "intermediate.pslx").exists()
+
+
+def test_parent_restores_preexisting_pwm_library_when_final_compile_mutates(
+    tmp_path: Path,
+) -> None:
+    service = make_parametric_service(tmp_path)
+    request = valid_request(model_fidelity="detailed_pwm")
+    plan = service.plan_model(request, project_name="MMC_CASE", folder=str(tmp_path))
+    source_library = Path(plan["engine_plans"][0]["source_paths"]["library"])
+    target = tmp_path / "intermediate.pslx"
+    original_contents = source_library.read_bytes()
+    target.write_bytes(original_contents)
+    original_load = service.pscad_service.load_projects
+
+    async def mutating_load(filenames: list[str]) -> str:
+        result = await original_load(filenames)
+        for filename in filenames:
+            path = Path(filename)
+            if path.name.casefold() == "intermediate.pslx" and path.parent == tmp_path:
+                path.write_text("mutated pre-existing library", encoding="utf-8")
+        return result
+
+    service.pscad_service.load_projects = mutating_load
+
+    started = asyncio.run(
+        service.build_model(
+            request,
+            plan["plan_hash"],
+            "MMC_CASE",
+            str(tmp_path),
+            confirm=True,
+        )
+    )
+    terminal = wait_for_terminal(service, started["build_id"])
+
+    assert terminal["state"] == "failed"
+    assert terminal["error"]["code"] == "MMC_POSTCONDITION_FAILED"
+    assert target.read_bytes() == original_contents
+    assert not (tmp_path / "MMC_CASE_pwm.pscx").exists()
+
+
+def test_failed_postcopy_hash_read_removes_unverified_pwm_library(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    service = make_parametric_service(tmp_path)
+    target = tmp_path / "intermediate.pslx"
+    original_sha256 = parametric_service_module._sha256
+
+    def failing_target_hash(path: Path) -> str:
+        if Path(path).resolve() == target.resolve() and target.exists():
+            raise PermissionError("injected final library hash failure")
+        return original_sha256(path)
+
+    monkeypatch.setattr(parametric_service_module, "_sha256", failing_target_hash)
+
+    _, terminal = _build(
+        service, tmp_path, valid_request(model_fidelity="detailed_pwm")
+    )
+
+    assert terminal["state"] == "failed"
+    assert not target.exists()

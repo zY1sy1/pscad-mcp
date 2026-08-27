@@ -1,12 +1,12 @@
 # PSCAD MCP 中文使用与验收说明
 
-本项目把 PSCAD 自动化封装为 83 个 MCP 工具，其中原有通用服务契约保持 60 个工具，并增加 HVDC、静默学习、固定 CIGRE LCC 与参数化 LCC 领域工具，可供 Codex、GitHub Copilot CLI 等支持 stdio MCP 的客户端调用。项目采用双后端：
+本项目把 PSCAD 自动化封装为 90 个 MCP 工具，其中原有通用服务契约保持 60 个工具，并增加 HVDC、静默学习、LCC 与参数化 MMC 领域工具，可供 Codex、GitHub Copilot CLI 等支持 stdio MCP 的客户端调用。项目采用双后端：
 
 - PSCAD 4.6.x：`mhrc.automation`，当前已在本机 PSCAD 4.6.2 x64 许可环境做真实验收；
 - PSCAD 5.x：`mhi.pscad` 3.1.x，当前完成契约测试，但由于本机没有 PSCAD 5.x，不能声称端到端真实验收通过；
 - 结果文件：`mhi.psout` 1.3.x。
 
-完整工具库存为 83 = 60 个通用工具 + 10 个 HVDC 工具 + 3 个学习工具 + 4 个固定 CIGRE LCC 工具 + 6 个参数化 LCC 工具；原有 60 个通用工具的名称和默认返回形状保持不变。
+完整工具库存为 90 = 60 个通用工具 + 10 个 HVDC 工具 + 3 个学习工具 + 4 个固定 CIGRE LCC 工具 + 6 个参数化 LCC 工具 + 7 个参数化 MMC 工具；原有 60 个通用工具的名称和默认返回形状保持不变。
 
 Legacy PSCAD 4.6.2 后端只支持启动新的受管 Automation 实例，不能附加到用户普通方式打开的 GUI。受管窗口默认可见；默认检测到已有 PSCAD 进程时会在启动前返回 `EXTERNAL_PSCAD_PRESENT`。`repair_connection` 使用连接时缓存的进程归属：自有实例会先正常退出，外部进程不会被终止。
 
@@ -31,7 +31,7 @@ Legacy PSCAD 4.6.2 后端只支持启动新的受管 Automation 实例，不能�
 
 ## 功能范围
 
-服务器固定注册 83 个工具，其中以下七组共 60 个通用工具：
+服务器固定注册 90 个工具，其中以下七组共 60 个通用工具：
 
 - 应用与文档 7 个：连接、状态、修复、退出、文档同步/列出/读取；
 - 工程与参数 12 个：加载、列出、运行、暂停、停止、运行状态、元件查询、参数读取/写入/校验、工程设置读取/写入；
@@ -89,6 +89,77 @@ legacy 服务和批准模板路径时，执行只返回 `LCC_BUILD_UNAVAILABLE` 
 catalog/provenance/final project 哈希、编译状态、输出文件哈希、每个模式的
 selector/单位和结构及稳态验收结果；只有报告最终状态为 `PASS` 才能称为真实
 PSCAD 验收完成。
+
+### 参数化双引擎 MMC
+
+MMC 领域新增七个工具：`audit_mmc_template`、`derive_mmc_parameters`、
+`plan_parametric_mmc_model`、`build_parametric_mmc_model`、
+`get_parametric_mmc_build_status`、`recommend_mmc_simulation` 和
+`validate_mmc_model`。同一请求可选择 `detailed_pwm`、`average_value` 或
+`both`，当前范围限定为 PSCAD 4.6.2。典型请求如下：
+
+```json
+{
+  "schema_version": 1,
+  "model_fidelity": "both",
+  "topology": "two_terminal_symmetrical_monopole",
+  "converter": "half_bridge",
+  "dc_voltage_kv": 640.0,
+  "active_power_mw": 1000.0,
+  "reactive_power_mvar": 0.0,
+  "frequency_hz": 60.0,
+  "station_p": {"ac_voltage_kv": 230.0, "short_circuit_ratio": 5.0, "x_over_r": 10.0},
+  "station_vdc": {"ac_voltage_kv": 230.0, "short_circuit_ratio": 5.0, "x_over_r": 10.0},
+  "dc_link": {"kind": "overhead_line", "length_km": 200.0},
+  "power_reversal_time_s": 0.5,
+  "engineering_overrides": {}
+}
+```
+
+详细 PWM 引擎遵守“官方模板只读”边界。默认发现路径是
+`C:\Users\Public\Documents\PSCAD\4.6\Examples\ModelsInProgress\H_MMC_Mono_DC.pscx`
+及同目录 `intermediate.pslx`。审核和规划只读取并哈希安装文件；执行时复制到
+隔离候选目录，候选执行前后都验证源文件不可变。本仓库与 wheel 均不包含官方
+PSCX/PSLX 内容。
+
+平均值引擎只使用仓库自有 `cigre_b4_p2p_avm_v1` 资产，显式放置十二个桥臂并
+表示半桥二极管等效阻断路径。它明确声明
+`individual_cell_balance_not_modeled`、`device_stress_not_modeled`、
+`switching_harmonics_not_modeled`、`thermal_not_modeled`。两种 fidelity 都报告
+`intrinsic_dc_fault_blocking=false`；直流故障验收必须提供断路器、闭锁命令、
+二极管电流、故障清除和恢复证据，不能声称半桥具备固有直流故障阻断能力。
+
+详细 PWM 请求先调用 `audit_mmc_template`，然后使用
+`derive_mmc_parameters` 与 `plan_parametric_mmc_model`。审查精确 parent plan hash
+以及每个引擎默认 4（four）个不可变预规划候选后，调用
+`build_parametric_mmc_model(..., expected_plan_hash=..., confirm=true)`，用
+`get_parametric_mmc_build_status` 轮询，通过 `recommend_mmc_simulation` 取得可执行
+正常/故障场景对象，最后把结果文件交给 `validate_mmc_model`。父生命周期在共享
+LCC/MMC 工作区锁下先 PWM 后 AVM 串行执行；所有请求的子引擎均独立验收并重新
+打开/编译前，不发布任何最终工程。
+
+发布阶段还会为每个最终工程创建独立只读的 `*_scenario_source.pscx` 副本。把已
+发布工程路径传给 `recommend_mmc_simulation` 后，返回场景的 `project` 指向该源
+副本，`derived_project` 指向可变更的最终工程，因此场景无需补字段即可交给
+`run_hvdc_scenario`。MMC v2 fingerprint 与结果 selector 会严格重绑定到已解析的
+derived project stem；自定义工程名也不会启用可写别名推断。
+
+详细 PWM 发布还会校验哈希并把暂存的 `intermediate.pslx` 发布到最终工程和场景源
+副本旁。只有内容哈希完全一致时才复用已有同名库；否则父发布失败并回滚，且不会
+覆盖该文件。不可变子计划哈希是唯一信任根；PSCAD 重新加载并编译后还会再次校验
+最终库。
+
+恢复只能选择用途与可重试诊断匹配的不可变预规划候选，不能临时发明参数、修改
+请求额定值、修复歧义绑定、绕过物理不可行约束或超过有界候选集。能力级别严格
+区分：`inspected` 表示已有图结构证据，`designed` 表示确定性推导通过，`planned`
+表示哈希与候选已冻结，`built` 表示工程存在且编译，`simulated` 表示已有动态输出，
+`accepted` 才表示完成 fidelity 专属验收。
+
+`docs/acceptance-status.json` 中此范围当前为
+`NOT_RUN_ON_INTEGRATED_COMMIT`。非许可测试、wheel 安装、结构验证或编译不能把
+任一引擎提升为 `accepted`。真实矩阵必须按
+`tests/test_mmc_parametric_real_acceptance.py` 配齐 PSCAD 4.6.2 环境变量，并记录
+官方源文件、仓库资产、既有工作区、计划、工程和输出哈希。
 
 ## Windows 安装
 
@@ -281,7 +352,7 @@ git diff --check
 git status --short --branch
 ```
 
-工具数量应输出 `83 83`。真实 PSCAD 5.x 必须在安装并运行对应版本后另做相同级别验收。
+工具数量应输出 `90 90`。真实 PSCAD 5.x 必须在安装并运行对应版本后另做相同级别验收。
 
 ## 常见故障
 

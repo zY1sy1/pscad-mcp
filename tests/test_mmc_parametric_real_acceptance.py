@@ -279,6 +279,7 @@ async def _run_case(
         "asset_hashes": {},
         "build": {},
         "project_hashes": {},
+        "library_hashes": {},
         "output_hashes": {},
         "scenarios": [],
         "runtime": {},
@@ -323,9 +324,19 @@ async def _run_case(
             return record
         for engine in build["engines"]:
             project = Path(str(engine["final_path"])).resolve()
-            record["project_hashes"][str(engine["engine"])] = _sha256(project)
+            engine_name = str(engine["engine"])
+            record["project_hashes"][engine_name] = _sha256(project)
+            if engine_name == "detailed_pwm":
+                final_library = Path(str(engine["final_library_path"])).resolve()
+                final_library_hash = _sha256(final_library)
+                planned_library_hash = record["source_hashes"][engine_name]["library"]
+                if final_library_hash != planned_library_hash:
+                    raise AssertionError(
+                        "The published PWM library differs from the immutable plan"
+                    )
+                record["library_hashes"][engine_name] = final_library_hash
             settings = await service.get_project_settings(project.stem)
-            record["compiler"][str(engine["engine"])] = {
+            record["compiler"][engine_name] = {
                 key: value
                 for key, value in settings.items()
                 if "compiler" in str(key).casefold()

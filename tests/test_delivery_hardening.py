@@ -70,4 +70,59 @@ def test_windows_ci_covers_supported_python_versions_and_release_gates():
     assert "python -m pip check" in workflow
     assert "python -m compileall -q pscad_mcp tests" in workflow
     assert "print(len(tools), len({tool.name for tool in tools}))" in workflow
-    assert "83 83" in workflow
+    assert "90 90" in workflow
+
+
+def test_readmes_document_parametric_mmc_contract_and_limits():
+    tools = (
+        "audit_mmc_template",
+        "derive_mmc_parameters",
+        "plan_parametric_mmc_model",
+        "build_parametric_mmc_model",
+        "get_parametric_mmc_build_status",
+        "recommend_mmc_simulation",
+        "validate_mmc_model",
+    )
+    shared = (
+        "90",
+        "detailed_pwm",
+        "average_value",
+        "PSCAD 4.6.2",
+        "intrinsic_dc_fault_blocking=false",
+        "individual_cell_balance_not_modeled",
+        "device_stress_not_modeled",
+        "switching_harmonics_not_modeled",
+        "thermal_not_modeled",
+        "inspected",
+        "designed",
+        "planned",
+        "built",
+        "simulated",
+        "accepted",
+        "NOT_RUN_ON_INTEGRATED_COMMIT",
+        "four",
+        "model_fidelity",
+        "two_terminal_symmetrical_monopole",
+        "H_MMC_Mono_DC.pscx",
+        "intermediate.pslx",
+        "_scenario_source.pscx",
+        "derived_project",
+    )
+    root = ROOT
+    for relative in ("README.md", "docs/zh-CN/README.md"):
+        text = (root / relative).read_text(encoding="utf-8")
+        for tool in tools:
+            assert tool in text, f"{relative} is missing {tool}"
+        for phrase in shared:
+            assert phrase in text, f"{relative} is missing {phrase}"
+    english = (root / "README.md").read_text(encoding="utf-8")
+    chinese = (root / "docs/zh-CN/README.md").read_text(encoding="utf-8")
+    for phrase in (
+        "read-only official template",
+        "source immutability",
+        "preplanned candidates",
+        "ModelsInProgress",
+    ):
+        assert phrase in english
+    for phrase in ("官方模板只读", "源文件不可变", "预规划候选", "ModelsInProgress"):
+        assert phrase in chinese

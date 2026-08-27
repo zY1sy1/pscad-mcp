@@ -6,6 +6,18 @@ All notable changes to this project are documented here.
 
 ### Changed
 
+- Added the PSCAD 4.6.2 parametric MMC dual-engine lifecycle with deterministic
+  derivation, an audited read-only detailed-PWM template adapter, a
+  repository-owned average-value builder, executable normal/fault
+  recommendations bound to independently published scenario-source copies,
+  hash-verified publication of the PWM sibling library, bounded preplanned
+  recovery, and seven guarded MCP tools.
+  Licensed parametric MMC acceptance remains opt-in and is currently
+  `NOT_RUN_ON_INTEGRATED_COMMIT`.
+- The MCP inventory is now 90 tools: the original 60 generic tools, ten HVDC
+  tools, three learning tools, four fixed LCC tools, six parametric LCC tools,
+  and seven parametric MMC tools.
+
 - Parameterized LCC execution now carries reviewed real-template selectors through
   deterministic plans, validates bindings before acquiring a workspace lease,
   stages PSCX changes atomically, and records bounded source/staging/read-back
@@ -29,10 +41,6 @@ All notable changes to this project are documented here.
 - LCC planning now fails closed without live PSCAD definition inventory;
   output-channel creation, final-project identity, waveform ownership, asset
   fingerprints, and acceptance-report evidence are checked explicitly.
-- The MCP inventory is now 83 tools: the original 60 generic tools, ten HVDC
-  tools, three learning tools, four fixed LCC tools, and six parametric LCC
-  tools.
-
 - HVDC strict control now supports explicit backend timing and output-channel
   provider hooks, bounded simulation-clock polling, stalled-clock detection,
   stable event IDs, and duplicate-event rejection.

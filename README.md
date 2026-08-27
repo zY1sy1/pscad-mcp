@@ -1,6 +1,6 @@
 # PSCAD MCP for Codex and GitHub Copilot CLI
 
-`pscad-mcp` is a Windows Model Context Protocol (MCP) server for PSCAD automation. It uses `mhrc.automation` for PSCAD 4.6.x and `mhi.pscad` for PSCAD 5.x behind one stable 60-tool generic service contract, plus separate HVDC, silent-learning, fixed CIGRE LCC, and parametric LCC domain layers. The current inventory is 83 tools.
+`pscad-mcp` is a Windows Model Context Protocol (MCP) server for PSCAD automation. It uses `mhrc.automation` for PSCAD 4.6.x and `mhi.pscad` for PSCAD 5.x behind one stable 60-tool generic service contract, plus separate HVDC, silent-learning, LCC, and parametric MMC domain layers. The current inventory is 90 tools.
 
 中文安装、配置、安全和验收说明：[docs/zh-CN/README.md](docs/zh-CN/README.md)
 
@@ -61,9 +61,10 @@ external process.
 
 ## Tool coverage
 
-The complete inventory is 83 = 60 generic tools, 10 HVDC tools, 3 learning
-tools, 4 fixed CIGRE LCC tools, and 6 parametric LCC tools. The generic 60-tool contract keeps its
-existing names and default return shapes.
+The complete inventory is 90 = 60 generic tools, 10 HVDC tools, 3 learning
+tools, 4 fixed CIGRE LCC tools, 6 parametric LCC tools, and 7 parametric MMC
+tools. The generic 60-tool contract keeps its existing names and default return
+shapes.
 
 The server currently exposes tool groups for:
 
@@ -129,6 +130,93 @@ LCC acceptance.
 Licensed acceptance has not passed for the PSCAD 4.6.2 implementation branch,
 so the feature must not be described as an autonomously constructed
 accepted CIGRE LCC model until the opt-in real acceptance test passes.
+
+### Parametric dual-engine MMC
+
+The MMC layer adds exactly seven tools: `audit_mmc_template`,
+`derive_mmc_parameters`, `plan_parametric_mmc_model`,
+`build_parametric_mmc_model`, `get_parametric_mmc_build_status`,
+`recommend_mmc_simulation`, and `validate_mmc_model`. The shared request
+supports `detailed_pwm`, `average_value`, or `both` under PSCAD 4.6.2. A
+typical request is:
+
+```json
+{
+  "schema_version": 1,
+  "model_fidelity": "both",
+  "topology": "two_terminal_symmetrical_monopole",
+  "converter": "half_bridge",
+  "dc_voltage_kv": 640.0,
+  "active_power_mw": 1000.0,
+  "reactive_power_mvar": 0.0,
+  "frequency_hz": 60.0,
+  "station_p": {"ac_voltage_kv": 230.0, "short_circuit_ratio": 5.0, "x_over_r": 10.0},
+  "station_vdc": {"ac_voltage_kv": 230.0, "short_circuit_ratio": 5.0, "x_over_r": 10.0},
+  "dc_link": {"kind": "overhead_line", "length_km": 200.0},
+  "power_reversal_time_s": 0.5,
+  "engineering_overrides": {}
+}
+```
+
+The detailed-PWM engine is a read-only official template adapter. Its default
+discovery candidates are
+`C:\Users\Public\Documents\PSCAD\4.6\Examples\ModelsInProgress\H_MMC_Mono_DC.pscx`
+and the adjacent `intermediate.pslx`. Audit and planning hash those installed
+files; execution copies them into an isolated candidate directory and never
+writes the installed examples. This source immutability boundary is enforced
+before and after each candidate. Official PSCX/PSLX content is not repository
+or wheel data.
+
+The average-value engine uses only the repository-owned
+`cigre_b4_p2p_avm_v1` assets. It exposes twelve visible arms and the
+half-bridge diode-equivalent blocked-state path, but its declared limits are
+`individual_cell_balance_not_modeled`, `device_stress_not_modeled`,
+`switching_harmonics_not_modeled`, and `thermal_not_modeled`. Both fidelities
+therefore report `intrinsic_dc_fault_blocking=false`; DC-fault acceptance
+requires breaker, block-command, diode-current, clearing, and recovery evidence
+instead of claiming intrinsic half-bridge interruption.
+
+Use `audit_mmc_template` when detailed PWM is requested, then call
+`derive_mmc_parameters` and `plan_parametric_mmc_model`. Review the exact parent
+plan hash and the default four immutable candidates per engine. Start with
+`build_parametric_mmc_model(..., expected_plan_hash=..., confirm=true)`, poll
+`get_parametric_mmc_build_status`, obtain executable normal/fault scenario
+objects from `recommend_mmc_simulation`, and use `validate_mmc_model` with the
+result files. The parent runs PWM then AVM serially under the shared LCC/MMC
+workspace lease and publishes neither final project unless every requested
+child independently accepts and reopens/compiles.
+
+For each final project, publication also creates an independent read-only
+`*_scenario_source.pscx` copy. Calling `recommend_mmc_simulation` with the
+published project path returns scenarios whose `project` names that source copy
+and whose `derived_project` names the mutable final project, so the scenario can
+be passed unchanged to `run_hvdc_scenario`. MMC v2 fingerprints and result
+selectors are rebound exactly to the resolved derived-project stem; no writable
+alias inference is used for custom project names.
+
+Detailed-PWM publication also hash-verifies and publishes the staged
+`intermediate.pslx` beside the final project and its scenario-source copy. An
+existing sibling library is reused only when its content hash matches exactly;
+otherwise the parent publication fails and rolls back without replacing it.
+The immutable child-plan hash is the trust root, and the final library is
+checked again after PSCAD reload and compile.
+
+Recovery can select only immutable preplanned candidates whose declared purpose
+matches a retryable diagnosis. It cannot invent parameters, change requested
+ratings, repair ambiguous bindings, bypass physical infeasibility, or exceed the
+bounded candidate set. Capability labels are deliberately distinct:
+`inspected` means graph evidence exists, `designed` means deterministic
+derivation passed, `planned` means hashes and candidates are frozen, `built`
+means a project exists and compiles, `simulated` means dynamic outputs exist,
+and `accepted` requires the complete fidelity-specific verdict.
+
+The licensed scope in `docs/acceptance-status.json` is currently
+`NOT_RUN_ON_INTEGRATED_COMMIT`. Non-licensed tests, wheel installation, structure,
+or compilation do not promote either engine to `accepted`. The opt-in matrix
+requires all PSCAD 4.6.2 environment variables documented in
+`tests/test_mmc_parametric_real_acceptance.py` and preserves hashes for the
+official sources, repository assets, pre-existing workspace, plans, projects,
+and outputs.
 
 Read-only HVDC inspection may scan an existing absolute `.pscx` source such as
 `C:\\PSCADFiles\\Breaker\\TEST1\\difforder_new.pscx`; all scenario mutations

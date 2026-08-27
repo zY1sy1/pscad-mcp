@@ -351,7 +351,7 @@ class RecordingParametricEngine:
                 "execute_candidate",
                 {"candidate_id": selected, "phase": "forward_steady"},
             )
-        if self.verdict != "PASS" and self.verdict != "NUMERICAL_ONCE":
+        if self.verdict not in {"PASS", "NUMERICAL_ONCE", "TAMPERED_LIBRARY"}:
             raise BackendError(
                 "MMC_ACCEPTANCE_FAILED",
                 "synthetic acceptance failure",
@@ -371,7 +371,7 @@ class RecordingParametricEngine:
             "<project version='4.6.2'><definitions><Definition name='Main'/></definitions></project>",
             encoding="utf-8",
         )
-        return {
+        result: dict[str, object] = {
             "state": "accepted",
             "engine": self.name,
             "candidate_id": selected,
@@ -381,6 +381,17 @@ class RecordingParametricEngine:
             "validation": {"verdict": "PASS"},
             "capability_level": "accepted",
         }
+        if self.name == "detailed_pwm":
+            source_library = Path(plan.source_paths["library"])
+            library = candidate_root / "intermediate.pslx"
+            shutil.copy2(source_library, library)
+            result["library_path"] = str(library)
+            result["source_hashes"] = dict(plan.source_hashes)
+            result["written_paths"] = [str(project), str(library)]
+            if self.verdict == "TAMPERED_LIBRARY":
+                library.write_text("tampered candidate library", encoding="utf-8")
+                result["source_hashes"]["library"] = sha256(library)
+        return result
 
     def validate(
         self,

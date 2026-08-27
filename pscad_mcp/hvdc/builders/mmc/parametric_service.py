@@ -9,6 +9,7 @@ import hmac
 import json
 import os
 import shutil
+import tempfile
 import threading
 import uuid
 from collections.abc import Mapping, Sequence
@@ -27,7 +28,12 @@ from .engines.avm import AvmBlueprintEngine
 from .engines.pwm import PwmTemplateEngine
 from .inspection import inspect_mmc_evidence
 from .journal import AtomicJournal, WorkspaceBuildLease
-from .parametric_models import MmcParametricRequest, MmcParentPlan, parse_parametric_request
+from .parametric_models import (
+    MmcEnginePlan,
+    MmcParametricRequest,
+    MmcParentPlan,
+    parse_parametric_request,
+)
 from .parametric_planner import create_parametric_plan
 from .scenarios import recommend_scenarios
 from .template_audit import audit_mmc_template
@@ -47,6 +53,10 @@ def _scenario_source_path(project: Path) -> Path:
 
 def _path_key(value: str | Path) -> str:
     return os.path.normcase(str(Path(value).expanduser().resolve())).casefold()
+
+
+def _sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def _run_coroutine_sync(factory: Callable[[], Any]) -> Any:
@@ -493,12 +503,155 @@ class ParametricMmcBuilderService:
             )
         return source
 
-    async def _publish(self, engines: list[dict[str, Any]]) -> list[str]:
+    def _candidate_library(
+        self,
+        engine_record: Mapping[str, Any],
+        engine_plan: MmcEnginePlan,
+    ) -> tuple[Path, str] | None:
+        if engine_plan.engine != "detailed_pwm":
+            return None
+        if engine_record.get("engine") != engine_plan.engine:
+            raise _error(
+                "MMC_POSTCONDITION_FAILED",
+                "An accepted MMC candidate does not match its immutable child plan.",
+                "build_parametric_mmc_model",
+                planned_engine=engine_plan.engine,
+                observed_engine=engine_record.get("engine"),
+            )
+        result = engine_record.get("candidate_result")
+        value = result.get("library_path") if isinstance(result, Mapping) else None
+        expected_hash = engine_plan.source_hashes.get("library")
+        if not isinstance(value, str) or not isinstance(expected_hash, str):
+            raise _error(
+                "MMC_POSTCONDITION_FAILED",
+                "An accepted detailed-PWM candidate has no verified library path.",
+                "build_parametric_mmc_model",
+            )
+        source = Path(value).expanduser().resolve()
+        if self.workspace_root is None:
+            raise _error(
+                "MMC_LAYOUT_INVALID",
+                "MMC workspace is unavailable.",
+                "build_parametric_mmc_model",
+            )
+        try:
+            source.relative_to(self.workspace_root)
+        except ValueError as error:
+            raise _error(
+                "MMC_POSTCONDITION_FAILED",
+                "An accepted detailed-PWM library is outside the workspace.",
+                "build_parametric_mmc_model",
+                path=str(source),
+            ) from error
+        if source.is_symlink() or not source.is_file():
+            raise _error(
+                "MMC_POSTCONDITION_FAILED",
+                "An accepted detailed-PWM library is not a regular file.",
+                "build_parametric_mmc_model",
+                path=str(source),
+            )
+        observed_hash = _sha256(source)
+        if not hmac.compare_digest(observed_hash, expected_hash):
+            raise _error(
+                "MMC_POSTCONDITION_FAILED",
+                "The accepted detailed-PWM library differs from its source hash.",
+                "build_parametric_mmc_model",
+                path=str(source),
+                expected_sha256=expected_hash,
+                observed_sha256=observed_hash,
+            )
+        return source, expected_hash
+
+    def _publish_library(
+        self, source: Path, target: Path, expected_hash: str
+    ) -> tuple[bool, Path | None]:
+        try:
+            target_stream = target.open("xb")
+        except FileExistsError:
+            if target.is_symlink() or not target.is_file():
+                raise _error(
+                    "MMC_BUILD_CONFLICT",
+                    "The detailed-PWM publication library target is not a regular file.",
+                    "build_parametric_mmc_model",
+                    target_path=str(target),
+                )
+            observed_hash = _sha256(target)
+            if not hmac.compare_digest(observed_hash, expected_hash):
+                raise _error(
+                    "MMC_BUILD_CONFLICT",
+                    "The detailed-PWM publication library target has different content.",
+                    "build_parametric_mmc_model",
+                    target_path=str(target),
+                    expected_sha256=expected_hash,
+                    observed_sha256=observed_hash,
+                )
+            backup_fd, backup_name = tempfile.mkstemp(
+                prefix=f".{target.name}.", suffix=".rollback", dir=target.parent
+            )
+            os.close(backup_fd)
+            backup = Path(backup_name)
+            try:
+                shutil.copy2(target, backup)
+                backup_hash = _sha256(backup)
+                if not hmac.compare_digest(backup_hash, expected_hash):
+                    raise _error(
+                        "MMC_BUILD_CONFLICT",
+                        "The detailed-PWM publication library changed while it was being backed up.",
+                        "build_parametric_mmc_model",
+                        target_path=str(target),
+                        expected_sha256=expected_hash,
+                        observed_sha256=backup_hash,
+                    )
+            except BaseException:
+                backup.unlink(missing_ok=True)
+                raise
+            return False, backup
+        try:
+            with target_stream, source.open("rb") as source_stream:
+                shutil.copyfileobj(source_stream, target_stream)
+            observed_hash = _sha256(target)
+            if not hmac.compare_digest(observed_hash, expected_hash):
+                raise _error(
+                    "MMC_POSTCONDITION_FAILED",
+                    "The published detailed-PWM library failed hash verification.",
+                    "build_parametric_mmc_model",
+                    target_path=str(target),
+                    expected_sha256=expected_hash,
+                    observed_sha256=observed_hash,
+                )
+        except BaseException as error:
+            try:
+                target.unlink(missing_ok=True)
+            except OSError as cleanup_error:
+                raise _error(
+                    "MMC_POSTCONDITION_FAILED",
+                    "An unverified detailed-PWM library could not be removed.",
+                    "build_parametric_mmc_model",
+                    target_path=str(target),
+                    cleanup_error=type(cleanup_error).__name__,
+                ) from error
+            raise
+        return True, None
+
+    async def _publish(
+        self,
+        engines: list[dict[str, Any]],
+        engine_plans: Sequence[MmcEnginePlan],
+    ) -> list[str]:
+        if len(engines) != len(engine_plans):
+            raise _error(
+                "MMC_POSTCONDITION_FAILED",
+                "Accepted MMC candidates do not match the immutable parent plan.",
+                "build_parametric_mmc_model",
+            )
         moved: list[tuple[Path, Path]] = []
         scenario_sources: list[Path] = []
+        created_libraries: list[Path] = []
+        existing_library_backups: list[tuple[Path, Path]] = []
         try:
-            for record in engines:
+            for record, engine_plan in zip(engines, engine_plans):
                 source = self._candidate_project(record)
+                library_evidence = self._candidate_library(record, engine_plan)
                 target = Path(str(record["final_path"])).resolve()
                 if self.workspace_root is None:
                     raise _error(
@@ -525,8 +678,37 @@ class ParametricMmcBuilderService:
                     ) from error
                 source.unlink()
                 moved.append((source, target))
-                await self.pscad_service.load_projects([str(target)])
+                load_paths = [str(target)]
+                library_target: Path | None = None
+                expected_library_hash: str | None = None
+                if library_evidence is not None:
+                    source_library, expected_library_hash = library_evidence
+                    library_target = target.parent / source_library.name
+                    library_created, library_backup = self._publish_library(
+                        source_library, library_target, expected_library_hash
+                    )
+                    if library_created:
+                        created_libraries.append(library_target)
+                    elif library_backup is not None:
+                        existing_library_backups.append((library_target, library_backup))
+                    record["final_library_path"] = str(library_target)
+                    load_paths.insert(0, str(library_target))
+                await self.pscad_service.load_projects(load_paths)
                 await self.pscad_service.build_project(target.stem)
+                if library_target is not None and expected_library_hash is not None:
+                    observed_library_hash = _sha256(library_target)
+                    if not hmac.compare_digest(
+                        observed_library_hash, expected_library_hash
+                    ):
+                        raise _error(
+                            "MMC_POSTCONDITION_FAILED",
+                            "The detailed-PWM library changed during final reload or compile.",
+                            "build_parametric_mmc_model",
+                            target_path=str(library_target),
+                            expected_sha256=expected_library_hash,
+                            observed_sha256=observed_library_hash,
+                        )
+                    record["final_library_sha256"] = observed_library_hash
                 scenario_source = _scenario_source_path(target)
                 try:
                     with target.open("rb") as source_stream, scenario_source.open(
@@ -541,6 +723,10 @@ class ParametricMmcBuilderService:
                         "build_parametric_mmc_model",
                         target_path=str(scenario_source),
                     ) from error
+            for index in range(len(existing_library_backups) - 1, -1, -1):
+                _, backup = existing_library_backups[index]
+                backup.unlink(missing_ok=True)
+                existing_library_backups.pop(index)
             return [str(target) for _, target in moved]
         except BaseException:
             rollback_failures: list[str] = []
@@ -555,6 +741,16 @@ class ParametricMmcBuilderService:
                         source.parent.mkdir(parents=True, exist_ok=True)
                         os.link(target, source)
                         target.unlink()
+                except OSError:
+                    rollback_failures.append(str(target))
+            for library in reversed(created_libraries):
+                try:
+                    library.unlink(missing_ok=True)
+                except OSError:
+                    rollback_failures.append(str(library))
+            for target, backup in reversed(existing_library_backups):
+                try:
+                    os.replace(backup, target)
                 except OSError:
                     rollback_failures.append(str(target))
             if rollback_failures:
@@ -591,7 +787,7 @@ class ParametricMmcBuilderService:
                 record["error"] = failed[0]["error"]
                 record["history"].append({"state": "failed", "reason": "child_failed"})
             else:
-                final_paths = await self._publish(engines)
+                final_paths = await self._publish(engines, plan.engine_plans)
                 for child, engine_record, final_path in zip(
                     plan.engine_plans, engines, final_paths
                 ):

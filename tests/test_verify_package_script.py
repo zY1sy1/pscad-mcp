@@ -14,6 +14,9 @@ def test_package_verification_script_builds_installs_and_cleans_up():
     assert "pip install --no-deps --target" not in text
     assert "Get-ChildItem" in text
     assert "Remove-Item -LiteralPath" in text
+    assert "assert len(tools) == 90" in text
+    assert "load_mmc_assets" in text
+    assert "len(mmc_assets.hashes)" in text
 
 
 def test_package_smoke_probes_do_not_hardcode_release_version():
