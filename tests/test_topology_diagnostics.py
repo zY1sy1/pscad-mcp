@@ -8,6 +8,7 @@ from pscad_mcp.topology.hashing import topology_sha256
 from pscad_mcp.topology.connectivity import build_connectivity
 from pscad_mcp.topology.models import (
     ProjectTopology,
+    TopologyBoundaryLink,
     TopologyComponent,
     TopologyConductor,
     TopologyPort,
@@ -203,6 +204,29 @@ def test_unresolved_source_evidence_produces_incomplete_finding():
     findings = diagnose_generic(topology)
     assert [item.code for item in findings] == ["TOPOLOGY_INCOMPLETE"]
     assert findings[0].status == "unresolved"
+
+
+def test_unresolved_hierarchy_boundary_does_not_claim_required_port_is_open():
+    boundary = TopologyBoundaryLink(
+        key="Main:1:P->Main/1:Child:P",
+        outer_port_key="Main:1:P",
+        outer_canvas_key="Main",
+        outer_point=(0, 0),
+        inner_port_key="Main/1:Child:P",
+        inner_canvas_key="Main/1:Child",
+        inner_point=(0, 0),
+        namespace="electrical",
+        dimension=1,
+    )
+    topology = replace(
+        topology_with_unconnected_ports(required=True, optional=False),
+        boundary_links=(boundary,),
+        unresolved=(f"hierarchy_boundary_unresolved:{boundary.key}",),
+    )
+
+    findings = diagnose_generic(topology)
+
+    assert [item.code for item in findings] == ["TOPOLOGY_INCOMPLETE"]
 
 
 def test_unknown_namespace_evidence_stays_unresolved_and_is_not_inferred():

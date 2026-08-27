@@ -74,9 +74,16 @@ def _unconnected_ports(
     topology: ProjectTopology,
 ) -> tuple[DiagnosticFinding, ...]:
     connected = {key for net in topology.nets for key in net.port_keys}
+    unresolved_boundary_ports = {
+        port_key
+        for boundary in topology.boundary_links
+        if f"hierarchy_boundary_unresolved:{boundary.key}"
+        in topology.unresolved
+        for port_key in (boundary.outer_port_key, boundary.inner_port_key)
+    }
     findings = []
     for _component, port in _active_ports(topology):
-        if port.key in connected:
+        if port.key in connected or port.key in unresolved_boundary_ports:
             continue
         required = port.required is True
         findings.append(
