@@ -14,6 +14,7 @@ from typing import Any
 
 from ....core.backend.base import BackendError
 from ....core.path_policy import PathPolicy, WorkspaceNotConfiguredError
+from ....runtime import PendingCleanupError
 from .derivation import derive_lcc_parameters
 from .journal import AtomicJournal, WorkspaceBuildLease
 from .modes import derive_mode_copies, validate_lcc_schedule
@@ -770,7 +771,7 @@ class ParametricLccBuilderService:
                 except BaseException:
                     pass
             if pending:
-                raise asyncio.TimeoutError
+                raise PendingCleanupError(tuple(pending))
         await asyncio.sleep(0)
         for build_id, lease in tuple(self._leases.items()):
             record = self._statuses.get(build_id)

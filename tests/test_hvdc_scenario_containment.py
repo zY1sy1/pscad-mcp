@@ -10,6 +10,7 @@ from pscad_mcp.core.executor import RobustExecutor
 from pscad_mcp.core.path_policy import PathPolicy
 from pscad_mcp.core.service import PscadService
 from pscad_mcp.hvdc.service import HvdcDomainService
+from pscad_mcp.runtime import PendingCleanupError
 
 
 def _write_project(path):
@@ -151,6 +152,33 @@ def test_shutdown_marks_scenario_interrupted_and_rejects_new_scenarios(tmp_path)
     assert service._scenario_operation_tasks == {}
     assert service._scenario_cleanup_tasks == {}
     assert service._active_scenario_id is None
+
+
+def test_shutdown_reports_live_hvdc_cleanup_task_as_pending(tmp_path):
+    service = HvdcDomainService(path_policy=PathPolicy(workspace_root=str(tmp_path)))
+
+    async def exercise():
+        release = asyncio.Event()
+
+        async def stubborn():
+            while not release.is_set():
+                try:
+                    await release.wait()
+                except asyncio.CancelledError:
+                    continue
+
+        task = asyncio.create_task(stubborn())
+        service._scenario_cleanup_tasks["pending"] = task
+        await asyncio.sleep(0)
+        try:
+            with pytest.raises(PendingCleanupError) as raised:
+                await service.shutdown(timeout_s=0.02)
+            assert task in raised.value.pending_tasks
+        finally:
+            release.set()
+            await task
+
+    asyncio.run(exercise())
 
 
 def test_timeout_attempts_stop_and_releases_reservation_only_when_contained(tmp_path):

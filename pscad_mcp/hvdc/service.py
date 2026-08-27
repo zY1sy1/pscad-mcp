@@ -11,6 +11,7 @@ from typing import Any, Mapping
 
 from ..core.backend.base import BackendError
 from ..core.path_policy import PathPolicy, WorkspaceNotConfiguredError
+from ..runtime import PendingCleanupError
 from .classifier import classify_topology, extract_assets
 from .mappings import MappingResolution, resolve_mappings
 from .profiles import list_profiles, load_profile, register_profile
@@ -65,7 +66,7 @@ class HvdcDomainService:
                 except BaseException:
                     pass
             if pending:
-                raise asyncio.TimeoutError
+                raise PendingCleanupError(tuple(pending))
         await asyncio.sleep(0)
         active = self._active_scenario_id
         if active is not None and not self._pending_scenario_operations(active):

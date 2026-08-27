@@ -13,6 +13,7 @@ from pscad_mcp.core.service import ConfirmationRequired
 from pscad_mcp.hvdc.builders.lcc.models import LccBuildRecord, LccBuildState
 from pscad_mcp.hvdc.builders.lcc.planner import LccPlanRequest
 from pscad_mcp.hvdc.builders.lcc.service import LccBuilderService
+from pscad_mcp.runtime import PendingCleanupError
 
 from lcc_builder_fakes import RecordingPscadService
 from test_lcc_planner import BLUEPRINT, INVENTORY, _asset_set
@@ -230,6 +231,33 @@ def test_shutdown_releases_lease_when_build_task_never_started(tmp_path):
     assert service.get_build_status(started["build_id"])["state"] == "interrupted"
     assert service._leases == {}
     assert not (tmp_path / ".pscad-mcp" / "lcc-build.lock").exists()
+
+
+def test_shutdown_reports_live_fixed_builder_task_as_pending(tmp_path):
+    service = _service(tmp_path)
+
+    async def exercise():
+        release = asyncio.Event()
+
+        async def stubborn():
+            while not release.is_set():
+                try:
+                    await release.wait()
+                except asyncio.CancelledError:
+                    continue
+
+        task = asyncio.create_task(stubborn())
+        service._tasks["pending"] = task
+        await asyncio.sleep(0)
+        try:
+            with pytest.raises(PendingCleanupError) as raised:
+                await service.shutdown(timeout_s=0.02)
+            assert task in raised.value.pending_tasks
+        finally:
+            release.set()
+            await task
+
+    asyncio.run(exercise())
 
 
 def test_builder_service_forwards_injected_threshold_registry_to_executor(tmp_path):

@@ -16,6 +16,7 @@ from pscad_mcp.hvdc.builders.lcc.parametric_models import (
     ParametricLccRequest,
 )
 from pscad_mcp.hvdc.builders.lcc.parametric_service import ParametricLccBuilderService
+from pscad_mcp.runtime import PendingCleanupError
 
 
 FIXTURES = Path(__file__).parent / "fixtures" / "lcc_parametric"
@@ -718,3 +719,30 @@ def test_shutdown_releases_parametric_lease_when_task_never_started(tmp_path):
     assert service.get_status(started["build_id"])["state"] == "interrupted"
     assert service._leases == {}
     assert not (values["workspace"] / ".pscad-mcp" / "lcc-build.lock").exists()
+
+
+def test_shutdown_reports_live_parametric_builder_task_as_pending(tmp_path):
+    service = ParametricLccBuilderService(workspace_root=tmp_path)
+
+    async def exercise():
+        release = asyncio.Event()
+
+        async def stubborn():
+            while not release.is_set():
+                try:
+                    await release.wait()
+                except asyncio.CancelledError:
+                    continue
+
+        task = asyncio.create_task(stubborn())
+        service._tasks["pending"] = task
+        await asyncio.sleep(0)
+        try:
+            with pytest.raises(PendingCleanupError) as raised:
+                await service.shutdown(timeout_s=0.02)
+            assert task in raised.value.pending_tasks
+        finally:
+            release.set()
+            await task
+
+    asyncio.run(exercise())

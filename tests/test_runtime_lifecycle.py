@@ -17,6 +17,7 @@ from pscad_mcp.core.service import PscadService
 from pscad_mcp.learning.service import LearningRuntime
 from pscad_mcp.main import create_server
 from pscad_mcp.runtime import (
+    PendingCleanupError,
     RuntimeLifecycle,
     SharedRuntimeLifespan,
     shutdown_domain_services,
@@ -181,7 +182,7 @@ def test_custom_runtime_action_that_swallows_cancel_is_still_bounded():
         try:
             await asyncio.Event().wait()
         except asyncio.CancelledError:
-            await asyncio.Event().wait()
+            return
 
     runtime = RuntimeLifecycle(
         domain_shutdown=stubborn,
@@ -200,6 +201,94 @@ def test_custom_runtime_action_that_swallows_cancel_is_still_bounded():
         "operation": "domain",
         "exception": "TimeoutError",
     }
+
+
+def test_live_timed_out_domain_cleanup_blocks_connection_and_executor(caplog):
+    calls: list[str] = []
+    release: asyncio.Event
+
+    async def exercise():
+        nonlocal release
+        release = asyncio.Event()
+
+        async def stubborn():
+            calls.append("domain")
+            while not release.is_set():
+                try:
+                    await release.wait()
+                except asyncio.CancelledError:
+                    continue
+            raise RuntimeError("SECRET-LATE-CLEANUP")
+
+        runtime = RuntimeLifecycle(
+            domain_shutdown=stubborn,
+            settlement_wait=lambda: calls.append("settlement") or True,
+            learning_close=lambda: calls.append("learning"),
+            connection_shutdown=lambda: calls.append("connection"),
+            executor_shutdown=lambda: calls.append("executor"),
+            timeout_s=0.03,
+        )
+        result = await runtime.shutdown()
+        assert runtime.pending_cleanup_count == 1
+        assert calls == ["domain", "settlement", "learning"]
+        assert result == {
+            "code": "SHUTDOWN_INCOMPLETE",
+            "failures": [
+                {"operation": "domain", "exception": "PendingCleanupError"},
+                {"operation": "connection", "exception": "PendingCleanupError"},
+                {"operation": "executor", "exception": "PendingCleanupError"},
+            ],
+        }
+        release.set()
+        for _ in range(20):
+            if runtime.pending_cleanup_count == 0:
+                break
+            await asyncio.sleep(0)
+        assert runtime.pending_cleanup_count == 0
+
+    with caplog.at_level(logging.ERROR, logger="pscad-mcp.runtime"):
+        asyncio.run(exercise())
+    assert "SECRET" not in caplog.text
+
+
+def test_domain_aggregate_propagates_live_cleanup_after_attempting_all(monkeypatch):
+    calls: list[str] = []
+
+    async def exercise():
+        release = asyncio.Event()
+
+        async def first(timeout_s=5.0):
+            calls.append("hvdc")
+            while not release.is_set():
+                try:
+                    await release.wait()
+                except asyncio.CancelledError:
+                    continue
+
+        async def second(timeout_s=5.0):
+            calls.append("fixed")
+
+        async def third(timeout_s=5.0):
+            calls.append("parametric")
+
+        monkeypatch.setattr(
+            "pscad_mcp.tools.hvdc_tools.shutdown_hvdc_service", first
+        )
+        monkeypatch.setattr(
+            "pscad_mcp.tools.lcc_tools.shutdown_lcc_builder_service", second
+        )
+        monkeypatch.setattr(
+            "pscad_mcp.tools.lcc_parametric_tools.shutdown_parametric_lcc_builder_service",
+            third,
+        )
+        with pytest.raises(PendingCleanupError) as raised:
+            await shutdown_domain_services(timeout_s=0.09)
+        assert calls == ["hvdc", "fixed", "parametric"]
+        assert any(not task.done() for task in raised.value.pending_tasks)
+        release.set()
+        await asyncio.gather(*raised.value.pending_tasks, return_exceptions=True)
+
+    asyncio.run(exercise())
 
 
 def test_runtime_shutdown_is_once_across_two_threads_and_event_loops():
@@ -369,6 +458,50 @@ def test_shared_lifespan_rejects_new_lease_while_last_exit_is_closing():
         await closing
 
     asyncio.run(exercise())
+
+
+def test_last_lifespan_exit_defers_repeated_cancellation_until_shutdown_finishes():
+    calls: list[str] = []
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    async def action(name):
+        calls.append(name)
+        if name == "domain":
+            entered.set()
+            await release.wait()
+        return True
+
+    runtime = RuntimeLifecycle(
+        domain_shutdown=lambda: action("domain"),
+        settlement_wait=lambda: action("settlement"),
+        learning_close=lambda: action("learning"),
+        connection_shutdown=lambda: action("connection"),
+        executor_shutdown=lambda: action("executor"),
+        timeout_s=0.5,
+    )
+    owner = SharedRuntimeLifespan(runtime)
+
+    async def exercise():
+        context = owner.lifespan(None)
+        await context.__aenter__()
+        exiting = asyncio.create_task(context.__aexit__(None, None, None))
+        await entered.wait()
+        exiting.cancel()
+        await asyncio.sleep(0)
+        exiting.cancel()
+        assert owner.active_count == 0
+        rejected = owner.lifespan(None)
+        with pytest.raises(RuntimeError, match="RUNTIME_CLOSING"):
+            await rejected.__aenter__()
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await exiting
+
+    asyncio.run(exercise())
+    assert calls == ["domain", "settlement", "learning", "connection", "executor"]
+    assert runtime._result == {"code": "SHUTDOWN_COMPLETE", "failures": []}
+    assert owner.state == "closed"
 
 
 def test_server_factories_share_process_lifespan_without_activating_it():

@@ -14,6 +14,7 @@ from typing import Any, Callable
 from ....core.backend.base import BackendError
 from ....core.path_policy import PathPolicy, WorkspaceNotConfiguredError
 from ....core.service import ConfirmationRequired
+from ....runtime import PendingCleanupError
 from .acceptance import evaluate_acceptance
 from .assets import LccAssetSet, load_packaged_asset_set, sha256_file
 from .catalog import parse_catalog
@@ -286,7 +287,7 @@ class LccBuilderService:
                 except BaseException:
                     pass
             if pending:
-                raise asyncio.TimeoutError
+                raise PendingCleanupError(tuple(pending))
         await asyncio.sleep(0)
         for build_id, lease in tuple(self._leases.items()):
             record = self._records.get(build_id)

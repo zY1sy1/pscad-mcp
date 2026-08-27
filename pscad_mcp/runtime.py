@@ -28,6 +28,16 @@ class DomainShutdownError(RuntimeError):
         super().__init__("One or more domain services failed to shut down.")
 
 
+class PendingCleanupError(RuntimeError):
+    """Signal that timed-out cleanup remains live and dependencies are unsafe."""
+
+    def __init__(self, tasks: tuple[asyncio.Future[Any], ...]) -> None:
+        self.pending_tasks = tuple(task for task in tasks if not task.done())
+        for task in self.pending_tasks:
+            task.add_done_callback(_consume_task_result)
+        super().__init__("Runtime cleanup remains pending.")
+
+
 def _consume_task_result(task: asyncio.Future[Any]) -> None:
     try:
         task.result()
@@ -58,6 +68,9 @@ async def _run_bounded(action: ShutdownAction, timeout_s: float) -> Any:
     if task in done:
         return task.result()
     _cancel_and_consume(task)
+    await asyncio.sleep(0)
+    if not task.done():
+        raise PendingCleanupError((task,))
     raise TimeoutError
 
 
@@ -75,14 +88,23 @@ async def shutdown_domain_services(timeout_s: float = 5.0) -> None:
         ("parametric_lcc", shutdown_parametric_lcc_builder_service),
     )
     failures: list[dict[str, str]] = []
+    pending_tasks: list[asyncio.Future[Any]] = []
     action_timeout_s = timeout_s / (len(actions) + 1)
     for operation, action in actions:
         try:
             await _run_bounded(action, action_timeout_s)
+        except PendingCleanupError as error:
+            pending_tasks.extend(error.pending_tasks)
+            failures.append(
+                {"operation": operation, "exception": "PendingCleanupError"}
+            )
         except Exception as error:
             failures.append(
                 {"operation": operation, "exception": type(error).__name__}
             )
+    live_tasks = tuple(task for task in pending_tasks if not task.done())
+    if live_tasks:
+        raise PendingCleanupError(live_tasks)
     if failures:
         raise DomainShutdownError(failures)
 
@@ -120,6 +142,33 @@ class RuntimeLifecycle:
         self._state_lock = threading.Lock()
         self._completion: concurrent.futures.Future[dict[str, Any]] | None = None
         self._result: dict[str, Any] | None = None
+        self._pending_cleanup_tasks: set[asyncio.Future[Any]] = set()
+
+    @property
+    def pending_cleanup_count(self) -> int:
+        with self._state_lock:
+            return sum(not task.done() for task in self._pending_cleanup_tasks)
+
+    def _pending_cleanup_finished(self, task: asyncio.Future[Any]) -> None:
+        _consume_task_result(task)
+        with self._state_lock:
+            self._pending_cleanup_tasks.discard(task)
+
+    def _track_pending_cleanup(
+        self,
+        tasks: tuple[asyncio.Future[Any], ...],
+    ) -> None:
+        live = tuple(task for task in tasks if not task.done())
+        with self._state_lock:
+            self._pending_cleanup_tasks.update(live)
+        for task in live:
+            task.add_done_callback(self._pending_cleanup_finished)
+
+    def _pending_cleanup_snapshot(self) -> tuple[asyncio.Future[Any], ...]:
+        with self._state_lock:
+            return tuple(
+                task for task in self._pending_cleanup_tasks if not task.done()
+            )
 
     @staticmethod
     def _copy_result(result: dict[str, Any]) -> dict[str, Any]:
@@ -149,11 +198,26 @@ class RuntimeLifecycle:
         )
         for operation, action in actions:
             try:
+                pending = self._pending_cleanup_snapshot()
+                if operation in {"connection", "executor"} and pending:
+                    raise PendingCleanupError(pending)
                 result = await _run_bounded(action, self.timeout_s)
                 if operation == "settlement" and result is False:
                     raise PendingSettlementError(
                         "PSCAD executor settlements did not complete in time."
                     )
+            except PendingCleanupError as error:
+                self._track_pending_cleanup(error.pending_tasks)
+                failure = {
+                    "operation": operation,
+                    "exception": "PendingCleanupError",
+                }
+                failures.append(failure)
+                logger.error(
+                    "Runtime shutdown failed for operation=%s exception=%s.",
+                    operation,
+                    "PendingCleanupError",
+                )
             except Exception as error:
                 failure = {
                     "operation": operation,
@@ -234,6 +298,11 @@ class SharedRuntimeLifespan:
         with self._lock:
             return self._active_count
 
+    @property
+    def state(self) -> str:
+        with self._lock:
+            return self._state
+
     def _acquire(self) -> None:
         with self._lock:
             if self._state != "open":
@@ -248,6 +317,38 @@ class SharedRuntimeLifespan:
                 return True
             return False
 
+    async def _shutdown_runtime(self) -> Any:
+        result = self.runtime.shutdown()
+        if inspect.isawaitable(result):
+            return await result
+        return result
+
+    async def _finish_shutdown(self) -> None:
+        shutdown_task = asyncio.create_task(self._shutdown_runtime())
+        cancelled = False
+        failure: BaseException | None = None
+        try:
+            while not shutdown_task.done():
+                try:
+                    await asyncio.shield(shutdown_task)
+                except asyncio.CancelledError:
+                    cancelled = True
+                except BaseException as error:
+                    failure = error
+                    break
+            if failure is None:
+                try:
+                    shutdown_task.result()
+                except BaseException as error:
+                    failure = error
+        finally:
+            with self._lock:
+                self._state = "closed"
+        if failure is not None:
+            raise failure
+        if cancelled:
+            raise asyncio.CancelledError
+
     @asynccontextmanager
     async def lifespan(self, _server: Any):
         self._acquire()
@@ -255,13 +356,7 @@ class SharedRuntimeLifespan:
             yield {}
         finally:
             if self._release():
-                try:
-                    result = self.runtime.shutdown()
-                    if inspect.isawaitable(result):
-                        await result
-                finally:
-                    with self._lock:
-                        self._state = "closed"
+                await self._finish_shutdown()
 
 
 PROCESS_RUNTIME_LIFESPAN = SharedRuntimeLifespan(RuntimeLifecycle())
@@ -272,5 +367,6 @@ __all__ = [
     "RuntimeLifecycle",
     "SharedRuntimeLifespan",
     "PROCESS_RUNTIME_LIFESPAN",
+    "PendingCleanupError",
     "shutdown_domain_services",
 ]
