@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from .models import FrozenDict, json_safe
+
 
 @dataclass(frozen=True)
 class CorpusDependency:
@@ -59,4 +61,26 @@ class CorpusSpec:
             "inclusion_policy": self.inclusion_policy,
             "exclusion_policy": self.exclusion_policy,
             "entry_points": [entry.to_dict() for entry in self.entry_points],
+        }
+
+
+@dataclass(frozen=True)
+class ProjectGraph:
+    project_id: str
+    source_sha256: str
+    dependency_hashes: FrozenDict
+    name: str
+    pscad_version: str
+    target: str
+    settings: FrozenDict
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "project_id": self.project_id,
+            "source_sha256": self.source_sha256,
+            "dependency_hashes": json_safe(self.dependency_hashes),
+            "name": self.name,
+            "pscad_version": self.pscad_version,
+            "target": self.target,
+            "settings": json_safe(self.settings),
         }
