@@ -17,6 +17,10 @@ class ExecutorUnhealthyError(RuntimeError):
     """Raised when a timed-out executor must be reset before reuse."""
 
 
+class PendingSettlementError(RuntimeError):
+    """Raised when shutdown would abandon an unsettled PSCAD worker call."""
+
+
 class ExecutorSettlementToken:
     """Loop-independent identity and completion signal for one worker call."""
 
@@ -145,6 +149,45 @@ class RobustExecutor:
                 for token in self._tokens_by_owner.get(owner, ())
                 if not token.settled
             )
+
+    async def wait_for_settlements(self, timeout_s: float) -> bool:
+        """Wait without blocking the event loop until current calls settle."""
+        tokens = self.pending_settlements()
+        if not tokens:
+            return True
+        loop = asyncio.get_running_loop()
+        changed = asyncio.Event()
+
+        def settled(_: ExecutorSettlementToken) -> None:
+            try:
+                loop.call_soon_threadsafe(changed.set)
+            except RuntimeError:
+                pass
+
+        for token in tokens:
+            token.add_done_callback(settled)
+
+        async def wait_all() -> None:
+            while any(not token.settled for token in tokens):
+                changed.clear()
+                if any(not token.settled for token in tokens):
+                    await changed.wait()
+
+        try:
+            await asyncio.wait_for(wait_all(), timeout=timeout_s)
+        except asyncio.TimeoutError:
+            return False
+        return True
+
+    def shutdown_if_settled(self) -> None:
+        """Close the worker only when every submitted call has settled."""
+        with self._state_lock:
+            if any(not token.settled for token in self._pending_tokens):
+                raise PendingSettlementError(
+                    "PSCAD executor shutdown is blocked by pending settlements."
+                )
+            executor = self.executor
+            executor.shutdown(wait=False, cancel_futures=True)
 
     async def run_safe(
         self,

@@ -24,6 +24,18 @@ def _service() -> LccBuilderService:
     return _builder_service
 
 
+async def shutdown_lcc_builder_service(timeout_s: float = 5.0) -> None:
+    """Close the existing fixed-builder singleton without initializing it."""
+    global _builder_service, _builder_backend
+    service = _builder_service
+    if service is None:
+        return
+    await service.shutdown(timeout_s=timeout_s)
+    if _builder_service is service:
+        _builder_service = None
+        _builder_backend = None
+
+
 async def plan_lcc_model(
     project_name: str,
     folder: str | None = None,
@@ -77,5 +89,6 @@ __all__ = [
     "get_lcc_build_status",
     "plan_lcc_model",
     "register_lcc_tools",
+    "shutdown_lcc_builder_service",
     "validate_lcc_model",
 ]

@@ -37,6 +37,18 @@ def _service() -> HvdcDomainService:
     return _domain_service
 
 
+async def shutdown_hvdc_service(timeout_s: float = 5.0) -> None:
+    """Close the existing domain singleton without initializing it."""
+    global _domain_service, _domain_backend
+    service = _domain_service
+    if service is None:
+        return
+    await service.shutdown(timeout_s=timeout_s)
+    if _domain_service is service:
+        _domain_service = None
+        _domain_backend = None
+
+
 async def inspect_hvdc_project(project_name: str, canvas_name: str = "Main") -> dict[str, Any]:
     """Inspect an HVDC project's topology, assets, mappings, and evidence."""
     return _service().inspect_project(project_name, canvas_name)

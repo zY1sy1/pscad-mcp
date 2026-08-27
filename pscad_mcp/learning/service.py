@@ -92,6 +92,10 @@ class LearningService:
             self._store.close()
             raise
 
+    def close(self) -> None:
+        """Close the durable learning store."""
+        self._store.close()
+
     @property
     def session_id(self) -> str:
         return self._session_id
@@ -531,6 +535,17 @@ class LearningRuntime:
                 "register_tool_name",
             ):
                 self._service.register_tool_name(name)
+
+    def close(self) -> None:
+        """Close an initialized service without triggering lazy creation."""
+        with self._lock:
+            service = self._service
+            if service is None:
+                return
+            close = getattr(service, "close")
+            close()
+            if self._service is service:
+                self._service = None
 
     def _log_config_issue(self, issue: str) -> None:
         if not self._availability_warning_emitted:

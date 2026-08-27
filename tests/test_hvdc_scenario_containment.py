@@ -116,6 +116,43 @@ def test_application_wide_scenario_reservation_rejects_concurrent_start(tmp_path
     assert service._active_scenario_id is None
 
 
+def test_shutdown_marks_scenario_interrupted_and_rejects_new_scenarios(tmp_path):
+    source = tmp_path / "case.pscx"
+    _write_project(source)
+    class StoppableBackend(BlockingBackend):
+        async def stop_simulation(self, project_name):
+            self.stopped = True
+            self.release_run.set()
+            return "stopped"
+
+    backend = StoppableBackend()
+    service = HvdcDomainService(
+        backend, path_policy=PathPolicy(workspace_root=str(tmp_path))
+    )
+
+    async def exercise():
+        started = await service.run_scenario(
+            str(source), _scenario(source), confirm=True
+        )
+        await asyncio.wait_for(backend.run_entered.wait(), 0.1)
+        await service.shutdown(timeout_s=0.2)
+        with pytest.raises(BackendError) as raised:
+            await service.run_scenario(
+                str(source), _scenario(source), confirm=True
+            )
+        return started, raised.value
+
+    started, error = asyncio.run(exercise())
+    record = service._scenarios[started["scenario_id"]]
+    assert record["status"] == "interrupted"
+    assert error.code == "HVDC_SCENARIO_CONFLICT"
+    assert service._scenario_tasks == {}
+    assert service._scenario_run_tasks == {}
+    assert service._scenario_operation_tasks == {}
+    assert service._scenario_cleanup_tasks == {}
+    assert service._active_scenario_id is None
+
+
 def test_timeout_attempts_stop_and_releases_reservation_only_when_contained(tmp_path):
     source = tmp_path / "case.pscx"
     _write_project(source)

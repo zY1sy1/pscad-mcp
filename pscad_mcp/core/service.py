@@ -373,6 +373,19 @@ class PscadService:
             await self._backend.disconnect()
         self._backend = None
 
+    async def shutdown(self) -> None:
+        """Release the selected backend according to process ownership."""
+        async with self._mutation_lock:
+            backend = self._backend
+            if backend is None:
+                return
+            if bool(getattr(backend, "owns_process", False)):
+                await backend.quit()
+            else:
+                await backend.disconnect()
+            if self._backend is backend:
+                self._backend = None
+
     async def repair_connection(self) -> str:
         async with self._mutation_lock:
             return await self._repair_connection_unlocked()

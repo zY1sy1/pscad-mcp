@@ -55,6 +55,20 @@ def _service() -> ParametricLccBuilderService:
     return _service_instance
 
 
+async def shutdown_parametric_lcc_builder_service(
+    timeout_s: float = 5.0,
+) -> None:
+    """Close the existing parametric singleton without initializing it."""
+    global _service_instance, _service_backend
+    service = _service_instance
+    if service is None:
+        return
+    await service.shutdown(timeout_s=timeout_s)
+    if _service_instance is service:
+        _service_instance = None
+        _service_backend = None
+
+
 def _request(value: ParametricLccRequest | dict[str, Any]) -> ParametricLccRequest:
     return value if isinstance(value, ParametricLccRequest) else parse_parametric_request(value)
 
@@ -118,4 +132,7 @@ def register_lcc_parametric_tools(mcp: FastMCP) -> None:
         register_tool(mcp, function)
 
 
-__all__ = ["register_lcc_parametric_tools"]
+__all__ = [
+    "register_lcc_parametric_tools",
+    "shutdown_parametric_lcc_builder_service",
+]

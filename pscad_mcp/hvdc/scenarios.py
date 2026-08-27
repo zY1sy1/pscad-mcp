@@ -32,11 +32,12 @@ _MAX_TIMEOUT_S = 86_400.0
 _TERMINAL_PROJECT_STATUSES = {"completed", "complete", "finished", "done", "idle", "stopped"}
 _FAILED_PROJECT_STATUSES = {"failed", "error", "aborted"}
 _TRANSITIONS = {
-    "validated": {"running", "failed", "timed_out", "completed"},
-    "running": {"completed", "failed", "timed_out"},
+    "validated": {"running", "failed", "timed_out", "completed", "interrupted"},
+    "running": {"completed", "failed", "timed_out", "interrupted"},
     "completed": set(),
     "failed": set(),
     "timed_out": set(),
+    "interrupted": set(),
 }
 
 
@@ -56,7 +57,7 @@ def transition_scenario(record: dict[str, Any], status: str) -> None:
         raise RuntimeError(f"Invalid HVDC scenario transition: {current} -> {status}")
     record["status"] = status
     record.setdefault("status_history", []).append({"status": status, "at": _utc_now()})
-    if status in {"completed", "failed", "timed_out"}:
+    if status in {"completed", "failed", "timed_out", "interrupted"}:
         record["finished_at"] = _utc_now()
 
 
@@ -858,8 +859,11 @@ async def _scenario_worker(service: Any, record: dict[str, Any], normalized: dic
             {"scenario_id": record["scenario_id"]},
         ).to_dict()
         contained = await _attempt_containment(service, record, timeout_s=timeout_s)
-        record["outcome"] = "cancelled_contained" if contained else "needs_review"
-        transition_scenario(record, "failed")
+        if record.get("status") == "interrupted":
+            record["outcome"] = "interrupted"
+        else:
+            record["outcome"] = "cancelled_contained" if contained else "needs_review"
+            transition_scenario(record, "failed")
         release_reservation = contained
         release_after_pending = (
             record.get("containment", {}).get("status") == "pending_operations"

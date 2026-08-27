@@ -34,6 +34,38 @@ class HvdcDomainService:
         self._scenario_release_after_operations: set[str] = set()
         self._scenario_reservation_lock = asyncio.Lock()
         self._active_scenario_id: str | None = None
+        self._closing = False
+
+    async def shutdown(self, timeout_s: float = 5.0) -> None:
+        """Interrupt and await every tracked HVDC background task."""
+        self._closing = True
+        terminal = {"completed", "failed", "timed_out", "interrupted"}
+        for record in self._scenarios.values():
+            if record.get("status") not in terminal:
+                from .scenarios import transition_scenario
+
+                transition_scenario(record, "interrupted")
+                record["outcome"] = "interrupted"
+        task_values: list[asyncio.Task[Any]] = []
+        task_values.extend(self._scenario_tasks.values())
+        task_values.extend(self._scenario_run_tasks.values())
+        for operations in self._scenario_operation_tasks.values():
+            task_values.extend(operations)
+        task_values.extend(self._scenario_cleanup_tasks.values())
+        tasks = tuple(
+            dict.fromkeys(task for task in task_values if not task.done())
+        )
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.wait_for(
+                asyncio.gather(*tasks, return_exceptions=True),
+                timeout=timeout_s,
+            )
+        await asyncio.sleep(0)
+        active = self._active_scenario_id
+        if active is not None and not self._pending_scenario_operations(active):
+            await self._release_scenario(active)
 
     def _pending_scenario_operations(self, scenario_id: str) -> list[str]:
         pending = [
@@ -440,6 +472,14 @@ class HvdcDomainService:
         return validate_scenario(scenario, workspace_root=self._workspace_root())
 
     async def run_scenario(self, project_name: str, scenario: Mapping[str, Any], confirm: bool = False) -> dict[str, Any]:
+        if self._closing:
+            raise BackendError(
+                "HVDC_SCENARIO_CONFLICT",
+                "The HVDC scenario service is shutting down.",
+                "hvdc",
+                "run_hvdc_scenario",
+                {"reason": "service_closing"},
+            )
         from .scenarios import run_scenario
         return await run_scenario(self, project_name, scenario, confirm=confirm, workspace_root=self._workspace_root())
 

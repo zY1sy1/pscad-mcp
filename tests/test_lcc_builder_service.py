@@ -182,6 +182,56 @@ def test_valid_build_returns_without_waiting_and_status_is_json_safe(tmp_path):
     assert not (tmp_path / ".pscad-mcp" / "lcc-build.lock").exists()
 
 
+def test_shutdown_interrupts_build_releases_lease_and_rejects_new_builds(tmp_path):
+    entered = asyncio.Event()
+
+    async def blocking_executor(*args, **kwargs):
+        entered.set()
+        await asyncio.Event().wait()
+
+    service = _service(tmp_path, executor_factory=blocking_executor)
+    plan = service.plan_model("CIGRE_LCC")
+
+    async def exercise():
+        started = await service.build_model(
+            "CIGRE_LCC", plan["plan_hash"], confirm=True
+        )
+        await entered.wait()
+        await service.shutdown(timeout_s=0.2)
+        with pytest.raises(BackendError) as raised:
+            await service.build_model(
+                "CIGRE_LCC", plan["plan_hash"], confirm=True
+            )
+        return started, raised.value
+
+    started, error = asyncio.run(exercise())
+    assert service.get_build_status(started["build_id"])["state"] == "interrupted"
+    assert error.code == "LCC_BUILD_CONFLICT"
+    assert service._tasks == {}
+    assert service._leases == {}
+    assert not (tmp_path / ".pscad-mcp" / "lcc-build.lock").exists()
+
+
+def test_shutdown_releases_lease_when_build_task_never_started(tmp_path):
+    async def blocking_executor(*args, **kwargs):
+        await asyncio.Event().wait()
+
+    service = _service(tmp_path, executor_factory=blocking_executor)
+    plan = service.plan_model("CIGRE_LCC")
+
+    async def exercise():
+        started = await service.build_model(
+            "CIGRE_LCC", plan["plan_hash"], confirm=True
+        )
+        await service.shutdown(timeout_s=0.2)
+        return started
+
+    started = asyncio.run(exercise())
+    assert service.get_build_status(started["build_id"])["state"] == "interrupted"
+    assert service._leases == {}
+    assert not (tmp_path / ".pscad-mcp" / "lcc-build.lock").exists()
+
+
 def test_builder_service_forwards_injected_threshold_registry_to_executor(tmp_path):
     registry = {"review": {"review_id": "review"}}
     captured = {}
