@@ -18,6 +18,7 @@ from mcp.types import CallToolResult
 from ..core.connection_manager import pscad_manager
 from ..learning.models import InvocationOutcome
 from ..learning.recorder import InvocationRecorder, learning_recorder
+from .catalog import TOOL_SPECS
 
 
 P = ParamSpec("P")
@@ -167,7 +168,12 @@ def _json_safe_copy(value: Any, seen: set[int] | None = None) -> Any:
 
 def _register_with_original_result(mcp: FastMCP, guarded: Callable[..., Any]) -> None:
     # FastMCP validates and then model-dumps structured output, which copies JSON-safe values.
-    mcp.add_tool(guarded)
+    spec = TOOL_SPECS[guarded.__name__]
+    mcp.add_tool(
+        guarded,
+        description=spec.description,
+        annotations=spec.annotations(),
+    )
     tool = mcp._tool_manager.get_tool(guarded.__name__)
     if tool is None:
         return
@@ -222,8 +228,18 @@ def register_tool(
 ) -> None:
     """Register an async tool while preserving structured backend failures."""
 
+    name = function.__name__
+    if name not in TOOL_SPECS:
+        raise ValueError(name)
+    registered_names = getattr(mcp, "_pscad_registered_tool_names", None)
+    if registered_names is None:
+        registered_names = set()
+        setattr(mcp, "_pscad_registered_tool_names", registered_names)
+    if name in registered_names:
+        raise ValueError(name)
+
     if record_learning:
-        _record_safely(lambda: recorder.register_tool_name(function.__name__))
+        _record_safely(lambda: recorder.register_tool_name(name))
 
     @wraps(function)
     async def guarded(*args: P.args, **kwargs: P.kwargs) -> Any:
@@ -276,15 +292,30 @@ def register_tool(
         return result
 
     signature = inspect.signature(function)
-    return_annotation = _resolved_return_annotation(function, signature)
+    try:
+        resolved_annotations = get_type_hints(function, include_extras=True)
+    except Exception:
+        resolved_annotations = dict(function.__annotations__)
+    resolved_parameters = [
+        parameter.replace(
+            annotation=resolved_annotations.get(parameter.name, parameter.annotation)
+        )
+        for parameter in signature.parameters.values()
+    ]
+    return_annotation = resolved_annotations.get(
+        "return",
+        _resolved_return_annotation(function, signature),
+    )
     error_aware_return = (
         return_annotation
         if _is_call_tool_result(return_annotation)
         else Union[return_annotation, dict[str, Any]]
     )
     guarded.__signature__ = signature.replace(
+        parameters=resolved_parameters,
         return_annotation=error_aware_return
     )
-    guarded.__annotations__ = dict(function.__annotations__)
+    guarded.__annotations__ = resolved_annotations
     guarded.__annotations__["return"] = error_aware_return
     _register_with_original_result(mcp, guarded)
+    registered_names.add(name)

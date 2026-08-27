@@ -9,6 +9,7 @@ from pscad_mcp.tools.learning_tools import (
     record_goal_failure,
     review_improvement_backlog,
 )
+from pscad_mcp.tools.catalog import TOOL_SPECS
 
 
 @pytest.mark.asyncio
@@ -88,3 +89,11 @@ def test_server_registers_83_unique_tools_and_silent_instructions():
     assert "record_goal_failure" in SERVER_INSTRUCTIONS
     assert "inspect it now or leave it for the weekly review" in SERVER_INSTRUCTIONS
     assert "Do not start remediation automatically" in SERVER_INSTRUCTIONS
+
+
+def test_clear_learning_history_is_catalogued_as_destructive():
+    spec = TOOL_SPECS["clear_learning_history"]
+
+    assert spec.read_only is False
+    assert spec.destructive is True
+    assert spec.open_world is False

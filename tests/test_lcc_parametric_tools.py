@@ -33,6 +33,23 @@ def test_parametric_lcc_tools_are_registered():
             assert "default" not in properties[field]
 
 
+def test_parametric_lcc_complex_inputs_expose_nested_shapes():
+    by_name = {
+        tool.name: tool for tool in create_server()._tool_manager.list_tools()
+    }
+
+    request_description = by_name["derive_lcc_parameters"].parameters[
+        "properties"
+    ]["request"]["description"]
+    events_description = by_name["validate_lcc_operating_modes"].parameters[
+        "properties"
+    ]["events"]["description"]
+    assert "ratings" in request_description
+    assert "rated_power_mw" in request_description
+    assert "event_id" in events_description
+    assert "target" in events_description
+
+
 def test_parametric_service_uses_configured_workspace_path_policy(monkeypatch, tmp_path):
     backend = SimpleNamespace(
         path_policy=SimpleNamespace(workspace_root=tmp_path),

@@ -4,6 +4,7 @@ import asyncio
 
 from pscad_mcp.main import create_server
 from pscad_mcp.tools import lcc_tools
+from pscad_mcp.tools.catalog import TOOL_SPECS
 
 
 def test_lcc_tools_are_registered_with_exact_names():
@@ -11,6 +12,13 @@ def test_lcc_tools_are_registered_with_exact_names():
 
     assert {"plan_lcc_model", "build_lcc_model", "get_lcc_build_status", "validate_lcc_model"} <= names
     assert len(names) == 83
+
+
+def test_fixed_lcc_build_catalog_records_the_documented_backend_boundary():
+    lcc_build = TOOL_SPECS["build_lcc_model"]
+
+    assert lcc_build.backend_support == frozenset({"legacy"})
+    assert lcc_build.limitation_code == "LCC_BUILD_UNAVAILABLE"
 
 
 def test_lcc_wrappers_forward_values_through_builder_service(monkeypatch):

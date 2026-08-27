@@ -22,6 +22,7 @@ async def record_goal_failure(
     failure_kind: str,
     primary_tool: str | None = None,
 ) -> dict[str, Any]:
+    """Record a bounded goal-level failure signal for local improvement review."""
     try:
         kind = GoalFailureKind(failure_kind)
     except (TypeError, ValueError) as error:
@@ -42,6 +43,7 @@ async def review_improvement_backlog(
     min_evidence: int = 3,
     mark_notified: bool = False,
 ) -> dict[str, Any]:
+    """Review bounded local improvement candidates and optionally mark them notified."""
     return learning_runtime.review(
         limit=limit,
         min_evidence=min_evidence,
@@ -52,6 +54,7 @@ async def review_improvement_backlog(
 async def clear_learning_history(
     confirm: bool = False,
 ) -> dict[str, Any]:
+    """Clear local learning history and backlog records after confirmation."""
     return learning_runtime.clear(confirm=confirm)
 
 

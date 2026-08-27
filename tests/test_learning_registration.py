@@ -10,6 +10,8 @@ from mcp.types import CallToolResult
 
 from pscad_mcp.core.backend.base import BackendError
 from pscad_mcp.core.service import PscadService
+from pscad_mcp.tools import registration as tool_registration
+from pscad_mcp.tools.catalog import TOOL_SPECS, ToolSpec
 from pscad_mcp.tools.registration import register_tool
 from tests.backend_fakes import ImmediateExecutor
 
@@ -29,8 +31,31 @@ class ScalarRecorder:
         self.events.append(metadata)
 
 
+@pytest.fixture
+def register_catalogued_test_tool(monkeypatch):
+    test_specs = dict(TOOL_SPECS)
+    monkeypatch.setattr(tool_registration, "TOOL_SPECS", test_specs)
+
+    def register(server, function, **kwargs):
+        test_specs[function.__name__] = ToolSpec(
+            name=function.__name__,
+            group="learning",
+            description="Temporary catalogued tool for learning wrapper tests.",
+            read_only=False,
+            destructive=False,
+            idempotent=False,
+            open_world=False,
+            backend_support=frozenset(),
+        )
+        register_tool(server, function, **kwargs)
+
+    return register
+
+
 @pytest.mark.asyncio
-async def test_wrapper_preserves_success_and_records_only_scalars():
+async def test_wrapper_preserves_success_and_records_only_scalars(
+    register_catalogued_test_tool,
+):
     result_object = {"secret_result": "DO_NOT_STORE"}
     calls = 0
 
@@ -46,7 +71,7 @@ async def test_wrapper_preserves_success_and_records_only_scalars():
         "pscad_mcp.tools.registration.pscad_manager.learning_snapshot",
         return_value={"backend": "legacy", "pscad_version": "4.6.2"},
     ):
-        register_tool(server, sample, recorder=recorder)
+        register_catalogued_test_tool(server, sample, recorder=recorder)
         _, structured = await server._tool_manager.call_tool(
             "sample",
             {"project_name": "SECRET_PROJECT"},
@@ -69,7 +94,9 @@ async def test_wrapper_preserves_success_and_records_only_scalars():
 
 
 @pytest.mark.asyncio
-async def test_wrapper_classifies_returned_and_raised_stable_errors():
+async def test_wrapper_classifies_returned_and_raised_stable_errors(
+    register_catalogued_test_tool,
+):
     async def returned_error():
         return {
             "error": {
@@ -87,8 +114,8 @@ async def test_wrapper_classifies_returned_and_raised_stable_errors():
 
     recorder = ScalarRecorder()
     server = FastMCP("test")
-    register_tool(server, returned_error, recorder=recorder)
-    register_tool(server, raised_error, recorder=recorder)
+    register_catalogued_test_tool(server, returned_error, recorder=recorder)
+    register_catalogued_test_tool(server, raised_error, recorder=recorder)
     await server._tool_manager.call_tool(
         "returned_error", {}, convert_result=True
     )
@@ -105,7 +132,9 @@ async def test_wrapper_classifies_returned_and_raised_stable_errors():
 
 
 @pytest.mark.asyncio
-async def test_wrapper_discards_malformed_error_metadata_without_echoing_it():
+async def test_wrapper_discards_malformed_error_metadata_without_echoing_it(
+    register_catalogued_test_tool,
+):
     async def malformed_error():
         return {
             "error": {
@@ -121,7 +150,7 @@ async def test_wrapper_discards_malformed_error_metadata_without_echoing_it():
         "pscad_mcp.tools.registration.pscad_manager.learning_snapshot",
         return_value={"backend": "legacy", "pscad_version": "4.6.2"},
     ):
-        register_tool(server, malformed_error, recorder=recorder)
+        register_catalogued_test_tool(server, malformed_error, recorder=recorder)
         await server._tool_manager.call_tool(
             "malformed_error", {}, convert_result=True
         )
@@ -132,12 +161,18 @@ async def test_wrapper_discards_malformed_error_metadata_without_echoing_it():
 
 
 @pytest.mark.asyncio
-async def test_recorder_failure_never_replaces_original_result():
+async def test_recorder_failure_never_replaces_original_result(
+    register_catalogued_test_tool,
+):
     async def sample():
         return "original"
 
     server = FastMCP("test")
-    register_tool(server, sample, recorder=ScalarRecorder(fail=True))
+    register_catalogued_test_tool(
+        server,
+        sample,
+        recorder=ScalarRecorder(fail=True),
+    )
     _, structured = await server._tool_manager.call_tool(
         "sample", {}, convert_result=True
     )
@@ -145,7 +180,9 @@ async def test_recorder_failure_never_replaces_original_result():
 
 
 @pytest.mark.asyncio
-async def test_record_learning_false_skips_names_snapshots_and_events():
+async def test_record_learning_false_skips_names_snapshots_and_events(
+    register_catalogued_test_tool,
+):
     async def maintenance():
         return {"reviewed": True}
 
@@ -154,7 +191,7 @@ async def test_record_learning_false_skips_names_snapshots_and_events():
     with patch(
         "pscad_mcp.tools.registration.pscad_manager.learning_snapshot"
     ) as snapshot:
-        register_tool(
+        register_catalogued_test_tool(
             server,
             maintenance,
             recorder=recorder,
@@ -169,14 +206,16 @@ async def test_record_learning_false_skips_names_snapshots_and_events():
 
 
 @pytest.mark.asyncio
-async def test_unwrapped_result_with_result_key_is_preserved():
+async def test_unwrapped_result_with_result_key_is_preserved(
+    register_catalogued_test_tool,
+):
     result_object = {"result": "original", "value": "kept"}
 
     async def sample() -> dict[str, Any]:
         return result_object
 
     server = FastMCP("test")
-    register_tool(server, sample, record_learning=False)
+    register_catalogued_test_tool(server, sample, record_learning=False)
     tool = server._tool_manager._tools["sample"]
     assert tool.fn_metadata.output_schema is not None
     assert tool.fn_metadata.wrap_output is False
@@ -189,14 +228,17 @@ async def test_unwrapped_result_with_result_key_is_preserved():
 
 @pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
 @pytest.mark.asyncio
-async def test_nonfinite_float_is_not_reinserted_into_structured_result(value):
+async def test_nonfinite_float_is_not_reinserted_into_structured_result(
+    value,
+    register_catalogued_test_tool,
+):
     result_object = {"value": value}
 
     async def sample() -> dict[str, float]:
         return result_object
 
     server = FastMCP("test")
-    register_tool(server, sample, record_learning=False)
+    register_catalogued_test_tool(server, sample, record_learning=False)
     _, structured = await server._tool_manager.call_tool(
         "sample", {}, convert_result=True
     )
@@ -207,7 +249,9 @@ async def test_nonfinite_float_is_not_reinserted_into_structured_result(value):
 
 
 @pytest.mark.asyncio
-async def test_future_annotations_and_call_tool_result_register_cleanly():
+async def test_future_annotations_and_call_tool_result_register_cleanly(
+    register_catalogued_test_tool,
+):
     future_result = {"status": "ready"}
     call_result = CallToolResult(content=[], structuredContent={"ok": True})
 
@@ -218,8 +262,16 @@ async def test_future_annotations_and_call_tool_result_register_cleanly():
         return call_result
 
     server = FastMCP("annotation-test")
-    register_tool(server, future_annotated, record_learning=False)
-    register_tool(server, call_result_tool, record_learning=False)
+    register_catalogued_test_tool(
+        server,
+        future_annotated,
+        record_learning=False,
+    )
+    register_catalogued_test_tool(
+        server,
+        call_result_tool,
+        record_learning=False,
+    )
 
     _, structured = await server._tool_manager.call_tool(
         "future_annotated", {}, convert_result=True

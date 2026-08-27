@@ -9,6 +9,7 @@ from pscad_mcp.core.backend.base import BackendError
 from pscad_mcp.core.path_policy import PathPolicy
 from pscad_mcp.hvdc.service import HvdcDomainService
 from pscad_mcp.hvdc.profiles import list_profiles, load_profile
+from pscad_mcp.tools.catalog import TOOL_SPECS
 
 
 EXPECTED = {
@@ -23,6 +24,16 @@ def test_hvdc_tools_are_registered_without_removing_generic_tools():
     names = {tool.name for tool in create_server()._tool_manager.list_tools()}
     assert EXPECTED <= names
     assert len(names) == 83
+
+
+def test_hvdc_safety_annotations_distinguish_inspection_from_scenario_runs():
+    inspection = TOOL_SPECS["inspect_hvdc_project"]
+    scenario_run = TOOL_SPECS["run_hvdc_scenario"]
+
+    assert inspection.read_only is True
+    assert inspection.destructive is False
+    assert scenario_run.read_only is False
+    assert scenario_run.idempotent is False
 
 
 def test_inspect_hvdc_project_is_json_safe(tmp_path):

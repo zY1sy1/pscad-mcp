@@ -2,15 +2,40 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Annotated, Any
 
 from mcp.server.fastmcp import FastMCP
+from pydantic import Field
 
 from ..core.connection_manager import pscad_manager
 from ..hvdc.builders.lcc.parametric_models import ParametricLccRequest
 from ..hvdc.builders.lcc.parametric_service import ParametricLccBuilderService
 from ..hvdc.builders.lcc.schema import parse_parametric_request
 from .registration import register_tool
+
+ParametricLccInput = Annotated[
+    dict[str, Any],
+    Field(
+        description=(
+            'Keys topology, ratings, engineering_overrides, operation_modes, '
+            'return_path_assets, mode_requests, and template_mappings; example '
+            '{"topology":"bipolar","ratings":{"rated_power_mw":1000,'
+            '"dc_voltage_kv":500,"dc_current_ka":2,"ac_voltage_kv":230,'
+            '"frequency_hz":50,"scr":3},"engineering_overrides":'
+            '{"base_mva":1000}}.'
+        )
+    ),
+]
+OperatingModeEvents = Annotated[
+    list[dict[str, Any]],
+    Field(
+        description=(
+            'Ordered events with event_id, time_s, target, and value; example '
+            '[{"event_id":"e1","time_s":0.5,"target":"operating_mode",'
+            '"value":"monopolar_earth_return"}].'
+        )
+    ),
+]
 
 _service_instance: ParametricLccBuilderService | None = None
 _service_backend: Any = None
@@ -34,20 +59,23 @@ def _request(value: ParametricLccRequest | dict[str, Any]) -> ParametricLccReque
     return value if isinstance(value, ParametricLccRequest) else parse_parametric_request(value)
 
 
-async def derive_lcc_parameters(request: dict[str, Any]) -> dict[str, Any]:
+async def derive_lcc_parameters(request: ParametricLccInput) -> dict[str, Any]:
+    """Derive deterministic LCC design parameters from a parametric request."""
     return _service().derive_parameters(_request(request))
 
 
 async def audit_lcc_template(template_path: str) -> dict[str, Any]:
+    """Audit an LCC template and report binding evidence without modifying it."""
     return _service().audit_template(template_path)
 
 
 async def plan_parametric_lcc_model(
-    request: dict[str, Any],
+    request: ParametricLccInput,
     template_path: str,
     project_name: str,
     folder: str,
 ) -> dict[str, Any]:
+    """Plan a parameterized LCC model build without changing the workspace."""
     return _service().plan_parametric_model(
         _request(request),
         template_path=template_path,
@@ -57,13 +85,14 @@ async def plan_parametric_lcc_model(
 
 
 async def build_parametric_lcc_model(
-    request: dict[str, Any],
+    request: ParametricLccInput,
     expected_plan_hash: str,
     template_path: str,
     project_name: str,
     folder: str,
     confirm: bool = False,
 ) -> dict[str, Any]:
+    """Start a confirmed parameterized LCC build from a matching plan."""
     return await _service().build_parametric_model(
         _request(request),
         template_path=template_path,
@@ -75,10 +104,12 @@ async def build_parametric_lcc_model(
 
 
 async def get_parametric_lcc_build_status(build_id: str) -> dict[str, Any]:
+    """Get the current status and evidence for a parameterized LCC build."""
     return _service().get_status(build_id)
 
 
-async def validate_lcc_operating_modes(events: list[dict[str, Any]]) -> dict[str, Any]:
+async def validate_lcc_operating_modes(events: OperatingModeEvents) -> dict[str, Any]:
+    """Validate an ordered schedule of LCC operating-mode events."""
     return _service().validate_operating_modes(events)
 
 

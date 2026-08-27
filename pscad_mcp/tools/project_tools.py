@@ -1,8 +1,37 @@
-from typing import List, Dict, Any, Optional
+from typing import Annotated, List, Dict, Any, Optional
 from mcp.server.fastmcp import FastMCP
+from pydantic import Field
 from ..core.connection_manager import pscad_manager
 from ..core.executor import robust_executor
 from .registration import register_tool
+
+ComponentParameters = Annotated[
+    Dict[str, Any],
+    Field(
+        description=(
+            'Component parameter_name keys mapped to values; example '
+            '{"R": 1.0, "enabled": true}.'
+        )
+    ),
+]
+ProjectSettings = Annotated[
+    Dict[str, Any],
+    Field(
+        description=(
+            'PSCAD project setting names mapped to values; example '
+            '{"time_duration": 10.0, "time_step": 0.00005}.'
+        )
+    ),
+]
+ParameterGridRequest = Annotated[
+    Optional[Dict[str, Any]],
+    Field(
+        description=(
+            'Parameter-grid keys action, project_name, filename, and folder; '
+            'example {"action": "view_project", "project_name": "Case"}.'
+        )
+    ),
+]
 
 async def load_projects(filenames: List[str]) -> str:
     """Load projects or workspace into PSCAD."""
@@ -36,13 +65,13 @@ async def get_component_parameters(project_name: str, component_id: int) -> Dict
         project_name, component_id
     )
 
-async def set_component_parameters(project_name: str, component_id: int, parameters: Dict[str, Any]) -> str:
+async def set_component_parameters(project_name: str, component_id: int, parameters: ComponentParameters) -> str:
     """Set parameter values for a specific component."""
     return await pscad_manager.service.set_component_parameters(
         project_name, component_id, parameters
     )
 
-async def validate_component_parameters(project_name: str, component_id: int, parameters: Dict[str, Any]) -> Dict[str, Any]:
+async def validate_component_parameters(project_name: str, component_id: int, parameters: ComponentParameters) -> Dict[str, Any]:
     """Validate if the given parameters are within the legal range for a component."""
     return await pscad_manager.service.validate_component_parameters(
         project_name, component_id, parameters
@@ -61,7 +90,7 @@ async def stop_simulation(project_name: str) -> str:
 async def get_project_settings(
     project_name: str,
     mode: str = "project",
-    parameter_grid: Optional[Dict[str, Any]] = None,
+    parameter_grid: ParameterGridRequest = None,
 ) -> Dict[str, Any]:
     """Get project settings or a normalized parameter-grid view."""
     if mode == "project" and parameter_grid is None:
@@ -74,9 +103,9 @@ async def get_project_settings(
 
 async def set_project_settings(
     project_name: str,
-    settings: Dict[str, Any],
+    settings: ProjectSettings,
     mode: str = "project",
-    parameter_grid: Optional[Dict[str, Any]] = None,
+    parameter_grid: ParameterGridRequest = None,
 ) -> str | Dict[str, Any]:
     """Update project settings or run a parameter-grid action."""
     if mode == "project" and parameter_grid is None:
