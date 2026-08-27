@@ -1,6 +1,7 @@
 from .hashing import canonical_sha256, topology_sha256
 from .models import (
     CandidateEdge,
+    DiagnosticReport,
     DefinitionPortContract,
     DiagnosticFinding,
     EvidenceRef,
@@ -21,6 +22,7 @@ from .models import (
 
 __all__ = [
     "CandidateEdge",
+    "DiagnosticReport",
     "DefinitionPortContract",
     "DiagnosticFinding",
     "EvidenceRef",

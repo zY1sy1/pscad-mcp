@@ -1,8 +1,16 @@
+from unittest.mock import AsyncMock
+
 import pytest
 
 from pscad_mcp.core.service import PscadService
+from pscad_mcp.topology.hashing import topology_sha256
+from pscad_mcp.topology.models import TopologySnapshot
 from pscad_mcp.topology.service import TopologyService
-from tests.topology_fakes import ReadOnlyRecordingBackend
+from tests.topology_fakes import (
+    ReadOnlyRecordingBackend,
+    topology_with_nearby_dangling_endpoint,
+    topology_with_seeded_defects,
+)
 
 
 MINIMAL_PROJECT_XML = """<project name="case" version="4.6.2">
@@ -60,3 +68,45 @@ async def test_pscad_service_caches_topology_service_per_connected_backend(tmp_p
     second = service.topology_service
     assert second is not first
     assert second.live_provider.backend is second_backend
+
+
+@pytest.mark.asyncio
+async def test_infer_mode_adds_candidates_without_changing_confirmed_hash():
+    source = topology_with_nearby_dangling_endpoint(grid_step=18)
+    snapshot = TopologySnapshot(
+        "live",
+        source.project_name,
+        pscad_version=source.pscad_version,
+        components=source.components,
+        conductors=source.conductors,
+        grid_step=source.grid_step,
+    )
+    backend = AsyncMock()
+    backend.inspect_canvas_topology.return_value = snapshot
+    service = TopologyService(backend)
+
+    conservative = await service.inspect("case", "Main", mode="conservative")
+    inferred = await service.inspect("case", "Main", mode="infer")
+
+    assert conservative.candidate_edges == ()
+    assert inferred.candidate_edges
+    assert topology_sha256(conservative) == topology_sha256(inferred)
+
+
+@pytest.mark.asyncio
+async def test_diagnose_reports_validity_summary_hash_and_rule_timing():
+    topology = topology_with_seeded_defects()
+    service = TopologyService(AsyncMock())
+    service.inspect = AsyncMock(return_value=topology)
+
+    report = await service.diagnose("case", "Main", mode="conservative")
+
+    assert not report.valid
+    assert report.topology_hash == topology_sha256(topology)
+    assert dict(report.summary) == {"error": 10, "info": 1, "warning": 5}
+    assert "generic_rules" in dict(report.timings_ms)
+    service.inspect.assert_awaited_once_with(
+        "case",
+        "Main",
+        mode="conservative",
+    )

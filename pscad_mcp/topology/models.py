@@ -142,6 +142,20 @@ class DiagnosticFinding:
 
 
 @dataclass(frozen=True)
+class DiagnosticReport:
+    topology_hash: str
+    valid: bool
+    findings: tuple[DiagnosticFinding, ...]
+    summary: tuple[tuple[str, int], ...]
+    timings_ms: tuple[tuple[str, float], ...] = field(
+        default=(), compare=False
+    )
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
 class TopologySnapshot:
     source: Literal["live", "pscx"]
     project_name: str
