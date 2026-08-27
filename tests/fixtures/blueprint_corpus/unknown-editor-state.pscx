@@ -1,0 +1,9 @@
+<project name="UnknownEditor" version="4.6.2" Target="EMTDC">
+  <paramlist name="Settings"><param name="time_duration" value="1" /></paramlist>
+  <editorState privatePath="C:\private\file.pscx">never copy this</editorState>
+  <definitions>
+    <Definition classid="UserCmpDefn" name="Main" id="1">
+      <schematic classid="UserCanvas"><TopologyMystery secret="raw" /></schematic>
+    </Definition>
+  </definitions>
+</project>

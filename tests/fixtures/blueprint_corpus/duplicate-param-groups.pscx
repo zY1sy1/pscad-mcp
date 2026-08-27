@@ -1,0 +1,12 @@
+<project name="Grouped" version="4.6.2" Target="EMTDC">
+  <definitions>
+    <Definition classid="UserCmpDefn" name="Main" id="1">
+      <schematic classid="UserCanvas">
+        <User classid="UserCmp" name="GRAPH" id="2" x="0" y="0" w="18" h="18" z="1" orient="0" link="-1" defn="master:graphframe" q="4">
+          <paramlist><param name="ymin" value="-1" /><param name="title" value="A" /></paramlist>
+          <paramlist><param name="ymin" value="-2" /></paramlist>
+        </User>
+      </schematic>
+    </Definition>
+  </definitions>
+</project>

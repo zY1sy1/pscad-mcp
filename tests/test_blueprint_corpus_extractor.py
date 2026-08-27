@@ -8,8 +8,8 @@ import shutil
 
 import pytest
 
-from pscad_mcp.builders.blueprint.corpus_extractor import ExtractionLimits, extract_project
-from pscad_mcp.builders.blueprint.corpus_models import CorpusDependency, CorpusSource
+from pscad_mcp.builders.blueprint.corpus_extractor import ExtractionLimits, extract_project, graph_signature
+from pscad_mcp.builders.blueprint.corpus_models import CorpusDependency, CorpusSource, CorpusWarning
 from pscad_mcp.core.backend.base import BackendError
 
 
@@ -187,3 +187,138 @@ def test_project_settings_drop_identity_paths_and_volatile_fields(tmp_path):
         "D:\\\\private",
     ):
         assert denied not in serialized
+
+
+def test_extract_project_normalizes_definitions_components_ports_connections_and_outputs(tmp_path):
+    graph = extract_fixture(tmp_path, "minimal.pscx")
+
+    controller = next(definition for definition in graph.definitions if definition.name == "Controller")
+    assert controller.key == "definition:user:controller"
+    assert controller.parameters[0].to_dict() == {
+        "name": "Kp",
+        "type": "real",
+        "dimension": "1",
+        "units": "pu",
+        "minimum": "0",
+        "maximum": "10",
+        "intent": "input",
+        "default": "1.0",
+    }
+    assert controller.ports[0].key == "definition:user:controller/port:in#1"
+    assert controller.ports[0].offset == (-36, 0)
+    assert {canvas.key for canvas in graph.canvases} == {"canvas:controller", "canvas:main"}
+    assert graph.components[0].key == "canvas:main/component:controller@198,270#1"
+    assert graph.components[0].definition_key == "definition:user:controller"
+    assert graph.components[0].parameters == {"Kp": "2.0"}
+    assert any(connection.kind == "wireorthogonal" for connection in graph.connections)
+    assert any(connection.kind == "hierarchy" for connection in graph.connections)
+    assert graph.output_channels[0].key == "output:0:ctrl-out"
+    assert graph.output_channels[0].source_component == graph.components[0].key
+    assert graph.output_channels[0].units == "pu"
+    assert graph.output_channels[0].resolved is True
+
+
+def test_logical_graph_signature_is_stable_when_runtime_ids_change(tmp_path):
+    source = copy_fixture(tmp_path, "minimal.pscx")
+    first = extract_project(tmp_path, source_contract(source))
+    changed = source.read_text(encoding="utf-8")
+    changed = changed.replace('id="101"', 'id="901"').replace('link="101"', 'link="901"').replace('id="101:0"', 'id="901:0"')
+    changed = changed.replace('id="201"', 'id="902"').replace('id="8001"', 'id="9801"').replace('id="8002"', 'id="9802"')
+    source.write_text(changed, encoding="utf-8")
+    second = extract_project(tmp_path, source_contract(source))
+
+    assert graph_signature(first) == graph_signature(second)
+    assert first.components[0].key == second.components[0].key
+    assert first.connections[0].key == second.connections[0].key
+    assert first.output_channels[0].key == second.output_channels[0].key
+
+
+def test_graph_output_contains_no_runtime_ids_or_denied_output_metadata(tmp_path):
+    graph = extract_fixture(tmp_path, "minimal.pscx")
+    serialized = json.dumps(graph.to_dict(), sort_keys=True, ensure_ascii=True)
+
+    assert '"runtime_id"' not in serialized
+    assert '"link"' not in serialized
+    assert '"date"' not in serialized
+    assert '"time"' not in serialized
+    assert "2026/08/27" not in serialized
+    assert "21:00:00" not in serialized
+
+
+def test_dangling_local_definition_reference_fails_closed(tmp_path):
+    source = copy_fixture(tmp_path, "dangling.pscx")
+
+    assert_extraction_error(tmp_path, source_contract(source), "CORPUS_REFERENCE_UNRESOLVED")
+
+
+def test_unknown_elements_are_bounded_path_only_warnings(tmp_path):
+    graph = extract_fixture(tmp_path, "unknown-editor-state.pscx")
+
+    assert graph.warnings == (
+        CorpusWarning("unknown_element", "project/editorState", 1, False),
+        CorpusWarning("unknown_element", "project/definitions/Definition/schematic/TopologyMystery", 1, True),
+    )
+    serialized = json.dumps(graph.to_dict(), sort_keys=True, ensure_ascii=True)
+    assert "privatePath" not in serialized
+    assert "never copy this" not in serialized
+    assert "secret" not in serialized
+
+
+def test_duplicate_definition_logical_key_fails_closed(tmp_path):
+    content = b"""<project name='Duplicate' version='4.6.2' Target='EMTDC'><definitions>
+    <Definition classid='UserCmpDefn' name='Same'><schematic /></Definition>
+    <Definition classid='UserCmpDefn' name='same'><schematic /></Definition>
+    </definitions></project>"""
+    source = tmp_path / "duplicate.pscx"
+    source.write_bytes(content)
+
+    assert_extraction_error(tmp_path, source_contract(source), "CORPUS_LOGICAL_KEY_COLLISION")
+
+
+def test_dangling_output_binding_is_explicit_without_retaining_runtime_id(tmp_path):
+    source = copy_fixture(tmp_path, "minimal.pscx")
+    content = source.read_text(encoding="utf-8").replace('id="101:0"', 'id="999:0"')
+    source.write_text(content, encoding="utf-8")
+
+    graph = extract_project(tmp_path, source_contract(source))
+
+    assert graph.output_channels[0].resolved is False
+    assert graph.output_channels[0].source_component is None
+    assert graph.output_channels[0].source_port == "0"
+    assert CorpusWarning("unresolved_output_binding", "project/output/analog/channel", 1, False) in graph.warnings
+    assert "999" not in json.dumps(graph.to_dict(), sort_keys=True)
+
+
+def test_duplicate_parameter_names_preserve_paramlist_scope(tmp_path):
+    graph = extract_fixture(tmp_path, "duplicate-param-groups.pscx")
+
+    assert graph.components[0].parameters == {
+        "group-1:ymin": "-1",
+        "group-2:ymin": "-2",
+        "title": "A",
+    }
+
+
+def test_virtual_station_hierarchy_root_is_normalized_without_runtime_link(tmp_path):
+    graph = extract_fixture(tmp_path, "minimal.pscx")
+    hierarchy = [connection for connection in graph.connections if connection.kind == "hierarchy"]
+
+    assert hierarchy[0].endpoints == ("hierarchy-root:station", graph.components[0].key)
+    assert hierarchy[1].endpoints == ("project:minimal", "hierarchy-root:station")
+
+
+def test_missing_nested_hierarchy_target_still_fails_closed(tmp_path):
+    source = copy_fixture(tmp_path, "minimal.pscx")
+    content = source.read_text(encoding="utf-8").replace('link="101" name="Minimal:Controller"', 'link="7777" name="Minimal:Controller"')
+    source.write_text(content, encoding="utf-8")
+
+    assert_extraction_error(tmp_path, source_contract(source), "CORPUS_REFERENCE_UNRESOLVED")
+
+
+def test_pscad_wire_branch_stub_is_a_bounded_builtin_definition(tmp_path):
+    graph = extract_fixture(tmp_path, "wire-branch-stub.pscx")
+    branch = next(connection for connection in graph.connections if connection.kind == "wirebranch")
+    nested = next(component for component in graph.components if component.canvas_key == "canvas:station")
+
+    assert branch.source_definition == "definition:builtin:stub"
+    assert nested.definition_key == "definition:user:main"

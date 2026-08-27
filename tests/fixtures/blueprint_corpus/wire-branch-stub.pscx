@@ -1,0 +1,13 @@
+<project name="Branch" version="4.6.2" Target="EMTDC">
+  <definitions>
+    <Definition classid="UserCmpDefn" name="Main" id="1"><schematic classid="UserCanvas" /></Definition>
+    <Definition classid="UserCmpDefn" name="Station" id="2">
+      <schematic classid="UserCanvas">
+        <Wire classid="WireBranch" id="3" name="STUB" x="180" y="180" w="68" h="82" orient="0" defn="STUB" recv="-1" send="-1" back="-1">
+          <vertex x="0" y="0" /><vertex x="0" y="36" /><vertex x="36" y="36" /><vertex x="36" y="72" />
+          <User classid="UserCmp" name="Branch:Main" id="3" x="0" y="0" w="0" h="0" z="-1" orient="0" defn="Branch:Main" link="3" q="4" />
+        </Wire>
+      </schematic>
+    </Definition>
+  </definitions>
+</project>

@@ -4,5 +4,47 @@
     <param name="time_step" value="50" />
     <param name="sample_step" value="100" />
   </paramlist>
-  <definitions />
+  <definitions>
+    <Definition classid="UserCmpDefn" name="Controller" id="8001">
+      <form name="" w="320" h="400" splitter="60">
+        <category name="Configuration" visible="true">
+          <parameter name="Kp" type="Real" dim="1" unit="p.u." min="0" max="10" intent="Input">
+            <value>1.0</value>
+          </parameter>
+        </category>
+      </form>
+      <svg viewBox="-200 -200 200 200" size="4">
+        <port model="Transfer" name="In" x="-36" y="0" dim="1" mode="Input" type="Real" internal="false">true</port>
+        <port model="Transfer" name="Out" x="36" y="0" dim="1" mode="Output" type="Real" internal="false">true</port>
+      </svg>
+      <schematic classid="UserCanvas" />
+      <references><using namespace="master" /></references>
+    </Definition>
+    <Definition classid="UserCmpDefn" name="Main" id="8002">
+      <form name="" w="320" h="400" splitter="60" />
+      <svg viewBox="-200 -200 200 200" size="4" />
+      <schematic classid="UserCanvas">
+        <User classid="UserCmp" name="CTRL" id="101" x="198" y="270" w="72" h="72" z="1" orient="0" link="-1" defn="Minimal:Controller" q="4">
+          <paramlist name=""><param name="Kp" value="2.0" /></paramlist>
+        </User>
+        <Wire classid="WireOrthogonal" id="201" name="" x="198" y="270" w="82" h="10" orient="0">
+          <vertex x="0" y="0" />
+          <vertex x="72" y="0" />
+        </Wire>
+      </schematic>
+      <references><using namespace="master" /></references>
+    </Definition>
+  </definitions>
+  <hierarchy>
+    <call link="9999" name="Minimal:Station" z="-1" view="false" instance="0">
+      <call link="101" name="Minimal:Controller" z="1" view="true" instance="0" />
+    </call>
+  </hierarchy>
+  <output name="Minimal" device="EMTDC" version="2010" date="2026/08/27" time="21:00:00">
+    <sample rate="100" end="5" />
+    <domain name="time" unit="us" mult="1" skew="0" />
+    <analog>
+      <channel index="0" id="101:0" name="CTRL_OUT" label="Controller output" dim="1" unit="p.u." min="0" max="10" />
+    </analog>
+  </output>
 </project>
