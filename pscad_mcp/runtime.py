@@ -61,7 +61,14 @@ def _invoke_shutdown_action(action: ShutdownAction, timeout_s: float) -> Any:
     except (TypeError, ValueError):
         parameters = ()
     supports_timeout = any(
-        parameter.name == "timeout_s"
+        (
+            parameter.name == "timeout_s"
+            and parameter.kind
+            in {
+                inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                inspect.Parameter.KEYWORD_ONLY,
+            }
+        )
         or parameter.kind is inspect.Parameter.VAR_KEYWORD
         for parameter in parameters
     )
@@ -165,7 +172,25 @@ class RuntimeLifecycle:
         self._state_lock = threading.Lock()
         self._completion: concurrent.futures.Future[dict[str, Any]] | None = None
         self._result: dict[str, Any] | None = None
+        self._latest_result: dict[str, Any] | None = None
+        self._finalization: concurrent.futures.Future[dict[str, Any]] = (
+            concurrent.futures.Future()
+        )
+        self._owner_loop: asyncio.AbstractEventLoop | None = None
+        self._state = "open"
+        self._deferred = False
+        self._finalizer_scheduled = False
+        self._finalizer_task: asyncio.Task[None] | None = None
         self._pending_cleanup_tasks: set[asyncio.Future[Any]] = set()
+
+    @property
+    def finalization_future(self) -> concurrent.futures.Future[dict[str, Any]]:
+        return self._finalization
+
+    @property
+    def state(self) -> str:
+        with self._state_lock:
+            return self._state
 
     @property
     def pending_cleanup_count(self) -> int:
@@ -176,6 +201,7 @@ class RuntimeLifecycle:
         _consume_task_result(task)
         with self._state_lock:
             self._pending_cleanup_tasks.discard(task)
+        self._schedule_deferred_finalizer()
 
     def _track_pending_cleanup(
         self,
@@ -194,21 +220,122 @@ class RuntimeLifecycle:
             )
 
     @staticmethod
+    def _requires_deferred_cleanup(result: dict[str, Any]) -> bool:
+        return any(
+            failure.get("exception") == "PendingCleanupError"
+            for failure in result["failures"]
+        )
+
+    def _schedule_deferred_finalizer(self) -> None:
+        loop: asyncio.AbstractEventLoop | None = None
+        with self._state_lock:
+            live = any(not task.done() for task in self._pending_cleanup_tasks)
+            if (
+                self._deferred
+                and not live
+                and not self._finalizer_scheduled
+                and self._owner_loop is not None
+            ):
+                self._finalizer_scheduled = True
+                loop = self._owner_loop
+        if loop is None:
+            return
+        try:
+            loop.call_soon_threadsafe(self._start_deferred_finalizer)
+        except RuntimeError:
+            self._publish_final(
+                {
+                    "code": "SHUTDOWN_INCOMPLETE",
+                    "failures": [
+                        {
+                            "operation": "lifecycle",
+                            "exception": "EventLoopClosedError",
+                        }
+                    ],
+                }
+            )
+
+    def _start_deferred_finalizer(self) -> None:
+        with self._state_lock:
+            if not self._deferred or self._finalization.done():
+                self._finalizer_scheduled = False
+                return
+            current = self._finalizer_task
+            if current is not None and not current.done():
+                return
+            task = asyncio.create_task(self._run_deferred_finalizer())
+            self._finalizer_task = task
+        task.add_done_callback(_consume_task_result)
+
+    async def _run_deferred_finalizer(self) -> None:
+        try:
+            result = await self._shutdown_once()
+        except BaseException as error:
+            result = {
+                "code": "SHUTDOWN_INCOMPLETE",
+                "failures": [
+                    {
+                        "operation": "lifecycle",
+                        "exception": type(error).__name__,
+                    }
+                ],
+            }
+            logger.error(
+                "Runtime shutdown failed for operation=lifecycle exception=%s.",
+                type(error).__name__,
+            )
+        if self._requires_deferred_cleanup(result):
+            with self._state_lock:
+                self._latest_result = self._copy_result(result)
+                self._finalizer_scheduled = False
+                self._finalizer_task = None
+            self._schedule_deferred_finalizer()
+            return
+        self._publish_final(result)
+
+    @staticmethod
     def _copy_result(result: dict[str, Any]) -> dict[str, Any]:
         return {
             "code": result["code"],
             "failures": [dict(item) for item in result["failures"]],
         }
 
-    def _publish(
+    def _publish_initial(
         self,
         completion: concurrent.futures.Future[dict[str, Any]],
         result: dict[str, Any],
     ) -> None:
         stored = self._copy_result(result)
         with self._state_lock:
+            self._latest_result = stored
+        if not completion.done():
+            completion.set_result(self._copy_result(stored))
+
+    def _publish_final(self, result: dict[str, Any]) -> None:
+        stored = self._copy_result(result)
+        completion: concurrent.futures.Future[dict[str, Any]] | None
+        with self._state_lock:
             self._result = stored
-        completion.set_result(self._copy_result(stored))
+            self._latest_result = stored
+            self._state = "closed"
+            self._deferred = False
+            self._finalizer_scheduled = False
+            self._finalizer_task = None
+            completion = self._completion
+        if completion is not None and not completion.done():
+            completion.set_result(self._copy_result(stored))
+        if not self._finalization.done():
+            self._finalization.set_result(self._copy_result(stored))
+
+    def _publish_deferred(
+        self,
+        completion: concurrent.futures.Future[dict[str, Any]],
+        result: dict[str, Any],
+    ) -> None:
+        with self._state_lock:
+            self._deferred = True
+        self._publish_initial(completion, result)
+        self._schedule_deferred_finalizer()
 
     async def _shutdown_once(self) -> dict[str, Any]:
         failures: list[dict[str, str]] = []
@@ -267,6 +394,10 @@ class RuntimeLifecycle:
             if owner:
                 completion = concurrent.futures.Future()
                 self._completion = completion
+                self._owner_loop = asyncio.get_running_loop()
+                self._state = "closing"
+            elif completion.done() and self._latest_result is not None:
+                return self._copy_result(self._latest_result)
         assert completion is not None
         if not owner:
             result = await asyncio.shield(asyncio.wrap_future(completion))
@@ -280,7 +411,7 @@ class RuntimeLifecycle:
                     {"operation": "lifecycle", "exception": "CancelledError"}
                 ],
             }
-            self._publish(completion, result)
+            self._publish_final(result)
             raise
         except BaseException as error:
             result = {
@@ -293,9 +424,12 @@ class RuntimeLifecycle:
                 "Runtime shutdown failed for operation=lifecycle exception=%s.",
                 type(error).__name__,
             )
-            self._publish(completion, result)
+            self._publish_final(result)
             raise
-        self._publish(completion, result)
+        if self._requires_deferred_cleanup(result):
+            self._publish_deferred(completion, result)
+        else:
+            self._publish_final(result)
         return self._copy_result(result)
 
     @asynccontextmanager
@@ -346,6 +480,20 @@ class SharedRuntimeLifespan:
             return await result
         return result
 
+    def _mark_closed(self, _future: Any = None) -> None:
+        with self._lock:
+            self._state = "closed"
+
+    def _close_or_follow_deferred_finalization(self) -> None:
+        finalization = getattr(self.runtime, "finalization_future", None)
+        if isinstance(finalization, concurrent.futures.Future):
+            if finalization.done():
+                self._mark_closed()
+            else:
+                finalization.add_done_callback(self._mark_closed)
+            return
+        self._mark_closed()
+
     async def _finish_shutdown(self) -> None:
         shutdown_task = asyncio.create_task(self._shutdown_runtime())
         cancelled = False
@@ -365,8 +513,7 @@ class SharedRuntimeLifespan:
                 except BaseException as error:
                     failure = error
         finally:
-            with self._lock:
-                self._state = "closed"
+            self._close_or_follow_deferred_finalization()
         if failure is not None:
             raise failure
         if cancelled:

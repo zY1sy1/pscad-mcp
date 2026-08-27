@@ -246,15 +246,91 @@ def test_live_timed_out_domain_cleanup_blocks_connection_and_executor(caplog):
             ],
         }
         release.set()
-        for _ in range(20):
-            if runtime.pending_cleanup_count == 0:
-                break
-            await asyncio.sleep(0)
+        final_result = await asyncio.wait_for(
+            asyncio.wrap_future(runtime.finalization_future),
+            timeout=1,
+        )
         assert runtime.pending_cleanup_count == 0
+        assert final_result == {
+            "code": "SHUTDOWN_INCOMPLETE",
+            "failures": [
+                {"operation": "domain", "exception": "RuntimeError"},
+            ],
+        }
+        assert await runtime.shutdown() == final_result
 
     with caplog.at_level(logging.ERROR, logger="pscad-mcp.runtime"):
         asyncio.run(exercise())
     assert "SECRET" not in caplog.text
+
+
+def test_deferred_finalizer_retries_serially_when_cleanup_is_pending_again():
+    releases = [asyncio.Event(), asyncio.Event()]
+    attempts = 0
+    active = 0
+    max_active = 0
+    calls: list[str] = []
+
+    async def domain():
+        nonlocal attempts, active, max_active
+        index = attempts
+        attempts += 1
+        active += 1
+        max_active = max(max_active, active)
+        try:
+            if index < len(releases):
+                while not releases[index].is_set():
+                    try:
+                        await releases[index].wait()
+                    except asyncio.CancelledError:
+                        continue
+        finally:
+            active -= 1
+
+    runtime = RuntimeLifecycle(
+        domain_shutdown=domain,
+        settlement_wait=lambda: calls.append("settlement") or True,
+        learning_close=lambda: calls.append("learning"),
+        connection_shutdown=lambda: calls.append("connection"),
+        executor_shutdown=lambda: calls.append("executor"),
+        timeout_s=0.02,
+    )
+
+    async def exercise():
+        try:
+            first = await runtime.shutdown()
+            assert first["failures"][0] == {
+                "operation": "domain",
+                "exception": "PendingCleanupError",
+            }
+            releases[0].set()
+            for _ in range(100):
+                if attempts == 2 and runtime.pending_cleanup_count == 1:
+                    break
+                await asyncio.sleep(0.005)
+            assert attempts == 2
+            assert runtime.pending_cleanup_count == 1
+            assert not runtime.finalization_future.done()
+            releases[1].set()
+            final = await asyncio.wait_for(
+                asyncio.wrap_future(runtime.finalization_future),
+                timeout=1,
+            )
+            assert final == {"code": "SHUTDOWN_COMPLETE", "failures": []}
+        finally:
+            for release in releases:
+                release.set()
+            if not runtime.finalization_future.done():
+                await asyncio.wait_for(
+                    asyncio.wrap_future(runtime.finalization_future),
+                    timeout=1,
+                )
+
+    asyncio.run(exercise())
+    assert attempts == 3
+    assert max_active == 1
+    assert calls.count("connection") == 1
+    assert calls.count("executor") == 1
 
 
 def test_domain_aggregate_propagates_live_cleanup_after_attempting_all(monkeypatch):
@@ -297,6 +373,29 @@ def test_domain_aggregate_propagates_live_cleanup_after_attempting_all(monkeypat
     asyncio.run(exercise())
 
 
+def test_shutdown_action_timeout_keyword_respects_parameter_kind():
+    def positional_only(timeout_s="positional-default", /):
+        return timeout_s
+
+    def var_positional(*timeout_s):
+        return timeout_s
+
+    def keyword_capable(timeout_s="keyword-default"):
+        return timeout_s
+
+    def arbitrary_keywords(**values):
+        return values
+
+    assert runtime_module._invoke_shutdown_action(positional_only, 0.25) == (
+        "positional-default"
+    )
+    assert runtime_module._invoke_shutdown_action(var_positional, 0.25) == ()
+    assert runtime_module._invoke_shutdown_action(keyword_capable, 0.25) == 0.25
+    assert runtime_module._invoke_shutdown_action(arbitrary_keywords, 0.25) == {
+        "timeout_s": 0.25
+    }
+
+
 @pytest.mark.parametrize("service_kind", ["hvdc", "fixed_lcc", "parametric_lcc"])
 def test_real_tool_shutdown_helper_propagates_pending_cleanup_to_runtime(
     monkeypatch, tmp_path, service_kind
@@ -313,6 +412,13 @@ def test_real_tool_shutdown_helper_propagates_pending_cleanup_to_runtime(
 
     async def exercise():
         release = asyncio.Event()
+        released_leases: list[str] = []
+
+        class Lease:
+            token = "lease-token"
+
+            def release(self, token):
+                released_leases.append(token)
 
         async def stubborn_child():
             while not release.is_set():
@@ -330,9 +436,11 @@ def test_real_tool_shutdown_helper_propagates_pending_cleanup_to_runtime(
         elif service_kind == "fixed_lcc":
             service = LccBuilderService(object(), workspace_root=tmp_path)
             service._tasks["pending"] = child
+            service._leases["pending"] = Lease()
         else:
             service = ParametricLccBuilderService(workspace_root=tmp_path)
             service._tasks["pending"] = child
+            service._leases["pending"] = Lease()
 
         for module, service_name, backend_name in modules.values():
             monkeypatch.setattr(module, service_name, None)
@@ -365,14 +473,36 @@ def test_real_tool_shutdown_helper_propagates_pending_cleanup_to_runtime(
                 ],
             }
             assert runtime.pending_cleanup_count == 1
+            assert runtime.state == "closing"
+            assert getattr(module, service_name) is service
+            assert released_leases == []
         finally:
             release.set()
             await child
-        for _ in range(20):
-            if runtime.pending_cleanup_count == 0:
-                break
-            await asyncio.sleep(0)
+        final_result = await asyncio.wait_for(
+            asyncio.wrap_future(runtime.finalization_future),
+            timeout=1,
+        )
         assert runtime.pending_cleanup_count == 0
+        assert getattr(module, service_name) is None
+        assert getattr(module, backend_name) is None
+        expected_leases = [] if service_kind == "hvdc" else ["lease-token"]
+        assert released_leases == expected_leases
+        assert calls == [
+            "settlement",
+            "learning",
+            "settlement",
+            "learning",
+            "connection",
+            "executor",
+        ]
+        expected_final = {"code": "SHUTDOWN_COMPLETE", "failures": []}
+        assert final_result == expected_final
+        assert runtime.state == "closed"
+        final_result["failures"].append(
+            {"operation": "mutated", "exception": "MutatedError"}
+        )
+        assert await runtime.shutdown() == expected_final
 
     asyncio.run(exercise())
 
@@ -544,6 +674,66 @@ def test_shared_lifespan_rejects_new_lease_while_last_exit_is_closing():
         await closing
 
     asyncio.run(exercise())
+
+
+def test_shared_lifespan_stays_closing_until_deferred_runtime_finalization():
+    calls: list[str] = []
+    release = asyncio.Event()
+    domain_attempts = 0
+
+    async def domain():
+        nonlocal domain_attempts
+        domain_attempts += 1
+        calls.append(f"domain-{domain_attempts}")
+        if domain_attempts == 1:
+            while not release.is_set():
+                try:
+                    await release.wait()
+                except asyncio.CancelledError:
+                    continue
+
+    runtime = RuntimeLifecycle(
+        domain_shutdown=domain,
+        settlement_wait=lambda: calls.append("settlement") or True,
+        learning_close=lambda: calls.append("learning"),
+        connection_shutdown=lambda: calls.append("connection"),
+        executor_shutdown=lambda: calls.append("executor"),
+        timeout_s=0.03,
+    )
+    owner = SharedRuntimeLifespan(runtime)
+
+    async def exercise():
+        context = owner.lifespan(None)
+        await context.__aenter__()
+        await context.__aexit__(None, None, None)
+        assert owner.state == "closing"
+        assert runtime.state == "closing"
+        rejected = owner.lifespan(None)
+        with pytest.raises(RuntimeError, match="RUNTIME_CLOSING"):
+            await rejected.__aenter__()
+        release.set()
+        await asyncio.wait_for(
+            asyncio.wrap_future(runtime.finalization_future),
+            timeout=1,
+        )
+        for _ in range(20):
+            if owner.state == "closed":
+                break
+            await asyncio.sleep(0)
+        assert owner.state == "closed"
+        assert runtime.state == "closed"
+
+    asyncio.run(exercise())
+    assert calls == [
+        "domain-1",
+        "settlement",
+        "learning",
+        "domain-2",
+        "settlement",
+        "learning",
+        "connection",
+        "executor",
+    ]
 
 
 def test_last_lifespan_exit_defers_repeated_cancellation_until_shutdown_finishes():
