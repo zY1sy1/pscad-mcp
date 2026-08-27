@@ -151,6 +151,40 @@ def test_generated_markdown_redacts_source_path_and_reports_package_version(tmp_
     assert str(source) not in rendered
 
 
+def test_generated_markdown_removes_top_level_pydoc_file_section(tmp_path):
+    source = r"C:\Users\private-user\site-packages\mhi\pscad\fake.py"
+    raw_doc = "\n".join(
+        (
+            "NAME",
+            "    mhi.pscad.fake",
+            "",
+            "DESCRIPTION",
+            "    The word FILE in normal documentation must remain.",
+            "",
+            "FILE",
+            f"    {source}",
+            "    private continuation text",
+            "",
+            "FUNCTIONS",
+            "    def public_function()",
+        )
+    )
+    manager = DocumentationManager(tmp_path / "docs")
+
+    rendered = manager._extract_enriched_markdown(
+        "mhi.pscad.fake",
+        raw_doc,
+        None,
+    )
+
+    assert "## FILE" not in rendered
+    assert source not in rendered
+    assert "private continuation text" not in rendered
+    assert "The word FILE in normal documentation must remain." in rendered
+    assert "## FUNCTIONS" in rendered
+    assert "public_function" in rendered
+
+
 def test_generated_heading_falls_back_to_package_version(tmp_path, monkeypatch):
     def missing_distribution(_distribution):
         raise importlib.metadata.PackageNotFoundError

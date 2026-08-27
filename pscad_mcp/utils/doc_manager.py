@@ -246,16 +246,32 @@ class DocumentationManager:
             "enum.Enum", "enum.IntEnum", "enum.ReprEnum", "enum.EnumType"
         }
         
+        in_file_section = False
         in_skipped_inheritance = False
         current_class = None
         
         for line in lines:
             stripped = line.strip()
+            is_top_level_heading = (
+                bool(stripped)
+                and not line[:1].isspace()
+                and stripped.isupper()
+            )
+
+            if in_file_section:
+                if not is_top_level_heading:
+                    continue
+                in_file_section = False
+
+            if is_top_level_heading and stripped == "FILE":
+                in_file_section = True
+                continue
+
             if not stripped:
                 md_lines.append("")
                 continue
             
-            if line.isupper() and not line.startswith(" "):
+            if is_top_level_heading:
                 md_lines.append(f"## {stripped}")
                 continue
             
