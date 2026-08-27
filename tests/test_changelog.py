@@ -63,3 +63,25 @@ def test_breaker_workdoc_records_implemented_and_live_status_separately():
     text = (Path(__file__).parents[1] / "docs" / "zh-CN" / "2026-08-25-breaker-engineering-package-auto-modeling-workdoc.md").read_text(encoding="utf-8")
     for phrase in ("implemented", "test_verified", "live_verified", "通用 Blueprint Builder", "尚未完成 Breaker 实机验收"):
         assert phrase in text
+
+
+def test_readmes_and_changelog_document_blueprint_corpus_boundaries():
+    root = Path(__file__).parents[1]
+    english = " ".join((root / "README.md").read_text(encoding="utf-8").lower().split())
+    chinese = " ".join((root / "docs" / "zh-CN" / "README.md").read_text(encoding="utf-8").split())
+    changelog = " ".join((root / "CHANGELOG.md").read_text(encoding="utf-8").lower().split())
+
+    for command in ("build_blueprint_corpus.py generate", "build_blueprint_corpus.py verify", "build_blueprint_corpus.py compare"):
+        assert command in english
+        assert command in chinese
+    for phrase in (
+        "deterministic derived data",
+        "original pscad models and simulation results are never committed",
+        "independent of `pscad_mcp.learning`",
+        "optional and read-only",
+    ):
+        assert phrase in english
+    for phrase in ("确定性派生数据", "原始 PSCAD 模型和仿真结果永不提交", "独立于 `pscad_mcp.learning`", "可选且只读"):
+        assert phrase in chinese
+    for phrase in ("blueprint corpus", "implemented=true", "test_verified=true", "live_verified=false"):
+        assert phrase in changelog

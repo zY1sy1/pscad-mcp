@@ -80,7 +80,14 @@ def test_built_wheel_is_installable_and_exposes_tools():
                     "from pscad_mcp.hvdc.builders.lcc.assets import load_packaged_asset_set; "
                     "assets = load_packaged_asset_set(); "
                     "assert assets.name == 'cigre_lcc_monopole_v1'; "
-                    "print(installed, len(tools), len(assets.hashes))"
+                    "from pscad_mcp.builders.blueprint.corpus_assets import load_corpus_blueprints, load_packaged_corpus_graphs, load_packaged_corpus_manifest, load_packaged_corpus_record_files; "
+                    "manifest = load_packaged_corpus_manifest('moxing_v1'); "
+                    "graphs = load_packaged_corpus_graphs(manifest); "
+                    "records = load_packaged_corpus_record_files(manifest); "
+                    "blueprints = load_corpus_blueprints(manifest); "
+                    "assert manifest.project_count == len(graphs) == len(records) == len(blueprints) == 4; "
+                    "assert all(not blueprint.operations for blueprint in blueprints); "
+                    "print(installed, len(tools), len(assets.hashes), manifest.project_count, len(graphs), len(records), len(blueprints))"
                 ),
             ],
             check=False,
@@ -90,4 +97,4 @@ def test_built_wheel_is_installable_and_exposes_tools():
             env=env,
         )
         assert probe.returncode == 0, probe.stderr
-        assert probe.stdout.strip() == f"{expected_version} 87 6"
+        assert probe.stdout.strip() == f"{expected_version} 87 6 4 4 4 4"

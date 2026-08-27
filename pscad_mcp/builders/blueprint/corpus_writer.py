@@ -501,6 +501,12 @@ def _parse_graph(value: Any) -> ProjectGraph:
     )
 
 
+def parse_project_graph(value: Any) -> ProjectGraph:
+    """Strictly reparse a committed normalized project graph."""
+
+    return _parse_graph(value)
+
+
 def _parse_record(value: Any) -> CorpusRecord:
     parsed = _exact(
         value,
@@ -524,6 +530,12 @@ def _parse_record(value: Any) -> CorpusRecord:
         _boolean(parsed["resolved"], "record.resolved"),
         _string(parsed["verification_status"], "record.verification_status"),
     )
+
+
+def parse_corpus_record(value: Any) -> CorpusRecord:
+    """Strictly reparse one committed corpus record."""
+
+    return _parse_record(value)
 
 
 def _parse_manifest(value: Any) -> CorpusManifest:
@@ -568,6 +580,12 @@ def _parse_manifest(value: Any) -> CorpusManifest:
         _integer(parsed["project_count"], "manifest.project_count", minimum=1),
         tuple(projects),
     )
+
+
+def parse_corpus_manifest(value: Any) -> CorpusManifest:
+    """Strictly reparse a committed corpus manifest."""
+
+    return _parse_manifest(value)
 
 
 def _load_json(path: Path) -> tuple[Any, bytes]:

@@ -6,6 +6,12 @@ All notable changes to this project are documented here.
 
 ### Changed
 
+- Added the deterministic, privacy-filtered PSCAD Blueprint corpus and four
+  reviewed no-mutation Blueprint assets. Original PSCAD models and simulation
+  results remain outside Git. Blueprint corpus status is `implemented=true`,
+  `test_verified=true`, and `live_verified=false`; licensed live inventory
+  verification remains explicit, optional, and read-only.
+
 - Added a generic PSCAD Blueprint Builder with four MCP tools for deterministic
   planning, exact-hash confirmed staging, immediate mutation read-back,
   save/reload/compile/simulate lifecycle evidence, independent validation,

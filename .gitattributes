@@ -1,0 +1,4 @@
+pscad_mcp/assets/corpora/*/*.json text eol=lf
+pscad_mcp/assets/corpora/*/graphs/*.json text eol=lf
+pscad_mcp/assets/corpora/*/records/*.jsonl text eol=lf
+pscad_mcp/assets/blueprints/*/*.json text eol=lf

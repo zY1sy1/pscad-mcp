@@ -91,6 +91,32 @@ model-observed 或 implementation-policy 阈值可以支持模型跑通，但不
 只有显式设置 `PSCAD_MCP_BLUEPRINT_ACCEPTANCE=1` 并提供已批准的 workspace、
 source package 和 blueprint JSON 后才运行 opt-in 测试，默认 skip 不是实机证据。
 
+### Blueprint corpus 维护流程
+
+`moxing_v1` Blueprint corpus 是由四个显式哈希绑定 PSCX 入口生成的确定性派生数据。
+原始 PSCAD 模型和仿真结果永不提交。graph 与 JSONL record 不保留源路径、运行时 ID、
+creator/revisor、构建输出或结果文件。该维护语料独立于 `pscad_mcp.learning`；静默学习
+仍然只保存有界标量，不摄取工程内容。
+
+必须显式提供只读源目录，并把 proposed output 放在源目录之外：
+
+```powershell
+$env:PSCAD_MCP_CORPUS_SOURCE = "C:\path\to\moxing"
+& .\.venv\Scripts\python.exe scripts\build_blueprint_corpus.py generate --source-root $env:PSCAD_MCP_CORPUS_SOURCE --spec pscad_mcp\assets\corpora\moxing_v1\source-spec.json --output .\.corpus-proposed\moxing_v1
+& .\.venv\Scripts\python.exe scripts\build_blueprint_corpus.py verify --source-root $env:PSCAD_MCP_CORPUS_SOURCE --spec pscad_mcp\assets\corpora\moxing_v1\source-spec.json --output .\.corpus-proposed\moxing_v1
+& .\.venv\Scripts\python.exe scripts\build_blueprint_corpus.py compare --source-root $env:PSCAD_MCP_CORPUS_SOURCE --spec pscad_mcp\assets\corpora\moxing_v1\source-spec.json --output pscad_mcp\assets\corpora\moxing_v1
+```
+
+`generate` 只有在 schema、哈希、隐私和 no-mutation Blueprint gate 全部通过后，
+才写入 corpus proposal 及同级 `moxing_v1-blueprints` proposal。`verify` 只读；
+`compare` 在临时目录重新生成，不改写 committed assets。提升 package assets 仍是人工
+审查后的普通文件系统与 Git 操作。每次提取都核对源文件前后哈希。
+
+licensed inventory 对比是可选且只读的，必须同时设置
+`PSCAD_MCP_CORPUS_LIVE=1`、`PSCAD_MCP_CORPUS_SOURCE`、`PSCAD_MCP_WORKSPACE`
+和明确的 `PSCAD_MCP_VERSION`。默认 skip 和 fake-service 测试都不是 licensed 证据；
+当前 packaged corpus 的状态是 `live_verified=false`。
+
 ### 参数化 LCC 真实模板执行边界
 
 参数化 LCC 现在支持额定值推导、真实 PSCX 模板的只读绑定审核、确定性

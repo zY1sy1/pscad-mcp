@@ -159,6 +159,36 @@ branch, but licensed acceptance has not been run. Enable the opt-in test only
 with `PSCAD_MCP_BLUEPRINT_ACCEPTANCE=1` plus approved workspace, source-package,
 and blueprint JSON paths; a skipped test is not live PSCAD evidence.
 
+### Blueprint corpus maintainer workflow
+
+The `moxing_v1` Blueprint corpus is deterministic derived data generated from
+four explicitly hash-bound PSCX entry points. The original PSCAD models and
+simulation results are never committed. Graphs and JSONL records contain no
+source path, runtime ID, creator/revisor value, build output, or result file.
+This maintainer corpus is independent of `pscad_mcp.learning`; the learning
+subsystem remains scalar-only and does not ingest project content.
+
+Use an explicit read-only source root and a proposed output outside that root:
+
+```powershell
+$env:PSCAD_MCP_CORPUS_SOURCE = "C:\path\to\moxing"
+& .\.venv\Scripts\python.exe scripts\build_blueprint_corpus.py generate --source-root $env:PSCAD_MCP_CORPUS_SOURCE --spec pscad_mcp\assets\corpora\moxing_v1\source-spec.json --output .\.corpus-proposed\moxing_v1
+& .\.venv\Scripts\python.exe scripts\build_blueprint_corpus.py verify --source-root $env:PSCAD_MCP_CORPUS_SOURCE --spec pscad_mcp\assets\corpora\moxing_v1\source-spec.json --output .\.corpus-proposed\moxing_v1
+& .\.venv\Scripts\python.exe scripts\build_blueprint_corpus.py compare --source-root $env:PSCAD_MCP_CORPUS_SOURCE --spec pscad_mcp\assets\corpora\moxing_v1\source-spec.json --output pscad_mcp\assets\corpora\moxing_v1
+```
+
+`generate` writes the corpus proposal plus a sibling `moxing_v1-blueprints`
+proposal only after schema, hash, privacy, and no-mutation Blueprint gates pass.
+`verify` is read-only. `compare` regenerates in a temporary directory and does
+not rewrite committed assets. Promotion into package assets remains a reviewed
+filesystem and Git action. Source hashes are checked before and after every
+extraction.
+
+Licensed inventory comparison is optional and read-only. It requires
+`PSCAD_MCP_CORPUS_LIVE=1`, `PSCAD_MCP_CORPUS_SOURCE`, `PSCAD_MCP_WORKSPACE`, and
+an explicit `PSCAD_MCP_VERSION`. Default skips and fake-service tests are not
+licensed evidence; the current packaged corpus has `live_verified=false`.
+
 Read-only HVDC inspection may scan an existing absolute `.pscx` source such as
 `C:\\PSCADFiles\\Breaker\\TEST1\\difforder_new.pscx`; all scenario mutations
 still require a workspace-scoped, pre-existing `derived_project` and explicit
