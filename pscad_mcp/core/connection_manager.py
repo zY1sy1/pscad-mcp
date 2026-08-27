@@ -170,6 +170,7 @@ class PSCADConnectionManager:
 
     async def shutdown(self, timeout_s: float = 5.0) -> None:
         """Direct shutdown entry point without invoking the server lifecycle."""
+        self._executor.begin_shutdown()
         settled = self._executor.wait_for_settlements(timeout_s)
         if inspect.isawaitable(settled):
             settled = await settled

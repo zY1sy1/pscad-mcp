@@ -17,7 +17,7 @@ from .tools.lcc_parametric_tools import register_lcc_parametric_tools
 from .tools.learning_tools import register_learning_tools
 from .tools.capability_tools import register_capability_tool
 from .tools.catalog import parse_tool_profile
-from .runtime import RuntimeLifecycle
+from .runtime import PROCESS_RUNTIME_LIFESPAN
 
 
 SERVER_INSTRUCTIONS = (
@@ -46,13 +46,14 @@ def create_server(environ: Mapping[str, str] | None = None) -> FastMCP:
     Applies modularity by registering tools from separate modules.
     """
     profile = parse_tool_profile(os.environ if environ is None else environ)
-    runtime = RuntimeLifecycle()
+    runtime_owner = PROCESS_RUNTIME_LIFESPAN
     mcp = FastMCP(
         "PSCAD-Modular",
         instructions=SERVER_INSTRUCTIONS,
-        lifespan=runtime.lifespan,
+        lifespan=runtime_owner.lifespan,
     )
-    mcp._pscad_runtime = runtime
+    mcp._pscad_runtime = runtime_owner.runtime
+    mcp._pscad_runtime_owner = runtime_owner
     mcp._pscad_tool_profile = profile
     mcp._pscad_learning_tool_names = set()
 

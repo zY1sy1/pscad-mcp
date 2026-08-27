@@ -279,10 +279,14 @@ class LccBuilderService:
         for task in tasks:
             task.cancel()
         if tasks:
-            await asyncio.wait_for(
-                asyncio.gather(*tasks, return_exceptions=True),
-                timeout=timeout_s,
-            )
+            done, pending = await asyncio.wait(tasks, timeout=timeout_s)
+            for task in done:
+                try:
+                    task.result()
+                except BaseException:
+                    pass
+            if pending:
+                raise asyncio.TimeoutError
         await asyncio.sleep(0)
         for build_id, lease in tuple(self._leases.items()):
             record = self._records.get(build_id)

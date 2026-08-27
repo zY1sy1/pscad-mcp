@@ -21,6 +21,10 @@ class PendingSettlementError(RuntimeError):
     """Raised when shutdown would abandon an unsettled PSCAD worker call."""
 
 
+class ExecutorClosingError(PendingSettlementError):
+    """Raised when a new call is submitted after shutdown begins."""
+
+
 class ExecutorSettlementToken:
     """Loop-independent identity and completion signal for one worker call."""
 
@@ -91,6 +95,7 @@ class RobustExecutor:
         self._active_generations: set[int] = set()
         self._next_operation_id = 0
         self._pending_tokens: set[ExecutorSettlementToken] = set()
+        self._closing = False
         self._tokens_by_owner: dict[
             asyncio.Task[Any], set[ExecutorSettlementToken]
         ] = {}
@@ -150,6 +155,11 @@ class RobustExecutor:
                 if not token.settled
             )
 
+    def begin_shutdown(self) -> None:
+        """Atomically close admission before inspecting settlements."""
+        with self._state_lock:
+            self._closing = True
+
     async def wait_for_settlements(self, timeout_s: float) -> bool:
         """Wait without blocking the event loop until current calls settle."""
         tokens = self.pending_settlements()
@@ -182,6 +192,7 @@ class RobustExecutor:
     def shutdown_if_settled(self) -> None:
         """Close the worker only when every submitted call has settled."""
         with self._state_lock:
+            self._closing = True
             if any(not token.settled for token in self._pending_tokens):
                 raise PendingSettlementError(
                     "PSCAD executor shutdown is blocked by pending settlements."
@@ -210,6 +221,10 @@ class RobustExecutor:
         started_at = time.perf_counter()
         owner = asyncio.current_task()
         with self._state_lock:
+            if self._closing:
+                raise ExecutorClosingError(
+                    "PSCAD executor is closing and cannot accept new calls."
+                )
             if not self.healthy:
                 raise ExecutorUnhealthyError(
                     "PSCAD executor is unhealthy; reset it before retrying."

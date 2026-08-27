@@ -6,7 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from pscad_mcp.core import executor as executor_module
 from pscad_mcp.core.executor import RobustExecutor
-from pscad_mcp.core.executor import PendingSettlementError
+from pscad_mcp.core.executor import ExecutorClosingError, PendingSettlementError
 
 
 class _RecordingHandler(logging.Handler):
@@ -49,10 +49,15 @@ class TestExecutorRecovery(unittest.IsolatedAsyncioTestCase):
         task = asyncio.create_task(executor.run_safe(blocked_call))
         try:
             self.assertTrue(await asyncio.to_thread(started.wait, 0.1))
+            executor.begin_shutdown()
             self.assertFalse(await executor.wait_for_settlements(0.01))
             with self.assertRaises(PendingSettlementError):
                 executor.shutdown_if_settled()
             self.assertIs(executor.executor, worker)
+            called = []
+            with self.assertRaises(ExecutorClosingError):
+                await executor.run_safe(lambda: called.append("ran"))
+            self.assertEqual(called, [])
             release.set()
             await task
             self.assertTrue(await executor.wait_for_settlements(0.1))

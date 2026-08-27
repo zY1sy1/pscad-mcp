@@ -58,10 +58,14 @@ class HvdcDomainService:
         for task in tasks:
             task.cancel()
         if tasks:
-            await asyncio.wait_for(
-                asyncio.gather(*tasks, return_exceptions=True),
-                timeout=timeout_s,
-            )
+            done, pending = await asyncio.wait(tasks, timeout=timeout_s)
+            for task in done:
+                try:
+                    task.result()
+                except BaseException:
+                    pass
+            if pending:
+                raise asyncio.TimeoutError
         await asyncio.sleep(0)
         active = self._active_scenario_id
         if active is not None and not self._pending_scenario_operations(active):
