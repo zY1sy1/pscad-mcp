@@ -14,8 +14,8 @@ from pscad_mcp.hvdc.builders.lcc.models import LccBuildRecord, LccBuildState
 from pscad_mcp.hvdc.builders.lcc.planner import LccPlanRequest
 from pscad_mcp.hvdc.builders.lcc.service import LccBuilderService
 
-from lcc_builder_fakes import RecordingPscadService
-from test_lcc_planner import BLUEPRINT, INVENTORY, _asset_set
+from tests.lcc_builder_fakes import RecordingPscadService
+from tests.test_lcc_planner import BLUEPRINT, INVENTORY, _asset_set
 
 
 class OutputReadingService(RecordingPscadService):
