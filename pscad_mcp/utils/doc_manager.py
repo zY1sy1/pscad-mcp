@@ -380,10 +380,52 @@ class DocumentationManager:
             )
             raise cls._storage_error(destination_parent.name) from None
 
+    def _prepare_base_storage(self) -> None:
+        missing_components = []
+        existing_ancestor = self.base_dir
+        while True:
+            try:
+                existing_ancestor.lstat()
+                break
+            except FileNotFoundError:
+                if existing_ancestor.parent == existing_ancestor:
+                    raise self._storage_error("generated") from None
+                missing_components.append(existing_ancestor)
+                existing_ancestor = existing_ancestor.parent
+            except Exception as error:
+                logger.error(
+                    "Documentation ancestor inspection failed after %s.",
+                    type(error).__name__,
+                )
+                raise self._storage_error("generated") from None
+
+        existing_components = (
+            *reversed(existing_ancestor.parents),
+            existing_ancestor,
+        )
+        for component in existing_components:
+            self._validate_storage_base(component)
+
+        parent = existing_ancestor
+        for component in reversed(missing_components):
+            self._validate_storage_base(parent)
+            try:
+                component.mkdir()
+            except FileExistsError:
+                pass
+            except Exception as error:
+                logger.error(
+                    "Documentation directory creation failed after %s.",
+                    type(error).__name__,
+                )
+                raise self._storage_error("generated") from None
+            self._validate_storage_base(parent)
+            self._validate_storage_base(component)
+            parent = component
+
     def _prepare_storage(self) -> None:
         try:
-            self.base_dir.mkdir(parents=True, exist_ok=True)
-            self._validate_storage_base(self.base_dir)
+            self._prepare_base_storage()
         except BackendError:
             raise
         except Exception as error:

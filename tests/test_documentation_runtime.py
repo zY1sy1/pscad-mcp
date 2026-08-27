@@ -926,6 +926,39 @@ def test_sync_rejects_base_replaced_by_junction_before_external_child_write(
             os.rmdir(base)
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows junction behavior")
+def test_sync_rejects_missing_ancestor_replaced_by_junction_without_external_write(
+    tmp_path,
+):
+    missing_ancestor = tmp_path / "local-state"
+    base = missing_ancestor / "pscad-mcp" / "docs"
+    outside = tmp_path / "SECRET_EXTERNAL_ANCESTOR"
+    outside.mkdir()
+    manager = DocumentationManager(base)
+    manager.MODULES = ()
+    created = subprocess.run(
+        ["cmd", "/c", "mklink", "/J", str(missing_ancestor), str(outside)],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if created.returncode != 0:
+        pytest.skip("Windows junction creation unavailable")
+
+    try:
+        with pytest.raises(BackendError) as raised:
+            manager.sync()
+
+        payload = raised.value.to_dict()
+        assert payload["code"] == "DOCUMENTATION_STORAGE_INVALID"
+        assert payload["operation"] == "sync_documentation"
+        assert "SECRET_EXTERNAL" not in repr(payload)
+        assert list(outside.iterdir()) == []
+    finally:
+        if missing_ancestor.exists():
+            os.rmdir(missing_ancestor)
+
+
 def test_generated_markdown_redacts_source_path_and_reports_package_version(tmp_path):
     source = tmp_path / "private-user" / "module.py"
     manager = DocumentationManager(tmp_path / "docs")
