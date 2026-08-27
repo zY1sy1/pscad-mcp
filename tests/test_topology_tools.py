@@ -37,6 +37,23 @@ async def test_diagnose_tool_routes_ruleset_and_mode():
     )
 
 
+@pytest.mark.asyncio
+async def test_diagnose_tool_defaults_to_generic_plus_hvdc_auto():
+    with patch.object(topology_tools, "pscad_manager") as manager:
+        manager.service.topology_service.diagnose_payload = AsyncMock(
+            return_value={"valid": False}
+        )
+
+        await topology_tools.diagnose_project_topology("case")
+
+    manager.service.topology_service.diagnose_payload.assert_awaited_once_with(
+        "case",
+        "Main",
+        ruleset="generic+hvdc-auto",
+        mode="conservative",
+    )
+
+
 def test_topology_tools_are_registered_exactly_once():
     names = {tool.name for tool in create_server()._tool_manager.list_tools()}
     assert {"inspect_project_topology", "diagnose_project_topology"} <= names

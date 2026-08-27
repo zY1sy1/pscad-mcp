@@ -9,6 +9,8 @@ from pscad_mcp.core.backend.base import BackendError
 from pscad_mcp.core.path_policy import PathPolicy
 from pscad_mcp.hvdc.service import HvdcDomainService
 from pscad_mcp.hvdc.profiles import list_profiles, load_profile
+from pscad_mcp.tools import hvdc_tools
+from tests.test_topology_hvdc_adapter import FIXTURE, canonical_hvdc_topology
 
 
 EXPECTED = {
@@ -17,6 +19,48 @@ EXPECTED = {
     "analyze_hvdc_results", "compare_hvdc_scenarios", "list_hvdc_profiles",
     "register_hvdc_profile",
 }
+
+
+class RecordingTopologyService:
+    def __init__(self):
+        self.calls = []
+
+    async def inspect(self, project_name, canvas_name, *, mode):
+        self.calls.append((project_name, canvas_name, mode))
+        return canonical_hvdc_topology()
+
+
+@pytest.mark.asyncio
+async def test_mcp_inspection_routes_loaded_project_through_canonical_topology(
+    monkeypatch,
+):
+    topology_service = RecordingTopologyService()
+    service = HvdcDomainService(
+        type("BackendService", (), {"topology_service": topology_service})()
+    )
+    monkeypatch.setattr(hvdc_tools, "_service", lambda: service)
+
+    result = await hvdc_tools.inspect_hvdc_project("loaded_case", "Main")
+    await hvdc_tools.inspect_hvdc_project("loaded_case", "Main")
+
+    assert topology_service.calls == [
+        ("loaded_case", "Main", "conservative"),
+        ("loaded_case", "Main", "conservative"),
+    ]
+    assert result["topology"]["family"] == "lcc"
+
+
+@pytest.mark.asyncio
+async def test_live_inspection_keeps_absolute_pscx_file_only():
+    topology_service = RecordingTopologyService()
+    service = HvdcDomainService(
+        type("BackendService", (), {"topology_service": topology_service})()
+    )
+
+    result = await service.inspect_live_project(str(FIXTURE), "Main")
+
+    assert topology_service.calls == []
+    assert result["project"]["path"] == str(FIXTURE.resolve())
 
 
 def test_hvdc_tools_are_registered_without_removing_generic_tools():

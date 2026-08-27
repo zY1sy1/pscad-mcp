@@ -9,6 +9,7 @@ from typing import Any
 from ..core.backend.base import BackendError
 from .connectivity import build_connectivity
 from .diagnostics.generic import diagnose_generic, infer_candidate_edges
+from .diagnostics.hvdc import diagnose_hvdc
 from .hashing import canonical_sha256, topology_sha256
 from .models import DiagnosticReport, ProjectTopology
 from .providers.live import LiveSnapshotProvider
@@ -74,7 +75,7 @@ class TopologyService:
         project_name: str,
         canvas_name: str = "Main",
         *,
-        ruleset: str = "generic",
+        ruleset: str = "generic+hvdc-auto",
         mode: str = "conservative",
     ) -> DiagnosticReport:
         _validate_ruleset(ruleset)
@@ -86,14 +87,19 @@ class TopologyService:
         started = perf_counter_ns()
         findings = diagnose_generic(topology)
         generic_rules_ms = _elapsed_ms(started)
+        timings = dict(topology.timings_ms)
+        timings["generic_rules"] = generic_rules_ms
+        if ruleset == "generic+hvdc-auto":
+            started = perf_counter_ns()
+            domain_findings = diagnose_hvdc(topology, profile="auto")
+            timings["domain_rules"] = _elapsed_ms(started)
+            findings = (*findings, *domain_findings)
         counts = Counter(finding.severity for finding in findings)
         valid = not any(
             finding.severity == "error"
             or finding.status in {"conflict", "unresolved"}
             for finding in findings
         )
-        timings = dict(topology.timings_ms)
-        timings["generic_rules"] = generic_rules_ms
         return DiagnosticReport(
             topology_hash=topology_sha256(topology),
             valid=valid,
@@ -133,7 +139,7 @@ class TopologyService:
         project_name: str,
         canvas_name: str = "Main",
         *,
-        ruleset: str = "generic",
+        ruleset: str = "generic+hvdc-auto",
         mode: str = "conservative",
     ) -> dict[str, Any]:
         report = await self.diagnose(
@@ -205,13 +211,14 @@ def _validate_mode(mode: str) -> None:
 
 
 def _validate_ruleset(ruleset: str) -> None:
-    if ruleset != "generic":
+    supported = ["generic", "generic+hvdc-auto"]
+    if ruleset not in supported:
         raise BackendError(
             "INVALID_ARGUMENT",
             "Unsupported topology ruleset.",
             "topology",
             "diagnose_project_topology",
-            {"ruleset": ruleset, "supported_rulesets": ["generic"]},
+            {"ruleset": ruleset, "supported_rulesets": supported},
         )
 
 

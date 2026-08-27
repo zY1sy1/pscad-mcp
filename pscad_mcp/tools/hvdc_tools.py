@@ -25,19 +25,19 @@ def _service() -> HvdcDomainService:
 
 
 async def inspect_hvdc_project(project_name: str, canvas_name: str = "Main") -> dict[str, Any]:
-    return _service().inspect_project(project_name, canvas_name)
+    return await _service().inspect_live_project(project_name, canvas_name)
 
 
 async def get_hvdc_assets(project_name: str, kind: str | None = None) -> list[dict[str, Any]]:
-    return _service().get_assets(project_name, kind)
+    return await _service().get_live_assets(project_name, kind)
 
 
 async def get_hvdc_mappings(project_name: str, canonical: str | None = None) -> dict[str, Any]:
-    return _service().get_mappings(project_name, canonical)
+    return await _service().get_live_mappings(project_name, canonical)
 
 
 async def validate_hvdc_project(project_name: str, profile: str = "auto") -> dict[str, Any]:
-    return _service().validate_project(project_name, profile)
+    return await _service().validate_live_project(project_name, profile)
 
 
 async def run_hvdc_scenario(project_name: str, scenario: dict[str, Any], confirm: bool = False) -> dict[str, Any]:

@@ -1,4 +1,6 @@
 from unittest.mock import AsyncMock
+from unittest.mock import patch
+from pathlib import Path
 
 import pytest
 
@@ -14,6 +16,14 @@ from tests.topology_fakes import (
     ReadOnlyRecordingBackend,
     topology_with_nearby_dangling_endpoint,
     topology_with_seeded_defects,
+)
+
+
+HVDC_LCC_FIXTURE = (
+    Path(__file__).parent
+    / "fixtures"
+    / "topology"
+    / "hvdc_lcc.pscx"
 )
 
 
@@ -103,7 +113,12 @@ async def test_diagnose_reports_validity_summary_hash_and_rule_timing():
     service = TopologyService(AsyncMock())
     service.inspect = AsyncMock(return_value=topology)
 
-    report = await service.diagnose("case", "Main", mode="conservative")
+    report = await service.diagnose(
+        "case",
+        "Main",
+        ruleset="generic",
+        mode="conservative",
+    )
 
     assert not report.valid
     assert report.topology_hash == topology_sha256(topology)
@@ -114,6 +129,38 @@ async def test_diagnose_reports_validity_summary_hash_and_rule_timing():
         "Main",
         mode="conservative",
     )
+
+
+@pytest.mark.asyncio
+async def test_default_diagnosis_runs_generic_then_hvdc_on_one_topology():
+    backend = ReadOnlyRecordingBackend(HVDC_LCC_FIXTURE)
+    service = TopologyService(backend)
+
+    payload = await service.diagnose_payload(
+        "case",
+        "Main",
+        mode="conservative",
+    )
+
+    codes = [item["code"] for item in payload["findings"]]
+    assert "WIRE_DANGLING_ENDPOINT" in codes
+    assert "HVDC_RETURN_PATH_UNRESOLVED" in codes
+    assert len(payload["topology_hash"]) == 64
+    assert "domain_rules" in dict(payload["timings_ms"])
+    assert backend.calls == ["inspect_canvas_topology"]
+
+
+@pytest.mark.asyncio
+async def test_generic_ruleset_never_invokes_hvdc_diagnostics():
+    topology = topology_with_seeded_defects()
+    service = TopologyService(AsyncMock())
+    service.inspect = AsyncMock(return_value=topology)
+
+    with patch("pscad_mcp.topology.service.diagnose_hvdc") as domain:
+        report = await service.diagnose("case", ruleset="generic")
+
+    domain.assert_not_called()
+    assert "domain_rules" not in dict(report.timings_ms)
 
 
 @pytest.mark.asyncio

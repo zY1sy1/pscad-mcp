@@ -22,7 +22,7 @@ async def inspect_project_topology(
 async def diagnose_project_topology(
     project_name: str,
     canvas_name: str = "Main",
-    ruleset: str = "generic",
+    ruleset: str = "generic+hvdc-auto",
     mode: str = "conservative",
 ) -> dict[str, Any]:
     """Run read-only topology diagnostics with optional explicit inference."""

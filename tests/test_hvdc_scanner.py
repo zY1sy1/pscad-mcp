@@ -6,6 +6,17 @@ from pscad_mcp.hvdc.scanner import scan_project
 
 
 REACHABLE_FIXTURE = Path(__file__).parent / "fixtures" / "hvdc" / "reachable_definitions.pscx"
+CANONICAL_FIXTURE = Path(__file__).parent / "fixtures" / "topology" / "hvdc_lcc.pscx"
+
+
+def test_scanner_adds_confirmed_canonical_net_connections():
+    evidence = scan_project(CANONICAL_FIXTURE, canvas_name="Main")
+
+    assert evidence.connections
+    assert all(
+        item.evidence[0].startswith("topology_net:")
+        for item in evidence.connections
+    )
 
 
 def test_scanner_extracts_definitions_components_labels_and_source(tmp_path):
