@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 import hashlib
 import json
 from pathlib import Path
+import shutil
+import tempfile
 from typing import Literal
 import xml.etree.ElementTree as ET
 
@@ -290,7 +292,10 @@ def case_recipes() -> tuple[CaseRecipe, ...]:
 
 
 def manifest_from_recipes(
-    cases: tuple[CaseRecipe, ...], sources: dict[str, Path]
+    cases: tuple[CaseRecipe, ...],
+    sources: dict[str, Path],
+    *,
+    require_files: bool = True,
 ) -> dict[str, object]:
     expected_names = {case.name for case in cases}
     if set(sources) != expected_names:
@@ -298,7 +303,7 @@ def manifest_from_recipes(
     projected_cases = []
     for case in cases:
         source = sources[case.name].resolve()
-        if not source.is_file():
+        if require_files and not source.is_file():
             raise FileNotFoundError(source)
         projected_cases.append(
             {
@@ -515,6 +520,160 @@ def semantic_probe_set(
         "label_namespaces_preserved": sorted(label_namespaces),
         "hierarchy_boundary_preserved": hierarchy_seen and hierarchy_ok,
     }
+
+
+_EXPECTED_SEMANTIC_PROBE = {
+    "required_port_preserved": True,
+    "electrical_namespace_preserved": True,
+    "data_namespace_preserved": True,
+    "dimensions_preserved": [1, 3],
+    "label_namespaces_preserved": ["data", "electrical"],
+    "hierarchy_boundary_preserved": True,
+}
+
+
+def audit_generated_set(staging: Path) -> dict[str, object]:
+    staging = staging.resolve()
+    projects_path = staging / "projects.json"
+    project_paths = tuple(
+        Path(value).resolve()
+        for value in json.loads(projects_path.read_text(encoding="utf-8"))
+    )
+    if not project_paths:
+        raise ValueError("generated topology set has no projects")
+    if any(not path.is_relative_to(staging) for path in project_paths):
+        raise ValueError("generated topology project escapes staging directory")
+    cases_by_name = {case.name: case for case in case_recipes()}
+    names = tuple(path.stem for path in project_paths)
+    if set(names) != set(cases_by_name) or len(names) != len(cases_by_name):
+        raise ValueError("generated topology set does not contain all six cases")
+    cases = tuple(cases_by_name[name] for name in names)
+    sources = dict(zip(names, project_paths, strict=True))
+    audits = {
+        case.name: audit_case(sources[case.name], case) for case in cases
+    }
+    semantic_probe = semantic_probe_set(sources, cases)
+    if semantic_probe != _EXPECTED_SEMANTIC_PROBE:
+        raise ValueError(f"semantic probe failed: {semantic_probe}")
+    return {
+        "cases": cases,
+        "sources": sources,
+        "audits": audits,
+        "semantic_probe": semantic_probe,
+    }
+
+
+def publish_truth_set(
+    staging: Path,
+    source_destination: Path,
+    manifest_destination: Path,
+    preparation_evidence: dict[str, object] | None = None,
+) -> tuple[Path, Path]:
+    staging = staging.resolve()
+    source_destination = source_destination.resolve()
+    manifest_destination = manifest_destination.resolve()
+    if source_destination.exists():
+        raise FileExistsError(
+            f"refusing existing topology-sources: {source_destination}"
+        )
+    if manifest_destination.exists():
+        raise FileExistsError(
+            f"refusing existing topology-truth.json: {manifest_destination}"
+        )
+    if not staging.is_dir():
+        raise FileNotFoundError(staging)
+    if source_destination.parent != manifest_destination.parent:
+        raise ValueError("source and manifest destinations must be siblings")
+    audited = audit_generated_set(staging)
+    cases = audited["cases"]
+    staging_sources = audited["sources"]
+    audits = audited["audits"]
+    assert isinstance(cases, tuple)
+    assert isinstance(staging_sources, dict)
+    assert isinstance(audits, dict)
+
+    source_destination.parent.mkdir(parents=True, exist_ok=True)
+    temporary_root = Path(
+        tempfile.mkdtemp(
+            prefix=f".{source_destination.name}-publishing-",
+            dir=source_destination.parent,
+        )
+    )
+    temporary_sources = temporary_root / source_destination.name
+    temporary_manifest = temporary_root / manifest_destination.name
+    source_published = False
+    try:
+        temporary_sources.mkdir()
+        final_sources = {}
+        for case in cases:
+            assert isinstance(case, CaseRecipe)
+            source = Path(staging_sources[case.name])
+            case_directory = temporary_sources / case.name
+            case_directory.mkdir()
+            copied = case_directory / source.name
+            shutil.copy2(source, copied)
+            if hashlib.sha256(copied.read_bytes()).hexdigest() != audits[
+                case.name
+            ]["sha256"]:
+                raise ValueError(f"copied source hash changed for {case.name}")
+            final_sources[case.name] = (
+                source_destination / case.name / source.name
+            )
+
+        recipe_payload = [asdict(case) for case in cases]
+        recipe_json = json.dumps(
+            recipe_payload,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        )
+        recipe_sha256 = hashlib.sha256(recipe_json.encode("utf-8")).hexdigest()
+        construction_record = {
+            "schema_version": 1,
+            "recipe_sha256": recipe_sha256,
+            "recipes": recipe_payload,
+            "audits": audits,
+        }
+        preparation_report = {
+            "schema_version": 1,
+            "status": "PASS",
+            "recipe_sha256": recipe_sha256,
+            "source_sha256": {
+                case.name: audits[case.name]["sha256"] for case in cases
+            },
+            "semantic_probe": audited["semantic_probe"],
+            **(preparation_evidence or {}),
+        }
+        manifest = manifest_from_recipes(
+            cases,
+            final_sources,
+            require_files=False,
+        )
+        _write_json(
+            temporary_sources / "construction-record.json",
+            construction_record,
+        )
+        _write_json(
+            temporary_sources / "preparation-report.json",
+            preparation_report,
+        )
+        _write_json(temporary_manifest, manifest)
+
+        temporary_sources.replace(source_destination)
+        source_published = True
+        if manifest_destination.exists():
+            raise FileExistsError(manifest_destination)
+        temporary_manifest.replace(manifest_destination)
+        return source_destination, manifest_destination
+    except BaseException:
+        if source_published and source_destination.exists():
+            rollback = temporary_root / source_destination.name
+            source_destination.replace(rollback)
+            shutil.rmtree(rollback)
+        raise
+    finally:
+        if temporary_root.exists():
+            shutil.rmtree(temporary_root)
 
 
 def _probe_port(
@@ -1127,19 +1286,50 @@ def _probe_command(arguments: argparse.Namespace) -> int:
     cases = tuple(available[name] for name in names)
     sources = dict(zip(names, project_paths, strict=True))
     result = semantic_probe_set(sources, cases)
-    expected = {
-        "required_port_preserved": True,
-        "electrical_namespace_preserved": True,
-        "data_namespace_preserved": True,
-        "dimensions_preserved": [1, 3],
-        "label_namespaces_preserved": ["data", "electrical"],
-        "hierarchy_boundary_preserved": True,
-    }
     print(json.dumps(result, sort_keys=True, allow_nan=False))
-    if result != expected:
+    if result != _EXPECTED_SEMANTIC_PROBE:
         print("TOPOLOGY_SEMANTIC_PROBE=FAIL")
         return 1
     print("TOPOLOGY_SEMANTIC_PROBE=PASS")
+    return 0
+
+
+def _audit_command(arguments: argparse.Namespace) -> int:
+    audited = audit_generated_set(arguments.directory)
+    output = {
+        "audits": audited["audits"],
+        "semantic_probe": audited["semantic_probe"],
+    }
+    print(json.dumps(output, sort_keys=True, allow_nan=False))
+    print("TOPOLOGY_TRUTH_AUDIT=PASS")
+    return 0
+
+
+def _publish_command(arguments: argparse.Namespace) -> int:
+    pids = sorted(
+        {
+            int(value)
+            for value in arguments.owned_pids.split(",")
+            if value.strip()
+        }
+    )
+    evidence = {
+        "pscad": {
+            "version": arguments.version,
+            "x64": arguments.x64,
+            "licensed": True,
+        },
+        "owned_pids": pids,
+        "owned_processes_cleaned": True,
+    }
+    sources, manifest = publish_truth_set(
+        arguments.staging,
+        arguments.sources,
+        arguments.manifest,
+        evidence,
+    )
+    print(f"TOPOLOGY_SOURCES={sources}")
+    print(f"TOPOLOGY_MANIFEST={manifest}")
     return 0
 
 
@@ -1156,6 +1346,19 @@ def main(argv: list[str] | None = None) -> int:
     probe = commands.add_parser("probe")
     probe.add_argument("--directory", type=Path, required=True)
     probe.set_defaults(handler=_probe_command)
+
+    audit = commands.add_parser("audit")
+    audit.add_argument("--directory", type=Path, required=True)
+    audit.set_defaults(handler=_audit_command)
+
+    publish = commands.add_parser("publish")
+    publish.add_argument("--staging", type=Path, required=True)
+    publish.add_argument("--sources", type=Path, required=True)
+    publish.add_argument("--manifest", type=Path, required=True)
+    publish.add_argument("--version", required=True)
+    publish.add_argument("--x64", action="store_true")
+    publish.add_argument("--owned-pids", default="")
+    publish.set_defaults(handler=_publish_command)
 
     arguments = parser.parse_args(argv)
     return arguments.handler(arguments)

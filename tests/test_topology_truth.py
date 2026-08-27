@@ -250,3 +250,56 @@ def test_build_and_probe_cli_contract(tmp_path, capsys):
     assert topology_truth.main(["probe", "--directory", str(destination)]) == 0
     output = capsys.readouterr().out
     assert "TOPOLOGY_SEMANTIC_PROBE=PASS" in output
+
+
+def test_atomic_publication_refuses_existing_destinations(tmp_path):
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    sources = tmp_path / "topology-sources"
+    sources.mkdir()
+
+    with pytest.raises(FileExistsError, match="topology-sources"):
+        topology_truth.publish_truth_set(
+            staging, sources, tmp_path / "topology-truth.json"
+        )
+
+
+def test_failed_audit_publishes_nothing(tmp_path, monkeypatch):
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    sources = tmp_path / "topology-sources"
+    manifest = tmp_path / "topology-truth.json"
+    monkeypatch.setattr(
+        topology_truth,
+        "audit_generated_set",
+        lambda *_: (_ for _ in ()).throw(ValueError("drift")),
+    )
+
+    with pytest.raises(ValueError, match="drift"):
+        topology_truth.publish_truth_set(staging, sources, manifest)
+
+    assert not sources.exists()
+    assert not manifest.exists()
+
+
+def test_successful_publication_points_manifest_at_final_sources(tmp_path):
+    cases = topology_truth.case_recipes()
+    staging = tmp_path / "staging"
+    topology_truth.generate_cases(SEED, staging, cases)
+    projects = [str(staging / case.name / f"{case.name}.pscx") for case in cases]
+    (staging / "projects.json").write_text(
+        json.dumps(projects), encoding="utf-8"
+    )
+    sources = tmp_path / "topology-sources"
+    manifest = tmp_path / "topology-truth.json"
+
+    result = topology_truth.publish_truth_set(staging, sources, manifest)
+
+    assert result == (sources.resolve(), manifest.resolve())
+    payload = json.loads(manifest.read_text(encoding="utf-8"))
+    assert all(
+        Path(case["source_project"]).is_relative_to(sources)
+        for case in payload["cases"]
+    )
+    assert (sources / "construction-record.json").is_file()
+    assert (sources / "preparation-report.json").is_file()
