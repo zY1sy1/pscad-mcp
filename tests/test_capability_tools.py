@@ -137,6 +137,41 @@ def test_unknown_but_well_formed_backend_name_is_not_disclosed():
     assert "secret_backend" not in json.dumps(payload)
 
 
+@pytest.mark.parametrize("field", ["backend", "version"])
+@pytest.mark.parametrize("bomb_kind", ["hash", "equality"])
+def test_connection_string_subclasses_degrade_atomically(field, bomb_kind):
+    class HashBomb(str):
+        def __hash__(self):
+            raise RuntimeError("SECRET_HASH_BOMB")
+
+    class EqualityBomb(str):
+        __hash__ = str.__hash__
+
+        def __eq__(self, other):
+            raise RuntimeError("SECRET_EQUALITY_BOMB")
+
+    bomb_type = HashBomb if bomb_kind == "hash" else EqualityBomb
+    connection = {
+        "connected": True,
+        "backend": "legacy",
+        "version": "4.6.2",
+    }
+    connection[field] = bomb_type(connection[field])
+
+    payload = build_capability_payload(
+        profile=parse_tool_profile({}),
+        registered_names=FULL_TOOL_NAMES,
+        connection=connection,
+    )
+
+    assert payload["connection"] == {
+        "connected": False,
+        "backend": None,
+        "version": None,
+    }
+    assert "SECRET" not in json.dumps(payload)
+
+
 @pytest.mark.parametrize("failure_kind", ["iterator", "string-subclass"])
 def test_registered_name_normalization_fails_closed_without_partial_values(
     failure_kind,
@@ -313,6 +348,42 @@ async def test_mcp_capability_tool_degrades_malicious_server_local_inputs(monkey
         "get_pscad_capabilities", {}, convert_result=True
     )
     assert payload["registered_tools"] == []
+    assert "error" not in payload
+    assert "SECRET" not in json.dumps(payload)
+
+
+@pytest.mark.asyncio
+async def test_mcp_capability_tool_degrades_status_string_subclasses(monkeypatch):
+    class HashBomb(str):
+        def __hash__(self):
+            raise RuntimeError("SECRET_HASH_BOMB")
+
+    async def status():
+        return {
+            "connected": True,
+            "backend": HashBomb("legacy"),
+            "version": "4.6.2",
+        }
+
+    monkeypatch.setattr(capability_tools.pscad_manager, "get_status", status)
+    server = create_server(environ={})
+
+    _, payload = await server._tool_manager.call_tool(
+        "get_pscad_capabilities", {}, convert_result=True
+    )
+    assert set(payload) == {
+        "profile",
+        "registered_groups",
+        "registered_tools",
+        "inactive_tools",
+        "connection",
+        "capabilities",
+    }
+    assert payload["connection"] == {
+        "connected": False,
+        "backend": None,
+        "version": None,
+    }
     assert "error" not in payload
     assert "SECRET" not in json.dumps(payload)
 

@@ -12,6 +12,6 @@ PSCAD_VERSION_PATTERN = re.compile(r"[0-9A-Za-z][0-9A-Za-z._+-]{0,31}\Z")
 
 def bounded_identifier(value: Any, pattern: re.Pattern[str]) -> str | None:
     """Return only strings accepted by a fixed identifier pattern."""
-    if isinstance(value, str) and pattern.fullmatch(value) is not None:
+    if type(value) is str and pattern.fullmatch(value) is not None:
         return value
     return None

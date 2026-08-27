@@ -32,17 +32,20 @@ def _bounded_connection(connection: object) -> dict[str, bool | str | None]:
         return dict(_UNKNOWN_CONNECTION)
     try:
         connected = connection.get("connected") is True
+        raw_backend = connection.get("backend")
+        raw_version = connection.get("version")
         backend = bounded_identifier(
-            connection.get("backend"),
+            raw_backend,
             BACKEND_NAME_PATTERN,
         )
         version = bounded_identifier(
-            connection.get("version"),
+            raw_version,
             PSCAD_VERSION_PATTERN,
         )
+        invalid_version = raw_version is not None and version is None
+        if not connected or backend not in _KNOWN_BACKENDS or invalid_version:
+            return dict(_UNKNOWN_CONNECTION)
     except Exception:
-        return dict(_UNKNOWN_CONNECTION)
-    if not connected or backend not in _KNOWN_BACKENDS:
         return dict(_UNKNOWN_CONNECTION)
     return {
         "connected": True,
