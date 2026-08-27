@@ -33,6 +33,24 @@ def test_unreleased_describes_horizontal_mcp_hardening():
         assert phrase in unreleased
 
 
+def test_unreleased_distinguishes_compatibility_inventory_from_current_total():
+    text = (Path(__file__).parents[1] / "CHANGELOG.md").read_text(encoding="utf-8")
+    unreleased = _unreleased_section(text).lower()
+
+    assert "83 compatibility tools" in unreleased
+    for phrase in (
+        "60 generic tools",
+        "ten hvdc tools",
+        "three learning tools",
+        "four fixed lcc tools",
+        "six parametric lcc tools",
+        "get_pscad_capabilities",
+        "current total is 84",
+    ):
+        assert phrase in unreleased
+    assert "inventory is now 83 tools" not in unreleased
+
+
 def test_readmes_document_the_fixed_lcc_builder_boundary():
     root = Path(__file__).parents[1]
     english = (root / "README.md").read_text(encoding="utf-8").lower()

@@ -37,9 +37,10 @@ All notable changes to this project are documented here.
 - LCC planning now fails closed without live PSCAD definition inventory;
   output-channel creation, final-project identity, waveform ownership, asset
   fingerprints, and acceptance-report evidence are checked explicitly.
-- The MCP inventory is now 83 tools: the original 60 generic tools, ten HVDC
-  tools, three learning tools, four fixed LCC tools, and six parametric LCC
-  tools.
+- The compatibility inventory is 83 compatibility tools: 60 generic tools,
+  ten HVDC tools, three learning tools, four fixed LCC tools,
+  and six parametric LCC tools. With the always-on `get_pscad_capabilities`
+  discovery tool, the current total is 84.
 
 - HVDC strict control now supports explicit backend timing and output-channel
   provider hooks, bounded simulation-clock polling, stalled-clock detection,
