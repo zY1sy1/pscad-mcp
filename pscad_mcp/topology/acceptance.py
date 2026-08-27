@@ -133,12 +133,16 @@ def _validate_pass_report(report: dict[str, Any]) -> None:
     has_healthy = False
     has_uncertainty = False
     has_scale_2000 = False
+    has_domain_rules = False
     for index, case in enumerate(cases):
-        observed_errors, observed_unresolved = _validate_pass_case(case, index)
+        observed_errors, observed_unresolved, _domain_codes = (
+            _validate_pass_case(case, index)
+        )
         observed_coverage.update(observed_errors)
         has_healthy |= case["healthy"]
         has_uncertainty |= bool(observed_unresolved)
         has_scale_2000 |= case["object_count"] >= 2000
+        has_domain_rules |= case.get("ruleset") == "generic+hvdc-auto"
 
     if not has_healthy:
         raise ValueError("PASS requires at least one healthy case")
@@ -148,11 +152,15 @@ def _validate_pass_report(report: dict[str, Any]) -> None:
         raise ValueError("PASS requires at least one 2,000-object case")
     if not _REQUIRED_CODES <= observed_coverage:
         raise ValueError("seeded cases do not observe every required defect")
+    if has_domain_rules and report["rule_version"] != "generic+hvdc-v1":
+        raise ValueError(
+            "domain acceptance requires rule_version generic+hvdc-v1"
+        )
 
 
 def _validate_pass_case(
     case: dict[str, Any], index: int
-) -> tuple[list[str], list[str]]:
+) -> tuple[list[str], list[str], list[str]]:
     prefix = f"cases[{index}]"
     if type(case.get("healthy")) is not bool:
         raise ValueError(f"{prefix}.healthy must be a boolean")
@@ -204,6 +212,25 @@ def _validate_pass_case(
     )
     _require_equal(expected_errors, observed_errors, f"{prefix} error codes")
 
+    ruleset = case.get("ruleset", "generic")
+    if ruleset not in {"generic", "generic+hvdc-auto"}:
+        raise ValueError(f"{prefix}.ruleset is unsupported")
+    expected_domain = _sorted_strings(
+        case.get("expected_domain_codes", []),
+        f"{prefix}.expected_domain_codes",
+    )
+    observed_domain = _sorted_strings(
+        case.get("observed_domain_codes", []),
+        f"{prefix}.observed_domain_codes",
+    )
+    _require_equal(
+        expected_domain,
+        observed_domain,
+        f"{prefix} domain codes",
+    )
+    if ruleset == "generic" and observed_domain:
+        raise ValueError(f"{prefix} generic ruleset contains domain findings")
+
     expected_unresolved = _sorted_strings(
         case.get("expected_unresolved_codes"),
         f"{prefix}.expected_unresolved_codes",
@@ -234,6 +261,13 @@ def _validate_pass_case(
         raise ValueError(f"{prefix}.phase_timings_ms is incomplete")
     for phase in _REQUIRED_PHASES:
         _nonnegative_number(timings[phase], f"{prefix}.phase_timings_ms.{phase}")
+    if ruleset == "generic+hvdc-auto":
+        if "domain_rules" not in timings:
+            raise ValueError(f"{prefix}.phase_timings_ms lacks domain_rules")
+        _nonnegative_number(
+            timings["domain_rules"],
+            f"{prefix}.phase_timings_ms.domain_rules",
+        )
 
     counts = _mapping(case.get("finding_counts"), f"{prefix}.finding_counts")
     if set(counts) != {"error", "info", "warning"}:
@@ -241,12 +275,14 @@ def _validate_pass_case(
     for severity, count in counts.items():
         if type(count) is not int or count < 0:
             raise ValueError(f"{prefix}.finding_counts.{severity} is invalid")
-    if counts["error"] != len(observed_errors):
+    if counts["error"] != len(observed_errors) + len(observed_domain):
         raise ValueError(f"{prefix}.finding_counts.error is inconsistent")
     if counts["warning"] != len(observed_unresolved):
         raise ValueError(f"{prefix}.finding_counts.warning is inconsistent")
 
-    if case["healthy"] and (observed_errors or observed_unresolved):
+    if case["healthy"] and (
+        observed_errors or observed_domain or observed_unresolved
+    ):
         raise ValueError(f"{prefix} healthy case contains findings")
 
     object_count = case.get("object_count")
@@ -260,7 +296,7 @@ def _validate_pass_case(
     if 500 < object_count <= 2000 and elapsed_ms > 10000.0:
         raise ValueError(f"{prefix} exceeds the 2,000-object performance limit")
 
-    return observed_errors, observed_unresolved
+    return observed_errors, observed_unresolved, observed_domain
 
 
 def _mapping(value: Any, field: str) -> dict[str, Any]:

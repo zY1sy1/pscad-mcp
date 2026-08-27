@@ -662,6 +662,9 @@ def test_pscad_service_discovers_only_new_outputs_tied_to_project(tmp_path):
     new_output.write_text("new", encoding="utf-8")
     direct_output = tmp_path / "derived.psout"
     direct_output.write_text("new", encoding="utf-8")
+    new_mtime = before + 1
+    os.utime(new_output, (new_mtime, new_mtime))
+    os.utime(direct_output, (new_mtime, new_mtime))
     unrelated = unrelated_outputs / "TL1.out"
     unrelated.write_text("unrelated", encoding="utf-8")
     misleading = misleading_outputs / "TL1.out"

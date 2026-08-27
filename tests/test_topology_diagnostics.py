@@ -1,4 +1,8 @@
+from collections import Counter
 from dataclasses import replace
+import time
+
+import pytest
 
 from pscad_mcp.topology.diagnostics.generic import (
     diagnose_generic,
@@ -269,3 +273,76 @@ def test_unknown_namespace_evidence_stays_unresolved_and_is_not_inferred():
         "PORT_UNCONNECTED",
         "TOPOLOGY_INCOMPLETE",
     ]
+
+
+def scale_topology(object_count):
+    pair_count = object_count // 2
+    components = []
+    conductors = []
+    for index in range(pair_count):
+        y = index * 18
+        component_key = f"Main:C{index:04d}"
+        components.append(
+            TopologyComponent(
+                key=component_key,
+                canvas_key="Main",
+                object_id=f"C{index:04d}",
+                definition="test:load",
+                location=(0, y),
+                ports=(
+                    TopologyPort(
+                        key=f"{component_key}:P",
+                        component_key=component_key,
+                        name="P",
+                        absolute=(0, y),
+                        kind="electrical",
+                        dimension=1,
+                        required=True,
+                    ),
+                ),
+            )
+        )
+        conductors.append(
+            TopologyConductor(
+                key=f"Main:W{index:04d}",
+                canvas_key="Main",
+                object_id=f"W{index:04d}",
+                kind="wire",
+                namespace="electrical",
+                vertices=((0, y), (18, y)),
+            )
+        )
+    return ProjectTopology(
+        "case",
+        "4.6.2",
+        components=tuple(components),
+        conductors=tuple(conductors),
+        grid_step=18,
+    )
+
+
+@pytest.mark.parametrize(
+    ("object_count", "dangling_count"),
+    [(500, 250), (2000, 1000)],
+)
+def test_scale_topology_is_deterministic_with_exact_defect_counts(
+    object_count,
+    dangling_count,
+):
+    source = scale_topology(object_count)
+    started = time.perf_counter()
+    forward = build_connectivity(source).topology
+    findings = diagnose_generic(forward)
+    elapsed_ms = (time.perf_counter() - started) * 1000.0
+    reversed_source = replace(
+        source,
+        components=tuple(reversed(source.components)),
+        conductors=tuple(reversed(source.conductors)),
+    )
+    reversed_topology = build_connectivity(reversed_source).topology
+
+    assert topology_sha256(forward) == topology_sha256(reversed_topology)
+    assert Counter(item.code for item in findings) == {
+        "WIRE_DANGLING_ENDPOINT": dangling_count,
+    }
+    assert elapsed_ms >= 0.0

@@ -7,6 +7,7 @@ from pscad_mcp.core.backend.legacy import LegacyBackend
 from pscad_mcp.core.backend.modern import ModernBackend
 from pscad_mcp.core.connection_manager import PSCADConnectionManager
 from pscad_mcp.main import create_server
+from pscad_mcp.tools.topology_tools import diagnose_project_topology
 from tests.backend_fakes import ImmediateExecutor
 
 
@@ -63,6 +64,14 @@ class TestToolBackendMatrix(unittest.TestCase):
         )
         self.assertIsInstance(legacy, PscadBackend)
         self.assertIsInstance(modern, PscadBackend)
+
+    def test_topology_diagnosis_defaults_to_unified_domain_rules(self):
+        signature = inspect.signature(diagnose_project_topology)
+
+        self.assertEqual(
+            signature.parameters["ruleset"].default,
+            "generic+hvdc-auto",
+        )
 
     def test_tool_modules_do_not_access_vendor_or_raw_pscad_proxies(self):
         tools_directory = Path(inspect.getfile(create_server)).parent / "tools"

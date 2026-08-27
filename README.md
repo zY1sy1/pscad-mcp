@@ -78,12 +78,17 @@ The server currently exposes tool groups for:
 - simulation output capture and file parsing
 
 The topology layer adds `inspect_project_topology` and
-`diagnose_project_topology`. Both tools are read-only. Phase 1 supports only
-the `generic` diagnostic ruleset. `mode="conservative"` reports confirmed
-topology, while `mode="infer"` may add explicit candidate edges; candidates
-are never promoted to confirmed nets or included in the confirmed topology
-hash. Licensed PSCAD 4.6.2 Legacy is the primary live target. PSCAD 5.x has
-contract coverage only and no real topology acceptance claim.
+`diagnose_project_topology`. Both tools are read-only. Diagnosis now defaults
+to `generic+hvdc-auto`: generic rules run first, then deterministic HVDC rules
+consume the same canonical confirmed topology. Use `ruleset="generic"` to run
+only the structural rules. `mode="conservative"` reports confirmed topology,
+while `mode="infer"` may add explicit candidate edges; candidates are never
+promoted to confirmed nets, included in the confirmed topology hash, or passed
+to HVDC/LCC validation. Loaded HVDC projects use live canonical evidence;
+absolute `.pscx` paths remain file-only compatible, and the LCC `ProjectGraph`
+API is now adapted from the same canonical records. Licensed PSCAD 4.6.2
+Legacy is the primary live target. PSCAD 5.x has contract coverage only and no
+real topology acceptance claim.
 
 The licensed topology gate is opt-in and runs only against timestamped project
 copies prepared from an approved absolute truth manifest:

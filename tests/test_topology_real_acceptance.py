@@ -203,6 +203,11 @@ class TestTopologyRealAcceptance(LegacyAcceptanceCase):
         )
         manifest = json.loads(self.manifest_path.read_text(encoding="utf-8"))
         self.assertIsInstance(manifest, dict)
+        self.rule_version = manifest.get("rule_version", "generic-v1")
+        self.assertIn(
+            self.rule_version,
+            {"generic-v1", "generic+hvdc-v1"},
+        )
         self.cases = manifest.get("cases")
         self.assertIsInstance(self.cases, list)
         self.assertTrue(self.cases, "Topology truth manifest has no cases.")
@@ -268,9 +273,14 @@ class TestTopologyRealAcceptance(LegacyAcceptanceCase):
         return inventory_sha256(snapshot)
 
     def _sorted_truth(
-        self, case: dict[str, Any], field: str, index: int
+        self,
+        case: dict[str, Any],
+        field: str,
+        index: int,
+        *,
+        optional: bool = False,
     ) -> list[str]:
-        value = case.get(field)
+        value = case.get(field, [] if optional else None)
         self.assertIsInstance(value, list, f"Case {index} {field} is invalid.")
         self.assertTrue(
             all(isinstance(item, str) for item in value),
@@ -289,6 +299,7 @@ class TestTopologyRealAcceptance(LegacyAcceptanceCase):
             canvas_name = case.get("canvas", "Main")
             healthy = case.get("healthy")
             minimum_object_count = case.get("minimum_object_count")
+            ruleset = case.get("ruleset", "generic")
             self.assertIsInstance(name, str)
             self.assertTrue(name)
             self.assertIsInstance(canvas_name, str)
@@ -296,6 +307,7 @@ class TestTopologyRealAcceptance(LegacyAcceptanceCase):
             self.assertIsInstance(healthy, bool)
             self.assertIsInstance(minimum_object_count, int)
             self.assertGreaterEqual(minimum_object_count, 0)
+            self.assertIn(ruleset, {"generic", "generic+hvdc-auto"})
 
             source_project = self._truth_source(case, index)
             copied_project = self._copied_project(source_project, index)
@@ -304,6 +316,12 @@ class TestTopologyRealAcceptance(LegacyAcceptanceCase):
             )
             expected_error_codes = self._sorted_truth(
                 case, "expected_error_codes", index
+            )
+            expected_domain_codes = self._sorted_truth(
+                case,
+                "expected_domain_codes",
+                index,
+                optional=True,
             )
             expected_unresolved_codes = self._sorted_truth(
                 case, "expected_unresolved_codes", index
@@ -328,7 +346,7 @@ class TestTopologyRealAcceptance(LegacyAcceptanceCase):
             first_report = await service.diagnose(
                 project_name,
                 canvas_name,
-                ruleset="generic",
+                ruleset=ruleset,
                 mode="conservative",
             )
             elapsed_ms = (time.perf_counter() - diagnosis_started) * 1000.0
@@ -353,10 +371,16 @@ class TestTopologyRealAcceptance(LegacyAcceptanceCase):
             second_topology_hash = topology_sha256(second)
             observed_confirmed_edges = confirmed_net_truth(first)
             observed_unresolved_codes = sorted(first.unresolved)
+            observed_domain_codes = sorted(
+                item.code
+                for item in first_report.findings
+                if item.severity == "error" and item.code.startswith("HVDC_")
+            )
             observed_error_codes = sorted(
                 item.code
                 for item in first_report.findings
                 if item.severity == "error"
+                and not item.code.startswith("HVDC_")
             )
             object_count = topology_object_count(first)
             source_capabilities = dict(first.source_capabilities)
@@ -377,6 +401,7 @@ class TestTopologyRealAcceptance(LegacyAcceptanceCase):
                 required_capabilities.items() <= source_capabilities.items()
             )
             self.assertEqual(expected_error_codes, observed_error_codes)
+            self.assertEqual(expected_domain_codes, observed_domain_codes)
             self.assertGreaterEqual(object_count, minimum_object_count)
             self.assertEqual(
                 set(readonly_backend.calls), {"inspect_canvas_topology"}
@@ -386,6 +411,7 @@ class TestTopologyRealAcceptance(LegacyAcceptanceCase):
             report_cases.append(
                 {
                     "name": name,
+                    "ruleset": ruleset,
                     "healthy": healthy,
                     "source_sha256": source_hash,
                     "before_sha256": before_hash,
@@ -409,6 +435,8 @@ class TestTopologyRealAcceptance(LegacyAcceptanceCase):
                     "observed_confirmed_edges": observed_confirmed_edges,
                     "expected_error_codes": expected_error_codes,
                     "observed_error_codes": observed_error_codes,
+                    "expected_domain_codes": expected_domain_codes,
+                    "observed_domain_codes": observed_domain_codes,
                     "expected_unresolved_codes": expected_unresolved_codes,
                     "observed_unresolved_codes": observed_unresolved_codes,
                     "candidate_edges_confirmed": False,
@@ -426,7 +454,7 @@ class TestTopologyRealAcceptance(LegacyAcceptanceCase):
             "schema_version": 1,
             "status": "PASS",
             "commit": commit,
-            "rule_version": "generic-v1",
+            "rule_version": self.rule_version,
             "pscad": {
                 "version": self.backend.version,
                 "backend": "legacy",

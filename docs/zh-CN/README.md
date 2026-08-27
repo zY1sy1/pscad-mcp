@@ -43,10 +43,13 @@ Legacy PSCAD 4.6.2 后端只支持启动新的受管 Automation 实例，不能�
 - 静默学习 3 个：`record_goal_failure`、`review_improvement_backlog`、`clear_learning_history`。
 
 拓扑层增加 `inspect_project_topology` 和 `diagnose_project_topology` 两个只读
-工具。Phase 1 仅支持 `generic` 诊断规则集。`mode="conservative"` 只报告已确认
-拓扑；`mode="infer"` 可额外返回显式候选边，但候选边不会升级为已确认网络，也
-不会进入已确认拓扑哈希。实时目标以 licensed PSCAD 4.6.2 Legacy 为主；PSCAD
-5.x 目前只有契约测试，不声称拓扑实机验收通过。
+工具。诊断现在默认使用 `generic+hvdc-auto`：先运行通用结构规则，再让确定性的
+HVDC 规则消费同一份 canonical 已确认拓扑；显式指定 `ruleset="generic"` 可只运行
+结构规则。`mode="conservative"` 只报告已确认拓扑；`mode="infer"` 可额外返回
+显式候选边，但候选边不会升级为已确认网络、进入已确认拓扑哈希，或传给 HVDC/LCC
+验证。已加载 HVDC 工程使用实时 canonical 证据，绝对 `.pscx` 路径仍保留文件只读
+兼容；LCC `ProjectGraph` 也由同一 canonical 记录适配。实时目标以 licensed PSCAD
+4.6.2 Legacy 为主；PSCAD 5.x 目前只有契约测试，不声称拓扑实机验收通过。
 
 授权拓扑门禁必须显式启用，并只在批准的绝对 truth manifest 所生成的时间戳工程
 副本上运行：

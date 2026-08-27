@@ -111,6 +111,29 @@ def valid_report():
     }
 
 
+def valid_domain_report():
+    report = valid_report()
+    report["rule_version"] = "generic+hvdc-v1"
+    case = _case(
+        "hvdc-lcc",
+        "f",
+        100,
+        90.0,
+        healthy=False,
+    )
+    case.update(
+        {
+            "ruleset": "generic+hvdc-auto",
+            "expected_domain_codes": ["HVDC_RETURN_PATH_UNRESOLVED"],
+            "observed_domain_codes": ["HVDC_RETURN_PATH_UNRESOLVED"],
+        }
+    )
+    case["phase_timings_ms"]["domain_rules"] = 5.0
+    case["finding_counts"]["error"] = 1
+    report["cases"].append(case)
+    return report
+
+
 def damage_report(report, damage):
     case = report["cases"][0]
     if damage == "changed_file":
@@ -151,6 +174,25 @@ def test_valid_pass_report_is_json_safe():
     report = validate_acceptance_report(valid_report())
     assert report["status"] == "PASS"
     json.dumps(report)
+
+
+def test_valid_domain_pass_requires_exact_codes_and_domain_timing():
+    report = validate_acceptance_report(valid_domain_report())
+
+    assert report["rule_version"] == "generic+hvdc-v1"
+
+
+@pytest.mark.parametrize("damage", ["domain_mismatch", "domain_timing_missing"])
+def test_domain_pass_rejects_incomplete_domain_evidence(damage):
+    report = valid_domain_report()
+    case = report["cases"][-1]
+    if damage == "domain_mismatch":
+        case["observed_domain_codes"] = []
+    else:
+        del case["phase_timings_ms"]["domain_rules"]
+
+    with pytest.raises(ValueError):
+        validate_acceptance_report(report)
 
 
 @pytest.mark.parametrize(
