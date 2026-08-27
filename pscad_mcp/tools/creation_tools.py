@@ -1,6 +1,7 @@
 from typing import List, Dict, Any, Optional
 from mcp.server.fastmcp import FastMCP
 from ..core.connection_manager import pscad_manager
+from .pagination import PaginationLimit, PaginationOffset, slice_items
 from .registration import register_tool
 
 
@@ -55,9 +56,15 @@ async def build_all_projects() -> str:
     return await pscad_manager.service.build_all_projects()
 
 
-async def get_project_definitions(project_name: str) -> List[str]:
+async def get_project_definitions(
+    project_name: str,
+    offset: PaginationOffset = 0,
+    limit: PaginationLimit = None,
+) -> List[str]:
     """List all component definitions available in a project."""
-    return await pscad_manager.service.get_project_definitions(project_name)
+    slice_items([], offset, limit, "get_project_definitions")
+    values = await pscad_manager.service.get_project_definitions(project_name)
+    return slice_items(values, offset, limit, "get_project_definitions")
 
 
 def register_creation_tools(mcp: FastMCP):

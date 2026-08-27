@@ -7,6 +7,7 @@ from ..core.backend.base import BackendError
 from ..core.connection_manager import pscad_manager
 from ..core.path_policy import PathPolicy
 from ..utils.doc_manager import doc_manager
+from .pagination import PaginationLimit, PaginationOffset, slice_items, slice_text
 from .registration import register_tool
 
 path_policy = PathPolicy()
@@ -57,9 +58,14 @@ def _list_documentation_sync() -> list[str]:
         return _list_documentation_locked()
 
 
-async def list_documentation() -> list[str]:
+async def list_documentation(
+    offset: PaginationOffset = 0,
+    limit: PaginationLimit = None,
+) -> list[str]:
     """List available PSCAD API documentation modules that can be read."""
-    return await asyncio.to_thread(_list_documentation_sync)
+    slice_items([], offset, limit, "list_documentation")
+    values = await asyncio.to_thread(_list_documentation_sync)
+    return slice_items(values, offset, limit, "list_documentation")
 
 
 def _documentation_not_found(module_name: str) -> str:
@@ -112,12 +118,64 @@ def _read_documentation_sync(module_name: str) -> str:
             raise doc_manager.storage_error("read_documentation", "md") from None
 
 
-async def read_documentation(module_name: str) -> str:
+async def read_documentation(
+    module_name: str,
+    offset: PaginationOffset = 0,
+    max_chars: PaginationLimit = None,
+) -> str:
     """Read the Markdown documentation for a specific PSCAD module (e.g., 'mhi.pscad.types')."""
-    return await asyncio.to_thread(_read_documentation_sync, module_name)
+    slice_text("", offset, max_chars, "read_documentation")
+    value = await asyncio.to_thread(_read_documentation_sync, module_name)
+    return slice_text(value, offset, max_chars, "read_documentation")
 
 
 def register_documentation_resources(mcp: FastMCP) -> None:
+    def resource_module_name(module_name: str) -> str:
+        # FastMCP 1.29 treats the query delimiter as a regex quantifier while
+        # extracting URI-template fields, so the preceding field retains it.
+        return module_name.removesuffix("?")
+
+    @mcp.resource(
+        "pscad-docs://modules/{module_name}?offset={offset}&max_chars={max_chars}",
+        name="pscad_documentation_module_slice",
+        description="Read a bounded slice of one local PSCAD API documentation module.",
+        mime_type="text/markdown",
+    )
+    async def documentation_slice(
+        module_name: str,
+        offset: int,
+        max_chars: int,
+    ) -> str:
+        return await read_documentation(
+            resource_module_name(module_name),
+            offset=offset,
+            max_chars=max_chars,
+        )
+
+    @mcp.resource(
+        "pscad-docs://modules/{module_name}?offset={offset}",
+        name="pscad_documentation_module_from_offset",
+        description="Read one local PSCAD API documentation module from an offset.",
+        mime_type="text/markdown",
+    )
+    async def documentation_from_offset(module_name: str, offset: int) -> str:
+        return await read_documentation(
+            resource_module_name(module_name),
+            offset=offset,
+        )
+
+    @mcp.resource(
+        "pscad-docs://modules/{module_name}?max_chars={max_chars}",
+        name="pscad_documentation_module_max_chars",
+        description="Read a bounded prefix of one local PSCAD API documentation module.",
+        mime_type="text/markdown",
+    )
+    async def documentation_max_chars(module_name: str, max_chars: int) -> str:
+        return await read_documentation(
+            resource_module_name(module_name),
+            max_chars=max_chars,
+        )
+
     @mcp.resource(
         "pscad-docs://modules/{module_name}",
         name="pscad_documentation_module",

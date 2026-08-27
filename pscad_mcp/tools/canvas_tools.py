@@ -4,6 +4,7 @@ from mcp.server.fastmcp import FastMCP
 from pydantic import Field
 
 from ..core.connection_manager import pscad_manager
+from .pagination import PaginationLimit, PaginationOffset, slice_items
 from .registration import register_tool
 
 CanvasParameters = Annotated[
@@ -169,12 +170,17 @@ async def create_control_frame(
 
 
 async def list_canvas_components(
-    project_name: str, canvas_name: str = "Main"
+    project_name: str,
+    canvas_name: str = "Main",
+    offset: PaginationOffset = 0,
+    limit: PaginationLimit = None,
 ) -> list[dict[str, Any]]:
     """List normalized objects on a canvas."""
-    return await pscad_manager.service.list_canvas_components(
+    slice_items([], offset, limit, "list_canvas_components")
+    values = await pscad_manager.service.list_canvas_components(
         project_name, canvas_name=canvas_name
     )
+    return slice_items(values, offset, limit, "list_canvas_components")
 
 
 async def find_empty_space(

@@ -3,6 +3,7 @@ from mcp.server.fastmcp import FastMCP
 from pydantic import Field
 from ..core.connection_manager import pscad_manager
 from ..core.executor import robust_executor
+from .pagination import PaginationLimit, PaginationOffset, slice_items
 from .registration import register_tool
 
 ComponentParameters = Annotated[
@@ -37,9 +38,14 @@ async def load_projects(filenames: List[str]) -> str:
     """Load projects or workspace into PSCAD."""
     return await pscad_manager.service.load_projects(filenames)
 
-async def list_projects() -> List[Dict[str, str]]:
+async def list_projects(
+    offset: PaginationOffset = 0,
+    limit: PaginationLimit = None,
+) -> List[Dict[str, str]]:
     """List all projects in the workspace."""
-    return await pscad_manager.service.list_projects()
+    slice_items([], offset, limit, "list_projects")
+    values = await pscad_manager.service.list_projects()
+    return slice_items(values, offset, limit, "list_projects")
 
 async def run_project(project_name: str) -> str:
     """Start simulation for a given project."""
@@ -52,12 +58,16 @@ async def get_run_status(project_name: str) -> Dict[str, Any]:
 async def find_components(
     project_name: str, 
     definition: Optional[str] = None, 
-    name: Optional[str] = None
+    name: Optional[str] = None,
+    offset: PaginationOffset = 0,
+    limit: PaginationLimit = None,
 ) -> List[Dict[str, Any]]:
     """Find components matching criteria in a project."""
-    return await pscad_manager.service.find_components(
+    slice_items([], offset, limit, "find_components")
+    values = await pscad_manager.service.find_components(
         project_name, definition=definition, name=name
     )
+    return slice_items(values, offset, limit, "find_components")
 
 async def get_component_parameters(project_name: str, component_id: int) -> Dict[str, Any]:
     """Get all parameter values for a specific component by its ID."""
