@@ -12,6 +12,7 @@ from .models import (
     HvdcProjectEvidence,
     HvdcSourceRef,
 )
+from .pscad_graph import scan_pscad_connections
 
 
 def _text(value: str | None) -> str:
@@ -178,7 +179,7 @@ def _reachable_scopes(root: ET.Element, initial: list[ET.Element], canvas_name: 
 
 def scan_project(path: str | Path, canvas_name: str = "Main") -> HvdcProjectEvidence:
     project_path = Path(path).expanduser().resolve()
-    warnings: list[str] = []
+    warnings: list[str | dict[str, object]] = []
     project_name = project_path.stem
     try:
         root = ET.parse(project_path).getroot()
@@ -264,6 +265,19 @@ def scan_project(path: str | Path, canvas_name: str = "Main") -> HvdcProjectEvid
                 if value:
                     labels.append(HvdcLabelRecord(value, "text", HvdcSourceRef(str(project_path), source_canvas_name, label=value)))
 
+    explicit_connections = _connection_records(root, project_path, canvas_name)
+    graph_connections, graph_warnings = scan_pscad_connections(root, project_path, scopes)
+    explicit_endpoints = {
+        (item.source_component_id, item.source_port, item.target_component_id, item.target_port)
+        for item in explicit_connections
+    }
+    graph_connections = tuple(
+        item
+        for item in graph_connections
+        if (item.source_component_id, item.source_port, item.target_component_id, item.target_port) not in explicit_endpoints
+    )
+    warnings.extend(graph_warnings)
+
     return HvdcProjectEvidence(
         project_path=str(project_path),
         project_name=project_name,
@@ -271,6 +285,6 @@ def scan_project(path: str | Path, canvas_name: str = "Main") -> HvdcProjectEvid
         definitions=definitions,
         components=tuple(components),
         labels=tuple(labels),
-        connections=_connection_records(root, project_path, canvas_name),
+        connections=explicit_connections + graph_connections,
         warnings=tuple(warnings),
     )
