@@ -1,19 +1,25 @@
 from __future__ import annotations
 
 import asyncio
+import importlib
 import importlib.metadata
+import logging
 import os
 import subprocess
 import sys
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
 
 import pscad_mcp
+import pscad_mcp.utils.doc_manager as doc_manager_module
 from pscad_mcp.core.backend.base import BackendError
 from pscad_mcp.main import create_server
 from pscad_mcp.tools import app_tools
-from pscad_mcp.utils.doc_manager import DocumentationManager
+from pscad_mcp.utils.doc_manager import DocumentationManager, SourceAnalyzer
 
 ROOT = Path(__file__).parents[1]
 SETTING = "PSCAD_MCP_DOCUMENTATION_DIR"
@@ -56,6 +62,76 @@ def test_explicit_absolute_documentation_override_is_lazy(tmp_path):
     assert manager.base_dir == root.resolve()
     assert manager.issue is None
     assert not root.exists()
+
+
+def test_absolute_override_does_not_resolve_unused_home(tmp_path, monkeypatch):
+    root = tmp_path / "private-doc-state"
+
+    def unexpected_home():
+        raise AssertionError("Path.home must not be called")
+
+    monkeypatch.setattr(Path, "home", unexpected_home)
+
+    manager = DocumentationManager.from_environ({SETTING: str(root)})
+
+    assert manager.base_dir == root.resolve()
+    assert manager.issue is None
+
+
+def test_override_string_subclass_is_rejected_without_calling_user_code(
+    tmp_path,
+):
+    class ExplodingString(str):
+        def strip(self, *args, **kwargs):
+            raise AssertionError("custom strip executed")
+
+    manager = DocumentationManager.from_environ(
+        {
+            SETTING: ExplodingString(str(tmp_path / "secret")),
+            "LOCALAPPDATA": str(tmp_path),
+        }
+    )
+
+    assert manager.issue == SETTING
+    assert not manager.base_dir.exists()
+
+
+@pytest.mark.parametrize("local_app_data", ("relative", "", None))
+def test_invalid_localappdata_falls_back_to_home_without_writing(
+    tmp_path,
+    monkeypatch,
+    local_app_data,
+):
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+
+    manager = DocumentationManager.from_environ(
+        {"LOCALAPPDATA": local_app_data}
+    )
+
+    assert manager.base_dir == (
+        tmp_path / ".local" / "state" / "pscad-mcp" / "docs"
+    ).resolve()
+    assert not manager.base_dir.exists()
+
+
+def test_localappdata_string_subclass_does_not_execute_custom_strip(
+    tmp_path,
+    monkeypatch,
+):
+    class ExplodingString(str):
+        def strip(self, *args, **kwargs):
+            raise AssertionError("custom strip executed")
+
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+
+    manager = DocumentationManager.from_environ(
+        {"LOCALAPPDATA": ExplodingString("SECRET_LOCAL_APP_DATA")}
+    )
+
+    assert manager.base_dir == (
+        tmp_path / ".local" / "state" / "pscad-mcp" / "docs"
+    ).resolve()
+    assert not manager.base_dir.exists()
 
 
 def test_invalid_documentation_override_names_only_the_setting():
@@ -127,6 +203,282 @@ def test_sync_creates_generated_directories_only_when_called(tmp_path):
 
     assert manager.md_dir.is_dir()
     assert manager.raw_dir.is_dir()
+
+
+def test_same_root_syncs_are_serialized_across_manager_instances(
+    tmp_path,
+    monkeypatch,
+):
+    root = tmp_path / "shared"
+    managers = [DocumentationManager(root), DocumentationManager(root)]
+    for manager in managers:
+        manager.MODULES = ("mhi.pscad.fake",)
+
+    start = threading.Barrier(3)
+    counter_lock = threading.Lock()
+    active = 0
+    maximum_active = 0
+    markers = []
+
+    def render_doc(_module_name, **_kwargs):
+        nonlocal active, maximum_active
+        marker = f"complete-{threading.get_ident()}-{time.perf_counter_ns()}"
+        with counter_lock:
+            active += 1
+            maximum_active = max(maximum_active, active)
+            markers.append(marker)
+        time.sleep(0.04)
+        with counter_lock:
+            active -= 1
+        return f"NAME\n    {marker}\n"
+
+    def synchronize(manager):
+        start.wait(timeout=2)
+        return manager.sync()
+
+    monkeypatch.setattr(doc_manager_module.importlib.util, "find_spec", lambda _: None)
+    monkeypatch.setattr(doc_manager_module.pydoc, "render_doc", render_doc)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [executor.submit(synchronize, manager) for manager in managers]
+        start.wait(timeout=2)
+        results = [future.result(timeout=5) for future in futures]
+
+    assert maximum_active == 1
+    assert results == [
+        ["Synced mhi.pscad.fake (Enriched)"],
+        ["Synced mhi.pscad.fake (Enriched)"],
+    ]
+    raw = (root / "raw" / "mhi_pscad_fake.txt").read_text(encoding="utf-8")
+    markdown = (root / "md" / "mhi_pscad_fake.md").read_text(encoding="utf-8")
+    final_marker = next(marker for marker in markers if marker in raw)
+    assert final_marker in markdown
+    assert list(root.rglob("*.tmp")) == []
+
+
+@pytest.mark.asyncio
+async def test_concurrent_sync_wrappers_leave_complete_files(tmp_path, monkeypatch):
+    manager = DocumentationManager(tmp_path / "shared")
+    manager.MODULES = ("mhi.pscad.fake",)
+    counter_lock = threading.Lock()
+    active = 0
+    maximum_active = 0
+
+    def render_doc(_module_name, **_kwargs):
+        nonlocal active, maximum_active
+        marker = f"wrapper-{threading.get_ident()}-{time.perf_counter_ns()}"
+        with counter_lock:
+            active += 1
+            maximum_active = max(maximum_active, active)
+        time.sleep(0.03)
+        with counter_lock:
+            active -= 1
+        return f"NAME\n    {marker}\n"
+
+    monkeypatch.setattr(app_tools, "doc_manager", manager)
+    monkeypatch.setattr(doc_manager_module.importlib.util, "find_spec", lambda _: None)
+    monkeypatch.setattr(doc_manager_module.pydoc, "render_doc", render_doc)
+
+    for _ in range(4):
+        results = await asyncio.gather(
+            app_tools.sync_documentation(),
+            app_tools.sync_documentation(),
+        )
+        assert results == [
+            ["Synced mhi.pscad.fake (Enriched)"],
+            ["Synced mhi.pscad.fake (Enriched)"],
+        ]
+
+    assert maximum_active == 1
+    raw = (manager.raw_dir / "mhi_pscad_fake.txt").read_text(encoding="utf-8")
+    markdown = (manager.md_dir / "mhi_pscad_fake.md").read_text(encoding="utf-8")
+    marker = raw.splitlines()[1].strip()
+    assert marker.startswith("wrapper-")
+    assert marker in markdown
+    assert not any("Failed" in result for batch in results for result in batch)
+    assert list(manager.base_dir.rglob("*.tmp")) == []
+
+
+def test_different_documentation_roots_can_sync_in_parallel(tmp_path, monkeypatch):
+    managers = [
+        DocumentationManager(tmp_path / "first"),
+        DocumentationManager(tmp_path / "second"),
+    ]
+    for manager in managers:
+        manager.MODULES = ("mhi.pscad.fake",)
+
+    start = threading.Barrier(3)
+    both_active = threading.Event()
+    counter_lock = threading.Lock()
+    active = 0
+
+    def render_doc(_module_name, **_kwargs):
+        nonlocal active
+        with counter_lock:
+            active += 1
+            if active == 2:
+                both_active.set()
+        both_active.wait(timeout=0.5)
+        with counter_lock:
+            active -= 1
+        return "NAME\n    complete\n"
+
+    def synchronize(manager):
+        start.wait(timeout=2)
+        return manager.sync()
+
+    monkeypatch.setattr(doc_manager_module.importlib.util, "find_spec", lambda _: None)
+    monkeypatch.setattr(doc_manager_module.pydoc, "render_doc", render_doc)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [executor.submit(synchronize, manager) for manager in managers]
+        start.wait(timeout=2)
+        results = [future.result(timeout=5) for future in futures]
+
+    assert both_active.is_set()
+    assert all(result == ["Synced mhi.pscad.fake (Enriched)"] for result in results)
+
+
+def test_source_analyzer_failure_log_does_not_disclose_source_path(
+    tmp_path,
+    caplog,
+):
+    source = tmp_path / "SECRET_PRIVATE_SOURCE" / "module.py"
+    source.parent.mkdir()
+    source.write_text("def invalid(:\n", encoding="utf-8")
+
+    with caplog.at_level(logging.ERROR, logger="pscad-mcp.doc_manager"):
+        SourceAnalyzer(source)
+
+    messages = "\n".join(caplog.messages)
+    assert "SECRET_PRIVATE_SOURCE" not in messages
+    assert "SyntaxError" in messages
+
+
+def test_fallback_outputs_and_logs_are_sanitized(tmp_path, monkeypatch, caplog):
+    secret = str(tmp_path / "SECRET_PRIVATE_VENDOR_PATH")
+    manager = DocumentationManager(tmp_path / "docs")
+    manager.MODULES = ("mhi.pscad.fake",)
+
+    def fail_pydoc(*_args, **_kwargs):
+        raise RuntimeError(secret)
+
+    def fail_import(_module_name):
+        raise OSError(secret)
+
+    monkeypatch.setattr(doc_manager_module.importlib.util, "find_spec", lambda _: None)
+    monkeypatch.setattr(doc_manager_module.pydoc, "render_doc", fail_pydoc)
+    monkeypatch.setattr(importlib, "import_module", fail_import)
+
+    with caplog.at_level(logging.WARNING, logger="pscad-mcp.doc_manager"):
+        results = manager.sync()
+
+    raw = (manager.raw_dir / "mhi_pscad_fake.txt").read_text(encoding="utf-8")
+    markdown = (manager.md_dir / "mhi_pscad_fake.md").read_text(encoding="utf-8")
+    messages = "\n".join(caplog.messages)
+    assert results == ["Synced mhi.pscad.fake (Enriched)"]
+    assert raw == "MANUAL_INSPECTION_FAILED: OSError"
+    assert "MANUAL_INSPECTION_FAILED: OSError" in markdown
+    assert "pydoc failed for mhi.pscad.fake after RuntimeError" in messages
+    assert secret not in repr((results, raw, markdown, messages))
+
+
+@pytest.mark.asyncio
+async def test_sync_failure_logs_and_mcp_result_are_sanitized(
+    tmp_path,
+    monkeypatch,
+    caplog,
+):
+    secret = str(tmp_path / "SECRET_PRIVATE_DESTINATION")
+    manager = DocumentationManager(tmp_path / "docs")
+    manager.MODULES = ("mhi.pscad.fake",)
+
+    def fail_write(*_args, **_kwargs):
+        raise OSError(secret)
+
+    monkeypatch.setattr(manager, "_atomic_write", fail_write)
+    monkeypatch.setattr(app_tools, "doc_manager", manager)
+    monkeypatch.setattr(doc_manager_module.importlib.util, "find_spec", lambda _: None)
+    monkeypatch.setattr(
+        doc_manager_module.pydoc,
+        "render_doc",
+        lambda *_args, **_kwargs: "NAME\n    safe\n",
+    )
+    server = create_server(environ={})
+
+    with caplog.at_level(logging.ERROR, logger="pscad-mcp.doc_manager"):
+        _, structured = await server._tool_manager.call_tool(
+            "sync_documentation",
+            {},
+            convert_result=True,
+        )
+
+    result = structured["result"]
+    messages = "\n".join(caplog.messages)
+    assert result == ["Failed mhi.pscad.fake: OSError"]
+    assert "Failed to sync mhi.pscad.fake after OSError" in messages
+    assert secret not in repr((result, messages))
+    assert list(manager.raw_dir.iterdir()) == []
+    assert list(manager.md_dir.iterdir()) == []
+
+
+def test_sync_rejects_symlinked_generated_directory(tmp_path, monkeypatch):
+    base = tmp_path / "docs"
+    outside = tmp_path / "outside"
+    base.mkdir()
+    outside.mkdir()
+    try:
+        (base / "md").symlink_to(outside, target_is_directory=True)
+    except OSError as error:
+        pytest.skip(f"directory symlink unavailable: {type(error).__name__}")
+    manager = DocumentationManager(base)
+    manager.MODULES = ()
+    replacements = []
+    monkeypatch.setattr(os, "replace", lambda *args: replacements.append(args))
+
+    with pytest.raises(BackendError) as raised:
+        manager.sync()
+
+    assert raised.value.code == "DOCUMENTATION_STORAGE_INVALID"
+    assert raised.value.details == {"directory": "md"}
+    assert str(outside) not in repr(raised.value.to_dict())
+    assert list(outside.iterdir()) == []
+    assert replacements == []
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows junction behavior")
+def test_sync_rejects_junctioned_generated_directory(tmp_path, monkeypatch):
+    base = tmp_path / "docs"
+    outside = tmp_path / "outside"
+    junction = base / "md"
+    base.mkdir()
+    outside.mkdir()
+    created = subprocess.run(
+        ["cmd", "/c", "mklink", "/J", str(junction), str(outside)],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if created.returncode != 0:
+        pytest.skip("Windows junction creation unavailable")
+
+    try:
+        manager = DocumentationManager(base)
+        manager.MODULES = ()
+        replacements = []
+        monkeypatch.setattr(os, "replace", lambda *args: replacements.append(args))
+
+        with pytest.raises(BackendError) as raised:
+            manager.sync()
+
+        assert raised.value.code == "DOCUMENTATION_STORAGE_INVALID"
+        assert raised.value.details == {"directory": "md"}
+        assert str(outside) not in repr(raised.value.to_dict())
+        assert list(outside.iterdir()) == []
+        assert replacements == []
+    finally:
+        if junction.exists():
+            os.rmdir(junction)
 
 
 def test_generated_markdown_redacts_source_path_and_reports_package_version(tmp_path):

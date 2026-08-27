@@ -6,6 +6,8 @@ import logging
 import os
 import pydoc
 import re
+import stat
+import threading
 from collections.abc import Mapping
 from pathlib import Path
 from tempfile import NamedTemporaryFile
@@ -39,8 +41,11 @@ class SourceAnalyzer:
                     self.classes[node.name] = self._parse_class(node)
                 elif isinstance(node, ast.FunctionDef):
                     self.functions[node.name] = self._parse_function(node)
-        except Exception as e:
-            logger.error(f"AST Analysis failed for {self.file_path}: {e}")
+        except Exception as error:
+            logger.error(
+                "Source analysis failed after %s.",
+                type(error).__name__,
+            )
 
     def _parse_class(self, node: ast.ClassDef) -> dict[str, Any]:
         methods = {}
@@ -107,6 +112,8 @@ class DocumentationManager:
     )
 
     SETTING = "PSCAD_MCP_DOCUMENTATION_DIR"
+    _SYNC_LOCKS: ClassVar[dict[Path, threading.RLock]] = {}
+    _SYNC_LOCKS_GUARD: ClassVar[threading.Lock] = threading.Lock()
 
     def __init__(
         self,
@@ -121,23 +128,31 @@ class DocumentationManager:
 
     @classmethod
     def from_environ(cls, environ: Mapping[str, str]) -> "DocumentationManager":
-        default_root = cls._default_root(environ)
-        if cls.SETTING not in environ:
-            return cls(default_root)
+        if cls.SETTING in environ:
+            override = environ.get(cls.SETTING)
+            if type(override) is str:
+                normalized = str.strip(override)
+                try:
+                    candidate = Path(normalized)
+                    if normalized and candidate.is_absolute():
+                        return cls(candidate)
+                except (OSError, ValueError):
+                    pass
+            return cls(cls._default_root(environ), issue=cls.SETTING)
 
-        override = environ.get(cls.SETTING)
-        if not isinstance(override, str) or not override.strip():
-            return cls(default_root, issue=cls.SETTING)
-        candidate = Path(override).expanduser()
-        if not candidate.is_absolute():
-            return cls(default_root, issue=cls.SETTING)
-        return cls(candidate)
+        return cls(cls._default_root(environ))
 
     @staticmethod
     def _default_root(environ: Mapping[str, str]) -> Path:
         local_app_data = environ.get("LOCALAPPDATA")
-        if isinstance(local_app_data, str) and local_app_data.strip():
-            return Path(local_app_data).expanduser() / "pscad-mcp" / "docs"
+        if type(local_app_data) is str:
+            normalized = str.strip(local_app_data)
+            try:
+                candidate = Path(normalized)
+                if normalized and candidate.is_absolute():
+                    return candidate / "pscad-mcp" / "docs"
+            except (OSError, ValueError):
+                pass
         return Path.home() / ".local" / "state" / "pscad-mcp" / "docs"
 
     def raise_for_issue(self, operation: str) -> None:
@@ -158,11 +173,147 @@ class DocumentationManager:
         except importlib.metadata.PackageNotFoundError:
             return __version__
 
+    @classmethod
+    def _sync_lock_for(cls, base_dir: Path) -> threading.RLock:
+        with cls._SYNC_LOCKS_GUARD:
+            lock = cls._SYNC_LOCKS.get(base_dir)
+            if lock is None:
+                lock = threading.RLock()
+                cls._SYNC_LOCKS[base_dir] = lock
+            return lock
+
     @staticmethod
-    def _atomic_write(target: Path, content: str) -> None:
+    def _storage_error(directory: str) -> BackendError:
+        return BackendError(
+            "DOCUMENTATION_STORAGE_INVALID",
+            "The documentation storage boundary is invalid.",
+            "server",
+            "sync_documentation",
+            {"directory": directory},
+        )
+
+    @staticmethod
+    def _is_reparse_point(path: Path) -> bool:
+        metadata = path.lstat()
+        attributes = getattr(metadata, "st_file_attributes", 0)
+        reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+        return bool(attributes & reparse_flag)
+
+    @classmethod
+    def _validate_storage_directory(
+        cls,
+        base_dir: Path,
+        directory: Path,
+    ) -> None:
+        label = directory.name if directory.name in {"md", "raw"} else "generated"
+        try:
+            if directory != base_dir / label or directory.parent != base_dir:
+                raise cls._storage_error(label)
+            if (
+                directory.is_symlink()
+                or cls._is_reparse_point(directory)
+                or not directory.is_dir()
+            ):
+                raise cls._storage_error(label)
+            if (
+                base_dir.is_symlink()
+                or cls._is_reparse_point(base_dir)
+                or not base_dir.is_dir()
+            ):
+                raise cls._storage_error(label)
+            resolved_base = base_dir.resolve(strict=True)
+            resolved_directory = directory.resolve(strict=True)
+            if (
+                resolved_base != base_dir
+                or resolved_directory != directory
+                or resolved_directory.parent != resolved_base
+            ):
+                raise cls._storage_error(label)
+        except BackendError:
+            raise
+        except Exception as error:
+            logger.error(
+                "Documentation storage validation for %s failed after %s.",
+                label,
+                type(error).__name__,
+            )
+            raise cls._storage_error(label) from None
+
+    @classmethod
+    def _validate_storage_target(
+        cls,
+        base_dir: Path,
+        destination: Path,
+    ) -> None:
+        parent = destination.parent
+        cls._validate_storage_directory(base_dir, parent)
+        try:
+            if destination.is_symlink() or (
+                destination.exists() and cls._is_reparse_point(destination)
+            ):
+                raise cls._storage_error(parent.name)
+        except BackendError:
+            raise
+        except Exception as error:
+            logger.error(
+                "Documentation destination validation for %s failed after %s.",
+                parent.name,
+                type(error).__name__,
+            )
+            raise cls._storage_error(parent.name) from None
+
+    @classmethod
+    def _validate_temporary_file(
+        cls,
+        temporary_path: Path,
+        destination_parent: Path,
+    ) -> None:
+        try:
+            if (
+                temporary_path.is_symlink()
+                or cls._is_reparse_point(temporary_path)
+                or not temporary_path.is_file()
+                or temporary_path.resolve(strict=True).parent != destination_parent
+            ):
+                raise cls._storage_error(destination_parent.name)
+        except BackendError:
+            raise
+        except Exception as error:
+            logger.error(
+                "Documentation temporary-file validation for %s failed after %s.",
+                destination_parent.name,
+                type(error).__name__,
+            )
+            raise cls._storage_error(destination_parent.name) from None
+
+    def _prepare_storage(self) -> None:
+        for directory in (self.md_dir, self.raw_dir):
+            try:
+                directory.mkdir(parents=True, exist_ok=True)
+                self._validate_storage_directory(self.base_dir, directory)
+            except BackendError:
+                raise
+            except Exception as error:
+                logger.error(
+                    "Documentation storage preparation for %s failed after %s.",
+                    directory.name,
+                    type(error).__name__,
+                )
+                raise self._storage_error(directory.name) from None
+
+    @classmethod
+    def _atomic_write(
+        cls,
+        target: Path,
+        content: str,
+        *,
+        base_dir: Path | None = None,
+    ) -> None:
         destination = Path(target)
         temporary_path: Path | None = None
         try:
+            if base_dir is not None:
+                cls._validate_storage_target(base_dir, destination)
             with NamedTemporaryFile(
                 mode="w",
                 encoding="utf-8",
@@ -176,6 +327,12 @@ class DocumentationManager:
                 temporary.write(content)
                 temporary.flush()
                 os.fsync(temporary.fileno())
+            if base_dir is not None:
+                cls._validate_storage_target(base_dir, destination)
+                cls._validate_temporary_file(
+                    temporary_path,
+                    destination.parent,
+                )
             os.replace(temporary_path, destination)
             temporary_path = None
         finally:
@@ -188,8 +345,11 @@ class DocumentationManager:
     def sync(self) -> list[str]:
         """Synchronize reference files from the installed mhi-pscad library."""
         self.raise_for_issue("sync_documentation")
-        self.md_dir.mkdir(parents=True, exist_ok=True)
-        self.raw_dir.mkdir(parents=True, exist_ok=True)
+        with self._sync_lock_for(self.base_dir):
+            return self._sync_locked()
+
+    def _sync_locked(self) -> list[str]:
+        self._prepare_storage()
         results = []
         for mod_name in self.MODULES:
             try:
@@ -204,22 +364,32 @@ class DocumentationManager:
                 # 2. Get raw output via pydoc
                 try:
                     raw_doc = pydoc.render_doc(mod_name, renderer=pydoc.plaintext)
-                except Exception as e:
-                    logger.warning(f"pydoc failed for {mod_name}, falling back to manual: {e}")
+                except Exception as error:
+                    logger.warning(
+                        "pydoc failed for %s after %s; using manual inspection.",
+                        mod_name,
+                        type(error).__name__,
+                    )
                     raw_doc = self._manual_inspect_raw(mod_name)
                 
                 raw_path = self.raw_dir / f"{mod_name.replace('.', '_')}.txt"
-                self._atomic_write(raw_path, raw_doc)
+                self._atomic_write(raw_path, raw_doc, base_dir=self.base_dir)
 
                 # 3. Process into enriched markdown
                 enriched_md = self._extract_enriched_markdown(mod_name, raw_doc, analyzer)
                 md_path = self.md_dir / f"{mod_name.replace('.', '_')}.md"
-                self._atomic_write(md_path, enriched_md)
+                self._atomic_write(md_path, enriched_md, base_dir=self.base_dir)
 
                 results.append(f"Synced {mod_name} (Enriched)")
-            except Exception as e:
-                logger.error(f"Failed to sync {mod_name}: {e!s}")
-                results.append(f"Failed {mod_name}: {e!s}")
+            except BackendError:
+                raise
+            except Exception as error:
+                logger.error(
+                    "Failed to sync %s after %s.",
+                    mod_name,
+                    type(error).__name__,
+                )
+                results.append(f"Failed {mod_name}: {type(error).__name__}")
         return results
 
     def _clean_pydoc(self, text: str) -> str:
@@ -346,8 +516,8 @@ class DocumentationManager:
                     doc = getattr(obj, "__doc__", "No docstring")
                     output.append(f"\n--- {name} ---\n{doc}\n")
             return "\n".join(output)
-        except Exception as e:
-            return f"CRITICAL FAILURE: {e!s}"
+        except Exception as error:
+            return f"MANUAL_INSPECTION_FAILED: {type(error).__name__}"
 
 # Shared instance. Path resolution is intentionally lazy and performs no writes.
 doc_manager = DocumentationManager.from_environ(os.environ)
