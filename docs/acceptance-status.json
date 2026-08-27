@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-08-24T22:00:00+08:00",
+  "updated_at": "2026-08-27T21:57:30+08:00",
   "policy": "A licensed PASS applies only to the named scope and commit. It must not be inherited by another builder, domain workflow, or later commit.",
   "scopes": [
     {
@@ -68,6 +68,17 @@
         "commit": "8872a96f72c039ebca1925b8e6a6cfa8763e7d19"
       },
       "note": "MMC Stage A remains on codex/mmc-autonomous-builder and has no licensed acceptance claim."
+    },
+    {
+      "scope": "parametric_mmc",
+      "implementation_status": "INTEGRATION_BRANCH",
+      "licensed_status": "NOT_RUN_ON_INTEGRATED_COMMIT",
+      "evidence": {
+        "report_path": null,
+        "sha256": null,
+        "commit": "cfcc48d1e82195577e0478619d4cc7c037adefcb"
+      },
+      "note": "The dual-engine parametric lifecycle has passed non-licensed regression on codex/mmc-parametric-dual-engine. The opt-in PSCAD 4.6.2 matrix has not run on this integrated commit, so no detailed-PWM or average-value licensed acceptance is claimed."
     }
   ]
 }

@@ -75,12 +75,16 @@ def test_built_wheel_is_installable_and_exposes_tools():
                     f"expected_version = {expected_version!r}; "
                     "assert installed == expected_version == pscad_mcp.__version__; "
                     "tools = create_server()._tool_manager.list_tools(); "
-                    "assert len(tools) == 83; "
-                    "assert len({tool.name for tool in tools}) == 83; "
+                    "assert len(tools) == 90; "
+                    "assert len({tool.name for tool in tools}) == 90; "
                     "from pscad_mcp.hvdc.builders.lcc.assets import load_packaged_asset_set; "
                     "assets = load_packaged_asset_set(); "
                     "assert assets.name == 'cigre_lcc_monopole_v1'; "
-                    "print(installed, len(tools), len(assets.hashes))"
+                    "from pscad_mcp.hvdc.builders.mmc.assets import load_packaged_asset_set as load_mmc_assets; "
+                    "mmc_assets = load_mmc_assets(); "
+                    "assert mmc_assets.name == 'cigre_b4_p2p_avm_v1'; "
+                    "assert mmc_assets.hashes; "
+                    "print(installed, len(tools), len(assets.hashes), len(mmc_assets.hashes))"
                 ),
             ],
             check=False,
@@ -90,4 +94,4 @@ def test_built_wheel_is_installable_and_exposes_tools():
             env=env,
         )
         assert probe.returncode == 0, probe.stderr
-        assert probe.stdout.strip() == f"{expected_version} 83 6"
+        assert probe.stdout.strip() == f"{expected_version} 90 6 8"

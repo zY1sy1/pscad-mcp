@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import hashlib
 import shutil
+import subprocess
+import sys
+import tempfile
 import time
+import zipfile
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -402,3 +406,28 @@ def wait_for_terminal(service: object, build_id: str) -> dict[str, Any]:
             return status
         time.sleep(0.01)
     raise TimeoutError(f"MMC build {build_id} did not reach a terminal state")
+
+
+def built_wheel_names() -> set[str]:
+    repository = Path(__file__).parents[1]
+    with tempfile.TemporaryDirectory() as temporary:
+        output = Path(temporary)
+        completed = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "build",
+                "--wheel",
+                "--outdir",
+                str(output),
+                str(repository),
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        assert completed.returncode == 0, completed.stderr
+        wheels = list(output.glob("*.whl"))
+        assert len(wheels) == 1
+        with zipfile.ZipFile(wheels[0]) as archive:
+            return set(archive.namelist())

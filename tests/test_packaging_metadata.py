@@ -2,6 +2,7 @@ from pathlib import Path
 import importlib.metadata
 
 import pscad_mcp
+from tests.mmc_parametric_fakes import built_wheel_names
 
 try:
     import tomllib
@@ -26,6 +27,29 @@ def test_project_packages_recursive_lcc_asset_set():
     assert "assets/lcc/*/*.json" in patterns
     assert "assets/lcc/*/*.md" in patterns
     assert "assets/lcc/*/library/*.pslx" in patterns
+
+
+def test_project_packages_only_the_declared_mmc_asset_shapes():
+    path = Path(__file__).parents[1] / "pyproject.toml"
+    document = tomllib.loads(path.read_text(encoding="utf-8"))
+    patterns = document["tool"]["setuptools"]["package-data"]["pscad_mcp"]
+
+    assert "assets/mmc/*/*.json" in patterns
+    assert "assets/mmc/*/*.md" in patterns
+    assert "assets/mmc/*/library/*.pslx" in patterns
+
+
+def test_wheel_contains_owned_avm_assets_and_no_official_example():
+    names = built_wheel_names()
+
+    assert any(
+        name.endswith("assets/mmc/cigre_b4_p2p_avm_v1/manifest.json")
+        for name in names
+    )
+    assert not any(
+        "H_MMC_Mono_DC" in name or name.endswith("intermediate.pslx")
+        for name in names
+    )
 
 
 def test_runtime_version_matches_project_metadata():
