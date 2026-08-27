@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<project name="ordinary" version="4.6.2">
+  <definitions>
+    <Definition name="Main" classid="UserCmpDefn">
+      <schematic classid="UserCanvas">
+        <User classid="UserCmp" id="101" name="R1" defn="master:resistor" x="0" y="0" orientation="0">
+          <Port name="A" kind="electrical" dimension="1" x="18" y="0" />
+        </User>
+        <User classid="UserCmp" id="102" name="R2" defn="master:resistor" x="54" y="18" orientation="0">
+          <Port name="A" kind="electrical" dimension="1" x="0" y="18" />
+        </User>
+        <Wire id="201" kind="electrical" x="0" y="0">
+          <vertex x="18" y="0" />
+          <vertex x="54" y="0" />
+          <vertex x="54" y="36" />
+        </Wire>
+        <nodelabel id="301" name="NODE" x="54" y="0" />
+      </schematic>
+    </Definition>
+  </definitions>
+</project>
