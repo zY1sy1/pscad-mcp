@@ -368,3 +368,43 @@ class BlueprintVerification:
             "operations_empty": self.operations_empty,
             "status": self.status,
         }
+
+
+@dataclass(frozen=True)
+class LiveVerificationCheck:
+    kind: str
+    key: str
+    status: str
+    expected: Any
+    observed: Any
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "kind": self.kind,
+            "key": self.key,
+            "status": self.status,
+            "expected": json_safe(self.expected),
+            "observed": json_safe(self.observed),
+        }
+
+
+@dataclass(frozen=True)
+class LiveVerification:
+    project_id: str
+    source_sha256: str
+    backend: str
+    pscad_version: str
+    status: str
+    live_verified: bool
+    checks: tuple[LiveVerificationCheck, ...]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "project_id": self.project_id,
+            "source_sha256": self.source_sha256,
+            "backend": self.backend,
+            "pscad_version": self.pscad_version,
+            "status": self.status,
+            "live_verified": self.live_verified,
+            "checks": [check.to_dict() for check in self.checks],
+        }
