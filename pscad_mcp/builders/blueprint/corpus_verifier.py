@@ -127,31 +127,47 @@ def _reject_unsafe_shape(value: Any) -> None:
         raise _error("CORPUS_BLUEPRINT_UNSAFE", "Corpus Blueprint publication must remain evidence-only.")
 
 
-def verify_blueprint_candidate(value: Any, graph: ProjectGraph) -> BlueprintVerification:
+def verify_blueprint_candidate(
+    value: Any,
+    graph: ProjectGraph,
+    source: CorpusSource | None = None,
+) -> BlueprintVerification:
     """Verify a corpus Blueprint against its immutable offline graph contract."""
 
     _reject_unsafe_shape(value)
     blueprint = parse_blueprint(value)
     if blueprint.operations:
         raise _error("CORPUS_BLUEPRINT_UNSAFE", "Corpus Blueprint operations must be empty.")
-    expected_required = [
-        {
-            "path": blueprint.source_package["entry_point"],
-            "kind": "file",
-            "sha256": graph.source_sha256,
-        },
-        *[
-            {"path": basename, "kind": "file", "sha256": digest}
-            for basename, digest in graph.dependency_hashes.items()
-        ],
-    ]
+    if source is None:
+        expected_required = [
+            {
+                "path": blueprint.source_package["entry_point"],
+                "kind": "file",
+                "sha256": graph.source_sha256,
+            },
+            *[
+                {"path": basename, "kind": "file", "sha256": digest}
+                for basename, digest in graph.dependency_hashes.items()
+            ],
+        ]
+        source_identity_matches = True
+    else:
+        expected_required = _source_requirements(source)
+        source_identity_matches = (
+            source.project_id == graph.project_id
+            and source.sha256 == graph.source_sha256
+            and blueprint.source_package["entry_point"] == source.basename
+            and blueprint.identity.supported_pscad_versions == source.pscad_versions
+            and dict(graph.dependency_hashes)
+            == {dependency.basename: dependency.sha256 for dependency in source.dependencies}
+        )
     observed_required = json_safe(blueprint.source_package["required"])
     identity_matches = (
         blueprint.identity.name == f"{graph.project_id}-existing-v1"
         and blueprint.identity.inspection_profile == _INSPECTION_PROFILE
         and graph.pscad_version in blueprint.identity.supported_pscad_versions
     )
-    source_matches = observed_required == expected_required
+    source_matches = source_identity_matches and observed_required == expected_required
     acceptance_matches = json_safe(blueprint.acceptance) == _expected_acceptance(graph)
     publication_matches = (
         blueprint.publication.delivery_package is False

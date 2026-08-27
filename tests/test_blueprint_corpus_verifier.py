@@ -106,6 +106,18 @@ def test_blueprint_verification_rejects_mutation_operations(tmp_path):
     assert raised.value.code == "CORPUS_BLUEPRINT_UNSAFE"
 
 
+def test_blueprint_source_spec_binding_rejects_renamed_entry_point(tmp_path):
+    source, graph = fixture_graph(tmp_path)
+    value = generate_blueprint_candidate(source, graph)
+    value["source_package"]["entry_point"] = "renamed.pscx"
+    value["source_package"]["required"][0]["path"] = "renamed.pscx"
+
+    with pytest.raises(BackendError) as raised:
+        verify_blueprint_candidate(value, graph, source)
+
+    assert raised.value.code == "CORPUS_BLUEPRINT_MISMATCH"
+
+
 def test_blueprint_generation_and_verification_do_not_mutate_graph(tmp_path):
     source, graph = fixture_graph(tmp_path)
     before = canonical_json(graph.to_dict())
