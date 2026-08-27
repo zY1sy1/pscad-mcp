@@ -12,6 +12,7 @@ from typing import Any, Mapping
 from ..core.backend.base import BackendError
 from ..core.path_policy import PathPolicy, WorkspaceNotConfiguredError
 from .classifier import classify_topology, extract_assets
+from .builders.mmc.inspection import inspect_mmc_evidence
 from .mappings import MappingResolution, resolve_mappings
 from .profiles import list_profiles, load_profile, register_profile
 from .scanner import scan_project
@@ -331,6 +332,7 @@ class HvdcDomainService:
             return cached[1]
         evidence = scan_project(path, canvas_name)
         topology = classify_topology(evidence)
+        mmc_report = inspect_mmc_evidence(evidence) if topology.family == "mmc" else None
         assets = extract_assets(evidence)
         profile_name = "hvdc_breaker_difforder" if any(asset.kind == "breaker" for asset in assets) else "auto"
         mappings: MappingResolution
@@ -352,6 +354,9 @@ class HvdcDomainService:
             "warnings": list(evidence.warnings) + list(mappings.warnings),
             "confidence": topology.confidence,
         }
+        if mmc_report is not None:
+            result["mmc"] = mmc_report
+            result["unresolved"] = [*result["unresolved"], *mmc_report["unresolved_questions"]]
         self._cache[key] = (mtime, result)
         return result
 

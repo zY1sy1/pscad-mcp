@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<project version="4.6.2">
+  <definitions>
+    <Definition name="MMCStation" />
+    <Definition name="MMCHalfBridgePwmArm" />
+    <Definition name="MMCHalfBridgeCell" />
+    <Definition name="MMCCarrierGenerator" />
+    <Definition name="MMCFiringPulseGenerator" />
+    <Definition name="MMCStationControl" />
+    <Definition name="MMCCirculatingCurrentControl" />
+    <Definition name="MMCDcBreakerProtection" />
+    <Definition name="MMCArmCurrentMeasurement" />
+  </definitions>
+  <canvas name="Main">
+    <component id="station-p" name="STATION_P" definition="MMCStation" />
+    <component id="station-vdc" name="STATION_VDC" definition="MMCStation" />
+    <component id="p-au" name="STATION_P ARM A UPPER" definition="MMCHalfBridgePwmArm" />
+    <component id="p-al" name="STATION_P ARM A LOWER" definition="MMCHalfBridgePwmArm" />
+    <component id="p-bu" name="STATION_P ARM B UPPER" definition="MMCHalfBridgePwmArm" />
+    <component id="p-bl" name="STATION_P ARM B LOWER" definition="MMCHalfBridgePwmArm" />
+    <component id="p-cu" name="STATION_P ARM C UPPER" definition="MMCHalfBridgePwmArm" />
+    <component id="p-cl" name="STATION_P ARM C LOWER" definition="MMCHalfBridgePwmArm" />
+    <component id="v-au" name="STATION_VDC ARM A UPPER" definition="MMCHalfBridgePwmArm" />
+    <component id="v-al" name="STATION_VDC ARM A LOWER" definition="MMCHalfBridgePwmArm" />
+    <component id="v-bu" name="STATION_VDC ARM B UPPER" definition="MMCHalfBridgePwmArm" />
+    <component id="v-bl" name="STATION_VDC ARM B LOWER" definition="MMCHalfBridgePwmArm" />
+    <component id="v-cu" name="STATION_VDC ARM C UPPER" definition="MMCHalfBridgePwmArm" />
+    <component id="v-cl" name="STATION_VDC ARM C LOWER" definition="MMCHalfBridgePwmArm" />
+    <component id="cells" name="HALF BRIDGE CELLS" definition="MMCHalfBridgeCell" />
+    <component id="carrier" name="PWM CARRIERS" definition="MMCCarrierGenerator" />
+    <component id="firing" name="FIRING PULSES" definition="MMCFiringPulseGenerator" />
+    <component id="station-control" name="MMC STATION CONTROL" definition="MMCStationControl" />
+    <component id="circulating-control" name="CIRCULATING CURRENT CONTROL" definition="MMCCirculatingCurrentControl" />
+    <component id="protection" name="DC BREAKER PROTECTION" definition="MMCDcBreakerProtection" />
+    <component id="measure-p-au" name="P AU ARM CURRENT" definition="MMCArmCurrentMeasurement" />
+    <component id="measure-p-al" name="P AL ARM CURRENT" definition="MMCArmCurrentMeasurement" />
+    <component id="measure-p-bu" name="P BU ARM CURRENT" definition="MMCArmCurrentMeasurement" />
+    <component id="measure-p-bl" name="P BL ARM CURRENT" definition="MMCArmCurrentMeasurement" />
+    <component id="measure-p-cu" name="P CU ARM CURRENT" definition="MMCArmCurrentMeasurement" />
+    <component id="measure-p-cl" name="P CL ARM CURRENT" definition="MMCArmCurrentMeasurement" />
+    <component id="measure-v-au" name="V AU ARM CURRENT" definition="MMCArmCurrentMeasurement" />
+    <component id="measure-v-al" name="V AL ARM CURRENT" definition="MMCArmCurrentMeasurement" />
+    <component id="measure-v-bu" name="V BU ARM CURRENT" definition="MMCArmCurrentMeasurement" />
+    <component id="measure-v-bl" name="V BL ARM CURRENT" definition="MMCArmCurrentMeasurement" />
+    <component id="measure-v-cu" name="V CU ARM CURRENT" definition="MMCArmCurrentMeasurement" />
+    <component id="measure-v-cl" name="V CL ARM CURRENT" definition="MMCArmCurrentMeasurement" />
+    <connection id="dc-positive" from_component="station-p" from_port="dc_positive" to_component="station-vdc" to_port="dc_positive" />
+    <connection id="dc-negative" from_component="station-p" from_port="dc_negative" to_component="station-vdc" to_port="dc_negative" />
+  </canvas>
+</project>

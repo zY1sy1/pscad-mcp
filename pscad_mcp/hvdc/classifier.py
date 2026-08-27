@@ -6,6 +6,7 @@ import re
 
 from .models import HvdcAsset, HvdcProjectEvidence, HvdcSourceRef, HvdcTopologySummary
 from .return_paths import analyze_return_paths
+from .builders.mmc.inspection import inspect_mmc_evidence
 
 
 def _tokens(values: list[str] | tuple[str, ...]) -> set[str]:
@@ -66,9 +67,15 @@ def classify_topology(evidence: HvdcProjectEvidence) -> HvdcTopologySummary:
     polarity = "bipolar" if pole_tokens >= 2 or generic_poles >= 2 else "monopolar" if pole_tokens == 1 or generic_poles == 1 else "unknown"
     breaker = _contains(joined, ("breaker", "loadbreaker", "protection", "diff"))
     line = _contains(joined, ("transline", "trans_line", "dc_line", "line", "tl1", "tl2"))
-    paths = analyze_return_paths(evidence)
+    mmc_report = inspect_mmc_evidence(evidence) if family == "mmc" else None
+    if mmc_report is not None:
+        polarity = "symmetrical_monopole" if mmc_report["topology"] == "two_terminal_symmetrical_monopole" else "unknown"
+    paths = () if family in {"mmc", "vsc_2level"} else analyze_return_paths(evidence)
     verified = [path for path in paths if path.closed]
-    if len(verified) == 1:
+    if family in {"mmc", "vsc_2level"}:
+        return_mode = "not_applicable"
+        path_status = "not_applicable"
+    elif len(verified) == 1:
         return_mode = verified[0].mode
         path_status = "verified"
     elif len(verified) > 1:
@@ -85,12 +92,14 @@ def classify_topology(evidence: HvdcProjectEvidence) -> HvdcTopologySummary:
         unresolved.append("HVDC topology family needs explicit profile evidence or additional component definitions.")
     if polarity == "unknown":
         unresolved.append("Pole polarity could not be established from project evidence.")
-    if path_status != "verified":
+    if path_status != "verified" and family not in {"mmc", "vsc_2level"}:
         unresolved.append("LCC return path could not be verified from explicit connection and switch evidence.")
+    if mmc_report is not None:
+        unresolved.extend(str(item) for item in mmc_report["unresolved_questions"])
     return HvdcTopologySummary(
         family=family,
         polarity=polarity,
-        terminal_count=None,
+        terminal_count=int(mmc_report["terminal_count"]) if mmc_report is not None else None,
         breaker_protection_present=breaker,
         dc_line_present=line,
         confidence=confidence,
