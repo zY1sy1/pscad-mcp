@@ -54,6 +54,22 @@ def _cancel_and_consume(task: asyncio.Future[Any]) -> None:
     task.add_done_callback(_consume_task_result)
 
 
+def _invoke_shutdown_action(action: ShutdownAction, timeout_s: float) -> Any:
+    """Pass a service budget when supported while preserving test injections."""
+    try:
+        parameters = inspect.signature(action).parameters.values()
+    except (TypeError, ValueError):
+        parameters = ()
+    supports_timeout = any(
+        parameter.name == "timeout_s"
+        or parameter.kind is inspect.Parameter.VAR_KEYWORD
+        for parameter in parameters
+    )
+    if supports_timeout:
+        return action(timeout_s=timeout_s)
+    return action()
+
+
 async def _run_bounded(action: ShutdownAction, timeout_s: float) -> Any:
     """Bound an async action without awaiting cancellation-resistant cleanup."""
     result = action()
@@ -89,10 +105,17 @@ async def shutdown_domain_services(timeout_s: float = 5.0) -> None:
     )
     failures: list[dict[str, str]] = []
     pending_tasks: list[asyncio.Future[Any]] = []
-    action_timeout_s = timeout_s / (len(actions) + 1)
+    action_timeout_s = max(0.0, timeout_s) / (len(actions) + 1)
+    service_timeout_s = action_timeout_s / 2
     for operation, action in actions:
         try:
-            await _run_bounded(action, action_timeout_s)
+            await _run_bounded(
+                lambda action=action: _invoke_shutdown_action(
+                    action,
+                    service_timeout_s,
+                ),
+                action_timeout_s,
+            )
         except PendingCleanupError as error:
             pending_tasks.extend(error.pending_tasks)
             failures.append(

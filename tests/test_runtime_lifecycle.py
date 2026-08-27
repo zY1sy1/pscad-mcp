@@ -13,7 +13,13 @@ import pscad_mcp.main as main_module
 import pscad_mcp.runtime as runtime_module
 from pscad_mcp.core.connection_manager import PSCADConnectionManager
 from pscad_mcp.core.executor import ExecutorClosingError, PendingSettlementError
+from pscad_mcp.core.path_policy import PathPolicy
 from pscad_mcp.core.service import PscadService
+from pscad_mcp.hvdc.builders.lcc.parametric_service import (
+    ParametricLccBuilderService,
+)
+from pscad_mcp.hvdc.builders.lcc.service import LccBuilderService
+from pscad_mcp.hvdc.service import HvdcDomainService
 from pscad_mcp.learning.service import LearningRuntime
 from pscad_mcp.main import create_server
 from pscad_mcp.runtime import (
@@ -287,6 +293,86 @@ def test_domain_aggregate_propagates_live_cleanup_after_attempting_all(monkeypat
         assert any(not task.done() for task in raised.value.pending_tasks)
         release.set()
         await asyncio.gather(*raised.value.pending_tasks, return_exceptions=True)
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("service_kind", ["hvdc", "fixed_lcc", "parametric_lcc"])
+def test_real_tool_shutdown_helper_propagates_pending_cleanup_to_runtime(
+    monkeypatch, tmp_path, service_kind
+):
+    modules = {
+        "hvdc": (tools.hvdc_tools, "_domain_service", "_domain_backend"),
+        "fixed_lcc": (tools.lcc_tools, "_builder_service", "_builder_backend"),
+        "parametric_lcc": (
+            tools.lcc_parametric_tools,
+            "_service_instance",
+            "_service_backend",
+        ),
+    }
+
+    async def exercise():
+        release = asyncio.Event()
+
+        async def stubborn_child():
+            while not release.is_set():
+                try:
+                    await release.wait()
+                except asyncio.CancelledError:
+                    continue
+
+        child = asyncio.create_task(stubborn_child())
+        if service_kind == "hvdc":
+            service = HvdcDomainService(
+                path_policy=PathPolicy(workspace_root=str(tmp_path))
+            )
+            service._scenario_cleanup_tasks["pending"] = child
+        elif service_kind == "fixed_lcc":
+            service = LccBuilderService(object(), workspace_root=tmp_path)
+            service._tasks["pending"] = child
+        else:
+            service = ParametricLccBuilderService(workspace_root=tmp_path)
+            service._tasks["pending"] = child
+
+        for module, service_name, backend_name in modules.values():
+            monkeypatch.setattr(module, service_name, None)
+            monkeypatch.setattr(module, backend_name, None)
+        module, service_name, backend_name = modules[service_kind]
+        monkeypatch.setattr(module, service_name, service)
+        monkeypatch.setattr(module, backend_name, object())
+
+        calls: list[str] = []
+        runtime = RuntimeLifecycle(
+            domain_shutdown=lambda: shutdown_domain_services(timeout_s=0.12),
+            settlement_wait=lambda: calls.append("settlement") or True,
+            learning_close=lambda: calls.append("learning"),
+            connection_shutdown=lambda: calls.append("connection"),
+            executor_shutdown=lambda: calls.append("executor"),
+            timeout_s=0.2,
+        )
+        try:
+            result = await runtime.shutdown()
+            assert calls == ["settlement", "learning"]
+            assert result == {
+                "code": "SHUTDOWN_INCOMPLETE",
+                "failures": [
+                    {"operation": "domain", "exception": "PendingCleanupError"},
+                    {
+                        "operation": "connection",
+                        "exception": "PendingCleanupError",
+                    },
+                    {"operation": "executor", "exception": "PendingCleanupError"},
+                ],
+            }
+            assert runtime.pending_cleanup_count == 1
+        finally:
+            release.set()
+            await child
+        for _ in range(20):
+            if runtime.pending_cleanup_count == 0:
+                break
+            await asyncio.sleep(0)
+        assert runtime.pending_cleanup_count == 0
 
     asyncio.run(exercise())
 
