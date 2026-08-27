@@ -315,3 +315,43 @@ def test_successful_publication_points_manifest_at_final_sources(tmp_path):
     )
     assert (sources / "construction-record.json").is_file()
     assert (sources / "preparation-report.json").is_file()
+
+
+def test_review_cli_writes_complete_summary_without_changing_manifest(
+    tmp_path, capsys
+):
+    cases = topology_truth.case_recipes()
+    staging = tmp_path / "staging"
+    topology_truth.generate_cases(SEED, staging, cases)
+    projects = [str(staging / case.name / f"{case.name}.pscx") for case in cases]
+    (staging / "projects.json").write_text(
+        json.dumps(projects), encoding="utf-8"
+    )
+    sources = tmp_path / "topology-sources"
+    manifest = tmp_path / "topology-truth.json"
+    topology_truth.publish_truth_set(staging, sources, manifest)
+    manifest_before = hashlib.sha256(manifest.read_bytes()).hexdigest()
+
+    assert (
+        topology_truth.main(
+            [
+                "review",
+                "--sources",
+                str(sources),
+                "--manifest",
+                str(manifest),
+            ]
+        )
+        == 0
+    )
+
+    manifest_after = hashlib.sha256(manifest.read_bytes()).hexdigest()
+    assert manifest_after == manifest_before
+    review = json.loads(
+        (sources / "truth-review.json").read_text(encoding="utf-8")
+    )
+    assert review["status"] == "PENDING_APPROVAL"
+    assert len(review["cases"]) == 6
+    scale = next(case for case in review["cases"] if case["name"] == "scale-2000")
+    assert len(scale["confirmed_edges"]) == 1000
+    assert "TOPOLOGY_TRUTH_REVIEW_SHA256=" in capsys.readouterr().out

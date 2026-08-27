@@ -676,6 +676,86 @@ def publish_truth_set(
             shutil.rmtree(temporary_root)
 
 
+def review_truth_set(sources: Path, manifest: Path) -> dict[str, object]:
+    sources = sources.resolve()
+    manifest = manifest.resolve()
+    if not sources.is_dir():
+        raise FileNotFoundError(sources)
+    if not manifest.is_file():
+        raise FileNotFoundError(manifest)
+    manifest_payload = json.loads(manifest.read_text(encoding="utf-8"))
+    construction = json.loads(
+        (sources / "construction-record.json").read_text(encoding="utf-8")
+    )
+    preparation = json.loads(
+        (sources / "preparation-report.json").read_text(encoding="utf-8")
+    )
+    audits = construction.get("audits")
+    if not isinstance(audits, dict):
+        raise ValueError("construction record has no audits")
+    manifest_cases = manifest_payload.get("cases")
+    if not isinstance(manifest_cases, list) or not manifest_cases:
+        raise ValueError("truth manifest has no cases")
+
+    reviewed_cases = []
+    for item in manifest_cases:
+        if not isinstance(item, dict):
+            raise ValueError("truth manifest case is invalid")
+        name = item.get("name")
+        if not isinstance(name, str) or name not in audits:
+            raise ValueError(f"truth manifest case has no audit: {name}")
+        audit = audits[name]
+        source = Path(str(item.get("source_project", ""))).resolve()
+        if not source.is_file() or not source.is_relative_to(sources):
+            raise ValueError(f"truth source is outside accepted sources: {source}")
+        source_sha256 = hashlib.sha256(source.read_bytes()).hexdigest()
+        if source_sha256 != audit.get("sha256"):
+            raise ValueError(f"truth source hash changed for {name}")
+        if source_sha256 != preparation.get("source_sha256", {}).get(name):
+            raise ValueError(f"preparation source hash changed for {name}")
+        comparisons = {
+            "expected_confirmed_edges": "confirmed_edges",
+            "expected_error_codes": "expected_error_codes",
+            "expected_unresolved_codes": "expected_unresolved_codes",
+            "minimum_object_count": "object_count",
+        }
+        for manifest_field, audit_field in comparisons.items():
+            if item.get(manifest_field) != audit.get(audit_field):
+                raise ValueError(
+                    f"manifest and audit disagree for {name}:{manifest_field}"
+                )
+        reviewed_cases.append(
+            {
+                "name": name,
+                "source_project": str(source),
+                "source_sha256": source_sha256,
+                "object_count": audit["object_count"],
+                "confirmed_edges": audit["confirmed_edges"],
+                "expected_error_codes": audit["expected_error_codes"],
+                "expected_unresolved_codes": audit[
+                    "expected_unresolved_codes"
+                ],
+                "required_source_capabilities": item[
+                    "required_source_capabilities"
+                ],
+            }
+        )
+    return {
+        "schema_version": 1,
+        "status": "PENDING_APPROVAL",
+        "manifest": str(manifest),
+        "manifest_sha256": hashlib.sha256(manifest.read_bytes()).hexdigest(),
+        "recipe_sha256": construction.get("recipe_sha256"),
+        "semantic_probe": preparation.get("semantic_probe"),
+        "pscad": preparation.get("pscad"),
+        "owned_pids": preparation.get("owned_pids"),
+        "owned_processes_cleaned": preparation.get(
+            "owned_processes_cleaned"
+        ),
+        "cases": reviewed_cases,
+    }
+
+
 def _probe_port(
     element: ET.Element | None,
     recipe: PortRecipe,
@@ -1333,6 +1413,28 @@ def _publish_command(arguments: argparse.Namespace) -> int:
     return 0
 
 
+def _review_command(arguments: argparse.Namespace) -> int:
+    sources = arguments.sources.resolve()
+    destination = sources / "truth-review.json"
+    if destination.exists():
+        raise FileExistsError(f"refusing existing truth review: {destination}")
+    review = review_truth_set(sources, arguments.manifest)
+    _write_json(destination, review)
+    digest = hashlib.sha256(destination.read_bytes()).hexdigest()
+    for case in review["cases"]:
+        print(
+            "TOPOLOGY_TRUTH_REVIEW_CASE="
+            f"{case['name']} objects={case['object_count']} "
+            f"nets={len(case['confirmed_edges'])} "
+            f"errors={len(case['expected_error_codes'])} "
+            f"unresolved={len(case['expected_unresolved_codes'])} "
+            f"sha256={case['source_sha256']}"
+        )
+    print(f"TOPOLOGY_TRUTH_REVIEW={destination}")
+    print(f"TOPOLOGY_TRUTH_REVIEW_SHA256={digest}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     commands = parser.add_subparsers(dest="command", required=True)
@@ -1359,6 +1461,11 @@ def main(argv: list[str] | None = None) -> int:
     publish.add_argument("--x64", action="store_true")
     publish.add_argument("--owned-pids", default="")
     publish.set_defaults(handler=_publish_command)
+
+    review = commands.add_parser("review")
+    review.add_argument("--sources", type=Path, required=True)
+    review.add_argument("--manifest", type=Path, required=True)
+    review.set_defaults(handler=_review_command)
 
     arguments = parser.parse_args(argv)
     return arguments.handler(arguments)
