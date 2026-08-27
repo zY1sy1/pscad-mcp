@@ -4,7 +4,7 @@ import asyncio
 
 from pscad_mcp.main import create_server
 from pscad_mcp.tools import lcc_tools
-from pscad_mcp.tools.catalog import TOOL_SPECS
+from pscad_mcp.tools.catalog import FULL_TOOL_NAMES, TOOL_SPECS
 
 
 def test_lcc_tools_are_registered_with_exact_names():
@@ -13,7 +13,7 @@ def test_lcc_tools_are_registered_with_exact_names():
     }
 
     assert {"plan_lcc_model", "build_lcc_model", "get_lcc_build_status", "validate_lcc_model"} <= names
-    assert len(names) == 83
+    assert names == FULL_TOOL_NAMES
 
 
 def test_fixed_lcc_build_catalog_records_the_documented_backend_boundary():

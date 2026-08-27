@@ -47,6 +47,7 @@ def create_server(environ: Mapping[str, str] | None = None) -> FastMCP:
     profile = parse_tool_profile(os.environ if environ is None else environ)
     mcp = FastMCP("PSCAD-Modular", instructions=SERVER_INSTRUCTIONS)
     mcp._pscad_tool_profile = profile
+    mcp._pscad_learning_tool_names = set()
 
     # Register tool groups (SRP)
     register_app_tools(mcp)

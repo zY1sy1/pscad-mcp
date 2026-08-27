@@ -16,7 +16,12 @@ from pscad_mcp.learning.recorder import learning_recorder
 from pscad_mcp.learning.service import LearningRuntime
 from pscad_mcp.tools import learning_tools
 from pscad_mcp.tools import hvdc_tools
-from pscad_mcp.tools.catalog import FULL_TOOL_NAMES, TOOL_GROUPS, TOOL_SPECS
+from pscad_mcp.tools.catalog import (
+    COMPATIBILITY_TOOL_NAMES,
+    FULL_TOOL_NAMES,
+    TOOL_GROUPS,
+    TOOL_SPECS,
+)
 
 
 @pytest.mark.asyncio
@@ -79,10 +84,11 @@ async def test_mcp_entry_rejects_an_arbitrary_kind_without_echoing_it():
     assert "SECRET_FREE_TEXT" not in repr(structured)
 
 
-def test_server_registers_83_unique_tools_and_silent_instructions():
+def test_server_registers_full_inventory_and_silent_instructions():
     server = create_server(environ={})
     names = {tool.name for tool in server._tool_manager.list_tools()}
-    assert len(names) == 83
+    assert names == FULL_TOOL_NAMES
+    assert len(COMPATIBILITY_TOOL_NAMES) == 83
     assert {
         "record_goal_failure",
         "review_improvement_backlog",
@@ -96,6 +102,21 @@ def test_server_registers_83_unique_tools_and_silent_instructions():
     assert "record_goal_failure" in SERVER_INSTRUCTIONS
     assert "inspect it now or leave it for the weekly review" in SERVER_INSTRUCTIONS
     assert "Do not start remediation automatically" in SERVER_INSTRUCTIONS
+
+
+def test_learning_eligibility_excludes_non_recorded_tools():
+    server = create_server(environ={})
+
+    assert server._pscad_registered_tool_names == set(FULL_TOOL_NAMES)
+    assert server._pscad_learning_tool_names == set(
+        COMPATIBILITY_TOOL_NAMES - TOOL_GROUPS["learning"]
+    )
+
+
+def test_learning_only_profile_has_an_explicit_empty_eligibility_set():
+    server = create_server(environ={"PSCAD_MCP_TOOL_PROFILE": "learning"})
+
+    assert server._pscad_learning_tool_names == set()
 
 
 @pytest.mark.parametrize("creation_order", ["full-first", "scoped-first"])
@@ -189,16 +210,90 @@ async def test_learning_primary_tool_is_scoped_per_server_profile(
         (
             GoalFailureKind.UNKNOWN,
             "list_projects",
-            frozenset(
-                TOOL_GROUPS["core"] | TOOL_GROUPS["learning"]
-            ),
+            TOOL_GROUPS["core"],
         ),
         (
             GoalFailureKind.UNKNOWN,
             "run_hvdc_scenario",
-            FULL_TOOL_NAMES,
+            COMPATIBILITY_TOOL_NAMES - TOOL_GROUPS["learning"],
         ),
     ]
+
+
+@pytest.mark.parametrize(
+    "primary_tool",
+    [
+        "get_pscad_capabilities",
+        "record_goal_failure",
+        "review_improvement_backlog",
+        "clear_learning_history",
+    ],
+)
+@pytest.mark.asyncio
+async def test_non_recorded_tool_cannot_be_an_explicit_learning_primary(
+    primary_tool,
+    monkeypatch,
+):
+    runtime = MagicMock()
+    monkeypatch.setattr(learning_tools, "learning_runtime", runtime)
+    server = create_server(environ={})
+
+    _, rejected = await server._tool_manager.call_tool(
+        "record_goal_failure",
+        {"failure_kind": "unknown", "primary_tool": primary_tool},
+        convert_result=True,
+    )
+
+    assert rejected["error"]["code"] == "INVALID_ARGUMENT"
+    assert primary_tool not in repr(rejected)
+    runtime.record_goal_failure.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_capability_tool_cannot_be_an_automatic_learning_primary(
+    monkeypatch,
+    tmp_path,
+):
+    config = LearningConfig(
+        enabled=True,
+        database_path=tmp_path / "learning.sqlite3",
+        backlog_path=tmp_path / "improvement-backlog.md",
+        retention_days=90,
+        max_events=20_000,
+        issue=None,
+    )
+    runtime = LearningRuntime(config_loader=lambda: config)
+    monkeypatch.setattr(learning_tools, "learning_runtime", runtime)
+    monkeypatch.setattr(learning_recorder, "_runtime", runtime)
+
+    async def disconnected_status():
+        return {"connected": False, "backend": None, "version": None}
+
+    from pscad_mcp.tools import capability_tools
+
+    monkeypatch.setattr(
+        capability_tools.pscad_manager,
+        "get_status",
+        disconnected_status,
+    )
+    server = create_server(environ={})
+    await server._tool_manager.call_tool(
+        "get_pscad_capabilities", {}, convert_result=True
+    )
+    await server._tool_manager.call_tool(
+        "record_goal_failure",
+        {"failure_kind": "unknown"},
+        convert_result=True,
+    )
+
+    failures = runtime._service._store.load_goal_failures(  # type: ignore[union-attr]
+        "1970-01-01T00:00:00+00:00"
+    )
+    invocations = runtime._service._store.load_invocations(  # type: ignore[union-attr]
+        "1970-01-01T00:00:00+00:00"
+    )
+    assert [failure.primary_tool for failure in failures] == [None]
+    assert invocations == []
 
 
 @pytest.mark.parametrize("creation_order", ["full-first", "scoped-first"])

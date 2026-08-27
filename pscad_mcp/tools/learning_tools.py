@@ -68,10 +68,10 @@ def _bind_record_goal_failure(mcp: FastMCP):
         failure_kind: str,
         primary_tool: str | None = None,
     ) -> dict[str, Any]:
-        registered_names = frozenset(
-            getattr(mcp, "_pscad_registered_tool_names", set())
+        eligible_names = frozenset(
+            getattr(mcp, "_pscad_learning_tool_names", set())
         )
-        if primary_tool is not None and primary_tool not in registered_names:
+        if primary_tool is not None and primary_tool not in eligible_names:
             raise BackendError(
                 "INVALID_ARGUMENT",
                 "The supplied tool name is not registered.",
@@ -81,7 +81,7 @@ def _bind_record_goal_failure(mcp: FastMCP):
         return learning_runtime.record_goal_failure(
             _failure_kind(failure_kind),
             primary_tool,
-            allowed_tool_names=registered_names,
+            allowed_tool_names=eligible_names,
         )
 
     return bound

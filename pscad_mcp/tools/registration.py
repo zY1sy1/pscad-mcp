@@ -19,6 +19,11 @@ from ..core.connection_manager import pscad_manager
 from ..learning.models import InvocationOutcome
 from ..learning.recorder import InvocationRecorder, learning_recorder
 from .catalog import TOOL_SPECS
+from .identifiers import (
+    BACKEND_NAME_PATTERN,
+    PSCAD_VERSION_PATTERN,
+    bounded_identifier,
+)
 
 
 P = ParamSpec("P")
@@ -27,8 +32,6 @@ _LOGGER = logging.getLogger("pscad-mcp.learning")
 _WARNING_LOCK = threading.Lock()
 _WARNING_EMITTED = False
 _ERROR_CODE = re.compile(r"[A-Z][A-Z0-9_]{0,63}\Z")
-_BACKEND_NAME = re.compile(r"[a-z][a-z0-9_-]{0,31}\Z")
-_PSCAD_VERSION = re.compile(r"[0-9A-Za-z][0-9A-Za-z._+-]{0,31}\Z")
 
 
 def _record_safely(action: Callable[[], Any], fallback: Any = None) -> Any:
@@ -46,28 +49,19 @@ def _record_safely(action: Callable[[], Any], fallback: Any = None) -> Any:
         return fallback
 
 
-def _bounded_identifier(
-    value: Any,
-    pattern: re.Pattern[str],
-) -> str | None:
-    if isinstance(value, str) and pattern.fullmatch(value) is not None:
-        return value
-    return None
-
-
 def _snapshot_metadata() -> dict[str, str | None]:
     def read_snapshot() -> dict[str, str | None]:
         snapshot = pscad_manager.learning_snapshot()
         if not isinstance(snapshot, Mapping):
             return {"backend": None, "pscad_version": None}
         return {
-            "backend": _bounded_identifier(
+            "backend": bounded_identifier(
                 snapshot.get("backend"),
-                _BACKEND_NAME,
+                BACKEND_NAME_PATTERN,
             ),
-            "pscad_version": _bounded_identifier(
+            "pscad_version": bounded_identifier(
                 snapshot.get("pscad_version"),
-                _PSCAD_VERSION,
+                PSCAD_VERSION_PATTERN,
             ),
         }
 
@@ -90,11 +84,11 @@ def _outcome_metadata(
                 None,
                 snapshot.get("backend"),
             )
-        error_code = _bounded_identifier(error.get("code"), _ERROR_CODE)
+        error_code = bounded_identifier(error.get("code"), _ERROR_CODE)
         retryable = error.get("retryable")
-        error_backend = _bounded_identifier(
+        error_backend = bounded_identifier(
             error.get("backend"),
-            _BACKEND_NAME,
+            BACKEND_NAME_PATTERN,
         )
     except Exception:
         return (
@@ -310,4 +304,9 @@ def register_tool(
         setattr(mcp, "_pscad_registered_tool_names", registered_names)
     registered_names.add(name)
     if record_learning:
+        learning_names = getattr(mcp, "_pscad_learning_tool_names", None)
+        if learning_names is None:
+            learning_names = set()
+            setattr(mcp, "_pscad_learning_tool_names", learning_names)
+        learning_names.add(name)
         _record_safely(lambda: recorder.register_tool_name(name))

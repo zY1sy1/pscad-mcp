@@ -8,13 +8,13 @@ from typing import Any
 from mcp.server.fastmcp import FastMCP
 
 from ..core.connection_manager import pscad_manager
-from .catalog import FULL_TOOL_NAMES, TOOL_SPECS, ToolProfile
-from .registration import (
-    _BACKEND_NAME,
-    _PSCAD_VERSION,
-    _bounded_identifier,
-    register_tool,
+from .catalog import FULL_TOOL_NAMES, TOOL_GROUPS, TOOL_SPECS, ToolProfile
+from .identifiers import (
+    BACKEND_NAME_PATTERN,
+    PSCAD_VERSION_PATTERN,
+    bounded_identifier,
 )
+from .registration import register_tool
 
 
 _UNKNOWN_CONNECTION = {
@@ -32,8 +32,14 @@ def _bounded_connection(connection: object) -> dict[str, bool | str | None]:
         return dict(_UNKNOWN_CONNECTION)
     try:
         connected = connection.get("connected") is True
-        backend = _bounded_identifier(connection.get("backend"), _BACKEND_NAME)
-        version = _bounded_identifier(connection.get("version"), _PSCAD_VERSION)
+        backend = bounded_identifier(
+            connection.get("backend"),
+            BACKEND_NAME_PATTERN,
+        )
+        version = bounded_identifier(
+            connection.get("version"),
+            PSCAD_VERSION_PATTERN,
+        )
     except Exception:
         return dict(_UNKNOWN_CONNECTION)
     if not connected or backend not in _KNOWN_BACKENDS:
@@ -46,20 +52,52 @@ def _bounded_connection(connection: object) -> dict[str, bool | str | None]:
 
 
 def _catalog_names(values: Iterable[object]) -> frozenset[str]:
-    return frozenset(
-        value
-        for value in values
-        if isinstance(value, str) and value in FULL_TOOL_NAMES
-    )
+    try:
+        names: set[str] = set()
+        for index, value in enumerate(values):
+            if index >= len(FULL_TOOL_NAMES):
+                return frozenset()
+            if type(value) is str and value in FULL_TOOL_NAMES:
+                names.add(value)
+    except Exception:
+        return frozenset()
+    return frozenset(names)
+
+
+def _bounded_profile(profile: object) -> tuple[str, frozenset[str]]:
+    try:
+        if not isinstance(profile, ToolProfile):
+            return "invalid", frozenset()
+        groups = profile.groups
+        if (
+            type(groups) is not frozenset
+            or not groups
+            or len(groups) > len(TOOL_GROUPS)
+            or any(type(group) is not str for group in groups)
+            or not groups <= TOOL_GROUPS.keys()
+        ):
+            return "invalid", frozenset()
+        bounded_groups = frozenset(groups)
+        label = (
+            "full"
+            if type(profile.label) is str
+            and profile.label == "full"
+            and bounded_groups == TOOL_GROUPS.keys()
+            else ",".join(sorted(bounded_groups))
+        )
+        return label, bounded_groups
+    except Exception:
+        return "invalid", frozenset()
 
 
 def build_capability_payload(
     *,
-    profile: ToolProfile,
+    profile: object,
     registered_names: Iterable[object],
     connection: object,
 ) -> dict[str, Any]:
     """Build a deterministic capability response without exposing raw values."""
+    profile_label, registered_groups = _bounded_profile(profile)
     registered = _catalog_names(registered_names)
     bounded_connection = _bounded_connection(connection)
     connected = bounded_connection["connected"] is True
@@ -88,8 +126,8 @@ def build_capability_payload(
         )
 
     return {
-        "profile": profile.label,
-        "registered_groups": sorted(profile.groups),
+        "profile": profile_label,
+        "registered_groups": sorted(registered_groups),
         "registered_tools": sorted(registered),
         "inactive_tools": sorted(FULL_TOOL_NAMES - registered),
         "connection": bounded_connection,

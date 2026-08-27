@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 from pscad_mcp.main import create_server
 from pscad_mcp.tools import lcc_parametric_tools
+from pscad_mcp.tools.catalog import FULL_TOOL_NAMES
 
 
 def test_parametric_lcc_tools_are_registered():
@@ -18,7 +19,7 @@ def test_parametric_lcc_tools_are_registered():
         "validate_lcc_operating_modes",
     }
     assert expected <= names
-    assert len(names) == 83
+    assert names == FULL_TOOL_NAMES
     by_name = {tool.name: tool for tool in tools}
     assert set(by_name["plan_parametric_lcc_model"].parameters["required"]) == {
         "request", "template_path", "project_name", "folder",

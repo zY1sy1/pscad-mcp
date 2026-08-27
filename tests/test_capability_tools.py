@@ -4,7 +4,10 @@ import pytest
 
 from pscad_mcp.main import create_server
 from pscad_mcp.tools import capability_tools
-from pscad_mcp.tools.capability_tools import build_capability_payload
+from pscad_mcp.tools.capability_tools import (
+    build_capability_payload,
+    register_capability_tool,
+)
 from pscad_mcp.tools.catalog import (
     COMPATIBILITY_TOOL_NAMES,
     FULL_TOOL_NAMES,
@@ -134,6 +137,91 @@ def test_unknown_but_well_formed_backend_name_is_not_disclosed():
     assert "secret_backend" not in json.dumps(payload)
 
 
+@pytest.mark.parametrize("failure_kind", ["iterator", "string-subclass"])
+def test_registered_name_normalization_fails_closed_without_partial_values(
+    failure_kind,
+):
+    class ExplodingNames:
+        def __iter__(self):
+            yield "list_projects"
+            raise RuntimeError("SECRET_REGISTERED_ITERATOR")
+
+    class ExplodingString(str):
+        def __hash__(self):
+            raise RuntimeError("SECRET_STRING_SUBCLASS")
+
+    registered_names = (
+        ExplodingNames()
+        if failure_kind == "iterator"
+        else [ExplodingString("list_projects")]
+    )
+    payload = build_capability_payload(
+        profile=parse_tool_profile({}),
+        registered_names=registered_names,
+        connection={"connected": False, "backend": None, "version": None},
+    )
+
+    assert payload["registered_tools"] == []
+    assert payload["inactive_tools"] == sorted(FULL_TOOL_NAMES)
+    assert "SECRET" not in json.dumps(payload)
+
+
+def test_registered_name_normalization_has_a_fixed_iteration_bound():
+    class ExcessNames:
+        def __init__(self):
+            self.count = 0
+
+        def __iter__(self):
+            for _ in range(len(FULL_TOOL_NAMES) + 1):
+                self.count += 1
+                yield "list_projects"
+
+    names = ExcessNames()
+    payload = build_capability_payload(
+        profile=parse_tool_profile({}),
+        registered_names=names,
+        connection={"connected": False, "backend": None, "version": None},
+    )
+
+    assert payload["registered_tools"] == []
+    assert payload["inactive_tools"] == sorted(FULL_TOOL_NAMES)
+    assert names.count == len(FULL_TOOL_NAMES) + 1
+
+
+@pytest.mark.parametrize(
+    ("profile", "expected_label", "expected_groups"),
+    [
+        (
+            capability_tools.ToolProfile("SECRET_PROFILE", frozenset({"core"})),
+            "core",
+            ["core"],
+        ),
+        (
+            capability_tools.ToolProfile(
+                "SECRET_PROFILE",
+                frozenset({"SECRET_GROUP"}),
+            ),
+            "invalid",
+            [],
+        ),
+    ],
+)
+def test_forged_profile_is_rebuilt_or_safely_degraded(
+    profile,
+    expected_label,
+    expected_groups,
+):
+    payload = build_capability_payload(
+        profile=profile,
+        registered_names=FULL_TOOL_NAMES,
+        connection={"connected": False, "backend": None, "version": None},
+    )
+
+    assert payload["profile"] == expected_label
+    assert payload["registered_groups"] == expected_groups
+    assert "SECRET" not in json.dumps(payload)
+
+
 @pytest.mark.asyncio
 async def test_registered_capability_tool_probes_status_without_learning(monkeypatch):
     calls = []
@@ -205,4 +293,49 @@ async def test_malformed_status_mapping_becomes_unknown_without_raw_error(monkey
         "backend": None,
         "version": None,
     }
+    assert "SECRET" not in json.dumps(payload)
+
+
+@pytest.mark.asyncio
+async def test_mcp_capability_tool_degrades_malicious_server_local_inputs(monkeypatch):
+    class ExplodingNames:
+        def __iter__(self):
+            raise RuntimeError("SECRET_MCP_NAMES")
+
+    async def status():
+        return {"connected": False, "backend": None, "version": None}
+
+    monkeypatch.setattr(capability_tools.pscad_manager, "get_status", status)
+    server = create_server(environ={})
+    server._pscad_registered_tool_names = ExplodingNames()
+
+    _, payload = await server._tool_manager.call_tool(
+        "get_pscad_capabilities", {}, convert_result=True
+    )
+    assert payload["registered_tools"] == []
+    assert "error" not in payload
+    assert "SECRET" not in json.dumps(payload)
+
+
+@pytest.mark.asyncio
+async def test_mcp_capability_tool_degrades_a_forged_profile(monkeypatch):
+    from mcp.server.fastmcp import FastMCP
+
+    async def status():
+        return {"connected": False, "backend": None, "version": None}
+
+    monkeypatch.setattr(capability_tools.pscad_manager, "get_status", status)
+    server = FastMCP("forged-profile")
+    server._pscad_tool_profile = capability_tools.ToolProfile(
+        "SECRET_PROFILE",
+        frozenset({"SECRET_GROUP"}),
+    )
+    register_capability_tool(server)
+
+    _, payload = await server._tool_manager.call_tool(
+        "get_pscad_capabilities", {}, convert_result=True
+    )
+    assert payload["profile"] == "invalid"
+    assert payload["registered_groups"] == []
+    assert "error" not in payload
     assert "SECRET" not in json.dumps(payload)
