@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import hashlib
 import shutil
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
 from pscad_mcp.hvdc.scanner import scan_project
+from pscad_mcp.hvdc.builders.mmc.assets import load_packaged_asset_set
+from pscad_mcp.hvdc.builders.mmc.template_audit import build_template_audit
 
 
 FIXTURES = Path(__file__).parent / "fixtures" / "mmc_synthetic"
@@ -46,3 +49,19 @@ def make_synthetic_official_shape(root: Path) -> tuple[Path, Path]:
     shutil.copy2(FIXTURES / "official_shape.pscx", project)
     shutil.copy2(FIXTURES / "official_shape.pslx", library)
     return project, library
+
+
+def pwm_audit():
+    report = build_template_audit(FIXTURES / "official_shape.pscx", FIXTURES / "official_shape.pslx")
+    paths = tuple(
+        {
+            **item,
+            "repair_policy": "verified_rebind" if item["kind"] in {"line_database", "line_constants"} else item["repair_policy"],
+        }
+        for item in report.absolute_paths
+    )
+    return replace(report, absolute_paths=paths)
+
+
+def avm_assets():
+    return load_packaged_asset_set()
