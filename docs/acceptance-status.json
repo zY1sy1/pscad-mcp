@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-08-24T22:00:00+08:00",
+  "updated_at": "2026-08-28T02:00:21+08:00",
   "policy": "A licensed PASS applies only to the named scope and commit. It must not be inherited by another builder, domain workflow, or later commit.",
   "scopes": [
     {
@@ -13,6 +13,18 @@
         "commit": null
       },
       "note": "The managed PSCAD 4.6.2 Legacy core workflow was accepted historically, but no single durable machine-readable report is committed. Rerun scripts/run_legacy_acceptance.ps1 for a release claim."
+    },
+    {
+      "scope": "unified_topology_462",
+      "implementation_status": "INTEGRATION_BRANCH",
+      "licensed_status": "PASS",
+      "pscad_version": "4.6.2",
+      "evidence": {
+        "report_path": "D:/PSCAD-Workspace/topology-acceptance/topology-acceptance-20260828-015848-7747211/topology-acceptance-report.json",
+        "sha256": "1083f8b9516457542026a75cf4b416d2ca022dfd88747e55ae189e61aa0ebb56",
+        "commit": "a78d5e0e9bafe06221d32fe1153b66593fb61a7a"
+      },
+      "note": "Licensed read-only Phase 1 topology acceptance passed for generic-v1 on the named commit. This scope does not imply HVDC, LCC, MMC, PSCAD 5.x, or later-commit acceptance."
     },
     {
       "scope": "fixed_cigre_lcc",

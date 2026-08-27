@@ -85,6 +85,26 @@ are never promoted to confirmed nets or included in the confirmed topology
 hash. Licensed PSCAD 4.6.2 Legacy is the primary live target. PSCAD 5.x has
 contract coverage only and no real topology acceptance claim.
 
+The licensed topology gate is opt-in and runs only against timestamped project
+copies prepared from an approved absolute truth manifest:
+
+```powershell
+& .\scripts\run_topology_acceptance.ps1 `
+  -Workspace 'D:\PSCAD-Workspace\topology-acceptance' `
+  -Manifest 'D:\PSCAD-Workspace\topology-truth.json' `
+  -Version '4.6.2' -X64
+```
+
+The runner refuses source projects inside the acceptance workspace and refuses
+to start while PSCAD is open. A `PASS` report must preserve project and object
+inventory hashes, match complete confirmed-net and diagnostic truth, remain
+deterministic, and satisfy the 500/2,000-object performance gates. The named
+`unified_topology_462` Phase 1 scope passed these gates on licensed PSCAD 4.6.2;
+its exact report, SHA-256, and tested commit are recorded in
+`docs/acceptance-status.json`. That generic-only result does not imply HVDC,
+LCC, MMC, PSCAD 5.x, or later-commit acceptance, and no acceptance status is
+inferred from the non-licensed contract suite.
+
 The HVDC domain layer adds ten tools without changing the original generic
 inventory: `inspect_hvdc_project`, `get_hvdc_assets`, `get_hvdc_mappings`,
 `validate_hvdc_project`, `run_hvdc_scenario`, `get_hvdc_scenario_status`,

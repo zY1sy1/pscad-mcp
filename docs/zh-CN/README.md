@@ -48,6 +48,24 @@ Legacy PSCAD 4.6.2 后端只支持启动新的受管 Automation 实例，不能�
 不会进入已确认拓扑哈希。实时目标以 licensed PSCAD 4.6.2 Legacy 为主；PSCAD
 5.x 目前只有契约测试，不声称拓扑实机验收通过。
 
+授权拓扑门禁必须显式启用，并只在批准的绝对 truth manifest 所生成的时间戳工程
+副本上运行：
+
+```powershell
+& .\scripts\run_topology_acceptance.ps1 `
+  -Workspace 'D:\PSCAD-Workspace\topology-acceptance' `
+  -Manifest 'D:\PSCAD-Workspace\topology-truth.json' `
+  -Version '4.6.2' -X64
+```
+
+runner 会拒绝位于验收工作区内的源工程，也会在已有 PSCAD 进程时拒绝启动。
+`PASS` 报告必须证明工程哈希和对象清单哈希未变化、完整确认网络和诊断真值精确
+匹配、拓扑结果确定，并满足 500/2,000 对象性能门限。命名范围
+`unified_topology_462` 已在 licensed PSCAD 4.6.2 上通过 Phase 1 门禁，精确报告、
+SHA-256 和受测提交记录在 `docs/acceptance-status.json`。该结果仅对应 generic
+规则，不代表 HVDC、LCC、MMC、PSCAD 5.x 或后续提交已通过；非许可契约测试也
+不能替代该实机状态。
+
 ### 固定 CIGRE LCC 构建器
 
 LCC 领域提供四个工具：`plan_lcc_model`、`build_lcc_model`、

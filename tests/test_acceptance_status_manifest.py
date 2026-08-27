@@ -13,12 +13,20 @@ def test_acceptance_status_manifest_separates_live_acceptance_scopes():
     scopes = {item["scope"]: item for item in payload["scopes"]}
     assert set(scopes) == {
         "legacy_core_462",
+        "unified_topology_462",
         "fixed_cigre_lcc",
         "parametric_lcc",
         "hvdc_scenarios",
         "mmc_stage_a",
     }
     assert scopes["legacy_core_462"]["licensed_status"] == "PASS_HISTORICAL"
+    topology = scopes["unified_topology_462"]
+    assert topology["licensed_status"] == "PASS"
+    assert topology["pscad_version"] == "4.6.2"
+    assert topology["evidence"]["commit"] == (
+        "a78d5e0e9bafe06221d32fe1153b66593fb61a7a"
+    )
+    assert len(topology["evidence"]["sha256"]) == 64
     assert scopes["fixed_cigre_lcc"]["licensed_status"] == "INCOMPLETE_ANALYSIS"
     assert scopes["parametric_lcc"]["licensed_status"] in {
         "NOT_RUN_ON_INTEGRATED_COMMIT",
