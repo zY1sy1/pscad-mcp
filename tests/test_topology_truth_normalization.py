@@ -71,3 +71,19 @@ async def test_normalizer_cleans_up_an_owned_unlicensed_session(tmp_path):
 
     backend.quit.assert_awaited_once()
     backend.disconnect.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_normalizer_uses_pscad_sanitized_project_identity(tmp_path):
+    project = tmp_path / "custom-library.pscx"
+    project.write_text(
+        '<project name="custom_library"/>', encoding="utf-8"
+    )
+    backend = _owned_backend((project,))
+    backend.list_projects.return_value = [
+        type("Project", (), {"name": "custom_library"})()
+    ]
+
+    assert await normalize_projects((project,), backend) == (project,)
+
+    backend.save_project.assert_awaited_once_with("custom_library")

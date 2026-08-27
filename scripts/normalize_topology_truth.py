@@ -5,6 +5,7 @@ import asyncio
 import json
 from pathlib import Path
 from typing import Any
+import xml.etree.ElementTree as ET
 
 from pscad_mcp.core.backend.legacy import LegacyBackend
 from pscad_mcp.core.executor import robust_executor
@@ -29,6 +30,10 @@ async def _load_owned_projects(
     missing_files = [str(path) for path in resolved if not path.is_file()]
     if missing_files:
         raise FileNotFoundError(f"missing topology projects: {missing_files}")
+    expected_names = {
+        path: _project_name(path)
+        for path in resolved
+    }
     info = None
     try:
         info = await backend.attach()
@@ -42,13 +47,22 @@ async def _load_owned_projects(
             if managed_pid is not None:
                 print(f"ACCEPTANCE_PID={managed_pid}")
         await backend.load_projects([str(path) for path in resolved])
-        loaded = {item.name for item in await backend.list_projects()}
-        missing = sorted(path.stem for path in resolved if path.stem not in loaded)
+        loaded = {
+            item.name.casefold(): item.name
+            for item in await backend.list_projects()
+        }
+        missing = sorted(
+            name
+            for name in expected_names.values()
+            if name.casefold() not in loaded
+        )
         if missing:
             raise RuntimeError(f"PSCAD did not load generated projects: {missing}")
         if save:
             for path in resolved:
-                await backend.save_project(path.stem)
+                await backend.save_project(
+                    loaded[expected_names[path].casefold()]
+                )
         return resolved
     finally:
         owned = bool(
@@ -60,6 +74,14 @@ async def _load_owned_projects(
                 await backend.quit()
         finally:
             await backend.disconnect()
+
+
+def _project_name(path: Path) -> str:
+    root = ET.parse(path).getroot()
+    name = (root.get("name") or "").strip()
+    if not name:
+        raise ValueError(f"project identity is missing: {path}")
+    return name
 
 
 def _backend(version: str, x64: bool) -> LegacyBackend:

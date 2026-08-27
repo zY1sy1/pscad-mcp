@@ -94,6 +94,10 @@ class CaseRecipe:
     def object_count(self) -> int:
         return len(self.components) + len(self.conductors) + len(self.labels)
 
+    @property
+    def project_name(self) -> str:
+        return self.name.replace("-", "_")
+
 
 def _port(
     name: str,
@@ -338,7 +342,7 @@ def generate_cases(
         case_directory.mkdir()
         tree = ET.parse(seed)
         root = tree.getroot()
-        _rewrite_identity(root, case.name)
+        _rewrite_identity(root, case.project_name)
         _replace_definitions(root, case)
         _replace_main_schematic(root, case)
         _replace_hierarchy(root, case)
@@ -352,7 +356,7 @@ def generate_cases(
 def audit_case(path: Path, case: CaseRecipe) -> dict[str, object]:
     payload = path.read_bytes()
     root = ET.fromstring(payload)
-    if root.get("name") != case.name:
+    if root.get("name") != case.project_name:
         raise ValueError(f"project identity changed for {case.name}")
     observed_components = _audit_components(root, case)
     observed_conductors = _audit_conductors(root, case)
@@ -688,7 +692,7 @@ def _append_component(
     local_definitions = {item.name.casefold() for item in case.definitions}
     definition = component.definition
     if definition.casefold() in local_definitions:
-        definition = f"{case.name}:{definition}"
+        definition = f"{case.project_name}:{definition}"
     element = ET.SubElement(
         schematic,
         "User",
@@ -817,7 +821,7 @@ def _replace_hierarchy(root: ET.Element, case: CaseRecipe) -> None:
             "call",
             {
                 "link": component.object_id,
-                "name": f"{case.name}:{component.definition}",
+                "name": f"{case.project_name}:{component.definition}",
                 "z": str(index),
                 "view": "false",
                 "instance": str(instance),

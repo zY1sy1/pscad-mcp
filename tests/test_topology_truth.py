@@ -94,7 +94,7 @@ def test_generation_uses_native_seed_and_audits_every_declared_record(tmp_path):
     for case in cases:
         path = generated[case.name]
         root = ET.parse(path).getroot()
-        assert root.get("name") == case.name
+        assert root.get("name") == case.project_name
         assert path.name == f"{case.name}.pscx"
         audit = topology_truth.audit_case(path, case)
         assert audit["object_count"] == case.object_count
