@@ -240,6 +240,7 @@ class RecordingMmcService:
         self.parameters: dict[tuple[str, str], dict[str, Any]] = {}
         self.settings: dict[str, Any] = {}
         self.written_paths: list[Path] = []
+        self.scenarios: dict[str, dict[str, Any]] = {}
 
     def _record(self, name: str, *args: Any) -> None:
         self.calls.append((name, args))
@@ -295,7 +296,26 @@ class RecordingMmcService:
         self, project_name: str, scenario: dict[str, Any], *, confirm: bool = False
     ) -> dict[str, Any]:
         self._record("run_scenario", project_name, scenario, confirm)
-        return {"state": "completed", "name": scenario["name"]}
+        scenario_id = f"scenario-{len(self.scenarios)}"
+        self.scenarios[scenario_id] = dict(scenario)
+        return {"scenario_id": scenario_id, "status": "validated"}
+
+    async def scenario_status(self, scenario_id: str) -> dict[str, Any]:
+        self._record("scenario_status", scenario_id)
+        return {
+            "scenario_id": scenario_id,
+            "status": "completed",
+            "output_files": [f"{scenario_id}.out"],
+        }
+
+    async def analyze_results(self, scenario_id: str) -> dict[str, Any]:
+        self._record("analyze_results", scenario_id)
+        return {
+            "scenario_id": scenario_id,
+            "verdict": "PASS",
+            "resolved_channels": [{"canonical": "dc_voltage"}],
+            "metrics": [{"name": "dc_voltage", "status": "observed"}],
+        }
 
     async def get_project_output(self, project_name: str, structured: bool = False) -> dict[str, Any]:
         self._record("get_project_output", project_name, structured)
@@ -319,6 +339,7 @@ class RecordingParametricEngine:
         service: object,
         *,
         candidate_id: str | None = None,
+        **_kwargs: Any,
     ) -> dict[str, object]:
         selected = candidate_id or plan.candidates[0].candidate_id
         self.calls.append((self.name, selected))

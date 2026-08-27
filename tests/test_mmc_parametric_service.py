@@ -150,3 +150,28 @@ def test_validation_without_outputs_cannot_claim_acceptance(tmp_path: Path) -> N
     assert validation["capability_level"] == "built"
     assert validation["accepted"] is False
     assert validation["acceptance"]["status"] == "not_evaluated"
+
+
+def test_project_aware_recommendations_bind_cached_derived_project(
+    tmp_path: Path,
+) -> None:
+    service = make_parametric_service(tmp_path)
+    request = valid_request(model_fidelity="average_value")
+    plan = service.plan_model(
+        request, project_name="CUSTOM_CASE", folder=str(tmp_path)
+    )
+    target = plan["engine_plans"][0]["target_path"]
+
+    result = service.recommend_simulation(target)
+
+    assert {item["engine"] for item in result["recommendations"]} == {
+        "average_value"
+    }
+    assert all(
+        item["scenario"]["derived_project"] == target
+        for item in result["recommendations"]
+    )
+    assert all(
+        item["scenario"]["project"] != target
+        for item in result["recommendations"]
+    )

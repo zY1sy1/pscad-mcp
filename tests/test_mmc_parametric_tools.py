@@ -1,5 +1,8 @@
 import asyncio
 
+from pscad_mcp.core.path_policy import PathPolicy
+from pscad_mcp.core.service import PscadService
+from pscad_mcp.hvdc.service import HvdcDomainService
 from pscad_mcp.main import create_server
 from pscad_mcp.tools import mmc_tools
 from tests.mmc_parametric_fakes import valid_request
@@ -48,3 +51,21 @@ def test_build_wrapper_preserves_confirmation_default_and_forwards_hash(monkeypa
         "D:/workspace",
         {"template_path": None, "library_path": None, "confirm": False},
     )
+
+
+def test_mmc_tools_wires_core_service_through_hvdc_domain_boundary(
+    monkeypatch, tmp_path
+) -> None:
+    core_service = PscadService(
+        lambda: object(),
+        path_policy=PathPolicy(workspace_root=str(tmp_path)),
+    )
+    monkeypatch.setattr(mmc_tools.pscad_manager, "_service", core_service)
+    monkeypatch.setattr(mmc_tools, "_service_instance", None)
+    monkeypatch.setattr(mmc_tools, "_service_backend", None)
+
+    builder = mmc_tools._service()
+
+    assert builder.pscad_service is core_service
+    assert isinstance(builder.scenario_service, HvdcDomainService)
+    assert builder.scenario_service.backend_service is core_service

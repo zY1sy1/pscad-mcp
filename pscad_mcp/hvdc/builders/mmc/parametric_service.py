@@ -68,6 +68,7 @@ class ParametricMmcBuilderService:
         pscad_service: Any = None,
         *,
         workspace_root: str | Path | None = None,
+        scenario_service: Any = None,
         pwm_engine: Any = None,
         avm_engine: Any = None,
         audit_loader: Callable[..., Any] = audit_mmc_template,
@@ -86,6 +87,13 @@ class ParametricMmcBuilderService:
             if self.workspace_root is not None
             else PathPolicy()
         )
+        if scenario_service is None:
+            from ...service import HvdcDomainService
+
+            scenario_service = HvdcDomainService(
+                pscad_service, path_policy=self.path_policy
+            )
+        self.scenario_service = scenario_service
         self.audit_loader = audit_loader
         self.asset_loader = asset_loader
         self.pwm_engine = PwmTemplateEngine() if pwm_engine is None else pwm_engine
@@ -327,9 +335,25 @@ class ParametricMmcBuilderService:
         while True:
             attempted.append(candidate_id)
             try:
-                result = await engine.execute_candidate(
-                    child, self.pscad_service, candidate_id=candidate_id
-                )
+                if child.engine == "detailed_pwm":
+                    design = derive_mmc_parameters(
+                        replace(plan.request, model_fidelity=child.engine)
+                    )
+                    scenarios = [
+                        item.to_dict()["scenario"]
+                        for item in recommend_scenarios(design)
+                    ]
+                    result = await engine.execute_candidate(
+                        child,
+                        self.pscad_service,
+                        candidate_id=candidate_id,
+                        scenario_service=self.scenario_service,
+                        scenarios=scenarios,
+                    )
+                else:
+                    result = await engine.execute_candidate(
+                        child, self.pscad_service, candidate_id=candidate_id
+                    )
                 if not isinstance(result, Mapping) or result.get("state") != "accepted":
                     raise _error(
                         "MMC_ACCEPTANCE_FAILED",
@@ -616,23 +640,25 @@ class ParametricMmcBuilderService:
         objectives: Sequence[str] | None = None,
     ) -> dict[str, Any]:
         if isinstance(request_or_project, str):
-            raise _error(
-                "MMC_REQUEST_INVALID",
-                "Project-only recommendation requires a stored design request.",
-                "recommend_mmc_simulation",
-                project_name=request_or_project,
+            request, fidelity, derived_project = self._request_for_project(
+                request_or_project
             )
-        request = parse_parametric_request(request_or_project)
-        fidelities = (
-            ("detailed_pwm", "average_value")
-            if request.model_fidelity == "both"
-            else (request.model_fidelity,)
-        )
+            fidelities = (fidelity,)
+        else:
+            request = parse_parametric_request(request_or_project)
+            fidelities = (
+                ("detailed_pwm", "average_value")
+                if request.model_fidelity == "both"
+                else (request.model_fidelity,)
+            )
+            derived_project = None
         selected_names = set(objectives or ())
         recommendations = []
         for fidelity in fidelities:
             design = derive_mmc_parameters(replace(request, model_fidelity=fidelity))
-            for item in recommend_scenarios(design):
+            for item in recommend_scenarios(
+                design, derived_project=derived_project
+            ):
                 if not selected_names or item.name in selected_names:
                     recommendations.append(item.to_dict())
         return {
@@ -640,6 +666,26 @@ class ParametricMmcBuilderService:
             "recommendations": recommendations,
             "capabilities": {"intrinsic_dc_fault_blocking": False},
         }
+
+    def _request_for_project(
+        self, project_name: str
+    ) -> tuple[MmcParametricRequest, str, str]:
+        candidate = Path(project_name).expanduser()
+        candidate_stem = candidate.stem.casefold()
+        candidate_path = candidate.resolve() if candidate.is_absolute() else None
+        for plan in reversed(tuple(self._plans.values())):
+            for child in plan.engine_plans:
+                target = Path(child.target_path).expanduser().resolve()
+                path_matches = candidate_path is not None and candidate_path == target
+                name_matches = candidate_stem == child.target_name.casefold()
+                if path_matches or name_matches:
+                    return plan.request, child.engine, str(target)
+        raise _error(
+            "MMC_REQUEST_INVALID",
+            "Project-only recommendation requires a cached immutable design plan.",
+            "recommend_mmc_simulation",
+            project_name=project_name,
+        )
 
     def _project_path(self, value: str | Path) -> Path:
         if self.workspace_root is None:

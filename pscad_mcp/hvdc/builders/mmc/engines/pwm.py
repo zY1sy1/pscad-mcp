@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import hmac
 import shutil
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -19,6 +20,7 @@ _PARAMETER_BINDINGS = {
     "rated_dc_voltage_kv": "requested_dc_voltage_kv",
     "active_power_mw": "requested_active_power_mw",
 }
+_TERMINAL_SCENARIO_STATES = {"completed", "failed", "timed_out"}
 
 
 def _error(code: str, message: str, **details: object) -> BackendError:
@@ -35,6 +37,17 @@ def _require_method(service: object, name: str):
         raise _error(
             "MMC_ENGINE_SERVICE_INVALID",
             f"The PWM engine requires PscadService.{name}().",
+            method=name,
+        )
+    return method
+
+
+def _require_scenario_method(service: object, name: str):
+    method = getattr(service, name, None)
+    if not callable(method):
+        raise _error(
+            "MMC_ENGINE_SERVICE_INVALID",
+            f"The PWM engine requires HvdcDomainService.{name}().",
             method=name,
         )
     return method
@@ -188,6 +201,169 @@ async def _apply_and_read_back(
         )
 
 
+def _bound_scenarios(
+    plan: MmcEnginePlan,
+    scenarios: Sequence[Mapping[str, Any]] | None,
+    source_project: Path,
+    derived_project: Path,
+) -> tuple[dict[str, Any], ...]:
+    supplied = (
+        [dict(item) for item in scenarios]
+        if scenarios is not None
+        else [
+            {
+                "name": name,
+                "profile": "mmc_detailed_pwm_v2",
+                "parameter_changes": [],
+                "events": [],
+                "analysis": {"metrics": ["dc_voltage"]},
+            }
+            for name in plan.scenarios
+        ]
+    )
+    by_name: dict[str, dict[str, Any]] = {}
+    for scenario in supplied:
+        name = scenario.get("name")
+        if not isinstance(name, str) or name in by_name:
+            raise _error(
+                "MMC_PLAN_INVALID",
+                "PWM scenario evidence must bind each planned name exactly once.",
+                scenario=name,
+            )
+        by_name[name] = scenario
+    if set(by_name) != set(plan.scenarios):
+        raise _error(
+            "MMC_PLAN_INVALID",
+            "PWM scenario payloads differ from the immutable child plan.",
+            expected=list(plan.scenarios),
+            observed=sorted(by_name),
+        )
+    result = []
+    for name in plan.scenarios:
+        scenario = dict(by_name[name])
+        scenario["project"] = str(source_project)
+        scenario["derived_project"] = str(derived_project)
+        result.append(scenario)
+    return tuple(result)
+
+
+async def _await_scenario_terminal(
+    scenario_service: object,
+    scenario_id: str,
+    timeout_s: float,
+) -> dict[str, Any]:
+    deadline = asyncio.get_running_loop().time() + timeout_s + 5.0
+    status_method = _require_scenario_method(scenario_service, "scenario_status")
+    while True:
+        status = await status_method(scenario_id)
+        if not isinstance(status, Mapping):
+            raise _error(
+                "MMC_ACCEPTANCE_FAILED",
+                "The HVDC domain returned an invalid PWM scenario status.",
+                scenario_id=scenario_id,
+            )
+        record = dict(status)
+        if record.get("status") in _TERMINAL_SCENARIO_STATES:
+            return record
+        if asyncio.get_running_loop().time() >= deadline:
+            raise _error(
+                "MMC_BUILD_TIMED_OUT",
+                "A PWM acceptance scenario did not reach a terminal state.",
+                scenario_id=scenario_id,
+            )
+        await asyncio.sleep(0.1)
+
+
+async def _execute_scenarios(
+    plan: MmcEnginePlan,
+    scenario_service: object,
+    source_project: Path,
+    derived_project: Path,
+    scenarios: Sequence[Mapping[str, Any]] | None,
+) -> list[dict[str, Any]]:
+    source_hash = _sha256(source_project)
+    results: list[dict[str, Any]] = []
+    run_method = _require_scenario_method(scenario_service, "run_scenario")
+    analyze_method = _require_scenario_method(scenario_service, "analyze_results")
+    for scenario in _bound_scenarios(
+        plan, scenarios, source_project, derived_project
+    ):
+        started = await run_method(
+            str(source_project), scenario, confirm=True
+        )
+        scenario_id = started.get("scenario_id") if isinstance(started, Mapping) else None
+        if not isinstance(scenario_id, str) or not scenario_id:
+            raise _error(
+                "MMC_ACCEPTANCE_FAILED",
+                "The HVDC domain did not return a PWM scenario identifier.",
+                scenario=scenario["name"],
+            )
+        timeout_s = float((scenario.get("run") or {}).get("timeout_s", 300.0))
+        terminal = await _await_scenario_terminal(
+            scenario_service, scenario_id, timeout_s
+        )
+        if terminal.get("status") != "completed":
+            raise _error(
+                "MMC_ACCEPTANCE_FAILED",
+                "A required PWM scenario did not complete successfully.",
+                scenario=scenario["name"],
+                scenario_id=scenario_id,
+                status=terminal.get("status"),
+                error=terminal.get("error"),
+            )
+        output_files = terminal.get("output_files")
+        if not isinstance(output_files, (list, tuple)) or not output_files:
+            raise _error(
+                "MMC_OUTPUT_INCOMPLETE",
+                "A completed PWM scenario produced no result files.",
+                scenario=scenario["name"],
+                scenario_id=scenario_id,
+            )
+        analysis = await analyze_method(scenario_id)
+        if not isinstance(analysis, Mapping) or str(
+            analysis.get("verdict", "")
+        ).upper() != "PASS":
+            raise _error(
+                "MMC_ACCEPTANCE_FAILED",
+                "A completed PWM scenario lacked passing analysis evidence.",
+                scenario=scenario["name"],
+                scenario_id=scenario_id,
+                verdict=(
+                    analysis.get("verdict")
+                    if isinstance(analysis, Mapping)
+                    else None
+                ),
+            )
+        metrics = analysis.get("metrics")
+        channels = analysis.get("resolved_channels")
+        if not isinstance(metrics, list) or not metrics or not isinstance(
+            channels, list
+        ) or not channels:
+            raise _error(
+                "MMC_OUTPUT_INCOMPLETE",
+                "Passing PWM analysis lacked metric or channel evidence.",
+                scenario=scenario["name"],
+                scenario_id=scenario_id,
+            )
+        if not hmac.compare_digest(_sha256(source_project), source_hash):
+            raise _error(
+                "MMC_POSTCONDITION_FAILED",
+                "PWM scenario execution changed its read-only source project.",
+                scenario=scenario["name"],
+                source_project=str(source_project),
+            )
+        results.append(
+            {
+                "name": scenario["name"],
+                "scenario_id": scenario_id,
+                "status": "completed",
+                "output_files": list(output_files),
+                "analysis": dict(analysis),
+            }
+        )
+    return results
+
+
 class PwmTemplateEngine:
     name = "detailed_pwm"
 
@@ -197,6 +373,8 @@ class PwmTemplateEngine:
         service: object,
         *,
         candidate_id: str | None = None,
+        scenario_service: object | None = None,
+        scenarios: Sequence[Mapping[str, Any]] | None = None,
     ) -> dict[str, object]:
         sources = _source_files(plan)
         _preflight_dependencies(plan)
@@ -259,21 +437,19 @@ class PwmTemplateEngine:
             await _require_method(service, "save_project")(project_name, confirm=True)
             scan_project(staged_project)
             await _require_method(service, "build_project")(project_name)
-            scenario_results = []
-            for scenario_name in plan.scenarios:
-                result = await _require_method(service, "run_scenario")(
-                    project_name,
-                    {"name": scenario_name, "profile": f"mmc_{scenario_name}_v2"},
-                    confirm=True,
-                )
-                scenario_results.append(result)
-            outputs = await _require_method(service, "get_project_output")(
-                project_name, structured=True
+            scenario_source = stage / f"{staged_project.stem}_scenario_source.pscx"
+            shutil.copy2(staged_project, scenario_source)
+            scenario_results = await _execute_scenarios(
+                plan,
+                service if scenario_service is None else scenario_service,
+                scenario_source,
+                staged_project,
+                scenarios,
             )
             validation = self.validate(
                 plan,
                 staged_project,
-                dict(outputs) if isinstance(outputs, Mapping) else {"output": outputs},
+                {"scenarios": scenario_results},
             )
             _verify_sources(plan, sources)
             return {
@@ -283,11 +459,14 @@ class PwmTemplateEngine:
                 "candidate_path": str(stage),
                 "project_path": str(staged_project),
                 "library_path": str(staged_library),
-                "written_paths": (str(staged_project), str(staged_library)),
+                "written_paths": (
+                    str(staged_project),
+                    str(staged_library),
+                    str(scenario_source),
+                ),
                 "source_hashes": dict(plan.source_hashes),
                 "project_sha256": _sha256(staged_project),
                 "scenario_results": scenario_results,
-                "outputs": outputs,
                 "validation": validation,
                 "capability_level": "accepted",
             }
@@ -310,18 +489,33 @@ class PwmTemplateEngine:
                 "The staged PWM project is missing after execution.",
                 project_path=str(project_path),
             )
-        verdict = str(outputs.get("verdict", "")).upper()
-        if verdict != "PASS":
+        scenarios = outputs.get("scenarios")
+        if not isinstance(scenarios, list) or len(scenarios) != len(plan.scenarios):
             raise _error(
                 "MMC_ACCEPTANCE_FAILED",
-                "The detailed PWM output did not pass acceptance.",
-                verdict=verdict or "UNKNOWN",
+                "The detailed PWM candidate lacks complete scenario evidence.",
+            )
+        observed = [
+            item.get("name") for item in scenarios if isinstance(item, Mapping)
+        ]
+        if observed != list(plan.scenarios) or any(
+            not isinstance(item, Mapping)
+            or item.get("status") != "completed"
+            or not isinstance(item.get("analysis"), Mapping)
+            or str(item["analysis"].get("verdict", "")).upper() != "PASS"
+            for item in scenarios
+        ):
+            raise _error(
+                "MMC_ACCEPTANCE_FAILED",
+                "The detailed PWM scenario evidence did not pass acceptance.",
+                observed=observed,
             )
         return {
             "verdict": "PASS",
             "model_fidelity": self.name,
             "intrinsic_dc_fault_blocking": False,
             "plan_hash": plan.plan_hash,
+            "scenario_count": len(scenarios),
         }
 
 
@@ -330,9 +524,15 @@ async def execute_pwm_candidate(
     service: object,
     *,
     candidate_id: str | None = None,
+    scenario_service: object | None = None,
+    scenarios: Sequence[Mapping[str, Any]] | None = None,
 ) -> dict[str, object]:
     return await PwmTemplateEngine().execute_candidate(
-        plan, service, candidate_id=candidate_id
+        plan,
+        service,
+        candidate_id=candidate_id,
+        scenario_service=scenario_service,
+        scenarios=scenarios,
     )
 
 

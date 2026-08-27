@@ -25,6 +25,11 @@ def test_recommendations_are_directly_runnable_and_model_aware() -> None:
     assert {item.name for item in pwm} == REQUIRED
     assert {item.name for item in avm} == REQUIRED
     assert all(item.scenario["profile"].startswith("mmc_") for item in pwm + avm)
+    assert all(item.scenario["derived_project"] for item in pwm + avm)
+    assert all(
+        item.scenario["project"] != item.scenario["derived_project"]
+        for item in pwm + avm
+    )
     assert all(
         validate_scenario(item.to_dict()["scenario"])["valid"] for item in pwm + avm
     )

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Any
 
 from ....core.backend.base import BackendError
@@ -163,6 +164,8 @@ def _metric_roles(name: str) -> tuple[str, ...]:
 
 def recommend_scenarios(
     design: MmcDerivedParameters,
+    *,
+    derived_project: str | None = None,
 ) -> tuple[MmcScenarioRecommendation, ...]:
     if not isinstance(design, MmcDerivedParameters) or not design.feasible:
         raise _error("Scenario recommendations require a feasible derived design.")
@@ -173,7 +176,20 @@ def recommend_scenarios(
         if engine == "detailed_pwm"
         else "mmc_average_value_v2"
     )
-    project = "MMC_CASE_pwm" if engine == "detailed_pwm" else "MMC_CASE_avm"
+    default_project = "MMC_CASE_pwm" if engine == "detailed_pwm" else "MMC_CASE_avm"
+    target_project = default_project if derived_project is None else derived_project
+    target_path = Path(target_project).expanduser()
+    if (
+        target_path.is_absolute()
+        or target_path.suffix.casefold() == ".pscx"
+        or "/" in target_project
+        or "\\" in target_project
+    ):
+        source_project = str(
+            target_path.with_name(f"{target_path.stem}_scenario_source.pscx")
+        )
+    else:
+        source_project = f"{target_project}_scenario_source"
     limitations = (
         "half_bridge_intrinsic_dc_fault_blocking=false",
         "dc_fault_acceptance_requires_diode_equivalent_current_and_breaker_evidence",
@@ -192,7 +208,7 @@ def recommend_scenarios(
         metrics = tuple(
             {
                 "role": role,
-                "selector": f"{project}/Main/{role}",
+                "selector": f"{Path(target_project).stem}/Main/{role}",
                 "units": _UNITS[role],
             }
             for role in roles
@@ -207,7 +223,8 @@ def recommend_scenarios(
         scenario = {
             "name": name,
             "profile": profile,
-            "project": project,
+            "project": source_project,
+            "derived_project": target_project,
             "parameter_changes": [],
             "events": events,
             "time_step_s": time_step,
@@ -221,6 +238,8 @@ def recommend_scenarios(
                 "required_units": {role: _UNITS[role] for role in roles},
             },
             "preconditions": [
+                "source_project_copy_is_preexisting_and_distinct",
+                "derived_project_is_preexisting",
                 "saved_project_matches_plan_hash",
                 "project_output_is_enabled",
                 "exact_profile_bindings_are_present",

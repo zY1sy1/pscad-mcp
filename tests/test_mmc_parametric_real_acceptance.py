@@ -208,10 +208,6 @@ async def _run_standard_scenarios(
         service,
         path_policy=PathPolicy(workspace_root=str(case_root)),
     )
-    recommendations = builder.recommend_simulation(request)["recommendations"]
-    expected = len(STANDARD_SCENARIOS) * 2
-    if len(recommendations) != expected:
-        raise AssertionError(f"Expected {expected} MMC recommendations, got {len(recommendations)}")
     engine_paths = {
         str(item["engine"]): Path(str(item["final_path"])).resolve()
         for item in build["engines"]
@@ -222,14 +218,17 @@ async def _run_standard_scenarios(
         source_copy = case_root / f"{final_project.stem}_scenario_source.pscx"
         shutil.copy2(final_project, source_copy)
         source_hash = _sha256(source_copy)
-        selected = [item for item in recommendations if item["engine"] == engine]
+        selected = builder.recommend_simulation(str(final_project))["recommendations"]
         if {item["name"] for item in selected} != set(STANDARD_SCENARIOS):
             raise AssertionError(f"The {engine} recommendation set is incomplete")
         for recommendation in selected:
             scenario = dict(recommendation["scenario"])
-            scenario["derived_project"] = str(final_project)
+            if Path(str(scenario["project"])).resolve() != source_copy:
+                raise AssertionError("The MMC recommendation source binding is not executable")
+            if Path(str(scenario["derived_project"])).resolve() != final_project:
+                raise AssertionError("The MMC recommendation derived binding is not executable")
             started = await domain.run_scenario(
-                str(source_copy), scenario, confirm=True
+                str(scenario["project"]), scenario, confirm=True
             )
             terminal = await _wait_for_scenario(domain, str(started["scenario_id"]))
             analysis = (

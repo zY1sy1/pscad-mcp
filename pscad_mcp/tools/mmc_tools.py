@@ -12,6 +12,7 @@ from ..hvdc.builders.mmc.parametric_models import (
     parse_parametric_request,
 )
 from ..hvdc.builders.mmc.parametric_service import ParametricMmcBuilderService
+from ..hvdc.service import HvdcDomainService
 from .registration import register_tool
 
 
@@ -26,8 +27,11 @@ def _service() -> ParametricMmcBuilderService:
         _service_backend = backend
         path_policy = getattr(backend, "path_policy", None)
         workspace_root = getattr(path_policy, "workspace_root", None)
+        scenario_service = HvdcDomainService(backend, path_policy=path_policy)
         _service_instance = ParametricMmcBuilderService(
-            backend, workspace_root=workspace_root
+            backend,
+            workspace_root=workspace_root,
+            scenario_service=scenario_service,
         )
     return _service_instance
 
