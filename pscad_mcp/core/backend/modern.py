@@ -7,6 +7,17 @@ from collections.abc import Mapping
 import time
 from typing import Any, Sequence
 
+from ...topology.hashing import canonical_sha256
+from ...topology.models import (
+    EvidenceRef,
+    TopologyCanvas,
+    TopologyComponent,
+    TopologyConductor,
+    TopologyLabel,
+    TopologyPort,
+    TopologySnapshot,
+)
+
 from ..pscad_adapter import PscadAdapter
 from ..pscad_config import _version_key
 from .base import (
@@ -737,6 +748,319 @@ class ModernBackend:
         return await self.adapter.call(
             await self._project(project_name), "canvas", canvas_name
         )
+
+    async def inspect_canvas_topology(
+        self, project_name: str, canvas_name: str
+    ) -> TopologySnapshot:
+        project = await self._project(project_name)
+        canvas = await self.adapter.call(project, "canvas", canvas_name)
+        before_values = list(await self.adapter.call(canvas, "components"))
+        before_inventory = await self._topology_inventory(before_values)
+        source_fingerprint = canonical_sha256(before_inventory)
+        observed_at_ns = time.time_ns()
+        evidence = lambda reference: (
+            EvidenceRef(
+                "live",
+                reference,
+                fingerprint=source_fingerprint,
+                observed_at_ns=observed_at_ns,
+            ),
+        )
+
+        components = []
+        conductors = []
+        labels = []
+        unresolved = set()
+        ports_supported = True
+        conductors_supported = True
+        for value in sorted(before_values, key=self._topology_object_id):
+            object_id = self._topology_object_id(value)
+            key = f"{canvas_name}:{object_id}"
+            definition = await self._topology_definition(value)
+            location = await self._topology_location(value)
+            lowered_definition = definition.casefold()
+            if self._is_topology_conductor(lowered_definition):
+                vertices = await self._topology_vertices(value)
+                if vertices is None:
+                    conductors_supported = False
+                    unresolved.add(f"conductor_geometry_unreadable:{key}")
+                    continue
+                conductors.append(
+                    TopologyConductor(
+                        key=key,
+                        canvas_key=canvas_name,
+                        object_id=object_id,
+                        kind="bus" if "bus" in lowered_definition else "wire",
+                        namespace=self._topology_namespace(value, lowered_definition),
+                        vertices=vertices,
+                        evidence=evidence(key),
+                    )
+                )
+                continue
+            parameters = await self._topology_parameters(value)
+            if self._is_topology_label(lowered_definition):
+                labels.append(
+                    TopologyLabel(
+                        key=key,
+                        canvas_key=canvas_name,
+                        object_id=object_id,
+                        name=self._topology_name(value, parameters),
+                        namespace=(
+                            "data" if "datalabel" in lowered_definition else "electrical"
+                        ),
+                        scope=canvas_name,
+                        location=location,
+                        evidence=evidence(key),
+                    )
+                )
+                continue
+            ports_method = getattr(value, "ports", None)
+            if ports_method is None:
+                ports_supported = False
+                raw_ports = {}
+            else:
+                raw_ports = await self.executor.run_safe(ports_method)
+            ports = tuple(
+                sorted(
+                    (
+                        TopologyPort(
+                            key=f"{key}:{name}",
+                            component_key=key,
+                            name=str(getattr(port, "name", name)),
+                            absolute=(int(port.x), int(port.y)),
+                            kind=self._port_namespace(getattr(port, "type", None)),
+                            dimension=self._optional_int(getattr(port, "dim", None)),
+                            evidence=evidence(f"{key}:{name}"),
+                        )
+                        for name, port in dict(raw_ports or {}).items()
+                    ),
+                    key=lambda item: item.key,
+                )
+            )
+            components.append(
+                TopologyComponent(
+                    key=key,
+                    canvas_key=canvas_name,
+                    object_id=object_id,
+                    definition=definition,
+                    name=self._topology_name(value, parameters) or None,
+                    location=location,
+                    orientation=self._topology_orientation(parameters),
+                    active=await self._topology_active(value),
+                    parameters=tuple(
+                        sorted((str(name), item) for name, item in parameters.items())
+                    ),
+                    ports=ports,
+                    evidence=evidence(key),
+                )
+            )
+
+        project_path = await self._topology_project_path(project)
+        dirty_available, _dirty = await self._topology_dirty_state(project)
+        if project_path is None:
+            unresolved.add("project_path_unavailable")
+        if await self._has_local_topology_definitions(project):
+            unresolved.add(f"live_hierarchy_unavailable:{canvas_name}")
+        after_values = list(await self.adapter.call(canvas, "components"))
+        after_inventory = await self._topology_inventory(after_values)
+        if before_inventory != after_inventory:
+            raise BackendError(
+                "TOPOLOGY_SNAPSHOT_UNSTABLE",
+                "Canvas changed during topology capture.",
+                self.name,
+                "inspect_canvas_topology",
+            )
+        return TopologySnapshot(
+            source="live",
+            project_name=project_name,
+            project_path=project_path,
+            pscad_version=self.version,
+            canvases=(TopologyCanvas(canvas_name, canvas_name),),
+            components=tuple(sorted(components, key=lambda item: item.key)),
+            conductors=tuple(sorted(conductors, key=lambda item: item.key)),
+            labels=tuple(sorted(labels, key=lambda item: item.key)),
+            unresolved=tuple(sorted(unresolved)),
+            capabilities=(
+                ("components", True),
+                ("conductors", conductors_supported),
+                ("dirty_state", dirty_available),
+                ("hierarchy", False),
+                ("labels", True),
+                ("ports", ports_supported),
+                ("project_path", project_path is not None),
+            ),
+            source_fingerprint=source_fingerprint,
+            grid_step=1,
+        )
+
+    async def _topology_inventory(self, values: list[Any]) -> tuple[tuple, ...]:
+        result = []
+        for value in sorted(values, key=self._topology_object_id):
+            definition = await self._topology_definition(value)
+            vertices = (
+                await self._topology_vertices(value)
+                if self._is_topology_conductor(definition.casefold())
+                else None
+            )
+            result.append(
+                (
+                    self._topology_object_id(value),
+                    definition,
+                    await self._topology_location(value),
+                    vertices,
+                )
+            )
+        return tuple(result)
+
+    @staticmethod
+    def _topology_object_id(value: Any) -> str:
+        raw = getattr(value, "id", None)
+        if raw is None:
+            raw = getattr(value, "_id", (type(value).__name__,))[0]
+        return str(raw)
+
+    async def _topology_definition(self, value: Any) -> str:
+        definition = str(getattr(value, "defn_name", "") or "")
+        method = getattr(value, "get_definition", None)
+        if not definition and method is not None:
+            proxy = await self.executor.run_safe(method)
+            definition = str(getattr(proxy, "scoped_name", proxy) or "")
+        return definition or type(value).__name__
+
+    async def _topology_location(self, value: Any) -> tuple[int, int] | None:
+        method = getattr(value, "get_location", None)
+        location = (
+            await self.executor.run_safe(method)
+            if method is not None
+            else getattr(value, "location", None)
+        )
+        if location is None:
+            return None
+        return int(location[0]), int(location[1])
+
+    async def _topology_parameters(self, value: Any) -> dict[str, Any]:
+        method = getattr(value, "parameters", None)
+        if method is None:
+            method = getattr(value, "get_parameters", None)
+        if method is None:
+            return {}
+        return dict(await self.executor.run_safe(method) or {})
+
+    async def _topology_active(self, value: Any) -> bool:
+        candidate = getattr(value, "is_enabled", None)
+        if candidate is None:
+            return bool(getattr(value, "enabled", True))
+        return bool(
+            await self.executor.run_safe(candidate) if callable(candidate) else candidate
+        )
+
+    async def _topology_vertices(
+        self, value: Any
+    ) -> tuple[tuple[int, int], ...] | None:
+        raw_vertices = getattr(value, "vertices", None)
+        if callable(raw_vertices):
+            raw_vertices = await self.executor.run_safe(raw_vertices)
+        if raw_vertices is None:
+            return None
+        try:
+            raw = tuple((int(point[0]), int(point[1])) for point in raw_vertices)
+        except (TypeError, ValueError, IndexError):
+            return None
+        if len(raw) < 2:
+            return None
+        location = await self._topology_location(value)
+        relative = (
+            tuple((location[0] + x, location[1] + y) for x, y in raw)
+            if location is not None
+            else raw
+        )
+        endpoints_method = getattr(value, "endpoints", None)
+        if endpoints_method is None:
+            return relative if raw[0] == (0, 0) and location is not None else raw
+        endpoints = await self.executor.run_safe(endpoints_method)
+        try:
+            expected = tuple((int(point.x), int(point.y)) for point in endpoints)
+        except (AttributeError, TypeError, ValueError):
+            return None
+        for candidate in (raw, relative):
+            if expected and candidate[0] == expected[0] and candidate[-1] == expected[-1]:
+                return candidate
+        return None
+
+    async def _topology_project_path(self, project: Any) -> str | None:
+        for name in ("filename", "path"):
+            value = getattr(project, name, None)
+            if callable(value):
+                value = await self.executor.run_safe(value)
+            if value:
+                return str(value)
+        return None
+
+    async def _topology_dirty_state(self, project: Any) -> tuple[bool, bool | None]:
+        for name in ("dirty", "is_dirty"):
+            value = getattr(project, name, None)
+            if value is None:
+                continue
+            if callable(value):
+                value = await self.executor.run_safe(value)
+            return True, bool(value)
+        return False, None
+
+    async def _has_local_topology_definitions(self, project: Any) -> bool:
+        method = getattr(project, "definitions", None)
+        if method is None:
+            return False
+        values = await self.executor.run_safe(method)
+        return bool(values)
+
+    @staticmethod
+    def _is_topology_conductor(definition: str) -> bool:
+        return "wire" in definition or definition == "bus" or definition.endswith(":bus")
+
+    @staticmethod
+    def _is_topology_label(definition: str) -> bool:
+        return "nodelabel" in definition or "datalabel" in definition
+
+    @staticmethod
+    def _topology_namespace(value: Any, definition: str) -> str:
+        raw = str(
+            getattr(value, "namespace", None)
+            or getattr(value, "kind", None)
+            or ""
+        ).casefold()
+        if raw in {"data", "signal", "digital"} or "data" in definition:
+            return "data"
+        return "electrical"
+
+    @staticmethod
+    def _port_namespace(value: Any) -> str:
+        raw = str(value or "").casefold()
+        if raw in {"electrical", "power", "analog", "node"}:
+            return "electrical"
+        if raw in {"data", "signal", "digital"}:
+            return "data"
+        return "unknown"
+
+    @staticmethod
+    def _optional_int(value: Any) -> int | None:
+        try:
+            return int(value) if value is not None else None
+        except (TypeError, ValueError):
+            return None
+
+    @classmethod
+    def _topology_orientation(cls, parameters: Mapping[str, Any]) -> int | None:
+        for name, value in parameters.items():
+            if str(name).casefold() in {"orient", "orientation"}:
+                return cls._optional_int(value)
+        return None
+
+    @staticmethod
+    def _topology_name(value: Any, parameters: Mapping[str, Any]) -> str:
+        for name, item in parameters.items():
+            if str(name).casefold() == "name":
+                return str(item)
+        return str(getattr(value, "name", "") or "")
 
     async def _component_info(self, component: Any) -> ComponentInfo:
         location_method = getattr(component, "get_location", None)

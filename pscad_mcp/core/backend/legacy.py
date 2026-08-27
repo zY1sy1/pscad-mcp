@@ -3360,3 +3360,10 @@ class LegacyBackend:
             if geometry:
                 rectangles[object_id] = geometry
         return rectangles
+    async def inspect_canvas_topology(self, project_name: str, canvas_name: str):
+        raise BackendError(
+            "CAPABILITY_UNAVAILABLE",
+            "Legacy topology capture is not yet available.",
+            self.name,
+            "inspect_canvas_topology",
+        )
