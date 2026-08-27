@@ -226,6 +226,35 @@ def test_explicit_page_port_link_joins_only_the_named_hierarchy_boundary():
     )
 
 
+def test_boundary_link_without_conductor_endpoints_remains_unresolved():
+    outer = _component(1, "IN", (20, 0))
+    boundary = TopologyBoundaryLink(
+        key="Main:1:IN->Main/1:SubSystem:IN",
+        outer_port_key="Main:1:IN",
+        outer_canvas_key="Main",
+        outer_point=(20, 0),
+        inner_port_key="Main/1:SubSystem:IN",
+        inner_canvas_key="Main/1:SubSystem",
+        inner_point=(0, 0),
+        namespace="electrical",
+        dimension=1,
+    )
+
+    result = build_connectivity(
+        ProjectTopology(
+            "case",
+            "4.6.2",
+            components=(outer,),
+            boundary_links=(boundary,),
+        )
+    )
+
+    assert result.topology.nets == ()
+    assert result.topology.unresolved == (
+        "hierarchy_boundary_unresolved:Main:1:IN->Main/1:SubSystem:IN",
+    )
+
+
 def test_boundary_link_with_mismatched_outer_port_point_fails_closed():
     outer = _component(1, "IN", (99, 0))
     conductors = (

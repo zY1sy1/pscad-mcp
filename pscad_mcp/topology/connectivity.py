@@ -155,7 +155,7 @@ def build_connectivity(topology: ProjectTopology) -> ConnectivityResult:
         inner = (boundary.namespace, boundary.inner_canvas_key, boundary.inner_point)
         outer_port = port_by_key.get(boundary.outer_port_key)
         inner_port = port_by_key.get(boundary.inner_port_key)
-        if not _valid_boundary(
+        status = _boundary_status(
             boundary.namespace,
             boundary.dimension,
             outer,
@@ -163,8 +163,14 @@ def build_connectivity(topology: ProjectTopology) -> ConnectivityResult:
             outer_port,
             inner_port,
             union_find,
-        ):
-            unresolved.add(f"invalid_boundary_link:{boundary.key}")
+        )
+        if status != "valid":
+            code = (
+                "hierarchy_boundary_unresolved"
+                if status == "unresolved"
+                else "invalid_boundary_link"
+            )
+            unresolved.add(f"{code}:{boundary.key}")
             continue
         if (boundary.outer_port_key, outer) not in port_attachments:
             port_attachments.append((boundary.outer_port_key, outer))
@@ -267,7 +273,7 @@ def _apply_relation(
         union_find.union(left_point, right_point)
 
 
-def _valid_boundary(
+def _boundary_status(
     namespace: str,
     dimension: int | None,
     outer: _Node,
@@ -275,13 +281,11 @@ def _valid_boundary(
     outer_port: TopologyPort | None,
     inner_port: TopologyPort | None,
     union_find: _UnionFind,
-) -> bool:
+) -> str:
     if namespace not in _KNOWN_NAMESPACES:
-        return False
-    if not union_find.contains(outer) or not union_find.contains(inner):
-        return False
+        return "invalid"
     if outer_port is None:
-        return False
+        return "invalid"
     for port, expected_point in (
         (outer_port, outer[2]),
         (inner_port, inner[2]),
@@ -289,13 +293,15 @@ def _valid_boundary(
         if port is None:
             continue
         if port.absolute != expected_point:
-            return False
+            return "invalid"
         if port.kind != namespace:
-            return False
+            return "invalid"
         if port.dimension is not None and dimension is not None:
             if port.dimension != dimension:
-                return False
-    return True
+                return "invalid"
+    if not union_find.contains(outer) or not union_find.contains(inner):
+        return "unresolved"
+    return "valid"
 
 
 def _materialize_nets(
