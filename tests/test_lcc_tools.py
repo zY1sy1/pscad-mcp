@@ -8,7 +8,9 @@ from pscad_mcp.tools.catalog import TOOL_SPECS
 
 
 def test_lcc_tools_are_registered_with_exact_names():
-    names = {tool.name for tool in create_server()._tool_manager.list_tools()}
+    names = {
+        tool.name for tool in create_server(environ={})._tool_manager.list_tools()
+    }
 
     assert {"plan_lcc_model", "build_lcc_model", "get_lcc_build_status", "validate_lcc_model"} <= names
     assert len(names) == 83

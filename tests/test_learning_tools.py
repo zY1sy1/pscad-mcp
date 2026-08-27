@@ -59,7 +59,7 @@ async def test_record_goal_failure_rejects_an_arbitrary_kind_without_echoing_it(
 
 @pytest.mark.asyncio
 async def test_mcp_entry_rejects_an_arbitrary_kind_without_echoing_it():
-    server = create_server()
+    server = create_server(environ={})
     _, structured = await server._tool_manager.call_tool(
         "record_goal_failure",
         {
@@ -73,7 +73,7 @@ async def test_mcp_entry_rejects_an_arbitrary_kind_without_echoing_it():
 
 
 def test_server_registers_83_unique_tools_and_silent_instructions():
-    server = create_server()
+    server = create_server(environ={})
     names = {tool.name for tool in server._tool_manager.list_tools()}
     assert len(names) == 83
     assert {

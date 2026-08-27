@@ -7,7 +7,7 @@ from pscad_mcp.tools import lcc_parametric_tools
 
 
 def test_parametric_lcc_tools_are_registered():
-    tools = create_server()._tool_manager.list_tools()
+    tools = create_server(environ={})._tool_manager.list_tools()
     names = {tool.name for tool in tools}
     expected = {
         "derive_lcc_parameters",
@@ -35,7 +35,8 @@ def test_parametric_lcc_tools_are_registered():
 
 def test_parametric_lcc_complex_inputs_expose_nested_shapes():
     by_name = {
-        tool.name: tool for tool in create_server()._tool_manager.list_tools()
+        tool.name: tool
+        for tool in create_server(environ={})._tool_manager.list_tools()
     }
 
     request_description = by_name["derive_lcc_parameters"].parameters[

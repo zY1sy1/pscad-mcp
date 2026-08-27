@@ -9,17 +9,25 @@ from pscad_mcp.tools.catalog import (
     TOOL_GROUPS,
     parse_tool_profile,
 )
+from pscad_mcp.tools.registration import register_tool
 
 
 def _names(server):
     return {tool.name for tool in server._tool_manager.list_tools()}
 
 
-def test_unset_profile_preserves_the_compatibility_inventory():
+def test_unset_profile_preserves_the_compatibility_inventory(monkeypatch):
+    monkeypatch.setenv("PSCAD_MCP_TOOL_PROFILE", "core")
     names = _names(create_server(environ={}))
 
     assert len(names) == 83
     assert names == COMPATIBILITY_TOOL_NAMES == FULL_TOOL_NAMES
+
+
+def test_default_factory_reads_the_process_environment(monkeypatch):
+    monkeypatch.setenv("PSCAD_MCP_TOOL_PROFILE", "core")
+
+    assert _names(create_server()) == TOOL_GROUPS["core"]
 
 
 def test_full_profile_preserves_the_compatibility_inventory():
@@ -35,6 +43,25 @@ def test_core_profile_is_explicitly_smaller():
     names = _names(create_server(environ={"PSCAD_MCP_TOOL_PROFILE": "core"}))
 
     assert names == TOOL_GROUPS["core"]
+
+
+@pytest.mark.parametrize(
+    "environ",
+    [{}, {"PSCAD_MCP_TOOL_PROFILE": "core"}],
+    ids=["full", "core"],
+)
+def test_factory_profile_rejects_uncatalogued_primary_tools(environ):
+    server = create_server(environ=environ)
+
+    async def uncatalogued_primary_tool() -> str:
+        return "never registered"
+
+    with pytest.raises(ValueError, match=r"^uncatalogued_primary_tool$"):
+        register_tool(
+            server,
+            uncatalogued_primary_tool,
+            record_learning=False,
+        )
 
 
 def test_invalid_profile_does_not_echo_the_value():

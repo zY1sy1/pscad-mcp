@@ -127,12 +127,22 @@ def test_inactive_tool_has_no_registration_or_learning_side_effects(monkeypatch)
     def unexpected_side_effect(*args, **kwargs):
         raise AssertionError("inactive tool must return before registration work")
 
-    class UnexpectedCatalog:
-        def __contains__(self, name):
-            unexpected_side_effect(name)
+    catalog_checks = []
 
-    monkeypatch.setattr(tool_registration, "TOOL_SPECS", UnexpectedCatalog())
-    monkeypatch.setattr(server._tool_manager, "get_tool", unexpected_side_effect)
+    class ObservedCatalog(dict):
+        def __contains__(self, name):
+            catalog_checks.append(name)
+            return super().__contains__(name)
+
+    manager_checks = []
+    original_get_tool = server._tool_manager.get_tool
+
+    def observe_manager_check(name):
+        manager_checks.append(name)
+        return original_get_tool(name)
+
+    monkeypatch.setattr(tool_registration, "TOOL_SPECS", ObservedCatalog(TOOL_SPECS))
+    monkeypatch.setattr(server._tool_manager, "get_tool", observe_manager_check)
     monkeypatch.setattr(server, "add_tool", unexpected_side_effect)
     monkeypatch.setattr(tool_registration.inspect, "signature", unexpected_side_effect)
     monkeypatch.setattr(
@@ -143,9 +153,26 @@ def test_inactive_tool_has_no_registration_or_learning_side_effects(monkeypatch)
 
     register_tool(server, record_goal_failure, recorder=recorder)
 
+    assert catalog_checks == ["record_goal_failure"]
+    assert manager_checks == ["record_goal_failure"]
     assert getattr(server, "_pscad_registered_tool_names", set()) == set()
     assert recorder.names == []
     assert recorder.events == []
+
+
+@pytest.mark.parametrize("duplicate_source", ["manager", "private"])
+def test_inactive_profile_still_rejects_duplicate_tools(duplicate_source):
+    server = FastMCP("inactive-duplicate")
+    server._pscad_tool_profile = parse_tool_profile(
+        {"PSCAD_MCP_TOOL_PROFILE": "core"}
+    )
+    if duplicate_source == "manager":
+        server.add_tool(record_goal_failure)
+    else:
+        server._pscad_registered_tool_names = {"record_goal_failure"}
+
+    with pytest.raises(ValueError, match=r"^record_goal_failure$"):
+        register_tool(server, record_goal_failure)
 
 
 def test_postprocessing_failure_rolls_back_and_allows_same_name_retry(
