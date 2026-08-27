@@ -37,7 +37,11 @@ def infer_candidate_edges(
     }
     candidates = []
     for component, port in _active_ports(topology):
-        if port.key in connected_ports or port.absolute is None:
+        if (
+            port.key in connected_ports
+            or port.absolute is None
+            or port.kind not in _KNOWN_NAMESPACES
+        ):
             continue
         for conductor, point in _dangling_endpoints(topology):
             if component.canvas_key != conductor.canvas_key:
@@ -371,6 +375,8 @@ def _segments(
 ) -> list[tuple[TopologyConductor, Segment]]:
     result = []
     for conductor in sorted(conductors, key=lambda item: item.key):
+        if conductor.namespace not in _KNOWN_NAMESPACES:
+            continue
         try:
             vertices = normalize_vertices(conductor.vertices)
         except ValueError:
@@ -389,6 +395,8 @@ def _dangling_endpoints(
     attached = _attached_points(topology)
     result = []
     for conductor in sorted(topology.conductors, key=lambda item: item.key):
+        if conductor.namespace not in _KNOWN_NAMESPACES:
+            continue
         try:
             vertices = normalize_vertices(conductor.vertices)
         except ValueError:

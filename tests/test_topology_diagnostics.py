@@ -5,6 +5,13 @@ from pscad_mcp.topology.diagnostics.generic import (
     infer_candidate_edges,
 )
 from pscad_mcp.topology.hashing import topology_sha256
+from pscad_mcp.topology.connectivity import build_connectivity
+from pscad_mcp.topology.models import (
+    ProjectTopology,
+    TopologyComponent,
+    TopologyConductor,
+    TopologyPort,
+)
 from tests.topology_fakes import (
     topology_with_candidate_only_connection,
     topology_with_incompatible_nearby_ports,
@@ -196,3 +203,45 @@ def test_unresolved_source_evidence_produces_incomplete_finding():
     findings = diagnose_generic(topology)
     assert [item.code for item in findings] == ["TOPOLOGY_INCOMPLETE"]
     assert findings[0].status == "unresolved"
+
+
+def test_unknown_namespace_evidence_stays_unresolved_and_is_not_inferred():
+    component = TopologyComponent(
+        key="Main:1",
+        canvas_key="Main",
+        object_id="1",
+        definition="test:unknown",
+        ports=(
+            TopologyPort(
+                key="Main:1:P",
+                component_key="Main:1",
+                name="P",
+                absolute=(18, 0),
+                kind="unknown",
+            ),
+        ),
+    )
+    topology = build_connectivity(
+        ProjectTopology(
+            "case",
+            "4.6.2",
+            components=(component,),
+            conductors=(
+                TopologyConductor(
+                    "Main:10",
+                    "Main",
+                    "10",
+                    "wire",
+                    "unknown",
+                    ((0, 0), (0, 18)),
+                ),
+            ),
+            grid_step=18,
+        )
+    ).topology
+
+    assert infer_candidate_edges(topology) == ()
+    assert [item.code for item in diagnose_generic(topology)] == [
+        "PORT_UNCONNECTED",
+        "TOPOLOGY_INCOMPLETE",
+    ]
