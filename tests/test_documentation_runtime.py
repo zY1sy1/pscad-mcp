@@ -195,6 +195,139 @@ async def test_invalid_configuration_uses_bounded_tool_error_envelope(
     assert not manager.base_dir.exists()
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure_point", ("is_dir", "iterdir"))
+async def test_list_documentation_filesystem_failure_is_sanitized(
+    tmp_path,
+    monkeypatch,
+    failure_point,
+):
+    secret = str(tmp_path / "SECRET_PRIVATE_LIST_PATH")
+    manager = DocumentationManager(tmp_path / "docs")
+    manager.md_dir.mkdir(parents=True)
+    monkeypatch.setattr(app_tools, "doc_manager", manager)
+    server = create_server(environ={})
+    original = getattr(Path, failure_point)
+
+    def fail(target, *args, **kwargs):
+        if target == manager.md_dir:
+            raise OSError(secret)
+        return original(target, *args, **kwargs)
+
+    monkeypatch.setattr(Path, failure_point, fail)
+
+    _, structured = await server._tool_manager.call_tool(
+        "list_documentation",
+        {},
+        convert_result=True,
+    )
+
+    payload = structured["result"]["error"]
+    assert payload["code"] == "DOCUMENTATION_STORAGE_INVALID"
+    assert payload["backend"] == "server"
+    assert payload["operation"] == "list_documentation"
+    assert payload["details"] == {"directory": "md"}
+    assert secret not in repr(payload)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure_point", ("resolve", "read_text"))
+async def test_read_documentation_filesystem_failure_is_sanitized(
+    tmp_path,
+    monkeypatch,
+    failure_point,
+):
+    secret = str(tmp_path / "SECRET_PRIVATE_READ_PATH")
+    manager = DocumentationManager(tmp_path / "docs")
+    manager.md_dir.mkdir(parents=True)
+    document = manager.md_dir / "mhi_pscad_fake.md"
+    document.write_text("safe", encoding="utf-8")
+    monkeypatch.setattr(app_tools, "doc_manager", manager)
+    server = create_server(environ={})
+
+    if failure_point == "resolve":
+        monkeypatch.setattr(
+            app_tools.path_policy,
+            "resolve_child",
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError(secret)),
+        )
+    else:
+        original_read_text = Path.read_text
+
+        def fail_read_text(target, *args, **kwargs):
+            if target == document:
+                raise OSError(secret)
+            return original_read_text(target, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "read_text", fail_read_text)
+
+    _, structured = await server._tool_manager.call_tool(
+        "read_documentation",
+        {"module_name": "mhi.pscad.fake"},
+        convert_result=True,
+    )
+
+    payload = structured["result"]["error"]
+    assert payload["code"] == "DOCUMENTATION_STORAGE_INVALID"
+    assert payload["backend"] == "server"
+    assert payload["operation"] == "read_documentation"
+    assert payload["details"] == {"directory": "md"}
+    assert secret not in repr(payload)
+
+
+@pytest.mark.asyncio
+async def test_documentation_resource_filesystem_failure_is_sanitized(
+    tmp_path,
+    monkeypatch,
+):
+    secret = str(tmp_path / "SECRET_PRIVATE_RESOURCE_PATH")
+    manager = DocumentationManager(tmp_path / "docs")
+    manager.md_dir.mkdir(parents=True)
+    document = manager.md_dir / "mhi_pscad_fake.md"
+    document.write_text("safe", encoding="utf-8")
+    monkeypatch.setattr(app_tools, "doc_manager", manager)
+    server = create_server(environ={})
+    original_read_text = Path.read_text
+
+    def fail_read_text(target, *args, **kwargs):
+        if target == document:
+            raise OSError(secret)
+        return original_read_text(target, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", fail_read_text)
+
+    with pytest.raises(ValueError) as raised:
+        await server.read_resource("pscad-docs://modules/mhi.pscad.fake")
+
+    message = str(raised.value)
+    assert "The documentation storage boundary is invalid." in message
+    assert secret not in message
+
+
+@pytest.mark.asyncio
+async def test_documentation_file_disappearing_preserves_not_found_response(
+    tmp_path,
+    monkeypatch,
+):
+    manager = DocumentationManager(tmp_path / "docs")
+    manager.md_dir.mkdir(parents=True)
+    document = manager.md_dir / "mhi_pscad_fake.md"
+    document.write_text("safe", encoding="utf-8")
+    monkeypatch.setattr(app_tools, "doc_manager", manager)
+    monkeypatch.setattr(
+        Path,
+        "read_text",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            FileNotFoundError("SECRET_RACE_PATH")
+        ),
+    )
+
+    result = await app_tools.read_documentation("mhi.pscad.fake")
+
+    assert result.startswith("Error: Documentation for 'mhi.pscad.fake' not found.")
+    assert "SECRET_RACE_PATH" not in result
+
+
 def test_sync_creates_generated_directories_only_when_called(tmp_path):
     manager = DocumentationManager(tmp_path / "docs")
     manager.MODULES = ()

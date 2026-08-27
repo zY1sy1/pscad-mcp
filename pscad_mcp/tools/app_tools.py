@@ -3,6 +3,7 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
+from ..core.backend.base import BackendError
 from ..core.connection_manager import pscad_manager
 from ..core.path_policy import PathPolicy
 from ..utils.doc_manager import doc_manager
@@ -32,15 +33,21 @@ async def sync_documentation() -> list[str]:
 async def list_documentation() -> list[str]:
     """List available PSCAD API documentation modules that can be read."""
     doc_manager.raise_for_issue("list_documentation")
-    if not doc_manager.md_dir.is_dir():
+    try:
+        if not doc_manager.md_dir.is_dir():
+            return ["No documentation found. Run sync_documentation first."]
+        paths = tuple(doc_manager.md_dir.iterdir())
+        docs = [
+            path.stem.replace("_", ".")
+            for path in paths
+            if path.is_file() and path.suffix == ".md"
+        ]
+    except FileNotFoundError:
         return ["No documentation found. Run sync_documentation first."]
-
-    docs = []
-    for path in doc_manager.md_dir.iterdir():
-        if path.is_file() and path.suffix == ".md":
-            # Return original module names (e.g. mhi_pscad_types.md -> mhi.pscad.types)
-            module_name = path.stem.replace("_", ".")
-            docs.append(module_name)
+    except BackendError:
+        raise
+    except Exception:
+        raise doc_manager.storage_error("list_documentation", "md") from None
     return sorted(docs)
 
 async def read_documentation(module_name: str) -> str:
@@ -60,11 +67,22 @@ async def read_documentation(module_name: str) -> str:
         )
     except (FileNotFoundError, ValueError):
         filepath = None
+    except BackendError:
+        raise
+    except Exception:
+        raise doc_manager.storage_error("read_documentation", "md") from None
     
     if filepath is None:
         return f"Error: Documentation for '{module_name}' not found. Available modules: {', '.join(await list_documentation())}"
-        
-    return filepath.read_text(encoding="utf-8")
+
+    try:
+        return filepath.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return f"Error: Documentation for '{module_name}' not found. Available modules: {', '.join(await list_documentation())}"
+    except BackendError:
+        raise
+    except Exception:
+        raise doc_manager.storage_error("read_documentation", "md") from None
 
 
 def register_documentation_resources(mcp: FastMCP) -> None:

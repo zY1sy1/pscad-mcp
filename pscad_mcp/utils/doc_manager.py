@@ -183,14 +183,29 @@ class DocumentationManager:
             return lock
 
     @staticmethod
-    def _storage_error(directory: str) -> BackendError:
+    def storage_error(operation: str, directory: str) -> BackendError:
+        safe_operation = (
+            operation
+            if operation
+            in {
+                "sync_documentation",
+                "list_documentation",
+                "read_documentation",
+            }
+            else "documentation"
+        )
+        safe_directory = directory if directory in {"md", "raw"} else "generated"
         return BackendError(
             "DOCUMENTATION_STORAGE_INVALID",
             "The documentation storage boundary is invalid.",
             "server",
-            "sync_documentation",
-            {"directory": directory},
+            safe_operation,
+            {"directory": safe_directory},
         )
+
+    @classmethod
+    def _storage_error(cls, directory: str) -> BackendError:
+        return cls.storage_error("sync_documentation", directory)
 
     @staticmethod
     def _is_reparse_point(path: Path) -> bool:
