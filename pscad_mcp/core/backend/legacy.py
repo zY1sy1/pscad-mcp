@@ -3408,7 +3408,9 @@ class LegacyBackend:
         conductors = []
         labels = []
         boundary_links = []
+        components_supported = True
         conductors_supported = True
+        labels_supported = True
         captured_keys = {capture["key"] for capture in captures}
         for capture in captures:
             canvas_key = capture["key"]
@@ -3458,23 +3460,27 @@ class LegacyBackend:
                         )
                     )
                     continue
-                if proxy is None:
-                    unresolved.add(f"component_proxy_unavailable:{key}")
-                    continue
                 definition = await self._legacy_topology_definition(
                     proxy, node
                 )
                 location = await self._legacy_topology_location(proxy, node)
-                parameters = await self._legacy_topology_parameters(proxy)
+                parameters = await self._legacy_topology_parameters(
+                    proxy, node
+                )
                 if self._legacy_topology_is_label(definition):
+                    label_name = self._legacy_topology_name(
+                        proxy, parameters, node
+                    )
+                    if not label_name:
+                        labels_supported = False
+                        unresolved.add(f"label_name_unreadable:{key}")
+                        continue
                     labels.append(
                         TopologyLabel(
                             key=key,
                             canvas_key=canvas_key,
                             object_id=object_id,
-                            name=self._legacy_topology_name(
-                                proxy, parameters
-                            ),
+                            name=label_name,
                             namespace=(
                                 "data"
                                 if "datalabel" in definition.casefold()
@@ -3486,6 +3492,9 @@ class LegacyBackend:
                         ),
                     )
                     continue
+                if definition.casefold() in {"user", "usercmp"}:
+                    components_supported = False
+                    unresolved.add(f"component_definition_unavailable:{key}")
                 orientation = await self._legacy_topology_orientation(
                     project_name,
                     object_id,
@@ -3500,6 +3509,7 @@ class LegacyBackend:
                     location,
                     orientation,
                     proxy,
+                    node,
                     evidence,
                     unresolved,
                     source_hashes,
@@ -3510,7 +3520,10 @@ class LegacyBackend:
                     object_id=object_id,
                     definition=definition,
                     name=(
-                        self._legacy_topology_name(proxy, parameters) or None
+                        self._legacy_topology_name(
+                            proxy, parameters, node
+                        )
+                        or None
                     ),
                     location=location,
                     orientation=orientation,
@@ -3568,7 +3581,23 @@ class LegacyBackend:
                     "inspect_canvas_topology",
                 )
         hierarchy_supported = project_path is not None and not any(
-            item.startswith("live_hierarchy_unavailable:")
+            item.startswith(
+                (
+                    "definition_ports_unavailable:",
+                    "hierarchy_boundary_unresolved:",
+                    "hierarchy_cycle:",
+                    "live_hierarchy_unavailable:",
+                )
+            )
+            for item in unresolved
+        )
+        ports_supported = not any(
+            item.startswith(
+                (
+                    "definition_metadata_unavailable:",
+                    "port_geometry_unresolved:",
+                )
+            )
             for item in unresolved
         )
         return TopologySnapshot(
@@ -3585,12 +3614,12 @@ class LegacyBackend:
             ),
             unresolved=tuple(sorted(unresolved)),
             capabilities=(
-                ("components", True),
+                ("components", components_supported),
                 ("conductors", conductors_supported),
                 ("dirty_state", False),
                 ("hierarchy", hierarchy_supported),
-                ("labels", True),
-                ("ports", True),
+                ("labels", labels_supported),
+                ("ports", ports_supported),
                 ("project_path", project_path is not None),
             ),
             source_fingerprint=source_fingerprint,
@@ -3624,6 +3653,7 @@ class LegacyBackend:
                 if method is None:
                     raise AttributeError("canvas accessor unavailable")
                 canvas = await self.executor.run_safe(method, request["name"])
+                response = await self._legacy_topology_bulk(canvas)
             except (AttributeError, BackendError, KeyError, TypeError):
                 if request["parent_key"] is None:
                     raise BackendError(
@@ -3636,8 +3666,13 @@ class LegacyBackend:
                     f"live_hierarchy_unavailable:{request['key']}"
                 )
                 continue
-            response = await self._legacy_topology_bulk(canvas)
-            proxies = await self._legacy_topology_proxies(canvas)
+            try:
+                proxies = await self._legacy_topology_proxies(canvas)
+            except (AttributeError, BackendError, KeyError, TypeError):
+                proxies = {}
+                unresolved.add(
+                    f"proxy_enrichment_unavailable:{request['key']}"
+                )
             capture = {
                 **request,
                 "canvas": canvas,
@@ -3652,8 +3687,6 @@ class LegacyBackend:
             for node in self._legacy_topology_nodes(response):
                 object_id = str(node.get("id"))
                 proxy = proxies.get(object_id)
-                if proxy is None:
-                    continue
                 definition = await self._legacy_topology_definition(
                     proxy, node
                 )
@@ -3811,11 +3844,7 @@ class LegacyBackend:
                 node,
                 proxy,
             )
-            definition = (
-                await self._legacy_topology_definition(proxy, node)
-                if proxy is not None
-                else class_id
-            )
+            definition = await self._legacy_topology_definition(proxy, node)
             vertices = (
                 await self._legacy_topology_vertices(node, proxy)
                 if self._legacy_topology_is_conductor(class_id.casefold(), proxy)
@@ -3825,7 +3854,8 @@ class LegacyBackend:
             if self._legacy_topology_is_label(definition):
                 label_name = self._legacy_topology_name(
                     proxy,
-                    await self._legacy_topology_parameters(proxy),
+                    await self._legacy_topology_parameters(proxy, node),
+                    node,
                 )
             result.append(
                 (
@@ -3885,14 +3915,30 @@ class LegacyBackend:
         except (TypeError, ValueError):
             return None
 
-    async def _legacy_topology_parameters(self, proxy: Any) -> dict[str, Any]:
+    async def _legacy_topology_parameters(
+        self, proxy: Any, node: ET.Element | None = None
+    ) -> dict[str, Any]:
+        result = {}
+        if node is not None:
+            for child in node.iter():
+                tag = str(child.tag).split("}")[-1].casefold()
+                if tag not in {"param", "parameter"}:
+                    continue
+                name = child.get("name") or child.get("key")
+                if name:
+                    result[str(name)] = (
+                        child.get("value")
+                        if child.get("value") is not None
+                        else (child.text or "").strip()
+                    )
         if proxy is None:
-            return {}
+            return result
         for name in ("get_parameters", "parameters"):
             method = getattr(proxy, name, None)
             if method is not None:
-                return dict(await self.executor.run_safe(method) or {})
-        return {}
+                result.update(dict(await self.executor.run_safe(method) or {}))
+                break
+        return result
 
     async def _legacy_topology_orientation(
         self,
@@ -3961,10 +4007,56 @@ class LegacyBackend:
         location: tuple[int, int] | None,
         orientation: int | None,
         proxy: Any,
+        node: ET.Element,
         evidence,
         unresolved: set[str],
         source_hashes: dict[Path, str],
     ) -> tuple[TopologyPort, ...]:
+        xml_ports = []
+        for port in node.iter():
+            if (
+                port is node
+                or str(port.tag).split("}")[-1].casefold() != "port"
+            ):
+                continue
+            name = port.get("name") or port.get("id")
+            if not name:
+                continue
+            try:
+                relative = (int(port.get("x")), int(port.get("y")))
+            except (TypeError, ValueError):
+                relative = None
+            absolute = None
+            if (
+                relative is not None
+                and location is not None
+                and orientation is not None
+            ):
+                try:
+                    absolute = absolute_port(location, relative, orientation)
+                except GeometryError:
+                    absolute = None
+            key = f"{component_key}:{name}"
+            if absolute is None:
+                unresolved.add(f"port_geometry_unresolved:{key}")
+            xml_ports.append(
+                TopologyPort(
+                    key=key,
+                    component_key=component_key,
+                    name=str(name),
+                    absolute=absolute,
+                    relative=relative,
+                    kind=self._legacy_topology_port_namespace(
+                        port.get("type") or port.get("kind")
+                    ),
+                    dimension=self._legacy_topology_optional_int(
+                        port.get("dim") or port.get("dimension")
+                    ),
+                    evidence=evidence(key),
+                )
+            )
+        if xml_ports:
+            return tuple(sorted(xml_ports, key=lambda item: item.key))
         method = getattr(proxy, "ports", None)
         if callable(method):
             raw_ports = await self.executor.run_safe(method)
@@ -4095,11 +4187,25 @@ class LegacyBackend:
             return None
 
     @staticmethod
-    def _legacy_topology_name(proxy: Any, parameters: Mapping[str, Any]) -> str:
+    def _legacy_topology_name(
+        proxy: Any,
+        parameters: Mapping[str, Any],
+        node: ET.Element | None = None,
+    ) -> str:
         for name, value in parameters.items():
             if str(name).casefold() == "name":
                 return str(value)
-        return str(getattr(proxy, "name", "") or "")
+        proxy_name = str(getattr(proxy, "name", "") or "")
+        if proxy_name:
+            return proxy_name
+        if node is None:
+            return ""
+        return str(
+            node.get("name")
+            or node.get("text")
+            or node.get("value")
+            or ""
+        )
 
     @staticmethod
     def _legacy_topology_active(parameters: Mapping[str, Any]) -> bool:

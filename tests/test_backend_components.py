@@ -1302,6 +1302,82 @@ class TestBackendComponentContracts(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIn(("hierarchy", True), snapshot.capabilities)
 
+    async def test_legacy_snapshot_uses_complete_bulk_xml_without_proxies(self):
+        root = ET.fromstring(
+            """<response><components>
+            <User id="101" classid="UserCmp" defn="case:SubSystem"
+                  name="S1" x="72" y="0" orient="0">
+              <Port name="IN" x="-18" y="0" dim="1" type="electrical" />
+            </User>
+            <NodeLabel id="9" classid="NodeLabel" name="N1" x="0" y="0" />
+            </components></response>"""
+        )
+        child = ET.fromstring(
+            """<response><components>
+            <Wire id="501" classid="WireOrthogonal">
+              <Vertex x="0" y="0" /><Vertex x="36" y="0" />
+            </Wire>
+            </components></response>"""
+        )
+        project = XmlOnlyTopologyProject(root, child)
+        library = (
+            '<project><Definition name="SubSystem"><svg>'
+            '<port name="IN" x="0" y="0" dim="1" type="electrical"/>'
+            "</svg></Definition></project>"
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            source = Path(temporary) / "case.pscx"
+            source.write_text(library, encoding="utf-8")
+            backend = LegacyBackend(
+                ImmediateExecutor(),
+                version="4.6.2",
+                x64=True,
+                automation_module=FakeLegacyAutomation(ComponentApp(project)),
+                definition_paths={"case": source},
+            )
+            await backend.attach()
+
+            snapshot = await backend.inspect_canvas_topology("case", "Main")
+
+        self.assertEqual(
+            [canvas.key for canvas in snapshot.canvases],
+            ["Main", "Main/101:SubSystem"],
+        )
+        self.assertEqual(snapshot.components[0].definition, "case:SubSystem")
+        self.assertEqual(snapshot.components[0].ports[0].absolute, (54, 0))
+        self.assertEqual(snapshot.labels[0].name, "N1")
+        self.assertEqual(
+            [link.key for link in snapshot.boundary_links],
+            ["Main:101:IN->Main/101:SubSystem:IN"],
+        )
+        self.assertNotIn(
+            "component_proxy_unavailable:Main:101", snapshot.unresolved
+        )
+        self.assertIn(("components", True), snapshot.capabilities)
+        self.assertIn(("labels", True), snapshot.capabilities)
+
+
+class XmlOnlyTopologyCanvas:
+    def __init__(self, response):
+        self.response = response
+
+    def list_components(self):
+        return self.response
+
+    def find_all(self):
+        return []
+
+
+class XmlOnlyTopologyProject:
+    def __init__(self, root, child):
+        self.canvases = {
+            "Main": XmlOnlyTopologyCanvas(root),
+            "SubSystem": XmlOnlyTopologyCanvas(child),
+        }
+
+    def user_canvas(self, name):
+        return self.canvases[name]
+
 
 if __name__ == "__main__":
     unittest.main()

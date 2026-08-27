@@ -756,7 +756,7 @@ class ModernBackend:
     ) -> TopologySnapshot:
         project = await self._project(project_name)
         definitions, definitions_supported = await self._topology_definitions(
-            project
+            project, project_name
         )
         captures, unresolved = await self._topology_canvas_captures(
             project,
@@ -939,7 +939,14 @@ class ModernBackend:
                     "inspect_canvas_topology",
                 )
         hierarchy_supported = definitions_supported and not any(
-            item.startswith("live_hierarchy_unavailable:")
+            item.startswith(
+                (
+                    "definition_ports_unavailable:",
+                    "hierarchy_boundary_unresolved:",
+                    "hierarchy_cycle:",
+                    "live_hierarchy_unavailable:",
+                )
+            )
             for item in unresolved
         )
         return TopologySnapshot(
@@ -969,12 +976,14 @@ class ModernBackend:
         )
 
     async def _topology_definitions(
-        self, project: Any
+        self, project: Any, project_name: str
     ) -> tuple[dict[str, Any], bool]:
         method = getattr(project, "definitions", None)
         if method is None:
             return {}, False
         values = await self.executor.run_safe(method)
+        if isinstance(values, dict):
+            values = values.values()
         result = {}
         for value in values or ():
             scoped = str(
@@ -982,8 +991,14 @@ class ModernBackend:
                 or getattr(value, "name", None)
                 or value
             )
-            result[scoped.casefold()] = value
-            result[scoped.rsplit(":", 1)[-1].casefold()] = value
+            if ":" in scoped:
+                scope, name = scoped.split(":", 1)
+                if scope.casefold() != project_name.casefold():
+                    continue
+                result[scoped.casefold()] = value
+                result[name.casefold()] = value
+            else:
+                result[scoped.casefold()] = value
         return result, True
 
     async def _topology_canvas_captures(
@@ -1010,6 +1025,10 @@ class ModernBackend:
                 canvas = await self._topology_canvas(
                     project, request["name"], request["parent_key"] is None
                 )
+                values = list(
+                    await self.adapter.call(canvas, "components")
+                )
+                inventory = await self._topology_inventory(values)
             except (AttributeError, BackendError, KeyError, TypeError):
                 if request["parent_key"] is None:
                     raise
@@ -1017,12 +1036,11 @@ class ModernBackend:
                     f"live_hierarchy_unavailable:{request['key']}"
                 )
                 continue
-            values = list(await self.adapter.call(canvas, "components"))
             capture = {
                 **request,
                 "canvas": canvas,
                 "values": values,
-                "inventory": await self._topology_inventory(values),
+                "inventory": inventory,
                 "children": [],
             }
             captures.append(capture)
@@ -1079,14 +1097,13 @@ class ModernBackend:
         project_name: str, definition: str, definitions: dict[str, Any]
     ) -> str | None:
         local_name = definition.rsplit(":", 1)[-1]
-        if definition.casefold() in definitions:
-            return local_name
-        if local_name.casefold() in definitions:
-            return local_name
         if ":" in definition:
             scope, _name = definition.split(":", 1)
             if scope.casefold() == project_name.casefold():
                 return local_name
+            return None
+        if definition.casefold() in definitions:
+            return local_name
         return None
 
     async def _topology_definition_ports(

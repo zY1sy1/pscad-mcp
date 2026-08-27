@@ -156,6 +156,101 @@ class TestBackendTopology(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIn(("hierarchy", False), snapshot.capabilities)
 
+    async def test_modern_snapshot_does_not_traverse_external_scoped_definition(self):
+        main = CanvasState(modern=True)
+        main.add_component("master", "SubSystem", 72, 0, 0, Name="S1")
+        child = CanvasState(modern=True)
+        child.create_wire((0, 0), (36, 0))
+        definition = SimpleNamespace(
+            name="SubSystem",
+            scoped_name="master:SubSystem",
+            ports=lambda: {},
+        )
+        project = HierarchyProject(main, child, definition)
+        backend = ModernBackend(
+            ImmediateExecutor(),
+            version="5.0.2",
+            x64=True,
+            pscad_module=FakeModernPscad(CanvasApp(project, modern=True)),
+            psout_module=False,
+        )
+        await backend.attach()
+
+        snapshot = await backend.inspect_canvas_topology("case", "Main")
+
+        self.assertEqual([canvas.key for canvas in snapshot.canvases], ["Main"])
+        self.assertEqual(snapshot.boundary_links, ())
+
+    async def test_modern_snapshot_marks_unreadable_child_inventory_unresolved(self):
+        main = CanvasState(modern=True)
+        instance = main.add_component(
+            "case", "SubSystem", 72, 0, 0, Name="S1"
+        )
+        instance.ports = lambda: {
+            "IN": SimpleNamespace(
+                name="IN", x=54, y=0, dim=1, type="electrical"
+            )
+        }
+        definition = SimpleNamespace(
+            name="SubSystem",
+            scoped_name="case:SubSystem",
+            ports=lambda: {
+                "IN": SimpleNamespace(
+                    name="IN", x=0, y=0, dim=1, type="electrical"
+                )
+            },
+        )
+        project = HierarchyProject(main, UnreadableCanvas(), definition)
+        backend = ModernBackend(
+            ImmediateExecutor(),
+            version="5.0.2",
+            x64=True,
+            pscad_module=FakeModernPscad(CanvasApp(project, modern=True)),
+            psout_module=False,
+        )
+        await backend.attach()
+
+        snapshot = await backend.inspect_canvas_topology("case", "Main")
+
+        child_key = "Main/101:SubSystem"
+        self.assertIn(
+            f"live_hierarchy_unavailable:{child_key}",
+            snapshot.unresolved,
+        )
+        self.assertEqual(snapshot.boundary_links, ())
+        self.assertIn(("hierarchy", False), snapshot.capabilities)
+
+    async def test_modern_snapshot_marks_missing_definition_ports_unsupported(self):
+        main = CanvasState(modern=True)
+        instance = main.add_component(
+            "case", "SubSystem", 72, 0, 0, Name="S1"
+        )
+        instance.id = 101
+        instance._id = ("101",)
+        child = CanvasState(modern=True)
+        definition = SimpleNamespace(
+            name="SubSystem",
+            scoped_name="case:SubSystem",
+            ports=lambda: {},
+        )
+        project = HierarchyProject(main, child, definition)
+        backend = ModernBackend(
+            ImmediateExecutor(),
+            version="5.0.2",
+            x64=True,
+            pscad_module=FakeModernPscad(CanvasApp(project, modern=True)),
+            psout_module=False,
+        )
+        await backend.attach()
+
+        snapshot = await backend.inspect_canvas_topology("case", "Main")
+
+        self.assertIn(
+            "definition_ports_unavailable:Main/101:SubSystem",
+            snapshot.unresolved,
+        )
+        self.assertIn(("hierarchy", False), snapshot.capabilities)
+
 
 def make_drifting_modern_backend():
     class DriftingCanvas(CanvasState):
@@ -200,3 +295,13 @@ class HierarchyProject:
 
     def definitions(self):
         return [self.definition]
+
+
+class UnreadableCanvas:
+    def components(self):
+        raise BackendError(
+            "CAPABILITY_UNAVAILABLE",
+            "child inventory unavailable",
+            "modern",
+            "components",
+        )
