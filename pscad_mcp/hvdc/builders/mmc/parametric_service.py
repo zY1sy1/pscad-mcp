@@ -8,6 +8,7 @@ import hashlib
 import hmac
 import json
 import os
+import shutil
 import threading
 import uuid
 from collections.abc import Mapping, Sequence
@@ -38,6 +39,14 @@ _TERMINAL = {"published", "failed", "interrupted"}
 
 def _error(code: str, message: str, operation: str, **details: object) -> BackendError:
     return BackendError(code, message, "hvdc", operation, details)
+
+
+def _scenario_source_path(project: Path) -> Path:
+    return project.with_name(f"{project.stem}_scenario_source.pscx")
+
+
+def _path_key(value: str | Path) -> str:
+    return os.path.normcase(str(Path(value).expanduser().resolve())).casefold()
 
 
 def _run_coroutine_sync(factory: Callable[[], Any]) -> Any:
@@ -102,6 +111,9 @@ class ParametricMmcBuilderService:
         self._statuses: dict[str, dict[str, Any]] = {}
         self._tasks: dict[str, asyncio.Task[Any]] = {}
         self._leases: dict[str, WorkspaceBuildLease] = {}
+        self._published_projects: dict[
+            str, tuple[MmcParametricRequest, str, str]
+        ] = {}
 
     def _workspace(self, folder: str | Path, operation: str) -> Path:
         if self.workspace_root is None:
@@ -258,13 +270,14 @@ class ParametricMmcBuilderService:
             )
         for child in plan.engine_plans:
             target = Path(child.target_path)
-            if target.exists() or target.is_symlink():
-                raise _error(
-                    "MMC_BUILD_CONFLICT",
-                    "A planned MMC final target already exists.",
-                    "build_parametric_mmc_model",
-                    target_path=str(target),
-                )
+            for reserved in (target, _scenario_source_path(target)):
+                if reserved.exists() or reserved.is_symlink():
+                    raise _error(
+                        "MMC_BUILD_CONFLICT",
+                        "A planned MMC publication target already exists.",
+                        "build_parametric_mmc_model",
+                        target_path=str(reserved),
+                    )
         for method in ("load_projects", "build_project"):
             if not callable(getattr(self.pscad_service, method, None)):
                 raise _error(
@@ -482,6 +495,7 @@ class ParametricMmcBuilderService:
 
     async def _publish(self, engines: list[dict[str, Any]]) -> list[str]:
         moved: list[tuple[Path, Path]] = []
+        scenario_sources: list[Path] = []
         try:
             for record in engines:
                 source = self._candidate_project(record)
@@ -513,9 +527,28 @@ class ParametricMmcBuilderService:
                 moved.append((source, target))
                 await self.pscad_service.load_projects([str(target)])
                 await self.pscad_service.build_project(target.stem)
+                scenario_source = _scenario_source_path(target)
+                try:
+                    with target.open("rb") as source_stream, scenario_source.open(
+                        "xb"
+                    ) as target_stream:
+                        scenario_sources.append(scenario_source)
+                        shutil.copyfileobj(source_stream, target_stream)
+                except FileExistsError as error:
+                    raise _error(
+                        "MMC_BUILD_CONFLICT",
+                        "An MMC scenario-source target appeared during publication.",
+                        "build_parametric_mmc_model",
+                        target_path=str(scenario_source),
+                    ) from error
             return [str(target) for _, target in moved]
         except BaseException:
             rollback_failures: list[str] = []
+            for scenario_source in reversed(scenario_sources):
+                try:
+                    scenario_source.unlink(missing_ok=True)
+                except OSError:
+                    rollback_failures.append(str(scenario_source))
             for source, target in reversed(moved):
                 try:
                     if target.is_file() and not source.exists():
@@ -559,8 +592,16 @@ class ParametricMmcBuilderService:
                 record["history"].append({"state": "failed", "reason": "child_failed"})
             else:
                 final_paths = await self._publish(engines)
-                for engine_record, final_path in zip(engines, final_paths):
+                for child, engine_record, final_path in zip(
+                    plan.engine_plans, engines, final_paths
+                ):
                     engine_record["final_path"] = final_path
+                    target = str(Path(final_path).expanduser().resolve())
+                    self._published_projects[_path_key(target)] = (
+                        plan.request,
+                        child.engine,
+                        target,
+                    )
                 record["state"] = "published"
                 record["result"] = {
                     "final_paths": final_paths,
@@ -672,19 +713,48 @@ class ParametricMmcBuilderService:
     ) -> tuple[MmcParametricRequest, str, str]:
         candidate = Path(project_name).expanduser()
         candidate_stem = candidate.stem.casefold()
-        candidate_path = candidate.resolve() if candidate.is_absolute() else None
-        for plan in reversed(tuple(self._plans.values())):
-            for child in plan.engine_plans:
-                target = Path(child.target_path).expanduser().resolve()
-                path_matches = candidate_path is not None and candidate_path == target
-                name_matches = candidate_stem == child.target_name.casefold()
-                if path_matches or name_matches:
-                    return plan.request, child.engine, str(target)
+        path_like = (
+            candidate.is_absolute()
+            or candidate.parent != Path(".")
+            or candidate.suffix.casefold() == ".pscx"
+        )
+        if path_like:
+            candidate_path = (
+                candidate
+                if candidate.is_absolute() or self.workspace_root is None
+                else self.workspace_root / candidate
+            ).resolve()
+            published = self._published_projects.get(_path_key(candidate_path))
+            if published is not None:
+                return published
+            matches = [
+                (plan.request, child.engine, str(target))
+                for plan in self._plans.values()
+                for child in plan.engine_plans
+                if _path_key(target := Path(child.target_path))
+                == _path_key(candidate_path)
+            ]
+        else:
+            matches = [
+                record
+                for record in self._published_projects.values()
+                if Path(record[2]).stem.casefold() == candidate_stem
+            ]
+            if not matches:
+                matches = [
+                    (plan.request, child.engine, str(Path(child.target_path).resolve()))
+                    for plan in self._plans.values()
+                    for child in plan.engine_plans
+                    if child.target_name.casefold() == candidate_stem
+                ]
+        if len(matches) == 1:
+            return matches[0]
         raise _error(
             "MMC_REQUEST_INVALID",
-            "Project-only recommendation requires a cached immutable design plan.",
+            "Project-only recommendation requires one matching immutable design plan.",
             "recommend_mmc_simulation",
             project_name=project_name,
+            match_count=len(matches),
         )
 
     def _project_path(self, value: str | Path) -> Path:

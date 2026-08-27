@@ -31,6 +31,28 @@ def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _verify_scenario_source(
+    source_project: Path,
+    expected_sha256: str,
+    scenario_name: str,
+) -> None:
+    try:
+        observed = _sha256(source_project)
+    except OSError:
+        observed = None
+    if not isinstance(observed, str) or not hmac.compare_digest(
+        observed, expected_sha256
+    ):
+        raise _error(
+            "MMC_POSTCONDITION_FAILED",
+            "PWM scenario execution changed its read-only source project.",
+            scenario=scenario_name,
+            source_project=str(source_project),
+            expected_sha256=expected_sha256,
+            observed_sha256=observed,
+        )
+
+
 def _require_method(service: object, name: str):
     method = getattr(service, name, None)
     if not callable(method):
@@ -288,79 +310,79 @@ async def _execute_scenarios(
     for scenario in _bound_scenarios(
         plan, scenarios, source_project, derived_project
     ):
-        started = await run_method(
-            str(source_project), scenario, confirm=True
-        )
-        scenario_id = started.get("scenario_id") if isinstance(started, Mapping) else None
-        if not isinstance(scenario_id, str) or not scenario_id:
-            raise _error(
-                "MMC_ACCEPTANCE_FAILED",
-                "The HVDC domain did not return a PWM scenario identifier.",
-                scenario=scenario["name"],
+        try:
+            started = await run_method(
+                str(source_project), scenario, confirm=True
             )
-        timeout_s = float((scenario.get("run") or {}).get("timeout_s", 300.0))
-        terminal = await _await_scenario_terminal(
-            scenario_service, scenario_id, timeout_s
-        )
-        if terminal.get("status") != "completed":
-            raise _error(
-                "MMC_ACCEPTANCE_FAILED",
-                "A required PWM scenario did not complete successfully.",
-                scenario=scenario["name"],
-                scenario_id=scenario_id,
-                status=terminal.get("status"),
-                error=terminal.get("error"),
+            scenario_id = (
+                started.get("scenario_id") if isinstance(started, Mapping) else None
             )
-        output_files = terminal.get("output_files")
-        if not isinstance(output_files, (list, tuple)) or not output_files:
-            raise _error(
-                "MMC_OUTPUT_INCOMPLETE",
-                "A completed PWM scenario produced no result files.",
-                scenario=scenario["name"],
-                scenario_id=scenario_id,
+            if not isinstance(scenario_id, str) or not scenario_id:
+                raise _error(
+                    "MMC_ACCEPTANCE_FAILED",
+                    "The HVDC domain did not return a PWM scenario identifier.",
+                    scenario=scenario["name"],
+                )
+            timeout_s = float((scenario.get("run") or {}).get("timeout_s", 300.0))
+            terminal = await _await_scenario_terminal(
+                scenario_service, scenario_id, timeout_s
             )
-        analysis = await analyze_method(scenario_id)
-        if not isinstance(analysis, Mapping) or str(
-            analysis.get("verdict", "")
-        ).upper() != "PASS":
-            raise _error(
-                "MMC_ACCEPTANCE_FAILED",
-                "A completed PWM scenario lacked passing analysis evidence.",
-                scenario=scenario["name"],
-                scenario_id=scenario_id,
-                verdict=(
-                    analysis.get("verdict")
-                    if isinstance(analysis, Mapping)
-                    else None
-                ),
+            if terminal.get("status") != "completed":
+                raise _error(
+                    "MMC_ACCEPTANCE_FAILED",
+                    "A required PWM scenario did not complete successfully.",
+                    scenario=scenario["name"],
+                    scenario_id=scenario_id,
+                    status=terminal.get("status"),
+                    error=terminal.get("error"),
+                )
+            output_files = terminal.get("output_files")
+            if not isinstance(output_files, (list, tuple)) or not output_files:
+                raise _error(
+                    "MMC_OUTPUT_INCOMPLETE",
+                    "A completed PWM scenario produced no result files.",
+                    scenario=scenario["name"],
+                    scenario_id=scenario_id,
+                )
+            analysis = await analyze_method(scenario_id)
+            if not isinstance(analysis, Mapping) or str(
+                analysis.get("verdict", "")
+            ).upper() != "PASS":
+                raise _error(
+                    "MMC_ACCEPTANCE_FAILED",
+                    "A completed PWM scenario lacked passing analysis evidence.",
+                    scenario=scenario["name"],
+                    scenario_id=scenario_id,
+                    verdict=(
+                        analysis.get("verdict")
+                        if isinstance(analysis, Mapping)
+                        else None
+                    ),
+                )
+            metrics = analysis.get("metrics")
+            channels = analysis.get("resolved_channels")
+            if not isinstance(metrics, list) or not metrics or not isinstance(
+                channels, list
+            ) or not channels:
+                raise _error(
+                    "MMC_OUTPUT_INCOMPLETE",
+                    "Passing PWM analysis lacked metric or channel evidence.",
+                    scenario=scenario["name"],
+                    scenario_id=scenario_id,
+                )
+            results.append(
+                {
+                    "name": scenario["name"],
+                    "scenario_id": scenario_id,
+                    "status": "completed",
+                    "output_files": list(output_files),
+                    "analysis": dict(analysis),
+                }
             )
-        metrics = analysis.get("metrics")
-        channels = analysis.get("resolved_channels")
-        if not isinstance(metrics, list) or not metrics or not isinstance(
-            channels, list
-        ) or not channels:
-            raise _error(
-                "MMC_OUTPUT_INCOMPLETE",
-                "Passing PWM analysis lacked metric or channel evidence.",
-                scenario=scenario["name"],
-                scenario_id=scenario_id,
+        finally:
+            _verify_scenario_source(
+                source_project, source_hash, str(scenario["name"])
             )
-        if not hmac.compare_digest(_sha256(source_project), source_hash):
-            raise _error(
-                "MMC_POSTCONDITION_FAILED",
-                "PWM scenario execution changed its read-only source project.",
-                scenario=scenario["name"],
-                source_project=str(source_project),
-            )
-        results.append(
-            {
-                "name": scenario["name"],
-                "scenario_id": scenario_id,
-                "status": "completed",
-                "output_files": list(output_files),
-                "analysis": dict(analysis),
-            }
-        )
     return results
 
 

@@ -56,6 +56,23 @@ class ProductionOutputShapeService(RecordingMmcService):
         return [{"severity": "info", "text": "Build completed", "source": None}]
 
 
+class MutatingFailedScenarioDomain(CompletedScenarioDomain):
+    async def run_scenario(
+        self, project_name: str, scenario: dict[str, object], *, confirm: bool = False
+    ) -> dict[str, object]:
+        Path(project_name).write_text("mutated during scenario", encoding="utf-8")
+        return await super().run_scenario(project_name, scenario, confirm=confirm)
+
+    async def scenario_status(self, scenario_id: str) -> dict[str, object]:
+        scenario = self.scenarios[scenario_id]
+        self.calls.append(("scenario_status", str(scenario["name"])))
+        return {
+            "scenario_id": scenario_id,
+            "status": "failed",
+            "output_files": [],
+        }
+
+
 def _scenario_payloads(plan) -> list[dict[str, object]]:
     return [
         {
@@ -134,6 +151,25 @@ def test_pwm_engine_rejects_incomplete_analysis_even_when_runs_complete(
 
     assert raised.value.code == "MMC_ACCEPTANCE_FAILED"
     assert "get_project_output" not in [name for name, _ in service.calls]
+
+
+def test_pwm_engine_reports_source_mutation_even_when_scenario_fails(
+    tmp_path: Path,
+) -> None:
+    project, library = make_synthetic_official_shape(tmp_path / "source")
+    plan = pwm_plan(project, library, tmp_path)
+
+    with pytest.raises(BackendError) as raised:
+        asyncio.run(
+            execute_pwm_candidate(
+                plan,
+                ProductionOutputShapeService(tmp_path),
+                scenario_service=MutatingFailedScenarioDomain(),
+                scenarios=_scenario_payloads(plan),
+            )
+        )
+
+    assert raised.value.code == "MMC_POSTCONDITION_FAILED"
 
 
 def test_pwm_engine_stops_before_pscad_when_line_dependency_is_unresolved(tmp_path: Path) -> None:

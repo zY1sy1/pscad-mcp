@@ -44,6 +44,12 @@ def test_both_engines_publish_only_after_independent_acceptance(tmp_path: Path) 
     ] == ["accepted", "accepted"]
     assert (tmp_path / "MMC_CASE_pwm.pscx").is_file()
     assert (tmp_path / "MMC_CASE_avm.pscx").is_file()
+    assert (tmp_path / "MMC_CASE_pwm_scenario_source.pscx").read_bytes() == (
+        tmp_path / "MMC_CASE_pwm.pscx"
+    ).read_bytes()
+    assert (tmp_path / "MMC_CASE_avm_scenario_source.pscx").read_bytes() == (
+        tmp_path / "MMC_CASE_avm.pscx"
+    ).read_bytes()
     assert service.recorded_engine_calls == [
         ("detailed_pwm", "pwm-0"),
         ("average_value", "avm-0"),
@@ -175,3 +181,54 @@ def test_project_aware_recommendations_bind_cached_derived_project(
         item["scenario"]["project"] != target
         for item in result["recommendations"]
     )
+
+
+def test_project_recommendations_use_the_plan_that_was_published(
+    tmp_path: Path,
+) -> None:
+    service = make_parametric_service(tmp_path)
+    published_request = valid_request(
+        model_fidelity="average_value", active_power_mw=900.0
+    )
+    published_plan = service.plan_model(
+        published_request, project_name="CUSTOM_CASE", folder=str(tmp_path)
+    )
+    service.plan_model(
+        valid_request(model_fidelity="average_value", active_power_mw=1100.0),
+        project_name="CUSTOM_CASE",
+        folder=str(tmp_path),
+    )
+
+    started = asyncio.run(
+        service.build_model(
+            published_request,
+            published_plan["plan_hash"],
+            "CUSTOM_CASE",
+            str(tmp_path),
+            confirm=True,
+        )
+    )
+    terminal = wait_for_terminal(service, started["build_id"])
+    target = terminal["engines"][0]["final_path"]
+
+    result = service.recommend_simulation(target)
+
+    assert result["request"]["active_power_mw"] == 900.0
+
+
+def test_absolute_project_lookup_does_not_alias_a_cached_basename(
+    tmp_path: Path,
+) -> None:
+    service = make_parametric_service(tmp_path)
+    plan = service.plan_model(
+        valid_request(model_fidelity="average_value"),
+        project_name="CUSTOM_CASE",
+        folder=str(tmp_path),
+    )
+    target_name = Path(plan["engine_plans"][0]["target_path"]).name
+    unrelated = tmp_path / "unrelated" / target_name
+
+    with pytest.raises(BackendError) as raised:
+        service.recommend_simulation(str(unrelated))
+
+    assert raised.value.code == "MMC_REQUEST_INVALID"

@@ -6,7 +6,6 @@ import asyncio
 import hashlib
 import json
 import os
-import shutil
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
@@ -216,7 +215,8 @@ async def _run_standard_scenarios(
     for engine in ("detailed_pwm", "average_value"):
         final_project = engine_paths[engine]
         source_copy = case_root / f"{final_project.stem}_scenario_source.pscx"
-        shutil.copy2(final_project, source_copy)
+        if not source_copy.is_file():
+            raise AssertionError(f"The {engine} scenario source was not published")
         source_hash = _sha256(source_copy)
         selected = builder.recommend_simulation(str(final_project))["recommendations"]
         if {item["name"] for item in selected} != set(STANDARD_SCENARIOS):
