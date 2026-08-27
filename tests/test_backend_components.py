@@ -2,6 +2,7 @@ import copy
 import tempfile
 from pathlib import Path
 import unittest
+from unittest.mock import patch
 from types import SimpleNamespace
 import xml.etree.ElementTree as ET
 
@@ -1151,6 +1152,49 @@ class TestBackendComponentContracts(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(snapshot.components[0].ports[0].kind, "data")
 
+    async def test_legacy_snapshot_indexes_saved_component_fallbacks_once(self):
+        project = LegacyComponentProject()
+        component = project.main.components[0]
+        component.orientation = None
+        component.defn_name = None
+        calls = {"location": 0, "definition": 0}
+
+        def get_location():
+            calls["location"] += 1
+            return component.location
+
+        def get_definition():
+            calls["definition"] += 1
+            return SimpleNamespace(scoped_name="master:source3")
+
+        component.get_location = get_location
+        component.get_definition = get_definition
+        source_xml = """<project><definitions>
+        <Definition name="Main"><schematic>
+          <User classid="UserCmp" id="7" x="10" y="5" orient="3"
+                defn="master:source3" />
+        </schematic></Definition>
+        </definitions></project>"""
+        with tempfile.TemporaryDirectory() as temporary:
+            source = Path(temporary) / "case.pscx"
+            source.write_text(source_xml, encoding="utf-8")
+            backend, _project, _component = await self.make_legacy_backend(
+                project,
+                definition_paths={"case": source},
+            )
+
+            with patch(
+                "pscad_mcp.core.backend.legacy.ET.parse",
+                wraps=ET.parse,
+            ) as parse:
+                snapshot = await backend.inspect_canvas_topology("case", "Main")
+
+        self.assertEqual(snapshot.components[0].orientation, 3)
+        self.assertEqual(snapshot.components[0].location, (10, 5))
+        self.assertEqual(snapshot.components[0].definition, "master:source3")
+        self.assertEqual(parse.call_count, 1)
+        self.assertEqual(calls, {"location": 0, "definition": 0})
+
     async def test_legacy_snapshot_marks_missing_optional_metadata_unresolved(self):
         backend, _project, component = await self.make_legacy_backend()
         component.port_names = []
@@ -1327,6 +1371,42 @@ class TestBackendComponentContracts(unittest.IsolatedAsyncioTestCase):
             "Main/101:SubSystem",
         )
         self.assertIn(("hierarchy", True), snapshot.capabilities)
+
+    async def test_legacy_snapshot_skips_leaf_local_definition_canvas(self):
+        project = LegacyComponentProject()
+        component = project.main.components[0]
+        component.defn_name = "case:Link"
+        canvas_calls = []
+
+        def user_canvas(name):
+            canvas_calls.append(name)
+            if name != "Main":
+                raise AssertionError(f"leaf definition was traversed: {name}")
+            return project.main
+
+        project.user_canvas = user_canvas
+        source_xml = """<project><definitions>
+        <Definition name="Link"><svg>
+          <port name="IN" x="-18" y="0" dim="1" />
+          <port name="OUT" x="18" y="0" dim="1" />
+        </svg><schematic><paramlist /></schematic></Definition>
+        <Definition name="Main"><schematic>
+          <User classid="UserCmp" id="7" x="10" y="5" orient="0"
+                defn="case:Link" />
+        </schematic></Definition>
+        </definitions></project>"""
+        with tempfile.TemporaryDirectory() as temporary:
+            source = Path(temporary) / "case.pscx"
+            source.write_text(source_xml, encoding="utf-8")
+            backend, _project, _component = await self.make_legacy_backend(
+                project,
+                definition_paths={"case": source},
+            )
+
+            snapshot = await backend.inspect_canvas_topology("case", "Main")
+
+        self.assertEqual(canvas_calls, ["Main"])
+        self.assertEqual([item.key for item in snapshot.canvases], ["Main"])
 
     async def test_legacy_snapshot_uses_complete_bulk_xml_without_proxies(self):
         root = ET.fromstring(

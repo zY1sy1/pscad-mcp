@@ -54,6 +54,11 @@ from .run_control import (
 
 
 _RUN_STATE_MISSING = object()
+_SavedTopologyRecord = tuple[
+    str | None,
+    tuple[int, int] | None,
+    str | None,
+]
 
 
 class LegacyBackend:
@@ -3391,11 +3396,22 @@ class LegacyBackend:
     ) -> TopologySnapshot:
         project = await self._project(project_name)
         source_hashes: dict[Path, str] = {}
+        saved_topology = await asyncio.to_thread(
+            self._saved_topology_components,
+            project_name,
+        )
+        if saved_topology is None:
+            saved_components = None
+            saved_modules = None
+        else:
+            saved_components, saved_modules = saved_topology
         captures, unresolved = await self._legacy_topology_captures(
             project,
             project_name,
             canvas_name,
             source_hashes,
+            saved_components,
+            saved_modules,
         )
         source_fingerprint = canonical_sha256(
             tuple(
@@ -3423,6 +3439,9 @@ class LegacyBackend:
         captured_keys = {capture["key"] for capture in captures}
         for capture in captures:
             canvas_key = capture["key"]
+            inventory_by_id = {
+                item[0]: item for item in capture["inventory"]
+            }
             page_ports = capture["page_ports"]
             canvases.append(
                 TopologyCanvas(
@@ -3439,11 +3458,10 @@ class LegacyBackend:
                 object_id = str(node.get("id"))
                 key = f"{canvas_key}:{object_id}"
                 proxy = capture["proxies"].get(object_id)
-                class_id = str(node.get("classid") or node.tag).casefold()
+                inventory_item = inventory_by_id[object_id]
+                class_id = str(inventory_item[1]).casefold()
                 if self._legacy_topology_is_conductor(class_id, proxy):
-                    vertices = await self._legacy_topology_vertices(
-                        node, proxy
-                    )
+                    vertices = inventory_item[6]
                     if vertices is None:
                         conductors_supported = False
                         unresolved.add(
@@ -3469,17 +3487,13 @@ class LegacyBackend:
                         )
                     )
                     continue
-                definition = await self._legacy_topology_definition(
-                    proxy, node
-                )
-                location = await self._legacy_topology_location(proxy, node)
+                definition = inventory_item[2]
+                location = inventory_item[3]
                 parameters = await self._legacy_topology_parameters(
                     proxy, node
                 )
                 if self._legacy_topology_is_label(definition):
-                    label_name = self._legacy_topology_name(
-                        proxy, parameters, node
-                    )
+                    label_name = inventory_item[5]
                     if not label_name:
                         labels_supported = False
                         unresolved.add(f"label_name_unreadable:{key}")
@@ -3504,12 +3518,7 @@ class LegacyBackend:
                 if definition.casefold() in {"user", "usercmp"}:
                     components_supported = False
                     unresolved.add(f"component_definition_unavailable:{key}")
-                orientation = await self._legacy_topology_orientation(
-                    project_name,
-                    object_id,
-                    node,
-                    proxy,
-                )
+                orientation = inventory_item[4]
                 ports = await self._legacy_topology_ports(
                     project_name,
                     canvas_key,
@@ -3581,6 +3590,7 @@ class LegacyBackend:
                 project_name,
                 after_response,
                 after_proxies,
+                saved_components,
             )
             if capture["inventory"] != after_inventory:
                 raise BackendError(
@@ -3641,6 +3651,10 @@ class LegacyBackend:
         project_name: str,
         canvas_name: str,
         source_hashes: dict[Path, str],
+        saved_components: Mapping[
+            tuple[str, str], _SavedTopologyRecord
+        ] | None,
+        saved_modules: frozenset[str] | None,
     ) -> tuple[list[dict[str, Any]], set[str]]:
         captures = []
         unresolved = set()
@@ -3682,27 +3696,40 @@ class LegacyBackend:
                 unresolved.add(
                     f"proxy_enrichment_unavailable:{request['key']}"
                 )
+            inventory = await self._legacy_topology_inventory(
+                project_name,
+                response,
+                proxies,
+                saved_components,
+            )
             capture = {
                 **request,
                 "canvas": canvas,
                 "response": response,
                 "proxies": proxies,
-                "inventory": await self._legacy_topology_inventory(
-                    project_name, response, proxies
-                ),
+                "inventory": inventory,
                 "children": [],
             }
+            inventory_by_id = {item[0]: item for item in inventory}
             captures.append(capture)
             for node in self._legacy_topology_nodes(response):
                 object_id = str(node.get("id"))
                 proxy = proxies.get(object_id)
-                definition = await self._legacy_topology_definition(
-                    proxy, node
+                inventory_item = inventory_by_id.get(object_id)
+                definition = (
+                    inventory_item[2]
+                    if inventory_item is not None
+                    else await self._legacy_topology_definition(proxy, node)
                 )
                 local_name = self._legacy_topology_local_definition_name(
                     project_name, definition
                 )
                 if local_name is None:
+                    continue
+                if (
+                    saved_modules is not None
+                    and local_name.casefold() not in saved_modules
+                ):
                     continue
                 child_key = f"{request['key']}/{object_id}:{local_name}"
                 if local_name.casefold() in request["ancestry"]:
@@ -3841,22 +3868,47 @@ class LegacyBackend:
         project_name: str,
         response: ET.Element,
         proxies: Mapping[str, Any],
+        saved_components: Mapping[
+            tuple[str, str], _SavedTopologyRecord
+        ] | None = None,
     ) -> tuple[tuple, ...]:
         result = []
         for node in self._legacy_topology_nodes(response):
             object_id = str(node.get("id"))
             proxy = proxies.get(object_id)
             class_id = str(node.get("classid") or node.tag)
-            location = await self._legacy_topology_location(proxy, node)
+            saved_component = (
+                saved_components.get(
+                    (
+                        object_id,
+                        self._legacy_topology_class_family(class_id),
+                    )
+                )
+                if saved_components is not None
+                else None
+            )
+            saved_definition, saved_location, saved_orientation = (
+                saved_component or (None, None, None)
+            )
+            location = await self._legacy_topology_location(
+                proxy,
+                node,
+                saved_location,
+            )
             orientation = await self._legacy_topology_orientation(
                 project_name,
                 object_id,
                 node,
                 proxy,
+                saved_orientation,
             )
-            definition = await self._legacy_topology_definition(proxy, node)
+            definition = await self._legacy_topology_definition(
+                proxy,
+                node,
+                saved_definition,
+            )
             vertices = (
-                await self._legacy_topology_vertices(node, proxy)
+                await self._legacy_topology_vertices(node, proxy, location)
                 if self._legacy_topology_is_conductor(class_id.casefold(), proxy)
                 else None
             )
@@ -3889,17 +3941,32 @@ class LegacyBackend:
         )
 
     @staticmethod
+    def _legacy_topology_class_family(class_id: str) -> str:
+        lowered = str(class_id).split("}")[-1].casefold()
+        if lowered in {"user", "usercmp"}:
+            return "user"
+        if "wire" in lowered:
+            return "wire"
+        if "bus" in lowered:
+            return "bus"
+        return lowered
+
+    @staticmethod
     def _legacy_topology_is_label(definition: str) -> bool:
         lowered = definition.casefold()
         return "nodelabel" in lowered or "datalabel" in lowered
 
     async def _legacy_topology_definition(
-        self, proxy: Any, node: ET.Element
+        self,
+        proxy: Any,
+        node: ET.Element,
+        saved_definition: str | None = None,
     ) -> str:
         definition = str(
             getattr(proxy, "defn_name", None)
             or node.get("defn")
             or node.get("definition")
+            or saved_definition
             or ""
         )
         method = getattr(proxy, "get_definition", None)
@@ -3909,38 +3976,30 @@ class LegacyBackend:
         return definition or str(node.get("classid") or node.tag)
 
     async def _legacy_topology_location(
-        self, proxy: Any, node: ET.Element
+        self,
+        proxy: Any,
+        node: ET.Element,
+        saved_location: tuple[int, int] | None = None,
     ) -> tuple[int, int] | None:
+        try:
+            return int(node.get("x")), int(node.get("y"))
+        except (TypeError, ValueError):
+            pass
         if proxy is not None:
+            value = getattr(proxy, "location", None)
+            if value is not None:
+                return int(value[0]), int(value[1])
             method = getattr(proxy, "get_location", None)
             if method is not None:
                 value = await self.executor.run_safe(method)
                 if value is not None:
                     return int(value[0]), int(value[1])
-            value = getattr(proxy, "location", None)
-            if value is not None:
-                return int(value[0]), int(value[1])
-        try:
-            return int(node.get("x")), int(node.get("y"))
-        except (TypeError, ValueError):
-            return None
+        return saved_location
 
     async def _legacy_topology_parameters(
         self, proxy: Any, node: ET.Element | None = None
     ) -> dict[str, Any]:
-        result = {}
-        if node is not None:
-            for child in node.iter():
-                tag = str(child.tag).split("}")[-1].casefold()
-                if tag not in {"param", "parameter"}:
-                    continue
-                name = child.get("name") or child.get("key")
-                if name:
-                    result[str(name)] = (
-                        child.get("value")
-                        if child.get("value") is not None
-                        else (child.text or "").strip()
-                    )
+        result = self._legacy_topology_xml_parameters(node)
         if proxy is None:
             return result
         for name in ("get_parameters", "parameters"):
@@ -3950,12 +4009,33 @@ class LegacyBackend:
                 break
         return result
 
+    @staticmethod
+    def _legacy_topology_xml_parameters(
+        node: ET.Element | None,
+    ) -> dict[str, Any]:
+        result = {}
+        if node is None:
+            return result
+        for child in node.iter():
+            tag = str(child.tag).split("}")[-1].casefold()
+            if tag not in {"param", "parameter"}:
+                continue
+            name = child.get("name") or child.get("key")
+            if name:
+                result[str(name)] = (
+                    child.get("value")
+                    if child.get("value") is not None
+                    else (child.text or "").strip()
+                )
+        return result
+
     async def _legacy_topology_orientation(
         self,
         project_name: str,
         object_id: str,
         node: ET.Element,
         proxy: Any,
+        saved_orientation: str | None = None,
     ) -> int | None:
         raw = node.get("orient") or node.get("orientation")
         if raw is None:
@@ -3964,14 +4044,83 @@ class LegacyBackend:
             )
             raw = cached if cached is not None else getattr(proxy, "orientation", None)
         if raw is None:
+            raw = saved_orientation
+        if raw is None:
             raw = await self._legacy_component_orientation(project_name, object_id)
         try:
             return int(raw) if raw is not None else None
         except (TypeError, ValueError):
             return None
 
+    def _saved_topology_components(
+        self, project_name: str
+    ) -> tuple[
+        dict[tuple[str, str], _SavedTopologyRecord],
+        frozenset[str],
+    ] | None:
+        path = self.definition_paths.get(project_name)
+        if path is None or not path.is_file():
+            return None
+        try:
+            root = ET.parse(path).getroot()
+        except (OSError, ET.ParseError):
+            return None
+        result: dict[tuple[str, str], _SavedTopologyRecord] = {}
+        modules = set()
+        for definition in root.iter():
+            if str(definition.tag).split("}")[-1].casefold() != "definition":
+                continue
+            name = definition.get("name")
+            if not name:
+                continue
+            has_page_port = any(
+                str(port.tag).split("}")[-1].casefold() == "port"
+                and (port.get("page") or "").strip().casefold()
+                in {"1", "true", "yes", "on"}
+                for port in definition.iter()
+            )
+            has_internal_objects = any(
+                child.get("id") is not None
+                for schematic in definition
+                if str(schematic.tag).split("}")[-1].casefold()
+                == "schematic"
+                for child in schematic.iter()
+                if child is not schematic
+            )
+            if has_page_port or has_internal_objects:
+                modules.add(str(name).casefold())
+        for node in root.iter():
+            object_id = node.get("id")
+            if object_id is None:
+                continue
+            class_id = node.get("classid") or str(node.tag).split("}")[-1]
+            definition = node.get("defn") or node.get("definition")
+            try:
+                location = (int(node.get("x")), int(node.get("y")))
+            except (TypeError, ValueError):
+                location = None
+            orientation = node.get("orient") or node.get("orientation")
+            record = (
+                str(definition) if definition is not None else None,
+                location,
+                str(orientation) if orientation is not None else None,
+            )
+            key = (
+                str(object_id),
+                self._legacy_topology_class_family(str(class_id)),
+            )
+            previous = result.get(key)
+            if previous is None or sum(item is not None for item in record) > sum(
+                item is not None for item in previous
+            ):
+                result[key] = record
+        return result, frozenset(modules)
+
     async def _legacy_topology_vertices(
-        self, node: ET.Element, proxy: Any
+        self,
+        node: ET.Element,
+        proxy: Any,
+        location: tuple[int, int] | None = None,
     ) -> tuple[tuple[int, int], ...] | None:
         raw_vertices = []
         for vertex in node.iter():
@@ -3998,7 +4147,7 @@ class LegacyBackend:
                     return None
         if len(raw_vertices) < 2:
             return None
-        origin = await self._legacy_topology_location(proxy, node)
+        origin = location
         has_xml_origin = node.get("x") is not None and node.get("y") is not None
         proxy_has_origin = proxy is not None and hasattr(proxy, "location")
         if origin is not None and (has_xml_origin or proxy_has_origin):
@@ -4214,16 +4363,16 @@ class LegacyBackend:
             if str(name).casefold() == "name":
                 return str(value)
         proxy_name = str(getattr(proxy, "name", "") or "")
-        if proxy_name:
-            return proxy_name
-        if node is None:
-            return ""
-        return str(
-            node.get("name")
-            or node.get("text")
-            or node.get("value")
-            or ""
-        )
+        if node is not None:
+            node_name = str(
+                node.get("name")
+                or node.get("text")
+                or node.get("value")
+                or ""
+            )
+            if node_name:
+                return node_name
+        return proxy_name
 
     @staticmethod
     def _legacy_topology_active(parameters: Mapping[str, Any]) -> bool:
