@@ -111,3 +111,38 @@ def test_invalid_explicit_orientation_leaves_port_geometry_unresolved(tmp_path):
     assert snapshot.components[0].orientation is None
     assert snapshot.components[0].ports[0].absolute is None
     assert snapshot.unresolved == ("port_geometry_unresolved:Main:1:P",)
+
+
+def test_pscx_provider_classifies_licensed_user_label_definitions(tmp_path):
+    source = tmp_path / "licensed_labels.pscx"
+    source.write_text(
+        """<project name="case" version="4.6.2">
+<Definition name="Main"><schematic>
+  <User classid="UserCmp" id="7" defn="master:resistor"
+        x="0" y="0" orient="0">
+    <Port name="A" kind="electrical" dimension="1" x="0" y="0" />
+  </User>
+  <User classid="UserCmp" id="110" name="master:nodelabel"
+        defn="master:nodelabel" x="10" y="20" orient="0"
+        namespace="electrical">
+    <paramlist><param name="Name" value="N_CONFLICT" /></paramlist>
+  </User>
+  <User classid="UserCmp" id="111" name="master:datalabel"
+        defn="master:datalabel" x="30" y="40" orient="0"
+        namespace="data">
+    <paramlist><param name="Name" value="D_CONFLICT" /></paramlist>
+  </User>
+</schematic></Definition></project>""",
+        encoding="utf-8",
+    )
+
+    snapshot = PscxSnapshotProvider().read(source, "Main")
+
+    assert [component.object_id for component in snapshot.components] == ["7"]
+    assert [
+        (label.object_id, label.name, label.namespace)
+        for label in snapshot.labels
+    ] == [
+        ("110", "N_CONFLICT", "electrical"),
+        ("111", "D_CONFLICT", "data"),
+    ]

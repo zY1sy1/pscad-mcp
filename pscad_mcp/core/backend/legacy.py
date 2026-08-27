@@ -3722,6 +3722,7 @@ class LegacyBackend:
                             offset=(port.x, port.y),
                         )
                         for port in metadata.ports
+                        if port.page
                     )
                     if metadata is not None
                     else ()

@@ -1290,8 +1290,9 @@ class TestBackendComponentContracts(unittest.IsolatedAsyncioTestCase):
         project.user_canvas = lambda name: project.canvases[name]
         library = (
             '<project><Definition name="SubSystem"><svg>'
-            '<port name="IN" x="0" y="0" dim="1" type="electrical"/>'
-            '<port name="OUT" x="36" y="0" dim="1" type="electrical"/>'
+            '<port name="IN" x="0" y="0" dim="1" type="electrical" page="true"/>'
+            '<port name="OUT" x="36" y="0" dim="1" type="electrical" page="true"/>'
+            '<port name="INTERNAL" x="18" y="18" dim="1" type="electrical"/>'
             "</svg></Definition></project>"
         )
         with tempfile.TemporaryDirectory() as temporary:
@@ -1306,6 +1307,13 @@ class TestBackendComponentContracts(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             [canvas.key for canvas in snapshot.canvases],
             ["Main", "Main/101:SubSystem"],
+        )
+        self.assertEqual(
+            snapshot.canvases[1].page_ports,
+            (
+                "Main/101:SubSystem:IN",
+                "Main/101:SubSystem:OUT",
+            ),
         )
         self.assertEqual(
             [link.key for link in snapshot.boundary_links],
@@ -1340,7 +1348,7 @@ class TestBackendComponentContracts(unittest.IsolatedAsyncioTestCase):
         project = XmlOnlyTopologyProject(root, child)
         library = (
             '<project><Definition name="SubSystem"><svg>'
-            '<port name="IN" x="0" y="0" dim="1" type="electrical"/>'
+            '<port name="IN" x="0" y="0" dim="1" type="electrical" page="true"/>'
             "</svg></Definition></project>"
         )
         with tempfile.TemporaryDirectory() as temporary:

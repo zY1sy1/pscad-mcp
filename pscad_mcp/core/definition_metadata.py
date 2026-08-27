@@ -16,6 +16,7 @@ class PortMetadata:
     type: str | None
     model: str | None = None
     kind: str | None = None
+    page: bool = False
 
 
 @dataclass(frozen=True)
@@ -53,6 +54,8 @@ def read_definition_metadata(
                 type=port.get("type") or port.get("model"),
                 model=port.get("model"),
                 kind=port.get("kind"),
+                page=(port.get("page") or "").strip().casefold()
+                in {"1", "true", "yes", "on"},
             )
         )
 

@@ -281,6 +281,8 @@ class PscxSnapshotProvider:
                 continue
             key = f"{canvas_key}:{object_id}"
             definition = _text(_attr(element, "definition", "defn", "type"))
+            if _label_kind(element, definition):
+                continue
             if not definition:
                 definition = "unknown"
                 unresolved.add(f"definition_unavailable:{key}")
@@ -545,11 +547,22 @@ def _parse_labels(
     result = []
     for index, element in enumerate(schematic.iter()):
         tag = _local_name(element.tag)
-        if tag not in {"label", "nodelabel", "datalabel"}:
+        definition = _text(_attr(element, "definition", "defn", "type"))
+        kind = _label_kind(element, definition)
+        if kind is None:
             continue
-        name = _text(
-            _attr(element, "name", "text", "value") or element.text
-        )
+        name = ""
+        if tag in {"label", "nodelabel", "datalabel"}:
+            name = _text(
+                _attr(element, "name", "text", "value") or element.text
+            )
+        if not name:
+            parameters = _parameters(element)
+            for parameter_name, parameter_value in parameters:
+                if parameter_name.casefold() in {"name", "label", "text"}:
+                    name = _text(parameter_value)
+                    if name:
+                        break
         if not name:
             continue
         object_id = _text(_attr(element, "id", "object_id")) or f"label{index}"
@@ -561,7 +574,7 @@ def _parse_labels(
                 object_id=object_id,
                 name=name,
                 namespace=_namespace(
-                    _attr(element, "namespace", "kind", "type"), tag
+                    _attr(element, "namespace", "kind", "type"), kind
                 ),
                 scope=canvas_key,
                 location=_point(element),
@@ -569,6 +582,14 @@ def _parse_labels(
             )
         )
     return tuple(sorted(result, key=lambda item: item.key))
+
+
+def _label_kind(element: ET.Element, definition: str = "") -> str | None:
+    tag = _local_name(element.tag)
+    if tag in {"label", "nodelabel", "datalabel"}:
+        return tag
+    normalized = definition.rsplit(":", 1)[-1].casefold()
+    return normalized if normalized in {"nodelabel", "datalabel"} else None
 
 
 def _boundary_links(
