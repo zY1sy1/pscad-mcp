@@ -51,12 +51,16 @@ from pscad_mcp.tools.catalog import FULL_TOOL_NAMES
 from pscad_mcp.hvdc.builders.lcc.assets import load_packaged_asset_set
 
 installed = metadata.version('pscad-mcp')
-assert installed == pscad_mcp.__version__, (installed, pscad_mcp.__version__)
+if installed != pscad_mcp.__version__:
+    raise RuntimeError(f'Installed version mismatch: {installed!r} != {pscad_mcp.__version__!r}')
 tools = create_server()._tool_manager.list_tools()
-assert {tool.name for tool in tools} == FULL_TOOL_NAMES
+if {tool.name for tool in tools} != FULL_TOOL_NAMES:
+    raise RuntimeError('Installed tool inventory does not match FULL_TOOL_NAMES')
 assets = load_packaged_asset_set()
-assert assets.name == 'cigre_lcc_monopole_v1'
-assert assets.pscad_version.startswith('4.')
+if assets.name != 'cigre_lcc_monopole_v1':
+    raise RuntimeError(f'Unexpected packaged asset set: {assets.name!r}')
+if not assets.pscad_version.startswith('4.'):
+    raise RuntimeError(f'Unexpected packaged asset PSCAD version: {assets.pscad_version!r}')
 print(f'{installed} {len(FULL_TOOL_NAMES)} {len(assets.hashes)}')
 "@
 

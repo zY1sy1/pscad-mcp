@@ -21,6 +21,33 @@ def _read_project_version() -> str:
     return document["project"]["version"]
 
 
+def _build_probe(expected_version: str) -> str:
+    return f"""
+import importlib.metadata as metadata
+import pscad_mcp
+from pscad_mcp.main import create_server
+from pscad_mcp.tools.catalog import FULL_TOOL_NAMES
+from pscad_mcp.hvdc.builders.lcc.assets import load_packaged_asset_set
+
+installed = metadata.version('pscad-mcp')
+expected_version = {expected_version!r}
+if installed != expected_version or installed != pscad_mcp.__version__:
+    raise RuntimeError(
+        f'Installed version mismatch: {{installed!r}}, {{expected_version!r}}, '
+        f'{{pscad_mcp.__version__!r}}'
+    )
+tools = create_server()._tool_manager.list_tools()
+if {{tool.name for tool in tools}} != FULL_TOOL_NAMES:
+    raise RuntimeError('Installed tool inventory does not match FULL_TOOL_NAMES')
+assets = load_packaged_asset_set()
+if assets.name != 'cigre_lcc_monopole_v1':
+    raise RuntimeError(f'Unexpected packaged asset set: {{assets.name!r}}')
+if not assets.pscad_version.startswith('4.'):
+    raise RuntimeError(f'Unexpected packaged asset PSCAD version: {{assets.pscad_version!r}}')
+print(installed, len(FULL_TOOL_NAMES), len(assets.hashes))
+"""
+
+
 def test_built_wheel_is_installable_and_exposes_tools():
     wheel = os.environ.get("PSCAD_MCP_SMOKE_WHEEL")
     if not wheel:
@@ -69,21 +96,7 @@ def test_built_wheel_is_installable_and_exposes_tools():
             [
                 str(venv_python),
                 "-c",
-                (
-                    "import importlib.metadata as metadata; "
-                    "import pscad_mcp; "
-                    "from pscad_mcp.main import create_server; "
-                    "installed = metadata.version('pscad-mcp'); "
-                    f"expected_version = {expected_version!r}; "
-                    "assert installed == expected_version == pscad_mcp.__version__; "
-                    "from pscad_mcp.tools.catalog import FULL_TOOL_NAMES; "
-                    "tools = create_server()._tool_manager.list_tools(); "
-                    "assert {tool.name for tool in tools} == FULL_TOOL_NAMES; "
-                    "from pscad_mcp.hvdc.builders.lcc.assets import load_packaged_asset_set; "
-                    "assets = load_packaged_asset_set(); "
-                    "assert assets.name == 'cigre_lcc_monopole_v1'; "
-                    "print(installed, len(FULL_TOOL_NAMES), len(assets.hashes))"
-                ),
+                _build_probe(expected_version),
             ],
             check=False,
             capture_output=True,
