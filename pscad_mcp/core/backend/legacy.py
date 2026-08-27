@@ -320,6 +320,15 @@ class LegacyBackend:
             path = Path(filename).resolve()
             if path.suffix.lower() in {".pslx", ".pscx"}:
                 self.definition_paths[path.stem] = path
+                try:
+                    tree = await asyncio.to_thread(ET.parse, path)
+                    project_name = (
+                        tree.getroot().get("name") or ""
+                    ).strip()
+                except (OSError, ET.ParseError):
+                    project_name = ""
+                if project_name:
+                    self.definition_paths[project_name] = path
 
     async def list_projects(self) -> list[ProjectInfo]:
         values = await self.executor.run_safe(self._require_app().list_projects)

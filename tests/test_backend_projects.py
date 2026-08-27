@@ -435,6 +435,22 @@ class TestLegacyProjectFiles(unittest.IsolatedAsyncioTestCase):
         await backend.load_projects([str(source)])
         return source, app.project_map["source"]
 
+    async def test_load_registers_xml_project_identity_and_filename_alias(self):
+        with tempfile.TemporaryDirectory() as folder:
+            backend, _app = await self.make_backend()
+            source = Path(folder) / "seeded-defects.pscx"
+            write_project_file(source, "seeded_defects", "case")
+
+            await backend.load_projects([str(source)])
+
+            expected = source.resolve()
+            self.assertEqual(
+                backend.definition_paths["seeded_defects"], expected
+            )
+            self.assertEqual(
+                backend.definition_paths["seeded-defects"], expected
+            )
+
     def assert_project_identity(
         self, destination: Path, expected_name: str, *, require_output: bool
     ) -> None:
