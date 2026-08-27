@@ -47,22 +47,24 @@ try {
 import importlib.metadata as metadata
 import pscad_mcp
 from pscad_mcp.main import create_server
+from pscad_mcp.tools.catalog import FULL_TOOL_NAMES
 from pscad_mcp.hvdc.builders.lcc.assets import load_packaged_asset_set
 
 installed = metadata.version('pscad-mcp')
 assert installed == pscad_mcp.__version__, (installed, pscad_mcp.__version__)
 tools = create_server()._tool_manager.list_tools()
-assert len(tools) == 77
-assert len({tool.name for tool in tools}) == 77
+assert {tool.name for tool in tools} == FULL_TOOL_NAMES
 assets = load_packaged_asset_set()
 assert assets.name == 'cigre_lcc_monopole_v1'
 assert assets.pscad_version.startswith('4.')
-print(f'{installed} {len(tools)} {len(assets.hashes)}')
+print(f'{installed} {len(FULL_TOOL_NAMES)} {len(assets.hashes)}')
 "@
 
     $previousPythonPath = $env:PYTHONPATH
     $previousNoUserSite = $env:PYTHONNOUSERSITE
+    $previousToolProfile = $env:PSCAD_MCP_TOOL_PROFILE
     Remove-Item Env:PYTHONPATH -ErrorAction SilentlyContinue
+    Remove-Item Env:PSCAD_MCP_TOOL_PROFILE -ErrorAction SilentlyContinue
     $env:PYTHONNOUSERSITE = "1"
     try {
         Push-Location $probeDir
@@ -81,6 +83,11 @@ print(f'{installed} {len(tools)} {len(assets.hashes)}')
             Remove-Item Env:PYTHONNOUSERSITE -ErrorAction SilentlyContinue
         } else {
             $env:PYTHONNOUSERSITE = $previousNoUserSite
+        }
+        if ($null -eq $previousToolProfile) {
+            Remove-Item Env:PSCAD_MCP_TOOL_PROFILE -ErrorAction SilentlyContinue
+        } else {
+            $env:PSCAD_MCP_TOOL_PROFILE = $previousToolProfile
         }
     }
 } finally {

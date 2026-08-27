@@ -1,6 +1,8 @@
 from pathlib import Path
 import re
 
+from pscad_mcp.tools.catalog import FULL_TOOL_NAMES
+
 
 def test_package_verification_script_builds_installs_and_cleans_up():
     script = Path(__file__).parents[1] / "scripts" / "verify_package.ps1"
@@ -32,3 +34,22 @@ def test_python_smoke_reads_expected_version_from_project_metadata():
 
     assert "pyproject.toml" in smoke
     assert "expected_version" in smoke
+
+
+def test_package_probes_compare_the_full_catalog_without_literal_inventory_counts():
+    root = Path(__file__).parents[1]
+
+    for relative in ("scripts/verify_package.ps1", "tests/test_install_smoke.py"):
+        text = (root / relative).read_text(encoding="utf-8")
+        assert "from pscad_mcp.tools.catalog import FULL_TOOL_NAMES" in text
+        assert "{tool.name for tool in tools} == FULL_TOOL_NAMES" in text
+        assert "PSCAD_MCP_TOOL_PROFILE" in text
+        assert not re.search(r"assert\s+len\(tools\)\s*==\s*(?:77|83)", text)
+        assert not re.search(
+            r"assert\s+len\(\{tool\.name for tool in tools\}\)\s*==\s*(?:77|83)",
+            text,
+        )
+
+    script = (root / "scripts" / "verify_package.ps1").read_text(encoding="utf-8")
+    assert "Remove-Item Env:PSCAD_MCP_TOOL_PROFILE" in script
+    assert str(len(FULL_TOOL_NAMES)) not in script
