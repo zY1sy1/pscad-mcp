@@ -191,3 +191,29 @@ class BlueprintPlan:
 
     def to_dict(self) -> dict[str, Any]:
         return {"plan_hash": self.plan_hash, **self.unsigned_dict()}
+
+
+@dataclass(frozen=True)
+class BlueprintBuildRecord:
+    build_id: str
+    state: BlueprintBuildState
+    plan: BlueprintPlan
+    history: tuple[FrozenDict, ...]
+    component_bindings: FrozenDict
+    staging_path: str | None = None
+    error: FrozenDict | None = None
+    result: FrozenDict | None = None
+    evidence: FrozenDict | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "build_id": self.build_id,
+            "state": self.state.value,
+            "plan": self.plan.to_dict(),
+            "history": json_safe(self.history),
+            "component_bindings": json_safe(self.component_bindings),
+            "staging_path": self.staging_path,
+            "error": json_safe(self.error),
+            "result": json_safe(self.result),
+            "evidence": json_safe(self.evidence),
+        }

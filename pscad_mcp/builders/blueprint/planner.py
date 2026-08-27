@@ -74,6 +74,7 @@ def _resolved_operations(
     result: list[BlueprintOperation] = []
     override_targets = set(parameter_overrides)
     applied_overrides: set[str] = set()
+    component_target_kinds = {"set_component_location", "rotate_component", "set_component_parameters"}
     for operation in asset.blueprint.operations:
         arguments = json_safe(operation.arguments)
         if operation.kind == "clone_component":
@@ -96,11 +97,35 @@ def _resolved_operations(
             if definition not in snapshot.definitions:
                 raise _error("BLUEPRINT_DEFINITION_MISSING", "Create definition is not in the live inventory.", definition=definition)
             produced_definitions[logical_id] = definition
-        elif operation.target not in produced_definitions and operation.kind != "set_project_settings":
+        elif operation.kind in component_target_kinds and operation.target not in produced_definitions:
             source = _resolve_source(snapshot, operation.target)
             touched_sources.add(source["logical_id"])
             selectors[operation.target] = source["id"]
             produced_definitions.setdefault(operation.target, source["definition"])
+
+        if operation.kind == "connect_ports":
+            for endpoint_name in ("from", "to"):
+                endpoint = arguments.get(endpoint_name)
+                if not isinstance(endpoint, Mapping) or not isinstance(endpoint.get("logical_id"), str) or not isinstance(endpoint.get("port"), str):
+                    raise _error("BLUEPRINT_OPERATION_INVALID", "Connection endpoints require logical_id and port.", operation_id=operation.operation_id)
+                logical_id = endpoint["logical_id"]
+                definition = produced_definitions.get(logical_id)
+                if definition is None:
+                    source = _resolve_source(snapshot, logical_id)
+                    touched_sources.add(source["logical_id"])
+                    selectors[logical_id] = source["id"]
+                    definition = source["definition"]
+                    produced_definitions[logical_id] = definition
+                contract = snapshot.definitions.get(definition)
+                ports = contract.get("ports") if isinstance(contract, Mapping) else None
+                if not isinstance(ports, Mapping) or endpoint["port"] not in ports:
+                    raise _error(
+                        "BLUEPRINT_PORT_MISSING",
+                        "A connection port is not declared by the live definition.",
+                        operation_id=operation.operation_id,
+                        logical_id=logical_id,
+                        port=endpoint["port"],
+                    )
 
         if operation.kind == "set_component_parameters":
             definition = produced_definitions.get(operation.target)
