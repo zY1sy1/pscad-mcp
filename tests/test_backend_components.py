@@ -1133,6 +1133,24 @@ class TestBackendComponentContracts(unittest.IsolatedAsyncioTestCase):
             ((378, 342), (450, 342), (450, 396)),
         )
 
+    async def test_legacy_snapshot_uses_definition_port_model_for_namespace(self):
+        library = """<project><Definition name="source3"><svg>
+            <port name="A" x="0" y="0" dim="1"
+                  model="Transfer" type="Real" />
+            </svg></Definition></project>"""
+        with tempfile.TemporaryDirectory() as temporary:
+            master = Path(temporary) / "master.pslx"
+            master.write_text(library, encoding="utf-8")
+            backend, _project, component = await self.make_legacy_backend(
+                definition_paths={"master": master}
+            )
+            component.port_names = []
+            component.ports = None
+
+            snapshot = await backend.inspect_canvas_topology("case", "Main")
+
+        self.assertEqual(snapshot.components[0].ports[0].kind, "data")
+
     async def test_legacy_snapshot_marks_missing_optional_metadata_unresolved(self):
         backend, _project, component = await self.make_legacy_backend()
         component.port_names = []

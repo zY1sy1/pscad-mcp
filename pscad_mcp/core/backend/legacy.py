@@ -3716,7 +3716,7 @@ class LegacyBackend:
                         DefinitionPortContract(
                             name=port.name,
                             kind=self._legacy_topology_port_namespace(
-                                port.type
+                                port.kind or port.model or port.type
                             ),
                             dimension=port.dim,
                             offset=(port.x, port.y),
@@ -4056,7 +4056,9 @@ class LegacyBackend:
                     absolute=absolute,
                     relative=relative,
                     kind=self._legacy_topology_port_namespace(
-                        port.get("type") or port.get("kind")
+                        port.get("kind")
+                        or port.get("model")
+                        or port.get("type")
                     ),
                     dimension=self._legacy_topology_optional_int(
                         port.get("dim") or port.get("dimension")
@@ -4122,7 +4124,9 @@ class LegacyBackend:
                     name=port.name,
                     absolute=absolute,
                     relative=(port.x, port.y),
-                    kind=self._legacy_topology_port_namespace(port.type),
+                    kind=self._legacy_topology_port_namespace(
+                        port.kind or port.model or port.type
+                    ),
                     dimension=port.dim,
                     evidence=evidence(key),
                 )
@@ -4186,7 +4190,11 @@ class LegacyBackend:
     @staticmethod
     def _legacy_topology_port_namespace(value: Any) -> str:
         raw = str(value or "").casefold()
-        return "data" if raw in {"data", "signal", "digital"} else "electrical"
+        return (
+            "data"
+            if raw in {"data", "signal", "digital", "transfer"}
+            else "electrical"
+        )
 
     @staticmethod
     def _legacy_topology_optional_int(value: Any) -> int | None:
