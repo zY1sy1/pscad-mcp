@@ -6,6 +6,14 @@ All notable changes to this project are documented here.
 
 ### Changed
 
+- Horizontal hardening preserves the 83-tool compatibility surface while adding
+  one always-on capability discovery tool, complete tool annotations, opt-in
+  tool profiles, and compatible pagination.
+- Runtime lifecycle cleanup is now idempotent and bounded across repeated MCP
+  lifespan entry, executor work, background tasks, and shutdown.
+- Local documentation is generated lazily in user state, can be served through
+  MCP resources, and is no longer tracked as generated repository output.
+
 - Parameterized LCC execution now carries reviewed real-template selectors through
   deterministic plans, validates bindings before acquiring a workspace lease,
   stages PSCX changes atomically, and records bounded source/staging/read-back

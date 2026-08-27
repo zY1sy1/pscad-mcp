@@ -28,8 +28,10 @@ def test_codex_config_template_is_portable():
     assert server["env"]["PSCAD_MCP_LEARNING_ENABLED"] == "true"
     assert server["env"]["PSCAD_MCP_LEARNING_RETENTION_DAYS"] == "90"
     assert server["env"]["PSCAD_MCP_LEARNING_MAX_EVENTS"] == "20000"
+    assert server["env"]["PSCAD_MCP_TOOL_PROFILE"] == "full"
     assert "PSCAD_MCP_LEARNING_DB" not in server["env"]
     assert "PSCAD_MCP_LEARNING_BACKLOG" not in server["env"]
+    assert "PSCAD_MCP_DOCUMENTATION_DIR" not in server["env"]
     assert r"D:\pscad-mcp" not in path_text
     assert r"D:\PSCAD-Workspace" not in path_text
 
