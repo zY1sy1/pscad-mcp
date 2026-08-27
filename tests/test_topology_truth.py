@@ -1,14 +1,19 @@
 from __future__ import annotations
 
 import ast
+import hashlib
 import importlib.util
 import json
 from pathlib import Path
 import sys
+import xml.etree.ElementTree as ET
+
+import pytest
 
 
 ROOT = Path(__file__).parents[1]
 MODULE_PATH = ROOT / "scripts" / "topology_truth.py"
+SEED = ROOT / "pscad_mcp" / "assets" / "templates" / "empty_case.pscx"
 SPEC = importlib.util.spec_from_file_location("topology_truth", MODULE_PATH)
 assert SPEC is not None and SPEC.loader is not None
 topology_truth = importlib.util.module_from_spec(SPEC)
@@ -80,3 +85,45 @@ def test_manifest_is_projected_only_from_declared_truth(tmp_path):
         scale["expected_confirmed_edges"]
     )
     json.dumps(manifest, allow_nan=False)
+
+
+def test_generation_uses_native_seed_and_audits_every_declared_record(tmp_path):
+    cases = topology_truth.case_recipes()
+    generated = topology_truth.generate_cases(SEED, tmp_path / "generated", cases)
+    assert set(generated) == {case.name for case in cases}
+    for case in cases:
+        path = generated[case.name]
+        root = ET.parse(path).getroot()
+        assert root.get("name") == case.name
+        assert path.name == f"{case.name}.pscx"
+        audit = topology_truth.audit_case(path, case)
+        assert audit["object_count"] == case.object_count
+        assert audit["confirmed_edges"] == sorted(net.text() for net in case.nets)
+        assert len(audit["sha256"]) == 64
+
+
+def test_audit_rejects_pscad_normalization_drift(tmp_path):
+    case = topology_truth.case_recipes()[0]
+    path = topology_truth.generate_cases(
+        SEED, tmp_path / "generated", (case,)
+    )[case.name]
+    tree = ET.parse(path)
+    wire = next(node for node in tree.getroot().iter() if node.get("id") == "201")
+    wire.set("id", "999")
+    tree.write(path, encoding="utf-8", xml_declaration=True)
+
+    with pytest.raises(ValueError, match="conductor identities"):
+        topology_truth.audit_case(path, case)
+
+
+def test_generation_is_byte_deterministic(tmp_path):
+    cases = topology_truth.case_recipes()
+    first = topology_truth.generate_cases(SEED, tmp_path / "first", cases)
+    second = topology_truth.generate_cases(SEED, tmp_path / "second", cases)
+    assert {
+        name: hashlib.sha256(path.read_bytes()).hexdigest()
+        for name, path in first.items()
+    } == {
+        name: hashlib.sha256(path.read_bytes()).hexdigest()
+        for name, path in second.items()
+    }

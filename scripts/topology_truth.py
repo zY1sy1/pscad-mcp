@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
 from pathlib import Path
 from typing import Literal
+import xml.etree.ElementTree as ET
 
 
 Point = tuple[int, int]
@@ -312,3 +314,608 @@ def manifest_from_recipes(
             }
         )
     return {"schema_version": 1, "cases": projected_cases}
+
+
+def generate_cases(
+    seed: Path,
+    destination: Path,
+    cases: tuple[CaseRecipe, ...],
+) -> dict[str, Path]:
+    seed = seed.resolve()
+    destination = destination.resolve()
+    if not seed.is_file():
+        raise FileNotFoundError(seed)
+    if destination.exists():
+        raise FileExistsError(
+            f"refusing existing generation directory: {destination}"
+        )
+    destination.mkdir(parents=True)
+    result = {}
+    for case in cases:
+        case_directory = destination / case.name
+        case_directory.mkdir()
+        tree = ET.parse(seed)
+        root = tree.getroot()
+        _rewrite_identity(root, case.name)
+        _replace_definitions(root, case)
+        _replace_main_schematic(root, case)
+        _replace_hierarchy(root, case)
+        path = case_directory / f"{case.name}.pscx"
+        ET.indent(tree, space="  ")
+        tree.write(path, encoding="utf-8", xml_declaration=True)
+        result[case.name] = path.resolve()
+    return result
+
+
+def audit_case(path: Path, case: CaseRecipe) -> dict[str, object]:
+    payload = path.read_bytes()
+    root = ET.fromstring(payload)
+    if root.get("name") != case.name:
+        raise ValueError(f"project identity changed for {case.name}")
+    observed_components = _audit_components(root, case)
+    observed_conductors = _audit_conductors(root, case)
+    observed_labels = _audit_labels(root, case)
+    _audit_definitions(root, case)
+    _audit_hierarchy(root, case)
+    if observed_components != {item.object_id for item in case.components}:
+        raise ValueError(f"component identities changed for {case.name}")
+    if observed_conductors != {item.object_id for item in case.conductors}:
+        raise ValueError(f"conductor identities changed for {case.name}")
+    if observed_labels != {item.object_id for item in case.labels}:
+        raise ValueError(f"label identities changed for {case.name}")
+    return {
+        "name": case.name,
+        "sha256": hashlib.sha256(payload).hexdigest(),
+        "object_count": case.object_count,
+        "confirmed_edges": sorted(net.text() for net in case.nets),
+        "expected_error_codes": list(case.expected_error_codes),
+        "expected_unresolved_codes": list(case.expected_unresolved_codes),
+    }
+
+
+def _stable_id(*parts: str) -> str:
+    digest = hashlib.sha256("\0".join(parts).encode("utf-8")).digest()
+    return str(int.from_bytes(digest[:4], "big") % 2_000_000_000 + 1)
+
+
+def _rewrite_identity(root: ET.Element, project_name: str) -> None:
+    old_name = root.get("name") or ""
+    root.set("name", project_name)
+    old_prefix = f"{old_name}:"
+    new_prefix = f"{project_name}:"
+    for element in root.iter():
+        for attribute, value in tuple(element.attrib.items()):
+            if old_prefix in value:
+                element.set(attribute, value.replace(old_prefix, new_prefix))
+
+
+def _replace_definitions(root: ET.Element, case: CaseRecipe) -> None:
+    definitions = root.find("definitions")
+    if definitions is None:
+        raise ValueError("seed has no definitions collection")
+    for element in tuple(definitions):
+        if element.tag.casefold() != "definition":
+            continue
+        if (element.get("name") or "").casefold() not in {"station", "main"}:
+            definitions.remove(element)
+    main = _definition(root, "Main")
+    insertion_index = list(definitions).index(main)
+    for recipe in sorted(case.definitions, key=lambda item: item.name):
+        definition = _definition_element(case, recipe)
+        definitions.insert(insertion_index, definition)
+        insertion_index += 1
+
+
+def _definition_element(
+    case: CaseRecipe, recipe: DefinitionRecipe
+) -> ET.Element:
+    instances = sum(
+        component.definition.casefold() == recipe.name.casefold()
+        for component in case.components
+    )
+    definition = ET.Element(
+        "Definition",
+        {
+            "classid": "UserCmpDefn",
+            "name": recipe.name,
+            "id": _stable_id(case.name, "definition", recipe.name),
+            "group": "",
+            "url": "",
+            "version": "",
+            "build": "",
+            "view": "false",
+            "date": "0",
+            "instances": str(instances),
+        },
+    )
+    parameters = ET.SubElement(definition, "paramlist", {"name": ""})
+    ET.SubElement(parameters, "param", {"name": "Description", "value": ""})
+    ET.SubElement(definition, "form", {"name": "", "w": "320", "h": "400"})
+    svg = ET.SubElement(
+        definition,
+        "svg",
+        {"viewBox": "-200 -200 200 200", "size": "2"},
+    )
+    for port in sorted(recipe.ports, key=lambda item: item.name):
+        _append_definition_port(svg, port)
+    ET.SubElement(
+        svg,
+        "rect",
+        {
+            "x": "-18",
+            "y": "-18",
+            "width": "36",
+            "height": "36",
+            "stroke": "Black",
+            "stroke-width": "0.2",
+            "fill-style": "Hollow",
+        },
+    )
+    ET.SubElement(definition, "script")
+    schematic = ET.SubElement(definition, "schematic", {"classid": "UserCanvas"})
+    _append_canvas_parameters(schematic)
+    for conductor in sorted(recipe.conductors, key=lambda item: item.object_id):
+        _append_conductor(schematic, conductor)
+    return definition
+
+
+def _append_definition_port(parent: ET.Element, port: PortRecipe) -> None:
+    attributes = {
+        "model": "Transfer" if port.kind == "data" else "Natural",
+        "name": port.name,
+        "x": str(port.offset[0]),
+        "y": str(port.offset[1]),
+        "dim": str(port.dimension),
+        "kind": port.kind,
+        "mode": "Input" if port.kind == "data" else "Electrical",
+        "type": "Real" if port.kind == "data" else "NonRemovable",
+        "internal": "false",
+    }
+    if port.required:
+        attributes["required"] = "true"
+    if port.page:
+        attributes["page"] = "true"
+    element = ET.SubElement(parent, "port", attributes)
+    element.text = "true"
+
+
+def _replace_main_schematic(root: ET.Element, case: CaseRecipe) -> None:
+    main = _definition(root, "Main")
+    schematic = next(
+        (
+            element
+            for element in main
+            if element.tag.casefold() == "schematic"
+        ),
+        None,
+    )
+    if schematic is None:
+        raise ValueError("seed Main definition has no schematic")
+    for child in tuple(schematic):
+        schematic.remove(child)
+    _append_canvas_parameters(schematic)
+    for index, component in enumerate(
+        sorted(case.components, key=lambda item: item.object_id), start=1
+    ):
+        _append_component(schematic, case, component, index)
+    for conductor in sorted(case.conductors, key=lambda item: item.object_id):
+        _append_conductor(schematic, conductor)
+    for label in sorted(case.labels, key=lambda item: item.object_id):
+        _append_label(schematic, label)
+
+
+def _append_canvas_parameters(schematic: ET.Element) -> None:
+    parameters = ET.SubElement(schematic, "paramlist")
+    values = {
+        "show_grid": "0",
+        "size": "0",
+        "orient": "1",
+        "show_border": "0",
+        "monitor_bus_voltage": "0",
+        "show_signal": "1",
+        "show_virtual": "0",
+        "show_sequence": "0",
+        "auto_sequence": "1",
+    }
+    for name, value in values.items():
+        ET.SubElement(parameters, "param", {"name": name, "value": value})
+
+
+def _append_component(
+    schematic: ET.Element,
+    case: CaseRecipe,
+    component: ComponentRecipe,
+    z_order: int,
+) -> None:
+    local_definitions = {item.name.casefold() for item in case.definitions}
+    definition = component.definition
+    if definition.casefold() in local_definitions:
+        definition = f"{case.name}:{definition}"
+    element = ET.SubElement(
+        schematic,
+        "User",
+        {
+            "classid": "UserCmp",
+            "name": component.name or definition,
+            "id": component.object_id,
+            "x": str(component.location[0]),
+            "y": str(component.location[1]),
+            "w": "46",
+            "h": "36",
+            "z": str(z_order),
+            "orient": str(component.orientation),
+            "link": "-1",
+            "defn": definition,
+            "q": "4",
+        },
+    )
+    ET.SubElement(element, "paramlist", {"link": "-1", "name": ""})
+    for port in sorted(component.explicit_ports, key=lambda item: item.name):
+        attributes = {
+            "classid": "Port",
+            "id": _stable_id(case.name, component.object_id, port.name),
+            "name": port.name,
+            "x": str(port.offset[0]),
+            "y": str(port.offset[1]),
+            "kind": port.kind,
+            "type": port.kind,
+            "dim": str(port.dimension),
+            "active": "true",
+        }
+        if port.required:
+            attributes["required"] = "true"
+        if port.page:
+            attributes["page"] = "true"
+        ET.SubElement(element, "Port", attributes)
+
+
+def _append_conductor(
+    schematic: ET.Element, conductor: ConductorRecipe
+) -> None:
+    origin = conductor.vertices[0]
+    xs = [point[0] for point in conductor.vertices]
+    ys = [point[1] for point in conductor.vertices]
+    element = ET.SubElement(
+        schematic,
+        "Wire" if conductor.kind == "wire" else "Bus",
+        {
+            "classid": (
+                "WireOrthogonal" if conductor.kind == "wire" else "Bus"
+            ),
+            "name": "",
+            "id": conductor.object_id,
+            "x": str(origin[0]),
+            "y": str(origin[1]),
+            "w": str(max(xs) - min(xs) + 10),
+            "h": str(max(ys) - min(ys) + 10),
+            "orient": "0",
+            "namespace": conductor.namespace,
+        },
+    )
+    for point in conductor.vertices:
+        ET.SubElement(
+            element,
+            "vertex",
+            {"x": str(point[0] - origin[0]), "y": str(point[1] - origin[1])},
+        )
+
+
+def _append_label(schematic: ET.Element, label: LabelRecipe) -> None:
+    definition = (
+        "master:datalabel" if label.namespace == "data" else "master:nodelabel"
+    )
+    element = ET.SubElement(
+        schematic,
+        "User",
+        {
+            "classid": "UserCmp",
+            "name": definition,
+            "id": label.object_id,
+            "x": str(label.location[0]),
+            "y": str(label.location[1]),
+            "w": "46",
+            "h": "21",
+            "z": "1",
+            "orient": "0",
+            "link": "-1",
+            "defn": definition,
+            "q": "4",
+            "namespace": label.namespace,
+            "scope": label.scope,
+        },
+    )
+    parameters = ET.SubElement(element, "paramlist", {"link": "-1", "name": ""})
+    ET.SubElement(parameters, "param", {"name": "Name", "value": label.name})
+
+
+def _replace_hierarchy(root: ET.Element, case: CaseRecipe) -> None:
+    hierarchy = root.find("hierarchy")
+    if hierarchy is None:
+        raise ValueError("seed has no hierarchy")
+    calls = [element for element in hierarchy.iter() if element.tag == "call"]
+    main_call = next(
+        (
+            element
+            for element in calls
+            if (element.get("name") or "").rsplit(":", 1)[-1] == "Main"
+        ),
+        None,
+    )
+    if main_call is None:
+        raise ValueError("seed hierarchy has no Main call")
+    for child in tuple(main_call):
+        main_call.remove(child)
+    local_definitions = {item.name.casefold() for item in case.definitions}
+    instance_counts: dict[str, int] = {}
+    for index, component in enumerate(
+        sorted(case.components, key=lambda item: item.object_id), start=1
+    ):
+        if component.definition.casefold() not in local_definitions:
+            continue
+        instance = instance_counts.get(component.definition.casefold(), 0)
+        instance_counts[component.definition.casefold()] = instance + 1
+        ET.SubElement(
+            main_call,
+            "call",
+            {
+                "link": component.object_id,
+                "name": f"{case.name}:{component.definition}",
+                "z": str(index),
+                "view": "false",
+                "instance": str(instance),
+            },
+        )
+
+
+def _definition(root: ET.Element, name: str) -> ET.Element:
+    definitions = root.find("definitions")
+    if definitions is None:
+        raise ValueError("project has no definitions collection")
+    for element in definitions:
+        if (
+            element.tag.casefold() == "definition"
+            and (element.get("name") or "").casefold() == name.casefold()
+        ):
+            return element
+    raise ValueError(f"project has no {name} definition")
+
+
+def _main_schematic(root: ET.Element) -> ET.Element:
+    main = _definition(root, "Main")
+    for element in main:
+        if element.tag.casefold() == "schematic":
+            return element
+    raise ValueError("project Main definition has no schematic")
+
+
+def _is_label_element(element: ET.Element) -> bool:
+    tag = element.tag.casefold()
+    definition = (element.get("defn") or "").casefold()
+    return tag in {"label", "nodelabel", "datalabel"} or definition.endswith(
+        (":nodelabel", ":datalabel")
+    )
+
+
+def _audit_components(root: ET.Element, case: CaseRecipe) -> set[str]:
+    observed = {}
+    for element in _main_schematic(root):
+        if element.tag.casefold() not in {"user", "component"}:
+            continue
+        if _is_label_element(element):
+            continue
+        object_id = element.get("id")
+        if object_id:
+            observed[object_id] = element
+    expected = {item.object_id: item for item in case.components}
+    if set(observed) != set(expected):
+        return set(observed)
+    local_definitions = {item.name.casefold() for item in case.definitions}
+    for object_id, recipe in expected.items():
+        element = observed[object_id]
+        definition = element.get("defn") or element.get("definition") or ""
+        observed_name = definition.rsplit(":", 1)[-1].casefold()
+        expected_name = recipe.definition.rsplit(":", 1)[-1].casefold()
+        if observed_name != expected_name:
+            raise ValueError(f"component definition changed for {case.name}:{object_id}")
+        if ":" in recipe.definition and definition.casefold() != recipe.definition.casefold():
+            raise ValueError(f"component scope changed for {case.name}:{object_id}")
+        if _point(element) != recipe.location:
+            raise ValueError(f"component location changed for {case.name}:{object_id}")
+        if _integer_attribute(element, "orient", "orientation") != recipe.orientation:
+            raise ValueError(f"component orientation changed for {case.name}:{object_id}")
+        if recipe.definition.casefold() in local_definitions and ":" not in definition:
+            raise ValueError(f"component scope changed for {case.name}:{object_id}")
+        _audit_instance_ports(element, recipe, case.name)
+    return set(observed)
+
+
+def _audit_instance_ports(
+    element: ET.Element, recipe: ComponentRecipe, case_name: str
+) -> None:
+    observed = {
+        port.get("name"): port
+        for port in element
+        if port.tag.casefold() == "port" and port.get("name")
+    }
+    expected = {port.name: port for port in recipe.explicit_ports}
+    if set(observed) != set(expected):
+        raise ValueError(
+            f"instance port identities changed for {case_name}:{recipe.object_id}"
+        )
+    for name, port in expected.items():
+        element_port = observed[name]
+        _audit_port(element_port, port, f"{case_name}:{recipe.object_id}:{name}")
+
+
+def _audit_conductors(root: ET.Element, case: CaseRecipe) -> set[str]:
+    observed = {}
+    for element in _main_schematic(root):
+        if element.tag.casefold() not in {"wire", "bus"}:
+            continue
+        object_id = element.get("id")
+        if object_id:
+            observed[object_id] = element
+    expected = {item.object_id: item for item in case.conductors}
+    if set(observed) != set(expected):
+        return set(observed)
+    for object_id, recipe in expected.items():
+        element = observed[object_id]
+        kind = (
+            "bus"
+            if element.tag.casefold() == "bus"
+            or "bus" in (element.get("classid") or "").casefold()
+            else "wire"
+        )
+        if kind != recipe.kind:
+            raise ValueError(f"conductor kind changed for {case.name}:{object_id}")
+        namespace = element.get("namespace") or element.get("kind") or "electrical"
+        if namespace.casefold() != recipe.namespace:
+            raise ValueError(
+                f"conductor namespace changed for {case.name}:{object_id}"
+            )
+        if _absolute_vertices(element) != recipe.vertices:
+            raise ValueError(
+                f"conductor vertices changed for {case.name}:{object_id}"
+            )
+    return set(observed)
+
+
+def _audit_labels(root: ET.Element, case: CaseRecipe) -> set[str]:
+    observed = {}
+    for element in _main_schematic(root):
+        if not _is_label_element(element):
+            continue
+        object_id = element.get("id")
+        if object_id:
+            observed[object_id] = element
+    expected = {item.object_id: item for item in case.labels}
+    if set(observed) != set(expected):
+        return set(observed)
+    for object_id, recipe in expected.items():
+        element = observed[object_id]
+        definition = (element.get("defn") or element.tag).casefold()
+        namespace = "data" if "datalabel" in definition else "electrical"
+        if namespace != recipe.namespace:
+            raise ValueError(f"label namespace changed for {case.name}:{object_id}")
+        if _label_name(element) != recipe.name:
+            raise ValueError(f"label name changed for {case.name}:{object_id}")
+        if _point(element) != recipe.location:
+            raise ValueError(f"label location changed for {case.name}:{object_id}")
+        if (element.get("scope") or "Main") != recipe.scope:
+            raise ValueError(f"label scope changed for {case.name}:{object_id}")
+    return set(observed)
+
+
+def _audit_definitions(root: ET.Element, case: CaseRecipe) -> None:
+    definitions = root.find("definitions")
+    if definitions is None:
+        raise ValueError("project has no definitions collection")
+    observed = {
+        (element.get("name") or ""): element
+        for element in definitions
+        if element.tag.casefold() == "definition"
+        and (element.get("name") or "").casefold() not in {"station", "main"}
+    }
+    expected = {item.name: item for item in case.definitions}
+    if set(observed) != set(expected):
+        raise ValueError(f"definition identities changed for {case.name}")
+    for name, recipe in expected.items():
+        element = observed[name]
+        schematic = next(
+            child for child in element if child.tag.casefold() == "schematic"
+        )
+        ports = {
+            port.get("name"): port
+            for port in element.iter()
+            if port.tag.casefold() == "port"
+            and not any(port is child for child in schematic.iter())
+            and port.get("name")
+        }
+        expected_ports = {port.name: port for port in recipe.ports}
+        if set(ports) != set(expected_ports):
+            raise ValueError(f"definition ports changed for {case.name}:{name}")
+        for port_name, port in expected_ports.items():
+            _audit_port(ports[port_name], port, f"{case.name}:{name}:{port_name}")
+
+
+def _audit_port(element: ET.Element, recipe: PortRecipe, identity: str) -> None:
+    if _point(element) != recipe.offset:
+        raise ValueError(f"port offset changed for {identity}")
+    kind = element.get("kind")
+    if kind is None:
+        raw_type = (element.get("type") or "").casefold()
+        kind = "data" if raw_type in {"data", "real", "integer"} else "electrical"
+    if kind.casefold() != recipe.kind:
+        raise ValueError(f"port namespace changed for {identity}")
+    if _integer_attribute(element, "dim", "dimension") != recipe.dimension:
+        raise ValueError(f"port dimension changed for {identity}")
+    if _boolean_attribute(element, "required") != recipe.required:
+        raise ValueError(f"port required flag changed for {identity}")
+    if _boolean_attribute(element, "page") != recipe.page:
+        raise ValueError(f"port page flag changed for {identity}")
+
+
+def _audit_hierarchy(root: ET.Element, case: CaseRecipe) -> None:
+    hierarchy = root.find("hierarchy")
+    if hierarchy is None:
+        raise ValueError(f"hierarchy disappeared for {case.name}")
+    local_definitions = {item.name.casefold() for item in case.definitions}
+    expected = {
+        (component.object_id, component.definition.casefold())
+        for component in case.components
+        if component.definition.casefold() in local_definitions
+    }
+    observed = {
+        (
+            element.get("link") or "",
+            (element.get("name") or "").rsplit(":", 1)[-1].casefold(),
+        )
+        for element in hierarchy.iter("call")
+        if (element.get("name") or "").rsplit(":", 1)[-1].casefold()
+        in local_definitions
+    }
+    if observed != expected:
+        raise ValueError(f"hierarchy records changed for {case.name}")
+
+
+def _point(element: ET.Element) -> Point | None:
+    try:
+        return int(element.get("x", "")), int(element.get("y", ""))
+    except ValueError:
+        return None
+
+
+def _absolute_vertices(element: ET.Element) -> tuple[Point, ...]:
+    origin = _point(element) or (0, 0)
+    result = []
+    for vertex in element:
+        if vertex.tag.casefold() != "vertex":
+            continue
+        relative = _point(vertex)
+        if relative is None:
+            return ()
+        result.append((origin[0] + relative[0], origin[1] + relative[1]))
+    return tuple(result)
+
+
+def _integer_attribute(element: ET.Element, *names: str) -> int | None:
+    for name in names:
+        raw = element.get(name)
+        if raw is not None:
+            try:
+                return int(raw)
+            except ValueError:
+                return None
+    return None
+
+
+def _boolean_attribute(element: ET.Element, name: str) -> bool:
+    raw = element.get(name)
+    return raw is not None and raw.casefold() in {"1", "true", "yes", "on"}
+
+
+def _label_name(element: ET.Element) -> str:
+    for parameter in element.iter("param"):
+        if (parameter.get("name") or "").casefold() == "name":
+            return parameter.get("value") or ""
+    return element.get("name") or element.get("text") or ""
