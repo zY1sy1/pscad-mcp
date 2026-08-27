@@ -32,11 +32,11 @@ class ScalarRecorder:
 
 
 @pytest.fixture
-def register_catalogued_test_tool(monkeypatch):
+def catalog_test_tool(monkeypatch):
     test_specs = dict(TOOL_SPECS)
     monkeypatch.setattr(tool_registration, "TOOL_SPECS", test_specs)
 
-    def register(server, function, **kwargs):
+    def catalog(function):
         test_specs[function.__name__] = ToolSpec(
             name=function.__name__,
             group="learning",
@@ -47,9 +47,72 @@ def register_catalogued_test_tool(monkeypatch):
             open_world=False,
             backend_support=frozenset(),
         )
+
+    return catalog
+
+
+@pytest.fixture
+def register_catalogued_test_tool(catalog_test_tool):
+    def register(server, function, **kwargs):
+        catalog_test_tool(function)
         register_tool(server, function, **kwargs)
 
     return register
+
+
+def test_unresolved_annotations_fail_before_registration_side_effects(
+    catalog_test_tool,
+):
+    async def invalid_annotations(value: str) -> str:
+        return value
+
+    invalid_annotations.__annotations__ = {
+        "value": "MissingParameter",
+        "return": "MissingReturn",
+    }
+    catalog_test_tool(invalid_annotations)
+    recorder = ScalarRecorder()
+    server = FastMCP("invalid-annotations")
+
+    with pytest.raises(NameError, match="MissingParameter"):
+        register_tool(server, invalid_annotations, recorder=recorder)
+
+    assert server._tool_manager.get_tool("invalid_annotations") is None
+    assert getattr(server, "_pscad_registered_tool_names", set()) == set()
+    assert recorder.names == []
+    assert recorder.events == []
+
+    async def valid_annotations(value: str) -> str:
+        return value
+
+    valid_annotations.__name__ = "invalid_annotations"
+    register_tool(server, valid_annotations, recorder=recorder)
+    assert server._tool_manager.get_tool("invalid_annotations") is not None
+    assert recorder.names == ["invalid_annotations"]
+
+
+def test_native_same_name_tool_is_not_replaced_or_recorded(catalog_test_tool):
+    async def native_tool() -> str:
+        return "native"
+
+    async def replacement_tool() -> str:
+        return "replacement"
+
+    native_tool.__name__ = "native_conflict"
+    replacement_tool.__name__ = "native_conflict"
+    catalog_test_tool(replacement_tool)
+    recorder = ScalarRecorder()
+    server = FastMCP("native-conflict")
+    server.add_tool(native_tool)
+    original = server._tool_manager.get_tool("native_conflict")
+
+    with pytest.raises(ValueError, match="^native_conflict$"):
+        register_tool(server, replacement_tool, recorder=recorder)
+
+    assert server._tool_manager.get_tool("native_conflict") is original
+    assert getattr(server, "_pscad_registered_tool_names", set()) == set()
+    assert recorder.names == []
+    assert recorder.events == []
 
 
 @pytest.mark.asyncio

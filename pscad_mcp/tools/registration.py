@@ -199,22 +199,6 @@ def _register_with_original_result(mcp: FastMCP, guarded: Callable[..., Any]) ->
     object.__setattr__(tool.fn_metadata, "convert_result", preserve_result)
 
 
-def _resolved_return_annotation(
-    function: Callable[..., Any],
-    signature: inspect.Signature,
-) -> Any:
-    annotation = signature.return_annotation
-    if annotation is inspect.Signature.empty:
-        return Any
-    try:
-        return get_type_hints(function, include_extras=True).get(
-            "return",
-            annotation,
-        )
-    except Exception:
-        return annotation
-
-
 def _is_call_tool_result(annotation: Any) -> bool:
     return isinstance(annotation, type) and issubclass(annotation, CallToolResult)
 
@@ -232,14 +216,20 @@ def register_tool(
     if name not in TOOL_SPECS:
         raise ValueError(name)
     registered_names = getattr(mcp, "_pscad_registered_tool_names", None)
-    if registered_names is None:
-        registered_names = set()
-        setattr(mcp, "_pscad_registered_tool_names", registered_names)
-    if name in registered_names:
+    privately_registered = registered_names is not None and name in registered_names
+    manager_registered = mcp._tool_manager.get_tool(name) is not None
+    if privately_registered or manager_registered:
         raise ValueError(name)
 
-    if record_learning:
-        _record_safely(lambda: recorder.register_tool_name(name))
+    signature = inspect.signature(function)
+    resolved_annotations = get_type_hints(function, include_extras=True)
+    resolved_parameters = [
+        parameter.replace(
+            annotation=resolved_annotations.get(parameter.name, parameter.annotation)
+        )
+        for parameter in signature.parameters.values()
+    ]
+    return_annotation = resolved_annotations.get("return", Any)
 
     @wraps(function)
     async def guarded(*args: P.args, **kwargs: P.kwargs) -> Any:
@@ -291,21 +281,6 @@ def register_tool(
         )
         return result
 
-    signature = inspect.signature(function)
-    try:
-        resolved_annotations = get_type_hints(function, include_extras=True)
-    except Exception:
-        resolved_annotations = dict(function.__annotations__)
-    resolved_parameters = [
-        parameter.replace(
-            annotation=resolved_annotations.get(parameter.name, parameter.annotation)
-        )
-        for parameter in signature.parameters.values()
-    ]
-    return_annotation = resolved_annotations.get(
-        "return",
-        _resolved_return_annotation(function, signature),
-    )
     error_aware_return = (
         return_annotation
         if _is_call_tool_result(return_annotation)
@@ -318,4 +293,9 @@ def register_tool(
     guarded.__annotations__ = resolved_annotations
     guarded.__annotations__["return"] = error_aware_return
     _register_with_original_result(mcp, guarded)
+    if registered_names is None:
+        registered_names = set()
+        setattr(mcp, "_pscad_registered_tool_names", registered_names)
     registered_names.add(name)
+    if record_learning:
+        _record_safely(lambda: recorder.register_tool_name(name))

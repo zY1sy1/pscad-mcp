@@ -1,4 +1,5 @@
 from dataclasses import FrozenInstanceError
+import inspect
 
 from mcp.server.fastmcp import FastMCP
 from pscad_mcp.main import create_server
@@ -135,11 +136,31 @@ def test_fastmcp_exposes_catalog_metadata_for_every_tool():
         assert tool.annotations.openWorldHint is spec.open_world
 
 
+def test_catalog_descriptions_match_registered_function_docstrings():
+    by_name = {tool.name: tool for tool in create_server()._tool_manager.list_tools()}
+
+    assert len(by_name) == 83
+    for name, spec in TOOL_SPECS.items():
+        assert inspect.getdoc(by_name[name].fn) == spec.description, name
+
+
 def test_component_deletion_is_catalogued_as_destructive():
     deletion = TOOL_SPECS["delete_component"]
 
     assert deletion.read_only is False
     assert deletion.destructive is True
+
+
+def test_project_settings_metadata_accounts_for_parameter_grid_mutation():
+    spec = TOOL_SPECS["get_project_settings"]
+    tool = create_server()._tool_manager.get_tool("get_project_settings")
+
+    assert spec.read_only is False
+    assert spec.destructive is False
+    assert spec.idempotent is False
+    assert tool.annotations.readOnlyHint is False
+    assert tool.annotations.destructiveHint is False
+    assert tool.annotations.idempotentHint is False
 
 
 @pytest.mark.parametrize(

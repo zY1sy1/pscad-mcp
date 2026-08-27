@@ -261,8 +261,6 @@ COMPATIBILITY_TOOL_SPECS = MappingProxyType(
         "get_project_settings": _spec(
             "get_project_settings",
             "Get project settings or a normalized parameter-grid view.",
-            read_only=True,
-            idempotent=True,
         ),
         "set_project_settings": _spec(
             "set_project_settings",
