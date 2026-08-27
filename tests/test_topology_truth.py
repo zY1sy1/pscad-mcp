@@ -61,6 +61,39 @@ def test_case_recipes_are_complete_and_have_exact_scale_counts():
     )
 
 
+def test_ordinary_recipe_uses_pscad_master_resistor_port_origin():
+    ordinary = next(
+        case for case in topology_truth.case_recipes() if case.name == "ordinary"
+    )
+    components = {item.object_id: item for item in ordinary.components}
+    port_points = {
+        f"Main:{component.object_id}:{port.name}": (
+            component.location[0] + port.offset[0],
+            component.location[1] + port.offset[1],
+        )
+        for component in ordinary.components
+        for port in component.explicit_ports
+    }
+    conductor_endpoints = {
+        f"Main:{conductor.object_id}": {
+            conductor.vertices[0],
+            conductor.vertices[-1],
+        }
+        for conductor in ordinary.conductors
+    }
+
+    assert components["101"].location == (54, 72)
+    assert components["102"].location == (162, 72)
+    assert [port.offset for port in components["101"].explicit_ports] == [
+        (0, 0),
+        (36, 0),
+    ]
+    for net in ordinary.nets:
+        assert {port_points[key] for key in net.port_keys} == conductor_endpoints[
+            net.conductor_keys[0]
+        ]
+
+
 def test_scale_recipes_use_pscad_preservable_numeric_object_ids():
     scales = [
         case for case in topology_truth.case_recipes() if case.name.startswith("scale-")

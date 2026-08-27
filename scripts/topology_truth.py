@@ -171,8 +171,8 @@ def _scale_case(object_count: int) -> CaseRecipe:
 
 def case_recipes() -> tuple[CaseRecipe, ...]:
     electrical_pair = (
-        _port("A", (-18, 0)),
-        _port("B", (18, 0)),
+        _port("A", (0, 0)),
+        _port("B", (36, 0)),
     )
     ordinary = CaseRecipe(
         name="ordinary",
@@ -180,10 +180,10 @@ def case_recipes() -> tuple[CaseRecipe, ...]:
         definitions=(),
         components=(
             ComponentRecipe(
-                "101", "master:resistor", (72, 72), 0, "R1", electrical_pair
+                "101", "master:resistor", (54, 72), 0, "R1", electrical_pair
             ),
             ComponentRecipe(
-                "102", "master:resistor", (180, 72), 0, "R2", electrical_pair
+                "102", "master:resistor", (162, 72), 0, "R2", electrical_pair
             ),
         ),
         conductors=(
