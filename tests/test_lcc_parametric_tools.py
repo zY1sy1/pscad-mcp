@@ -18,7 +18,7 @@ def test_parametric_lcc_tools_are_registered():
         "validate_lcc_operating_modes",
     }
     assert expected <= names
-    assert len(names) == 83
+    assert len(names) == 90
     by_name = {tool.name: tool for tool in tools}
     assert set(by_name["plan_parametric_lcc_model"].parameters["required"]) == {
         "request", "template_path", "project_name", "folder",

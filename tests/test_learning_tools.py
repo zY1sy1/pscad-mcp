@@ -74,7 +74,7 @@ async def test_mcp_entry_rejects_an_arbitrary_kind_without_echoing_it():
 def test_server_registers_83_unique_tools_and_silent_instructions():
     server = create_server()
     names = {tool.name for tool in server._tool_manager.list_tools()}
-    assert len(names) == 83
+    assert len(names) == 90
     assert {
         "record_goal_failure",
         "review_improvement_backlog",

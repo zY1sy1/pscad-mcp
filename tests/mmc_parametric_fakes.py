@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import shutil
+import time
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -13,6 +14,7 @@ from pscad_mcp.hvdc.builders.mmc.parametric_models import MmcEnginePlan
 from pscad_mcp.hvdc.builders.mmc.parametric_planner import create_parametric_plan
 from pscad_mcp.hvdc.builders.mmc.template_audit import build_template_audit
 from pscad_mcp.core.backend.base import BackendError
+from pscad_mcp.core.path_policy import PathPolicy
 
 
 FIXTURES = Path(__file__).parent / "fixtures" / "mmc_synthetic"
@@ -227,6 +229,7 @@ class RecordingMmcService:
         mismatch_readback: bool = False,
     ) -> None:
         self.workspace = workspace.resolve()
+        self.path_policy = PathPolicy(workspace_root=str(self.workspace))
         self.fail_on = fail_on
         self.mismatch_readback = mismatch_readback
         self.calls: list[tuple[str, tuple[Any, ...]]] = []
@@ -293,3 +296,109 @@ class RecordingMmcService:
     async def get_project_output(self, project_name: str, structured: bool = False) -> dict[str, Any]:
         self._record("get_project_output", project_name, structured)
         return {"verdict": "PASS", "channels": ["VDC", "IDC"]}
+
+
+class RecordingParametricEngine:
+    def __init__(
+        self,
+        name: str,
+        verdict: str,
+        calls: list[tuple[str, str]],
+    ) -> None:
+        self.name = name
+        self.verdict = verdict
+        self.calls = calls
+
+    async def execute_candidate(
+        self,
+        plan: MmcEnginePlan,
+        service: object,
+        *,
+        candidate_id: str | None = None,
+    ) -> dict[str, object]:
+        selected = candidate_id or plan.candidates[0].candidate_id
+        self.calls.append((self.name, selected))
+        if self.verdict == "NUMERICAL_ONCE" and selected.endswith("-0"):
+            raise BackendError(
+                "MMC_NUMERICAL_UNSTABLE",
+                "synthetic numerical failure",
+                "fake",
+                "execute_candidate",
+                {"candidate_id": selected, "phase": "forward_steady"},
+            )
+        if self.verdict != "PASS" and self.verdict != "NUMERICAL_ONCE":
+            raise BackendError(
+                "MMC_ACCEPTANCE_FAILED",
+                "synthetic acceptance failure",
+                "fake",
+                "execute_candidate",
+                {"candidate_id": selected},
+            )
+        candidate_root = (
+            Path(plan.workspace)
+            / ".test-mmc-candidates"
+            / self.name
+            / selected
+        )
+        candidate_root.mkdir(parents=True, exist_ok=False)
+        project = candidate_root / f"{plan.target_name}.pscx"
+        project.write_text(
+            "<project version='4.6.2'><definitions><Definition name='Main'/></definitions></project>",
+            encoding="utf-8",
+        )
+        return {
+            "state": "accepted",
+            "engine": self.name,
+            "candidate_id": selected,
+            "candidate_path": str(candidate_root),
+            "project_path": str(project),
+            "written_paths": [str(project)],
+            "validation": {"verdict": "PASS"},
+            "capability_level": "accepted",
+        }
+
+    def validate(
+        self,
+        plan: MmcEnginePlan,
+        project_path: Path,
+        outputs: dict[str, object],
+    ) -> dict[str, object]:
+        return {"verdict": "PASS", "project_path": str(project_path)}
+
+
+def make_parametric_service(
+    workspace: Path,
+    pwm_verdict: str = "PASS",
+    avm_verdict: str = "PASS",
+):
+    from pscad_mcp.hvdc.builders.mmc.parametric_service import (
+        ParametricMmcBuilderService,
+    )
+
+    calls: list[tuple[str, str]] = []
+    pscad_service = RecordingMmcService(workspace)
+    service = ParametricMmcBuilderService(
+        pscad_service,
+        workspace_root=workspace,
+        pwm_engine=RecordingParametricEngine(
+            "detailed_pwm", pwm_verdict, calls
+        ),
+        avm_engine=RecordingParametricEngine(
+            "average_value", avm_verdict, calls
+        ),
+        audit_loader=lambda *_args, **_kwargs: pwm_audit(),
+        asset_loader=lambda: avm_assets(),
+    )
+    service.recorded_engine_calls = calls
+    return service
+
+
+def wait_for_terminal(service: object, build_id: str) -> dict[str, Any]:
+    terminal_states = {"published", "failed", "interrupted"}
+    deadline = time.monotonic() + 5.0
+    while time.monotonic() < deadline:
+        status = service.get_status(build_id)
+        if status["state"] in terminal_states:
+            return status
+        time.sleep(0.01)
+    raise TimeoutError(f"MMC build {build_id} did not reach a terminal state")

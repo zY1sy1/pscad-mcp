@@ -169,21 +169,25 @@ def create_parametric_plan(
     request: MmcParametricRequest | Mapping[str, Any],
     project_name: str,
     workspace: str | Path,
-    pwm_audit: object,
+    pwm_audit: object | None,
     avm_assets: object,
 ) -> MmcParentPlan:
     parsed = parse_parametric_request(request)
     workspace_root = Path(workspace).expanduser().resolve()
-    audit = _audit_dict(pwm_audit)
-    source_hashes = _hashes(audit.get("source_hashes"), "PWM source")
+    requested_engines = (
+        ("detailed_pwm", "average_value") if parsed.model_fidelity == "both" else (parsed.model_fidelity,)
+    )
+    audit = _audit_dict(pwm_audit) if "detailed_pwm" in requested_engines else {}
+    source_hashes = (
+        _hashes(audit.get("source_hashes"), "PWM source")
+        if "detailed_pwm" in requested_engines
+        else {}
+    )
     audit_sources = audit.get("sources", {})
     if not isinstance(audit_sources, Mapping):
         raise _error("MMC_TEMPLATE_INVALID", "PWM source paths must be a mapping.")
     source_paths = {str(key): str(value) for key, value in audit_sources.items()}
     asset_hashes = _hashes(getattr(avm_assets, "hashes", None), "AVM asset")
-    requested_engines = (
-        ("detailed_pwm", "average_value") if parsed.model_fidelity == "both" else (parsed.model_fidelity,)
-    )
     if "detailed_pwm" in requested_engines:
         if audit.get("compatible") is not True:
             raise _error("MMC_TEMPLATE_INCOMPATIBLE", "The audited PWM template is not compatible.")
@@ -200,7 +204,7 @@ def create_parametric_plan(
             )
     derived = derive_mmc_parameters(
         parsed,
-        pwm_reference=_pwm_reference(audit),
+        pwm_reference=_pwm_reference(audit) if "detailed_pwm" in requested_engines else None,
         avm_reference=_avm_reference(avm_assets),
     )
     if not derived.feasible:

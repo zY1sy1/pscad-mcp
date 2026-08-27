@@ -10,7 +10,7 @@ def test_lcc_tools_are_registered_with_exact_names():
     names = {tool.name for tool in create_server()._tool_manager.list_tools()}
 
     assert {"plan_lcc_model", "build_lcc_model", "get_lcc_build_status", "validate_lcc_model"} <= names
-    assert len(names) == 83
+    assert len(names) == 90
 
 
 def test_lcc_wrappers_forward_values_through_builder_service(monkeypatch):

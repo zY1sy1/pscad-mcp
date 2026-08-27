@@ -40,6 +40,9 @@ EXPECTED_TOOLS = {
     "plan_lcc_model", "build_lcc_model", "get_lcc_build_status", "validate_lcc_model",
     "derive_lcc_parameters", "audit_lcc_template", "plan_parametric_lcc_model",
     "build_parametric_lcc_model", "get_parametric_lcc_build_status", "validate_lcc_operating_modes",
+    "audit_mmc_template", "derive_mmc_parameters", "plan_parametric_mmc_model",
+    "build_parametric_mmc_model", "get_parametric_mmc_build_status",
+    "recommend_mmc_simulation", "validate_mmc_model",
 }
 
 
@@ -49,7 +52,7 @@ class TestToolBackendMatrix(unittest.TestCase):
             tool.name for tool in create_server()._tool_manager.list_tools()
         }
         self.assertEqual(names, EXPECTED_TOOLS)
-        self.assertEqual(len(names), 83)
+        self.assertEqual(len(names), 90)
 
     def test_both_backends_implement_complete_protocol(self):
         legacy = LegacyBackend(
