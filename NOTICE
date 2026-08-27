@@ -12,10 +12,10 @@ The MIT License in LICENSE applies only to material for which the relevant
 contributors have authority to grant those rights. It does not grant rights in
 third-party software, documentation, trademarks, or other materials.
 
-The directories docs/raw and docs/md contain API reference snapshots generated
-from locally installed PSCAD automation libraries. Those snapshots are not
-covered by this project's MIT License and remain subject to the applicable
-third-party terms.
+The directories docs/raw and docs/md are reserved for API reference files
+generated locally from installed PSCAD automation libraries. These generated
+files are not distributed with this project, are not covered by this project's
+MIT License, and remain subject to the applicable third-party terms.
 
 PSCAD is a trademark of Manitoba Hydro International Ltd. (MHI). This is an
 independent community project and is not affiliated with, endorsed by, or

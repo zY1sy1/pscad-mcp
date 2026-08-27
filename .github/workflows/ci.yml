@@ -37,7 +37,9 @@ jobs:
             '*.pytest_cache*',
             '*.ruff_cache*',
             '*.mypy_cache*',
-            '.worktrees/*'
+            '.worktrees/*',
+            'docs/raw/*',
+            'docs/md/*'
           )
           $trackedArtifacts = @(
             foreach ($pattern in $patterns) {

@@ -3,7 +3,6 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-
 ROOT = Path(__file__).parents[1]
 
 
@@ -40,6 +39,11 @@ def test_repository_tracks_no_cache_or_temporary_worktree_artifacts():
     assert tracked == set()
 
 
+def test_repository_tracks_no_generated_documentation_snapshots():
+    assert _tracked("docs/raw/*") == []
+    assert _tracked("docs/md/*") == []
+
+
 def test_repository_has_one_ci_workflow():
     assert _tracked(".github/workflows/*") == [".github/workflows/ci.yml"]
 
@@ -61,6 +65,15 @@ def test_ci_covers_declared_python_range_and_catalog_parity():
         "*.ruff_cache*",
         "*.mypy_cache*",
         ".worktrees/*",
+        "docs/raw/*",
+        "docs/md/*",
     ):
         assert required_text in workflow
     assert "== 83" not in workflow
+
+
+def test_generated_documentation_directories_are_ignored():
+    ignore = (ROOT / ".gitignore").read_text(encoding="utf-8")
+
+    assert "docs/raw/" in ignore
+    assert "docs/md/" in ignore

@@ -1,0 +1,293 @@
+from __future__ import annotations
+
+import asyncio
+import importlib.metadata
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
+import pscad_mcp
+from pscad_mcp.core.backend.base import BackendError
+from pscad_mcp.main import create_server
+from pscad_mcp.tools import app_tools
+from pscad_mcp.utils.doc_manager import DocumentationManager
+
+ROOT = Path(__file__).parents[1]
+SETTING = "PSCAD_MCP_DOCUMENTATION_DIR"
+
+
+def test_manager_construction_does_not_write(tmp_path):
+    root = tmp_path / "generated"
+
+    manager = DocumentationManager(root)
+
+    assert manager.base_dir == root.resolve()
+    assert manager.md_dir == root.resolve() / "md"
+    assert manager.raw_dir == root.resolve() / "raw"
+    assert not root.exists()
+
+
+def test_localappdata_default_is_lazy(tmp_path):
+    manager = DocumentationManager.from_environ({"LOCALAPPDATA": str(tmp_path)})
+
+    assert manager.base_dir == (tmp_path / "pscad-mcp" / "docs").resolve()
+    assert not manager.base_dir.exists()
+
+
+def test_home_state_default_is_lazy_without_localappdata(tmp_path, monkeypatch):
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+
+    manager = DocumentationManager.from_environ({})
+
+    assert manager.base_dir == (
+        tmp_path / ".local" / "state" / "pscad-mcp" / "docs"
+    ).resolve()
+    assert not manager.base_dir.exists()
+
+
+def test_explicit_absolute_documentation_override_is_lazy(tmp_path):
+    root = tmp_path / "private-doc-state"
+
+    manager = DocumentationManager.from_environ({SETTING: str(root)})
+
+    assert manager.base_dir == root.resolve()
+    assert manager.issue is None
+    assert not root.exists()
+
+
+def test_invalid_documentation_override_names_only_the_setting():
+    secret = "SECRET_RELATIVE_PATH"
+
+    manager = DocumentationManager.from_environ({SETTING: secret})
+
+    assert manager.issue == SETTING
+    assert secret not in repr(manager)
+
+
+def test_invalid_manager_sync_raises_sanitized_backend_error():
+    secret = "SECRET_RELATIVE_PATH"
+    manager = DocumentationManager.from_environ({SETTING: secret})
+
+    with pytest.raises(BackendError) as raised:
+        manager.sync()
+
+    error = raised.value
+    assert error.code == "DOCUMENTATION_CONFIG_INVALID"
+    assert error.backend == "server"
+    assert error.operation == "sync_documentation"
+    assert error.details == {"setting": SETTING}
+    assert secret not in repr(error.to_dict())
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("tool_name", "arguments"),
+    (
+        ("sync_documentation", {}),
+        ("list_documentation", {}),
+        ("read_documentation", {"module_name": "mhi.pscad"}),
+    ),
+)
+async def test_invalid_configuration_uses_bounded_tool_error_envelope(
+    tmp_path,
+    monkeypatch,
+    tool_name,
+    arguments,
+):
+    secret = "SECRET_RELATIVE_PATH"
+    manager = DocumentationManager.from_environ(
+        {SETTING: secret, "LOCALAPPDATA": str(tmp_path)}
+    )
+    monkeypatch.setattr(app_tools, "doc_manager", manager)
+    server = create_server(environ={})
+
+    _, structured = await server._tool_manager.call_tool(
+        tool_name,
+        arguments,
+        convert_result=True,
+    )
+
+    payload = structured["result"]["error"]
+    assert payload["code"] == "DOCUMENTATION_CONFIG_INVALID"
+    assert payload["backend"] == "server"
+    assert payload["operation"] == tool_name
+    assert payload["details"] == {"setting": SETTING}
+    assert secret not in repr(payload)
+    assert not manager.base_dir.exists()
+
+
+def test_sync_creates_generated_directories_only_when_called(tmp_path):
+    manager = DocumentationManager(tmp_path / "docs")
+    manager.MODULES = ()
+
+    assert manager.sync() == []
+
+    assert manager.md_dir.is_dir()
+    assert manager.raw_dir.is_dir()
+
+
+def test_generated_markdown_redacts_source_path_and_reports_package_version(tmp_path):
+    source = tmp_path / "private-user" / "module.py"
+    manager = DocumentationManager(tmp_path / "docs")
+    analyzer = type(
+        "Analyzer",
+        (),
+        {"file_path": str(source), "classes": {}, "functions": {}},
+    )()
+
+    rendered = manager._extract_enriched_markdown(
+        "mhi.pscad.fake",
+        "NAME\n",
+        analyzer,
+    )
+
+    installed_version = importlib.metadata.version("pscad-mcp")
+    assert rendered.splitlines()[0] == (
+        f"# Module mhi.pscad.fake (pscad-mcp {installed_version})"
+    )
+    assert str(source) not in rendered
+
+
+def test_generated_heading_falls_back_to_package_version(tmp_path, monkeypatch):
+    def missing_distribution(_distribution):
+        raise importlib.metadata.PackageNotFoundError
+
+    monkeypatch.setattr(importlib.metadata, "version", missing_distribution)
+    manager = DocumentationManager(tmp_path / "docs")
+
+    rendered = manager._extract_enriched_markdown(
+        "mhi.pscad.fake",
+        "NAME\n",
+        None,
+    )
+
+    assert rendered.splitlines()[0] == (
+        f"# Module mhi.pscad.fake (pscad-mcp {pscad_mcp.__version__})"
+    )
+
+
+def test_atomic_write_replaces_destination_without_temp_residue(
+    tmp_path,
+    monkeypatch,
+):
+    target = tmp_path / "module.md"
+    target.write_text("old", encoding="utf-8")
+    replacements = []
+    fsynced = []
+    real_replace = os.replace
+    real_fsync = os.fsync
+
+    def record_replace(source, destination):
+        replacements.append((Path(source), Path(destination)))
+        real_replace(source, destination)
+
+    def record_fsync(file_descriptor):
+        fsynced.append(file_descriptor)
+        real_fsync(file_descriptor)
+
+    monkeypatch.setattr(os, "replace", record_replace)
+    monkeypatch.setattr(os, "fsync", record_fsync)
+
+    DocumentationManager._atomic_write(target, "new")
+
+    assert target.read_text(encoding="utf-8") == "new"
+    assert replacements[0][0].parent == tmp_path
+    assert replacements[0][1] == target
+    assert fsynced
+    assert list(tmp_path.iterdir()) == [target]
+
+
+def test_atomic_write_failure_deletes_only_its_own_temp_file(tmp_path, monkeypatch):
+    target = tmp_path / "module.md"
+    unrelated = tmp_path / "keep.tmp"
+    unrelated.write_text("keep", encoding="utf-8")
+
+    def fail_replace(_source, _destination):
+        raise OSError("replace failed")
+
+    monkeypatch.setattr(os, "replace", fail_replace)
+
+    with pytest.raises(OSError, match="replace failed"):
+        DocumentationManager._atomic_write(target, "new")
+
+    assert unrelated.read_text(encoding="utf-8") == "keep"
+    assert sorted(tmp_path.iterdir()) == [unrelated]
+
+
+@pytest.mark.asyncio
+async def test_sync_wrapper_runs_blocking_work_in_a_thread(tmp_path, monkeypatch):
+    manager = DocumentationManager(tmp_path / "docs")
+    calls = []
+
+    def sync():
+        return ["synced"]
+
+    async def to_thread(function, *args, **kwargs):
+        calls.append((function, args, kwargs))
+        return function(*args, **kwargs)
+
+    monkeypatch.setattr(manager, "sync", sync)
+    monkeypatch.setattr(app_tools, "doc_manager", manager)
+    monkeypatch.setattr(asyncio, "to_thread", to_thread)
+
+    assert await app_tools.sync_documentation() == ["synced"]
+    assert calls == [(sync, (), {})]
+
+
+@pytest.mark.asyncio
+async def test_server_reads_registered_documentation_resource(tmp_path, monkeypatch):
+    manager = DocumentationManager(tmp_path / "docs")
+    manager.md_dir.mkdir(parents=True)
+    expected = "# Local PSCAD documentation\n"
+    (manager.md_dir / "mhi_pscad_fake.md").write_text(expected, encoding="utf-8")
+    monkeypatch.setattr(app_tools, "doc_manager", manager)
+    server = create_server(environ={})
+
+    templates = await server.list_resource_templates()
+    template = next(
+        item
+        for item in templates
+        if str(item.uriTemplate) == "pscad-docs://modules/{module_name}"
+    )
+    assert template.name == "pscad_documentation_module"
+    assert template.description == (
+        "Read one locally generated PSCAD API documentation module."
+    )
+    assert template.mimeType == "text/markdown"
+
+    contents = await server.read_resource("pscad-docs://modules/mhi.pscad.fake")
+
+    assert len(contents) == 1
+    assert contents[0].content == expected
+    assert contents[0].mime_type == "text/markdown"
+
+
+def test_importing_main_creates_no_documentation_directories(tmp_path):
+    local_app_data = tmp_path / "local-app-data"
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+    env = os.environ.copy()
+    for name in tuple(env):
+        if name.startswith("PSCAD_MCP") and "ACCEPTANCE" in name:
+            env.pop(name)
+    env.pop("PSCAD_MCP_HVDC_SOURCE", None)
+    env.pop("PSCAD_MCP_HVDC_LIBRARY", None)
+    env["LOCALAPPDATA"] = str(local_app_data)
+    env["PYTHONPATH"] = str(ROOT)
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+
+    imported = subprocess.run(
+        [sys.executable, "-c", "import pscad_mcp.main"],
+        cwd=cwd,
+        env=env,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert imported.returncode == 0, imported.stderr
+    assert not (local_app_data / "pscad-mcp" / "docs").exists()
+    assert not (cwd / "docs").exists()

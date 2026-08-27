@@ -1,11 +1,18 @@
-import os
-import pydoc
+import ast
+import importlib.metadata
+import importlib.util
 import inspect
 import logging
+import os
+import pydoc
 import re
-import ast
-import importlib.util
-from typing import List, Dict, Any, Optional
+from collections.abc import Mapping
+from pathlib import Path
+from tempfile import NamedTemporaryFile
+from typing import Any, ClassVar
+
+from .. import __version__
+from ..core.backend.base import BackendError
 
 logger = logging.getLogger("pscad-mcp.doc_manager")
 
@@ -14,19 +21,18 @@ class SourceAnalyzer:
     Parses Python source files using AST to extract metadata 
     that pydoc might miss (decorators like @rmi, type hints, etc.)
     """
-    def __init__(self, file_path: str):
-        self.file_path = file_path
+    def __init__(self, file_path: str | os.PathLike[str]):
+        self.file_path = Path(file_path)
         self.classes = {}
         self.functions = {}
         self._analyze()
 
     def _analyze(self):
-        if not os.path.exists(self.file_path):
+        if not self.file_path.exists():
             return
             
         try:
-            with open(self.file_path, "r", encoding="utf-8") as f:
-                tree = ast.parse(f.read())
+            tree = ast.parse(self.file_path.read_text(encoding="utf-8"))
                 
             for node in tree.body:
                 if isinstance(node, ast.ClassDef):
@@ -36,7 +42,7 @@ class SourceAnalyzer:
         except Exception as e:
             logger.error(f"AST Analysis failed for {self.file_path}: {e}")
 
-    def _parse_class(self, node: ast.ClassDef) -> Dict[str, Any]:
+    def _parse_class(self, node: ast.ClassDef) -> dict[str, Any]:
         methods = {}
         for item in node.body:
             if isinstance(item, ast.FunctionDef):
@@ -47,7 +53,7 @@ class SourceAnalyzer:
             "bases": [ast.dump(b) for b in node.bases]
         }
 
-    def _parse_function(self, node: ast.FunctionDef) -> Dict[str, Any]:
+    def _parse_function(self, node: ast.FunctionDef) -> dict[str, Any]:
         decorators = []
         for d in node.decorator_list:
             if isinstance(d, ast.Name):
@@ -77,7 +83,7 @@ class DocumentationManager:
     Handles extraction and synchronization of mhi-pscad documentation.
     Produces LLM-friendly Markdown output enriched with source analysis.
     """
-    MODULES = [
+    MODULES: ClassVar[tuple[str, ...]] = (
         "mhi.pscad", 
         "mhi.pscad.project", 
         "mhi.pscad.canvas", 
@@ -97,20 +103,93 @@ class DocumentationManager:
         "mhi.pscad.wizard",
         "mhi.pscad.form",
         "mhi.pscad.certificate",
-        "mhi.pscad.annotation"
-    ]
+        "mhi.pscad.annotation",
+    )
 
-    def __init__(self, docs_dir: str = "docs"):
-        self.base_dir = os.path.abspath(docs_dir)
-        self.md_dir = os.path.join(self.base_dir, "md")
-        self.raw_dir = os.path.join(self.base_dir, "raw")
-        
-        # Ensure directory structure exists
-        os.makedirs(self.md_dir, exist_ok=True)
-        os.makedirs(self.raw_dir, exist_ok=True)
+    SETTING = "PSCAD_MCP_DOCUMENTATION_DIR"
 
-    def sync(self) -> List[str]:
+    def __init__(
+        self,
+        docs_dir: str | os.PathLike[str],
+        *,
+        issue: str | None = None,
+    ):
+        self.base_dir = Path(docs_dir).expanduser().resolve()
+        self.md_dir = self.base_dir / "md"
+        self.raw_dir = self.base_dir / "raw"
+        self.issue = issue
+
+    @classmethod
+    def from_environ(cls, environ: Mapping[str, str]) -> "DocumentationManager":
+        default_root = cls._default_root(environ)
+        if cls.SETTING not in environ:
+            return cls(default_root)
+
+        override = environ.get(cls.SETTING)
+        if not isinstance(override, str) or not override.strip():
+            return cls(default_root, issue=cls.SETTING)
+        candidate = Path(override).expanduser()
+        if not candidate.is_absolute():
+            return cls(default_root, issue=cls.SETTING)
+        return cls(candidate)
+
+    @staticmethod
+    def _default_root(environ: Mapping[str, str]) -> Path:
+        local_app_data = environ.get("LOCALAPPDATA")
+        if isinstance(local_app_data, str) and local_app_data.strip():
+            return Path(local_app_data).expanduser() / "pscad-mcp" / "docs"
+        return Path.home() / ".local" / "state" / "pscad-mcp" / "docs"
+
+    def raise_for_issue(self, operation: str) -> None:
+        if self.issue is None:
+            return
+        raise BackendError(
+            "DOCUMENTATION_CONFIG_INVALID",
+            "The documentation storage configuration is invalid.",
+            "server",
+            operation,
+            {"setting": self.issue},
+        )
+
+    @staticmethod
+    def _package_version() -> str:
+        try:
+            return importlib.metadata.version("pscad-mcp")
+        except importlib.metadata.PackageNotFoundError:
+            return __version__
+
+    @staticmethod
+    def _atomic_write(target: Path, content: str) -> None:
+        destination = Path(target)
+        temporary_path: Path | None = None
+        try:
+            with NamedTemporaryFile(
+                mode="w",
+                encoding="utf-8",
+                newline="",
+                dir=destination.parent,
+                prefix=f".{destination.name}.",
+                suffix=".tmp",
+                delete=False,
+            ) as temporary:
+                temporary_path = Path(temporary.name)
+                temporary.write(content)
+                temporary.flush()
+                os.fsync(temporary.fileno())
+            os.replace(temporary_path, destination)
+            temporary_path = None
+        finally:
+            if temporary_path is not None:
+                try:
+                    temporary_path.unlink()
+                except FileNotFoundError:
+                    pass
+
+    def sync(self) -> list[str]:
         """Synchronize reference files from the installed mhi-pscad library."""
+        self.raise_for_issue("sync_documentation")
+        self.md_dir.mkdir(parents=True, exist_ok=True)
+        self.raw_dir.mkdir(parents=True, exist_ok=True)
         results = []
         for mod_name in self.MODULES:
             try:
@@ -129,20 +208,18 @@ class DocumentationManager:
                     logger.warning(f"pydoc failed for {mod_name}, falling back to manual: {e}")
                     raw_doc = self._manual_inspect_raw(mod_name)
                 
-                raw_path = os.path.join(self.raw_dir, f"{mod_name.replace('.', '_')}.txt")
-                with open(raw_path, "w", encoding="utf-8") as f:
-                    f.write(raw_doc)
+                raw_path = self.raw_dir / f"{mod_name.replace('.', '_')}.txt"
+                self._atomic_write(raw_path, raw_doc)
 
                 # 3. Process into enriched markdown
                 enriched_md = self._extract_enriched_markdown(mod_name, raw_doc, analyzer)
-                md_path = os.path.join(self.md_dir, f"{mod_name.replace('.', '_')}.md")
-                with open(md_path, "w", encoding="utf-8") as f:
-                    f.write(enriched_md)
+                md_path = self.md_dir / f"{mod_name.replace('.', '_')}.md"
+                self._atomic_write(md_path, enriched_md)
 
                 results.append(f"Synced {mod_name} (Enriched)")
             except Exception as e:
-                logger.error(f"Failed to sync {mod_name}: {str(e)}")
-                results.append(f"Failed {mod_name}: {str(e)}")
+                logger.error(f"Failed to sync {mod_name}: {e!s}")
+                results.append(f"Failed {mod_name}: {e!s}")
         return results
 
     def _clean_pydoc(self, text: str) -> str:
@@ -151,14 +228,18 @@ class DocumentationManager:
         text = re.sub(r'.\x08', '', text)
         return text
 
-    def _extract_enriched_markdown(self, mod_name: str, raw_doc: str, analyzer: Optional[SourceAnalyzer]) -> str:
+    def _extract_enriched_markdown(
+        self,
+        mod_name: str,
+        raw_doc: str,
+        analyzer: SourceAnalyzer | None,
+    ) -> str:
         """Process raw pydoc text and enrich with AST analysis."""
         clean_doc = self._clean_pydoc(raw_doc)
         lines = clean_doc.splitlines()
-        md_lines = [f"# Module {mod_name}\n"]
-        
-        if analyzer and analyzer.file_path:
-            md_lines.append(f"*Source: {analyzer.file_path}*\n")
+        md_lines = [
+            f"# Module {mod_name} (pscad-mcp {self._package_version()})\n"
+        ]
 
         skip_inheritance_for = {
             "builtins.object", "builtins.int", "builtins.tuple", 
@@ -250,10 +331,10 @@ class DocumentationManager:
                     output.append(f"\n--- {name} ---\n{doc}\n")
             return "\n".join(output)
         except Exception as e:
-            return f"CRITICAL FAILURE: {str(e)}"
+            return f"CRITICAL FAILURE: {e!s}"
 
-# Shared instance
-doc_manager = DocumentationManager()
+# Shared instance. Path resolution is intentionally lazy and performs no writes.
+doc_manager = DocumentationManager.from_environ(os.environ)
 
 if __name__ == "__main__":
     import logging
