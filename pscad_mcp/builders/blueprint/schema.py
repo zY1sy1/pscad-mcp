@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from pathlib import PurePosixPath
 import re
 from typing import Any, Mapping
 
@@ -212,6 +213,13 @@ def _publication(value: Any) -> PublicationSpec:
         raise _error("publication.evidence_files must contain non-empty paths.", path="blueprint.publication.evidence_files")
     if len(set(evidence)) != len(evidence):
         raise _error("publication.evidence_files must be unique.", path="blueprint.publication.evidence_files")
+    for item in evidence:
+        candidate = PurePosixPath(item.replace("\\", "/"))
+        if candidate.is_absolute() or ".." in candidate.parts or len(candidate.parts) != 1:
+            raise _error(
+                "publication.evidence_files must use simple evidence filenames.",
+                path="blueprint.publication.evidence_files",
+            )
     if record["scope"] not in _PUBLICATION_SCOPES:
         raise _error("publication.scope is not supported.", path="blueprint.publication.scope")
     return PublicationSpec(record["delivery_package"], tuple(evidence), record["scope"])

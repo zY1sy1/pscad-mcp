@@ -222,3 +222,56 @@ def create_plan(
         warnings,
         freeze(overrides),
     )
+
+
+def plan_from_dict(value: Any) -> BlueprintPlan:
+    """Restore a persisted canonical plan and verify its self-hash."""
+
+    required = {
+        "plan_hash", "blueprint", "blueprint_hash", "asset_hashes", "source_path",
+        "source_entry_point", "source_manifest", "source_package_hash", "inventory_hash",
+        "pscad_version", "target_name", "staging_path", "resolved_selectors", "operations",
+        "warnings", "parameter_overrides",
+    }
+    if not isinstance(value, Mapping) or set(value) != required:
+        raise _error("BLUEPRINT_PLAN_INVALID", "Persisted plan fields are not exact.")
+    original_blueprint = asset_blueprint = value["blueprint"]
+    if not isinstance(original_blueprint, Mapping) or not isinstance(value["operations"], list):
+        raise _error("BLUEPRINT_PLAN_INVALID", "Persisted plan blueprint or operations are invalid.")
+    from .schema import parse_blueprint
+
+    blueprint = parse_blueprint(original_blueprint)
+    resolved_value = {**dict(asset_blueprint), "operations": value["operations"]}
+    resolved_operations = parse_blueprint(resolved_value).operations
+    mappings = ("asset_hashes", "source_manifest", "resolved_selectors", "parameter_overrides")
+    if any(not isinstance(value[field], Mapping) for field in mappings):
+        raise _error("BLUEPRINT_PLAN_INVALID", "Persisted plan mappings are invalid.")
+    if any(not isinstance(item, str) for item in value["warnings"] if isinstance(value["warnings"], list)) or not isinstance(value["warnings"], list):
+        raise _error("BLUEPRINT_PLAN_INVALID", "Persisted plan warnings are invalid.")
+    plan = BlueprintPlan(
+        str(value["plan_hash"]),
+        blueprint,
+        str(value["blueprint_hash"]),
+        freeze(value["asset_hashes"]),
+        str(value["source_path"]),
+        str(value["source_entry_point"]),
+        freeze(value["source_manifest"]),
+        str(value["source_package_hash"]),
+        str(value["inventory_hash"]),
+        str(value["pscad_version"]),
+        str(value["target_name"]),
+        str(value["staging_path"]),
+        freeze(value["resolved_selectors"]),
+        resolved_operations,
+        tuple(value["warnings"]),
+        freeze(value["parameter_overrides"]),
+    )
+    observed_hash = sha256_bytes(canonical_json(plan.unsigned_dict()))
+    if observed_hash != plan.plan_hash:
+        raise _error(
+            "BLUEPRINT_PLAN_INVALID",
+            "Persisted plan hash does not match its canonical content.",
+            expected_plan_hash=plan.plan_hash,
+            observed_plan_hash=observed_hash,
+        )
+    return plan

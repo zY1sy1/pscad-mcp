@@ -117,3 +117,70 @@ class BuildJournal:
             stream.flush()
             os.fsync(stream.fileno())
         return json.loads(line)
+
+
+class WorkspaceBuildLease:
+    """Exclusive cross-process lease for mutation in one PSCAD workspace."""
+
+    def __init__(self, workspace_root: Path, build_id: str, token: str) -> None:
+        self.workspace_root = workspace_root
+        self.build_id = build_id
+        self.token = token
+        self.lock_path = workspace_root / ".pscad-mcp" / "blueprint-build.lock"
+
+    @classmethod
+    def acquire(cls, workspace_root: str | Path, build_id: str) -> "WorkspaceBuildLease":
+        if not isinstance(build_id, str) or _BUILD_ID.fullmatch(build_id) is None:
+            raise _error("BLUEPRINT_BUILD_CONFLICT", "Build lease ID is invalid.", build_id=build_id)
+        root = Path(workspace_root).expanduser().resolve()
+        lock_path = root / ".pscad-mcp" / "blueprint-build.lock"
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        token = uuid.uuid4().hex
+        metadata = {
+            "build_id": build_id,
+            "pid": os.getpid(),
+            "token": token,
+            "created_at_utc": _utc_now(),
+        }
+        try:
+            descriptor = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        except FileExistsError as error:
+            try:
+                existing = json.loads(lock_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                existing = {"build_id": "unknown"}
+            raise _error(
+                "BLUEPRINT_BUILD_CONFLICT",
+                "Another blueprint build owns the workspace lease.",
+                owner_build_id=existing.get("build_id"),
+            ) from error
+        try:
+            with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as stream:
+                stream.write(_serialized(metadata) + "\n")
+                stream.flush()
+                os.fsync(stream.fileno())
+        except BaseException:
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+            try:
+                lock_path.unlink()
+            except OSError:
+                pass
+            raise
+        return cls(root, build_id, token)
+
+    def release(self, token: str | None = None) -> bool:
+        expected = self.token if token is None else token
+        try:
+            metadata = json.loads(self.lock_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return False
+        if metadata.get("token") != expected or metadata.get("build_id") != self.build_id:
+            return False
+        try:
+            self.lock_path.unlink()
+        except FileNotFoundError:
+            return False
+        return True
