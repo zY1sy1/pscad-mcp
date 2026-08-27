@@ -33,15 +33,22 @@ PARAMETRIC_LCC_TOOLS = {
     "get_parametric_lcc_build_status",
     "validate_lcc_operating_modes",
 }
+BLUEPRINT_TOOLS = {
+    "plan_pscad_project_build",
+    "build_pscad_project",
+    "get_pscad_project_build_status",
+    "validate_pscad_project_build",
+}
 
 
 def test_server_preserves_the_exact_60_generic_tools_and_adds_hvdc_tools():
     tools = create_server()._tool_manager.list_tools()
     names = [tool.name for tool in tools]
 
-    assert len(set(names)) == 83
-    assert len(set(names) - HVDC_TOOLS - LEARNING_TOOLS - LCC_TOOLS - PARAMETRIC_LCC_TOOLS) == 60
+    assert len(set(names)) == 87
+    assert len(set(names) - HVDC_TOOLS - LEARNING_TOOLS - LCC_TOOLS - PARAMETRIC_LCC_TOOLS - BLUEPRINT_TOOLS) == 60
     assert HVDC_TOOLS <= set(names)
     assert LEARNING_TOOLS <= set(names)
     assert LCC_TOOLS <= set(names)
     assert PARAMETRIC_LCC_TOOLS <= set(names)
+    assert BLUEPRINT_TOOLS <= set(names)

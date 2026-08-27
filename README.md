@@ -1,6 +1,6 @@
 # PSCAD MCP for Codex and GitHub Copilot CLI
 
-`pscad-mcp` is a Windows Model Context Protocol (MCP) server for PSCAD automation. It uses `mhrc.automation` for PSCAD 4.6.x and `mhi.pscad` for PSCAD 5.x behind one stable 60-tool generic service contract, plus separate HVDC, silent-learning, fixed CIGRE LCC, and parametric LCC domain layers. The current inventory is 83 tools.
+`pscad-mcp` is a Windows Model Context Protocol (MCP) server for PSCAD automation. It uses `mhrc.automation` for PSCAD 4.6.x and `mhi.pscad` for PSCAD 5.x behind one stable 60-tool generic service contract, plus separate HVDC, silent-learning, fixed CIGRE LCC, parametric LCC, and generic Blueprint Builder layers. The current inventory is 87 tools.
 
 中文安装、配置、安全和验收说明：[docs/zh-CN/README.md](docs/zh-CN/README.md)
 
@@ -61,8 +61,9 @@ external process.
 
 ## Tool coverage
 
-The complete inventory is 83 = 60 generic tools, 10 HVDC tools, 3 learning
-tools, 4 fixed CIGRE LCC tools, and 6 parametric LCC tools. The generic 60-tool contract keeps its
+The complete inventory is 87 = 60 generic tools, 10 HVDC tools, 3 learning
+tools, 4 fixed CIGRE LCC tools, 6 parametric LCC tools, and 4 generic
+Blueprint Builder tools. The generic 60-tool contract keeps its
 existing names and default return shapes.
 
 The server currently exposes tool groups for:
@@ -129,6 +130,34 @@ LCC acceptance.
 Licensed acceptance has not passed for the PSCAD 4.6.2 implementation branch,
 so the feature must not be described as an autonomously constructed
 accepted CIGRE LCC model until the opt-in real acceptance test passes.
+
+### Generic PSCAD Blueprint Builder
+
+The domain-neutral Blueprint Builder exposes four tools:
+`plan_pscad_project_build`, `build_pscad_project`,
+`get_pscad_project_build_status`, and `validate_pscad_project_build`. A strict
+versioned blueprint declares a read-only source package, ordered component and
+graph operations, output rules, and a publication scope. Planning audits the
+complete package and live PSCAD inventory without creating a staging project,
+then binds the blueprint, source, dependencies, selectors, units, overrides,
+and PSCAD version into one deterministic `plan_hash`.
+
+Mutation requires the same inputs, the exact current `plan_hash`, and
+`confirm=true`. The builder copies the complete source package into a unique
+workspace staging directory, performs each mutation through `PscadService`,
+reads it back immediately, saves and reloads the project, compiles, simulates,
+parses INF/OUT evidence, and runs an independent persisted-project validator.
+Failures are quarantined and cannot be published. Publication stays under
+`PSCAD_MCP_WORKSPACE` and copies only evidence filenames explicitly declared by
+the blueprint; it never copies or overwrites the source package.
+
+Reports keep `run_through_acceptance` and `physical_acceptance` independent.
+Provisional, model-observed, or implementation-policy thresholds can support a
+model run-through but cannot produce physical acceptance. The implementation
+and default offline/service-contract tests are complete on this integration
+branch, but licensed acceptance has not been run. Enable the opt-in test only
+with `PSCAD_MCP_BLUEPRINT_ACCEPTANCE=1` plus approved workspace, source-package,
+and blueprint JSON paths; a skipped test is not live PSCAD evidence.
 
 Read-only HVDC inspection may scan an existing absolute `.pscx` source such as
 `C:\\PSCADFiles\\Breaker\\TEST1\\difforder_new.pscx`; all scenario mutations

@@ -17,6 +17,7 @@ def test_acceptance_status_manifest_separates_live_acceptance_scopes():
         "parametric_lcc",
         "hvdc_scenarios",
         "mmc_stage_a",
+        "generic_blueprint_builder",
     }
     assert scopes["legacy_core_462"]["licensed_status"] == "PASS_HISTORICAL"
     assert scopes["fixed_cigre_lcc"]["licensed_status"] == "INCOMPLETE_ANALYSIS"
@@ -28,6 +29,8 @@ def test_acceptance_status_manifest_separates_live_acceptance_scopes():
     }
     assert scopes["hvdc_scenarios"]["licensed_status"] == "PARTIAL"
     assert scopes["mmc_stage_a"]["licensed_status"] == "NOT_INTEGRATED"
+    assert scopes["generic_blueprint_builder"]["implementation_status"] == "INTEGRATION_BRANCH"
+    assert scopes["generic_blueprint_builder"]["licensed_status"] == "NOT_RUN_ON_INTEGRATED_COMMIT"
 
 
 def test_live_pass_requires_durable_evidence_identity():

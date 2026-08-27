@@ -41,4 +41,5 @@ pscad_mcp = [
     "assets/lcc/*/*.json",
     "assets/lcc/*/*.md",
     "assets/lcc/*/library/*.pslx",
+    "assets/blueprints/*/*.json",
 ]

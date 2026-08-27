@@ -26,6 +26,7 @@ def test_project_packages_recursive_lcc_asset_set():
     assert "assets/lcc/*/*.json" in patterns
     assert "assets/lcc/*/*.md" in patterns
     assert "assets/lcc/*/library/*.pslx" in patterns
+    assert "assets/blueprints/*/*.json" in patterns
 
 
 def test_runtime_version_matches_project_metadata():

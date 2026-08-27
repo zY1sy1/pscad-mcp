@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-08-24T22:00:00+08:00",
+  "updated_at": "2026-08-27T00:00:00+08:00",
   "policy": "A licensed PASS applies only to the named scope and commit. It must not be inherited by another builder, domain workflow, or later commit.",
   "scopes": [
     {
@@ -68,6 +68,17 @@
         "commit": "8872a96f72c039ebca1925b8e6a6cfa8763e7d19"
       },
       "note": "MMC Stage A remains on codex/mmc-autonomous-builder and has no licensed acceptance claim."
+    },
+    {
+      "scope": "generic_blueprint_builder",
+      "implementation_status": "INTEGRATION_BRANCH",
+      "licensed_status": "NOT_RUN_ON_INTEGRATED_COMMIT",
+      "evidence": {
+        "report_path": null,
+        "sha256": null,
+        "commit": null
+      },
+      "note": "The generic Blueprint Builder is implemented on codex/pscad-blueprint-builder and has passed only default offline and service-contract regression. The opt-in licensed PSCAD acceptance test has not been run for this scope."
     }
   ]
 }

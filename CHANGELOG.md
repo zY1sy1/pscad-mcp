@@ -6,6 +6,12 @@ All notable changes to this project are documented here.
 
 ### Changed
 
+- Added a generic PSCAD Blueprint Builder with four MCP tools for deterministic
+  planning, exact-hash confirmed staging, immediate mutation read-back,
+  save/reload/compile/simulate lifecycle evidence, independent validation,
+  quarantine, and evidence-only publication. Default tests do not constitute
+  licensed PSCAD acceptance.
+
 - Parameterized LCC execution now carries reviewed real-template selectors through
   deterministic plans, validates bindings before acquiring a workspace lease,
   stages PSCX changes atomically, and records bounded source/staging/read-back
@@ -29,9 +35,9 @@ All notable changes to this project are documented here.
 - LCC planning now fails closed without live PSCAD definition inventory;
   output-channel creation, final-project identity, waveform ownership, asset
   fingerprints, and acceptance-report evidence are checked explicitly.
-- The MCP inventory is now 83 tools: the original 60 generic tools, ten HVDC
+- The MCP inventory is now 87 tools: the original 60 generic tools, ten HVDC
   tools, three learning tools, four fixed LCC tools, and six parametric LCC
-  tools.
+  tools, plus four generic Blueprint Builder tools.
 
 - HVDC strict control now supports explicit backend timing and output-channel
   provider hooks, bounded simulation-clock polling, stalled-clock detection,

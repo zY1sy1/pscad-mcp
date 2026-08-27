@@ -1,12 +1,12 @@
 # PSCAD MCP 中文使用与验收说明
 
-本项目把 PSCAD 自动化封装为 83 个 MCP 工具，其中原有通用服务契约保持 60 个工具，并增加 HVDC、静默学习、固定 CIGRE LCC 与参数化 LCC 领域工具，可供 Codex、GitHub Copilot CLI 等支持 stdio MCP 的客户端调用。项目采用双后端：
+本项目把 PSCAD 自动化封装为 87 个 MCP 工具，其中原有通用服务契约保持 60 个工具，并增加 HVDC、静默学习、固定 CIGRE LCC、参数化 LCC 与通用 Blueprint Builder 领域工具，可供 Codex、GitHub Copilot CLI 等支持 stdio MCP 的客户端调用。项目采用双后端：
 
 - PSCAD 4.6.x：`mhrc.automation`，当前已在本机 PSCAD 4.6.2 x64 许可环境做真实验收；
 - PSCAD 5.x：`mhi.pscad` 3.1.x，当前完成契约测试，但由于本机没有 PSCAD 5.x，不能声称端到端真实验收通过；
 - 结果文件：`mhi.psout` 1.3.x。
 
-完整工具库存为 83 = 60 个通用工具 + 10 个 HVDC 工具 + 3 个学习工具 + 4 个固定 CIGRE LCC 工具 + 6 个参数化 LCC 工具；原有 60 个通用工具的名称和默认返回形状保持不变。
+完整工具库存为 87 = 60 个通用工具 + 10 个 HVDC 工具 + 3 个学习工具 + 4 个固定 CIGRE LCC 工具 + 6 个参数化 LCC 工具 + 4 个通用 Blueprint Builder 工具；原有 60 个通用工具的名称和默认返回形状保持不变。
 
 Legacy PSCAD 4.6.2 后端只支持启动新的受管 Automation 实例，不能附加到用户普通方式打开的 GUI。受管窗口默认可见；默认检测到已有 PSCAD 进程时会在启动前返回 `EXTERNAL_PSCAD_PRESENT`。`repair_connection` 使用连接时缓存的进程归属：自有实例会先正常退出，外部进程不会被终止。
 
@@ -31,7 +31,7 @@ Legacy PSCAD 4.6.2 后端只支持启动新的受管 Automation 实例，不能�
 
 ## 功能范围
 
-服务器固定注册 83 个工具，其中以下七组共 60 个通用工具：
+服务器固定注册 87 个工具，其中以下七组共 60 个通用工具：
 
 - 应用与文档 7 个：连接、状态、修复、退出、文档同步/列出/读取；
 - 工程与参数 12 个：加载、列出、运行、暂停、停止、运行状态、元件查询、参数读取/写入/校验、工程设置读取/写入；
@@ -68,6 +68,28 @@ PSCAD 5.x、故障或换相失败验收、MMC 构建均不可用。
 
 当前实现的 PSCAD 4.6.2 授权验收尚未通过；在 opt-in 实机验收
 通过前，不得把该功能描述为已自治构建并验收的 CIGRE LCC 模型。
+
+### 通用 PSCAD Blueprint Builder
+
+通用 Blueprint Builder 提供四个工具：`plan_pscad_project_build`、
+`build_pscad_project`、`get_pscad_project_build_status` 和
+`validate_pscad_project_build`。严格版本化 blueprint 声明只读源工程包、固定顺序
+的元件/图操作、输出规则和发布范围。规划阶段审计完整工程包与实时 PSCAD
+inventory，不创建 staging；blueprint、source/dependency hash、selector、端口、
+单位、override 和 PSCAD 版本共同进入确定性的 `plan_hash`。
+
+执行必须再次提供同一组输入、当前精确 `plan_hash` 和 `confirm=true`。构建器先把
+完整源包复制到工作区内的 build-ID staging，再通过 `PscadService` 逐项修改和
+立即读回，随后保存、重新加载、编译、仿真、解析 INF/OUT，并由独立 validator
+重新检查持久化工程。失败 staging 进入 quarantine，不能发布。发布只发生在
+`PSCAD_MCP_WORKSPACE` 内，并且只复制 blueprint 明确列出的 evidence 文件；源包
+不会被覆盖或隐式复制到发布目录。
+
+报告分别给出 `run_through_acceptance` 与 `physical_acceptance`。provisional、
+model-observed 或 implementation-policy 阈值可以支持模型跑通，但不能产生物理
+验收。本集成分支已完成实现与默认离线/服务契约测试，许可实机验收尚未运行；
+只有显式设置 `PSCAD_MCP_BLUEPRINT_ACCEPTANCE=1` 并提供已批准的 workspace、
+source package 和 blueprint JSON 后才运行 opt-in 测试，默认 skip 不是实机证据。
 
 ### 参数化 LCC 真实模板执行边界
 
@@ -281,7 +303,7 @@ git diff --check
 git status --short --branch
 ```
 
-工具数量应输出 `83 83`。真实 PSCAD 5.x 必须在安装并运行对应版本后另做相同级别验收。
+工具数量应输出 `87 87`。真实 PSCAD 5.x 必须在安装并运行对应版本后另做相同级别验收。
 
 ## 常见故障
 
