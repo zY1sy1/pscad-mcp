@@ -10,7 +10,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import asdict
 import inspect
 from pathlib import Path
-from typing import Any, Awaitable, Callable
+from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
 from .backend.base import BackendError, BackendInfo, ParameterGridRequest
 from .executor import (
@@ -19,6 +19,9 @@ from .executor import (
     robust_executor,
 )
 from .path_policy import PathPolicy, WorkspaceNotConfiguredError
+
+if TYPE_CHECKING:
+    from ..topology.service import TopologyService
 
 
 BackendFactory = Callable[[], Any | Awaitable[Any]]
@@ -258,6 +261,7 @@ class PscadService:
         self.executor = executor
         self.path_policy = path_policy or PathPolicy()
         self._backend: Any = None
+        self._topology_service: TopologyService | None = None
         self._mutation_lock = asyncio.Lock()
 
     @property
@@ -265,6 +269,18 @@ class PscadService:
         if self._backend is None:
             raise RuntimeError("PSCAD is not connected. Call get_local_pscad first.")
         return self._backend
+
+    @property
+    def topology_service(self) -> TopologyService:
+        backend = self.backend
+        if (
+            self._topology_service is None
+            or self._topology_service.live_provider.backend is not backend
+        ):
+            from ..topology.service import TopologyService
+
+            self._topology_service = TopologyService(backend)
+        return self._topology_service
 
     def _resolve_path(
         self,
@@ -300,6 +316,7 @@ class PscadService:
             self._backend = (
                 await candidate if inspect.isawaitable(candidate) else candidate
             )
+            self._topology_service = None
             if self._backend is None:
                 raise RuntimeError("The PSCAD backend factory returned no backend.")
         return self._backend
@@ -311,6 +328,7 @@ class PscadService:
         except BaseException:
             if self._backend is backend:
                 self._backend = None
+                self._topology_service = None
             raise
         architecture = "x64" if info.x64 else "x86"
         if info.backend == "legacy":
@@ -372,6 +390,7 @@ class PscadService:
         if self._backend is not None:
             await self._backend.disconnect()
         self._backend = None
+        self._topology_service = None
 
     async def repair_connection(self) -> str:
         async with self._mutation_lock:
@@ -402,6 +421,7 @@ class PscadService:
                             disconnect_error
                         )
                     self._backend = None
+                    self._topology_service = None
                     self.executor.reset()
                     raise BackendError(
                         "REPAIR_CLEANUP_FAILED",
@@ -415,6 +435,7 @@ class PscadService:
             else:
                 await current.disconnect()
             self._backend = None
+            self._topology_service = None
         self.executor.reset()
         return await self.attach_local()
 
@@ -424,6 +445,7 @@ class PscadService:
         backend = self.backend
         await backend.quit()
         self._backend = None
+        self._topology_service = None
         return "PSCAD terminated."
 
     async def load_projects(self, filenames: list[str]) -> str:
