@@ -1,3 +1,4 @@
+from functools import wraps
 from typing import Any, Literal
 
 from mcp.server.fastmcp import FastMCP
@@ -58,9 +59,28 @@ async def clear_learning_history(
     return learning_runtime.clear(confirm=confirm)
 
 
+def _bind_record_goal_failure(mcp: FastMCP):
+    @wraps(record_goal_failure)
+    async def bound(
+        failure_kind: str,
+        primary_tool: str | None = None,
+    ) -> dict[str, Any]:
+        registered_names = getattr(mcp, "_pscad_registered_tool_names", set())
+        if primary_tool is not None and primary_tool not in registered_names:
+            raise BackendError(
+                "INVALID_ARGUMENT",
+                "The supplied tool name is not registered.",
+                "learning",
+                "learning",
+            )
+        return await record_goal_failure(failure_kind, primary_tool)
+
+    return bound
+
+
 def register_learning_tools(mcp: FastMCP) -> None:
     for function in (
-        record_goal_failure,
+        _bind_record_goal_failure(mcp),
         review_improvement_backlog,
         clear_learning_history,
     ):

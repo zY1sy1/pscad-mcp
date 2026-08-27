@@ -1,3 +1,4 @@
+import inspect
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -9,6 +10,8 @@ from pscad_mcp.tools.learning_tools import (
     record_goal_failure,
     review_improvement_backlog,
 )
+from pscad_mcp.learning.models import GoalFailureKind
+from pscad_mcp.tools import learning_tools
 from pscad_mcp.tools.catalog import TOOL_SPECS
 
 
@@ -89,6 +92,91 @@ def test_server_registers_83_unique_tools_and_silent_instructions():
     assert "record_goal_failure" in SERVER_INSTRUCTIONS
     assert "inspect it now or leave it for the weekly review" in SERVER_INSTRUCTIONS
     assert "Do not start remediation automatically" in SERVER_INSTRUCTIONS
+
+
+@pytest.mark.parametrize("creation_order", ["full-first", "scoped-first"])
+@pytest.mark.asyncio
+async def test_learning_primary_tool_is_scoped_per_server_profile(
+    creation_order,
+    monkeypatch,
+):
+    class RecordingRuntime:
+        def __init__(self):
+            self.calls = []
+
+        def record_goal_failure(self, failure_kind, primary_tool):
+            self.calls.append((failure_kind, primary_tool))
+            return {
+                "recorded": True,
+                "learning_enabled": True,
+                "immediate_attention": False,
+            }
+
+    runtime = RecordingRuntime()
+    monkeypatch.setattr(learning_tools, "learning_runtime", runtime)
+    factories = {
+        "full": lambda: create_server(environ={}),
+        "scoped": lambda: create_server(
+            environ={"PSCAD_MCP_TOOL_PROFILE": "core,learning"}
+        ),
+    }
+    order = (
+        ("full", "scoped")
+        if creation_order == "full-first"
+        else ("scoped", "full")
+    )
+    servers = {name: factories[name]() for name in order}
+    scoped_tool = servers["scoped"]._tool_manager.get_tool(
+        "record_goal_failure"
+    )
+    full_tool = servers["full"]._tool_manager.get_tool("record_goal_failure")
+
+    assert scoped_tool is not None
+    assert full_tool is not None
+    assert scoped_tool.name == record_goal_failure.__name__
+    assert inspect.getdoc(scoped_tool.fn) == inspect.getdoc(record_goal_failure)
+    assert inspect.signature(scoped_tool.fn) == inspect.signature(
+        record_goal_failure
+    )
+    assert scoped_tool.parameters == full_tool.parameters
+
+    _, rejected = await servers["scoped"]._tool_manager.call_tool(
+        "record_goal_failure",
+        {
+            "failure_kind": "unknown",
+            "primary_tool": "run_hvdc_scenario",
+        },
+        convert_result=True,
+    )
+    assert rejected["error"] == {
+        "code": "INVALID_ARGUMENT",
+        "message": "The supplied tool name is not registered.",
+        "backend": "learning",
+        "operation": "learning",
+        "details": {},
+        "retryable": False,
+        "suggested_action": "Correct the argument values and retry the operation.",
+    }
+    assert "run_hvdc_scenario" not in repr(rejected)
+    assert runtime.calls == []
+
+    await servers["scoped"]._tool_manager.call_tool(
+        "record_goal_failure",
+        {"failure_kind": "unknown", "primary_tool": "list_projects"},
+        convert_result=True,
+    )
+    await servers["full"]._tool_manager.call_tool(
+        "record_goal_failure",
+        {
+            "failure_kind": "unknown",
+            "primary_tool": "run_hvdc_scenario",
+        },
+        convert_result=True,
+    )
+    assert runtime.calls == [
+        (GoalFailureKind.UNKNOWN, "list_projects"),
+        (GoalFailureKind.UNKNOWN, "run_hvdc_scenario"),
+    ]
 
 
 def test_clear_learning_history_is_catalogued_as_destructive():

@@ -83,6 +83,17 @@ def test_empty_or_unknown_profile_is_rejected(raw):
         parse_tool_profile({"PSCAD_MCP_TOOL_PROFILE": raw})
 
 
+@pytest.mark.parametrize("raw", [None, b"SECRET", 7, [], {}])
+def test_explicit_non_string_profile_is_rejected_without_echoing(raw):
+    with pytest.raises(ValueError) as raised:
+        parse_tool_profile(  # type: ignore[arg-type]
+            {"PSCAD_MCP_TOOL_PROFILE": raw}
+        )
+
+    assert str(raised.value) == "INVALID_TOOL_PROFILE: PSCAD_MCP_TOOL_PROFILE"
+    assert repr(raw) not in str(raised.value)
+
+
 def test_profile_normalizes_whitespace_case_order_and_duplicates():
     profile = parse_tool_profile(
         {"PSCAD_MCP_TOOL_PROFILE": " HVDC, core,CORE "}

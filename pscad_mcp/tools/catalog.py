@@ -145,15 +145,24 @@ TOOL_GROUPS = MappingProxyType(
 )
 
 
-def parse_tool_profile(environ: Mapping[str, str]) -> ToolProfile:
-    raw = environ.get("PSCAD_MCP_TOOL_PROFILE")
-    if raw is None or raw.strip().casefold() == "full":
+_TOOL_PROFILE_KEY = "PSCAD_MCP_TOOL_PROFILE"
+_TOOL_PROFILE_MISSING = object()
+_INVALID_TOOL_PROFILE = "INVALID_TOOL_PROFILE: PSCAD_MCP_TOOL_PROFILE"
+
+
+def parse_tool_profile(environ: Mapping[str, object]) -> ToolProfile:
+    raw = environ.get(_TOOL_PROFILE_KEY, _TOOL_PROFILE_MISSING)
+    if raw is _TOOL_PROFILE_MISSING:
+        return ToolProfile("full", frozenset(TOOL_GROUPS))
+    if not isinstance(raw, str):
+        raise ValueError(_INVALID_TOOL_PROFILE)
+    if raw.strip().casefold() == "full":
         return ToolProfile("full", frozenset(TOOL_GROUPS))
     groups = frozenset(
         part.strip().casefold() for part in raw.split(",") if part.strip()
     )
     if not groups or not groups <= TOOL_GROUPS.keys():
-        raise ValueError("INVALID_TOOL_PROFILE: PSCAD_MCP_TOOL_PROFILE")
+        raise ValueError(_INVALID_TOOL_PROFILE)
     return ToolProfile(",".join(sorted(groups)), groups)
 
 COMPATIBILITY_TOOL_NAMES = frozenset().union(*TOOL_GROUPS.values())
