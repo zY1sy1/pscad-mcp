@@ -127,3 +127,126 @@ def test_generation_is_byte_deterministic(tmp_path):
         name: hashlib.sha256(path.read_bytes()).hexdigest()
         for name, path in second.items()
     }
+
+
+def _semantic_probe_set(tmp_path):
+    cases = tuple(
+        case
+        for case in topology_truth.case_recipes()
+        if case.name
+        in {"seeded-defects", "custom-library", "hierarchy-uncertain"}
+    )
+    generated = topology_truth.generate_cases(SEED, tmp_path / "probe", cases)
+    return cases, generated
+
+
+def test_semantic_probe_requires_all_normalized_evidence(tmp_path):
+    cases, generated = _semantic_probe_set(tmp_path)
+
+    assert topology_truth.semantic_probe_set(generated, cases) == {
+        "required_port_preserved": True,
+        "electrical_namespace_preserved": True,
+        "data_namespace_preserved": True,
+        "dimensions_preserved": [1, 3],
+        "label_namespaces_preserved": ["data", "electrical"],
+        "hierarchy_boundary_preserved": True,
+    }
+
+
+@pytest.mark.parametrize(
+    ("case_name", "selector", "attribute", "replacement", "field", "expected"),
+    [
+        (
+            "seeded-defects",
+            lambda root: next(node for node in root.iter("port") if node.get("required")),
+            "required",
+            None,
+            "required_port_preserved",
+            False,
+        ),
+        (
+            "seeded-defects",
+            lambda root: next(node for node in root.iter("port") if node.get("kind") == "data"),
+            "kind",
+            None,
+            "data_namespace_preserved",
+            False,
+        ),
+        (
+            "seeded-defects",
+            lambda root: next(node for node in root.iter("port") if node.get("dim") == "3"),
+            "dim",
+            None,
+            "dimensions_preserved",
+            [1],
+        ),
+        (
+            "seeded-defects",
+            lambda root: next(
+                node
+                for node in root.iter("User")
+                if node.get("defn") == "master:datalabel"
+            ),
+            "namespace",
+            None,
+            "label_namespaces_preserved",
+            ["electrical"],
+        ),
+        (
+            "hierarchy-uncertain",
+            lambda root: next(node for node in root.iter("port") if node.get("page")),
+            "page",
+            None,
+            "hierarchy_boundary_preserved",
+            False,
+        ),
+    ],
+)
+def test_semantic_probe_does_not_guess_removed_evidence(
+    tmp_path,
+    case_name,
+    selector,
+    attribute,
+    replacement,
+    field,
+    expected,
+):
+    cases, generated = _semantic_probe_set(tmp_path)
+    tree = ET.parse(generated[case_name])
+    node = selector(tree.getroot())
+    if replacement is None:
+        node.attrib.pop(attribute)
+    else:
+        node.set(attribute, replacement)
+    tree.write(generated[case_name], encoding="utf-8", xml_declaration=True)
+
+    assert topology_truth.semantic_probe_set(generated, cases)[field] == expected
+
+
+def test_build_and_probe_cli_contract(tmp_path, capsys):
+    destination = tmp_path / "cli-probe"
+    selected = "seeded-defects,custom-library,hierarchy-uncertain"
+
+    assert (
+        topology_truth.main(
+            [
+                "build",
+                "--seed",
+                str(SEED),
+                "--destination",
+                str(destination),
+                "--cases",
+                selected,
+            ]
+        )
+        == 0
+    )
+    projects = json.loads(
+        (destination / "projects.json").read_text(encoding="utf-8")
+    )
+    assert len(projects) == 3
+    assert all(Path(path).is_absolute() for path in projects)
+
+    assert topology_truth.main(["probe", "--directory", str(destination)]) == 0
+    output = capsys.readouterr().out
+    assert "TOPOLOGY_SEMANTIC_PROBE=PASS" in output

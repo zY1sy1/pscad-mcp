@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import argparse
 from dataclasses import dataclass
 import hashlib
+import json
 from pathlib import Path
 from typing import Literal
 import xml.etree.ElementTree as ET
@@ -371,6 +373,162 @@ def audit_case(path: Path, case: CaseRecipe) -> dict[str, object]:
         "expected_error_codes": list(case.expected_error_codes),
         "expected_unresolved_codes": list(case.expected_unresolved_codes),
     }
+
+
+def semantic_probe_set(
+    sources: dict[str, Path], cases: tuple[CaseRecipe, ...]
+) -> dict[str, object]:
+    if set(sources) != {case.name for case in cases}:
+        raise ValueError("semantic probe sources do not match recipes")
+    namespace_seen = {"electrical": False, "data": False}
+    namespace_ok = {"electrical": True, "data": True}
+    dimensions = set()
+    label_namespaces = set()
+    required_seen = False
+    required_ok = True
+    hierarchy_seen = False
+    hierarchy_ok = True
+
+    for case in cases:
+        root = ET.parse(sources[case.name]).getroot()
+        definitions = {
+            (element.get("name") or "").casefold(): element
+            for element in root.iter("Definition")
+        }
+        main = _main_schematic(root)
+        components = {
+            element.get("id"): element
+            for element in main
+            if element.tag.casefold() in {"user", "component"}
+            and not _is_label_element(element)
+            and element.get("id")
+        }
+        conductors = {
+            element.get("id"): element
+            for element in main
+            if element.tag.casefold() in {"wire", "bus"} and element.get("id")
+        }
+        labels = {
+            element.get("id"): element
+            for element in main
+            if _is_label_element(element) and element.get("id")
+        }
+        hierarchy_links = {
+            element.get("link")
+            for element in root.iter("call")
+            if element.get("link")
+        }
+
+        for definition_recipe in case.definitions:
+            definition = definitions.get(definition_recipe.name.casefold())
+            observed_ports = (
+                {
+                    port.get("name"): port
+                    for port in definition.iter("port")
+                    if port.get("name")
+                }
+                if definition is not None
+                else {}
+            )
+            for port_recipe in definition_recipe.ports:
+                port = observed_ports.get(port_recipe.name)
+                _probe_port(
+                    port,
+                    port_recipe,
+                    namespace_seen,
+                    namespace_ok,
+                    dimensions,
+                )
+                if port_recipe.required:
+                    required_seen = True
+                    required_ok &= port is not None and _boolean_attribute(
+                        port, "required"
+                    )
+                if port_recipe.page:
+                    hierarchy_seen = True
+                    hierarchy_ok &= (
+                        port is not None
+                        and _boolean_attribute(port, "page")
+                        and any(
+                            component.object_id in hierarchy_links
+                            for component in case.components
+                            if component.definition.casefold()
+                            == definition_recipe.name.casefold()
+                        )
+                    )
+
+        for component_recipe in case.components:
+            element = components.get(component_recipe.object_id)
+            observed_ports = (
+                {
+                    port.get("name"): port
+                    for port in element
+                    if port.tag.casefold() == "port" and port.get("name")
+                }
+                if element is not None
+                else {}
+            )
+            for port_recipe in component_recipe.explicit_ports:
+                port = observed_ports.get(port_recipe.name)
+                _probe_port(
+                    port,
+                    port_recipe,
+                    namespace_seen,
+                    namespace_ok,
+                    dimensions,
+                )
+                if port_recipe.required:
+                    required_seen = True
+                    required_ok &= port is not None and _boolean_attribute(
+                        port, "required"
+                    )
+
+        for conductor_recipe in case.conductors:
+            namespace_seen[conductor_recipe.namespace] = True
+            element = conductors.get(conductor_recipe.object_id)
+            namespace_ok[conductor_recipe.namespace] &= (
+                element is not None
+                and element.get("namespace") == conductor_recipe.namespace
+            )
+
+        for label_recipe in case.labels:
+            element = labels.get(label_recipe.object_id)
+            if (
+                element is not None
+                and element.get("namespace") == label_recipe.namespace
+            ):
+                label_namespaces.add(label_recipe.namespace)
+
+    return {
+        "required_port_preserved": required_seen and required_ok,
+        "electrical_namespace_preserved": (
+            namespace_seen["electrical"] and namespace_ok["electrical"]
+        ),
+        "data_namespace_preserved": (
+            namespace_seen["data"] and namespace_ok["data"]
+        ),
+        "dimensions_preserved": sorted(dimensions),
+        "label_namespaces_preserved": sorted(label_namespaces),
+        "hierarchy_boundary_preserved": hierarchy_seen and hierarchy_ok,
+    }
+
+
+def _probe_port(
+    element: ET.Element | None,
+    recipe: PortRecipe,
+    namespace_seen: dict[str, bool],
+    namespace_ok: dict[str, bool],
+    dimensions: set[int],
+) -> None:
+    namespace_seen[recipe.kind] = True
+    namespace_ok[recipe.kind] &= (
+        element is not None and element.get("kind") == recipe.kind
+    )
+    if element is None:
+        return
+    dimension = _integer_attribute(element, "dim", "dimension")
+    if dimension == recipe.dimension:
+        dimensions.add(dimension)
 
 
 def _stable_id(*parts: str) -> str:
@@ -919,3 +1077,85 @@ def _label_name(element: ET.Element) -> str:
         if (parameter.get("name") or "").casefold() == "name":
             return parameter.get("value") or ""
     return element.get("name") or element.get("text") or ""
+
+
+def _selected_cases(raw: str) -> tuple[CaseRecipe, ...]:
+    requested = tuple(name.strip() for name in raw.split(",") if name.strip())
+    available = {case.name: case for case in case_recipes()}
+    unknown = sorted(set(requested) - set(available))
+    if unknown:
+        raise ValueError(f"unknown topology cases: {unknown}")
+    if len(requested) != len(set(requested)):
+        raise ValueError("topology case selection contains duplicates")
+    return tuple(available[name] for name in requested)
+
+
+def _write_json(path: Path, value: object) -> None:
+    path.write_text(
+        json.dumps(value, indent=2, sort_keys=True, allow_nan=False) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _build_command(arguments: argparse.Namespace) -> int:
+    cases = _selected_cases(arguments.cases)
+    generated = generate_cases(arguments.seed, arguments.destination, cases)
+    _write_json(
+        arguments.destination.resolve() / "projects.json",
+        [str(generated[case.name]) for case in cases],
+    )
+    return 0
+
+
+def _probe_command(arguments: argparse.Namespace) -> int:
+    directory = arguments.directory.resolve()
+    project_paths = tuple(
+        Path(value).resolve()
+        for value in json.loads(
+            (directory / "projects.json").read_text(encoding="utf-8")
+        )
+    )
+    available = {case.name: case for case in case_recipes()}
+    names = tuple(path.stem for path in project_paths)
+    unknown = sorted(set(names) - set(available))
+    if unknown:
+        raise ValueError(f"probe project names have no recipes: {unknown}")
+    cases = tuple(available[name] for name in names)
+    sources = dict(zip(names, project_paths, strict=True))
+    result = semantic_probe_set(sources, cases)
+    expected = {
+        "required_port_preserved": True,
+        "electrical_namespace_preserved": True,
+        "data_namespace_preserved": True,
+        "dimensions_preserved": [1, 3],
+        "label_namespaces_preserved": ["data", "electrical"],
+        "hierarchy_boundary_preserved": True,
+    }
+    print(json.dumps(result, sort_keys=True, allow_nan=False))
+    if result != expected:
+        print("TOPOLOGY_SEMANTIC_PROBE=FAIL")
+        return 1
+    print("TOPOLOGY_SEMANTIC_PROBE=PASS")
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser()
+    commands = parser.add_subparsers(dest="command", required=True)
+
+    build = commands.add_parser("build")
+    build.add_argument("--seed", type=Path, required=True)
+    build.add_argument("--destination", type=Path, required=True)
+    build.add_argument("--cases", required=True)
+    build.set_defaults(handler=_build_command)
+
+    probe = commands.add_parser("probe")
+    probe.add_argument("--directory", type=Path, required=True)
+    probe.set_defaults(handler=_probe_command)
+
+    arguments = parser.parse_args(argv)
+    return arguments.handler(arguments)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
