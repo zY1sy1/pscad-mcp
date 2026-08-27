@@ -19,13 +19,9 @@ FailureKindValue = Literal[
 ]
 
 
-async def record_goal_failure(
-    failure_kind: str,
-    primary_tool: str | None = None,
-) -> dict[str, Any]:
-    """Record a bounded goal-level failure signal for local improvement review."""
+def _failure_kind(failure_kind: str) -> GoalFailureKind:
     try:
-        kind = GoalFailureKind(failure_kind)
+        return GoalFailureKind(failure_kind)
     except (TypeError, ValueError) as error:
         raise BackendError(
             "INVALID_ARGUMENT",
@@ -33,8 +29,15 @@ async def record_goal_failure(
             "learning",
             "record_goal_failure",
         ) from error
+
+
+async def record_goal_failure(
+    failure_kind: str,
+    primary_tool: str | None = None,
+) -> dict[str, Any]:
+    """Record a bounded goal-level failure signal for local improvement review."""
     return learning_runtime.record_goal_failure(
-        kind,
+        _failure_kind(failure_kind),
         primary_tool,
     )
 
@@ -65,7 +68,9 @@ def _bind_record_goal_failure(mcp: FastMCP):
         failure_kind: str,
         primary_tool: str | None = None,
     ) -> dict[str, Any]:
-        registered_names = getattr(mcp, "_pscad_registered_tool_names", set())
+        registered_names = frozenset(
+            getattr(mcp, "_pscad_registered_tool_names", set())
+        )
         if primary_tool is not None and primary_tool not in registered_names:
             raise BackendError(
                 "INVALID_ARGUMENT",
@@ -73,7 +78,11 @@ def _bind_record_goal_failure(mcp: FastMCP):
                 "learning",
                 "learning",
             )
-        return await record_goal_failure(failure_kind, primary_tool)
+        return learning_runtime.record_goal_failure(
+            _failure_kind(failure_kind),
+            primary_tool,
+            allowed_tool_names=registered_names,
+        )
 
     return bound
 

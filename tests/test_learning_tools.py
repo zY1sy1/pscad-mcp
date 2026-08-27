@@ -4,6 +4,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from pscad_mcp.core.backend.base import BackendError
+from pscad_mcp.learning.config import LearningConfig
 from pscad_mcp.main import SERVER_INSTRUCTIONS, create_server
 from pscad_mcp.tools.learning_tools import (
     clear_learning_history,
@@ -11,8 +12,11 @@ from pscad_mcp.tools.learning_tools import (
     review_improvement_backlog,
 )
 from pscad_mcp.learning.models import GoalFailureKind
+from pscad_mcp.learning.recorder import learning_recorder
+from pscad_mcp.learning.service import LearningRuntime
 from pscad_mcp.tools import learning_tools
-from pscad_mcp.tools.catalog import TOOL_SPECS
+from pscad_mcp.tools import hvdc_tools
+from pscad_mcp.tools.catalog import FULL_TOOL_NAMES, TOOL_GROUPS, TOOL_SPECS
 
 
 @pytest.mark.asyncio
@@ -104,8 +108,16 @@ async def test_learning_primary_tool_is_scoped_per_server_profile(
         def __init__(self):
             self.calls = []
 
-        def record_goal_failure(self, failure_kind, primary_tool):
-            self.calls.append((failure_kind, primary_tool))
+        def record_goal_failure(
+            self,
+            failure_kind,
+            primary_tool,
+            *,
+            allowed_tool_names=None,
+        ):
+            self.calls.append(
+                (failure_kind, primary_tool, allowed_tool_names)
+            )
             return {
                 "recorded": True,
                 "learning_enabled": True,
@@ -174,9 +186,88 @@ async def test_learning_primary_tool_is_scoped_per_server_profile(
         convert_result=True,
     )
     assert runtime.calls == [
-        (GoalFailureKind.UNKNOWN, "list_projects"),
-        (GoalFailureKind.UNKNOWN, "run_hvdc_scenario"),
+        (
+            GoalFailureKind.UNKNOWN,
+            "list_projects",
+            frozenset(
+                TOOL_GROUPS["core"] | TOOL_GROUPS["learning"]
+            ),
+        ),
+        (
+            GoalFailureKind.UNKNOWN,
+            "run_hvdc_scenario",
+            FULL_TOOL_NAMES,
+        ),
     ]
+
+
+@pytest.mark.parametrize("creation_order", ["full-first", "scoped-first"])
+@pytest.mark.asyncio
+async def test_automatic_learning_correlation_filters_peer_inactive_tools(
+    creation_order,
+    monkeypatch,
+    tmp_path,
+):
+    config = LearningConfig(
+        enabled=True,
+        database_path=tmp_path / "learning.sqlite3",
+        backlog_path=tmp_path / "improvement-backlog.md",
+        retention_days=90,
+        max_events=20_000,
+        issue=None,
+    )
+    runtime = LearningRuntime(config_loader=lambda: config)
+    monkeypatch.setattr(learning_tools, "learning_runtime", runtime)
+    monkeypatch.setattr(learning_recorder, "_runtime", runtime)
+
+    class PeerHvdcService:
+        async def run_scenario(self, project_name, scenario, *, confirm):
+            return {"status": "completed"}
+
+    monkeypatch.setattr(hvdc_tools, "_service", PeerHvdcService)
+    factories = {
+        "full": lambda: create_server(environ={}),
+        "scoped": lambda: create_server(
+            environ={"PSCAD_MCP_TOOL_PROFILE": "core,learning"}
+        ),
+    }
+    order = (
+        ("full", "scoped")
+        if creation_order == "full-first"
+        else ("scoped", "full")
+    )
+    servers = {name: factories[name]() for name in order}
+
+    await servers["full"]._tool_manager.call_tool(
+        "run_hvdc_scenario",
+        {
+            "project_name": "peer-case",
+            "scenario": {},
+            "confirm": False,
+        },
+        convert_result=True,
+    )
+    await servers["full"]._tool_manager.call_tool(
+        "record_goal_failure",
+        {"failure_kind": "unknown"},
+        convert_result=True,
+    )
+    _, scoped_result = await servers["scoped"]._tool_manager.call_tool(
+        "record_goal_failure",
+        {"failure_kind": "unknown"},
+        convert_result=True,
+    )
+
+    failures = runtime._service._store.load_goal_failures(  # type: ignore[union-attr]
+        "1970-01-01T00:00:00+00:00"
+    )
+    assert [failure.primary_tool for failure in failures] == [
+        "run_hvdc_scenario",
+        None,
+    ]
+    assert failures[0].correlated_invocation_id is not None
+    assert failures[1].correlated_invocation_id is None
+    assert "run_hvdc_scenario" not in repr(scoped_result)
 
 
 def test_clear_learning_history_is_catalogued_as_destructive():
