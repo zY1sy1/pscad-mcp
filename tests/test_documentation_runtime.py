@@ -328,6 +328,122 @@ async def test_documentation_file_disappearing_preserves_not_found_response(
     assert "SECRET_RACE_PATH" not in result
 
 
+async def _assert_replaced_documentation_boundary_is_rejected(
+    server,
+    access: str,
+    secret: str,
+) -> None:
+    if access == "resource":
+        with pytest.raises(ValueError) as raised:
+            await server.read_resource("pscad-docs://modules/mhi.pscad.fake")
+        assert "The documentation storage boundary is invalid." in str(raised.value)
+        assert secret not in str(raised.value)
+        return
+
+    arguments = {} if access == "list_documentation" else {
+        "module_name": "mhi.pscad.fake"
+    }
+    _, structured = await server._tool_manager.call_tool(
+        access,
+        arguments,
+        convert_result=True,
+    )
+    result = structured["result"]
+    assert isinstance(result, dict)
+    payload = result["error"]
+    assert payload["code"] == "DOCUMENTATION_STORAGE_INVALID"
+    assert payload["backend"] == "server"
+    assert payload["operation"] == (
+        "read_documentation" if access == "resource" else access
+    )
+    assert payload["details"] == {"directory": "md"}
+    assert secret not in repr(payload)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "access",
+    ("list_documentation", "read_documentation", "resource"),
+)
+async def test_documentation_reads_reject_replaced_windows_junction(
+    tmp_path,
+    monkeypatch,
+    access,
+):
+    if os.name != "nt":
+        pytest.skip("Windows junction behavior")
+    manager = DocumentationManager(tmp_path / "docs")
+    manager.MODULES = ()
+    manager.sync()
+    outside = tmp_path / "SECRET_EXTERNAL_JUNCTION"
+    outside.mkdir()
+    external_document = outside / "mhi_pscad_fake.md"
+    external_document.write_text("SECRET_EXTERNAL_CONTENT", encoding="utf-8")
+    manager.md_dir.rmdir()
+    created = subprocess.run(
+        ["cmd", "/c", "mklink", "/J", str(manager.md_dir), str(outside)],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if created.returncode != 0:
+        pytest.skip("Windows junction creation unavailable")
+    monkeypatch.setattr(app_tools, "doc_manager", manager)
+    server = create_server(environ={})
+
+    try:
+        await _assert_replaced_documentation_boundary_is_rejected(
+            server,
+            access,
+            "SECRET_EXTERNAL",
+        )
+        assert external_document.read_text(encoding="utf-8") == (
+            "SECRET_EXTERNAL_CONTENT"
+        )
+    finally:
+        if manager.md_dir.exists():
+            os.rmdir(manager.md_dir)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "access",
+    ("list_documentation", "read_documentation", "resource"),
+)
+async def test_documentation_reads_reject_replaced_directory_symlink(
+    tmp_path,
+    monkeypatch,
+    access,
+):
+    manager = DocumentationManager(tmp_path / "docs")
+    manager.MODULES = ()
+    manager.sync()
+    outside = tmp_path / "SECRET_EXTERNAL_SYMLINK"
+    outside.mkdir()
+    external_document = outside / "mhi_pscad_fake.md"
+    external_document.write_text("SECRET_EXTERNAL_CONTENT", encoding="utf-8")
+    manager.md_dir.rmdir()
+    try:
+        manager.md_dir.symlink_to(outside, target_is_directory=True)
+    except OSError as error:
+        pytest.skip(f"directory symlink unavailable: {type(error).__name__}")
+    monkeypatch.setattr(app_tools, "doc_manager", manager)
+    server = create_server(environ={})
+
+    try:
+        await _assert_replaced_documentation_boundary_is_rejected(
+            server,
+            access,
+            "SECRET_EXTERNAL",
+        )
+        assert external_document.read_text(encoding="utf-8") == (
+            "SECRET_EXTERNAL_CONTENT"
+        )
+    finally:
+        if manager.md_dir.is_symlink():
+            manager.md_dir.unlink()
+
+
 def test_sync_creates_generated_directories_only_when_called(tmp_path):
     manager = DocumentationManager(tmp_path / "docs")
     manager.MODULES = ()

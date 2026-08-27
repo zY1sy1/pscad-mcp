@@ -219,23 +219,25 @@ class DocumentationManager:
         cls,
         base_dir: Path,
         directory: Path,
+        *,
+        operation: str = "sync_documentation",
     ) -> None:
         label = directory.name if directory.name in {"md", "raw"} else "generated"
         try:
             if directory != base_dir / label or directory.parent != base_dir:
-                raise cls._storage_error(label)
+                raise cls.storage_error(operation, label)
             if (
                 directory.is_symlink()
                 or cls._is_reparse_point(directory)
                 or not directory.is_dir()
             ):
-                raise cls._storage_error(label)
+                raise cls.storage_error(operation, label)
             if (
                 base_dir.is_symlink()
                 or cls._is_reparse_point(base_dir)
                 or not base_dir.is_dir()
             ):
-                raise cls._storage_error(label)
+                raise cls.storage_error(operation, label)
             resolved_base = base_dir.resolve(strict=True)
             resolved_directory = directory.resolve(strict=True)
             if (
@@ -243,7 +245,7 @@ class DocumentationManager:
                 or resolved_directory != directory
                 or resolved_directory.parent != resolved_base
             ):
-                raise cls._storage_error(label)
+                raise cls.storage_error(operation, label)
         except BackendError:
             raise
         except Exception as error:
@@ -252,7 +254,47 @@ class DocumentationManager:
                 label,
                 type(error).__name__,
             )
-            raise cls._storage_error(label) from None
+            raise cls.storage_error(operation, label) from None
+
+    def validate_read_directory(self, operation: str) -> bool:
+        self.raise_for_issue(operation)
+        try:
+            self.md_dir.lstat()
+        except FileNotFoundError:
+            return False
+        except Exception:
+            raise self.storage_error(operation, "md") from None
+        self._validate_storage_directory(
+            self.base_dir,
+            self.md_dir,
+            operation=operation,
+        )
+        return True
+
+    def validate_read_target(self, target: Path, operation: str) -> Path:
+        if not self.validate_read_directory(operation):
+            raise FileNotFoundError from None
+        candidate = Path(target)
+        try:
+            if candidate.parent != self.md_dir:
+                raise self.storage_error(operation, "md")
+            candidate.lstat()
+            if (
+                candidate.is_symlink()
+                or self._is_reparse_point(candidate)
+                or not candidate.is_file()
+                or candidate.resolve(strict=True).parent != self.md_dir
+            ):
+                raise self.storage_error(operation, "md")
+        except FileNotFoundError:
+            raise
+        except BackendError:
+            raise
+        except Exception:
+            raise self.storage_error(operation, "md") from None
+        if not self.validate_read_directory(operation):
+            raise FileNotFoundError from None
+        return candidate
 
     @classmethod
     def _validate_storage_target(

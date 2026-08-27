@@ -32,9 +32,8 @@ async def sync_documentation() -> list[str]:
 
 async def list_documentation() -> list[str]:
     """List available PSCAD API documentation modules that can be read."""
-    doc_manager.raise_for_issue("list_documentation")
     try:
-        if not doc_manager.md_dir.is_dir():
+        if not doc_manager.validate_read_directory("list_documentation"):
             return ["No documentation found. Run sync_documentation first."]
         paths = tuple(doc_manager.md_dir.iterdir())
         docs = [
@@ -42,6 +41,8 @@ async def list_documentation() -> list[str]:
             for path in paths
             if path.is_file() and path.suffix == ".md"
         ]
+        if not doc_manager.validate_read_directory("list_documentation"):
+            return ["No documentation found. Run sync_documentation first."]
     except FileNotFoundError:
         return ["No documentation found. Run sync_documentation first."]
     except BackendError:
@@ -59,12 +60,19 @@ async def read_documentation(module_name: str) -> str:
         normalized_name += ".md"
         
     try:
-        filepath = path_policy.resolve_child(
-            doc_manager.md_dir,
-            normalized_name,
-            suffixes={".md"},
-            must_exist=True,
-        )
+        if not doc_manager.validate_read_directory("read_documentation"):
+            filepath = None
+        else:
+            filepath = path_policy.resolve_child(
+                doc_manager.md_dir,
+                normalized_name,
+                suffixes={".md"},
+                must_exist=True,
+            )
+            filepath = doc_manager.validate_read_target(
+                filepath,
+                "read_documentation",
+            )
     except (FileNotFoundError, ValueError):
         filepath = None
     except BackendError:
@@ -76,7 +84,9 @@ async def read_documentation(module_name: str) -> str:
         return f"Error: Documentation for '{module_name}' not found. Available modules: {', '.join(await list_documentation())}"
 
     try:
-        return filepath.read_text(encoding="utf-8")
+        content = filepath.read_text(encoding="utf-8")
+        doc_manager.validate_read_target(filepath, "read_documentation")
+        return content
     except FileNotFoundError:
         return f"Error: Documentation for '{module_name}' not found. Available modules: {', '.join(await list_documentation())}"
     except BackendError:
