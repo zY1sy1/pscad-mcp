@@ -8,7 +8,9 @@ import pydoc
 import re
 import stat
 import threading
-from collections.abc import Mapping
+import time
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import Any, ClassVar
@@ -114,6 +116,11 @@ class DocumentationManager:
     SETTING = "PSCAD_MCP_DOCUMENTATION_DIR"
     _SYNC_LOCKS: ClassVar[dict[Path, threading.RLock]] = {}
     _SYNC_LOCKS_GUARD: ClassVar[threading.Lock] = threading.Lock()
+    _REPLACE_ATTEMPTS: ClassVar[int] = 6
+    _REPLACE_RETRY_DELAY: ClassVar[float] = 0.02
+    _RETRYABLE_WINDOWS_REPLACE_ERRORS: ClassVar[frozenset[int]] = frozenset(
+        {5, 32, 33}
+    )
 
     def __init__(
         self,
@@ -182,6 +189,12 @@ class DocumentationManager:
                 cls._SYNC_LOCKS[base_dir] = lock
             return lock
 
+    @contextmanager
+    def coordinated_access(self) -> Iterator[None]:
+        """Serialize documentation reads and writes for one storage root."""
+        with self._sync_lock_for(self.base_dir):
+            yield
+
     @staticmethod
     def storage_error(operation: str, directory: str) -> BackendError:
         safe_operation = (
@@ -215,6 +228,31 @@ class DocumentationManager:
         return bool(attributes & reparse_flag)
 
     @classmethod
+    def _validate_storage_base(
+        cls,
+        base_dir: Path,
+        *,
+        operation: str = "sync_documentation",
+        directory: str = "generated",
+    ) -> None:
+        try:
+            if (
+                base_dir.is_symlink()
+                or cls._is_reparse_point(base_dir)
+                or not base_dir.is_dir()
+                or base_dir.resolve(strict=True) != base_dir
+            ):
+                raise cls.storage_error(operation, directory)
+        except BackendError:
+            raise
+        except Exception as error:
+            logger.error(
+                "Documentation base validation failed after %s.",
+                type(error).__name__,
+            )
+            raise cls.storage_error(operation, directory) from None
+
+    @classmethod
     def _validate_storage_directory(
         cls,
         base_dir: Path,
@@ -226,16 +264,15 @@ class DocumentationManager:
         try:
             if directory != base_dir / label or directory.parent != base_dir:
                 raise cls.storage_error(operation, label)
+            cls._validate_storage_base(
+                base_dir,
+                operation=operation,
+                directory=label,
+            )
             if (
                 directory.is_symlink()
                 or cls._is_reparse_point(directory)
                 or not directory.is_dir()
-            ):
-                raise cls.storage_error(operation, label)
-            if (
-                base_dir.is_symlink()
-                or cls._is_reparse_point(base_dir)
-                or not base_dir.is_dir()
             ):
                 raise cls.storage_error(operation, label)
             resolved_base = base_dir.resolve(strict=True)
@@ -344,9 +381,29 @@ class DocumentationManager:
             raise cls._storage_error(destination_parent.name) from None
 
     def _prepare_storage(self) -> None:
+        try:
+            self.base_dir.mkdir(parents=True, exist_ok=True)
+            self._validate_storage_base(self.base_dir)
+        except BackendError:
+            raise
+        except Exception as error:
+            logger.error(
+                "Documentation base preparation failed after %s.",
+                type(error).__name__,
+            )
+            raise self._storage_error("generated") from None
+
         for directory in (self.md_dir, self.raw_dir):
             try:
-                directory.mkdir(parents=True, exist_ok=True)
+                self._validate_storage_base(
+                    self.base_dir,
+                    directory=directory.name,
+                )
+                directory.mkdir(exist_ok=True)
+                self._validate_storage_base(
+                    self.base_dir,
+                    directory=directory.name,
+                )
                 self._validate_storage_directory(self.base_dir, directory)
             except BackendError:
                 raise
@@ -357,6 +414,42 @@ class DocumentationManager:
                     type(error).__name__,
                 )
                 raise self._storage_error(directory.name) from None
+
+    @classmethod
+    def _is_retryable_replace_error(cls, error: OSError) -> bool:
+        if os.name != "nt":
+            return False
+        return isinstance(error, PermissionError) or getattr(
+            error,
+            "winerror",
+            None,
+        ) in cls._RETRYABLE_WINDOWS_REPLACE_ERRORS
+
+    @classmethod
+    def _replace_with_retry(
+        cls,
+        temporary_path: Path,
+        destination: Path,
+        *,
+        base_dir: Path | None,
+    ) -> None:
+        for attempt in range(cls._REPLACE_ATTEMPTS):
+            if base_dir is not None:
+                cls._validate_storage_target(base_dir, destination)
+                cls._validate_temporary_file(
+                    temporary_path,
+                    destination.parent,
+                )
+            try:
+                os.replace(temporary_path, destination)
+                return
+            except OSError as error:
+                if (
+                    not cls._is_retryable_replace_error(error)
+                    or attempt + 1 == cls._REPLACE_ATTEMPTS
+                ):
+                    raise
+                time.sleep(cls._REPLACE_RETRY_DELAY)
 
     @classmethod
     def _atomic_write(
@@ -384,13 +477,11 @@ class DocumentationManager:
                 temporary.write(content)
                 temporary.flush()
                 os.fsync(temporary.fileno())
-            if base_dir is not None:
-                cls._validate_storage_target(base_dir, destination)
-                cls._validate_temporary_file(
-                    temporary_path,
-                    destination.parent,
-                )
-            os.replace(temporary_path, destination)
+            cls._replace_with_retry(
+                temporary_path,
+                destination,
+                base_dir=base_dir,
+            )
             temporary_path = None
         finally:
             if temporary_path is not None:

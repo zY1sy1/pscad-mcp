@@ -588,6 +588,168 @@ def test_different_documentation_roots_can_sync_in_parallel(tmp_path, monkeypatc
     assert all(result == ["Synced mhi.pscad.fake (Enriched)"] for result in results)
 
 
+def test_read_and_sync_share_the_same_root_lock(tmp_path, monkeypatch):
+    manager = DocumentationManager(tmp_path / "docs")
+    manager.MODULES = ("mhi.pscad.fake",)
+    manager.md_dir.mkdir(parents=True)
+    document = manager.md_dir / "mhi_pscad_fake.md"
+    document.write_text("old", encoding="utf-8")
+    monkeypatch.setattr(app_tools, "doc_manager", manager)
+    monkeypatch.setattr(doc_manager_module.importlib.util, "find_spec", lambda _: None)
+    read_entered = threading.Event()
+    release_read = threading.Event()
+    sync_entered = threading.Event()
+    original_read_text = Path.read_text
+
+    def blocking_read(target, *args, **kwargs):
+        if target == document:
+            read_entered.set()
+            if not release_read.wait(timeout=2):
+                raise TimeoutError("read release timed out")
+        return original_read_text(target, *args, **kwargs)
+
+    def render_doc(*_args, **_kwargs):
+        sync_entered.set()
+        return "NAME\n    new\n"
+
+    monkeypatch.setattr(Path, "read_text", blocking_read)
+    monkeypatch.setattr(doc_manager_module.pydoc, "render_doc", render_doc)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        read_future = executor.submit(
+            lambda: asyncio.run(app_tools.read_documentation("mhi.pscad.fake"))
+        )
+        assert read_entered.wait(timeout=2)
+        sync_future = executor.submit(
+            lambda: asyncio.run(app_tools.sync_documentation())
+        )
+        time.sleep(0.05)
+        assert not sync_entered.is_set()
+        release_read.set()
+        assert read_future.result(timeout=5) == "old"
+        assert sync_future.result(timeout=5) == [
+            "Synced mhi.pscad.fake (Enriched)"
+        ]
+
+    assert sync_entered.is_set()
+    assert "new" in original_read_text(document, encoding="utf-8")
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows replacement semantics")
+def test_atomic_write_retries_only_windows_sharing_conflicts(
+    tmp_path,
+    monkeypatch,
+):
+    target = tmp_path / "module.md"
+    target.write_text("old", encoding="utf-8")
+    real_replace = os.replace
+    attempts = 0
+
+    def flaky_replace(source, destination):
+        nonlocal attempts
+        attempts += 1
+        if attempts < 3:
+            error = PermissionError("SECRET_WINDOWS_SHARING_PATH")
+            error.winerror = 32
+            raise error
+        real_replace(source, destination)
+
+    monkeypatch.setattr(os, "replace", flaky_replace)
+    monkeypatch.setattr(time, "sleep", lambda _delay: None)
+
+    DocumentationManager._atomic_write(target, "new")
+
+    assert attempts == 3
+    assert target.read_text(encoding="utf-8") == "new"
+    assert list(tmp_path.iterdir()) == [target]
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows replacement semantics")
+def test_atomic_write_does_not_retry_unrelated_replace_error(
+    tmp_path,
+    monkeypatch,
+):
+    target = tmp_path / "module.md"
+    attempts = 0
+
+    def fail_replace(_source, _destination):
+        nonlocal attempts
+        attempts += 1
+        error = OSError("SECRET_UNRELATED_REPLACE_PATH")
+        error.winerror = 123
+        raise error
+
+    monkeypatch.setattr(os, "replace", fail_replace)
+    monkeypatch.setattr(time, "sleep", lambda _delay: None)
+
+    with pytest.raises(OSError, match="SECRET_UNRELATED_REPLACE_PATH"):
+        DocumentationManager._atomic_write(target, "new")
+
+    assert attempts == 1
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows replacement semantics")
+def test_atomic_write_windows_retry_is_bounded_and_cleans_temp(
+    tmp_path,
+    monkeypatch,
+):
+    target = tmp_path / "module.md"
+    attempts = 0
+    delays = []
+
+    def fail_replace(_source, _destination):
+        nonlocal attempts
+        attempts += 1
+        error = PermissionError("SECRET_PERSISTENT_SHARING_PATH")
+        error.winerror = 32
+        raise error
+
+    monkeypatch.setattr(os, "replace", fail_replace)
+    monkeypatch.setattr(time, "sleep", delays.append)
+
+    with pytest.raises(PermissionError, match="SECRET_PERSISTENT_SHARING_PATH"):
+        DocumentationManager._atomic_write(target, "new")
+
+    assert 1 < attempts <= 10
+    assert len(delays) == attempts - 1
+    assert sum(delays) <= 0.5
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows replacement semantics")
+def test_sync_succeeds_when_external_read_handle_releases_during_retry(
+    tmp_path,
+    monkeypatch,
+):
+    manager = DocumentationManager(tmp_path / "docs")
+    manager.MODULES = ("mhi.pscad.fake",)
+    monkeypatch.setattr(doc_manager_module.importlib.util, "find_spec", lambda _: None)
+    rendered = "NAME\n    old\n"
+    monkeypatch.setattr(
+        doc_manager_module.pydoc,
+        "render_doc",
+        lambda *_args, **_kwargs: rendered,
+    )
+    assert manager.sync() == ["Synced mhi.pscad.fake (Enriched)"]
+    document = manager.md_dir / "mhi_pscad_fake.md"
+    handle = document.open("r", encoding="utf-8")
+    rendered = "NAME\n    new\n"
+
+    try:
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(manager.sync)
+            time.sleep(0.05)
+            handle.close()
+            result = future.result(timeout=5)
+    finally:
+        handle.close()
+
+    assert result == ["Synced mhi.pscad.fake (Enriched)"]
+    assert "new" in document.read_text(encoding="utf-8")
+    assert list(manager.base_dir.rglob("*.tmp")) == []
+
+
 def test_source_analyzer_failure_log_does_not_disclose_source_path(
     tmp_path,
     caplog,
@@ -728,6 +890,40 @@ def test_sync_rejects_junctioned_generated_directory(tmp_path, monkeypatch):
     finally:
         if junction.exists():
             os.rmdir(junction)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows junction behavior")
+def test_sync_rejects_base_replaced_by_junction_before_external_child_write(
+    tmp_path,
+):
+    base = tmp_path / "docs"
+    outside = tmp_path / "SECRET_EXTERNAL_BASE"
+    base.mkdir()
+    outside.mkdir()
+    manager = DocumentationManager(base)
+    manager.MODULES = ()
+    base.rmdir()
+    created = subprocess.run(
+        ["cmd", "/c", "mklink", "/J", str(base), str(outside)],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if created.returncode != 0:
+        pytest.skip("Windows junction creation unavailable")
+
+    try:
+        with pytest.raises(BackendError) as raised:
+            manager.sync()
+
+        payload = raised.value.to_dict()
+        assert payload["code"] == "DOCUMENTATION_STORAGE_INVALID"
+        assert payload["operation"] == "sync_documentation"
+        assert "SECRET_EXTERNAL" not in repr(payload)
+        assert list(outside.iterdir()) == []
+    finally:
+        if base.exists():
+            os.rmdir(base)
 
 
 def test_generated_markdown_redacts_source_path_and_reports_package_version(tmp_path):

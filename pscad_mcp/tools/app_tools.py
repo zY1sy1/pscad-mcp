@@ -30,8 +30,8 @@ async def sync_documentation() -> list[str]:
     """Synchronize AI reference files with the currently installed library version."""
     return await asyncio.to_thread(doc_manager.sync)
 
-async def list_documentation() -> list[str]:
-    """List available PSCAD API documentation modules that can be read."""
+
+def _list_documentation_locked() -> list[str]:
     try:
         if not doc_manager.validate_read_directory("list_documentation"):
             return ["No documentation found. Run sync_documentation first."]
@@ -51,48 +51,70 @@ async def list_documentation() -> list[str]:
         raise doc_manager.storage_error("list_documentation", "md") from None
     return sorted(docs)
 
-async def read_documentation(module_name: str) -> str:
-    """Read the Markdown documentation for a specific PSCAD module (e.g., 'mhi.pscad.types')."""
+
+def _list_documentation_sync() -> list[str]:
+    with doc_manager.coordinated_access():
+        return _list_documentation_locked()
+
+
+async def list_documentation() -> list[str]:
+    """List available PSCAD API documentation modules that can be read."""
+    return await asyncio.to_thread(_list_documentation_sync)
+
+
+def _documentation_not_found(module_name: str) -> str:
+    available = ", ".join(_list_documentation_locked())
+    return (
+        f"Error: Documentation for '{module_name}' not found. "
+        f"Available modules: {available}"
+    )
+
+
+def _read_documentation_sync(module_name: str) -> str:
     doc_manager.raise_for_issue("read_documentation")
-    # Normalize input
     normalized_name = module_name.replace(".", "_")
     if not normalized_name.endswith(".md"):
         normalized_name += ".md"
-        
-    try:
-        if not doc_manager.validate_read_directory("read_documentation"):
+    with doc_manager.coordinated_access():
+        try:
+            if not doc_manager.validate_read_directory("read_documentation"):
+                filepath = None
+            else:
+                filepath = path_policy.resolve_child(
+                    doc_manager.md_dir,
+                    normalized_name,
+                    suffixes={".md"},
+                    must_exist=True,
+                )
+                filepath = doc_manager.validate_read_target(
+                    filepath,
+                    "read_documentation",
+                )
+        except (FileNotFoundError, ValueError):
             filepath = None
-        else:
-            filepath = path_policy.resolve_child(
-                doc_manager.md_dir,
-                normalized_name,
-                suffixes={".md"},
-                must_exist=True,
-            )
-            filepath = doc_manager.validate_read_target(
-                filepath,
-                "read_documentation",
-            )
-    except (FileNotFoundError, ValueError):
-        filepath = None
-    except BackendError:
-        raise
-    except Exception:
-        raise doc_manager.storage_error("read_documentation", "md") from None
-    
-    if filepath is None:
-        return f"Error: Documentation for '{module_name}' not found. Available modules: {', '.join(await list_documentation())}"
+        except BackendError:
+            raise
+        except Exception:
+            raise doc_manager.storage_error("read_documentation", "md") from None
 
-    try:
-        content = filepath.read_text(encoding="utf-8")
-        doc_manager.validate_read_target(filepath, "read_documentation")
-        return content
-    except FileNotFoundError:
-        return f"Error: Documentation for '{module_name}' not found. Available modules: {', '.join(await list_documentation())}"
-    except BackendError:
-        raise
-    except Exception:
-        raise doc_manager.storage_error("read_documentation", "md") from None
+        if filepath is None:
+            return _documentation_not_found(module_name)
+
+        try:
+            content = filepath.read_text(encoding="utf-8")
+            doc_manager.validate_read_target(filepath, "read_documentation")
+            return content
+        except FileNotFoundError:
+            return _documentation_not_found(module_name)
+        except BackendError:
+            raise
+        except Exception:
+            raise doc_manager.storage_error("read_documentation", "md") from None
+
+
+async def read_documentation(module_name: str) -> str:
+    """Read the Markdown documentation for a specific PSCAD module (e.g., 'mhi.pscad.types')."""
+    return await asyncio.to_thread(_read_documentation_sync, module_name)
 
 
 def register_documentation_resources(mcp: FastMCP) -> None:
