@@ -61,6 +61,18 @@ def test_case_recipes_are_complete_and_have_exact_scale_counts():
     )
 
 
+def test_scale_recipes_use_pscad_preservable_numeric_object_ids():
+    scales = [
+        case for case in topology_truth.case_recipes() if case.name.startswith("scale-")
+    ]
+    for case in scales:
+        component_ids = {item.object_id for item in case.components}
+        conductor_ids = {item.object_id for item in case.conductors}
+        assert all(object_id.isdecimal() for object_id in component_ids)
+        assert all(object_id.isdecimal() for object_id in conductor_ids)
+        assert component_ids.isdisjoint(conductor_ids)
+
+
 def test_manifest_is_projected_only_from_declared_truth(tmp_path):
     cases = topology_truth.case_recipes()
     sources = {}

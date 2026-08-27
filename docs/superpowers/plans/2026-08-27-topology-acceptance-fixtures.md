@@ -251,6 +251,10 @@ class CaseRecipe:
     def object_count(self) -> int:
         return len(self.components) + len(self.conductors) + len(self.labels)
 
+    @property
+    def project_name(self) -> str:
+        return self.name.replace("-", "_")
+
 
 def _port(
     name: str,
@@ -277,7 +281,7 @@ def _scale_case(object_count: int) -> CaseRecipe:
     component_count = object_count // 2
     components = tuple(
         ComponentRecipe(
-            f"C{index:04d}",
+            str(1_000_000 + index),
             "Link",
             (72 + index * 72, 180),
             name=f"L{index:04d}",
@@ -295,12 +299,12 @@ def _scale_case(object_count: int) -> CaseRecipe:
             if next_index
             else (start, (start[0], 72), (end[0], 72), end)
         )
-        conductor_id = f"W{index:04d}"
+        conductor_id = str(2_000_000 + index)
         conductors.append(ConductorRecipe(conductor_id, vertices))
         nets.append(
             _net(
-                f"Main:C{index:04d}:OUT",
-                f"Main:C{next_index:04d}:IN",
+                f"Main:{components[index].object_id}:OUT",
+                f"Main:{components[next_index].object_id}:IN",
                 conductor=f"Main:{conductor_id}",
             )
         )
@@ -488,9 +492,9 @@ def manifest_from_recipes(
 - Hierarchy uncertainty: definition `Child` with required page port `IN`,
   component `410` without the matching outer instance port, and the exact
   unresolved reference shown in the test.
-- Scale cases: component/conductor IDs cover `C0000`/`W0000` through
-  `C0249`/`W0249` for 500 objects and through `C0999`/`W0999` for 2,000
-  objects; every
+- Scale cases: PSCAD-preservable numeric component IDs start at `1000000`
+  and conductor IDs start at `2000000`; the ranges contain 250 entries for
+  500 objects and 1,000 entries for 2,000 objects; every
   two-port component `OUT` connects to the next component `IN`, with the last
   conductor routed above the chain back to the first component. The declared
   `NetTruth` records enumerate every ring edge exactly.
@@ -533,7 +537,7 @@ def test_generation_uses_native_seed_and_audits_every_declared_record(tmp_path):
     for case in cases:
         path = generated[case.name]
         root = ET.parse(path).getroot()
-        assert root.get("name") == case.name
+        assert root.get("name") == case.project_name
         assert path.name == f"{case.name}.pscx"
         audit = topology_truth.audit_case(path, case)
         assert audit["object_count"] == case.object_count
@@ -598,7 +602,7 @@ def generate_cases(
         case_directory.mkdir()
         tree = ET.parse(seed)
         root = tree.getroot()
-        _rewrite_identity(root, case.name)
+        _rewrite_identity(root, case.project_name)
         _replace_definitions(root, case)
         _replace_main_schematic(root, case)
         _replace_hierarchy(root, case)
@@ -630,7 +634,7 @@ Add:
 def audit_case(path: Path, case: CaseRecipe) -> dict[str, object]:
     payload = path.read_bytes()
     root = ET.fromstring(payload)
-    if root.get("name") != case.name:
+    if root.get("name") != case.project_name:
         raise ValueError(f"project identity changed for {case.name}")
     observed_components = _audit_components(root, case)
     observed_conductors = _audit_conductors(root, case)

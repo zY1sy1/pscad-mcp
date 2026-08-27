@@ -126,7 +126,7 @@ def _scale_case(object_count: int) -> CaseRecipe:
     component_count = object_count // 2
     components = tuple(
         ComponentRecipe(
-            f"C{index:04d}",
+            str(1_000_000 + index),
             "Link",
             (72 + index * 72, 180),
             name=f"L{index:04d}",
@@ -144,12 +144,12 @@ def _scale_case(object_count: int) -> CaseRecipe:
             if next_index
             else (start, (start[0], 72), (end[0], 72), end)
         )
-        conductor_id = f"W{index:04d}"
+        conductor_id = str(2_000_000 + index)
         conductors.append(ConductorRecipe(conductor_id, vertices))
         nets.append(
             _net(
-                f"Main:C{index:04d}:OUT",
-                f"Main:C{next_index:04d}:IN",
+                f"Main:{components[index].object_id}:OUT",
+                f"Main:{components[next_index].object_id}:IN",
                 conductor=f"Main:{conductor_id}",
             )
         )
