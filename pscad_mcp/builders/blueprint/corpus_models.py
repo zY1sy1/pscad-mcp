@@ -270,3 +270,81 @@ class ProjectGraph:
             "output_channels": [channel.to_dict() for channel in self.output_channels],
             "warnings": [warning.to_dict() for warning in self.warnings],
         }
+
+
+@dataclass(frozen=True)
+class CorpusRecord:
+    schema_version: int
+    normalization_profile: str
+    corpus_name: str
+    project_id: str
+    source_sha256: str
+    kind: str
+    record_key: str
+    payload: FrozenDict
+    resolved: bool
+    verification_status: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema_version": self.schema_version,
+            "normalization_profile": self.normalization_profile,
+            "corpus_name": self.corpus_name,
+            "project_id": self.project_id,
+            "source_sha256": self.source_sha256,
+            "kind": self.kind,
+            "record_key": self.record_key,
+            "payload": json_safe(self.payload),
+            "resolved": self.resolved,
+            "verification_status": self.verification_status,
+        }
+
+
+@dataclass(frozen=True)
+class CorpusProjectManifest:
+    project_id: str
+    source_sha256: str
+    graph_path: str
+    graph_sha256: str
+    graph_byte_length: int
+    graph_signature: str
+    records_path: str
+    records_sha256: str
+    records_byte_length: int
+    record_count: int
+    record_counts: FrozenDict
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "project_id": self.project_id,
+            "source_sha256": self.source_sha256,
+            "graph_path": self.graph_path,
+            "graph_sha256": self.graph_sha256,
+            "graph_byte_length": self.graph_byte_length,
+            "graph_signature": self.graph_signature,
+            "records_path": self.records_path,
+            "records_sha256": self.records_sha256,
+            "records_byte_length": self.records_byte_length,
+            "record_count": self.record_count,
+            "record_counts": json_safe(self.record_counts),
+        }
+
+
+@dataclass(frozen=True)
+class CorpusManifest:
+    schema_version: int
+    normalization_profile: str
+    name: str
+    source_spec_sha256: str
+    project_count: int
+    projects: tuple[CorpusProjectManifest, ...]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema_version": self.schema_version,
+            "normalization_profile": self.normalization_profile,
+            "name": self.name,
+            "source_spec_sha256": self.source_spec_sha256,
+            "project_count": self.project_count,
+            "projects": [project.to_dict() for project in self.projects],
+        }
