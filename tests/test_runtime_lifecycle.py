@@ -374,6 +374,55 @@ def test_domain_aggregate_propagates_live_cleanup_after_attempting_all(monkeypat
     asyncio.run(exercise())
 
 
+def test_runtime_tracks_nested_bounded_actions_without_claiming_external_tasks(
+    monkeypatch,
+):
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    async def first(timeout_s=5.0):
+        entered.set()
+        await release.wait()
+
+    async def other(timeout_s=5.0):
+        return None
+
+    monkeypatch.setattr(
+        "pscad_mcp.tools.hvdc_tools.shutdown_hvdc_service",
+        first,
+    )
+    monkeypatch.setattr(
+        "pscad_mcp.tools.lcc_tools.shutdown_lcc_builder_service",
+        other,
+    )
+    monkeypatch.setattr(
+        "pscad_mcp.tools.lcc_parametric_tools.shutdown_parametric_lcc_builder_service",
+        other,
+    )
+    runtime = RuntimeLifecycle(
+        domain_shutdown=lambda: shutdown_domain_services(timeout_s=0.2),
+        settlement_wait=lambda: True,
+        learning_close=lambda: None,
+        connection_shutdown=lambda: None,
+        executor_shutdown=lambda: None,
+        timeout_s=0.3,
+    )
+
+    async def exercise():
+        external_release = asyncio.Event()
+        external = asyncio.create_task(external_release.wait())
+        shutdown = asyncio.create_task(runtime.shutdown())
+        await entered.wait()
+        assert runtime.bounded_action_count == 2
+        release.set()
+        assert await shutdown == {"code": "SHUTDOWN_COMPLETE", "failures": []}
+        assert runtime.bounded_action_count == 0
+        external_release.set()
+        await external
+
+    asyncio.run(exercise())
+
+
 def test_shutdown_action_timeout_keyword_respects_parameter_kind():
     def positional_only(timeout_s="positional-default", /):
         return timeout_s
@@ -960,6 +1009,93 @@ def test_force_closed_owner_loop_detaches_reported_tasks_without_diagnostics():
         "Task was destroyed" in str(context.get("message", ""))
         for context in diagnostics
     )
+
+
+def test_force_close_during_deferred_action_detaches_only_runtime_tasks(
+    caplog, recwarn
+):
+    diagnostics: list[dict] = []
+    calls: list[str] = []
+    attempts = 0
+    loop = asyncio.new_event_loop()
+    loop.set_exception_handler(lambda _loop, context: diagnostics.append(context))
+    release_first = asyncio.Event()
+    release_second = asyncio.Event()
+    second_entered = asyncio.Event()
+
+    async def domain():
+        nonlocal attempts
+        attempts += 1
+        release = release_first if attempts == 1 else release_second
+        if attempts == 2:
+            second_entered.set()
+        while not release.is_set():
+            try:
+                await release.wait()
+            except asyncio.CancelledError:
+                continue
+
+    runtime = RuntimeLifecycle(
+        domain_shutdown=domain,
+        settlement_wait=lambda: calls.append("settlement") or True,
+        learning_close=lambda: calls.append("learning"),
+        connection_shutdown=lambda: calls.append("connection"),
+        executor_shutdown=lambda: calls.append("executor"),
+        timeout_s=0.02,
+    )
+    owner = SharedRuntimeLifespan(runtime)
+    external_task = None
+    bounded_before_close = -1
+
+    try:
+        context = owner.lifespan(None)
+        loop.run_until_complete(context.__aenter__())
+        loop.run_until_complete(context.__aexit__(None, None, None))
+        assert owner.state == "closing"
+        release_first.set()
+        loop.run_until_complete(second_entered.wait())
+        assert attempts == 2
+        external_task = loop.create_task(asyncio.Event().wait())
+        loop.run_until_complete(asyncio.sleep(0))
+        bounded_before_close = getattr(runtime, "bounded_action_count", -1)
+        watcher = runtime._loop_watcher
+        assert watcher is not None
+    finally:
+        loop.close()
+
+    with caplog.at_level(logging.ERROR, logger="pscad-mcp.runtime"):
+        final = runtime.finalization_future.result(timeout=1)
+        watcher.join(timeout=1)
+        gc.collect()
+    assert external_task is not None
+    external_log_flag = getattr(external_task, "_log_destroy_pending", True)
+    if hasattr(external_task, "_log_destroy_pending"):
+        external_task._log_destroy_pending = False
+
+    assert final == {
+        "code": "SHUTDOWN_INCOMPLETE",
+        "failures": [
+            {"operation": "lifecycle", "exception": "EventLoopClosedError"},
+        ],
+    }
+    assert not watcher.is_alive()
+    assert runtime.state == "closed"
+    assert owner.state == "closed"
+    assert runtime._finalizer_task is None
+    assert runtime.pending_cleanup_count == 0
+    assert bounded_before_close >= 1
+    assert runtime.bounded_action_count == 0
+    assert calls == ["settlement", "learning"]
+    assert "GeneratorExit" not in caplog.text
+    assert not any(
+        "Task was destroyed" in str(context.get("message", ""))
+        for context in diagnostics
+    )
+    assert not any(
+        "never awaited" in str(warning.message)
+        for warning in recwarn
+    )
+    assert external_log_flag is True
 
 
 def test_last_lifespan_exit_defers_repeated_cancellation_until_shutdown_finishes():

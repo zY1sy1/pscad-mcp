@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import concurrent.futures
+import contextvars
 from contextlib import asynccontextmanager
 import inspect
 import logging
@@ -18,6 +19,10 @@ from .learning.service import learning_runtime
 
 logger = logging.getLogger("pscad-mcp.runtime")
 ShutdownAction = Callable[[], Any]
+BoundedTaskTracker = Callable[[asyncio.Future[Any]], None]
+_BOUNDED_TASK_TRACKER: contextvars.ContextVar[BoundedTaskTracker | None] = (
+    contextvars.ContextVar("pscad_mcp_bounded_task_tracker", default=None)
+)
 
 
 class DomainShutdownError(RuntimeError):
@@ -99,6 +104,9 @@ async def _run_bounded(action: ShutdownAction, timeout_s: float) -> Any:
     if not inspect.isawaitable(result):
         return result
     task = asyncio.ensure_future(result)
+    tracker = _BOUNDED_TASK_TRACKER.get()
+    if tracker is not None:
+        tracker(task)
     try:
         done, _ = await asyncio.wait({task}, timeout=timeout_s)
     except asyncio.CancelledError:
@@ -202,6 +210,7 @@ class RuntimeLifecycle:
         self._finalization_done = threading.Event()
         self._loop_watcher: threading.Thread | None = None
         self._pending_cleanup_tasks: set[asyncio.Future[Any]] = set()
+        self._bounded_action_tasks: set[asyncio.Future[Any]] = set()
 
     @property
     def finalization_future(self) -> concurrent.futures.Future[dict[str, Any]]:
@@ -241,6 +250,24 @@ class RuntimeLifecycle:
     def pending_cleanup_count(self) -> int:
         with self._state_lock:
             return sum(not task.done() for task in self._pending_cleanup_tasks)
+
+    @property
+    def bounded_action_count(self) -> int:
+        with self._state_lock:
+            return sum(not task.done() for task in self._bounded_action_tasks)
+
+    def _bounded_action_finished(self, task: asyncio.Future[Any]) -> None:
+        _consume_task_result(task)
+        with self._state_lock:
+            self._bounded_action_tasks.discard(task)
+
+    def _track_bounded_action(self, task: asyncio.Future[Any]) -> None:
+        if task.done():
+            _consume_task_result(task)
+            return
+        with self._state_lock:
+            self._bounded_action_tasks.add(task)
+        task.add_done_callback(self._bounded_action_finished)
 
     def _pending_cleanup_finished(self, task: asyncio.Future[Any]) -> None:
         _consume_task_result(task)
@@ -310,17 +337,23 @@ class RuntimeLifecycle:
     def _detach_tasks_from_closed_loop(self) -> None:
         with self._state_lock:
             pending = tuple(self._pending_cleanup_tasks)
+            bounded = tuple(self._bounded_action_tasks)
             finalizer = self._finalizer_task
             self._pending_cleanup_tasks.clear()
+            self._bounded_action_tasks.clear()
             self._finalizer_task = None
             self._finalizer_wakeup = None
             self._finalizer_started_async = None
             self._owner_loop = None
             self._loop_watcher = None
-        for task in pending:
+        for task in dict.fromkeys((*pending, *bounded)):
             self._suppress_reported_destroy_warning(task)
             try:
                 task.remove_done_callback(self._pending_cleanup_finished)
+            except (AttributeError, RuntimeError):
+                pass
+            try:
+                task.remove_done_callback(self._bounded_action_finished)
             except (AttributeError, RuntimeError):
                 pass
         if finalizer is not None:
@@ -502,6 +535,19 @@ class RuntimeLifecycle:
         return final_result if final_result is not None else self._copy_result(result)
 
     async def _shutdown_once(self) -> dict[str, Any]:
+        tracker_token = _BOUNDED_TASK_TRACKER.set(self._track_bounded_action)
+        try:
+            return await self._shutdown_actions()
+        finally:
+            try:
+                _BOUNDED_TASK_TRACKER.reset(tracker_token)
+            except ValueError:
+                # A coroutine abandoned with an already-closed owner loop can
+                # later receive GeneratorExit from a different GC context.
+                # The loop cannot run more work, so no tracker can leak into it.
+                pass
+
+    async def _shutdown_actions(self) -> dict[str, Any]:
         failures: list[dict[str, str]] = []
         actions = (
             ("domain", self._domain_shutdown),
