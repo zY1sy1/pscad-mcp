@@ -112,6 +112,7 @@ def _engine_plan(
     target_path: Path,
     workspace: Path,
     candidates: tuple[MmcCandidate, ...],
+    source_paths: dict[str, str],
     source_hashes: dict[str, str],
     asset_hashes: dict[str, str],
     source_bindings: tuple[dict[str, Any], ...],
@@ -135,6 +136,7 @@ def _engine_plan(
         "target_path": str(target_path),
         "workspace": str(workspace),
         "candidates": [item.to_dict() for item in candidates],
+        "source_paths": source_paths,
         "source_hashes": source_hashes,
         "asset_hashes": asset_hashes,
         "source_bindings": source_bindings,
@@ -151,6 +153,7 @@ def _engine_plan(
         workspace=str(workspace),
         candidates=candidates,
         plan_hash=content_hash(payload),
+        source_paths=source_paths,
         source_hashes=source_hashes,
         asset_hashes=asset_hashes,
         source_bindings=source_bindings,
@@ -173,6 +176,10 @@ def create_parametric_plan(
     workspace_root = Path(workspace).expanduser().resolve()
     audit = _audit_dict(pwm_audit)
     source_hashes = _hashes(audit.get("source_hashes"), "PWM source")
+    audit_sources = audit.get("sources", {})
+    if not isinstance(audit_sources, Mapping):
+        raise _error("MMC_TEMPLATE_INVALID", "PWM source paths must be a mapping.")
+    source_paths = {str(key): str(value) for key, value in audit_sources.items()}
     asset_hashes = _hashes(getattr(avm_assets, "hashes", None), "AVM asset")
     requested_engines = (
         ("detailed_pwm", "average_value") if parsed.model_fidelity == "both" else (parsed.model_fidelity,)
@@ -207,11 +214,11 @@ def create_parametric_plan(
         if engine == "detailed_pwm":
             bindings = tuple(dict(item) for item in (*audit.get("role_bindings", ()), *audit.get("writable_parameter_bindings", ())))
             dependencies = tuple(dict(item) for item in audit.get("absolute_paths", ()))
-            plan_source_hashes, plan_asset_hashes = source_hashes, {}
+            plan_source_paths, plan_source_hashes, plan_asset_hashes = source_paths, source_hashes, {}
         else:
             bindings = ()
             dependencies = ()
-            plan_source_hashes, plan_asset_hashes = {}, asset_hashes
+            plan_source_paths, plan_source_hashes, plan_asset_hashes = {}, {}, asset_hashes
         plans.append(
             _engine_plan(
                 engine=engine,
@@ -219,6 +226,7 @@ def create_parametric_plan(
                 target_path=target_path,
                 workspace=workspace_root,
                 candidates=candidates,
+                source_paths=plan_source_paths,
                 source_hashes=plan_source_hashes,
                 asset_hashes=plan_asset_hashes,
                 source_bindings=bindings,

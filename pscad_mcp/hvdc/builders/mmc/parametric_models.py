@@ -134,6 +134,7 @@ class MmcEnginePlan(JsonRecord):
     workspace: str
     candidates: tuple[MmcCandidate, ...]
     plan_hash: str
+    source_paths: dict[str, str] = field(default_factory=dict)
     source_hashes: dict[str, str] = field(default_factory=dict)
     asset_hashes: dict[str, str] = field(default_factory=dict)
     source_bindings: tuple[dict[str, Any], ...] = ()
@@ -145,6 +146,7 @@ class MmcEnginePlan(JsonRecord):
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "candidates", tuple(self.candidates))
+        object.__setattr__(self, "source_paths", freeze(self.source_paths))
         object.__setattr__(self, "source_hashes", freeze(self.source_hashes))
         object.__setattr__(self, "asset_hashes", freeze(self.asset_hashes))
         object.__setattr__(self, "source_bindings", freeze(self.source_bindings))
