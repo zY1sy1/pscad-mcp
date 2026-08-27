@@ -217,6 +217,7 @@ def register_tool(
     *,
     recorder: InvocationRecorder = learning_recorder,
     record_learning: bool = True,
+    force: bool = False,
 ) -> None:
     """Register an async tool while preserving structured backend failures."""
 
@@ -229,7 +230,7 @@ def register_tool(
     if privately_registered or manager_registered:
         raise ValueError(name)
     profile = getattr(mcp, "_pscad_tool_profile", None)
-    if profile is not None and not profile.includes(name):
+    if not force and profile is not None and not profile.includes(name):
         return
 
     signature = inspect.signature(function)

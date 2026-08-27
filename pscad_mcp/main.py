@@ -15,6 +15,7 @@ from .tools.hvdc_tools import register_hvdc_tools
 from .tools.lcc_tools import register_lcc_tools
 from .tools.lcc_parametric_tools import register_lcc_parametric_tools
 from .tools.learning_tools import register_learning_tools
+from .tools.capability_tools import register_capability_tool
 from .tools.catalog import parse_tool_profile
 
 
@@ -59,6 +60,7 @@ def create_server(environ: Mapping[str, str] | None = None) -> FastMCP:
     register_lcc_tools(mcp)
     register_lcc_parametric_tools(mcp)
     register_learning_tools(mcp)
+    register_capability_tool(mcp)
 
     logger.info("PSCAD MCP Server initialized with modular tools.")
     return mcp

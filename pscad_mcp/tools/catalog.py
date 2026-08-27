@@ -166,7 +166,8 @@ def parse_tool_profile(environ: Mapping[str, object]) -> ToolProfile:
     return ToolProfile(",".join(sorted(groups)), groups)
 
 COMPATIBILITY_TOOL_NAMES = frozenset().union(*TOOL_GROUPS.values())
-FULL_TOOL_NAMES = COMPATIBILITY_TOOL_NAMES
+CAPABILITY_TOOL_NAME = "get_pscad_capabilities"
+FULL_TOOL_NAMES = COMPATIBILITY_TOOL_NAMES | {CAPABILITY_TOOL_NAME}
 
 _GROUP_BY_NAME = {
     name: group for group, names in TOOL_GROUPS.items() for name in names
@@ -639,4 +640,21 @@ COMPATIBILITY_TOOL_SPECS = MappingProxyType(
     }
 )
 
-TOOL_SPECS = COMPATIBILITY_TOOL_SPECS
+TOOL_SPECS = MappingProxyType(
+    {
+        **COMPATIBILITY_TOOL_SPECS,
+        CAPABILITY_TOOL_NAME: ToolSpec(
+            name=CAPABILITY_TOOL_NAME,
+            group="core",
+            description=(
+                "Discover the active PSCAD MCP profile and bounded backend "
+                "capabilities."
+            ),
+            read_only=True,
+            destructive=False,
+            idempotent=True,
+            open_world=False,
+            backend_support=frozenset(),
+        ),
+    }
+)

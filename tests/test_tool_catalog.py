@@ -101,11 +101,15 @@ def test_catalog_locks_group_boundaries_and_immutable_values():
 
 
 def test_every_catalog_tool_has_bounded_description_and_annotations():
-    assert TOOL_SPECS is COMPATIBILITY_TOOL_SPECS
-    assert set(TOOL_SPECS) == COMPATIBILITY_TOOL_NAMES
+    assert set(COMPATIBILITY_TOOL_SPECS) == COMPATIBILITY_TOOL_NAMES
+    assert set(TOOL_SPECS) == FULL_TOOL_NAMES
     for name, spec in TOOL_SPECS.items():
         assert spec.name == name
-        assert name in TOOL_GROUPS[spec.group]
+        if name == "get_pscad_capabilities":
+            assert spec.group == "core"
+            assert name not in COMPATIBILITY_TOOL_NAMES
+        else:
+            assert name in TOOL_GROUPS[spec.group]
         assert 12 <= len(spec.description) <= 240, name
         assert isinstance(spec.read_only, bool), name
         assert isinstance(spec.destructive, bool), name
@@ -147,7 +151,7 @@ def test_catalog_descriptions_match_registered_function_docstrings():
         for tool in create_server(environ={})._tool_manager.list_tools()
     }
 
-    assert len(by_name) == 83
+    assert len(by_name) == 84
     for name, spec in TOOL_SPECS.items():
         assert inspect.getdoc(by_name[name].fn) == spec.description, name
 
