@@ -13,7 +13,100 @@ from typing import Any
 from ..core.backend.base import BackendError
 
 
+def _mmc_v2_profile(project: str, fidelity: str) -> dict[str, Any]:
+    measurement_contract = (
+        ("station_p_active_power", "P_STATION_P", "power", "MW"),
+        ("station_vdc_active_power", "P_STATION_VDC", "power", "MW"),
+        ("station_p_reactive_power", "Q_STATION_P", "power", "MVAr"),
+        ("station_vdc_reactive_power", "Q_STATION_VDC", "power", "MVAr"),
+        ("ac_voltage", "VAC", "voltage", "kV"),
+        ("ac_current", "IAC", "current", "kA"),
+        ("dc_voltage", "VDC_POLE_TO_POLE", "voltage", "kV"),
+        ("dc_current", "IDC", "current", "kA"),
+        ("arm_current", "ARM_CURRENT", "current", "kA"),
+        ("equivalent_capacitor_voltage", "V_CAP_EQ", "voltage", "kV"),
+        ("circulating_current", "I_CIRC", "current", "kA"),
+        ("modulation_margin", "MODULATION_MARGIN", "ratio", "pu"),
+        ("block_status", "BLOCK_STATUS", "boolean", "1"),
+        ("ac_breaker_status", "AC_BREAKER_STATUS", "boolean", "1"),
+        ("dc_breaker_status", "DC_BREAKER_STATUS", "boolean", "1"),
+        ("diode_equivalent_current", "DIODE_EQ_CURRENT", "current", "kA"),
+    )
+    control_component = (
+        "converter-control" if fidelity == "detailed_pwm" else "STATION_P.control"
+    )
+    protection_component = (
+        "converter-protection"
+        if fidelity == "detailed_pwm"
+        else "STATION_P.initialization"
+    )
+    commands = (
+        ("active_power_order", control_component, "P_ORDER_PU", [-1.0, -0.8, 0.0, 0.8, 1.0]),
+        ("reactive_power_order", control_component, "Q_ORDER_PU", [-0.1, 0.0, 0.1]),
+        ("block_command", protection_component, "BLOCK", [0, 1]),
+        ("reset_command", protection_component, "RESET", [0, 1]),
+        ("ac_breaker_command", protection_component, "AC_BREAKER", [0, 1]),
+        ("dc_breaker_command", protection_component, "DC_BREAKER", [0, 1]),
+        ("ac_fault_command", protection_component, "AC_FAULT", [0, 1]),
+        ("dc_fault_command", protection_component, "DC_FAULT", [0, 1]),
+    )
+    return {
+        "profile_version": 2,
+        "required_assets": [],
+        "topology_constraints": {
+            "family": "mmc",
+            "polarity": "symmetrical_monopole",
+            "return_mode": "metallic",
+        },
+        "mappings": [
+            {
+                "canonical": canonical,
+                "aliases": [alias],
+                "source_kinds": ["measurement"],
+                "unit_family": family,
+                "direction": "measurement",
+                "units": units,
+            }
+            for canonical, alias, family, units in measurement_contract
+        ],
+        "project_fingerprints": [
+            {"project_stem": project, "pscad_version": "4.6.2"}
+        ],
+        "command_bindings": [
+            {
+                "canonical": canonical,
+                "component": {
+                    "component_id": component,
+                    "canvas": "Main",
+                },
+                "parameter_name": parameter,
+                "allowed_values": allowed,
+                "semantics": "active_high",
+                "read_back": True,
+            }
+            for canonical, component, parameter, allowed in commands
+        ],
+        "result_channels": [
+            {
+                "canonical": canonical,
+                "path": f"{project}/Main/{path}",
+                "units": units,
+                "location": "Main",
+            }
+            for canonical, path, _, units in measurement_contract
+        ],
+        "metric_roles": {
+            canonical: canonical for canonical, _, _, _ in measurement_contract
+        },
+        "sequences": [],
+        "model_fidelity": fidelity,
+        "capabilities": {"intrinsic_dc_fault_blocking": False},
+    }
+
+
 _BUILTIN_PROFILES: dict[str, dict[str, Any]] = {
+    "mmc_detailed_pwm_v2": _mmc_v2_profile("MMC_CASE_pwm", "detailed_pwm"),
+    "mmc_average_value_v2": _mmc_v2_profile("MMC_CASE_avm", "average_value"),
     "cigre_lcc_monopole_v1": {
         "profile_version": 2,
         "required_assets": ["rectifier", "inverter", "controller", "pole", "dc_line"],

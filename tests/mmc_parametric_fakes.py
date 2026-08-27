@@ -8,6 +8,7 @@ from typing import Any
 
 from pscad_mcp.hvdc.scanner import scan_project
 from pscad_mcp.hvdc.builders.mmc.assets import load_packaged_asset_set
+from pscad_mcp.hvdc.builders.mmc.derivation import derive_mmc_parameters
 from pscad_mcp.hvdc.builders.mmc.parametric_models import MmcEnginePlan
 from pscad_mcp.hvdc.builders.mmc.parametric_planner import create_parametric_plan
 from pscad_mcp.hvdc.builders.mmc.template_audit import build_template_audit
@@ -139,6 +140,39 @@ def avm_parametric_plan(
         avm_assets(),
     )
     return parent.engine_plans[0]
+
+
+def pwm_design():
+    audit = pwm_audit()
+    return derive_mmc_parameters(
+        valid_request(model_fidelity="detailed_pwm"),
+        pwm_reference={
+            "evidence": f"audited-template:{audit.source_hashes['project']}",
+            "reference_cells_per_arm": 400,
+            "arm_inductance_h": 0.05,
+            "arm_resistance_ohm": 0.15,
+            "stored_energy_mj": 40.0,
+            "switching_frequency_hz": 1350.0,
+            "control_sample_time_s": 50e-6,
+            "control_bandwidth_hz": 100.0,
+        },
+    )
+
+
+def avm_design():
+    assets = avm_assets()
+    return derive_mmc_parameters(
+        valid_request(model_fidelity="average_value"),
+        avm_reference={
+            "evidence": f"repository-asset:{assets.name}",
+            "reference_cells_per_arm": 400,
+            "arm_inductance_h": 0.05,
+            "arm_resistance_ohm": 0.15,
+            "stored_energy_mj": 40.0,
+            "control_sample_time_s": 200e-6,
+            "control_bandwidth_hz": 80.0,
+        },
+    )
 
 
 class RecordingMmcService:
