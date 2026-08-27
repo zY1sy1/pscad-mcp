@@ -185,5 +185,5 @@
     {"name": "power_reversal", "kind": "window", "required": true, "expected": {"direction": "negative", "channels": ["p_ac_p"]}, "units": "MW", "comparison_window": [1.0, 1.5]},
     {"name": "reverse_steady", "kind": "window", "required": true, "expected": {"power_mw": -1000.0, "channels": ["p_ac_p"]}, "units": "MW", "comparison_window": [1.5, 2.0]}
   ],
-  "provenance": {"nominal_vdc_kv": "original_engineering_derivation", "nominal_power_mw": "original_engineering_derivation", "equations": "approved_design_document"}
+  "provenance": {"nominal_vdc_kv": "original_engineering_derivation", "nominal_power_mw": "original_engineering_derivation", "equations": "approved_design_document", "blocked_state_path": "half_bridge_diode_equivalent", "intrinsic_dc_fault_blocking": false}
 }

@@ -36,6 +36,8 @@ def test_production_mmc_asset_set_is_exact_and_audited():
 
     assert parsed.nominal_vdc_kv == 640.0
     assert parsed.nominal_power_mw == 1000.0
+    assert parsed.provenance["blocked_state_path"] == "half_bridge_diode_equivalent"
+    assert parsed.provenance["intrinsic_dc_fault_blocking"] is False
     arm_components = [component for component in parsed.components if component.definition.endswith(":MMCAverageArm")]
     assert len(arm_components) == 12
     assert len({component.logical_id for component in arm_components}) == 12
@@ -82,6 +84,8 @@ def test_production_mmc_asset_set_is_exact_and_audited():
     }
     controls = json.loads((ASSET_ROOT / "controls.json").read_text(encoding="utf-8"))
     assert controls["bandwidth_hz"] == {"pll": 10.0, "outer": 20.0, "energy": 40.0, "circulating": 60.0, "inner": 120.0}
+    assert controls["blocked_state_path"] == "half_bridge_diode_equivalent"
+    assert controls["intrinsic_dc_fault_blocking"] is False
     golden = json.loads((ASSET_ROOT / "golden.json").read_text(encoding="utf-8"))
     assert golden["source"]["builder_generated"] is False
     assert golden["source"]["status"] != "accepted"

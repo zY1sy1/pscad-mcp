@@ -369,4 +369,69 @@ def create_plan(request: MmcPlanRequest, asset_set: MmcAssetSet, inventory: Any,
     return MmcBuildPlan(blueprint=normalized_blueprint, operations=tuple(operations), plan_hash=content_hash(payload), acceptance_checks=checks, target_path=str(final_path), staging_path=str(staging_path), asset_hashes=dict(asset_set.hashes), pscad_version=asset_set.pscad_version, catalog_identity=catalog.identity, metadata=payload["request"])
 
 
-__all__ = ["MmcAssetSet", "MmcPlanRequest", "PHASES", "create_plan"]
+def create_parametric_avm_plan(
+    engine_plan: Any,
+    asset_set: MmcAssetSet,
+    inventory: Any,
+    workspace: str | Path | PathPolicy,
+    *,
+    candidate_id: str | None = None,
+) -> MmcBuildPlan:
+    """Bind a parameterized AVM child plan to the verified Stage A planner."""
+
+    from .engines.avm import materialize_parametric_blueprint
+    from .parametric_models import MmcEnginePlan
+
+    if not isinstance(engine_plan, MmcEnginePlan) or engine_plan.engine != "average_value":
+        raise _error(
+            "MMC_PLAN_INVALID",
+            "The parametric AVM planner requires an average_value child plan.",
+        )
+    if dict(engine_plan.asset_hashes) != dict(asset_set.hashes):
+        raise _error(
+            "MMC_ASSET_MISMATCH",
+            "The AVM asset hashes differ from the immutable child plan.",
+            expected=dict(engine_plan.asset_hashes),
+            observed=dict(asset_set.hashes),
+        )
+    blueprint = materialize_parametric_blueprint(
+        engine_plan, asset_set=asset_set, candidate_id=candidate_id
+    )
+    parameterized_assets = replace(asset_set, blueprint=blueprint)
+    fixed = create_plan(
+        MmcPlanRequest(project_name=engine_plan.target_name),
+        parameterized_assets,
+        inventory,
+        workspace,
+    )
+    if Path(fixed.target_path or "").resolve() != Path(engine_plan.target_path).resolve():
+        raise _error(
+            "MMC_PLAN_STALE",
+            "The Stage A AVM target differs from the immutable child target.",
+            child_target=engine_plan.target_path,
+            stage_a_target=fixed.target_path,
+        )
+    selected_id = candidate_id or engine_plan.candidates[0].candidate_id
+    metadata = {
+        **dict(fixed.metadata),
+        "parametric_engine_plan_hash": engine_plan.plan_hash,
+        "parametric_candidate_id": selected_id,
+        "intrinsic_dc_fault_blocking": False,
+    }
+    bound_hash = content_hash(
+        {
+            "stage_a_plan_hash": fixed.plan_hash,
+            "parametric_engine_plan_hash": engine_plan.plan_hash,
+            "parametric_candidate_id": selected_id,
+        }
+    )
+    return replace(fixed, plan_hash=bound_hash, metadata=metadata)
+
+
+__all__ = [
+    "MmcAssetSet",
+    "MmcPlanRequest",
+    "PHASES",
+    "create_parametric_avm_plan",
+    "create_plan",
+]

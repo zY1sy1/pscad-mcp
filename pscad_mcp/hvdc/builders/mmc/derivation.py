@@ -89,6 +89,15 @@ def _engine_candidates(
     base_parameters: dict[str, Any] = {
         "requested_dc_voltage_kv": request.dc_voltage_kv,
         "requested_active_power_mw": request.active_power_mw,
+        "rated_dc_voltage_kv": request.dc_voltage_kv,
+        "rated_power_mw": request.active_power_mw,
+        "reactive_power_mvar": request.reactive_power_mvar,
+        "frequency_hz": request.frequency_hz,
+        "station_p_ac_voltage_kv": request.station_p.ac_voltage_kv,
+        "station_vdc_ac_voltage_kv": request.station_vdc.ac_voltage_kv,
+        "dc_link_kind": request.dc_link.kind,
+        "dc_link_length_km": request.dc_link.length_km,
+        "power_reversal_time_s": request.power_reversal_time_s,
         "cell_count_per_arm": cell_count,
         "arm_inductance_h": float(reference["arm_inductance_h"]) * impedance_scale,
         "arm_resistance_ohm": float(reference["arm_resistance_ohm"]) * impedance_scale,
@@ -101,6 +110,15 @@ def _engine_candidates(
         "station_vdc_grid_r_ohm": common["station_vdc_grid_r_ohm"],
         "station_vdc_grid_x_ohm": common["station_vdc_grid_x_ohm"],
         "line_resistance_ohm": common["line_resistance_ohm"],
+        "equivalent_arm_capacitance_f": (
+            2.0
+            * float(reference["stored_energy_mj"])
+            * power_scale
+            * 1_000_000.0
+            / 12.0
+            / ((request.dc_voltage_kv * 1_000.0 / 2.0) ** 2)
+        ),
+        "loss_per_arm_mw": common["loss_budget_mw"] / 12.0,
     }
     for name, override in request.engineering_overrides.items():
         base_parameters[name] = override["value"]

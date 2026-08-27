@@ -16,6 +16,7 @@
         <state name="energy_derivative" equation="dW_arm/dt = v_inserted * i_arm - p_loss_arm" />
         <arm_current upper="i_upper = I_dc / 3 + i_phase / 2 + i_circulating" lower="i_lower = I_dc / 3 - i_phase / 2 + i_circulating" />
         <modulation lower="0" upper="1" />
+        <blocked_state conduction_path="half_bridge_diode_equivalent" intrinsic_dc_fault_blocking="false" />
       </equations>
     </definition>
     <definition name="cigre_mmc_avm_v1:MMCStationControl">

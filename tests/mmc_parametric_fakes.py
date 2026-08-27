@@ -111,6 +111,36 @@ def pwm_plan_with_unresolved_line_constants(workspace: Path) -> MmcEnginePlan:
     )
 
 
+def avm_parametric_plan(
+    workspace: Path,
+    dc_voltage_kv: float = 500.0,
+    active_power_mw: float = 750.0,
+) -> MmcEnginePlan:
+    ac_voltage_kv = 230.0 * dc_voltage_kv / 640.0
+    parent = create_parametric_plan(
+        valid_request(
+            model_fidelity="average_value",
+            dc_voltage_kv=dc_voltage_kv,
+            active_power_mw=active_power_mw,
+            station_p={
+                "ac_voltage_kv": ac_voltage_kv,
+                "short_circuit_ratio": 5.0,
+                "x_over_r": 10.0,
+            },
+            station_vdc={
+                "ac_voltage_kv": ac_voltage_kv,
+                "short_circuit_ratio": 5.0,
+                "x_over_r": 10.0,
+            },
+        ),
+        "MMC_CASE",
+        workspace,
+        pwm_audit(),
+        avm_assets(),
+    )
+    return parent.engine_plans[0]
+
+
 class RecordingMmcService:
     def __init__(
         self,

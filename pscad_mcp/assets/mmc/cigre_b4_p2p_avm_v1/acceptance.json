@@ -6,5 +6,5 @@
     {"name": "power_reversal", "kind": "window", "required": true, "expected": {"direction": "negative", "channels": ["p_ac_p"]}, "units": "MW", "comparison_window": [1.0, 1.5]},
     {"name": "reverse_steady", "kind": "window", "required": true, "expected": {"power_mw": -1000.0, "channels": ["p_ac_p"]}, "units": "MW", "comparison_window": [1.5, 2.0]}
   ],
-  "limitations": {"submodule_balance": "not_modeled", "switching_stress": "not_modeled", "switching_harmonics": "not_modeled", "dc_fault_blocking": "not_modeled"}
+  "limitations": {"submodule_balance": "not_modeled", "switching_stress": "not_modeled", "switching_harmonics": "not_modeled", "intrinsic_dc_fault_blocking": false, "blocked_state_path": "half_bridge_diode_equivalent"}
 }
