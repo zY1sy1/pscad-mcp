@@ -150,3 +150,44 @@ class Blueprint:
             "publication": self.publication.to_dict(),
         }
 
+
+@dataclass(frozen=True)
+class BlueprintPlan:
+    plan_hash: str
+    blueprint: Blueprint
+    blueprint_hash: str
+    asset_hashes: FrozenDict
+    source_path: str
+    source_entry_point: str
+    source_manifest: FrozenDict
+    source_package_hash: str
+    inventory_hash: str
+    pscad_version: str
+    target_name: str
+    staging_path: str
+    resolved_selectors: FrozenDict
+    operations: tuple[BlueprintOperation, ...]
+    warnings: tuple[str, ...]
+    parameter_overrides: FrozenDict
+
+    def unsigned_dict(self) -> dict[str, Any]:
+        return {
+            "blueprint": self.blueprint.to_dict(),
+            "blueprint_hash": self.blueprint_hash,
+            "asset_hashes": json_safe(self.asset_hashes),
+            "source_path": self.source_path,
+            "source_entry_point": self.source_entry_point,
+            "source_manifest": json_safe(self.source_manifest),
+            "source_package_hash": self.source_package_hash,
+            "inventory_hash": self.inventory_hash,
+            "pscad_version": self.pscad_version,
+            "target_name": self.target_name,
+            "staging_path": self.staging_path,
+            "resolved_selectors": json_safe(self.resolved_selectors),
+            "operations": [operation.to_dict() for operation in self.operations],
+            "warnings": list(self.warnings),
+            "parameter_overrides": json_safe(self.parameter_overrides),
+        }
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"plan_hash": self.plan_hash, **self.unsigned_dict()}
