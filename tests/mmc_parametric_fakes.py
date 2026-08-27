@@ -12,6 +12,7 @@ from pscad_mcp.hvdc.builders.mmc.derivation import derive_mmc_parameters
 from pscad_mcp.hvdc.builders.mmc.parametric_models import MmcEnginePlan
 from pscad_mcp.hvdc.builders.mmc.parametric_planner import create_parametric_plan
 from pscad_mcp.hvdc.builders.mmc.template_audit import build_template_audit
+from pscad_mcp.core.backend.base import BackendError
 
 
 FIXTURES = Path(__file__).parent / "fixtures" / "mmc_synthetic"
@@ -172,6 +173,48 @@ def avm_design():
             "control_sample_time_s": 200e-6,
             "control_bandwidth_hz": 80.0,
         },
+    )
+
+
+def error_with_code(code: str) -> BackendError:
+    return BackendError(code, f"synthetic {code}", "fake", "execute_candidate")
+
+
+def numerical_failure() -> BackendError:
+    return BackendError(
+        "MMC_NUMERICAL_UNSTABLE",
+        "The EMTDC solution diverged.",
+        "fake",
+        "run_scenario",
+        {"phase": "forward_steady", "evidence": "non_finite_output"},
+    )
+
+
+def repeated_failure() -> BackendError:
+    from pscad_mcp.hvdc.builders.mmc.diagnostics import classify_mmc_failure
+
+    base = numerical_failure()
+    signature = classify_mmc_failure(base).signature
+    return BackendError(
+        base.code,
+        str(base),
+        base.backend,
+        base.operation,
+        {
+            **base.details,
+            "candidate_id": "pwm-1",
+            "previous_failure_signatures": [signature],
+        },
+    )
+
+
+def parent_plan_with_four_candidates():
+    return create_parametric_plan(
+        valid_request(model_fidelity="both"),
+        "MMC_CASE",
+        FIXTURES,
+        pwm_audit(),
+        avm_assets(),
     )
 
 
