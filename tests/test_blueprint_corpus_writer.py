@@ -10,6 +10,7 @@ import pytest
 
 from pscad_mcp.builders.blueprint.corpus_extractor import extract_project
 from pscad_mcp.builders.blueprint.corpus_models import CorpusSource, CorpusSpec
+from pscad_mcp.builders.blueprint.models import freeze
 from pscad_mcp.builders.blueprint.corpus_writer import (
     KIND_ORDER,
     canonical_json,
@@ -78,6 +79,28 @@ def test_records_are_derived_in_stable_kind_and_key_order(tmp_path):
     assert all(record.source_sha256 == graph.source_sha256 for record in records)
     assert all(record.corpus_name == "fixture_v1" for record in records)
     assert canonical_jsonl(records) == canonical_jsonl(tuple(reversed(records)))
+
+
+@pytest.mark.parametrize(
+    "parameters",
+    [
+        {"DIM": "1", "Dim": "2"},
+        {"Idc base_500": "1", "Idc_base_500": "2"},
+    ],
+)
+def test_colliding_parameter_slugs_get_stable_unique_record_keys(tmp_path, parameters):
+    spec, graph = fixture_corpus(tmp_path)
+    component = replace(graph.components[0], parameters=freeze(parameters))
+    first = replace(graph, components=(component,))
+    reversed_component = replace(component, parameters=freeze(dict(reversed(tuple(parameters.items())))))
+    second = replace(graph, components=(reversed_component,))
+
+    first_records = derive_records(spec.name, spec.normalization_profile, first)
+    second_records = derive_records(spec.name, spec.normalization_profile, second)
+    parameter_keys = [record.record_key for record in first_records if record.kind == "parameter"]
+
+    assert len(parameter_keys) == len(set(parameter_keys))
+    assert canonical_jsonl(first_records) == canonical_jsonl(second_records)
 
 
 def test_canonical_json_is_ascii_sorted_finite_and_newline_terminated():

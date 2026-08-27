@@ -101,6 +101,25 @@ def _key_part(value: str) -> str:
     return re.sub(r"-+", "-", normalized).strip("-.") or "unnamed"
 
 
+def _unique_key_parts(names: Iterable[str]) -> dict[str, str]:
+    values = tuple(names)
+    if len(set(values)) != len(values):
+        raise _error("Record owner contains duplicate parameter names.")
+    bases = {name: _key_part(name) for name in values}
+    counts = Counter(bases.values())
+    result = {
+        name: (
+            base
+            if counts[base] == 1
+            else f"{base}-{hashlib.sha256(name.encode('utf-8')).hexdigest()[:16]}"
+        )
+        for name, base in bases.items()
+    }
+    if len(set(result.values())) != len(result):
+        raise _error("Derived parameter key parts are not unique.")
+    return result
+
+
 def _record(
     corpus_name: str,
     normalization_profile: str,
@@ -152,6 +171,7 @@ def derive_records(corpus_name: str, normalization_profile: str, graph: ProjectG
         records.append(
             _record(corpus_name, normalization_profile, graph, "definition", definition.key, definition.to_dict(), True)
         )
+        parameter_parts = _unique_key_parts(parameter.name for parameter in definition.parameters)
         for parameter in definition.parameters:
             records.append(
                 _record(
@@ -159,7 +179,7 @@ def derive_records(corpus_name: str, normalization_profile: str, graph: ProjectG
                     normalization_profile,
                     graph,
                     "parameter",
-                    f"{definition.key}/parameter:{_key_part(parameter.name)}",
+                    f"{definition.key}/parameter:{parameter_parts[parameter.name]}",
                     {"owner_kind": "definition", "owner_key": definition.key, **parameter.to_dict()},
                     True,
                 )
@@ -180,6 +200,7 @@ def derive_records(corpus_name: str, normalization_profile: str, graph: ProjectG
         records.append(
             _record(corpus_name, normalization_profile, graph, "component", component.key, component.to_dict(), component.resolved)
         )
+        parameter_parts = _unique_key_parts(component.parameters)
         for name, value in component.parameters.items():
             records.append(
                 _record(
@@ -187,7 +208,7 @@ def derive_records(corpus_name: str, normalization_profile: str, graph: ProjectG
                     normalization_profile,
                     graph,
                     "parameter",
-                    f"{component.key}/parameter:{_key_part(name)}",
+                    f"{component.key}/parameter:{parameter_parts[name]}",
                     {"owner_kind": "component", "owner_key": component.key, "name": name, "value": value},
                     component.resolved,
                 )
@@ -197,6 +218,7 @@ def derive_records(corpus_name: str, normalization_profile: str, graph: ProjectG
         records.append(
             _record(corpus_name, normalization_profile, graph, "connection", connection.key, connection.to_dict(), resolved)
         )
+    setting_parts = _unique_key_parts(graph.settings)
     for name, value in graph.settings.items():
         records.append(
             _record(
@@ -204,7 +226,7 @@ def derive_records(corpus_name: str, normalization_profile: str, graph: ProjectG
                 normalization_profile,
                 graph,
                 "project_setting",
-                f"project:{graph.project_id}/setting:{_key_part(name)}",
+                f"project:{graph.project_id}/setting:{setting_parts[name]}",
                 {"name": name, "value": value},
                 True,
             )
