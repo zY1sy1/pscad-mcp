@@ -293,7 +293,42 @@ class RuntimeLifecycle:
                         ],
                     }
                 )
+                self._detach_tasks_from_closed_loop()
                 return
+
+    @staticmethod
+    def _suppress_reported_destroy_warning(task: asyncio.Future[Any]) -> None:
+        # The owner loop is already closed, so these tasks cannot be resumed or
+        # cancelled safely. Suppress only their already-reported pending-task
+        # diagnostic; never close or drive a user coroutine from this thread.
+        if not task.done() and hasattr(task, "_log_destroy_pending"):
+            try:
+                task._log_destroy_pending = False  # type: ignore[attr-defined]
+            except (AttributeError, RuntimeError):
+                pass
+
+    def _detach_tasks_from_closed_loop(self) -> None:
+        with self._state_lock:
+            pending = tuple(self._pending_cleanup_tasks)
+            finalizer = self._finalizer_task
+            self._pending_cleanup_tasks.clear()
+            self._finalizer_task = None
+            self._finalizer_wakeup = None
+            self._finalizer_started_async = None
+            self._owner_loop = None
+            self._loop_watcher = None
+        for task in pending:
+            self._suppress_reported_destroy_warning(task)
+            try:
+                task.remove_done_callback(self._pending_cleanup_finished)
+            except (AttributeError, RuntimeError):
+                pass
+        if finalizer is not None:
+            self._suppress_reported_destroy_warning(finalizer)
+            try:
+                finalizer.remove_done_callback(self._finalizer_finished)
+            except (AttributeError, RuntimeError):
+                pass
 
     def _start_loop_watcher(self) -> None:
         with self._state_lock:
@@ -344,6 +379,8 @@ class RuntimeLifecycle:
                     ],
                 }
             )
+        except GeneratorExit:
+            raise
         except BaseException as error:
             logger.error(
                 "Runtime shutdown failed for operation=lifecycle exception=%s.",
@@ -362,18 +399,26 @@ class RuntimeLifecycle:
             )
 
     def _finalizer_finished(self, task: asyncio.Task[None]) -> None:
-        _consume_task_result(task)
+        failure_type: str | None = None
+        if task.cancelled():
+            failure_type = "CancelledError"
+        else:
+            try:
+                task.result()
+            except BaseException as error:
+                if not self._finalizer_started.is_set():
+                    failure_type = type(error).__name__
         started_async = self._finalizer_started_async
         if started_async is not None:
             started_async.set()
-        if task.cancelled():
+        if failure_type is not None:
             self._publish_final(
                 {
                     "code": "SHUTDOWN_INCOMPLETE",
                     "failures": [
                         {
                             "operation": "lifecycle",
-                            "exception": "CancelledError",
+                            "exception": failure_type,
                         }
                     ],
                 }
@@ -397,7 +442,6 @@ class RuntimeLifecycle:
                 await asyncio.shield(started_async.wait())
             except asyncio.CancelledError:
                 cancelled = True
-        assert self._finalizer_started.is_set()
         return cancelled
 
     @staticmethod
@@ -439,17 +483,23 @@ class RuntimeLifecycle:
         self,
         completion: concurrent.futures.Future[dict[str, Any]],
         result: dict[str, Any],
-    ) -> None:
+    ) -> dict[str, Any]:
         with self._state_lock:
             self._deferred = True
             self._latest_result = self._copy_result(result)
         cancelled = await self._start_deferred_finalizer()
         with self._state_lock:
             finalized = self._result is not None
+            final_result = (
+                self._copy_result(self._result)
+                if self._result is not None
+                else None
+            )
         if not finalized:
             self._publish_initial(completion, result)
         if cancelled:
             raise asyncio.CancelledError
+        return final_result if final_result is not None else self._copy_result(result)
 
     async def _shutdown_once(self) -> dict[str, Any]:
         failures: list[dict[str, str]] = []
@@ -541,7 +591,7 @@ class RuntimeLifecycle:
             self._publish_final(result)
             raise
         if self._requires_deferred_cleanup(result):
-            await self._publish_deferred(completion, result)
+            result = await self._publish_deferred(completion, result)
         else:
             self._publish_final(result)
         return self._copy_result(result)

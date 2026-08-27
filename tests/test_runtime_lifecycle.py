@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import gc
 import logging
 import threading
 import time
@@ -803,6 +804,75 @@ def test_cancelled_deferred_finalizer_publishes_failure_and_closes_owner():
     asyncio.run(exercise())
 
 
+@pytest.mark.parametrize("shared", [False, True])
+def test_finalizer_cancelled_by_task_factory_before_first_line_is_stable(shared):
+    release = asyncio.Event()
+    calls: list[str] = []
+
+    async def domain():
+        while not release.is_set():
+            try:
+                await release.wait()
+            except asyncio.CancelledError:
+                continue
+
+    runtime = RuntimeLifecycle(
+        domain_shutdown=domain,
+        settlement_wait=lambda: calls.append("settlement") or True,
+        learning_close=lambda: calls.append("learning"),
+        connection_shutdown=lambda: calls.append("connection"),
+        executor_shutdown=lambda: calls.append("executor"),
+        timeout_s=0.02,
+    )
+    owner = SharedRuntimeLifespan(runtime)
+
+    async def exercise():
+        loop = asyncio.get_running_loop()
+        default_factory = loop.get_task_factory()
+
+        def cancel_finalizer_factory(loop, coroutine, context=None):
+            kwargs = {"loop": loop}
+            if context is not None:
+                kwargs["context"] = context
+            try:
+                task = asyncio.Task(coroutine, **kwargs)
+            except TypeError:
+                task = asyncio.Task(coroutine, loop=loop)
+            code = getattr(coroutine, "cr_code", None)
+            if getattr(code, "co_name", None) == "_run_deferred_finalizer":
+                task.cancel()
+            return task
+
+        loop.set_task_factory(cancel_finalizer_factory)
+        try:
+            if shared:
+                context = owner.lifespan(None)
+                await context.__aenter__()
+                await context.__aexit__(None, None, None)
+            else:
+                await runtime.shutdown()
+        finally:
+            loop.set_task_factory(default_factory)
+            release.set()
+            await asyncio.gather(
+                *runtime._pending_cleanup_snapshot(),
+                return_exceptions=True,
+            )
+        result = await runtime.shutdown()
+        assert result == {
+            "code": "SHUTDOWN_INCOMPLETE",
+            "failures": [
+                {"operation": "lifecycle", "exception": "CancelledError"},
+            ],
+        }
+        assert runtime.state == "closed"
+        if shared:
+            assert owner.state == "closed"
+
+    asyncio.run(exercise())
+    assert calls == ["settlement", "learning"]
+
+
 def test_closed_owner_loop_watcher_publishes_fixed_failure_and_closes_owner():
     calls: list[str] = []
     runtime = RuntimeLifecycle(
@@ -838,6 +908,58 @@ def test_closed_owner_loop_watcher_publishes_fixed_failure_and_closes_owner():
     assert runtime.state == "closed"
     assert owner.state == "closed"
     assert calls == []
+
+
+def test_force_closed_owner_loop_detaches_reported_tasks_without_diagnostics():
+    diagnostics: list[dict] = []
+    calls: list[str] = []
+    loop = asyncio.new_event_loop()
+    loop.set_exception_handler(lambda _loop, context: diagnostics.append(context))
+    release = asyncio.Event()
+
+    async def domain():
+        while not release.is_set():
+            try:
+                await release.wait()
+            except asyncio.CancelledError:
+                continue
+
+    runtime = RuntimeLifecycle(
+        domain_shutdown=domain,
+        settlement_wait=lambda: calls.append("settlement") or True,
+        learning_close=lambda: calls.append("learning"),
+        connection_shutdown=lambda: calls.append("connection"),
+        executor_shutdown=lambda: calls.append("executor"),
+        timeout_s=0.02,
+    )
+
+    try:
+        first = loop.run_until_complete(runtime.shutdown())
+        assert first["failures"][0]["exception"] == "PendingCleanupError"
+        watcher = runtime._loop_watcher
+        assert watcher is not None
+    finally:
+        loop.close()
+
+    final = runtime.finalization_future.result(timeout=1)
+    watcher.join(timeout=1)
+    gc.collect()
+
+    assert final == {
+        "code": "SHUTDOWN_INCOMPLETE",
+        "failures": [
+            {"operation": "lifecycle", "exception": "EventLoopClosedError"},
+        ],
+    }
+    assert not watcher.is_alive()
+    assert runtime.state == "closed"
+    assert runtime._finalizer_task is None
+    assert runtime.pending_cleanup_count == 0
+    assert calls == ["settlement", "learning"]
+    assert not any(
+        "Task was destroyed" in str(context.get("message", ""))
+        for context in diagnostics
+    )
 
 
 def test_last_lifespan_exit_defers_repeated_cancellation_until_shutdown_finishes():
