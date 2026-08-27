@@ -474,6 +474,8 @@ def test_real_tool_shutdown_helper_propagates_pending_cleanup_to_runtime(
             }
             assert runtime.pending_cleanup_count == 1
             assert runtime.state == "closing"
+            assert runtime._finalizer_task is not None
+            assert runtime._finalizer_started.is_set()
             assert getattr(module, service_name) is service
             assert released_leases == []
         finally:
@@ -708,12 +710,29 @@ def test_shared_lifespan_stays_closing_until_deferred_runtime_finalization():
         await context.__aexit__(None, None, None)
         assert owner.state == "closing"
         assert runtime.state == "closing"
+        cancelled_waiter = runtime.finalization_future
+        independent_waiter = runtime.finalization_future
+        with pytest.raises(RuntimeError, match="FINALIZATION_FUTURE_READ_ONLY"):
+            independent_waiter.set_result(
+                {"code": "FORGED", "failures": []}
+            )
+        waiters_are_independent = cancelled_waiter is not independent_waiter
+        waiter_cancelled = cancelled_waiter.cancel()
+        peer_was_cancelled = independent_waiter.cancelled()
+        peer_was_done = independent_waiter.done()
+        state_after_waiter_cancel = owner.state
         rejected = owner.lifespan(None)
         with pytest.raises(RuntimeError, match="RUNTIME_CLOSING"):
             await rejected.__aenter__()
         release.set()
+        await asyncio.sleep(0.1)
+        assert waiters_are_independent
+        assert waiter_cancelled
+        assert not peer_was_cancelled
+        assert not peer_was_done
+        assert state_after_waiter_cancel == "closing"
         await asyncio.wait_for(
-            asyncio.wrap_future(runtime.finalization_future),
+            asyncio.wrap_future(independent_waiter),
             timeout=1,
         )
         for _ in range(20):
@@ -734,6 +753,91 @@ def test_shared_lifespan_stays_closing_until_deferred_runtime_finalization():
         "connection",
         "executor",
     ]
+
+
+def test_cancelled_deferred_finalizer_publishes_failure_and_closes_owner():
+    release = asyncio.Event()
+    calls: list[str] = []
+
+    async def domain():
+        while not release.is_set():
+            try:
+                await release.wait()
+            except asyncio.CancelledError:
+                continue
+
+    runtime = RuntimeLifecycle(
+        domain_shutdown=domain,
+        settlement_wait=lambda: calls.append("settlement") or True,
+        learning_close=lambda: calls.append("learning"),
+        connection_shutdown=lambda: calls.append("connection"),
+        executor_shutdown=lambda: calls.append("executor"),
+        timeout_s=0.02,
+    )
+    owner = SharedRuntimeLifespan(runtime)
+
+    async def exercise():
+        context = owner.lifespan(None)
+        await context.__aenter__()
+        await context.__aexit__(None, None, None)
+        assert owner.state == "closing"
+        finalizer = runtime._finalizer_task
+        assert finalizer is not None
+        finalizer.cancel()
+        await finalizer
+        final = await asyncio.wrap_future(runtime.finalization_future)
+        assert final == {
+            "code": "SHUTDOWN_INCOMPLETE",
+            "failures": [
+                {"operation": "lifecycle", "exception": "CancelledError"},
+            ],
+        }
+        assert owner.state == "closed"
+        assert calls == ["settlement", "learning"]
+        release.set()
+        await asyncio.gather(
+            *runtime._pending_cleanup_snapshot(),
+            return_exceptions=True,
+        )
+
+    asyncio.run(exercise())
+
+
+def test_closed_owner_loop_watcher_publishes_fixed_failure_and_closes_owner():
+    calls: list[str] = []
+    runtime = RuntimeLifecycle(
+        domain_shutdown=lambda: None,
+        settlement_wait=lambda: True,
+        learning_close=lambda: None,
+        connection_shutdown=lambda: calls.append("connection"),
+        executor_shutdown=lambda: calls.append("executor"),
+    )
+    owner = SharedRuntimeLifespan(runtime)
+
+    class ClosedLoop:
+        @staticmethod
+        def is_closed():
+            return True
+
+    with runtime._state_lock:
+        runtime._state = "closing"
+        runtime._deferred = True
+        runtime._owner_loop = ClosedLoop()
+    with owner._lock:
+        owner._state = "closing"
+    owner._close_or_follow_deferred_finalization()
+    runtime._start_loop_watcher()
+
+    result = runtime.finalization_future.result(timeout=1)
+    assert result == {
+        "code": "SHUTDOWN_INCOMPLETE",
+        "failures": [
+            {"operation": "lifecycle", "exception": "EventLoopClosedError"},
+        ],
+    }
+    assert runtime.state == "closed"
+    assert owner.state == "closed"
+    assert calls == []
 
 
 def test_last_lifespan_exit_defers_repeated_cancellation_until_shutdown_finishes():
