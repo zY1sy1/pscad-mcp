@@ -1,5 +1,6 @@
 from pscad_mcp.hvdc.builders.mmc.scenarios import recommend_scenarios
 from pscad_mcp.hvdc.scenarios import validate_scenario
+from pscad_mcp.hvdc.profiles import bind_profile_project, load_profile
 from tests.mmc_parametric_fakes import avm_design, pwm_design
 
 
@@ -74,3 +75,22 @@ def test_recommendations_bind_exact_units_metrics_and_timing() -> None:
             assert all(metric["selector"] and metric["units"] for metric in item.metrics)
             assert item.thresholds
             assert item.preconditions
+
+
+def test_recommendation_metrics_use_bound_profile_result_selectors() -> None:
+    target = "D:/workspace/CUSTOM_CASE_avm.pscx"
+    recommendation = recommend_scenarios(
+        avm_design(), derived_project=target
+    )[0]
+    profile = bind_profile_project(
+        load_profile(recommendation.scenario["profile"]), target
+    )
+    expected = {
+        channel["canonical"]: channel["path"]
+        for channel in profile["result_channels"]
+    }
+
+    assert all(
+        metric["selector"] == expected[metric["role"]]
+        for metric in recommendation.metrics
+    )

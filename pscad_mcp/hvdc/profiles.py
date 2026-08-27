@@ -52,6 +52,7 @@ def _mmc_v2_profile(project: str, fidelity: str) -> dict[str, Any]:
     )
     return {
         "profile_version": 2,
+        "project_binding": "derived_project_stem",
         "required_assets": [],
         "topology_constraints": {
             "family": "mmc",
@@ -545,6 +546,45 @@ def _merge_profile(base: dict[str, Any], profile: dict[str, Any]) -> dict[str, A
         else:
             merged["metric_roles"] = {**deepcopy(base_roles), **deepcopy(profile_roles)}
     return merged
+
+
+def bind_profile_project(
+    profile: dict[str, Any], derived_project: str | Path
+) -> dict[str, Any]:
+    """Bind an explicitly project-qualified profile to one resolved target."""
+
+    bound = deepcopy(profile)
+    binding = bound.get("project_binding")
+    if binding is None:
+        return bound
+    if binding != "derived_project_stem":
+        raise _invalid(
+            "Unsupported project_binding contract.",
+            str(binding),
+            "bind_profile_project",
+        )
+    project_stem = Path(derived_project).stem
+    if not project_stem:
+        raise _invalid(
+            "A project-bound profile requires a non-empty derived project stem.",
+            "",
+            "bind_profile_project",
+        )
+    for fingerprint in bound.get("project_fingerprints", []):
+        if isinstance(fingerprint, dict) and "project_stem" in fingerprint:
+            fingerprint["project_stem"] = project_stem
+    for channel in bound.get("result_channels", []):
+        if not isinstance(channel, dict) or not isinstance(channel.get("path"), str):
+            continue
+        _, separator, remainder = channel["path"].partition("/")
+        if not separator or not remainder:
+            raise _invalid(
+                "A project-bound result channel must use a project-qualified path.",
+                project_stem,
+                "bind_profile_project",
+            )
+        channel["path"] = f"{project_stem}/{remainder}"
+    return bound
 
 
 def list_profiles(workspace_root: str | Path | None = None) -> list[str]:

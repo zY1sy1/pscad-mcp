@@ -23,7 +23,7 @@ from .builders.lcc.modes import (
     preflight_lcc_switching,
 )
 from .preflight import preflight_scenario
-from .profiles import load_profile
+from .profiles import bind_profile_project, load_profile
 from .scanner import scan_project
 
 
@@ -947,6 +947,8 @@ async def run_scenario(
             target_project = await _resolve_target_project(service, project_name, str(normalized["derived_project"]))
         elif _is_path_like(target_project):
             target_project = str(service._resolve_mutation_project(target_project))
+        profile_data = bind_profile_project(profile_data, target_project)
+        normalized["profile_data"] = profile_data
         topology_constraints = profile_data.get("topology_constraints", {})
         event_modes = [
             str(item.get("target"))

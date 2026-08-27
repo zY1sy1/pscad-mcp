@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from ....core.backend.base import BackendError
+from ...profiles import bind_profile_project, load_profile
 from .parametric_models import MmcDerivedParameters, MmcScenarioRecommendation
 
 
@@ -190,6 +191,11 @@ def recommend_scenarios(
         )
     else:
         source_project = f"{target_project}_scenario_source"
+    profile_data = bind_profile_project(load_profile(profile), target_project)
+    result_selectors = {
+        item["canonical"]: item["path"]
+        for item in profile_data["result_channels"]
+    }
     limitations = (
         "half_bridge_intrinsic_dc_fault_blocking=false",
         "dc_fault_acceptance_requires_diode_equivalent_current_and_breaker_evidence",
@@ -208,7 +214,7 @@ def recommend_scenarios(
         metrics = tuple(
             {
                 "role": role,
-                "selector": f"{Path(target_project).stem}/Main/{role}",
+                "selector": result_selectors[role],
                 "units": _UNITS[role],
             }
             for role in roles
