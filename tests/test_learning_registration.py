@@ -6,6 +6,7 @@ from typing import Any
 
 import pytest
 from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp.exceptions import ToolError
 from mcp.types import CallToolResult
 
 from pscad_mcp.core.backend.base import BackendError
@@ -110,6 +111,88 @@ def test_native_same_name_tool_is_not_replaced_or_recorded(catalog_test_tool):
         register_tool(server, replacement_tool, recorder=recorder)
 
     assert server._tool_manager.get_tool("native_conflict") is original
+    assert getattr(server, "_pscad_registered_tool_names", set()) == set()
+    assert recorder.names == []
+    assert recorder.events == []
+
+
+def test_postprocessing_failure_rolls_back_and_allows_same_name_retry(
+    catalog_test_tool,
+    monkeypatch,
+):
+    async def partial_registration() -> str:
+        return "registered"
+
+    catalog_test_tool(partial_registration)
+    recorder = ScalarRecorder()
+    server = FastMCP("postprocessing-rollback")
+    original_get_tool = server._tool_manager.get_tool
+    original_remove_tool = server.remove_tool
+    lookup_count = 0
+
+    def fail_after_add(name):
+        nonlocal lookup_count
+        lookup_count += 1
+        if lookup_count == 2:
+            monkeypatch.setattr(
+                server._tool_manager,
+                "get_tool",
+                original_get_tool,
+            )
+            raise RuntimeError("postprocessing failed")
+        return original_get_tool(name)
+
+    def remove_then_report_missing(name):
+        original_remove_tool(name)
+        raise ToolError(f"Unknown tool: {name}")
+
+    monkeypatch.setattr(server._tool_manager, "get_tool", fail_after_add)
+    monkeypatch.setattr(server, "remove_tool", remove_then_report_missing)
+
+    with pytest.raises(RuntimeError, match="^postprocessing failed$"):
+        register_tool(server, partial_registration, recorder=recorder)
+
+    assert original_get_tool("partial_registration") is None
+    assert getattr(server, "_pscad_registered_tool_names", set()) == set()
+    assert recorder.names == []
+    assert recorder.events == []
+
+    register_tool(server, partial_registration, recorder=recorder)
+    assert original_get_tool("partial_registration") is not None
+    assert recorder.names == ["partial_registration"]
+
+
+def test_missing_post_add_tool_is_a_bounded_registration_failure(
+    catalog_test_tool,
+    monkeypatch,
+):
+    async def missing_post_add() -> str:
+        return "registered"
+
+    catalog_test_tool(missing_post_add)
+    recorder = ScalarRecorder()
+    server = FastMCP("missing-post-add")
+    original_get_tool = server._tool_manager.get_tool
+    lookup_count = 0
+
+    def hide_after_add(name):
+        nonlocal lookup_count
+        lookup_count += 1
+        if lookup_count == 2:
+            monkeypatch.setattr(
+                server._tool_manager,
+                "get_tool",
+                original_get_tool,
+            )
+            return None
+        return original_get_tool(name)
+
+    monkeypatch.setattr(server._tool_manager, "get_tool", hide_after_add)
+
+    with pytest.raises(RuntimeError, match="^missing_post_add$"):
+        register_tool(server, missing_post_add, recorder=recorder)
+
+    assert original_get_tool("missing_post_add") is None
     assert getattr(server, "_pscad_registered_tool_names", set()) == set()
     assert recorder.names == []
     assert recorder.events == []

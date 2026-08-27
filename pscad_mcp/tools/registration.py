@@ -168,35 +168,43 @@ def _json_safe_copy(value: Any, seen: set[int] | None = None) -> Any:
 
 def _register_with_original_result(mcp: FastMCP, guarded: Callable[..., Any]) -> None:
     # FastMCP validates and then model-dumps structured output, which copies JSON-safe values.
-    spec = TOOL_SPECS[guarded.__name__]
-    mcp.add_tool(
-        guarded,
-        description=spec.description,
-        annotations=spec.annotations(),
-    )
-    tool = mcp._tool_manager.get_tool(guarded.__name__)
-    if tool is None:
-        return
-    convert_result = tool.fn_metadata.convert_result
+    name = guarded.__name__
+    spec = TOOL_SPECS[name]
+    try:
+        mcp.add_tool(
+            guarded,
+            description=spec.description,
+            annotations=spec.annotations(),
+        )
+        tool = mcp._tool_manager.get_tool(name)
+        if tool is None:
+            raise RuntimeError(name)
+        convert_result = tool.fn_metadata.convert_result
 
-    def preserve_result(result: Any) -> Any:
-        converted = convert_result(result)
-        if (
-            tool.fn_metadata.output_schema is not None
-            and isinstance(converted, tuple)
-            and len(converted) == 2
-        ):
-            unstructured, structured = converted
-            structured = _json_safe_copy(structured)
-            if tool.fn_metadata.wrap_output:
-                if _is_json_safe(result):
-                    structured["result"] = result
-            elif _is_json_safe(result):
-                structured = result
-            return unstructured, structured
-        return converted
+        def preserve_result(result: Any) -> Any:
+            converted = convert_result(result)
+            if (
+                tool.fn_metadata.output_schema is not None
+                and isinstance(converted, tuple)
+                and len(converted) == 2
+            ):
+                unstructured, structured = converted
+                structured = _json_safe_copy(structured)
+                if tool.fn_metadata.wrap_output:
+                    if _is_json_safe(result):
+                        structured["result"] = result
+                elif _is_json_safe(result):
+                    structured = result
+                return unstructured, structured
+            return converted
 
-    object.__setattr__(tool.fn_metadata, "convert_result", preserve_result)
+        object.__setattr__(tool.fn_metadata, "convert_result", preserve_result)
+    except Exception:
+        try:
+            mcp.remove_tool(name)
+        except Exception:
+            pass
+        raise
 
 
 def _is_call_tool_result(annotation: Any) -> bool:
