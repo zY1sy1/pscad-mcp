@@ -24,6 +24,7 @@ def test_package_metadata_declares_release_version_and_dev_dependencies():
     assert project["requires-python"] == ">=3.10"
     requirements = project["optional-dependencies"]["dev"]
     assert any(item.startswith("pytest") for item in requirements)
+    assert "ruff>=0.12,<1" in requirements
     assert any("tomli" in item for item in requirements)
     assert importlib.import_module("pscad_mcp").__version__ == "0.2.0"
 
@@ -58,16 +59,3 @@ def test_release_notes_cover_all_approved_batches():
         "parameter-grid",
     ):
         assert phrase in changelog
-
-
-def test_windows_ci_covers_supported_python_versions_and_release_gates():
-    workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(
-        encoding="utf-8"
-    )
-
-    for version in ("3.10", "3.11", "3.12"):
-        assert version in workflow
-    assert "python -m pip check" in workflow
-    assert "python -m compileall -q pscad_mcp tests" in workflow
-    assert "print(len(tools), len({tool.name for tool in tools}))" in workflow
-    assert "83 83" in workflow

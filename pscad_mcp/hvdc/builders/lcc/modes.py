@@ -169,7 +169,8 @@ def derive_mode_copies(base_plan: Any, modes: Sequence[str]) -> tuple[ModeCopy, 
                     mode=mode,
                     reason="evidence_root_invalid",
                 )
-            plan["evidence_directory"] = f"{evidence_root.rstrip('/\\\\')}/{mode}"
+            evidence_root = evidence_root.rstrip("/\\")
+            plan["evidence_directory"] = f"{evidence_root}/{mode}"
         copies.append(ModeCopy(mode, _freeze(plan)))
     return tuple(copies)
 

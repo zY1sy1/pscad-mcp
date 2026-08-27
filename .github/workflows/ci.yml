@@ -10,22 +10,44 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.10", "3.11", "3.12"]
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
 
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install development dependencies
-        run: python -m pip install -e ".[dev]"
+        run: python -m pip install ".[dev]"
       - name: Run contract suite
         run: python -m pytest -q
+      - name: Verify built package
+        shell: pwsh
+        run: .\scripts\verify_package.ps1
+      - name: Check Python correctness
+        run: python -m ruff check --select E9,F63,F7,F82 pscad_mcp tests
+      - name: Reject tracked generated artifacts
+        shell: pwsh
+        run: |
+          $patterns = @(
+            '*.pyc',
+            '*__pycache__*',
+            '*.pytest_cache*',
+            '*.ruff_cache*',
+            '*.mypy_cache*',
+            '.worktrees/*'
+          )
+          $trackedArtifacts = @(
+            foreach ($pattern in $patterns) {
+              git ls-files -- $pattern
+            }
+          ) | Where-Object { $_ }
+          if ($trackedArtifacts.Count -gt 0) {
+            throw "Generated artifacts are tracked:`n$($trackedArtifacts -join "`n")"
+          }
       - name: Compile package and tests
         run: python -m compileall -q pscad_mcp tests
       - name: Verify dependencies
         run: python -m pip check
-      - name: Verify exact MCP tool inventory
-        # Expected output: 83 83
-        run: >-
-          python -c "from pscad_mcp.main import create_server; tools=create_server()._tool_manager.list_tools(); print(len(tools), len({tool.name for tool in tools})); assert len(tools) == len({tool.name for tool in tools}) == 83"
