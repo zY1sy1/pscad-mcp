@@ -142,6 +142,23 @@ def test_component_deletion_is_catalogued_as_destructive():
     assert deletion.destructive is True
 
 
+@pytest.mark.parametrize(
+    ("tool_name", "field", "expected"),
+    [
+        ("set_component_location", "idempotent", True),
+        ("get_lcc_build_status", "open_world", True),
+        ("validate_lcc_model", "backend_support", frozenset()),
+        ("plan_parametric_lcc_model", "backend_support", frozenset()),
+    ],
+)
+def test_capability_metadata_matches_verified_execution_boundaries(
+    tool_name,
+    field,
+    expected,
+):
+    assert getattr(TOOL_SPECS[tool_name], field) == expected
+
+
 def test_registration_rejects_duplicate_and_uncatalogued_primary_tools():
     server = FastMCP("catalog-contract")
     register_tool(server, list_projects, record_learning=False)

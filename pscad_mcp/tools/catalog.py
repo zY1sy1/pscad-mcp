@@ -423,6 +423,7 @@ COMPATIBILITY_TOOL_SPECS = MappingProxyType(
         "set_component_location": _spec(
             "set_component_location",
             "Move a component to a grid location.",
+            idempotent=True,
         ),
         "rotate_component": _spec(
             "rotate_component",
@@ -536,7 +537,6 @@ COMPATIBILITY_TOOL_SPECS = MappingProxyType(
             "Get the current status and evidence for a fixed LCC model build.",
             read_only=True,
             idempotent=True,
-            open_world=False,
             backend_support=_SERVER_LOCAL,
         ),
         "validate_lcc_model": _spec(
@@ -544,6 +544,7 @@ COMPATIBILITY_TOOL_SPECS = MappingProxyType(
             "Validate a fixed LCC model and optional output evidence.",
             read_only=True,
             idempotent=True,
+            backend_support=_SERVER_LOCAL,
         ),
         "derive_lcc_parameters": _spec(
             "derive_lcc_parameters",
@@ -565,6 +566,7 @@ COMPATIBILITY_TOOL_SPECS = MappingProxyType(
             "Plan a parameterized LCC model build without changing the workspace.",
             read_only=True,
             idempotent=True,
+            backend_support=_SERVER_LOCAL,
         ),
         "build_parametric_lcc_model": _spec(
             "build_parametric_lcc_model",
