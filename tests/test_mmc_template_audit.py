@@ -56,3 +56,17 @@ def test_installed_example_contract_is_read_only() -> None:
     assert before == (sha256(project), sha256(library))
     if os.environ.get("PSCAD_MCP_MMC_ACCEPTANCE") == "1":
         assert report["pscad_version"] == "4.6.2"
+
+
+def test_installed_example_exposes_station_and_pwm_hierarchy_roles() -> None:
+    try:
+        project, library = discover_official_mmc_template()
+    except BackendError as error:
+        if error.code == "MMC_TEMPLATE_NOT_FOUND":
+            pytest.skip("PSCAD 4.6 MMC example is not installed")
+        raise
+    report = audit_mmc_template(project, library)
+    roles = {item["role"] for item in report["role_bindings"]}
+    assert report["compatible"] is True
+    assert {"station_p", "station_vdc"} <= roles
+    assert len([role for role in roles if role.startswith("pwm_converter_")]) >= 2

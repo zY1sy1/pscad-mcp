@@ -136,6 +136,14 @@ def _parameters(component: ET.Element) -> tuple[tuple[str, str], ...]:
     return tuple(result)
 
 
+def _hierarchy_call_names(root: ET.Element) -> tuple[str, ...]:
+    return tuple(
+        _text(element.attrib.get("name"))
+        for element in root.iter()
+        if _name(element.tag) == "call" and _text(element.attrib.get("name"))
+    )
+
+
 def _is_absolute(value: str) -> bool:
     return Path(value).is_absolute() or PureWindowsPath(value).is_absolute() or bool(re.match(r"^[A-Za-z]:[\\/]", value))
 
@@ -181,12 +189,26 @@ def build_template_audit(project: Path, library: Path) -> MmcTemplateAudit:
     absolute_paths: list[dict[str, object]] = []
     pwm_count = 0
     station_roles: set[str] = set()
+    hierarchy_calls = _hierarchy_call_names(project_root)
+    has_station_hierarchy = sum(
+        name.rsplit(":", 1)[-1].casefold() == "station" for name in hierarchy_calls
+    ) == 1
+    converter_hierarchy_count = sum(
+        name.rsplit(":", 1)[-1].casefold() == "vscconverter" for name in hierarchy_calls
+    )
     for index, component in enumerate(_components(project_root)):
         owner = _text(component.attrib.get("id")) or f"component-{index}"
         component_name = _text(component.attrib.get("name"))
         definition = _text(component.attrib.get("definition") or component.attrib.get("defn") or component.attrib.get("type"))
         description = f"{component_name} {definition}".casefold()
         role = "station_p" if "station_p" in description else "station_vdc" if "station_vdc" in description else ""
+        if not role and definition.rsplit(":", 1)[-1].casefold() == "vscconverter":
+            parameter_values = dict(_parameters(component))
+            mode = parameter_values.get("dmode", "").strip()
+            if mode == "0":
+                role = "station_vdc"
+            elif mode == "1":
+                role = "station_p"
         if role:
             station_roles.add(role)
             roles.append({"role": role, "owner": owner, "definition": definition})
@@ -215,6 +237,10 @@ def build_template_audit(project: Path, library: Path) -> MmcTemplateAudit:
         version == "4.6.2"
         and station_roles == {"station_p", "station_vdc"}
         and pwm_count >= 2
+        and (
+            not hierarchy_calls
+            or (has_station_hierarchy and converter_hierarchy_count >= 2)
+        )
         and any(library_namespace.casefold() in item.casefold() for item in definitions)
     )
     warnings: list[str] = []
