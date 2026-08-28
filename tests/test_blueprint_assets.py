@@ -14,7 +14,7 @@ from pscad_mcp.builders.blueprint.assets import (
 from pscad_mcp.builders.blueprint.schema import parse_blueprint
 from pscad_mcp.core.backend.base import BackendError
 from pscad_mcp.core.path_policy import PathPolicy
-from test_blueprint_schema import valid_blueprint
+from tests.test_blueprint_schema import valid_blueprint
 
 
 def write_source_package(root: Path) -> Path:

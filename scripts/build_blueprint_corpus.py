@@ -10,6 +10,10 @@ import sys
 import tempfile
 from typing import Any, Sequence
 
+# Keep direct ``python scripts/build_blueprint_corpus.py`` invocation working.
+if __package__ in (None, ""):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 from pscad_mcp.builders.blueprint.corpus_extractor import extract_project
 from pscad_mcp.builders.blueprint.corpus_models import CorpusSpec, ProjectGraph
 from pscad_mcp.builders.blueprint.corpus_schema import parse_corpus_spec

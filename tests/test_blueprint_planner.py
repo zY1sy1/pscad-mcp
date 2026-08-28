@@ -11,8 +11,8 @@ from pscad_mcp.builders.blueprint.inventory import normalize_inventory
 from pscad_mcp.builders.blueprint.planner import create_plan, plan_from_dict
 from pscad_mcp.core.backend.base import BackendError
 from pscad_mcp.core.path_policy import PathPolicy
-from test_blueprint_assets import write_source_package
-from test_blueprint_schema import valid_blueprint
+from tests.test_blueprint_assets import write_source_package
+from tests.test_blueprint_schema import valid_blueprint
 
 
 def live_inventory() -> dict:

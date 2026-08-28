@@ -6,16 +6,16 @@ from pathlib import Path
 
 import pytest
 
-from blueprint_builder_fakes import RecordingBlueprintPscadService
+from tests.blueprint_builder_fakes import RecordingBlueprintPscadService
 from pscad_mcp.builders.blueprint.assets import hash_tree, load_blueprint_asset
 from pscad_mcp.builders.blueprint.executor import execute_build
 from pscad_mcp.builders.blueprint.inventory import normalize_inventory
 from pscad_mcp.builders.blueprint.models import BlueprintBuildState
 from pscad_mcp.builders.blueprint.planner import create_plan
 from pscad_mcp.core.path_policy import PathPolicy
-from test_blueprint_assets import write_source_package
-from test_blueprint_planner import live_inventory, plan
-from test_blueprint_schema import valid_blueprint
+from tests.test_blueprint_assets import write_source_package
+from tests.test_blueprint_planner import live_inventory, plan
+from tests.test_blueprint_schema import valid_blueprint
 
 
 def full_blueprint() -> dict:

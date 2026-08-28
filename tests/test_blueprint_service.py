@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from blueprint_builder_fakes import RecordingBlueprintPscadService
+from tests.blueprint_builder_fakes import RecordingBlueprintPscadService
 from pscad_mcp.builders.blueprint import journal as journal_module
 from pscad_mcp.builders.blueprint.executor import execute_build
 from pscad_mcp.builders.blueprint.journal import WorkspaceBuildLease
@@ -15,9 +15,9 @@ from pscad_mcp.builders.blueprint.service import BlueprintBuilderService
 from pscad_mcp.core.backend.base import BackendError
 from pscad_mcp.core.path_policy import PathPolicy
 from pscad_mcp.core.service import ConfirmationRequired
-from test_blueprint_assets import write_source_package
-from test_blueprint_planner import live_inventory
-from test_blueprint_schema import valid_blueprint
+from tests.test_blueprint_assets import write_source_package
+from tests.test_blueprint_planner import live_inventory
+from tests.test_blueprint_schema import valid_blueprint
 
 
 class ServicePscadFake(RecordingBlueprintPscadService):

@@ -4,8 +4,8 @@ import json
 from pathlib import Path
 
 from pscad_mcp.builders.blueprint.validator import inspect_project_file, validate_staging, write_validation_report
-from test_blueprint_planner import plan
-from test_blueprint_schema import valid_blueprint
+from tests.test_blueprint_planner import plan
+from tests.test_blueprint_schema import valid_blueprint
 
 
 def write_staging_project(root: Path, *, definition="master:breaker", parameter="BRK_COPY") -> Path:
