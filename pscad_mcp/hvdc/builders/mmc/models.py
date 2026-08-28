@@ -30,6 +30,16 @@ class MmcBuildState(str, Enum):
     INTERRUPTED = "interrupted"
 
 
+class SubmoduleTopology(str, Enum):
+    FULL_BRIDGE = "full_bridge"
+    HALF_BRIDGE = "half_bridge"
+
+    @classmethod
+    def capabilities(cls, topology: SubmoduleTopology | str) -> dict[str, bool]:
+        selected = cls(topology)
+        return {"intrinsic_dc_fault_blocking": selected is cls.FULL_BRIDGE}
+
+
 def _tuple(value: Any) -> tuple[Any, ...]:
     if value is None:
         return ()
@@ -264,4 +274,5 @@ __all__ = [
     "MmcPlanOperation",
     "MmcSequencePhase",
     "MmcStationSpec",
+    "SubmoduleTopology",
 ]

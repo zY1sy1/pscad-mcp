@@ -4,6 +4,7 @@ from .journal import AtomicJournal, WorkspaceBuildLease
 from .records import JsonRecord, freeze
 from .routing import absolute_port, route_intersects_rectangles, transform_offset, validate_orthogonal_route
 from .serialization import canonical_json, content_hash, json_safe
+from .blank import BlankProjectFactory, ComponentLibraryResolver, DefinitionResolution
 
 __all__ = [
     "AtomicJournal",
@@ -17,4 +18,7 @@ __all__ = [
     "route_intersects_rectangles",
     "transform_offset",
     "validate_orthogonal_route",
+    "BlankProjectFactory",
+    "ComponentLibraryResolver",
+    "DefinitionResolution",
 ]

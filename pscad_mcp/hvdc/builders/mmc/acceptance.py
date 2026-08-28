@@ -10,7 +10,7 @@ from typing import Any
 
 from ..common.records import JsonRecord, freeze
 from .electrical import arm_currents, arm_energy, clip_modulation
-from .models import MmcAcceptanceCheck
+from .models import MmcAcceptanceCheck, SubmoduleTopology
 
 
 class AcceptanceState(str, Enum):
@@ -590,6 +590,40 @@ def evaluate_acceptance(samples: Mapping[str, Any] | Sequence[Mapping[str, Any]]
 run_acceptance = evaluate_acceptance
 
 
+def evaluate_dc_fault_blocking(
+    evidence: Mapping[str, Any],
+    *,
+    topology: SubmoduleTopology | str = SubmoduleTopology.FULL_BRIDGE,
+) -> dict[str, Any]:
+    """Evaluate the explicit full-bridge DC-fault blocking contract."""
+
+    selected = SubmoduleTopology(topology)
+    if selected is SubmoduleTopology.HALF_BRIDGE:
+        return {
+            "verdict": "NOT_APPLICABLE",
+            "capabilities": selected.capabilities(selected),
+            "reason": "half_bridge does not claim intrinsic DC-fault blocking",
+        }
+    checks = {
+        "fault_applied": bool(evidence.get("fault_applied")),
+        "negative_voltage_inserted": bool(evidence.get("negative_voltage_inserted")),
+        "blocked": bool(evidence.get("blocked")),
+        "recovered": bool(evidence.get("recovered")),
+        "bounded_fault_current": False,
+    }
+    try:
+        peak = float(evidence.get("fault_current_peak_ka"))
+        limit = float(evidence.get("fault_current_limit_ka"))
+        checks["bounded_fault_current"] = math.isfinite(peak) and math.isfinite(limit) and 0 <= peak <= limit
+    except (TypeError, ValueError):
+        checks["bounded_fault_current"] = False
+    return {
+        "verdict": "PASS" if all(checks.values()) else "FAIL",
+        "capabilities": selected.capabilities(selected),
+        "checks": checks,
+    }
+
+
 __all__ = [
     "AcceptanceState",
     "AVM_LIMITATIONS",
@@ -606,6 +640,7 @@ __all__ = [
     "energy_consistency_check",
     "energy_profile_check",
     "evaluate_acceptance",
+    "evaluate_dc_fault_blocking",
     "modulation_check",
     "normalize_samples",
     "phase_kcl_check",
