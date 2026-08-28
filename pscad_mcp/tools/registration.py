@@ -10,10 +10,11 @@ import math
 import re
 import threading
 import time
-from typing import Any, ParamSpec, TypeVar, Union, get_type_hints
+from typing import Any, ParamSpec, TypeVar, Union, get_args, get_type_hints
 
 from mcp.server.fastmcp import FastMCP
 from mcp.types import CallToolResult
+from pydantic.fields import FieldInfo
 
 from ..core.connection_manager import pscad_manager
 from ..learning.models import InvocationOutcome
@@ -173,6 +174,13 @@ def _register_with_original_result(mcp: FastMCP, guarded: Callable[..., Any]) ->
         tool = mcp._tool_manager.get_tool(name)
         if tool is None:
             raise RuntimeError(name)
+        properties = tool.parameters.get("properties")
+        if isinstance(properties, dict):
+            for parameter in inspect.signature(guarded).parameters.values():
+                description = _annotation_description(parameter.annotation)
+                schema = properties.get(parameter.name)
+                if description and isinstance(schema, dict):
+                    schema.setdefault("description", description)
         convert_result = tool.fn_metadata.convert_result
 
         def preserve_result(result: Any) -> Any:
@@ -203,6 +211,14 @@ def _register_with_original_result(mcp: FastMCP, guarded: Callable[..., Any]) ->
 
 def _is_call_tool_result(annotation: Any) -> bool:
     return isinstance(annotation, type) and issubclass(annotation, CallToolResult)
+
+
+def _annotation_description(annotation: Any) -> str | None:
+    """Read a Field description from an Annotated parameter type."""
+    for metadata in get_args(annotation)[1:]:
+        if isinstance(metadata, FieldInfo) and isinstance(metadata.description, str):
+            return metadata.description
+    return None
 
 
 def register_tool(

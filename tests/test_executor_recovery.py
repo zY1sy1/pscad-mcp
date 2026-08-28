@@ -157,7 +157,9 @@ class TestExecutorRecovery(unittest.IsolatedAsyncioTestCase):
         try:
             self.assertTrue(await asyncio.to_thread(started.wait, 0.1))
             task.cancel()
-            await asyncio.sleep(0.05)
+            deadline = asyncio.get_running_loop().time() + 1.0
+            while not task.done() and asyncio.get_running_loop().time() < deadline:
+                await asyncio.sleep(0.01)
 
             self.assertTrue(task.done())
             self.assertEqual(executor.snapshot()["in_flight_calls"], 1)
