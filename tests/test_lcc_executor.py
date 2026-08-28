@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from pscad_mcp.hvdc.builders.lcc.executor import execute_build as _execute_build
+from pscad_mcp.hvdc.builders.lcc.executor import _legacy_project_settings
 from pscad_mcp.hvdc.builders.lcc.executor import LccExecutor
 from pscad_mcp.hvdc.builders.lcc.assets import load_packaged_asset_set
 from pscad_mcp.hvdc.builders.lcc.models import (
@@ -601,3 +602,21 @@ def test_execute_build_without_assets_cannot_fabricate_acceptance_pass(tmp_path)
     assert record.state.value == "failed"
     assert record.error["code"] == "LCC_ACCEPTANCE_FAILED"
     assert record.result["verdict"] == "INCOMPLETE_ANALYSIS"
+
+
+def test_legacy_project_settings_map_seconds_to_pscad_46_microseconds():
+    mapped = _legacy_project_settings(
+        {
+            "simulation_duration_s": 1.0,
+            "time_step_s": 0.00005,
+            "output_step_s": 0.00025,
+            "output_enabled": True,
+            "compiler_target": "fortran",
+        }
+    )
+    assert mapped == {
+        "time_duration": 1.0,
+        "time_step": 50,
+        "sample_step": 250,
+        "PlotType": 1,
+    }

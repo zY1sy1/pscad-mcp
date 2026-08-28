@@ -31,7 +31,11 @@ from ...topology.models import (
     TopologyPort,
     TopologySnapshot,
 )
-from ..definition_metadata import DefinitionMetadata, read_definition_metadata
+from ..definition_metadata import (
+    DefinitionMetadata,
+    master_definition_binding,
+    read_definition_metadata,
+)
 from ..process_inventory import bounded_process_records
 from ..pscad_adapter import PscadAdapter
 from .base import (
@@ -118,6 +122,9 @@ class LegacyBackend:
             for name, path in (definition_paths or {}).items()
         }
         self._component_orientations: dict[tuple[str, int], int] = {}
+        self._component_bindings: dict[
+            tuple[str, int], tuple[str, dict[str, str], dict[str, str]]
+        ] = {}
         self._topology_definition_cache: dict[
             tuple[str, str, str], DefinitionMetadata
         ] = {}
@@ -198,9 +205,7 @@ class LegacyBackend:
                 },
             )
 
-        display_name = (
-            f"PSCAD {self.version} ({'x64' if self.x64 else 'x86'})"
-        )
+        display_name = f"PSCAD {self.version} ({'x64' if self.x64 else 'x86'})"
 
         def launch() -> Any:
             return self.automation.launch_pscad(
@@ -222,11 +227,7 @@ class LegacyBackend:
             await self.executor.run_safe(self.process_probe)
         )
         managed_record = next(
-            (
-                item
-                for item in after_launch
-                if item["pid"] == self._managed_pid
-            ),
+            (item for item in after_launch if item["pid"] == self._managed_pid),
             None,
         )
         self._managed_executable = (
@@ -327,9 +328,7 @@ class LegacyBackend:
                 self.definition_paths[path.stem] = path
                 try:
                     tree = await asyncio.to_thread(ET.parse, path)
-                    project_name = (
-                        tree.getroot().get("name") or ""
-                    ).strip()
+                    project_name = (tree.getroot().get("name") or "").strip()
                 except (OSError, ET.ParseError):
                     project_name = ""
                 if project_name:
@@ -419,9 +418,7 @@ class LegacyBackend:
         return backup
 
     @staticmethod
-    def _restore_destination(
-        destination: Path, backup: Path | None
-    ) -> None:
+    def _restore_destination(destination: Path, backup: Path | None) -> None:
         if backup is None:
             destination.unlink(missing_ok=True)
         else:
@@ -433,34 +430,25 @@ class LegacyBackend:
     ) -> None:
         root = ET.parse(destination).getroot()
         if root.tag != "project":
-            raise ValueError(
-                f"Expected root <project> but found <{root.tag}>."
-            )
+            raise ValueError(f"Expected root <project> but found <{root.tag}>.")
         actual_kind = legacy_support.project_kind(root, destination.suffix)
         if actual_kind != kind:
-            raise ValueError(
-                f"Expected a {kind} project but found {actual_kind}."
-            )
+            raise ValueError(f"Expected a {kind} project but found {actual_kind}.")
         if root.get("name") != expected_name:
             raise ValueError("Rewritten project root identity is invalid.")
         if any(
-            output.get("name") != expected_name
-            for output in root.findall("./output")
+            output.get("name") != expected_name for output in root.findall("./output")
         ):
             raise ValueError("Rewritten project output identity is invalid.")
 
     async def _load_and_verify_project(
         self, destination: Path, kind: str, operation: str
     ) -> ProjectInfo:
-        await self.executor.run_safe(
-            self._require_app().load, str(destination)
-        )
+        await self.executor.run_safe(self._require_app().load, str(destination))
         expected_name = destination.stem
         expected_type = "Case" if kind == "case" else "Library"
         projects = await self.list_projects()
-        match = next(
-            (item for item in projects if item.name == expected_name), None
-        )
+        match = next((item for item in projects if item.name == expected_name), None)
         if match is None or match.type.casefold() != expected_type.casefold():
             raise BackendError(
                 "POSTCONDITION_FAILED",
@@ -482,9 +470,7 @@ class LegacyBackend:
         kind: str,
         operation: str,
     ) -> ProjectInfo:
-        temporary: Path | None = self._temporary_path(
-            destination, destination.suffix
-        )
+        temporary: Path | None = self._temporary_path(destination, destination.suffix)
         backup: Path | None = None
         replaced = False
         try:
@@ -492,18 +478,14 @@ class LegacyBackend:
             legacy_support.rewrite_template_identity(
                 temporary, temporary, destination.stem
             )
-            self._validate_rewritten_project(
-                temporary, kind, destination.stem
-            )
+            self._validate_rewritten_project(temporary, kind, destination.stem)
 
             backup = self._backup_destination(destination)
             os.replace(temporary, destination)
             temporary = None
             replaced = True
 
-            info = await self._load_and_verify_project(
-                destination, kind, operation
-            )
+            info = await self._load_and_verify_project(destination, kind, operation)
             if backup is not None:
                 backup.unlink(missing_ok=True)
                 backup = None
@@ -514,9 +496,7 @@ class LegacyBackend:
                 if backup is not None:
                     recovery_backup = backup
                     backup = None
-                    self._restore_destination(
-                        destination, recovery_backup
-                    )
+                    self._restore_destination(destination, recovery_backup)
                 else:
                     self._restore_destination(destination, None)
             raise
@@ -533,9 +513,7 @@ class LegacyBackend:
             raise ValueError("kind must be case or library.")
         destination = self._project_destination(filename, folder)
         self._require_project_suffix(destination, kind)
-        template_name = (
-            "empty_case.pscx" if kind == "case" else "empty_library.pslx"
-        )
+        template_name = "empty_case.pscx" if kind == "case" else "empty_library.pslx"
         template = (
             files("pscad_mcp")
             .joinpath("assets")
@@ -636,16 +614,22 @@ class LegacyBackend:
     async def get_timed_control_capabilities(self, project_name: str) -> dict[str, Any]:
         project = await self._project(project_name)
         return {
-            "native_schedule": callable(getattr(project, "schedule_timed_controls", None)),
+            "native_schedule": callable(
+                getattr(project, "schedule_timed_controls", None)
+            ),
             "simulation_clock": callable(getattr(project, "get_simulation_time", None)),
             "time_basis": "EMTDC",
         }
 
-    async def schedule_timed_controls(self, project_name: str, events: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    async def schedule_timed_controls(
+        self, project_name: str, events: Sequence[Mapping[str, Any]]
+    ) -> list[dict[str, Any]]:
         project = await self._project(project_name)
         provider = getattr(project, "schedule_timed_controls", None)
         if callable(provider):
-            values = await self.executor.run_safe(provider, [dict(event) for event in events])
+            values = await self.executor.run_safe(
+                provider, [dict(event) for event in events]
+            )
             if isinstance(values, (list, tuple)):
                 return [dict(item) for item in values if isinstance(item, MappingABC)]
         raise BackendError(
@@ -688,9 +672,7 @@ class LegacyBackend:
         target = await self._wait_for_pauseable_target(project_name)
         if target.status.casefold() == "paused":
             return
-        await self._run_control_command(
-            "ID_RIBBON_HOME_RUN_PAUSE", "pause_project"
-        )
+        await self._run_control_command("ID_RIBBON_HOME_RUN_PAUSE", "pause_project")
         self._paused_projects.add(project_name)
         await self._wait_for_project_state(
             project_name,
@@ -706,9 +688,7 @@ class LegacyBackend:
             backend=self.name,
             operation="stop_project",
         )
-        await self._run_control_command(
-            "ID_RIBBON_HOME_RUN_STOP", "stop_project"
-        )
+        await self._run_control_command("ID_RIBBON_HOME_RUN_STOP", "stop_project")
         self._paused_projects.discard(project_name)
         await self._wait_for_project_state(
             project_name,
@@ -728,9 +708,7 @@ class LegacyBackend:
             states[project.name] = await self.project_run_state(project.name)
         return states
 
-    async def _wait_for_pauseable_target(
-        self, project_name: str
-    ) -> RunState:
+    async def _wait_for_pauseable_target(self, project_name: str) -> RunState:
         deadline = time.monotonic() + self.PAUSE_READY_TIMEOUT
         while True:
             states = await self._case_run_states()
@@ -786,9 +764,7 @@ class LegacyBackend:
                 )
             await asyncio.sleep(self.RUN_CONTROL_POLL_INTERVAL)
 
-    async def _run_control_command(
-        self, command_id: str, operation: str
-    ) -> None:
+    async def _run_control_command(self, command_id: str, operation: str) -> None:
         app = self._require_app()
         command = await self.executor.run_safe(app._command_id_cmd, command_id)
         response = await self.executor.run_safe(command.execute)
@@ -800,7 +776,8 @@ class LegacyBackend:
 
     @staticmethod
     def _resolve_run_status_future(
-        future: asyncio.Future[Any], payload: tuple[Any, tuple[Any, ...], dict[str, Any]]
+        future: asyncio.Future[Any],
+        payload: tuple[Any, tuple[Any, ...], dict[str, Any]],
     ) -> None:
         if not future.done():
             future.set_result(payload)
@@ -886,9 +863,7 @@ class LegacyBackend:
         )
 
     @classmethod
-    def _run_state_values(
-        cls, value: Any, depth: int = 0
-    ) -> tuple[Any, Any]:
+    def _run_state_values(cls, value: Any, depth: int = 0) -> tuple[Any, Any]:
         missing = _RUN_STATE_MISSING
         if depth >= 4:
             return missing, missing
@@ -934,15 +909,19 @@ class LegacyBackend:
 
         if isinstance(value, MappingABC):
             try:
-                lowered = {
-                    str(key).casefold(): item for key, item in value.items()
-                }
+                lowered = {str(key).casefold(): item for key, item in value.items()}
             except Exception:
                 return missing, missing
             status = next(
                 (
                     lowered[key]
-                    for key in ("status", "state", "run-status", "run_status", "runstate")
+                    for key in (
+                        "status",
+                        "state",
+                        "run-status",
+                        "run_status",
+                        "runstate",
+                    )
                     if key in lowered
                 ),
                 missing,
@@ -960,9 +939,7 @@ class LegacyBackend:
             for index, item in enumerate(lowered.values()):
                 if index >= 16:
                     break
-                nested_status, nested_progress = cls._run_state_values(
-                    item, depth + 1
-                )
+                nested_status, nested_progress = cls._run_state_values(item, depth + 1)
                 if nested_status is not missing:
                     return nested_status, nested_progress
             return missing, missing
@@ -1025,9 +1002,9 @@ class LegacyBackend:
     async def project_run_state(self, project_name: str) -> RunState:
         project = await self._project(project_name)
         loop = asyncio.get_running_loop()
-        future: asyncio.Future[
-            tuple[Any, tuple[Any, ...], dict[str, Any]]
-        ] = loop.create_future()
+        future: asyncio.Future[tuple[Any, tuple[Any, ...], dict[str, Any]]] = (
+            loop.create_future()
+        )
 
         def receive(
             response: Any,
@@ -1035,9 +1012,7 @@ class LegacyBackend:
             **callback_kwargs: Any,
         ) -> None:
             payload = (response, callback_args, callback_kwargs)
-            loop.call_soon_threadsafe(
-                self._resolve_run_status_future, future, payload
-            )
+            loop.call_soon_threadsafe(self._resolve_run_status_future, future, payload)
 
         app = self._require_app()
 
@@ -1061,16 +1036,13 @@ class LegacyBackend:
                 {"project": project_name},
             ) from error
 
-        state = self._parse_run_state(
-            response, callback_args, callback_kwargs
-        )
+        state = self._parse_run_state(response, callback_args, callback_kwargs)
         observed_at = time.monotonic()
         if (
             state.status == "idle"
             and project_name in self._running_projects
             and project_name not in self._run_activity_seen
-            and time.monotonic()
-            - self._run_submitted_at.get(project_name, 0.0)
+            and time.monotonic() - self._run_submitted_at.get(project_name, 0.0)
             < self.RUN_START_GRACE
         ):
             return RunState("starting", state.progress)
@@ -1079,8 +1051,7 @@ class LegacyBackend:
             and project_name in self._running_projects
             and project_name in self._run_activity_seen
             and self._run_last_active_status.get(project_name) == "building"
-            and observed_at
-            - self._run_last_active_at.get(project_name, 0.0)
+            and observed_at - self._run_last_active_at.get(project_name, 0.0)
             < self.RUN_TRANSITION_GRACE
         ):
             return RunState(
@@ -1122,7 +1093,9 @@ class LegacyBackend:
         values = await self.executor.run_safe(method)
         return [str(value) for value in values]
 
-    async def lcc_definition_inventory(self, catalog: Mapping[str, Any]) -> dict[str, Any]:
+    async def lcc_definition_inventory(
+        self, catalog: Mapping[str, Any]
+    ) -> dict[str, Any]:
         """Read the requested Master definitions from the installed 4.6.2 library.
 
         Companion-library definitions are intentionally left to the service
@@ -1140,11 +1113,15 @@ class LegacyBackend:
         values = catalog.get("definitions", ())
         if isinstance(values, Mapping):
             entries = list(values.items())
-        elif isinstance(values, Sequence) and not isinstance(values, (str, bytes, bytearray)):
+        elif isinstance(values, Sequence) and not isinstance(
+            values, (str, bytes, bytearray)
+        ):
             entries = []
             for item in values:
                 if isinstance(item, Mapping):
-                    name = item.get("scoped_name", item.get("definition", item.get("name")))
+                    name = item.get(
+                        "scoped_name", item.get("definition", item.get("name"))
+                    )
                     entries.append((name, item))
         else:
             entries = []
@@ -1163,15 +1140,28 @@ class LegacyBackend:
             )
 
         definitions: dict[str, dict[str, Any]] = {}
-        for scoped_name, _item in entries:
+        for scoped_name, item in entries:
             if not isinstance(scoped_name, str) or ":" not in scoped_name:
                 continue
             scope, definition_name = scoped_name.split(":", 1)
             if scope.casefold() != "master":
                 continue
+            metadata_contract = (
+                item.get("metadata", {}) if isinstance(item, Mapping) else {}
+            )
+            physical_name = (
+                metadata_contract.get("master_definition")
+                if isinstance(metadata_contract, Mapping)
+                else None
+            )
+            if not isinstance(physical_name, str) or not physical_name:
+                try:
+                    physical_name = master_definition_binding(scoped_name).definition
+                except KeyError:
+                    physical_name = definition_name
             try:
                 metadata = await asyncio.to_thread(
-                    read_definition_metadata, master_path, definition_name
+                    read_definition_metadata, master_path, physical_name
                 )
             except (OSError, ET.ParseError, KeyError) as error:
                 raise BackendError(
@@ -1181,16 +1171,33 @@ class LegacyBackend:
                     "lcc_definition_inventory",
                     {"definition": scoped_name, "path": str(master_path)},
                 ) from error
-            definitions[scoped_name] = {
-                "ports": [
+            actual_ports = {
+                port.name: {"dimension": port.dim, "kind": port.type}
+                for port in metadata.ports
+            }
+            port_mapping = (
+                metadata_contract.get("port_mapping")
+                if isinstance(metadata_contract, Mapping)
+                else None
+            )
+            if isinstance(port_mapping, Mapping):
+                ports = [
                     {
-                        "name": port.name,
-                        "dimension": port.dim,
-                        "kind": port.type,
+                        "name": str(logical),
+                        **actual_ports.get(str(physical), {}),
                     }
+                    for logical, physical in port_mapping.items()
+                    if str(physical) in actual_ports
+                ]
+            else:
+                ports = [
+                    {"name": port.name, "dimension": port.dim, "kind": port.type}
                     for port in metadata.ports
-                ],
+                ]
+            definitions[scoped_name] = {
+                "ports": ports,
                 "source": "live_master",
+                "physical_definition": physical_name,
             }
         return {
             "pscad_version": self.version,
@@ -1269,9 +1276,7 @@ class LegacyBackend:
             if cls._is_oversized_integer(key):
                 metadata = cls._oversized_integer_metadata(key)
                 return cls._bounded_setting_text(
-                    "<int bit_length={bit_length} sign={sign}>".format(
-                        **metadata
-                    )
+                    "<int bit_length={bit_length} sign={sign}>".format(**metadata)
                 )
             return cls._bounded_setting_text(str(key))
         if isinstance(key, float):
@@ -1291,8 +1296,7 @@ class LegacyBackend:
         while True:
             suffix = f"_{suffix_index}"
             candidate = (
-                detail_key[: cls.SETTING_DETAIL_TEXT_LIMIT - len(suffix)]
-                + suffix
+                detail_key[: cls.SETTING_DETAIL_TEXT_LIMIT - len(suffix)] + suffix
             )
             if candidate not in details:
                 return candidate
@@ -1301,11 +1305,7 @@ class LegacyBackend:
     @classmethod
     def _setting_detail_value(cls, value: Any, depth: int = 0) -> Any:
         if value is None or isinstance(value, (str, bool)):
-            return (
-                cls._bounded_setting_text(value)
-                if isinstance(value, str)
-                else value
-            )
+            return cls._bounded_setting_text(value) if isinstance(value, str) else value
         if isinstance(value, int):
             if cls._is_oversized_integer(value):
                 return cls._oversized_integer_metadata(value)
@@ -1323,12 +1323,8 @@ class LegacyBackend:
                     if index >= cls.SETTING_DETAIL_MAX_ENTRIES:
                         details["__truncated__"] = {"truncated": "entries"}
                         break
-                    detail_key = cls._unique_setting_detail_key(
-                        details, key, index
-                    )
-                    details[detail_key] = cls._setting_detail_value(
-                        item, depth + 1
-                    )
+                    detail_key = cls._unique_setting_detail_key(details, key, index)
+                    details[detail_key] = cls._setting_detail_value(item, depth + 1)
                 return details
             except Exception:
                 return {
@@ -1461,7 +1457,10 @@ class LegacyBackend:
         if output is not None:
             return str(await self.executor.run_safe(output))
         messages = await self.executor.run_safe(project.messages)
-        return "\n".join(str(message[0] if isinstance(message, tuple) else message) for message in messages)
+        return "\n".join(
+            str(message[0] if isinstance(message, tuple) else message)
+            for message in messages
+        )
 
     async def get_output_channels(self, project_name: str) -> list[dict[str, Any]]:
         project = await self._project(project_name)
@@ -1732,7 +1731,9 @@ class LegacyBackend:
         self, set_name: str, task_name: str, parameters: Mapping[str, Any]
     ) -> SimulationTaskInfo:
         original_record = await self.get_simulation_task_parameters(set_name, task_name)
-        unsupported = [key for key in parameters if key not in self._TASK_PARAMETER_ORDER]
+        unsupported = [
+            key for key in parameters if key not in self._TASK_PARAMETER_ORDER
+        ]
         if unsupported:
             raise BackendError(
                 "INVALID_ARGUMENT",
@@ -1863,9 +1864,7 @@ class LegacyBackend:
             )
         definition = getattr(component, "defn_name", None)
         if not definition:
-            definition_proxy = await self.executor.run_safe(
-                component.get_definition
-            )
+            definition_proxy = await self.executor.run_safe(component.get_definition)
             definition = getattr(definition_proxy, "scoped_name", definition_proxy)
         location = await self.executor.run_safe(component.get_location)
         return ComponentInfo(
@@ -1899,9 +1898,7 @@ class LegacyBackend:
                 if raw_id is None:
                     continue
                 try:
-                    component = await self.executor.run_safe(
-                        user_cmp, raw_id
-                    )
+                    component = await self.executor.run_safe(user_cmp, raw_id)
                 except (TypeError, ValueError):
                     continue
                 if self._is_user_component(component):
@@ -1909,9 +1906,7 @@ class LegacyBackend:
             return canvas, components
 
         canvas_objects = await self.executor.run_safe(canvas.find_all)
-        components = [
-            item for item in canvas_objects if self._is_user_component(item)
-        ]
+        components = [item for item in canvas_objects if self._is_user_component(item)]
         return canvas, components
 
     async def _legacy_scoped_list_components(self, canvas: Any) -> ET.Element | None:
@@ -1954,9 +1949,7 @@ class LegacyBackend:
         definition: str | None,
         name: str | None,
     ) -> list[ComponentInfo]:
-        _canvas, components = await self._legacy_components(
-            project_name, canvas_name
-        )
+        _canvas, components = await self._legacy_components(project_name, canvas_name)
         result = []
         for component in components:
             info = await self._component_info(component)
@@ -1973,7 +1966,13 @@ class LegacyBackend:
         self, project_name: str, component_id: int
     ) -> dict[str, Any]:
         _canvas, component = await self._component_proxy(project_name, component_id)
-        return dict(await self.executor.run_safe(component.get_parameters))
+        values = dict(await self.executor.run_safe(component.get_parameters))
+        binding = self._component_bindings.get((project_name, int(component_id)))
+        if binding is None:
+            return values
+        _logical, _ports, parameter_map = binding
+        reverse = {physical: logical for logical, physical in parameter_map.items()}
+        return {reverse.get(key, key): value for key, value in values.items()}
 
     async def set_component_parameters(
         self, project_name: str, component_id: int, parameters: Any
@@ -2087,12 +2086,8 @@ class LegacyBackend:
         self, project_name: str, component_id: int, location: tuple[int, int]
     ) -> ComponentInfo:
         canvas, component = await self._component_proxy(project_name, component_id)
-        definition_proxy = await self.executor.run_safe(
-            component.get_definition
-        )
-        scoped_name = str(
-            getattr(definition_proxy, "scoped_name", definition_proxy)
-        )
+        definition_proxy = await self.executor.run_safe(component.get_definition)
+        scoped_name = str(getattr(definition_proxy, "scoped_name", definition_proxy))
         if ":" not in scoped_name:
             raise BackendError(
                 "DEFINITION_METADATA_UNAVAILABLE",
@@ -2101,9 +2096,7 @@ class LegacyBackend:
                 "clone_component",
             )
         library, definition_name = scoped_name.split(":", 1)
-        parameters = dict(
-            await self.executor.run_safe(component.get_parameters)
-        )
+        parameters = dict(await self.executor.run_safe(component.get_parameters))
         clone = await self.executor.run_safe(
             canvas.add_component,
             library,
@@ -2156,18 +2149,14 @@ class LegacyBackend:
         static_ports = {}
         if not port_names:
             definition_metadata = await self._definition_metadata(component)
-            static_ports = {
-                item.name: item for item in definition_metadata.ports
-            }
+            static_ports = {item.name: item for item in definition_metadata.ports}
             port_names = list(static_ports)
         else:
             try:
                 definition_metadata = await self._definition_metadata(component)
             except BackendError:
                 definition_metadata = DefinitionMetadata((), {})
-            static_ports = {
-                item.name: item for item in definition_metadata.ports
-            }
+            static_ports = {item.name: item for item in definition_metadata.ports}
         result = []
         for port_name in port_names:
             static_port = static_ports.get(port_name)
@@ -2183,17 +2172,22 @@ class LegacyBackend:
             if location is None:
                 location_method = getattr(component, "get_port_location", None)
                 if location_method is not None:
-                    location = await self.executor.run_safe(
-                        location_method, port_name
-                    )
+                    location = await self.executor.run_safe(location_method, port_name)
             if location is None:
                 continue
             item = metadata.get(port_name) if hasattr(metadata, "get") else None
             if item is None:
                 item = static_ports.get(port_name)
+            logical_port_name = port_name
+            binding = self._component_bindings.get((project_name, int(component_id)))
+            if binding is not None:
+                reverse_ports = {
+                    physical: logical for logical, physical in binding[1].items()
+                }
+                logical_port_name = reverse_ports.get(port_name, port_name)
             result.append(
                 PortInfo(
-                    str(port_name),
+                    str(logical_port_name),
                     int(location[0]),
                     int(location[1]),
                     getattr(item, "dim", None),
@@ -2256,9 +2250,7 @@ class LegacyBackend:
     async def _legacy_component_orientation(
         self, project_name: str, component_id: str
     ) -> str | None:
-        cached = self._component_orientations.get(
-            (project_name, int(component_id))
-        )
+        cached = self._component_orientations.get((project_name, int(component_id)))
         if cached is not None:
             return str(cached)
         path = self.definition_paths.get(project_name)
@@ -2284,9 +2276,7 @@ class LegacyBackend:
 
     async def _definition_metadata(self, component: Any) -> DefinitionMetadata:
         definition_proxy = await self.executor.run_safe(component.get_definition)
-        scoped_name = str(
-            getattr(definition_proxy, "scoped_name", definition_proxy)
-        )
+        scoped_name = str(getattr(definition_proxy, "scoped_name", definition_proxy))
         if ":" not in scoped_name:
             raise BackendError(
                 "DEFINITION_METADATA_UNAVAILABLE",
@@ -2324,9 +2314,7 @@ class LegacyBackend:
     async def _discover_master_library(self) -> Path | None:
         if self.automation is None:
             return None
-        display_name = (
-            f"PSCAD {self.version} ({'x64' if self.x64 else 'x86'})"
-        )
+        display_name = f"PSCAD {self.version} ({'x64' if self.x64 else 'x86'})"
         try:
             controller_source = self.automation.controller
             controller_factory = (
@@ -2335,9 +2323,7 @@ class LegacyBackend:
                 else controller_source.Controller
             )
             executable = await self.executor.run_safe(
-                lambda: controller_factory().get_param(
-                    "pscad", display_name
-                )
+                lambda: controller_factory().get_param("pscad", display_name)
             )
         except Exception:
             return None
@@ -2351,9 +2337,7 @@ class LegacyBackend:
     async def set_component_enabled(
         self, project_name: str, component_id: int, enabled: bool
     ) -> None:
-        canvas, component = await self._component_proxy(
-            project_name, component_id
-        )
+        canvas, component = await self._component_proxy(project_name, component_id)
         project = await self._project(project_name)
         before = await self._component_layers(canvas, component_id)
         details = {"project": project_name, "component_id": component_id}
@@ -2363,39 +2347,27 @@ class LegacyBackend:
                 response = await self.executor.run_safe(
                     component.remove_from_layer, self._disabled_layer
                 )
-                legacy_support.require_success(
-                    response, "enable_component", details
-                )
+                legacy_support.require_success(response, "enable_component", details)
         else:
             layer_is_known = (
                 self._disabled_layer in before
-                or await self._layer_is_known(
-                    project_name, self._disabled_layer
-                )
+                or await self._layer_is_known(project_name, self._disabled_layer)
             )
             if not layer_is_known:
                 response = await self.executor.run_safe(
                     project.create_layer, self._disabled_layer
                 )
-                legacy_support.require_success(
-                    response, "disable_component", details
-                )
-                self._known_managed_layers.add(
-                    (project_name, self._disabled_layer)
-                )
+                legacy_support.require_success(response, "disable_component", details)
+                self._known_managed_layers.add((project_name, self._disabled_layer))
             response = await self.executor.run_safe(
                 project.set_layer, self._disabled_layer, "disabled"
             )
-            legacy_support.require_success(
-                response, "disable_component", details
-            )
+            legacy_support.require_success(response, "disable_component", details)
             if self._disabled_layer not in before:
                 response = await self.executor.run_safe(
                     component.add_to_layer, self._disabled_layer
                 )
-                legacy_support.require_success(
-                    response, "disable_component", details
-                )
+                legacy_support.require_success(response, "disable_component", details)
 
         after = await self._component_layers(canvas, component_id)
         has_disabled_layer = self._disabled_layer in after
@@ -2416,15 +2388,9 @@ class LegacyBackend:
     def _layer_names(value: str | None) -> set[str]:
         if not isinstance(value, str):
             return set()
-        return {
-            name
-            for name in re.split(r"[;,\s]+", value)
-            if name
-        }
+        return {name for name in re.split(r"[;,\s]+", value) if name}
 
-    async def _component_layers(
-        self, canvas: Any, component_id: int
-    ) -> set[str]:
+    async def _component_layers(self, canvas: Any, component_id: int) -> set[str]:
         response = await self.executor.run_safe(canvas.list_components)
         if not isinstance(response, ET.Element):
             raise BackendError(
@@ -2444,9 +2410,7 @@ class LegacyBackend:
         for node in response.iter():
             if node.get("id") != expected_id:
                 continue
-            return self._layer_names(
-                node.get("layer") or node.get("layers")
-            )
+            return self._layer_names(node.get("layer") or node.get("layers"))
         raise BackendError(
             "POSTCONDITION_FAILED",
             "PSCAD did not list the component for layer verification.",
@@ -2455,9 +2419,7 @@ class LegacyBackend:
             {"component_id": component_id},
         )
 
-    async def _layer_is_known(
-        self, project_name: str, layer_name: str
-    ) -> bool:
+    async def _layer_is_known(self, project_name: str, layer_name: str) -> bool:
         if (project_name, layer_name) in self._known_managed_layers:
             return True
         path = self.definition_paths.get(project_name)
@@ -2471,9 +2433,7 @@ class LegacyBackend:
             tag = str(node.tag).split("}")[-1].casefold()
             if tag == "layer" and node.get("name") == layer_name:
                 return True
-            layers = self._layer_names(
-                node.get("layer") or node.get("layers")
-            )
+            layers = self._layer_names(node.get("layer") or node.get("layers"))
             if layer_name in layers:
                 return True
         return False
@@ -2497,22 +2457,15 @@ class LegacyBackend:
             targets.append(component)
 
         ports_by_component = {
-            component_id: await self.get_component_ports(
-                project_name, component_id
-            )
+            component_id: await self.get_component_ports(project_name, component_id)
             for component_id in unique_ids
         }
         target_ports = {
-            (port.x, port.y)
-            for ports in ports_by_component.values()
-            for port in ports
+            (port.x, port.y) for ports in ports_by_component.values() for port in ports
         }
         selection_bounds = {}
         for component_id, component in zip(unique_ids, targets):
-            points = [
-                (port.x, port.y)
-                for port in ports_by_component[component_id]
-            ]
+            points = [(port.x, port.y) for port in ports_by_component[component_id]]
             location_method = getattr(component, "get_location", None)
             try:
                 if location_method is not None:
@@ -2536,11 +2489,7 @@ class LegacyBackend:
             if type(value).__name__ != "WireOrthogonal":
                 continue
             vertices = await self._absolute_wire_vertices(value)
-            endpoints = (
-                {tuple(vertices[0]), tuple(vertices[-1])}
-                if vertices
-                else set()
-            )
+            endpoints = {tuple(vertices[0]), tuple(vertices[-1])} if vertices else set()
             if not endpoints.intersection(target_ports):
                 continue
             wire_id = self._component_id(value)
@@ -2560,28 +2509,19 @@ class LegacyBackend:
             selection_bounds,
         )
 
-    async def _absolute_wire_vertices(
-        self, wire: Any
-    ) -> list[tuple[int, int]]:
+    async def _absolute_wire_vertices(self, wire: Any) -> list[tuple[int, int]]:
         vertices = [
             (int(point[0]), int(point[1]))
-            for point in await self.executor.run_safe(
-                lambda item=wire: item.vertices
-            )
+            for point in await self.executor.run_safe(lambda item=wire: item.vertices)
         ]
         try:
-            location = await self.executor.run_safe(
-                lambda item=wire: item.location
-            )
+            location = await self.executor.run_safe(lambda item=wire: item.location)
         except (AttributeError, BackendError):
             location = None
         if location is None:
             return vertices
         origin_x, origin_y = int(location[0]), int(location[1])
-        return [
-            (origin_x + x, origin_y + y)
-            for x, y in vertices
-        ]
+        return [(origin_x + x, origin_y + y) for x, y in vertices]
 
     @staticmethod
     def _selection_bounds(
@@ -2643,9 +2583,7 @@ class LegacyBackend:
             location_method = getattr(value, "get_location", None)
             try:
                 if location_method is not None:
-                    location = await self.executor.run_safe(
-                        location_method
-                    )
+                    location = await self.executor.run_safe(location_method)
                 else:
                     location = await self.executor.run_safe(
                         lambda item=value: item.location
@@ -2671,9 +2609,7 @@ class LegacyBackend:
                 "delete_components",
             )
         if response.get("success") is not None:
-            legacy_support.require_success(
-                response, "delete_components", {}
-            )
+            legacy_support.require_success(response, "delete_components", {})
         identifiers = set()
         for node in response.iter():
             raw_id = node.get("id")
@@ -2746,9 +2682,7 @@ class LegacyBackend:
                     "select_delete_batch",
                     {"project": project_name, "component_ids": target_ids},
                 )
-                response = await self.executor.run_safe(
-                    generic, "IDM_DELETE"
-                )
+                response = await self.executor.run_safe(generic, "IDM_DELETE")
                 legacy_support.require_success(
                     response,
                     "delete_batch",
@@ -2761,9 +2695,7 @@ class LegacyBackend:
                     await delete(wire, wire_id, "delete_wire")
                     completed_wire_ids.append(wire_id)
                 for component, component_id in zip(targets, target_ids):
-                    await delete(
-                        component, component_id, "delete_component"
-                    )
+                    await delete(component, component_id, "delete_component")
                     completed_target_ids.append(component_id)
         except Exception as error:
             mutation_error = error
@@ -2794,15 +2726,9 @@ class LegacyBackend:
             remaining_component_ids = [
                 value for value in target_ids if value in remaining_ids
             ]
-            remaining_wire_ids = [
-                value for value in wire_ids if value in remaining_ids
-            ]
+            remaining_wire_ids = [value for value in wire_ids if value in remaining_ids]
 
-        if (
-            mutation_error is not None
-            or remaining_component_ids
-            or remaining_wire_ids
-        ):
+        if mutation_error is not None or remaining_component_ids or remaining_wire_ids:
             raise BackendError(
                 "PARTIAL_COMPLETION",
                 "The component deletion plan did not complete.",
@@ -2817,9 +2743,7 @@ class LegacyBackend:
             ) from mutation_error
 
         for component_id in target_ids:
-            self._component_orientations.pop(
-                (project_name, component_id), None
-            )
+            self._component_orientations.pop((project_name, component_id), None)
 
     async def add_component(
         self,
@@ -2834,6 +2758,27 @@ class LegacyBackend:
         if orientation not in range(8):
             raise ValueError("orientation must be between 0 and 7.")
         canvas = await self._canvas(project_name, canvas_name)
+        logical_definition = f"{library}:{definition}"
+        binding = None
+        if library == "master":
+            try:
+                resolved = master_definition_binding(logical_definition)
+            except KeyError:
+                resolved = None
+            if resolved is not None:
+                binding = (
+                    resolved.definition,
+                    dict(resolved.port_map),
+                    dict(resolved.parameter_map),
+                )
+                definition = resolved.definition
+                parameters = {
+                    binding[2].get(key, key): (
+                        float(value) * 0.001 if key == "Inductance_mH" else value
+                    )
+                    for key, value in dict(parameters or {}).items()
+                    if key != "Connection"
+                }
         component = await self.executor.run_safe(
             canvas.add_component, library, definition, *location
         )
@@ -2845,9 +2790,7 @@ class LegacyBackend:
                 "add_component",
             )
         if parameters:
-            await self.executor.run_safe(
-                component.set_parameters, **dict(parameters)
-            )
+            await self.executor.run_safe(component.set_parameters, **dict(parameters))
         command = getattr(component, "_generic", None)
         if command is not None:
             if orientation >= 4:
@@ -2856,14 +2799,16 @@ class LegacyBackend:
             for _ in range(rotations):
                 await self.executor.run_safe(command, "IDM_ROTATERIGHT")
         info = await self._component_info(component)
+        if binding is not None:
+            info = ComponentInfo(info.id, info.name, logical_definition, info.location)
         requested_location = {"x": location[0], "y": location[1]}
         snapped_location = {
             "x": round(location[0] / self._canvas_grid) * self._canvas_grid,
             "y": round(location[1] / self._canvas_grid) * self._canvas_grid,
         }
-        if (
-            info.definition != f"{library}:{definition}"
-            or info.location not in (requested_location, snapped_location)
+        if info.definition != logical_definition or info.location not in (
+            requested_location,
+            snapped_location,
         ):
             raise BackendError(
                 "POSTCONDITION_FAILED",
@@ -2871,7 +2816,7 @@ class LegacyBackend:
                 self.name,
                 "add_component",
                 {
-                    "expected_definition": f"{library}:{definition}",
+                    "expected_definition": logical_definition,
                     "actual_definition": info.definition,
                     "requested_location": requested_location,
                     "expected_snapped_location": snapped_location,
@@ -2879,12 +2824,16 @@ class LegacyBackend:
                 },
             )
         self._component_orientations[(project_name, info.id)] = orientation
+        if binding is not None:
+            self._component_bindings[(project_name, info.id)] = (
+                logical_definition,
+                binding[1],
+                binding[2],
+            )
         return info
 
     @staticmethod
-    def _canvas_endpoints_payload(
-        object_id: int, points: Any
-    ) -> dict[str, Any]:
+    def _canvas_endpoints_payload(object_id: int, points: Any) -> dict[str, Any]:
         return {
             "id": int(object_id),
             "endpoints": [list(points[0]), list(points[-1])],
@@ -2905,9 +2854,7 @@ class LegacyBackend:
                 self.name,
                 "create_wire",
             )
-        return self._canvas_endpoints_payload(
-            self._component_id(wire), vertices
-        )
+        return self._canvas_endpoints_payload(self._component_id(wire), vertices)
 
     async def _add_legacy_canvas_object(
         self, canvas: Any, class_id: str
@@ -2947,17 +2894,14 @@ class LegacyBackend:
         if method is not None:
             await self.executor.run_safe(method, *location)
         else:
-            await self.executor.run_safe(
-                setattr, proxy, "location", tuple(location)
-            )
+            await self.executor.run_safe(setattr, proxy, "location", tuple(location))
 
     async def _legacy_canvas_object_exists(
         self, canvas: Any, object_id: int, class_id: str
     ) -> bool:
         response = await self.executor.run_safe(canvas.list_components)
         return any(
-            node.get("id") == str(object_id)
-            and node.get("classid") == class_id
+            node.get("id") == str(object_id) and node.get("classid") == class_id
             for node in response.findall("components/*")
         )
 
@@ -2972,18 +2916,14 @@ class LegacyBackend:
         if len(vertices) < 2:
             raise ValueError("At least two bus vertices are required.")
         canvas = await self._canvas(project_name, canvas_name)
-        object_id, _response = await self._add_legacy_canvas_object(
-            canvas, "Bus"
-        )
+        object_id, _response = await self._add_legacy_canvas_object(canvas, "Bus")
         bus = await self._legacy_canvas_proxy(canvas, "Bus", object_id)
         await self._set_legacy_proxy_location(bus, vertices[0])
         x0, y0 = vertices[0]
         relative = [(x - x0, y - y0) for x, y in vertices]
         await self.executor.run_safe(setattr, bus, "vertices", relative)
         if parameters:
-            await self.executor.run_safe(
-                bus.set_parameters, **dict(parameters)
-            )
+            await self.executor.run_safe(bus.set_parameters, **dict(parameters))
         return self._canvas_endpoints_payload(object_id, vertices)
 
     async def create_connection(
@@ -3051,13 +2991,9 @@ class LegacyBackend:
         object_id, _response = await self._add_legacy_canvas_object(
             canvas, "GraphFrame"
         )
-        proxy = await self._legacy_canvas_proxy(
-            canvas, "GraphFrame", object_id
-        )
+        proxy = await self._legacy_canvas_proxy(canvas, "GraphFrame", object_id)
         await self._set_legacy_proxy_location(proxy, location)
-        if not await self._legacy_canvas_object_exists(
-            canvas, object_id, "GraphFrame"
-        ):
+        if not await self._legacy_canvas_object_exists(canvas, object_id, "GraphFrame"):
             raise BackendError(
                 "POSTCONDITION_FAILED",
                 "Graph frame could not be found after creation.",
@@ -3073,9 +3009,7 @@ class LegacyBackend:
         object_id, _response = await self._add_legacy_canvas_object(
             canvas, "ControlFrame"
         )
-        proxy = await self._legacy_canvas_proxy(
-            canvas, "ControlFrame", object_id
-        )
+        proxy = await self._legacy_canvas_proxy(canvas, "ControlFrame", object_id)
         await self._set_legacy_proxy_location(proxy, location)
         if not await self._legacy_canvas_object_exists(
             canvas, object_id, "ControlFrame"
@@ -3112,12 +3046,8 @@ class LegacyBackend:
             definition = getattr(value, "defn_name", None)
             definition_method = getattr(value, "get_definition", None)
             if not definition and definition_method is not None:
-                definition_proxy = await self.executor.run_safe(
-                    definition_method
-                )
-                definition = getattr(
-                    definition_proxy, "scoped_name", definition_proxy
-                )
+                definition_proxy = await self.executor.run_safe(definition_method)
+                definition = getattr(definition_proxy, "scoped_name", definition_proxy)
             if not definition:
                 definition = type(value).__name__
             location_method = getattr(value, "get_location", None)
@@ -3148,9 +3078,7 @@ class LegacyBackend:
             class_id = str(node.get("classid") or node.tag)
             location = None
             if class_id == "ControlFrame":
-                proxy = await self._legacy_canvas_proxy(
-                    canvas, class_id, int(raw_id)
-                )
+                proxy = await self._legacy_canvas_proxy(canvas, class_id, int(raw_id))
                 location_method = getattr(proxy, "get_location", None)
                 location = (
                     await self.executor.run_safe(location_method)
@@ -3189,17 +3117,11 @@ class LegacyBackend:
 
         method = getattr(canvas, "closest_empty_rect", None)
         if method is not None:
-            rectangle = await self.executor.run_safe(
-                method, width, height, near
-            )
+            rectangle = await self.executor.run_safe(method, width, height, near)
             add_candidate(
                 legacy_support.Rect(
-                    legacy_support.snap_to_grid(
-                        int(rectangle.x), self._canvas_grid
-                    ),
-                    legacy_support.snap_to_grid(
-                        int(rectangle.y), self._canvas_grid
-                    ),
+                    legacy_support.snap_to_grid(int(rectangle.x), self._canvas_grid),
+                    legacy_support.snap_to_grid(int(rectangle.y), self._canvas_grid),
                     width,
                     height,
                 )
@@ -3213,9 +3135,7 @@ class LegacyBackend:
         ):
             add_candidate(candidate)
 
-        occupied = await self._occupied_rectangles(
-            project_name, canvas_name, canvas
-        )
+        occupied = await self._occupied_rectangles(project_name, canvas_name, canvas)
         if not any(
             all(
                 not rectangle.intersects(candidate, margin=self._canvas_grid)
@@ -3230,9 +3150,7 @@ class LegacyBackend:
                 "find_empty_space",
             )
 
-        refreshed = await self._occupied_rectangles(
-            project_name, canvas_name, canvas
-        )
+        refreshed = await self._occupied_rectangles(project_name, canvas_name, canvas)
         for candidate in candidates:
             if all(
                 not rectangle.intersects(candidate, margin=self._canvas_grid)
@@ -3263,9 +3181,7 @@ class LegacyBackend:
                 "find_empty_space",
             )
         if response.get("success") is not None:
-            legacy_support.require_success(
-                response, "find_empty_space", {}
-            )
+            legacy_support.require_success(response, "find_empty_space", {})
         nodes = list(response.findall("components/*"))
         saved_rectangles = await asyncio.to_thread(
             self._saved_canvas_rectangles, project_name, canvas_name
@@ -3286,9 +3202,7 @@ class LegacyBackend:
                 location_method = getattr(proxy, "get_location", None)
                 try:
                     if location_method is not None:
-                        location = await self.executor.run_safe(
-                            location_method
-                        )
+                        location = await self.executor.run_safe(location_method)
                     else:
                         location = await self.executor.run_safe(
                             lambda item=proxy: item.location
@@ -3415,6 +3329,7 @@ class LegacyBackend:
             if geometry:
                 rectangles[object_id] = geometry
         return rectangles
+
     async def inspect_canvas_topology(
         self, project_name: str, canvas_name: str
     ) -> TopologySnapshot:
@@ -3438,10 +3353,7 @@ class LegacyBackend:
             saved_modules,
         )
         source_fingerprint = canonical_sha256(
-            tuple(
-                (capture["key"], capture["inventory"])
-                for capture in captures
-            )
+            tuple((capture["key"], capture["inventory"]) for capture in captures)
         )
         observed_at_ns = time.time_ns()
         evidence = lambda reference: (
@@ -3463,9 +3375,7 @@ class LegacyBackend:
         captured_keys = {capture["key"] for capture in captures}
         for capture in captures:
             canvas_key = capture["key"]
-            inventory_by_id = {
-                item[0]: item for item in capture["inventory"]
-            }
+            inventory_by_id = {item[0]: item for item in capture["inventory"]}
             page_ports = capture["page_ports"]
             canvases.append(
                 TopologyCanvas(
@@ -3488,9 +3398,7 @@ class LegacyBackend:
                     vertices = inventory_item[6]
                     if vertices is None:
                         conductors_supported = False
-                        unresolved.add(
-                            f"conductor_geometry_unreadable:{key}"
-                        )
+                        unresolved.add(f"conductor_geometry_unreadable:{key}")
                         continue
                     conductors.append(
                         TopologyConductor(
@@ -3503,9 +3411,7 @@ class LegacyBackend:
                                 or type(proxy).__name__.casefold() == "bus"
                                 else "wire"
                             ),
-                            namespace=self._legacy_topology_namespace(
-                                node, proxy
-                            ),
+                            namespace=self._legacy_topology_namespace(node, proxy),
                             vertices=vertices,
                             evidence=evidence(key),
                         )
@@ -3513,9 +3419,7 @@ class LegacyBackend:
                     continue
                 definition = inventory_item[2]
                 location = inventory_item[3]
-                parameters = await self._legacy_topology_parameters(
-                    proxy, node
-                )
+                parameters = await self._legacy_topology_parameters(proxy, node)
                 if self._legacy_topology_is_label(definition):
                     label_name = inventory_item[5]
                     if not label_name:
@@ -3561,20 +3465,12 @@ class LegacyBackend:
                     canvas_key=canvas_key,
                     object_id=object_id,
                     definition=definition,
-                    name=(
-                        self._legacy_topology_name(
-                            proxy, parameters, node
-                        )
-                        or None
-                    ),
+                    name=(self._legacy_topology_name(proxy, parameters, node) or None),
                     location=location,
                     orientation=orientation,
                     active=self._legacy_topology_active(parameters),
                     parameters=tuple(
-                        sorted(
-                            (str(name), value)
-                            for name, value in parameters.items()
-                        )
+                        sorted((str(name), value) for name, value in parameters.items())
                     ),
                     ports=ports,
                     evidence=evidence(key),
@@ -3582,8 +3478,7 @@ class LegacyBackend:
                 components.append(component)
                 canvas_components.append(component)
             component_by_id = {
-                component.object_id: component
-                for component in canvas_components
+                component.object_id: component for component in canvas_components
             }
             for child in capture["children"]:
                 if child["key"] not in captured_keys:
@@ -3604,12 +3499,8 @@ class LegacyBackend:
         if project_path is None:
             unresolved.add("project_path_unavailable")
         for capture in captures:
-            after_response = await self._legacy_topology_bulk(
-                capture["canvas"]
-            )
-            after_proxies = await self._legacy_topology_proxies(
-                capture["canvas"]
-            )
+            after_response = await self._legacy_topology_bulk(capture["canvas"])
+            after_proxies = await self._legacy_topology_proxies(capture["canvas"])
             after_inventory = await self._legacy_topology_inventory(
                 project_name,
                 after_response,
@@ -3652,9 +3543,7 @@ class LegacyBackend:
             components=tuple(sorted(components, key=lambda item: item.key)),
             conductors=tuple(sorted(conductors, key=lambda item: item.key)),
             labels=tuple(sorted(labels, key=lambda item: item.key)),
-            boundary_links=tuple(
-                sorted(boundary_links, key=lambda item: item.key)
-            ),
+            boundary_links=tuple(sorted(boundary_links, key=lambda item: item.key)),
             unresolved=tuple(sorted(unresolved)),
             capabilities=(
                 ("components", components_supported),
@@ -3675,9 +3564,7 @@ class LegacyBackend:
         project_name: str,
         canvas_name: str,
         source_hashes: dict[Path, str],
-        saved_components: Mapping[
-            tuple[str, str], _SavedTopologyRecord
-        ] | None,
+        saved_components: Mapping[tuple[str, str], _SavedTopologyRecord] | None,
         saved_modules: frozenset[str] | None,
     ) -> tuple[list[dict[str, Any]], set[str]]:
         captures = []
@@ -3709,17 +3596,13 @@ class LegacyBackend:
                         self.name,
                         "inspect_canvas_topology",
                     )
-                unresolved.add(
-                    f"live_hierarchy_unavailable:{request['key']}"
-                )
+                unresolved.add(f"live_hierarchy_unavailable:{request['key']}")
                 continue
             try:
                 proxies = await self._legacy_topology_proxies(canvas)
             except (AttributeError, BackendError, KeyError, TypeError):
                 proxies = {}
-                unresolved.add(
-                    f"proxy_enrichment_unavailable:{request['key']}"
-                )
+                unresolved.add(f"proxy_enrichment_unavailable:{request['key']}")
             inventory = await self._legacy_topology_inventory(
                 project_name,
                 response,
@@ -3779,15 +3662,12 @@ class LegacyBackend:
                     else ()
                 )
                 if metadata is None:
-                    unresolved.add(
-                        f"definition_ports_unavailable:{child_key}"
-                    )
+                    unresolved.add(f"definition_ports_unavailable:{child_key}")
                 child = {
                     "name": local_name,
                     "key": child_key,
                     "parent_key": request["key"],
-                    "ancestry": request["ancestry"]
-                    + (local_name.casefold(),),
+                    "ancestry": request["ancestry"] + (local_name.casefold(),),
                     "page_ports": page_ports,
                 }
                 capture["children"].append(
@@ -3822,8 +3702,7 @@ class LegacyBackend:
         for page_port in page_ports:
             outer = outer_ports.get(page_port.name)
             key = (
-                f"{component.key}:{page_port.name}->"
-                f"{child_canvas_key}:{page_port.name}"
+                f"{component.key}:{page_port.name}->{child_canvas_key}:{page_port.name}"
             )
             if outer is None or outer.absolute is None:
                 unresolved.append(f"hierarchy_boundary_unresolved:{key}")
@@ -3866,11 +3745,7 @@ class LegacyBackend:
     @staticmethod
     def _legacy_topology_nodes(response: ET.Element) -> list[ET.Element]:
         return sorted(
-            (
-                node
-                for node in response.iter()
-                if node.get("id") is not None
-            ),
+            (node for node in response.iter() if node.get("id") is not None),
             key=lambda node: str(node.get("id")),
         )
 
@@ -3892,9 +3767,7 @@ class LegacyBackend:
         project_name: str,
         response: ET.Element,
         proxies: Mapping[str, Any],
-        saved_components: Mapping[
-            tuple[str, str], _SavedTopologyRecord
-        ] | None = None,
+        saved_components: Mapping[tuple[str, str], _SavedTopologyRecord] | None = None,
     ) -> tuple[tuple, ...]:
         result = []
         for node in self._legacy_topology_nodes(response):
@@ -3911,8 +3784,10 @@ class LegacyBackend:
                 if saved_components is not None
                 else None
             )
-            saved_definition, saved_location, saved_orientation = (
-                saved_component or (None, None, None)
+            saved_definition, saved_location, saved_orientation = saved_component or (
+                None,
+                None,
+                None,
             )
             location = await self._legacy_topology_location(
                 proxy,
@@ -3960,8 +3835,7 @@ class LegacyBackend:
     def _legacy_topology_is_conductor(class_id: str, proxy: Any) -> bool:
         proxy_name = type(proxy).__name__.casefold() if proxy is not None else ""
         return any(
-            marker in class_id or marker in proxy_name
-            for marker in ("wire", "bus")
+            marker in class_id or marker in proxy_name for marker in ("wire", "bus")
         )
 
     @staticmethod
@@ -4063,9 +3937,7 @@ class LegacyBackend:
     ) -> int | None:
         raw = node.get("orient") or node.get("orientation")
         if raw is None:
-            cached = self._component_orientations.get(
-                (project_name, int(object_id))
-            )
+            cached = self._component_orientations.get((project_name, int(object_id)))
             raw = cached if cached is not None else getattr(proxy, "orientation", None)
         if raw is None:
             raw = saved_orientation
@@ -4078,10 +3950,13 @@ class LegacyBackend:
 
     def _saved_topology_components(
         self, project_name: str
-    ) -> tuple[
-        dict[tuple[str, str], _SavedTopologyRecord],
-        frozenset[str],
-    ] | None:
+    ) -> (
+        tuple[
+            dict[tuple[str, str], _SavedTopologyRecord],
+            frozenset[str],
+        ]
+        | None
+    ):
         path = self.definition_paths.get(project_name)
         if path is None or not path.is_file():
             return None
@@ -4106,8 +3981,7 @@ class LegacyBackend:
             has_internal_objects = any(
                 child.get("id") is not None
                 for schematic in definition
-                if str(schematic.tag).split("}")[-1].casefold()
-                == "schematic"
+                if str(schematic.tag).split("}")[-1].casefold() == "schematic"
                 for child in schematic.iter()
                 if child is not schematic
             )
@@ -4164,9 +4038,7 @@ class LegacyBackend:
                 values = await self.executor.run_safe(values)
             if values is not None:
                 try:
-                    raw_vertices = [
-                        (int(point[0]), int(point[1])) for point in values
-                    ]
+                    raw_vertices = [(int(point[0]), int(point[1])) for point in values]
                 except (TypeError, ValueError, IndexError):
                     return None
         if len(raw_vertices) < 2:
@@ -4176,9 +4048,7 @@ class LegacyBackend:
         proxy_has_origin = proxy is not None and hasattr(proxy, "location")
         if origin is not None and (has_xml_origin or proxy_has_origin):
             if raw_vertices[0] == (0, 0):
-                raw_vertices = [
-                    (origin[0] + x, origin[1] + y) for x, y in raw_vertices
-                ]
+                raw_vertices = [(origin[0] + x, origin[1] + y) for x, y in raw_vertices]
         return tuple(raw_vertices)
 
     async def _legacy_topology_ports(
@@ -4197,10 +4067,7 @@ class LegacyBackend:
     ) -> tuple[TopologyPort, ...]:
         xml_ports = []
         for port in node.iter():
-            if (
-                port is node
-                or str(port.tag).split("}")[-1].casefold() != "port"
-            ):
+            if port is node or str(port.tag).split("}")[-1].casefold() != "port":
                 continue
             name = port.get("name") or port.get("id")
             if not name:
@@ -4230,9 +4097,7 @@ class LegacyBackend:
                     absolute=absolute,
                     relative=relative,
                     kind=self._legacy_topology_port_namespace(
-                        port.get("kind")
-                        or port.get("model")
-                        or port.get("type")
+                        port.get("kind") or port.get("model") or port.get("type")
                     ),
                     dimension=self._legacy_topology_optional_int(
                         port.get("dim") or port.get("dimension")
@@ -4272,9 +4137,7 @@ class LegacyBackend:
             source_hashes,
         )
         if metadata is None:
-            unresolved.add(
-                f"definition_metadata_unavailable:{component_key}"
-            )
+            unresolved.add(f"definition_metadata_unavailable:{component_key}")
             return ()
         result = []
         for port in metadata.ports:
@@ -4365,9 +4228,7 @@ class LegacyBackend:
     def _legacy_topology_port_namespace(value: Any) -> str:
         raw = str(value or "").casefold()
         return (
-            "data"
-            if raw in {"data", "signal", "digital", "transfer"}
-            else "electrical"
+            "data" if raw in {"data", "signal", "digital", "transfer"} else "electrical"
         )
 
     @staticmethod
@@ -4389,10 +4250,7 @@ class LegacyBackend:
         proxy_name = str(getattr(proxy, "name", "") or "")
         if node is not None:
             node_name = str(
-                node.get("name")
-                or node.get("text")
-                or node.get("value")
-                or ""
+                node.get("name") or node.get("text") or node.get("value") or ""
             )
             if node_name:
                 return node_name
