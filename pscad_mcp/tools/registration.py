@@ -176,7 +176,10 @@ def _register_with_original_result(mcp: FastMCP, guarded: Callable[..., Any]) ->
         properties = tool.parameters.get("properties")
         if isinstance(properties, dict):
             for parameter in inspect.signature(guarded).parameters.values():
-                description = _annotation_description(parameter.annotation)
+                field = tool.fn_metadata.arg_model.model_fields.get(parameter.name)
+                description = getattr(field, "description", None)
+                if not isinstance(description, str):
+                    description = _annotation_description(parameter.annotation)
                 schema = properties.get(parameter.name)
                 if description and isinstance(schema, dict):
                     schema.setdefault("description", description)
