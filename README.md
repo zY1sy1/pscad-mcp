@@ -1,6 +1,6 @@
 # PSCAD MCP for Codex and GitHub Copilot CLI
 
-`pscad-mcp` is a Windows Model Context Protocol (MCP) server for PSCAD automation. It uses `mhrc.automation` for PSCAD 4.6.x and `mhi.pscad` for PSCAD 5.x behind one stable 60-tool generic service contract, plus read-only topology diagnostics, HVDC, silent-learning, fixed CIGRE LCC, parametric LCC, parametric MMC, and generic Blueprint Builder layers. The current inventory is 97 tools: 96 compatibility/domain tools plus one always-on capability tool.
+`pscad-mcp` is a Windows Model Context Protocol (MCP) server for PSCAD automation. It uses `mhrc.automation` for PSCAD 4.6.x and `mhi.pscad` for PSCAD 5.x behind one stable 60-tool generic service contract, plus read-only topology diagnostics, HVDC, silent-learning, blank LCC/MMC, fixed CIGRE LCC, parametric LCC, parametric MMC, and generic Blueprint Builder layers. The current inventory is 105 tools: 104 compatibility/domain tools plus one always-on capability tool.
 
 中文安装、配置、安全和验收说明：[docs/zh-CN/README.md](docs/zh-CN/README.md)
 
@@ -61,7 +61,7 @@ external process.
 
 ## Tool coverage
 
-The complete inventory is 97 = 60 generic tools, 2 topology tools, 10 HVDC
+The complete inventory is 105 = 60 generic tools, 2 topology tools, 10 HVDC
 tools, 3 learning tools, 4 fixed CIGRE LCC tools, 6 parametric LCC tools,
 7 parametric MMC tools, 4 generic Blueprint Builder tools, and one always-on
 `get_pscad_capabilities` tool.

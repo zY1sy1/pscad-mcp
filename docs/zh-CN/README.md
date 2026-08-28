@@ -1,13 +1,13 @@
 # PSCAD MCP 中文使用与验收说明
 
-本项目把 PSCAD 自动化封装为 97 个 MCP 工具，其中原有通用服务契约保持 60 个工具，并增加只读拓扑诊断、HVDC、静默学习、固定 CIGRE LCC、参数化 LCC、参数化双引擎 MMC、通用 Blueprint Builder 与始终注册的能力工具，可供 Codex、GitHub Copilot CLI 等支持 stdio MCP 的客户端调用。项目采用双后端；PSCAD 5.x 当前为 contract-tested only：
+本项目把 PSCAD 自动化封装为 105 个 MCP 工具，其中原有通用服务契约保持 60 个工具，并增加只读拓扑诊断、HVDC、静默学习、blank LCC/MMC、固定 CIGRE LCC、参数化 LCC、参数化双引擎 MMC、通用 Blueprint Builder 与始终注册的能力工具，可供 Codex、GitHub Copilot CLI 等支持 stdio MCP 的客户端调用。项目采用双后端；PSCAD 5.x 当前为 contract-tested only：
 
 - PSCAD 4.6.x：`mhrc.automation`，当前已在本机 PSCAD 4.6.2 x64 许可环境做真实验收；
 - PSCAD 5.x：`mhi.pscad` 3.1.x，当前完成契约测试，但由于本机没有 PSCAD 5.x，不能声称端到端真实验收通过；
 - 结果文件：`mhi.psout` 1.3.x。
 
-完整工具库存为 97 = 60 个通用工具 + 2 个拓扑工具 + 10 个 HVDC 工具 + 3 个学习工具 + 4 个固定 CIGRE LCC 工具 + 6 个参数化 LCC 工具 + 7 个参数化 MMC 工具 + 4 个通用 Blueprint Builder 工具 + 1 个始终注册的 `get_pscad_capabilities` 能力工具；原有 60 个通用工具的名称和默认返回形状保持不变。
-其中 96 个兼容/领域工具 + 1 个始终注册的能力工具。
+完整工具库存为 105 = 60 个通用工具 + 2 个拓扑工具 + 10 个 HVDC 工具 + 3 个学习工具 + 8 个 LCC 工具（含 blank 生命周期） + 6 个参数化 LCC 工具 + 11 个 MMC 工具（含 blank 生命周期） + 4 个通用 Blueprint Builder 工具 + 1 个始终注册的 `get_pscad_capabilities` 能力工具；原有 60 个通用工具的名称和默认返回形状保持不变。
+其中 104 个兼容/领域工具 + 1 个始终注册的能力工具。
 
 Legacy PSCAD 4.6.2 后端只支持启动新的受管 Automation 实例，不能附加到用户普通方式打开的 GUI。受管窗口默认可见；默认检测到已有 PSCAD 进程时会在启动前返回 `EXTERNAL_PSCAD_PRESENT`。`repair_connection` 使用连接时缓存的进程归属：自有实例会先正常退出，外部进程不会被终止。
 
@@ -354,7 +354,7 @@ git diff --check
 git status --short --branch
 ```
 
-工具数量应输出 `97 97`。真实 PSCAD 5.x 必须在安装并运行对应版本后另做相同级别验收。
+工具数量应输出 `105 105`。真实 PSCAD 5.x 必须在安装并运行对应版本后另做相同级别验收。
 
 ## 常见故障
 

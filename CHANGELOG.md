@@ -49,10 +49,10 @@ All notable changes to this project are documented here.
 - LCC planning now fails closed without live PSCAD definition inventory;
   output-channel creation, final-project identity, waveform ownership, asset
   fingerprints, and acceptance-report evidence are checked explicitly.
-- The compatibility inventory is 83 compatibility tools: 60 generic tools,
-  two topology tools, ten HVDC tools, three learning tools, four fixed LCC tools,
-  and six parametric LCC tools. With the always-on
-  `get_pscad_capabilities` discovery tool, the current total is 97.
+- The compatibility inventory is 104 compatibility tools: 60 generic tools,
+  two topology tools, ten HVDC tools, three learning tools, eight LCC tools,
+  six parametric LCC tools, and eleven MMC tools. With the always-on
+  `get_pscad_capabilities` discovery tool, the current total is 105.
 
 - Added the deterministic, privacy-filtered PSCAD Blueprint corpus and four
   reviewed no-mutation Blueprint Builder tools. Builds require immutable plan
