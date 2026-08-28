@@ -1,6 +1,6 @@
 # PSCAD MCP for Codex and GitHub Copilot CLI
 
-`pscad-mcp` is a Windows Model Context Protocol (MCP) server for PSCAD automation. It uses `mhrc.automation` for PSCAD 4.6.x and `mhi.pscad` for PSCAD 5.x behind one stable 60-tool generic service contract, plus read-only topology diagnostics, HVDC, silent-learning, fixed CIGRE LCC, parametric LCC, and parametric MMC domain layers. The current inventory is 93 tools: 92 compatibility/domain tools plus one always-on capability tool.
+`pscad-mcp` is a Windows Model Context Protocol (MCP) server for PSCAD automation. It uses `mhrc.automation` for PSCAD 4.6.x and `mhi.pscad` for PSCAD 5.x behind one stable 60-tool generic service contract, plus read-only topology diagnostics, HVDC, silent-learning, fixed CIGRE LCC, parametric LCC, parametric MMC, and generic Blueprint Builder layers. The current inventory is 97 tools: 96 compatibility/domain tools plus one always-on capability tool.
 
 中文安装、配置、安全和验收说明：[docs/zh-CN/README.md](docs/zh-CN/README.md)
 
@@ -61,9 +61,10 @@ external process.
 
 ## Tool coverage
 
-The complete inventory is 93 = 60 generic tools, 2 topology tools, 10 HVDC
+The complete inventory is 97 = 60 generic tools, 2 topology tools, 10 HVDC
 tools, 3 learning tools, 4 fixed CIGRE LCC tools, 6 parametric LCC tools,
-7 parametric MMC tools, and one always-on `get_pscad_capabilities` tool.
+7 parametric MMC tools, 4 generic Blueprint Builder tools, and one always-on
+`get_pscad_capabilities` tool.
 The generic 60-tool contract keeps its existing names and default return
 shapes.
 
@@ -211,6 +212,16 @@ scenario can be passed unchanged to `run_hvdc_scenario`. Structural states
 `inspected`, `designed`, `planned`, `built`, `simulated`, and `accepted` are
 distinct, and `NOT_RUN_ON_INTEGRATED_COMMIT` remains explicit until licensed
 evidence exists.
+
+### Generic PSCAD Blueprint Builder
+
+The Blueprint Builder adds `plan_pscad_project_build`, `build_pscad_project`,
+`get_pscad_project_build_status`, and `validate_pscad_project_build`. It builds
+from a privacy-filtered reviewed corpus, requires an immutable plan hash and
+explicit confirmation, stages source packages inside a contained workspace,
+and publishes evidence-only no-mutation assets. Path boundaries and hashes are
+verified; default tests are not licensed acceptance and packaged corpus status
+remains `live_verified=false`.
 
 Read-only HVDC inspection may scan an existing absolute `.pscx` source such as
 `C:\\PSCADFiles\\Breaker\\TEST1\\difforder_new.pscx`; all scenario mutations

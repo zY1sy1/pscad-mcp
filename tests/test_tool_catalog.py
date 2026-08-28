@@ -54,6 +54,16 @@ LEARNING_TOOL_NAMES = frozenset(
         "clear_learning_history",
     }
 )
+TOPOLOGY_TOOL_NAMES = frozenset({"inspect_project_topology", "diagnose_project_topology"})
+MMC_TOOL_NAMES = frozenset({
+    "audit_mmc_template", "derive_mmc_parameters", "plan_parametric_mmc_model",
+    "build_parametric_mmc_model", "get_parametric_mmc_build_status",
+    "recommend_mmc_simulation", "validate_mmc_model",
+})
+BLUEPRINT_TOOL_NAMES = frozenset({
+    "plan_pscad_project_build", "build_pscad_project",
+    "get_pscad_project_build_status", "validate_pscad_project_build",
+})
 
 
 def test_default_server_matches_the_full_tool_catalog():
@@ -78,20 +88,29 @@ def test_catalog_locks_group_boundaries_and_immutable_values():
         LCC_TOOL_NAMES,
         PARAMETRIC_LCC_TOOL_NAMES,
         LEARNING_TOOL_NAMES,
+        TOPOLOGY_TOOL_NAMES,
+        MMC_TOOL_NAMES,
+        BLUEPRINT_TOOL_NAMES,
     )
 
-    assert set(TOOL_GROUPS) == {"core", "hvdc", "lcc", "parametric_lcc", "learning"}
+    assert set(TOOL_GROUPS) == {"core", "hvdc", "lcc", "parametric_lcc", "learning", "topology", "mmc", "blueprint"}
     assert {name: len(tools) for name, tools in TOOL_GROUPS.items()} == {
         "core": 60,
         "hvdc": 10,
         "lcc": 4,
         "parametric_lcc": 6,
         "learning": 3,
+        "topology": 2,
+        "mmc": 7,
+        "blueprint": 4,
     }
     assert TOOL_GROUPS["hvdc"] == HVDC_TOOL_NAMES
     assert TOOL_GROUPS["lcc"] == LCC_TOOL_NAMES
     assert TOOL_GROUPS["parametric_lcc"] == PARAMETRIC_LCC_TOOL_NAMES
     assert TOOL_GROUPS["learning"] == LEARNING_TOOL_NAMES
+    assert TOOL_GROUPS["topology"] == TOPOLOGY_TOOL_NAMES
+    assert TOOL_GROUPS["mmc"] == MMC_TOOL_NAMES
+    assert TOOL_GROUPS["blueprint"] == BLUEPRINT_TOOL_NAMES
     assert TOOL_GROUPS["core"] == COMPATIBILITY_TOOL_NAMES - domain_tool_names
 
     with pytest.raises(TypeError):
@@ -151,7 +170,7 @@ def test_catalog_descriptions_match_registered_function_docstrings():
         for tool in create_server(environ={})._tool_manager.list_tools()
     }
 
-    assert len(by_name) == 84
+    assert len(by_name) == 97
     for name, spec in TOOL_SPECS.items():
         assert inspect.getdoc(by_name[name].fn) == spec.description, name
 

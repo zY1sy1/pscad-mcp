@@ -52,7 +52,12 @@ All notable changes to this project are documented here.
 - The compatibility inventory is 83 compatibility tools: 60 generic tools,
   two topology tools, ten HVDC tools, three learning tools, four fixed LCC tools,
   and six parametric LCC tools. With the always-on
-  `get_pscad_capabilities` discovery tool, the current total is 93.
+  `get_pscad_capabilities` discovery tool, the current total is 97.
+
+- Added the deterministic, privacy-filtered PSCAD Blueprint corpus and four
+  reviewed no-mutation Blueprint Builder tools. Builds require immutable plan
+  hashes, explicit confirmation, contained staging, and evidence-only
+  publication; licensed acceptance remains opt-in.
 - HVDC strict control now supports explicit backend timing and output-channel
   provider hooks, bounded simulation-clock polling, stalled-clock detection,
   stable event IDs, and duplicate-event rejection.

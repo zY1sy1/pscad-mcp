@@ -47,6 +47,12 @@ PARAMETRIC_MMC_TOOLS = {
     "recommend_mmc_simulation",
     "validate_mmc_model",
 }
+BLUEPRINT_TOOLS = {
+    "plan_pscad_project_build",
+    "build_pscad_project",
+    "get_pscad_project_build_status",
+    "validate_pscad_project_build",
+}
 
 
 def test_server_preserves_the_compatibility_inventory():
@@ -61,3 +67,4 @@ def test_server_preserves_the_compatibility_inventory():
     assert PARAMETRIC_LCC_TOOLS <= COMPATIBILITY_TOOL_NAMES
     assert TOPOLOGY_TOOLS <= COMPATIBILITY_TOOL_NAMES
     assert PARAMETRIC_MMC_TOOLS <= COMPATIBILITY_TOOL_NAMES
+    assert BLUEPRINT_TOOLS <= COMPATIBILITY_TOOL_NAMES

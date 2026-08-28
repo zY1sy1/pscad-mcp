@@ -23,7 +23,7 @@ def test_exact_mmc_tools_are_registered() -> None:
     tools = create_server()._tool_manager.list_tools()
     names = {tool.name for tool in tools}
     assert EXPECTED_MMC_TOOLS <= names
-    assert len(names) == 93
+    assert len(names) == 97
     assert not {"plan_mmc_model", "build_mmc_model", "get_mmc_build_status"} & names
 
 

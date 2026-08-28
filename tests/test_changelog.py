@@ -18,7 +18,7 @@ def test_changelog_describes_current_release_boundary():
     assert "contract" in text
     assert "silent learning" in text
     assert "83" in text
-    assert "93" in text
+    assert "97" in text
 
 
 def test_unreleased_describes_horizontal_mcp_hardening():
@@ -46,12 +46,13 @@ def test_unreleased_distinguishes_compatibility_inventory_from_current_total():
         "four fixed lcc tools",
         "six parametric lcc tools",
         "get_pscad_capabilities",
-        "current total is 93",
+        "current total is 97",
     ):
         assert phrase in unreleased
     assert "inventory is now 83 tools" not in unreleased
     assert "dual-engine" in unreleased
     assert "parametric mmc" in unreleased
+    assert "blueprint builder" in unreleased
 
 
 def test_readmes_document_the_fixed_lcc_builder_boundary():

@@ -158,6 +158,14 @@ TOOL_GROUPS = MappingProxyType(
                 "validate_mmc_model",
             }
         ),
+        "blueprint": frozenset(
+            {
+                "plan_pscad_project_build",
+                "build_pscad_project",
+                "get_pscad_project_build_status",
+                "validate_pscad_project_build",
+            }
+        ),
     }
 )
 
@@ -703,6 +711,28 @@ COMPATIBILITY_TOOL_SPECS = MappingProxyType(
         "validate_mmc_model": _spec(
             "validate_mmc_model",
             "Validate a parameterized MMC model and its acceptance evidence.",
+            read_only=True,
+            idempotent=True,
+        ),
+        "plan_pscad_project_build": _spec(
+            "plan_pscad_project_build",
+            "Audit a blueprint and source package and return an immutable plan hash.",
+            read_only=True,
+            idempotent=True,
+        ),
+        "build_pscad_project": _spec(
+            "build_pscad_project",
+            "Start the explicitly confirmed, exact-hash blueprint build.",
+        ),
+        "get_pscad_project_build_status": _spec(
+            "get_pscad_project_build_status",
+            "Return JSON-safe asynchronous blueprint build state and evidence.",
+            read_only=True,
+            idempotent=True,
+        ),
+        "validate_pscad_project_build": _spec(
+            "validate_pscad_project_build",
+            "Independently validate one completed build or contained staging package.",
             read_only=True,
             idempotent=True,
         ),

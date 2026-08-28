@@ -46,10 +46,12 @@ async def audit_mmc_template(
     template_path: str | None = None,
     library_path: str | None = None,
 ) -> dict[str, Any]:
+    """Audit a packaged or supplied MMC template without modifying PSCAD state."""
     return _service().audit_template(template_path, library_path)
 
 
 async def derive_mmc_parameters(request: dict[str, Any]) -> dict[str, Any]:
+    """Derive deterministic parameters for a parametric MMC request."""
     return _service().derive_parameters(_request(request))
 
 
@@ -60,6 +62,7 @@ async def plan_parametric_mmc_model(
     template_path: str | None = None,
     library_path: str | None = None,
 ) -> dict[str, Any]:
+    """Plan a parameterized MMC model build."""
     return _service().plan_model(
         _request(request),
         project_name,
@@ -78,6 +81,7 @@ async def build_parametric_mmc_model(
     library_path: str | None = None,
     confirm: bool = False,
 ) -> dict[str, Any]:
+    """Build a parameterized MMC model after confirmation."""
     return await _service().build_model(
         _request(request),
         expected_plan_hash,
@@ -90,6 +94,7 @@ async def build_parametric_mmc_model(
 
 
 async def get_parametric_mmc_build_status(build_id: str) -> dict[str, Any]:
+    """Get the status of a parameterized MMC build."""
     return _service().get_status(build_id)
 
 
@@ -97,6 +102,7 @@ async def recommend_mmc_simulation(
     request_or_project: dict[str, Any] | str,
     objectives: list[str] | None = None,
 ) -> dict[str, Any]:
+    """Recommend executable normal and fault MMC simulation scenarios."""
     value: MmcParametricRequest | str = (
         _request(request_or_project)
         if isinstance(request_or_project, dict)
@@ -111,6 +117,7 @@ async def validate_mmc_model(
     output_files: list[str] | None = None,
     acceptance_scope: str = "full",
 ) -> dict[str, Any]:
+    """Validate a parameterized MMC model and its acceptance evidence."""
     return _service().validate_model(
         project_name,
         model_fidelity,

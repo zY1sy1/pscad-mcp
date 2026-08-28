@@ -107,6 +107,17 @@
         "owned_process_cleaned": true
       },
       "note": "The opt-in PSCAD 4.6.2 Legacy matrix generated and verified public tline.exe line constants, staged and built the detailed-PWM candidate, then stopped safely because the Legacy backend does not expose strict EMTDC timed-control capability. The AVM child stopped during live definition inventory because installed master.pslx has no master:dc_bus. No licensed PASS is claimed."
+    },
+    {
+      "scope": "generic_blueprint_builder",
+      "implementation_status": "INTEGRATION_BRANCH",
+      "licensed_status": "NOT_RUN_ON_INTEGRATED_COMMIT",
+      "evidence": {
+        "report_path": null,
+        "sha256": null,
+        "commit": null
+      },
+      "note": "The generic Blueprint Builder has passed offline and service-contract regression only; the opt-in licensed PSCAD acceptance test has not been run for this scope."
     }
   ]
 }

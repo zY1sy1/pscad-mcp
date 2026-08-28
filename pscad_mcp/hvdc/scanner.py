@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import json
 from pathlib import Path
 import xml.etree.ElementTree as ET
 
@@ -314,8 +315,18 @@ def scan_project(path: str | Path, canvas_name: str = "Main") -> HvdcProjectEvid
         ): item
         for item in (*legacy.connections, *canonical.connections)
     }
+    merged_warnings: list[object] = []
+    seen_warnings: set[str] = set()
+    for warning in (*legacy.warnings, *canonical.warnings):
+        try:
+            identity = json.dumps(warning, sort_keys=True, separators=(",", ":"))
+        except (TypeError, ValueError):
+            identity = repr(warning)
+        if identity not in seen_warnings:
+            seen_warnings.add(identity)
+            merged_warnings.append(warning)
     return replace(
         legacy,
         connections=tuple(connections[key] for key in sorted(connections)),
-        warnings=tuple(sorted(set(legacy.warnings) | set(canonical.warnings))),
+        warnings=tuple(merged_warnings),
     )

@@ -21,7 +21,7 @@ def test_unset_profile_preserves_the_compatibility_inventory(monkeypatch):
     monkeypatch.setenv("PSCAD_MCP_TOOL_PROFILE", "core")
     names = _names(create_server(environ={}))
 
-    assert len(names) == 84
+    assert len(names) == 97
     assert names == FULL_TOOL_NAMES
     assert names - COMPATIBILITY_TOOL_NAMES == {"get_pscad_capabilities"}
 
@@ -39,7 +39,7 @@ def test_full_profile_preserves_the_compatibility_inventory():
         create_server(environ={"PSCAD_MCP_TOOL_PROFILE": " FuLl "})
     )
 
-    assert len(names) == 84
+    assert len(names) == 97
     assert names == FULL_TOOL_NAMES
     assert names - COMPATIBILITY_TOOL_NAMES == {"get_pscad_capabilities"}
 

@@ -66,7 +66,7 @@ def test_readmes_describe_compatible_mcp_hardening_in_both_languages():
         "get_pscad_capabilities",
         "PSCAD_MCP_TOOL_PROFILE",
         "PSCAD_MCP_DOCUMENTATION_DIR",
-        "93",
+        "97",
         "offset",
         "limit",
         "pscad-docs://modules/",
@@ -81,7 +81,7 @@ def test_readmes_describe_compatible_mcp_hardening_in_both_languages():
 
     language_contracts = {
         "README.md": (
-            "92 compatibility/domain tools plus one always-on capability tool",
+            "96 compatibility/domain tools plus one always-on capability tool",
             "`full` remains the unchanged default",
             "opt-in",
             "fail server startup",
@@ -91,7 +91,7 @@ def test_readmes_describe_compatible_mcp_hardening_in_both_languages():
             "contract-tested only",
         ),
         "docs/zh-CN/README.md": (
-            "92 个兼容/领域工具 + 1 个始终注册的能力工具",
+            "96 个兼容/领域工具 + 1 个始终注册的能力工具",
             "`full` 保持不变的默认值",
             "显式启用",
             "启动失败",
@@ -114,7 +114,7 @@ def test_readmes_document_parametric_mmc_contract_and_limits():
         "recommend_mmc_simulation", "validate_mmc_model",
     )
     shared = (
-        "93", "detailed_pwm", "average_value", "PSCAD 4.6.2",
+        "97", "detailed_pwm", "average_value", "PSCAD 4.6.2",
         "intrinsic_dc_fault_blocking=false", "individual_cell_balance_not_modeled",
         "device_stress_not_modeled", "switching_harmonics_not_modeled",
         "thermal_not_modeled", "inspected", "designed", "planned", "built",
