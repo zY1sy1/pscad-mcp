@@ -125,6 +125,9 @@ class LegacyBackend:
         self._component_bindings: dict[
             tuple[str, int], tuple[str, dict[str, str], dict[str, str]]
         ] = {}
+        self._composite_components: dict[
+            tuple[str, int], dict[str, tuple[int, str]]
+        ] = {}
         self._topology_definition_cache: dict[
             tuple[str, str, str], DefinitionMetadata
         ] = {}
@@ -1966,6 +1969,10 @@ class LegacyBackend:
         self, project_name: str, component_id: int
     ) -> dict[str, Any]:
         _canvas, component = await self._component_proxy(project_name, component_id)
+        composite = self._composite_components.get((project_name, int(component_id)))
+        if composite:
+            first_id = next(iter(composite.values()))[0]
+            _canvas, component = await self._component_proxy(project_name, first_id)
         values = dict(await self.executor.run_safe(component.get_parameters))
         binding = self._component_bindings.get((project_name, int(component_id)))
         if binding is None:
@@ -2134,8 +2141,29 @@ class LegacyBackend:
         return info
 
     async def get_component_ports(
-        self, project_name: str, component_id: int
+        self,
+        project_name: str,
+        component_id: int,
+        *,
+        _include_composite: bool = True,
     ) -> list[PortInfo]:
+        composite = self._composite_components.get((project_name, int(component_id)))
+        if composite and _include_composite:
+            result: list[PortInfo] = []
+            for logical_name, (physical_id, physical_name) in composite.items():
+                origin = await self.get_component_location(project_name, physical_id)
+                offset = {"A": (0, -54), "B": (0, 54)}.get(physical_name)
+                if offset is not None:
+                    result.append(
+                        PortInfo(
+                            logical_name,
+                            origin[0] + offset[0],
+                            origin[1] + offset[1],
+                            1,
+                            "NonRemovable",
+                        )
+                    )
+            return result
         canvas, component = await self._component_proxy(project_name, component_id)
         port_names = list(getattr(component, "port_names", []))
         ports_method = getattr(component, "ports", None)
@@ -2759,6 +2787,15 @@ class LegacyBackend:
             raise ValueError("orientation must be between 0 and 7.")
         canvas = await self._canvas(project_name, canvas_name)
         logical_definition = f"{library}:{definition}"
+        if logical_definition == "master:ac_filter_branch":
+            return await self._add_three_phase_filter(
+                project_name,
+                canvas_name,
+                location,
+                orientation,
+                parameters,
+                logical_definition,
+            )
         binding = None
         if library == "master":
             try:
@@ -2830,6 +2867,74 @@ class LegacyBackend:
                 binding[1],
                 binding[2],
             )
+        return info
+
+    async def _add_three_phase_filter(
+        self,
+        project_name: str,
+        canvas_name: str,
+        location: tuple[int, int],
+        orientation: int,
+        parameters: Any,
+        logical_definition: str,
+    ) -> ComponentInfo:
+        """Expand the logical three-phase filter into three Master cfilters."""
+
+        canvas = await self._canvas(project_name, canvas_name)
+        physical_ids: dict[str, int] = {}
+        logical_parameters = dict(parameters or {})
+        physical_parameters = {
+            "Q": logical_parameters.get("Branch_MVAR", 0.0),
+            "f0": logical_parameters.get("Tuning_Hz", 300.0),
+        }
+        for phase, offset in {"A": 0, "B": 120, "C": 240}.items():
+            physical = await self.executor.run_safe(
+                canvas.add_component,
+                "master",
+                "cfilter",
+                int(location[0]),
+                int(location[1]) + offset,
+            )
+            if physical is None or not self._is_user_component(physical):
+                raise BackendError(
+                    "POSTCONDITION_FAILED",
+                    "Three-phase filter expansion did not return a user component.",
+                    self.name,
+                    "add_component",
+                )
+            await self.executor.run_safe(physical.set_parameters, **physical_parameters)
+            command = getattr(physical, "_generic", None)
+            if command is not None:
+                if orientation >= 4:
+                    await self.executor.run_safe(command, "IDM_FLIP")
+                for _ in range(orientation - 4 if orientation >= 4 else orientation):
+                    await self.executor.run_safe(command, "IDM_ROTATERIGHT")
+            physical_ids[phase] = self._component_id(physical)
+        first_id = physical_ids["A"]
+        _canvas, first = await self._component_proxy(project_name, first_id)
+        info = await self._component_info(first)
+        info = ComponentInfo(info.id, info.name, logical_definition, info.location)
+        self._component_orientations[(project_name, first_id)] = orientation
+        self._component_bindings[(project_name, first_id)] = (
+            logical_definition,
+            {
+                "IN_A": "A",
+                "OUT_A": "B",
+                "IN_B": "A",
+                "OUT_B": "B",
+                "IN_C": "A",
+                "OUT_C": "B",
+            },
+            {"Branch_MVAR": "Q", "Tuning_Hz": "f0"},
+        )
+        self._composite_components[(project_name, first_id)] = {
+            "IN_A": (physical_ids["A"], "A"),
+            "OUT_A": (physical_ids["A"], "B"),
+            "IN_B": (physical_ids["B"], "A"),
+            "OUT_B": (physical_ids["B"], "B"),
+            "IN_C": (physical_ids["C"], "A"),
+            "OUT_C": (physical_ids["C"], "B"),
+        }
         return info
 
     @staticmethod
