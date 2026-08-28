@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-08-28T16:03:23+08:00",
+  "updated_at": "2026-08-28T16:08:37+08:00",
   "policy": "A licensed PASS applies only to the named scope and commit. It must not be inherited by another builder, domain workflow, or later commit.",
   "scopes": [
     {
@@ -74,12 +74,12 @@
       "implementation_status": "INTEGRATION_BRANCH",
       "licensed_status": "INCOMPLETE_ANALYSIS",
       "evidence": {
-        "report_path": "D:/PSCAD-Workspace/mmc-parametric-acceptance/mmc-parametric-acceptance-20260828T080323968782Z/mmc-parametric-acceptance-report.json",
-        "sha256": "6d54f8f377e3f96fdf5543d8711d91965b51c92b22547b5147a1bb488b32f266",
-        "commit": "6f9416124cd0a4e3e29537cf149d18de3316dc90"
+        "report_path": "D:/PSCAD-Workspace/mmc-parametric-acceptance/mmc-parametric-acceptance-20260828T080837223737Z/mmc-parametric-acceptance-report.json",
+        "sha256": "18975323c2b563d308a81d6e1743ef866bfb66d193be2de04cd4284917d5d4e5",
+        "commit": "aec74dd52f8f4e6d523aba652eff3eec1456198c"
       },
       "attempt": {
-        "timestamp": "2026-08-28T16:03:23+08:00",
+        "timestamp": "2026-08-28T16:08:37+08:00",
         "failure_stage": "scenario_preflight_and_avm_definition_inventory",
         "failure_code": "HVDC_TIMED_CONTROL_UNAVAILABLE; LCC_DEFINITION_MISSING",
         "blocking_dependency": "master:dc_bus",
