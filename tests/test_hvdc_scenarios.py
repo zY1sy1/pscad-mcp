@@ -692,7 +692,15 @@ def test_status_refresh_does_not_finish_scenario_while_event_task_is_active(tmp_
 
     async def exercise():
         started = await service.run_scenario(str(source), scenario, confirm=True)
-        await asyncio.sleep(0.001)
+        deadline = asyncio.get_running_loop().time() + 0.5
+        while started["scenario_id"] not in service._scenario_tasks:
+            if asyncio.get_running_loop().time() >= deadline:
+                raise AssertionError("scenario worker did not start")
+            await asyncio.sleep(0)
+        while started["scenario_id"] in service._scenario_tasks and service.backend_service.status_calls == 0:
+            if asyncio.get_running_loop().time() >= deadline:
+                raise AssertionError("scenario status was not queried")
+            await asyncio.sleep(0)
         interim = await service.scenario_status(started["scenario_id"])
         terminal = await _wait_for_terminal(service, started["scenario_id"])
         return interim, terminal

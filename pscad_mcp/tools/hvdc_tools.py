@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Any
+from typing import Annotated, Any, Dict
 
 from mcp.server.fastmcp import FastMCP
 from pydantic import Field
@@ -12,7 +12,7 @@ from ..hvdc.service import HvdcDomainService
 from .registration import register_tool
 
 HvdcScenario = Annotated[
-    dict[str, Any],
+    Dict[str, Any],
     Field(
         description=(
             'Keys name, profile, project, parameter_changes, events, run, '

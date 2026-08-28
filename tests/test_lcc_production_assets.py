@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -68,7 +69,7 @@ def test_confirmed_golden_generator_is_the_only_writer(tmp_path):
 
     without_confirmation = subprocess.run(
         [
-            str(Path(__file__).parents[1] / ".venv" / "Scripts" / "python.exe"),
+            sys.executable,
             "scripts/generate_lcc_golden.py",
             "--reference-output", str(reference),
             "--blueprint", str(blueprint),
@@ -84,7 +85,7 @@ def test_confirmed_golden_generator_is_the_only_writer(tmp_path):
 
     confirmed = subprocess.run(
         [
-            str(Path(__file__).parents[1] / ".venv" / "Scripts" / "python.exe"),
+            sys.executable,
             "scripts/generate_lcc_golden.py",
             "--reference-output", str(reference),
             "--blueprint", str(blueprint),

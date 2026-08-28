@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Any
+from typing import Annotated, Any, Dict, List
 
 from mcp.server.fastmcp import FastMCP
 from pydantic import Field
@@ -14,7 +14,7 @@ from ..hvdc.builders.lcc.schema import parse_parametric_request
 from .registration import register_tool
 
 ParametricLccInput = Annotated[
-    dict[str, Any],
+    Dict[str, Any],
     Field(
         description=(
             'Keys topology, ratings, engineering_overrides, operation_modes, '
@@ -27,7 +27,7 @@ ParametricLccInput = Annotated[
     ),
 ]
 OperatingModeEvents = Annotated[
-    list[dict[str, Any]],
+    List[Dict[str, Any]],
     Field(
         description=(
             'Ordered events with event_id, time_s, target, and value; example '

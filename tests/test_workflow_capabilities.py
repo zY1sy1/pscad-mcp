@@ -249,7 +249,7 @@ class TestStructuredProjectMessages(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, {"channels": []})
         self.assertEqual(
             backend.calls,
-            [(str(path), 25, "Root/Voltage/PGB:Data", True)],
+            [(str(path.resolve()), 25, "Root/Voltage/PGB:Data", True)],
         )
 
         with patch("pscad_mcp.tools.data_tools.pscad_manager") as manager:
