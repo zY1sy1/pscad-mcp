@@ -431,7 +431,12 @@ def test_path_like_target_without_suffix_still_obeys_workspace_policy(tmp_path):
         outside.with_suffix(".pscx").unlink()
 
 
-def test_path_like_baseline_execution_target_obeys_workspace_policy(tmp_path):
+def test_path_like_baseline_execution_target_obeys_workspace_policy(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.delenv("PSCAD_MCP_WORKSPACE", raising=False)
+    monkeypatch.delenv("PSCAD_MCP_ALLOW_UNSCOPED_PATHS", raising=False)
     source = tmp_path / "external.pscx"
     source.write_text("<project />", encoding="utf-8")
     service = HvdcDomainService(ScenarioBackend(projects=()))

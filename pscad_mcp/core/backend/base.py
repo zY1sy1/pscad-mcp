@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Mapping, Protocol, Sequence, runtime_checkable
+from typing import TYPE_CHECKING, Any, Mapping, Protocol, Sequence, runtime_checkable
+
+if TYPE_CHECKING:
+    from ...topology.models import TopologySnapshot
 
 
 JsonDict = dict[str, Any]
@@ -182,6 +185,10 @@ class ComponentBackend(Protocol):
 
 
 class CanvasBackend(Protocol):
+    async def inspect_canvas_topology(
+        self, project_name: str, canvas_name: str
+    ) -> "TopologySnapshot": ...
+
     async def add_component(
         self,
         project_name: str,

@@ -141,6 +141,12 @@ TOOL_GROUPS = MappingProxyType(
                 "clear_learning_history",
             }
         ),
+        "topology": frozenset(
+            {
+                "inspect_project_topology",
+                "diagnose_project_topology",
+            }
+        ),
     }
 )
 
@@ -636,6 +642,18 @@ COMPATIBILITY_TOOL_SPECS = MappingProxyType(
             destructive=True,
             open_world=False,
             backend_support=_SERVER_LOCAL,
+        ),
+        "inspect_project_topology": _spec(
+            "inspect_project_topology",
+            "Inspect confirmed project topology without modifying PSCAD state.",
+            read_only=True,
+            idempotent=True,
+        ),
+        "diagnose_project_topology": _spec(
+            "diagnose_project_topology",
+            "Run read-only topology diagnostics with optional explicit inference.",
+            read_only=True,
+            idempotent=True,
         ),
     }
 )

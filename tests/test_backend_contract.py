@@ -13,6 +13,7 @@ from pscad_mcp.core.backend.base import (
     SimulationSetInfo,
     SimulationTaskInfo,
 )
+from pscad_mcp.topology.models import TopologySnapshot
 
 
 class IncompleteBackend:
@@ -30,6 +31,7 @@ class TestBackendRecords(unittest.TestCase):
             RunState("running", 25.0),
             SimulationSetInfo("Batch1", None, ("CaseA", "CaseB")),
             SimulationTaskInfo("CaseA", "CaseA", "", 1, 1),
+            TopologySnapshot("live", "case"),
         ]
 
         payload = json.loads(json.dumps([asdict(record) for record in records]))
@@ -39,6 +41,7 @@ class TestBackendRecords(unittest.TestCase):
         self.assertEqual(payload[4]["progress"], 25.0)
         self.assertEqual(payload[5]["tasks"], ["CaseA", "CaseB"])
         self.assertEqual(payload[6]["volley"], 1)
+        self.assertEqual(payload[7]["source"], "live")
 
     def test_backend_error_has_stable_payload(self):
         error = BackendError(

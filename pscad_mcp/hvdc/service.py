@@ -12,8 +12,11 @@ from typing import Any, Mapping
 from ..core.backend.base import BackendError
 from ..core.path_policy import PathPolicy, WorkspaceNotConfiguredError
 from ..runtime import PendingCleanupError
+from ..topology.adapters.hvdc import topology_to_hvdc_evidence
+from ..topology.models import ProjectTopology
 from .classifier import classify_topology, extract_assets
 from .mappings import MappingResolution, resolve_mappings
+from .models import HvdcProjectEvidence
 from .profiles import list_profiles, load_profile, register_profile
 from .scanner import scan_project
 
@@ -367,6 +370,15 @@ class HvdcDomainService:
         if cached and cached[0] == mtime:
             return cached[1]
         evidence = scan_project(path, canvas_name)
+        result = self._inspection_from_evidence(evidence, canvas_name)
+        self._cache[key] = (mtime, result)
+        return result
+
+    def _inspection_from_evidence(
+        self,
+        evidence: HvdcProjectEvidence,
+        canvas_name: str,
+    ) -> dict[str, Any]:
         topology = classify_topology(evidence)
         assets = extract_assets(evidence)
         profile_name = "hvdc_breaker_difforder" if any(asset.kind == "breaker" for asset in assets) else "auto"
@@ -389,8 +401,84 @@ class HvdcDomainService:
             "warnings": list(evidence.warnings) + list(mappings.warnings),
             "confidence": topology.confidence,
         }
-        self._cache[key] = (mtime, result)
         return result
+
+    async def _live_evidence(
+        self,
+        project_name: str,
+        canvas_name: str,
+    ) -> HvdcProjectEvidence:
+        candidate = Path(project_name).expanduser()
+        if candidate.suffix.casefold() == ".pscx" or (
+            candidate.is_absolute() and candidate.exists()
+        ):
+            path = self._resolve_project(project_name)
+            return await asyncio.to_thread(scan_project, path, canvas_name)
+
+        topology_service = getattr(
+            self.backend_service,
+            "topology_service",
+            None,
+        )
+        if topology_service is None:
+            path = self._resolve_project(project_name)
+            return await asyncio.to_thread(scan_project, path, canvas_name)
+        try:
+            topology: ProjectTopology = await topology_service.inspect(
+                project_name,
+                canvas_name,
+                mode="conservative",
+            )
+        except BackendError as error:
+            if error.code not in {
+                "NOT_FOUND",
+                "PROJECT_NOT_FOUND",
+                "PROJECT_NOT_LOADED",
+            }:
+                raise
+            path = self._resolve_project(project_name)
+            return await asyncio.to_thread(scan_project, path, canvas_name)
+        return topology_to_hvdc_evidence(topology)
+
+    async def inspect_live_project(
+        self,
+        project_name: str,
+        canvas_name: str = "Main",
+    ) -> dict[str, Any]:
+        evidence = await self._live_evidence(project_name, canvas_name)
+        return self._inspection_from_evidence(evidence, canvas_name)
+
+    async def get_live_assets(
+        self,
+        project_name: str,
+        kind: str | None = None,
+        canvas_name: str = "Main",
+    ) -> list[dict[str, Any]]:
+        assets = (await self.inspect_live_project(project_name, canvas_name))[
+            "assets"
+        ]
+        return [
+            asset for asset in assets if kind is None or asset["kind"] == kind
+        ]
+
+    async def get_live_mappings(
+        self,
+        project_name: str,
+        canonical: str | None = None,
+        canvas_name: str = "Main",
+    ) -> dict[str, Any]:
+        result = await self.inspect_live_project(project_name, canvas_name)
+        mappings = [
+            item
+            for item in result["mappings"]
+            if canonical is None or item["canonical"] == canonical
+        ]
+        return {
+            "mappings": mappings,
+            "unresolved": result["unresolved"],
+            "conflicts": result.get("mapping_conflicts", []),
+            "warnings": result["warnings"],
+        }
 
     def inspect_project(self, project_name: str, canvas_name: str = "Main") -> dict[str, Any]:
         return self._inspection(project_name, canvas_name)
@@ -420,12 +508,30 @@ class HvdcDomainService:
 
     def validate_project(self, project_name: str, profile: str = "auto", canvas_name: str = "Main") -> dict[str, Any]:
         result = self._inspection(project_name, canvas_name)
+        evidence = scan_project(self._resolve_project(project_name), canvas_name)
+        return self._validate_evidence(result, evidence, profile)
+
+    async def validate_live_project(
+        self,
+        project_name: str,
+        profile: str = "auto",
+        canvas_name: str = "Main",
+    ) -> dict[str, Any]:
+        evidence = await self._live_evidence(project_name, canvas_name)
+        result = self._inspection_from_evidence(evidence, canvas_name)
+        return self._validate_evidence(result, evidence, profile)
+
+    def _validate_evidence(
+        self,
+        result: dict[str, Any],
+        evidence: HvdcProjectEvidence,
+        profile: str,
+    ) -> dict[str, Any]:
         profile_name = profile
         if profile == "auto":
             profile_name = "hvdc_breaker_difforder" if any(item["kind"] == "breaker" for item in result["assets"]) else "lcc_bipolar_generic"
         loaded = load_profile(profile_name, workspace_root=self._workspace_root())
         if profile_name != "auto":
-            evidence = scan_project(self._resolve_project(project_name), canvas_name)
             resolution = resolve_mappings(evidence, loaded)
             result = dict(result)
             result["mappings"] = [asdict(mapping) for mapping in resolution.mappings]

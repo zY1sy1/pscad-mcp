@@ -1,6 +1,6 @@
 # PSCAD MCP for Codex and GitHub Copilot CLI
 
-`pscad-mcp` is a Windows Model Context Protocol (MCP) server for PSCAD automation. It uses `mhrc.automation` for PSCAD 4.6.x and `mhi.pscad` for PSCAD 5.x behind one stable 60-tool generic service contract, plus separate HVDC, silent-learning, fixed CIGRE LCC, and parametric LCC domain layers. The current inventory is 84 tools: 83 compatibility tools plus one always-on capability tool.
+`pscad-mcp` is a Windows Model Context Protocol (MCP) server for PSCAD automation. It uses `mhrc.automation` for PSCAD 4.6.x and `mhi.pscad` for PSCAD 5.x behind one stable 60-tool generic service contract, plus read-only topology diagnostics, HVDC, silent-learning, fixed CIGRE LCC, and parametric LCC domain layers. The current inventory is 86 tools: 85 compatibility/domain tools plus one always-on capability tool.
 
 中文安装、配置、安全和验收说明：[docs/zh-CN/README.md](docs/zh-CN/README.md)
 
@@ -61,10 +61,11 @@ external process.
 
 ## Tool coverage
 
-The 83 compatibility tools are 83 = 60 generic tools, 10 HVDC tools, 3 learning
-tools, 4 fixed CIGRE LCC tools, and 6 parametric LCC tools. The always-on
-`get_pscad_capabilities` discovery tool brings the current-branch total to 84.
-The generic 60-tool contract keeps its existing names and default return shapes.
+The complete inventory is 86 = 60 generic tools, 2 topology tools, 10 HVDC
+tools, 3 learning tools, 4 fixed CIGRE LCC tools, 6 parametric LCC tools,
+and one always-on `get_pscad_capabilities` tool.
+The generic 60-tool contract keeps its existing names and default return
+shapes.
 
 The server currently exposes tool groups for:
 
@@ -80,7 +81,7 @@ The server currently exposes tool groups for:
 ### Compatible discovery, profiles, pagination, and documentation
 
 `full` remains the unchanged default for `PSCAD_MCP_TOOL_PROFILE`, so existing
-clients receive all 83 compatibility tools plus the always-on
+clients receive all compatibility/domain tools plus the always-on
 `get_pscad_capabilities` tool. Selecting a comma-separated subset of `core`,
 `hvdc`, `lcc`, `parametric_lcc`, and `learning` is opt-in. Empty, unknown, or
 otherwise invalid profile values fail server startup instead of silently
@@ -94,13 +95,43 @@ resources under `pscad-docs://modules/`, including bounded URI variants.
 
 Generated API documentation lives in local state and is created only when
 `sync_documentation` is called. On Windows the default root is
-`%LOCALAPPDATA%\pscad-mcp\docs`; a platform home-state fallback is used when
-that location is unavailable. `PSCAD_MCP_DOCUMENTATION_DIR` may override the
-root, but it must be an absolute path. This documentation path is deliberately
-absent from the portable configuration example.
+`%LOCALAPPDATA%\\pscad-mcp\\docs`; `PSCAD_MCP_DOCUMENTATION_DIR` may override
+the root, but it must be an absolute path.
 
-Modern PSCAD 5.x support remains contract-tested only; no real PSCAD 5.x
-end-to-end acceptance PASS is claimed by this branch.
+The topology layer adds `inspect_project_topology` and
+`diagnose_project_topology`. Both tools are read-only. Diagnosis now defaults
+to `generic+hvdc-auto`: generic rules run first, then deterministic HVDC rules
+consume the same canonical confirmed topology. Use `ruleset="generic"` to run
+only the structural rules. `mode="conservative"` reports confirmed topology,
+while `mode="infer"` may add explicit candidate edges; candidates are never
+promoted to confirmed nets, included in the confirmed topology hash, or passed
+to HVDC/LCC validation. Loaded HVDC projects use live canonical evidence;
+absolute `.pscx` paths remain file-only compatible, and the LCC `ProjectGraph`
+API is now adapted from the same canonical records. Licensed PSCAD 4.6.2
+Legacy is the primary live target. PSCAD 5.x has contract coverage only and no
+real topology acceptance claim.
+
+The licensed topology gate is opt-in and runs only against timestamped project
+copies prepared from an approved absolute truth manifest:
+
+```powershell
+& .\scripts\run_topology_acceptance.ps1 `
+  -Workspace 'D:\PSCAD-Workspace\topology-acceptance' `
+  -Manifest 'D:\PSCAD-Workspace\topology-truth.json' `
+  -Version '4.6.2' -X64
+```
+
+The runner refuses source projects inside the acceptance workspace and refuses
+to start while PSCAD is open. A `PASS` report must preserve project and object
+inventory hashes, match complete confirmed-net and diagnostic truth, remain
+deterministic, and satisfy the 500/2,000-object performance gates. The named
+`unified_topology_462` scope passed the final `generic+hvdc-v1` gate on licensed
+PSCAD 4.6.2, including exact canonical HVDC/LCC diagnostic codes. Its report,
+truth manifest and review hashes, SHA-256, and tested commit are recorded in
+`docs/acceptance-status.json`. This read-only diagnostic result does not imply
+mutating HVDC workflows, fixed or parametric LCC builders, MMC, PSCAD 5.x, or
+later-commit acceptance, and no acceptance status is inferred from the
+non-licensed contract suite.
 
 The HVDC domain layer adds ten tools without changing the original generic
 inventory: `inspect_hvdc_project`, `get_hvdc_assets`, `get_hvdc_mappings`,
@@ -499,7 +530,6 @@ PSCAD_MCP_LEGACY_MINIMIZE = 'false'
 PSCAD_MCP_LEGACY_EXISTING_POLICY = 'reject'
 PSCAD_MCP_WORKSPACE = 'C:/path/to/PSCAD-Workspace'
 PSCAD_MCP_ALLOW_UNSCOPED_PATHS = 'false'
-PSCAD_MCP_TOOL_PROFILE = 'full'
 PSCAD_MCP_LEARNING_ENABLED = 'true'
 PSCAD_MCP_LEARNING_RETENTION_DAYS = '90'
 PSCAD_MCP_LEARNING_MAX_EVENTS = '20000'
@@ -551,11 +581,10 @@ This project can generate PSCAD API reference snapshots that are easier for LLMs
 py -3 -m pscad_mcp.utils.doc_manager
 ```
 
-Generated files are written lazily to local state, not to tracked repository
-directories. The default Windows root is `%LOCALAPPDATA%\pscad-mcp\docs`; set
-`PSCAD_MCP_DOCUMENTATION_DIR` to an absolute path if an explicit local root is
-required. Use `list_documentation`, `read_documentation`, or the
-`pscad-docs://modules/` MCP resources after synchronization.
+Generated files are written to:
+
+- `docs\raw` for raw extracted output
+- `docs\md` for enriched Markdown
 
 ### Run tests
 
@@ -577,7 +606,7 @@ The runner refuses to start while another PSCAD process is open and never
 broadly terminates PSCAD processes. It runs the six original acceptance tests
 plus nine reliability tests, records owned PIDs and evidence directories, and
 requires all owned processes to exit. PSCAD 4.6.2 has been exercised on a real
-licensed installation; PSCAD 5.x remains contract-tested until a real 5.x
+licensed installation; PSCAD 5.x remains contract-tested only until a real 5.x
 installation is available for end-to-end acceptance.
 
 ## Project structure

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import importlib
 import math
 import os
@@ -17,6 +18,19 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 import xml.etree.ElementTree as ET
 
+from ...topology.geometry import GeometryError, absolute_port
+from ...topology.hashing import canonical_sha256
+from ...topology.models import (
+    DefinitionPortContract,
+    EvidenceRef,
+    TopologyBoundaryLink,
+    TopologyCanvas,
+    TopologyComponent,
+    TopologyConductor,
+    TopologyLabel,
+    TopologyPort,
+    TopologySnapshot,
+)
 from ..definition_metadata import DefinitionMetadata, read_definition_metadata
 from ..process_inventory import bounded_process_records
 from ..pscad_adapter import PscadAdapter
@@ -40,6 +54,11 @@ from .run_control import (
 
 
 _RUN_STATE_MISSING = object()
+_SavedTopologyRecord = tuple[
+    str | None,
+    tuple[int, int] | None,
+    str | None,
+]
 
 
 class LegacyBackend:
@@ -99,6 +118,9 @@ class LegacyBackend:
             for name, path in (definition_paths or {}).items()
         }
         self._component_orientations: dict[tuple[str, int], int] = {}
+        self._topology_definition_cache: dict[
+            tuple[str, str, str], DefinitionMetadata
+        ] = {}
         self._running_projects: set[str] = set()
         self._paused_projects: set[str] = set()
         self._run_activity_seen: set[str] = set()
@@ -303,6 +325,15 @@ class LegacyBackend:
             path = Path(filename).resolve()
             if path.suffix.lower() in {".pslx", ".pscx"}:
                 self.definition_paths[path.stem] = path
+                try:
+                    tree = await asyncio.to_thread(ET.parse, path)
+                    project_name = (
+                        tree.getroot().get("name") or ""
+                    ).strip()
+                except (OSError, ET.ParseError):
+                    project_name = ""
+                if project_name:
+                    self.definition_paths[project_name] = path
 
     async def list_projects(self) -> list[ProjectInfo]:
         values = await self.executor.run_safe(self._require_app().list_projects)
@@ -3360,3 +3391,992 @@ class LegacyBackend:
             if geometry:
                 rectangles[object_id] = geometry
         return rectangles
+    async def inspect_canvas_topology(
+        self, project_name: str, canvas_name: str
+    ) -> TopologySnapshot:
+        project = await self._project(project_name)
+        source_hashes: dict[Path, str] = {}
+        saved_topology = await asyncio.to_thread(
+            self._saved_topology_components,
+            project_name,
+        )
+        if saved_topology is None:
+            saved_components = None
+            saved_modules = None
+        else:
+            saved_components, saved_modules = saved_topology
+        captures, unresolved = await self._legacy_topology_captures(
+            project,
+            project_name,
+            canvas_name,
+            source_hashes,
+            saved_components,
+            saved_modules,
+        )
+        source_fingerprint = canonical_sha256(
+            tuple(
+                (capture["key"], capture["inventory"])
+                for capture in captures
+            )
+        )
+        observed_at_ns = time.time_ns()
+        evidence = lambda reference: (
+            EvidenceRef(
+                "live",
+                reference,
+                fingerprint=source_fingerprint,
+                observed_at_ns=observed_at_ns,
+            ),
+        )
+        canvases = []
+        components = []
+        conductors = []
+        labels = []
+        boundary_links = []
+        components_supported = True
+        conductors_supported = True
+        labels_supported = True
+        captured_keys = {capture["key"] for capture in captures}
+        for capture in captures:
+            canvas_key = capture["key"]
+            inventory_by_id = {
+                item[0]: item for item in capture["inventory"]
+            }
+            page_ports = capture["page_ports"]
+            canvases.append(
+                TopologyCanvas(
+                    key=canvas_key,
+                    name=capture["name"],
+                    parent_key=capture["parent_key"],
+                    page_ports=tuple(
+                        f"{canvas_key}:{port.name}" for port in page_ports
+                    ),
+                )
+            )
+            canvas_components = []
+            for node in self._legacy_topology_nodes(capture["response"]):
+                object_id = str(node.get("id"))
+                key = f"{canvas_key}:{object_id}"
+                proxy = capture["proxies"].get(object_id)
+                inventory_item = inventory_by_id[object_id]
+                class_id = str(inventory_item[1]).casefold()
+                if self._legacy_topology_is_conductor(class_id, proxy):
+                    vertices = inventory_item[6]
+                    if vertices is None:
+                        conductors_supported = False
+                        unresolved.add(
+                            f"conductor_geometry_unreadable:{key}"
+                        )
+                        continue
+                    conductors.append(
+                        TopologyConductor(
+                            key=key,
+                            canvas_key=canvas_key,
+                            object_id=object_id,
+                            kind=(
+                                "bus"
+                                if "bus" in class_id
+                                or type(proxy).__name__.casefold() == "bus"
+                                else "wire"
+                            ),
+                            namespace=self._legacy_topology_namespace(
+                                node, proxy
+                            ),
+                            vertices=vertices,
+                            evidence=evidence(key),
+                        )
+                    )
+                    continue
+                definition = inventory_item[2]
+                location = inventory_item[3]
+                parameters = await self._legacy_topology_parameters(
+                    proxy, node
+                )
+                if self._legacy_topology_is_label(definition):
+                    label_name = inventory_item[5]
+                    if not label_name:
+                        labels_supported = False
+                        unresolved.add(f"label_name_unreadable:{key}")
+                        continue
+                    labels.append(
+                        TopologyLabel(
+                            key=key,
+                            canvas_key=canvas_key,
+                            object_id=object_id,
+                            name=label_name,
+                            namespace=(
+                                "data"
+                                if "datalabel" in definition.casefold()
+                                else "electrical"
+                            ),
+                            scope=canvas_key,
+                            location=location,
+                            evidence=evidence(key),
+                        ),
+                    )
+                    continue
+                if definition.casefold() in {"user", "usercmp"}:
+                    components_supported = False
+                    unresolved.add(f"component_definition_unavailable:{key}")
+                orientation = inventory_item[4]
+                ports = await self._legacy_topology_ports(
+                    project_name,
+                    canvas_key,
+                    key,
+                    definition,
+                    location,
+                    orientation,
+                    proxy,
+                    node,
+                    evidence,
+                    unresolved,
+                    source_hashes,
+                )
+                component = TopologyComponent(
+                    key=key,
+                    canvas_key=canvas_key,
+                    object_id=object_id,
+                    definition=definition,
+                    name=(
+                        self._legacy_topology_name(
+                            proxy, parameters, node
+                        )
+                        or None
+                    ),
+                    location=location,
+                    orientation=orientation,
+                    active=self._legacy_topology_active(parameters),
+                    parameters=tuple(
+                        sorted(
+                            (str(name), value)
+                            for name, value in parameters.items()
+                        )
+                    ),
+                    ports=ports,
+                    evidence=evidence(key),
+                )
+                components.append(component)
+                canvas_components.append(component)
+            component_by_id = {
+                component.object_id: component
+                for component in canvas_components
+            }
+            for child in capture["children"]:
+                if child["key"] not in captured_keys:
+                    continue
+                component = component_by_id.get(child["object_id"])
+                if component is None:
+                    continue
+                links, missing = self._legacy_topology_boundary_links(
+                    component,
+                    child["key"],
+                    child["page_ports"],
+                    evidence,
+                )
+                boundary_links.extend(links)
+                unresolved.update(missing)
+
+        project_path = self.definition_paths.get(project_name)
+        if project_path is None:
+            unresolved.add("project_path_unavailable")
+        for capture in captures:
+            after_response = await self._legacy_topology_bulk(
+                capture["canvas"]
+            )
+            after_proxies = await self._legacy_topology_proxies(
+                capture["canvas"]
+            )
+            after_inventory = await self._legacy_topology_inventory(
+                project_name,
+                after_response,
+                after_proxies,
+                saved_components,
+            )
+            if capture["inventory"] != after_inventory:
+                raise BackendError(
+                    "TOPOLOGY_SNAPSHOT_UNSTABLE",
+                    "Canvas changed during topology capture.",
+                    self.name,
+                    "inspect_canvas_topology",
+                )
+        hierarchy_supported = project_path is not None and not any(
+            item.startswith(
+                (
+                    "definition_ports_unavailable:",
+                    "hierarchy_boundary_unresolved:",
+                    "hierarchy_cycle:",
+                    "live_hierarchy_unavailable:",
+                )
+            )
+            for item in unresolved
+        )
+        ports_supported = not any(
+            item.startswith(
+                (
+                    "definition_metadata_unavailable:",
+                    "port_geometry_unresolved:",
+                )
+            )
+            for item in unresolved
+        )
+        return TopologySnapshot(
+            source="live",
+            project_name=project_name,
+            project_path=str(project_path) if project_path is not None else None,
+            pscad_version=self.version,
+            canvases=tuple(sorted(canvases, key=lambda item: item.key)),
+            components=tuple(sorted(components, key=lambda item: item.key)),
+            conductors=tuple(sorted(conductors, key=lambda item: item.key)),
+            labels=tuple(sorted(labels, key=lambda item: item.key)),
+            boundary_links=tuple(
+                sorted(boundary_links, key=lambda item: item.key)
+            ),
+            unresolved=tuple(sorted(unresolved)),
+            capabilities=(
+                ("components", components_supported),
+                ("conductors", conductors_supported),
+                ("dirty_state", False),
+                ("hierarchy", hierarchy_supported),
+                ("labels", labels_supported),
+                ("ports", ports_supported),
+                ("project_path", project_path is not None),
+            ),
+            source_fingerprint=source_fingerprint,
+            grid_step=self._canvas_grid,
+        )
+
+    async def _legacy_topology_captures(
+        self,
+        project: Any,
+        project_name: str,
+        canvas_name: str,
+        source_hashes: dict[Path, str],
+        saved_components: Mapping[
+            tuple[str, str], _SavedTopologyRecord
+        ] | None,
+        saved_modules: frozenset[str] | None,
+    ) -> tuple[list[dict[str, Any]], set[str]]:
+        captures = []
+        unresolved = set()
+        queue = [
+            {
+                "name": canvas_name,
+                "key": canvas_name,
+                "parent_key": None,
+                "ancestry": (canvas_name.casefold(),),
+                "page_ports": (),
+            }
+        ]
+        while queue:
+            request = queue.pop(0)
+            method = getattr(project, "user_canvas", None)
+            if method is None:
+                method = getattr(project, "canvas", None)
+            try:
+                if method is None:
+                    raise AttributeError("canvas accessor unavailable")
+                canvas = await self.executor.run_safe(method, request["name"])
+                response = await self._legacy_topology_bulk(canvas)
+            except (AttributeError, BackendError, KeyError, TypeError):
+                if request["parent_key"] is None:
+                    raise BackendError(
+                        "TOPOLOGY_SOURCE_INVALID",
+                        "Legacy canvas inventory is unavailable.",
+                        self.name,
+                        "inspect_canvas_topology",
+                    )
+                unresolved.add(
+                    f"live_hierarchy_unavailable:{request['key']}"
+                )
+                continue
+            try:
+                proxies = await self._legacy_topology_proxies(canvas)
+            except (AttributeError, BackendError, KeyError, TypeError):
+                proxies = {}
+                unresolved.add(
+                    f"proxy_enrichment_unavailable:{request['key']}"
+                )
+            inventory = await self._legacy_topology_inventory(
+                project_name,
+                response,
+                proxies,
+                saved_components,
+            )
+            capture = {
+                **request,
+                "canvas": canvas,
+                "response": response,
+                "proxies": proxies,
+                "inventory": inventory,
+                "children": [],
+            }
+            inventory_by_id = {item[0]: item for item in inventory}
+            captures.append(capture)
+            for node in self._legacy_topology_nodes(response):
+                object_id = str(node.get("id"))
+                proxy = proxies.get(object_id)
+                inventory_item = inventory_by_id.get(object_id)
+                definition = (
+                    inventory_item[2]
+                    if inventory_item is not None
+                    else await self._legacy_topology_definition(proxy, node)
+                )
+                local_name = self._legacy_topology_local_definition_name(
+                    project_name, definition
+                )
+                if local_name is None:
+                    continue
+                if (
+                    saved_modules is not None
+                    and local_name.casefold() not in saved_modules
+                ):
+                    continue
+                child_key = f"{request['key']}/{object_id}:{local_name}"
+                if local_name.casefold() in request["ancestry"]:
+                    unresolved.add(f"hierarchy_cycle:{child_key}")
+                    continue
+                metadata = await self._legacy_topology_definition_metadata(
+                    definition, source_hashes
+                )
+                page_ports = (
+                    tuple(
+                        DefinitionPortContract(
+                            name=port.name,
+                            kind=self._legacy_topology_port_namespace(
+                                port.kind or port.model or port.type
+                            ),
+                            dimension=port.dim,
+                            offset=(port.x, port.y),
+                        )
+                        for port in metadata.ports
+                        if port.page
+                    )
+                    if metadata is not None
+                    else ()
+                )
+                if metadata is None:
+                    unresolved.add(
+                        f"definition_ports_unavailable:{child_key}"
+                    )
+                child = {
+                    "name": local_name,
+                    "key": child_key,
+                    "parent_key": request["key"],
+                    "ancestry": request["ancestry"]
+                    + (local_name.casefold(),),
+                    "page_ports": page_ports,
+                }
+                capture["children"].append(
+                    {
+                        "object_id": object_id,
+                        "key": child_key,
+                        "page_ports": page_ports,
+                    }
+                )
+                queue.append(child)
+        return captures, unresolved
+
+    @staticmethod
+    def _legacy_topology_local_definition_name(
+        project_name: str, definition: str
+    ) -> str | None:
+        if ":" not in definition:
+            return None
+        scope, name = definition.split(":", 1)
+        return name if scope.casefold() == project_name.casefold() else None
+
+    @staticmethod
+    def _legacy_topology_boundary_links(
+        component: TopologyComponent,
+        child_canvas_key: str,
+        page_ports: tuple[DefinitionPortContract, ...],
+        evidence,
+    ) -> tuple[list[TopologyBoundaryLink], list[str]]:
+        outer_ports = {port.name: port for port in component.ports}
+        links = []
+        unresolved = []
+        for page_port in page_ports:
+            outer = outer_ports.get(page_port.name)
+            key = (
+                f"{component.key}:{page_port.name}->"
+                f"{child_canvas_key}:{page_port.name}"
+            )
+            if outer is None or outer.absolute is None:
+                unresolved.append(f"hierarchy_boundary_unresolved:{key}")
+                continue
+            links.append(
+                TopologyBoundaryLink(
+                    key=key,
+                    outer_port_key=outer.key,
+                    outer_canvas_key=component.canvas_key,
+                    outer_point=outer.absolute,
+                    inner_port_key=f"{child_canvas_key}:{page_port.name}",
+                    inner_canvas_key=child_canvas_key,
+                    inner_point=page_port.offset,
+                    namespace=page_port.kind,
+                    dimension=page_port.dimension,
+                    evidence=evidence(key),
+                )
+            )
+        return links, unresolved
+
+    async def _legacy_topology_bulk(self, canvas: Any) -> ET.Element:
+        method = getattr(canvas, "list_components", None)
+        if method is None:
+            raise BackendError(
+                "TOPOLOGY_SOURCE_INVALID",
+                "Legacy canvas inventory is unavailable.",
+                self.name,
+                "inspect_canvas_topology",
+            )
+        response = await self.executor.run_safe(method)
+        if not isinstance(response, ET.Element):
+            raise BackendError(
+                "TOPOLOGY_SOURCE_INVALID",
+                "Legacy canvas inventory is invalid.",
+                self.name,
+                "inspect_canvas_topology",
+            )
+        return response
+
+    @staticmethod
+    def _legacy_topology_nodes(response: ET.Element) -> list[ET.Element]:
+        return sorted(
+            (
+                node
+                for node in response.iter()
+                if node.get("id") is not None
+            ),
+            key=lambda node: str(node.get("id")),
+        )
+
+    async def _legacy_topology_proxies(self, canvas: Any) -> dict[str, Any]:
+        method = getattr(canvas, "find_all", None)
+        if method is None:
+            return {}
+        values = list(await self.executor.run_safe(method))
+        result = {}
+        for value in values:
+            try:
+                result[str(self._component_id(value))] = value
+            except (TypeError, ValueError):
+                continue
+        return result
+
+    async def _legacy_topology_inventory(
+        self,
+        project_name: str,
+        response: ET.Element,
+        proxies: Mapping[str, Any],
+        saved_components: Mapping[
+            tuple[str, str], _SavedTopologyRecord
+        ] | None = None,
+    ) -> tuple[tuple, ...]:
+        result = []
+        for node in self._legacy_topology_nodes(response):
+            object_id = str(node.get("id"))
+            proxy = proxies.get(object_id)
+            class_id = str(node.get("classid") or node.tag)
+            saved_component = (
+                saved_components.get(
+                    (
+                        object_id,
+                        self._legacy_topology_class_family(class_id),
+                    )
+                )
+                if saved_components is not None
+                else None
+            )
+            saved_definition, saved_location, saved_orientation = (
+                saved_component or (None, None, None)
+            )
+            location = await self._legacy_topology_location(
+                proxy,
+                node,
+                saved_location,
+            )
+            orientation = await self._legacy_topology_orientation(
+                project_name,
+                object_id,
+                node,
+                proxy,
+                saved_orientation,
+            )
+            definition = await self._legacy_topology_definition(
+                proxy,
+                node,
+                saved_definition,
+            )
+            vertices = (
+                await self._legacy_topology_vertices(node, proxy, location)
+                if self._legacy_topology_is_conductor(class_id.casefold(), proxy)
+                else None
+            )
+            label_name = None
+            if self._legacy_topology_is_label(definition):
+                label_name = self._legacy_topology_name(
+                    proxy,
+                    await self._legacy_topology_parameters(proxy, node),
+                    node,
+                )
+            result.append(
+                (
+                    object_id,
+                    class_id,
+                    definition,
+                    location,
+                    orientation,
+                    label_name,
+                    vertices,
+                )
+            )
+        return tuple(result)
+
+    @staticmethod
+    def _legacy_topology_is_conductor(class_id: str, proxy: Any) -> bool:
+        proxy_name = type(proxy).__name__.casefold() if proxy is not None else ""
+        return any(
+            marker in class_id or marker in proxy_name
+            for marker in ("wire", "bus")
+        )
+
+    @staticmethod
+    def _legacy_topology_class_family(class_id: str) -> str:
+        lowered = str(class_id).split("}")[-1].casefold()
+        if lowered in {"user", "usercmp"}:
+            return "user"
+        if "wire" in lowered:
+            return "wire"
+        if "bus" in lowered:
+            return "bus"
+        return lowered
+
+    @staticmethod
+    def _legacy_topology_is_label(definition: str) -> bool:
+        lowered = definition.casefold()
+        return "nodelabel" in lowered or "datalabel" in lowered
+
+    async def _legacy_topology_definition(
+        self,
+        proxy: Any,
+        node: ET.Element,
+        saved_definition: str | None = None,
+    ) -> str:
+        definition = str(
+            getattr(proxy, "defn_name", None)
+            or node.get("defn")
+            or node.get("definition")
+            or saved_definition
+            or ""
+        )
+        method = getattr(proxy, "get_definition", None)
+        if not definition and method is not None:
+            value = await self.executor.run_safe(method)
+            definition = str(getattr(value, "scoped_name", value) or "")
+        return definition or str(node.get("classid") or node.tag)
+
+    async def _legacy_topology_location(
+        self,
+        proxy: Any,
+        node: ET.Element,
+        saved_location: tuple[int, int] | None = None,
+    ) -> tuple[int, int] | None:
+        try:
+            return int(node.get("x")), int(node.get("y"))
+        except (TypeError, ValueError):
+            pass
+        if proxy is not None:
+            value = getattr(proxy, "location", None)
+            if value is not None:
+                return int(value[0]), int(value[1])
+            method = getattr(proxy, "get_location", None)
+            if method is not None:
+                value = await self.executor.run_safe(method)
+                if value is not None:
+                    return int(value[0]), int(value[1])
+        return saved_location
+
+    async def _legacy_topology_parameters(
+        self, proxy: Any, node: ET.Element | None = None
+    ) -> dict[str, Any]:
+        result = self._legacy_topology_xml_parameters(node)
+        if proxy is None:
+            return result
+        for name in ("get_parameters", "parameters"):
+            method = getattr(proxy, name, None)
+            if method is not None:
+                result.update(dict(await self.executor.run_safe(method) or {}))
+                break
+        return result
+
+    @staticmethod
+    def _legacy_topology_xml_parameters(
+        node: ET.Element | None,
+    ) -> dict[str, Any]:
+        result = {}
+        if node is None:
+            return result
+        for child in node.iter():
+            tag = str(child.tag).split("}")[-1].casefold()
+            if tag not in {"param", "parameter"}:
+                continue
+            name = child.get("name") or child.get("key")
+            if name:
+                result[str(name)] = (
+                    child.get("value")
+                    if child.get("value") is not None
+                    else (child.text or "").strip()
+                )
+        return result
+
+    async def _legacy_topology_orientation(
+        self,
+        project_name: str,
+        object_id: str,
+        node: ET.Element,
+        proxy: Any,
+        saved_orientation: str | None = None,
+    ) -> int | None:
+        raw = node.get("orient") or node.get("orientation")
+        if raw is None:
+            cached = self._component_orientations.get(
+                (project_name, int(object_id))
+            )
+            raw = cached if cached is not None else getattr(proxy, "orientation", None)
+        if raw is None:
+            raw = saved_orientation
+        if raw is None:
+            raw = await self._legacy_component_orientation(project_name, object_id)
+        try:
+            return int(raw) if raw is not None else None
+        except (TypeError, ValueError):
+            return None
+
+    def _saved_topology_components(
+        self, project_name: str
+    ) -> tuple[
+        dict[tuple[str, str], _SavedTopologyRecord],
+        frozenset[str],
+    ] | None:
+        path = self.definition_paths.get(project_name)
+        if path is None or not path.is_file():
+            return None
+        try:
+            root = ET.parse(path).getroot()
+        except (OSError, ET.ParseError):
+            return None
+        result: dict[tuple[str, str], _SavedTopologyRecord] = {}
+        modules = set()
+        for definition in root.iter():
+            if str(definition.tag).split("}")[-1].casefold() != "definition":
+                continue
+            name = definition.get("name")
+            if not name:
+                continue
+            has_page_port = any(
+                str(port.tag).split("}")[-1].casefold() == "port"
+                and (port.get("page") or "").strip().casefold()
+                in {"1", "true", "yes", "on"}
+                for port in definition.iter()
+            )
+            has_internal_objects = any(
+                child.get("id") is not None
+                for schematic in definition
+                if str(schematic.tag).split("}")[-1].casefold()
+                == "schematic"
+                for child in schematic.iter()
+                if child is not schematic
+            )
+            if has_page_port or has_internal_objects:
+                modules.add(str(name).casefold())
+        for node in root.iter():
+            object_id = node.get("id")
+            if object_id is None:
+                continue
+            class_id = node.get("classid") or str(node.tag).split("}")[-1]
+            definition = node.get("defn") or node.get("definition")
+            try:
+                location = (int(node.get("x")), int(node.get("y")))
+            except (TypeError, ValueError):
+                location = None
+            orientation = node.get("orient") or node.get("orientation")
+            record = (
+                str(definition) if definition is not None else None,
+                location,
+                str(orientation) if orientation is not None else None,
+            )
+            key = (
+                str(object_id),
+                self._legacy_topology_class_family(str(class_id)),
+            )
+            previous = result.get(key)
+            if previous is None or sum(item is not None for item in record) > sum(
+                item is not None for item in previous
+            ):
+                result[key] = record
+        return result, frozenset(modules)
+
+    async def _legacy_topology_vertices(
+        self,
+        node: ET.Element,
+        proxy: Any,
+        location: tuple[int, int] | None = None,
+    ) -> tuple[tuple[int, int], ...] | None:
+        raw_vertices = []
+        for vertex in node.iter():
+            if vertex is node or str(vertex.tag).split("}")[-1].casefold() not in {
+                "vertex",
+                "point",
+                "node",
+            }:
+                continue
+            try:
+                raw_vertices.append((int(vertex.get("x")), int(vertex.get("y"))))
+            except (TypeError, ValueError):
+                return None
+        if not raw_vertices and proxy is not None:
+            values = getattr(proxy, "vertices", None)
+            if callable(values):
+                values = await self.executor.run_safe(values)
+            if values is not None:
+                try:
+                    raw_vertices = [
+                        (int(point[0]), int(point[1])) for point in values
+                    ]
+                except (TypeError, ValueError, IndexError):
+                    return None
+        if len(raw_vertices) < 2:
+            return None
+        origin = location
+        has_xml_origin = node.get("x") is not None and node.get("y") is not None
+        proxy_has_origin = proxy is not None and hasattr(proxy, "location")
+        if origin is not None and (has_xml_origin or proxy_has_origin):
+            if raw_vertices[0] == (0, 0):
+                raw_vertices = [
+                    (origin[0] + x, origin[1] + y) for x, y in raw_vertices
+                ]
+        return tuple(raw_vertices)
+
+    async def _legacy_topology_ports(
+        self,
+        project_name: str,
+        canvas_name: str,
+        component_key: str,
+        definition: str,
+        location: tuple[int, int] | None,
+        orientation: int | None,
+        proxy: Any,
+        node: ET.Element,
+        evidence,
+        unresolved: set[str],
+        source_hashes: dict[Path, str],
+    ) -> tuple[TopologyPort, ...]:
+        xml_ports = []
+        for port in node.iter():
+            if (
+                port is node
+                or str(port.tag).split("}")[-1].casefold() != "port"
+            ):
+                continue
+            name = port.get("name") or port.get("id")
+            if not name:
+                continue
+            try:
+                relative = (int(port.get("x")), int(port.get("y")))
+            except (TypeError, ValueError):
+                relative = None
+            absolute = None
+            if (
+                relative is not None
+                and location is not None
+                and orientation is not None
+            ):
+                try:
+                    absolute = absolute_port(location, relative, orientation)
+                except GeometryError:
+                    absolute = None
+            key = f"{component_key}:{name}"
+            if absolute is None:
+                unresolved.add(f"port_geometry_unresolved:{key}")
+            xml_ports.append(
+                TopologyPort(
+                    key=key,
+                    component_key=component_key,
+                    name=str(name),
+                    absolute=absolute,
+                    relative=relative,
+                    kind=self._legacy_topology_port_namespace(
+                        port.get("kind")
+                        or port.get("model")
+                        or port.get("type")
+                    ),
+                    dimension=self._legacy_topology_optional_int(
+                        port.get("dim") or port.get("dimension")
+                    ),
+                    evidence=evidence(key),
+                )
+            )
+        if xml_ports:
+            return tuple(sorted(xml_ports, key=lambda item: item.key))
+        method = getattr(proxy, "ports", None)
+        if callable(method):
+            raw_ports = await self.executor.run_safe(method)
+            if raw_ports:
+                return tuple(
+                    sorted(
+                        (
+                            TopologyPort(
+                                key=f"{component_key}:{name}",
+                                component_key=component_key,
+                                name=str(getattr(port, "name", name)),
+                                absolute=(int(port.x), int(port.y)),
+                                kind=self._legacy_topology_port_namespace(
+                                    getattr(port, "type", None)
+                                ),
+                                dimension=self._legacy_topology_optional_int(
+                                    getattr(port, "dim", None)
+                                ),
+                                evidence=evidence(f"{component_key}:{name}"),
+                            )
+                            for name, port in dict(raw_ports).items()
+                        ),
+                        key=lambda item: item.key,
+                    )
+                )
+        metadata = await self._legacy_topology_definition_metadata(
+            definition,
+            source_hashes,
+        )
+        if metadata is None:
+            unresolved.add(
+                f"definition_metadata_unavailable:{component_key}"
+            )
+            return ()
+        result = []
+        for port in metadata.ports:
+            key = f"{component_key}:{port.name}"
+            absolute = None
+            if location is not None and orientation is not None:
+                try:
+                    absolute = absolute_port(
+                        location,
+                        (port.x, port.y),
+                        orientation,
+                    )
+                except GeometryError:
+                    absolute = None
+            if absolute is None:
+                unresolved.add(f"port_geometry_unresolved:{key}")
+            result.append(
+                TopologyPort(
+                    key=key,
+                    component_key=component_key,
+                    name=port.name,
+                    absolute=absolute,
+                    relative=(port.x, port.y),
+                    kind=self._legacy_topology_port_namespace(
+                        port.kind or port.model or port.type
+                    ),
+                    dimension=port.dim,
+                    evidence=evidence(key),
+                )
+            )
+        return tuple(sorted(result, key=lambda item: item.key))
+
+    async def _legacy_topology_definition_metadata(
+        self,
+        definition: str,
+        source_hashes: dict[Path, str],
+    ) -> DefinitionMetadata | None:
+        if ":" not in definition:
+            return None
+        scope, definition_name = definition.split(":", 1)
+        path = self.definition_paths.get(scope)
+        if path is None and scope.casefold() == "master":
+            path = await self._discover_master_library()
+            if path is not None:
+                self.definition_paths[scope] = path
+        if path is None or not path.is_file():
+            return None
+        path = path.resolve()
+        source_hash = source_hashes.get(path)
+        if source_hash is None:
+            try:
+                source_hash = hashlib.sha256(path.read_bytes()).hexdigest()
+            except OSError:
+                return None
+            source_hashes[path] = source_hash
+        cache_key = (str(path), source_hash, definition_name.casefold())
+        metadata = self._topology_definition_cache.get(cache_key)
+        if metadata is None:
+            try:
+                metadata = await asyncio.to_thread(
+                    read_definition_metadata,
+                    path,
+                    definition_name,
+                )
+            except (OSError, ET.ParseError, KeyError, TypeError, ValueError):
+                return None
+            self._topology_definition_cache[cache_key] = metadata
+        stale = [
+            key
+            for key in self._topology_definition_cache
+            if key[0] == str(path) and key[1] != source_hash
+        ]
+        for key in stale:
+            self._topology_definition_cache.pop(key, None)
+        return metadata
+
+    @staticmethod
+    def _legacy_topology_namespace(node: ET.Element, proxy: Any) -> str:
+        raw = str(
+            node.get("namespace")
+            or node.get("kind")
+            or getattr(proxy, "namespace", None)
+            or ""
+        ).casefold()
+        return "data" if raw in {"data", "signal", "digital"} else "electrical"
+
+    @staticmethod
+    def _legacy_topology_port_namespace(value: Any) -> str:
+        raw = str(value or "").casefold()
+        return (
+            "data"
+            if raw in {"data", "signal", "digital", "transfer"}
+            else "electrical"
+        )
+
+    @staticmethod
+    def _legacy_topology_optional_int(value: Any) -> int | None:
+        try:
+            return int(value) if value is not None else None
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _legacy_topology_name(
+        proxy: Any,
+        parameters: Mapping[str, Any],
+        node: ET.Element | None = None,
+    ) -> str:
+        for name, value in parameters.items():
+            if str(name).casefold() == "name":
+                return str(value)
+        proxy_name = str(getattr(proxy, "name", "") or "")
+        if node is not None:
+            node_name = str(
+                node.get("name")
+                or node.get("text")
+                or node.get("value")
+                or ""
+            )
+            if node_name:
+                return node_name
+        return proxy_name
+
+    @staticmethod
+    def _legacy_topology_active(parameters: Mapping[str, Any]) -> bool:
+        for name, value in parameters.items():
+            if str(name).casefold() == "enabled":
+                return bool(value)
+        return True

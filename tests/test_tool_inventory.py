@@ -34,6 +34,10 @@ PARAMETRIC_LCC_TOOLS = {
     "get_parametric_lcc_build_status",
     "validate_lcc_operating_modes",
 }
+TOPOLOGY_TOOLS = {
+    "inspect_project_topology",
+    "diagnose_project_topology",
+}
 
 
 def test_server_preserves_the_compatibility_inventory():
@@ -46,3 +50,4 @@ def test_server_preserves_the_compatibility_inventory():
     assert LEARNING_TOOLS <= COMPATIBILITY_TOOL_NAMES
     assert LCC_TOOLS <= COMPATIBILITY_TOOL_NAMES
     assert PARAMETRIC_LCC_TOOLS <= COMPATIBILITY_TOOL_NAMES
+    assert TOPOLOGY_TOOLS <= COMPATIBILITY_TOOL_NAMES

@@ -1,10 +1,16 @@
-"""Read-only, tolerant PSCX evidence extraction."""
+"""Read-only PSCX compatibility scanner backed by canonical topology."""
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 import xml.etree.ElementTree as ET
 
+from ..core.backend.base import BackendError
+from ..topology.adapters.hvdc import topology_to_hvdc_evidence
+from ..topology.connectivity import build_connectivity
+from ..topology.providers.pscx import PscxSnapshotProvider
+from ..topology.reconcile import reconcile_snapshots
 from .models import (
     HvdcConnectionRecord,
     HvdcComponentRecord,
@@ -176,7 +182,7 @@ def _reachable_scopes(root: ET.Element, initial: list[ET.Element], canvas_name: 
     return result
 
 
-def scan_project(path: str | Path, canvas_name: str = "Main") -> HvdcProjectEvidence:
+def _legacy_scan_project(path: str | Path, canvas_name: str) -> HvdcProjectEvidence:
     project_path = Path(path).expanduser().resolve()
     warnings: list[str] = []
     project_name = project_path.stem
@@ -273,4 +279,29 @@ def scan_project(path: str | Path, canvas_name: str = "Main") -> HvdcProjectEvid
         labels=tuple(labels),
         connections=_connection_records(root, project_path, canvas_name),
         warnings=tuple(warnings),
+    )
+
+
+def scan_project(path: str | Path, canvas_name: str = "Main") -> HvdcProjectEvidence:
+    """Scan through canonical topology while preserving legacy file evidence."""
+    legacy = _legacy_scan_project(path, canvas_name)
+    try:
+        saved = PscxSnapshotProvider().read(path, canvas_name)
+    except BackendError:
+        return legacy
+    topology = build_connectivity(reconcile_snapshots(None, saved)).topology
+    canonical = topology_to_hvdc_evidence(topology)
+    connections = {
+        (
+            item.source_component_id,
+            item.source_port,
+            item.target_component_id,
+            item.target_port,
+        ): item
+        for item in (*legacy.connections, *canonical.connections)
+    }
+    return replace(
+        legacy,
+        connections=tuple(connections[key] for key in sorted(connections)),
+        warnings=tuple(sorted(set(legacy.warnings) | set(canonical.warnings))),
     )

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-08-24T22:00:00+08:00",
+  "updated_at": "2026-08-28T13:59:03+08:00",
   "policy": "A licensed PASS applies only to the named scope and commit. It must not be inherited by another builder, domain workflow, or later commit.",
   "scopes": [
     {
@@ -13,6 +13,23 @@
         "commit": null
       },
       "note": "The managed PSCAD 4.6.2 Legacy core workflow was accepted historically, but no single durable machine-readable report is committed. Rerun scripts/run_legacy_acceptance.ps1 for a release claim."
+    },
+    {
+      "scope": "unified_topology_462",
+      "implementation_status": "INTEGRATION_BRANCH",
+      "licensed_status": "PASS",
+      "pscad_version": "4.6.2",
+      "rule_version": "generic+hvdc-v1",
+      "evidence": {
+        "report_path": "D:/PSCAD-Workspace/topology-acceptance/topology-acceptance-20260828-135805-5754967/topology-acceptance-report.json",
+        "sha256": "a6876641794af0a0f0dee43a7ffadbf26290401d180eca15c8cc8b940770203c",
+        "commit": "6ec6118f9fd0e979fb9a8a00202327dbf576e165",
+        "truth_manifest_path": "D:/PSCAD-Workspace/topology-truth-unified-candidate.json",
+        "truth_manifest_sha256": "56b8ebff5777bd66a1e26951e51547806e9e4987869b0e749693eb75447b42f0",
+        "truth_review_path": "D:/PSCAD-Workspace/topology-sources-unified-candidate/truth-review-unified-candidate.json",
+        "truth_review_sha256": "2c4c0c3839ee10c8bb431d9ee9e0cde6cbe70dcff178beab968103ec4115fa0d"
+      },
+      "note": "Licensed read-only unified topology acceptance passed for generic+hvdc-v1 on the named commit, including exact canonical HVDC/LCC diagnostic codes. This scope does not imply mutating HVDC workflows, fixed or parametric LCC builders, MMC, PSCAD 5.x, or later-commit acceptance."
     },
     {
       "scope": "fixed_cigre_lcc",

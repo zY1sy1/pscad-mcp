@@ -45,7 +45,7 @@ def test_unreleased_distinguishes_compatibility_inventory_from_current_total():
         "four fixed lcc tools",
         "six parametric lcc tools",
         "get_pscad_capabilities",
-        "current total is 84",
+        "current total is 86",
     ):
         assert phrase in unreleased
     assert "inventory is now 83 tools" not in unreleased

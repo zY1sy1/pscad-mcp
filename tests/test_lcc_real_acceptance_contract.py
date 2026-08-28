@@ -5,7 +5,11 @@ from pathlib import Path
 
 import pytest
 
-from test_lcc_real_acceptance import acceptance_config, evidence_directory, write_acceptance_report
+from tests.test_lcc_real_acceptance import (
+    acceptance_config,
+    evidence_directory,
+    write_acceptance_report,
+)
 
 
 def test_acceptance_config_requires_absolute_legacy_462_workspace():

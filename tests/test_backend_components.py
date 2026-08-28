@@ -2,6 +2,7 @@ import copy
 import tempfile
 from pathlib import Path
 import unittest
+from unittest.mock import patch
 from types import SimpleNamespace
 import xml.etree.ElementTree as ET
 
@@ -14,6 +15,7 @@ from tests.backend_fakes import (
     FakeModernPscad,
     ImmediateExecutor,
 )
+from tests.test_backend_canvas import CanvasApp, CanvasProject, CanvasState
 
 
 class StatefulComponent:
@@ -1110,6 +1112,377 @@ class TestBackendComponentContracts(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertEqual(rectangles, [Rect(450, 288, 40, 36)])
+
+    async def test_legacy_snapshot_uses_bulk_xml_and_static_port_fallback(self):
+        backend, project, component = await self.make_legacy_backend()
+        component.location = (378, 342)
+        project.main.components.append(
+            WireOrthogonal(
+                100,
+                [(378, 342), (450, 342), (450, 396)],
+                project.main,
+            )
+        )
+        snapshot = await backend.inspect_canvas_topology("case", "Main")
+        observed = next(
+            item for item in snapshot.components if item.object_id == "7"
+        )
+        self.assertEqual([port.name for port in observed.ports], ["A", "B"])
+        wire = next(item for item in snapshot.conductors if item.kind == "wire")
+        self.assertEqual(
+            wire.vertices,
+            ((378, 342), (450, 342), (450, 396)),
+        )
+
+    async def test_legacy_snapshot_uses_definition_port_model_for_namespace(self):
+        library = """<project><Definition name="source3"><svg>
+            <port name="A" x="0" y="0" dim="1"
+                  model="Transfer" type="Real" />
+            </svg></Definition></project>"""
+        with tempfile.TemporaryDirectory() as temporary:
+            master = Path(temporary) / "master.pslx"
+            master.write_text(library, encoding="utf-8")
+            backend, _project, component = await self.make_legacy_backend(
+                definition_paths={"master": master}
+            )
+            component.port_names = []
+            component.ports = None
+
+            snapshot = await backend.inspect_canvas_topology("case", "Main")
+
+        self.assertEqual(snapshot.components[0].ports[0].kind, "data")
+
+    async def test_legacy_snapshot_indexes_saved_component_fallbacks_once(self):
+        project = LegacyComponentProject()
+        component = project.main.components[0]
+        component.orientation = None
+        component.defn_name = None
+        calls = {"location": 0, "definition": 0}
+
+        def get_location():
+            calls["location"] += 1
+            return component.location
+
+        def get_definition():
+            calls["definition"] += 1
+            return SimpleNamespace(scoped_name="master:source3")
+
+        component.get_location = get_location
+        component.get_definition = get_definition
+        source_xml = """<project><definitions>
+        <Definition name="Main"><schematic>
+          <User classid="UserCmp" id="7" x="10" y="5" orient="3"
+                defn="master:source3" />
+        </schematic></Definition>
+        </definitions></project>"""
+        with tempfile.TemporaryDirectory() as temporary:
+            source = Path(temporary) / "case.pscx"
+            source.write_text(source_xml, encoding="utf-8")
+            backend, _project, _component = await self.make_legacy_backend(
+                project,
+                definition_paths={"case": source},
+            )
+
+            with patch(
+                "pscad_mcp.core.backend.legacy.ET.parse",
+                wraps=ET.parse,
+            ) as parse:
+                snapshot = await backend.inspect_canvas_topology("case", "Main")
+
+        self.assertEqual(snapshot.components[0].orientation, 3)
+        self.assertEqual(snapshot.components[0].location, (10, 5))
+        self.assertEqual(snapshot.components[0].definition, "master:source3")
+        self.assertEqual(parse.call_count, 1)
+        self.assertEqual(calls, {"location": 0, "definition": 0})
+
+    async def test_legacy_snapshot_marks_missing_optional_metadata_unresolved(self):
+        backend, _project, component = await self.make_legacy_backend()
+        component.port_names = []
+        component.ports = None
+        backend.definition_paths.clear()
+        snapshot = await backend.inspect_canvas_topology("case", "Main")
+        self.assertIn(
+            "definition_metadata_unavailable:Main:7",
+            snapshot.unresolved,
+        )
+
+    async def test_legacy_snapshot_rejects_second_inventory_drift(self):
+        backend, project, component = await self.make_legacy_backend()
+        original = project.main.list_components
+        calls = 0
+
+        def drifting_inventory():
+            nonlocal calls
+            calls += 1
+            if calls >= 2:
+                component.location = (
+                    component.location[0] + 1,
+                    component.location[1],
+                )
+            return original()
+
+        project.main.list_components = drifting_inventory
+        with self.assertRaises(BackendError) as raised:
+            await backend.inspect_canvas_topology("case", "Main")
+        self.assertEqual(
+            raised.exception.code,
+            "TOPOLOGY_SNAPSHOT_UNSTABLE",
+        )
+
+    async def test_legacy_and_modern_normalize_the_same_component_contract(self):
+        legacy, _project, _component = await self.make_legacy_backend()
+        legacy_snapshot = await legacy.inspect_canvas_topology("case", "Main")
+
+        canvas = CanvasState(modern=True)
+        component = canvas.add_component(
+            "master", "source3", 10, 5, 0, Name="V1"
+        )
+        component.id = 7
+        component._id = ("7",)
+        component.ports = lambda: {
+            "A": SimpleNamespace(
+                name="A", x=9, y=5, dim=1, type="electrical"
+            ),
+            "B": SimpleNamespace(
+                name="B", x=11, y=5, dim=1, type="electrical"
+            ),
+        }
+        modern = ModernBackend(
+            ImmediateExecutor(),
+            version="5.0.2",
+            x64=True,
+            pscad_module=FakeModernPscad(
+                CanvasApp(CanvasProject(canvas), modern=True)
+            ),
+            psout_module=False,
+        )
+        await modern.attach()
+        modern_snapshot = await modern.inspect_canvas_topology("case", "Main")
+
+        def component_projection(snapshot):
+            return [
+                (
+                    item.object_id,
+                    item.definition,
+                    item.location,
+                    [
+                        (
+                            port.name,
+                            port.absolute,
+                            port.kind,
+                            port.dimension,
+                        )
+                        for port in item.ports
+                    ],
+                )
+                for item in snapshot.components
+            ]
+
+        self.assertEqual(
+            component_projection(legacy_snapshot),
+            component_projection(modern_snapshot),
+        )
+
+    async def test_legacy_definition_cache_invalidates_on_file_hash_change(self):
+        def library(port_name):
+            return (
+                '<project><Definition name="source3"><svg>'
+                f'<port name="{port_name}" x="-1" y="0" dim="1" '
+                'type="electrical"/>'
+                "</svg></Definition></project>"
+            )
+
+        with tempfile.TemporaryDirectory() as temporary:
+            master = Path(temporary) / "master.pslx"
+            master.write_text(library("A"), encoding="utf-8")
+            backend, _project, component = await self.make_legacy_backend(
+                definition_paths={"master": master}
+            )
+            component.port_names = []
+            component.ports = None
+            first = await backend.inspect_canvas_topology("case", "Main")
+            master.write_text(library("B"), encoding="utf-8")
+            second = await backend.inspect_canvas_topology("case", "Main")
+        self.assertEqual(
+            [port.name for port in first.components[0].ports],
+            ["A"],
+        )
+        self.assertEqual(
+            [port.name for port in second.components[0].ports],
+            ["B"],
+        )
+
+    async def test_legacy_snapshot_traverses_explicit_local_definition(self):
+        project = LegacyComponentProject()
+        instance = project.main.components[0]
+        instance.id = 101
+        instance._id = ("101",)
+        instance.defn_name = "case:SubSystem"
+        instance.location = (72, 0)
+        instance.port_map = {
+            "IN": SimpleNamespace(
+                name="IN", x=54, y=0, dim=1, type="electrical"
+            ),
+            "OUT": SimpleNamespace(
+                name="OUT", x=90, y=0, dim=1, type="electrical"
+            ),
+        }
+        child = StatefulCanvas(legacy=True)
+        child.components.clear()
+        child.components.append(WireOrthogonal(501, [(0, 0), (36, 0)], child))
+        project.canvases = {"Main": project.main, "SubSystem": child}
+        project.user_canvas = lambda name: project.canvases[name]
+        library = (
+            '<project><Definition name="SubSystem"><svg>'
+            '<port name="IN" x="0" y="0" dim="1" type="electrical" page="true"/>'
+            '<port name="OUT" x="36" y="0" dim="1" type="electrical" page="true"/>'
+            '<port name="INTERNAL" x="18" y="18" dim="1" type="electrical"/>'
+            "</svg></Definition></project>"
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            source = Path(temporary) / "case.pscx"
+            source.write_text(library, encoding="utf-8")
+            backend, _project, _component = await self.make_legacy_backend(
+                project,
+                definition_paths={"case": source},
+            )
+            snapshot = await backend.inspect_canvas_topology("case", "Main")
+
+        self.assertEqual(
+            [canvas.key for canvas in snapshot.canvases],
+            ["Main", "Main/101:SubSystem"],
+        )
+        self.assertEqual(
+            snapshot.canvases[1].page_ports,
+            (
+                "Main/101:SubSystem:IN",
+                "Main/101:SubSystem:OUT",
+            ),
+        )
+        self.assertEqual(
+            [link.key for link in snapshot.boundary_links],
+            [
+                "Main:101:IN->Main/101:SubSystem:IN",
+                "Main:101:OUT->Main/101:SubSystem:OUT",
+            ],
+        )
+        self.assertEqual(
+            snapshot.conductors[0].canvas_key,
+            "Main/101:SubSystem",
+        )
+        self.assertIn(("hierarchy", True), snapshot.capabilities)
+
+    async def test_legacy_snapshot_skips_leaf_local_definition_canvas(self):
+        project = LegacyComponentProject()
+        component = project.main.components[0]
+        component.defn_name = "case:Link"
+        canvas_calls = []
+
+        def user_canvas(name):
+            canvas_calls.append(name)
+            if name != "Main":
+                raise AssertionError(f"leaf definition was traversed: {name}")
+            return project.main
+
+        project.user_canvas = user_canvas
+        source_xml = """<project><definitions>
+        <Definition name="Link"><svg>
+          <port name="IN" x="-18" y="0" dim="1" />
+          <port name="OUT" x="18" y="0" dim="1" />
+        </svg><schematic><paramlist /></schematic></Definition>
+        <Definition name="Main"><schematic>
+          <User classid="UserCmp" id="7" x="10" y="5" orient="0"
+                defn="case:Link" />
+        </schematic></Definition>
+        </definitions></project>"""
+        with tempfile.TemporaryDirectory() as temporary:
+            source = Path(temporary) / "case.pscx"
+            source.write_text(source_xml, encoding="utf-8")
+            backend, _project, _component = await self.make_legacy_backend(
+                project,
+                definition_paths={"case": source},
+            )
+
+            snapshot = await backend.inspect_canvas_topology("case", "Main")
+
+        self.assertEqual(canvas_calls, ["Main"])
+        self.assertEqual([item.key for item in snapshot.canvases], ["Main"])
+
+    async def test_legacy_snapshot_uses_complete_bulk_xml_without_proxies(self):
+        root = ET.fromstring(
+            """<response><components>
+            <User id="101" classid="UserCmp" defn="case:SubSystem"
+                  name="S1" x="72" y="0" orient="0">
+              <Port name="IN" x="-18" y="0" dim="1" type="electrical" />
+            </User>
+            <NodeLabel id="9" classid="NodeLabel" name="N1" x="0" y="0" />
+            </components></response>"""
+        )
+        child = ET.fromstring(
+            """<response><components>
+            <Wire id="501" classid="WireOrthogonal">
+              <Vertex x="0" y="0" /><Vertex x="36" y="0" />
+            </Wire>
+            </components></response>"""
+        )
+        project = XmlOnlyTopologyProject(root, child)
+        library = (
+            '<project><Definition name="SubSystem"><svg>'
+            '<port name="IN" x="0" y="0" dim="1" type="electrical" page="true"/>'
+            "</svg></Definition></project>"
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            source = Path(temporary) / "case.pscx"
+            source.write_text(library, encoding="utf-8")
+            backend = LegacyBackend(
+                ImmediateExecutor(),
+                version="4.6.2",
+                x64=True,
+                automation_module=FakeLegacyAutomation(ComponentApp(project)),
+                definition_paths={"case": source},
+            )
+            await backend.attach()
+
+            snapshot = await backend.inspect_canvas_topology("case", "Main")
+
+        self.assertEqual(
+            [canvas.key for canvas in snapshot.canvases],
+            ["Main", "Main/101:SubSystem"],
+        )
+        self.assertEqual(snapshot.components[0].definition, "case:SubSystem")
+        self.assertEqual(snapshot.components[0].ports[0].absolute, (54, 0))
+        self.assertEqual(snapshot.labels[0].name, "N1")
+        self.assertEqual(
+            [link.key for link in snapshot.boundary_links],
+            ["Main:101:IN->Main/101:SubSystem:IN"],
+        )
+        self.assertNotIn(
+            "component_proxy_unavailable:Main:101", snapshot.unresolved
+        )
+        self.assertIn(("components", True), snapshot.capabilities)
+        self.assertIn(("labels", True), snapshot.capabilities)
+
+
+class XmlOnlyTopologyCanvas:
+    def __init__(self, response):
+        self.response = response
+
+    def list_components(self):
+        return self.response
+
+    def find_all(self):
+        return []
+
+
+class XmlOnlyTopologyProject:
+    def __init__(self, root, child):
+        self.canvases = {
+            "Main": XmlOnlyTopologyCanvas(root),
+            "SubSystem": XmlOnlyTopologyCanvas(child),
+        }
+
+    def user_canvas(self, name):
+        return self.canvases[name]
 
 
 if __name__ == "__main__":

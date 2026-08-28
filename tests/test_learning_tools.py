@@ -88,7 +88,7 @@ def test_server_registers_full_inventory_and_silent_instructions():
     server = create_server(environ={})
     names = {tool.name for tool in server._tool_manager.list_tools()}
     assert names == FULL_TOOL_NAMES
-    assert len(COMPATIBILITY_TOOL_NAMES) == 83
+    assert len(COMPATIBILITY_TOOL_NAMES) == 85
     assert {
         "record_goal_failure",
         "review_improvement_backlog",

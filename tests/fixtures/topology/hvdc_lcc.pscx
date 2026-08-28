@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<project name="hvdc_lcc" version="4.6.2">
+  <definitions>
+    <Definition name="Main" classid="UserCmpDefn">
+      <schematic classid="UserCanvas">
+        <!--
+          Intentional defects: conductor 9901 has two dangling endpoints, and
+          the declared earth-return equipment has no complete neutral path.
+        -->
+        <User classid="UserCmp" id="101" name="Positive Pole Rectifier"
+              defn="master:RectCC_PositivePole" x="0" y="0" orientation="0">
+          <paramlist>
+            <param name="LogicalId" value="rectifier" />
+            <param name="Mode" value="positive" />
+          </paramlist>
+          <Port name="DC" kind="electrical" dimension="1" x="10" y="0" />
+        </User>
+        <User classid="UserCmp" id="102" name="Negative Pole Inverter"
+              defn="master:InverterPole_NegativePole" x="100" y="0" orientation="0">
+          <paramlist>
+            <param name="LogicalId" value="inverter" />
+            <param name="Mode" value="negative" />
+          </paramlist>
+          <Port name="DC" kind="electrical" dimension="1" x="-10" y="0" />
+        </User>
+        <User classid="UserCmp" id="103" name="Earth Return"
+              defn="master:EarthReturn" x="200" y="0" orientation="0">
+          <paramlist><param name="LogicalId" value="earth_return" /></paramlist>
+          <Port name="N" kind="electrical" dimension="1" x="-10" y="0" />
+        </User>
+        <wire kind="electrical" id="9001">
+          <vertex x="10" y="0" />
+          <vertex x="90" y="0" />
+        </wire>
+        <wire kind="electrical" id="9901">
+          <vertex x="300" y="300" />
+          <vertex x="318" y="300" />
+        </wire>
+        <label kind="data" name="IDC" x="20" y="40" />
+        <datalabel kind="data" text="IDC" x="120" y="40" />
+      </schematic>
+    </Definition>
+  </definitions>
+</project>

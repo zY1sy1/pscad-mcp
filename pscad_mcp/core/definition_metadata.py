@@ -14,6 +14,9 @@ class PortMetadata:
     y: int
     dim: int | None
     type: str | None
+    model: str | None = None
+    kind: str | None = None
+    page: bool = False
 
 
 @dataclass(frozen=True)
@@ -49,6 +52,10 @@ def read_definition_metadata(
                 y=int(port.get("y", "0")),
                 dim=int(raw_dim) if raw_dim not in {None, ""} else None,
                 type=port.get("type") or port.get("model"),
+                model=port.get("model"),
+                kind=port.get("kind"),
+                page=(port.get("page") or "").strip().casefold()
+                in {"1", "true", "yes", "on"},
             )
         )
 

@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<project name="mixed_signal" version="4.6.2">
+  <definitions>
+    <Definition name="Main" classid="UserCmpDefn">
+      <schematic classid="UserCanvas">
+        <Wire id="201" kind="electrical">
+          <vertex x="0" y="0" />
+          <vertex x="18" y="0" />
+        </Wire>
+        <nodelabel id="301" name="NODE" x="0" y="0" />
+        <Wire id="202" kind="data">
+          <vertex x="0" y="36" />
+          <vertex x="18" y="36" />
+        </Wire>
+        <datalabel id="302" name="ENABLE" x="0" y="36" />
+      </schematic>
+    </Definition>
+  </definitions>
+</project>

@@ -51,22 +51,22 @@ async def shutdown_hvdc_service(timeout_s: float = 5.0) -> None:
 
 async def inspect_hvdc_project(project_name: str, canvas_name: str = "Main") -> dict[str, Any]:
     """Inspect an HVDC project's topology, assets, mappings, and evidence."""
-    return _service().inspect_project(project_name, canvas_name)
+    return await _service().inspect_live_project(project_name, canvas_name)
 
 
 async def get_hvdc_assets(project_name: str, kind: str | None = None) -> list[dict[str, Any]]:
     """Get normalized HVDC assets, optionally filtered by kind."""
-    return _service().get_assets(project_name, kind)
+    return await _service().get_live_assets(project_name, kind)
 
 
 async def get_hvdc_mappings(project_name: str, canonical: str | None = None) -> dict[str, Any]:
     """Get canonical HVDC signal mappings and their evidence."""
-    return _service().get_mappings(project_name, canonical)
+    return await _service().get_live_mappings(project_name, canonical)
 
 
 async def validate_hvdc_project(project_name: str, profile: str = "auto") -> dict[str, Any]:
     """Validate an HVDC project against a named mapping profile."""
-    return _service().validate_project(project_name, profile)
+    return await _service().validate_live_project(project_name, profile)
 
 
 async def run_hvdc_scenario(project_name: str, scenario: HvdcScenario, confirm: bool = False) -> dict[str, Any]:

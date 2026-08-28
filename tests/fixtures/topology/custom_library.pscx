@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<project name="custom_library" version="4.6.2">
+  <definitions>
+    <Definition name="meter" classid="UserCmpDefn">
+      <svg>
+        <Port name="IN" kind="electrical" dimension="1" x="-18" y="0" />
+        <Port name="OUT" kind="electrical" dimension="1" x="18" y="0" />
+      </svg>
+      <schematic classid="UserCanvas" />
+    </Definition>
+    <Definition name="Main" classid="UserCmpDefn">
+      <schematic classid="UserCanvas">
+        <User classid="UserCmp" id="101" name="M1" defn="custom_library:meter" x="36" y="36" orientation="0" />
+      </schematic>
+    </Definition>
+  </definitions>
+</project>

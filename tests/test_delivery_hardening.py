@@ -66,7 +66,7 @@ def test_readmes_describe_compatible_mcp_hardening_in_both_languages():
         "get_pscad_capabilities",
         "PSCAD_MCP_TOOL_PROFILE",
         "PSCAD_MCP_DOCUMENTATION_DIR",
-        "84",
+        "86",
         "offset",
         "limit",
         "pscad-docs://modules/",
@@ -81,7 +81,7 @@ def test_readmes_describe_compatible_mcp_hardening_in_both_languages():
 
     language_contracts = {
         "README.md": (
-            "83 compatibility tools plus one always-on capability tool",
+            "85 compatibility/domain tools plus one always-on capability tool",
             "`full` remains the unchanged default",
             "opt-in",
             "fail server startup",
@@ -91,7 +91,7 @@ def test_readmes_describe_compatible_mcp_hardening_in_both_languages():
             "contract-tested only",
         ),
         "docs/zh-CN/README.md": (
-            "83 个兼容工具 + 1 个始终注册的能力工具",
+            "85 个兼容/领域工具 + 1 个始终注册的能力工具",
             "`full` 保持不变的默认值",
             "显式启用",
             "启动失败",

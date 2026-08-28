@@ -19,7 +19,7 @@ LIBRARY_XML = """<?xml version="1.0"?>
         </category>
       </form>
       <svg>
-        <port model="Natural" name="A" x="0" y="0" dim="0" type="Removable" />
+        <port model="Natural" name="A" x="0" y="0" dim="0" type="Removable" page="true" />
         <port model="Transfer" name="OUT" x="36" y="0" dim="1" type="Real" />
       </svg>
     </Definition>
@@ -39,6 +39,7 @@ class TestDefinitionMetadata(unittest.TestCase):
         self.assertEqual([port.name for port in metadata.ports], ["A", "OUT"])
         self.assertEqual(metadata.ports[1].dim, 1)
         self.assertEqual(metadata.ports[1].type, "Real")
+        self.assertEqual([port.page for port in metadata.ports], [True, False])
         self.assertEqual(metadata.parameter_ranges["R"], (0.0, 100.0))
         self.assertEqual(metadata.parameter_ranges["OnlyMin"], (0.0, None))
         self.assertEqual(metadata.parameter_ranges["Mode"], ["0", "1"])

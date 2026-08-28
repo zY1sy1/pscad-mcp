@@ -18,7 +18,7 @@ from pscad_mcp.hvdc.builders.lcc.models import (
     LccPlanOperation,
 )
 
-from lcc_builder_fakes import RecordingPscadService
+from tests.lcc_builder_fakes import RecordingPscadService
 
 
 def execute_build(*args, **kwargs):
