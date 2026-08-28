@@ -1,7 +1,5 @@
 """MCP wrappers for parameterized LCC modeling."""
 
-from __future__ import annotations
-
 from typing import Annotated, Any, Dict, List
 
 from mcp.server.fastmcp import FastMCP

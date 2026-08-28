@@ -191,7 +191,7 @@ def test_golden_generator_rejects_units_and_window_contract_drift(tmp_path):
 
     result = subprocess.run(
         [
-            str(Path(__file__).parents[1] / ".venv" / "Scripts" / "python.exe"),
+            sys.executable,
             "scripts/generate_lcc_golden.py",
             "--reference-output", str(reference),
             "--blueprint", str(blueprint),

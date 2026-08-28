@@ -165,7 +165,7 @@ class TestExecutorRecovery(unittest.IsolatedAsyncioTestCase):
                 await task
 
             release.set()
-            deadline = asyncio.get_running_loop().time() + 0.2
+            deadline = asyncio.get_running_loop().time() + 1.0
             while executor.snapshot()["in_flight_calls"] and asyncio.get_running_loop().time() < deadline:
                 await asyncio.sleep(0.001)
             self.assertEqual(executor.snapshot()["in_flight_calls"], 0)

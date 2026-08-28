@@ -1,7 +1,5 @@
 """MCP registrations for the isolated HVDC domain layer."""
 
-from __future__ import annotations
-
 from typing import Annotated, Any, Dict
 
 from mcp.server.fastmcp import FastMCP
