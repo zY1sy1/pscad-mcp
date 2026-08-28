@@ -419,6 +419,7 @@ class ParametricMmcBuilderService:
                         engine=child.engine,
                         candidate_id=candidate_id,
                         exception=type(failure).__name__,
+                        exception_message=str(failure),
                     )
                 )
                 decision_error = BackendError(

@@ -56,6 +56,23 @@ class ProductionOutputShapeService(RecordingMmcService):
         return [{"severity": "info", "text": "Build completed", "source": None}]
 
 
+class SanitizingProjectNameService(ProductionOutputShapeService):
+    async def list_projects(self) -> list[dict[str, str]]:
+        self._record("list_projects")
+        return [{"name": "master", "type": "Library"}, {"name": "MMC_CASE_pwm__pwm_0", "type": "Case"}]
+
+
+class RootParameterOnlyService(ProductionOutputShapeService):
+    async def get_project_settings(self, project_name: str) -> dict[str, object]:
+        self._record("get_project_settings", project_name)
+        return {"VdcBase": 640.0, "Sbase": 1000.0}
+
+    async def set_project_settings(self, project_name: str, settings: dict[str, object]) -> str:
+        self._record("set_project_settings", project_name, settings)
+        assert set(settings) <= {"VdcBase", "Sbase"}
+        return "set"
+
+
 class MutatingFailedScenarioDomain(CompletedScenarioDomain):
     async def run_scenario(
         self, project_name: str, scenario: dict[str, object], *, confirm: bool = False
@@ -101,6 +118,31 @@ def test_pwm_engine_copies_then_mutates_only_staging(tmp_path: Path) -> None:
     assert all(Path(path).is_relative_to(tmp_path) for path in service.written_paths)
     assert Path(result["project_path"]).is_file()
     assert not (tmp_path / "MMC_CASE_pwm.pscx").exists()
+
+
+def test_pwm_engine_uses_pscad_loaded_project_identity(tmp_path: Path) -> None:
+    project, library = make_synthetic_official_shape(tmp_path / "source")
+    service = SanitizingProjectNameService(tmp_path)
+
+    result = asyncio.run(execute_pwm_candidate(pwm_plan(project, library, tmp_path), service))
+
+    assert result["state"] == "accepted"
+    mutation_names = [args[0] for name, args in service.calls if name in {
+        "set_component_parameters", "set_project_settings", "save_project", "build_project"
+    }]
+    assert mutation_names
+    assert all(name == "MMC_CASE_pwm__pwm_0" for name in mutation_names)
+
+
+def test_pwm_engine_filters_abstract_settings_to_pscad_project_parameters(tmp_path: Path) -> None:
+    project, library = make_synthetic_official_shape(tmp_path / "source")
+    service = RootParameterOnlyService(tmp_path)
+
+    result = asyncio.run(execute_pwm_candidate(pwm_plan(project, library, tmp_path), service))
+
+    assert result["state"] == "accepted"
+    settings_calls = [args for name, args in service.calls if name == "set_project_settings"]
+    assert settings_calls == [("MMC_CASE_pwm__pwm-0", {})]
 
 
 def test_pwm_engine_accepts_only_terminal_analyzed_scenario_evidence(

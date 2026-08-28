@@ -190,6 +190,14 @@ def build_template_audit(project: Path, library: Path) -> MmcTemplateAudit:
     pwm_count = 0
     station_roles: set[str] = set()
     hierarchy_calls = _hierarchy_call_names(project_root)
+    writable_links = {
+        _text(element.attrib.get("link"))
+        for element in project_root.iter()
+        if _name(element.tag) == "call"
+        and _text(element.attrib.get("link"))
+        and _text(element.attrib.get("name")).rsplit(":", 1)[-1].casefold()
+        in {"vscconverter", "dctl"}
+    }
     has_station_hierarchy = sum(
         name.rsplit(":", 1)[-1].casefold() == "station" for name in hierarchy_calls
     ) == 1
@@ -216,20 +224,29 @@ def build_template_audit(project: Path, library: Path) -> MmcTemplateAudit:
             pwm_count += 1
             roles.append({"role": f"pwm_converter_{pwm_count}", "owner": owner, "definition": definition})
         for parameter, value in _parameters(component):
-            bindings.append({"owner": owner, "parameter": parameter, "value": value})
+            if not hierarchy_calls or owner in writable_links:
+                bindings.append({"owner": owner, "parameter": parameter, "value": value})
             kind = _path_kind(parameter, value)
             if not kind or not _is_absolute(value):
                 continue
-            absolute_paths.append(
-                {
-                    "kind": kind,
-                    "owner": owner,
-                    "parameter": parameter,
-                    "value": value,
-                    "exists": Path(value).is_file(),
-                    "repair_policy": "remove_if_missing" if kind == "startup_snapshot" else "requires_verified_rebind",
-                }
-            )
+            path_record: dict[str, object] = {
+                "kind": kind,
+                "owner": owner,
+                "parameter": parameter,
+                "value": value,
+                "exists": Path(value).is_file(),
+                "repair_policy": (
+                    "remove_if_missing"
+                    if kind == "startup_snapshot"
+                    else "verified_rebind"
+                    if Path(value).is_file()
+                    else "requires_verified_rebind"
+                ),
+            }
+            if Path(value).is_file():
+                path_record["resolved_value"] = str(Path(value).resolve())
+                path_record["expected_sha256"] = _sha256(Path(value))
+            absolute_paths.append(path_record)
 
     combined_text = " ".join((*definitions, *(item.get("definition", "") for item in roles))).casefold()
     model_fidelity = "detailed_pwm" if pwm_count >= 2 or "pwm" in combined_text else "unknown"

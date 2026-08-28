@@ -5,6 +5,7 @@ import pytest
 
 from pscad_mcp.core.backend.base import BackendError
 from pscad_mcp.hvdc.builders.mmc.engines.avm import (
+    _inventory_catalog,
     create_parametric_avm_plan,
     materialize_parametric_blueprint,
 )
@@ -78,3 +79,11 @@ def test_parametric_avm_plan_rejects_asset_hash_drift(tmp_path: Path) -> None:
 
     assert raised.value.code == "MMC_ASSET_MISMATCH"
     assert list(tmp_path.iterdir()) == []
+
+
+def test_avm_inventory_request_includes_live_master_dependencies() -> None:
+    catalog = _inventory_catalog(ASSET)
+    definitions = catalog["definitions"]
+    assert "cigre_mmc_avm_v1:MMCAverageArm" in definitions
+    assert "master:source3" in definitions
+    assert "master:transformer" in definitions

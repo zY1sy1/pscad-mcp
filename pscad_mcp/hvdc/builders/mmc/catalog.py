@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
@@ -58,6 +59,8 @@ def _text(value: Any, context: str) -> str:
 
 
 def _integer(value: Any, context: str, *, positive: bool = False) -> int:
+    if isinstance(value, str) and re.fullmatch(r"[+]?[0-9]+", value.strip()):
+        value = int(value.strip())
     if isinstance(value, bool) or not isinstance(value, int) or positive and value <= 0:
         raise _error("MMC_BLUEPRINT_INVALID", f"{context} must be a {'positive ' if positive else ''}integer.", context=context)
     return value

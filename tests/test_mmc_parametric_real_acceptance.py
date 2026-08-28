@@ -6,6 +6,7 @@ import asyncio
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
@@ -16,6 +17,10 @@ import pytest
 from pscad_mcp.core.backend.base import BackendError
 from pscad_mcp.hvdc.builders.mmc.assets import load_packaged_asset_set
 from pscad_mcp.hvdc.builders.mmc.derivation import derive_mmc_parameters
+from pscad_mcp.hvdc.builders.mmc.line_constants import (
+    generate_public_line_constants,
+    rebind_template_line_constants,
+)
 from pscad_mcp.hvdc.builders.mmc.parametric_models import parse_parametric_request
 from pscad_mcp.hvdc.builders.mmc.parametric_planner import STANDARD_SCENARIOS
 
@@ -266,6 +271,15 @@ async def _run_case(
 
     case_root = acceptance_root / f"feasible-{index + 1}"
     case_root.mkdir()
+    line_root = case_root / "public-line-constants"
+    artifacts = generate_public_line_constants(config["template"], line_root)
+    source_root = case_root / "pwm-sources"
+    source_root.mkdir()
+    staged_library = source_root / "intermediate.pslx"
+    shutil.copy2(config["library"], staged_library)
+    staged_template = rebind_template_line_constants(
+        config["template"], artifacts, source_root / "H_MMC_Mono_DC.pscx"
+    )
     service = PscadService(
         lambda: LegacyBackend(robust_executor, version="4.6.2", x64=True),
         path_policy=PathPolicy(workspace_root=str(case_root)),
@@ -277,6 +291,7 @@ async def _run_case(
         "child_hashes": {},
         "source_hashes": {},
         "asset_hashes": {},
+        "line_constants": [item.to_dict() for item in artifacts],
         "build": {},
         "project_hashes": {},
         "library_hashes": {},
@@ -295,8 +310,8 @@ async def _run_case(
             request,
             project_name="MMC_CASE",
             folder=str(case_root),
-            template_path=str(config["template"]),
-            library_path=str(config["library"]),
+            template_path=str(staged_template),
+            library_path=str(staged_library),
         )
         record["plan_hash"] = plan["plan_hash"]
         record["child_hashes"] = {
@@ -313,8 +328,8 @@ async def _run_case(
             plan["plan_hash"],
             "MMC_CASE",
             str(case_root),
-            template_path=str(config["template"]),
-            library_path=str(config["library"]),
+            template_path=str(staged_template),
+            library_path=str(staged_library),
             confirm=True,
         )
         build = await _wait_for_build(builder, str(started["build_id"]))

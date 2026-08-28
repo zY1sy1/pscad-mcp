@@ -112,6 +112,19 @@ def _component_parameters(component: Any, candidate: MmcCandidate) -> dict[str, 
     return parameters
 
 
+def _inventory_catalog(asset_set: Any) -> dict[str, Any]:
+    """Request live metadata for every Master definition used by the AVM asset."""
+
+    catalog = dict(asset_set.catalog)
+    definitions = dict(catalog.get("definitions", {}))
+    for component in asset_set.blueprint.components:
+        definition = str(component.definition)
+        if definition.startswith("master:"):
+            definitions.setdefault(definition, {})
+    catalog["definitions"] = definitions
+    return catalog
+
+
 def materialize_parametric_blueprint(
     plan: MmcEnginePlan,
     *,
@@ -243,7 +256,7 @@ class AvmBlueprintEngine:
                     "MMC_ENGINE_SERVICE_INVALID",
                     "The AVM engine requires a public definition-inventory method.",
                 )
-            inventory = await get_inventory(self.asset_set.catalog)
+            inventory = await get_inventory(_inventory_catalog(self.asset_set))
         selected = _candidate(plan, candidate_id)
         candidate_root = (
             Path(plan.workspace).resolve()

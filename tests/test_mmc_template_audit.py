@@ -43,6 +43,22 @@ def test_audit_rejects_partial_template_pair(tmp_path: Path) -> None:
     assert raised.value.code == "MMC_TEMPLATE_PAIR_INVALID"
 
 
+def test_audit_marks_existing_line_constants_as_verified_rebind(tmp_path: Path) -> None:
+    project, library = make_synthetic_official_shape(tmp_path)
+    constants = tmp_path / "line.tlo"
+    constants.write_bytes(b"public-lcp-output")
+    text = project.read_text(encoding="utf-8")
+    project.write_text(
+        text.replace(r"C:\synthetic\line_constants.tlo", str(constants)),
+        encoding="utf-8",
+    )
+    report = audit_mmc_template(project, library)
+    policies = {
+        item["kind"]: item["repair_policy"] for item in report["absolute_paths"]
+    }
+    assert policies["line_constants"] == "verified_rebind"
+
+
 def test_installed_example_contract_is_read_only() -> None:
     try:
         project, library = discover_official_mmc_template()

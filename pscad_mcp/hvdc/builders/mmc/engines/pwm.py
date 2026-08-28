@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import hmac
+import re
 import shutil
 from collections.abc import Mapping, Sequence
 from pathlib import Path
@@ -19,6 +20,9 @@ _SOURCE_NAMES = ("project", "library")
 _PARAMETER_BINDINGS = {
     "rated_dc_voltage_kv": "requested_dc_voltage_kv",
     "active_power_mw": "requested_active_power_mw",
+    "VdcBase": "rated_dc_voltage_kv",
+    "Sbase": "rated_power_mw",
+    "fref": "frequency_hz",
 }
 _TERMINAL_SCENARIO_STATES = {"completed", "failed", "timed_out"}
 
@@ -73,6 +77,66 @@ def _require_scenario_method(service: object, name: str):
             method=name,
         )
     return method
+
+
+def _readback_matches(expected: Any, observed: Any) -> bool:
+    if observed == expected:
+        return True
+    if isinstance(expected, (int, float)) and not isinstance(expected, bool) and isinstance(observed, str):
+        match = re.match(r"^\s*([-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[Ee][-+]?\d+)?)", observed)
+        if match:
+            try:
+                return float(match.group(1)) == float(expected)
+            except ValueError:
+                pass
+    return False
+
+
+def _rename_project_identity(project_path: Path, project_name: str) -> None:
+    text = project_path.read_text(encoding="utf-8")
+    updated, count = re.subn(
+        r'(<project\b[^>]*\bname=["\'])[^"\']*(["\'])',
+        lambda match: match.group(1) + project_name + match.group(2),
+        text,
+        count=1,
+        flags=re.IGNORECASE,
+    )
+    if count != 1:
+        raise _error("MMC_PLAN_INVALID", "The PWM project root has no name identity.")
+    project_path.write_text(updated, encoding="utf-8", newline="")
+
+
+async def _loaded_project_identity(service: object, fallback: str) -> str:
+    list_method = getattr(service, "list_projects", None)
+    if not callable(list_method):
+        return fallback
+    projects = await list_method()
+    if not isinstance(projects, (list, tuple)):
+        raise _error(
+            "MMC_POSTCONDITION_FAILED",
+            "PSCAD returned an invalid project inventory after loading the PWM candidate.",
+            observed=projects,
+        )
+    normalized = re.sub(r"[^A-Za-z0-9_]", "_", fallback)
+    matches: list[str] = []
+    for project in projects:
+        if isinstance(project, Mapping):
+            name = project.get("name")
+            kind = project.get("type")
+        else:
+            name = getattr(project, "name", None)
+            kind = getattr(project, "type", None)
+        if isinstance(name, str) and isinstance(kind, str) and kind.casefold() == "case":
+            if re.sub(r"[^A-Za-z0-9_]", "_", name) == normalized:
+                matches.append(name)
+    if len(matches) == 1:
+        return matches[0]
+    raise _error(
+        "MMC_POSTCONDITION_FAILED",
+        "PSCAD did not expose exactly one loaded PWM case identity.",
+        fallback=fallback,
+        matches=matches,
+    )
 
 
 def _source_files(plan: MmcEnginePlan) -> dict[str, Path]:
@@ -206,13 +270,16 @@ async def _apply_and_read_back(
     parameter: str,
     value: Any,
 ) -> None:
+    component_id: int | str = owner
+    if isinstance(owner, str) and owner.isdigit():
+        component_id = int(owner)
     await _require_method(service, "set_component_parameters")(
-        project_name, owner, {parameter: value}
+        project_name, component_id, {parameter: value}
     )
     observed = await _require_method(service, "get_component_parameters")(
-        project_name, owner
+        project_name, component_id
     )
-    if not isinstance(observed, Mapping) or observed.get(parameter) != value:
+    if not isinstance(observed, Mapping) or not _readback_matches(value, observed.get(parameter)):
         raise _error(
             "MMC_POSTCONDITION_FAILED",
             "A PWM parameter read-back differed from the immutable plan.",
@@ -416,9 +483,10 @@ class PwmTemplateEngine:
             await _require_method(service, "load_projects")(
                 [str(staged_library), str(staged_project)]
             )
+            project_name = await _loaded_project_identity(service, project_name)
             for dependency in plan.dependencies:
                 policy = dependency.get("repair_policy")
-                if policy == "remove_if_missing" and not dependency.get("exists", False):
+                if policy == "remove_if_missing" and not dependency.get("exists", False) and dependency.get("kind") != "startup_snapshot":
                     await _apply_and_read_back(
                         service,
                         project_name,
@@ -426,7 +494,7 @@ class PwmTemplateEngine:
                         str(dependency["parameter"]),
                         "",
                     )
-                elif policy == "verified_rebind":
+                elif policy == "verified_rebind" and dependency.get("kind") != "line_constants":
                     await _apply_and_read_back(
                         service,
                         project_name,
@@ -438,7 +506,21 @@ class PwmTemplateEngine:
                 await _apply_and_read_back(
                     service, project_name, owner, parameter, value
                 )
-            settings = dict(candidate.settings)
+            requested_settings = dict(candidate.settings)
+            available_settings = await _require_method(service, "get_project_settings")(
+                project_name
+            )
+            if not isinstance(available_settings, Mapping):
+                raise _error(
+                    "MMC_POSTCONDITION_FAILED",
+                    "PSCAD returned invalid project parameters before PWM settings were applied.",
+                    observed=available_settings,
+                )
+            settings = {
+                key: value
+                for key, value in requested_settings.items()
+                if key in available_settings
+            }
             await _require_method(service, "set_project_settings")(project_name, settings)
             observed_settings = await _require_method(service, "get_project_settings")(
                 project_name

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-08-27T21:57:30+08:00",
+  "updated_at": "2026-08-28T16:03:23+08:00",
   "policy": "A licensed PASS applies only to the named scope and commit. It must not be inherited by another builder, domain workflow, or later commit.",
   "scopes": [
     {
@@ -74,22 +74,22 @@
       "implementation_status": "INTEGRATION_BRANCH",
       "licensed_status": "INCOMPLETE_ANALYSIS",
       "evidence": {
-        "report_path": "D:/PSCAD-Workspace/mmc-parametric-acceptance/mmc-parametric-acceptance-20260828T071043979341Z/mmc-parametric-acceptance-report.json",
-        "sha256": "746069766a019968a1310ccb491baa5d56e216c65649b46202f9b0f15cc8f703",
-        "commit": "99cf80c2a92c8b9c20528cc296f3066e19e732e4"
+        "report_path": "D:/PSCAD-Workspace/mmc-parametric-acceptance/mmc-parametric-acceptance-20260828T080323968782Z/mmc-parametric-acceptance-report.json",
+        "sha256": "6d54f8f377e3f96fdf5543d8711d91965b51c92b22547b5147a1bb488b32f266",
+        "commit": "6f9416124cd0a4e3e29537cf149d18de3316dc90"
       },
       "attempt": {
-        "timestamp": "2026-08-28T15:10:43+08:00",
-        "failure_stage": "template_audit_and_plan",
-        "failure_code": "MMC_ABSOLUTE_PATH_UNRESOLVED",
-        "blocking_dependency": "C:\\Temp\\my_constants_file.tlo",
-        "build_evidence": false,
+        "timestamp": "2026-08-28T16:03:23+08:00",
+        "failure_stage": "scenario_preflight_and_avm_definition_inventory",
+        "failure_code": "HVDC_TIMED_CONTROL_UNAVAILABLE; LCC_DEFINITION_MISSING",
+        "blocking_dependency": "master:dc_bus",
+        "build_evidence": true,
         "output_evidence": false,
         "source_hashes_unchanged": true,
         "preexisting_workspace_immutable": true,
         "owned_process_cleaned": true
       },
-      "note": "The opt-in PSCAD 4.6.2 Legacy matrix ran on the integrated commit and correctly recognized the official Station/VSC hierarchy. All three feasible requests stopped before project writes because both DCTL instances reference the missing C:\\Temp\\my_constants_file.tlo; no licensed PASS is claimed."
+      "note": "The opt-in PSCAD 4.6.2 Legacy matrix generated and verified public tline.exe line constants, staged and built the detailed-PWM candidate, then stopped safely because the Legacy backend does not expose strict EMTDC timed-control capability. The AVM child stopped during live definition inventory because installed master.pslx has no master:dc_bus. No licensed PASS is claimed."
     }
   ]
 }

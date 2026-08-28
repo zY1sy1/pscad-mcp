@@ -26,6 +26,16 @@ def test_mmc_v2_profiles_use_project_qualified_exact_bindings() -> None:
         }
 
 
+def test_detailed_pwm_profile_uses_audited_official_component_parameters() -> None:
+    profile = load_profile("mmc_detailed_pwm_v2")
+    bindings = {item["canonical"]: item for item in profile["command_bindings"]}
+
+    assert bindings["active_power_order"]["component"] == {"component_id": "800413106"}
+    assert bindings["active_power_order"]["parameter_name"] == "Pref"
+    assert bindings["ac_breaker_command"]["parameter_name"] == "ACBrkCtrl"
+    assert bindings["ac_fault_command"]["component"] == {"component_id": "326579344"}
+
+
 def test_mmc_v2_profiles_bind_exact_custom_derived_project() -> None:
     original = load_profile("mmc_average_value_v2")
 
