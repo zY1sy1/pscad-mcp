@@ -72,13 +72,24 @@
     {
       "scope": "parametric_mmc",
       "implementation_status": "INTEGRATION_BRANCH",
-      "licensed_status": "NOT_RUN_ON_INTEGRATED_COMMIT",
+      "licensed_status": "INCOMPLETE_ANALYSIS",
       "evidence": {
-        "report_path": null,
-        "sha256": null,
-        "commit": "cfcc48d1e82195577e0478619d4cc7c037adefcb"
+        "report_path": "D:/PSCAD-Workspace/mmc-parametric-acceptance/mmc-parametric-acceptance-20260828T071043979341Z/mmc-parametric-acceptance-report.json",
+        "sha256": "746069766a019968a1310ccb491baa5d56e216c65649b46202f9b0f15cc8f703",
+        "commit": "99cf80c2a92c8b9c20528cc296f3066e19e732e4"
       },
-      "note": "The dual-engine parametric lifecycle has passed non-licensed regression on codex/mmc-parametric-dual-engine. The opt-in PSCAD 4.6.2 matrix has not run on this integrated commit, so no detailed-PWM or average-value licensed acceptance is claimed."
+      "attempt": {
+        "timestamp": "2026-08-28T15:10:43+08:00",
+        "failure_stage": "template_audit_and_plan",
+        "failure_code": "MMC_ABSOLUTE_PATH_UNRESOLVED",
+        "blocking_dependency": "C:\\Temp\\my_constants_file.tlo",
+        "build_evidence": false,
+        "output_evidence": false,
+        "source_hashes_unchanged": true,
+        "preexisting_workspace_immutable": true,
+        "owned_process_cleaned": true
+      },
+      "note": "The opt-in PSCAD 4.6.2 Legacy matrix ran on the integrated commit and correctly recognized the official Station/VSC hierarchy. All three feasible requests stopped before project writes because both DCTL instances reference the missing C:\\Temp\\my_constants_file.tlo; no licensed PASS is claimed."
     }
   ]
 }
