@@ -14,7 +14,6 @@ from typing import Any, ParamSpec, TypeVar, Union, get_args, get_type_hints
 
 from mcp.server.fastmcp import FastMCP
 from mcp.types import CallToolResult
-from pydantic.fields import FieldInfo
 
 from ..core.connection_manager import pscad_manager
 from ..learning.models import InvocationOutcome
@@ -216,8 +215,9 @@ def _is_call_tool_result(annotation: Any) -> bool:
 def _annotation_description(annotation: Any) -> str | None:
     """Read a Field description from an Annotated parameter type."""
     for metadata in get_args(annotation)[1:]:
-        if isinstance(metadata, FieldInfo) and isinstance(metadata.description, str):
-            return metadata.description
+        description = getattr(metadata, "description", None)
+        if isinstance(description, str):
+            return description
     return None
 
 
