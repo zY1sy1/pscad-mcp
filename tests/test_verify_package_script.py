@@ -26,6 +26,15 @@ def test_package_verification_script_builds_installs_and_cleans_up():
     assert "Remove-Item -LiteralPath" in text
 
 
+def test_package_verification_isolates_pythonpath_before_building_wheel():
+    script = Path(__file__).parents[1] / "scripts" / "verify_package.ps1"
+    text = script.read_text(encoding="utf-8")
+
+    clear = text.index("Remove-Item Env:PYTHONPATH")
+    build = text.index("-m pip wheel")
+    assert clear < build
+
+
 def test_package_smoke_probes_do_not_hardcode_release_version():
     root = Path(__file__).parents[1]
 

@@ -15,6 +15,8 @@ $venvDir = Join-Path $tempRoot "venv"
 $probeDir = Join-Path $tempRoot "probe"
 
 New-Item -ItemType Directory -Path $wheelDir, $probeDir | Out-Null
+$previousPythonPath = $env:PYTHONPATH
+Remove-Item Env:PYTHONPATH -ErrorAction SilentlyContinue
 
 try {
     & $python -m pip wheel $repoRoot --no-deps --wheel-dir $wheelDir
@@ -64,7 +66,6 @@ if not assets.pscad_version.startswith('4.'):
 print(f'{installed} {len(FULL_TOOL_NAMES)} {len(assets.hashes)}')
 "@
 
-    $previousPythonPath = $env:PYTHONPATH
     $previousNoUserSite = $env:PYTHONNOUSERSITE
     $previousToolProfile = $env:PSCAD_MCP_TOOL_PROFILE
     Remove-Item Env:PYTHONPATH -ErrorAction SilentlyContinue
@@ -95,6 +96,11 @@ print(f'{installed} {len(FULL_TOOL_NAMES)} {len(assets.hashes)}')
         }
     }
 } finally {
+    if ($null -eq $previousPythonPath) {
+        Remove-Item Env:PYTHONPATH -ErrorAction SilentlyContinue
+    } else {
+        $env:PYTHONPATH = $previousPythonPath
+    }
     if (Test-Path -LiteralPath $tempRoot) {
         Remove-Item -LiteralPath $tempRoot -Recurse -Force
     }
