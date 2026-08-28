@@ -25,7 +25,7 @@ def test_acceptance_status_manifest_separates_live_acceptance_scopes():
     assert topology["pscad_version"] == "4.6.2"
     assert topology["rule_version"] == "generic+hvdc-v1"
     assert topology["evidence"]["commit"] == (
-        "8f337edc1fd7c2b0d3e8cff2848973d7f62cd89d"
+        "6ec6118f9fd0e979fb9a8a00202327dbf576e165"
     )
     assert len(topology["evidence"]["sha256"]) == 64
     assert len(topology["evidence"]["truth_manifest_sha256"]) == 64
