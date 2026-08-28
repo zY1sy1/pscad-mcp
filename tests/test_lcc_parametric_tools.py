@@ -4,10 +4,11 @@ from types import SimpleNamespace
 
 from pscad_mcp.main import create_server
 from pscad_mcp.tools import lcc_parametric_tools
+from pscad_mcp.tools.catalog import FULL_TOOL_NAMES
 
 
 def test_parametric_lcc_tools_are_registered():
-    tools = create_server()._tool_manager.list_tools()
+    tools = create_server(environ={})._tool_manager.list_tools()
     names = {tool.name for tool in tools}
     expected = {
         "derive_lcc_parameters",
@@ -18,7 +19,7 @@ def test_parametric_lcc_tools_are_registered():
         "validate_lcc_operating_modes",
     }
     assert expected <= names
-    assert len(names) == 83
+    assert names == FULL_TOOL_NAMES
     by_name = {tool.name: tool for tool in tools}
     assert set(by_name["plan_parametric_lcc_model"].parameters["required"]) == {
         "request", "template_path", "project_name", "folder",
@@ -31,6 +32,24 @@ def test_parametric_lcc_tools_are_registered():
         for field in ("template_path", "project_name", "folder"):
             assert properties[field]["type"] == "string"
             assert "default" not in properties[field]
+
+
+def test_parametric_lcc_complex_inputs_expose_nested_shapes():
+    by_name = {
+        tool.name: tool
+        for tool in create_server(environ={})._tool_manager.list_tools()
+    }
+
+    request_description = by_name["derive_lcc_parameters"].parameters[
+        "properties"
+    ]["request"]["description"]
+    events_description = by_name["validate_lcc_operating_modes"].parameters[
+        "properties"
+    ]["events"]["description"]
+    assert "ratings" in request_description
+    assert "rated_power_mw" in request_description
+    assert "event_id" in events_description
+    assert "target" in events_description
 
 
 def test_parametric_service_uses_configured_workspace_path_policy(monkeypatch, tmp_path):

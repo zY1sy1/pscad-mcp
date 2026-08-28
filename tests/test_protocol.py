@@ -1,11 +1,13 @@
 import asyncio
 import unittest
 import json
+import os
 from unittest.mock import AsyncMock, MagicMock, patch
 from pscad_mcp.core.backend.base import BackendError
 from pscad_mcp.main import create_server
 from pscad_mcp.tools.data_tools import read_output_file
 from pscad_mcp.tools.project_tools import list_projects, run_project
+from pscad_mcp.tools.catalog import FULL_TOOL_NAMES
 from pscad_mcp.core.connection_manager import pscad_manager
 
 class TestProtocolIntegrity(unittest.IsolatedAsyncioTestCase):
@@ -46,7 +48,7 @@ class TestProtocolIntegrity(unittest.IsolatedAsyncioTestCase):
         )
         self.mock_service.run_project = AsyncMock(side_effect=error)
 
-        result = await create_server()._tool_manager.call_tool(
+        result = await create_server(environ={})._tool_manager.call_tool(
             "run_project",
             {"project_name": "missing"},
             convert_result=True,
@@ -72,7 +74,7 @@ class TestProtocolIntegrity(unittest.IsolatedAsyncioTestCase):
         )
         self.mock_service.run_project = AsyncMock(side_effect=error)
 
-        result = await create_server()._tool_manager.call_tool(
+        result = await create_server(environ={})._tool_manager.call_tool(
             "run_project",
             {"project_name": "case"},
             convert_result=True,
@@ -88,7 +90,7 @@ class TestProtocolIntegrity(unittest.IsolatedAsyncioTestCase):
             side_effect=ValueError("bad project")
         )
 
-        result = await create_server()._tool_manager.call_tool(
+        result = await create_server(environ={})._tool_manager.call_tool(
             "run_project",
             {"project_name": "bad"},
             convert_result=True,
@@ -101,7 +103,7 @@ class TestProtocolIntegrity(unittest.IsolatedAsyncioTestCase):
 
     async def test_fastmcp_success_keeps_typed_structured_output(self):
         self.mock_service.run_project = AsyncMock(return_value="started")
-        server = create_server()
+        server = create_server(environ={})
 
         _, structured = await server._tool_manager.call_tool(
             "run_project",
@@ -115,6 +117,21 @@ class TestProtocolIntegrity(unittest.IsolatedAsyncioTestCase):
             tool.parameters["properties"]["project_name"]["type"],
             "string",
         )
+
+    def test_explicit_factory_environment_ignores_legal_shell_profiles(self):
+        for profile in ("core", "hvdc"):
+            with self.subTest(profile=profile):
+                with patch.dict(
+                    os.environ,
+                    {"PSCAD_MCP_TOOL_PROFILE": profile},
+                ):
+                    names = {
+                        tool.name
+                        for tool in create_server(
+                            environ={}
+                        )._tool_manager.list_tools()
+                    }
+                self.assertEqual(names, FULL_TOOL_NAMES)
 
     async def test_direct_tool_calls_still_raise_backend_errors(self):
         error = BackendError(

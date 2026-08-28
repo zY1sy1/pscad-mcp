@@ -6,6 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from pscad_mcp.core import executor as executor_module
 from pscad_mcp.core.executor import RobustExecutor
+from pscad_mcp.core.executor import ExecutorClosingError, PendingSettlementError
 
 
 class _RecordingHandler(logging.Handler):
@@ -35,6 +36,42 @@ class _ResetAfterFirstStateCapture:
 
 
 class TestExecutorRecovery(unittest.IsolatedAsyncioTestCase):
+    async def test_wait_for_settlements_is_bounded_and_shutdown_guard_preserves_worker(self):
+        executor = RobustExecutor(timeout=1)
+        started = threading.Event()
+        release = threading.Event()
+        worker = executor.executor
+
+        def blocked_call():
+            started.set()
+            release.wait(2)
+
+        task = asyncio.create_task(executor.run_safe(blocked_call))
+        try:
+            self.assertTrue(await asyncio.to_thread(started.wait, 0.1))
+            executor.begin_shutdown()
+            self.assertFalse(await executor.wait_for_settlements(0.01))
+            with self.assertRaises(PendingSettlementError):
+                executor.shutdown_if_settled()
+            self.assertIs(executor.executor, worker)
+            called = []
+            with self.assertRaises(ExecutorClosingError):
+                await executor.run_safe(lambda: called.append("ran"))
+            self.assertEqual(called, [])
+            release.set()
+            await task
+            self.assertTrue(await executor.wait_for_settlements(0.1))
+            executor.shutdown_if_settled()
+        finally:
+            release.set()
+            if not task.done():
+                task.cancel()
+            try:
+                await task
+            except BaseException:
+                pass
+            executor.shutdown()
+
     async def test_reset_and_shutdown_settle_tokens_for_cancelled_queued_calls(self):
         for action in ("reset", "shutdown"):
             with self.subTest(action=action):

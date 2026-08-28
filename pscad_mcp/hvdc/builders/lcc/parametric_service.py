@@ -14,6 +14,7 @@ from typing import Any
 
 from ....core.backend.base import BackendError
 from ....core.path_policy import PathPolicy, WorkspaceNotConfiguredError
+from ....runtime import PendingCleanupError
 from .derivation import derive_lcc_parameters
 from .journal import AtomicJournal, WorkspaceBuildLease
 from .modes import derive_mode_copies, validate_lcc_schedule
@@ -283,6 +284,7 @@ class ParametricLccBuilderService:
         self._plans: dict[str, dict[str, Any]] = {}
         self._tasks: dict[str, asyncio.Task[Any]] = {}
         self._leases: dict[str, WorkspaceBuildLease] = {}
+        self._closing = False
 
     def derive_parameters(self, request: ParametricLccRequest) -> dict[str, Any]:
         return derive_lcc_parameters(request, self.catalog).to_dict()
@@ -576,6 +578,13 @@ class ParametricLccBuilderService:
         expected_plan_hash: str,
         confirm: bool = False,
     ) -> dict[str, Any]:
+        if self._closing:
+            raise _error(
+                "LCC_BUILD_CONFLICT",
+                "The parametric LCC builder is shutting down.",
+                "build_parametric_lcc_model",
+                reason="service_closing",
+            )
         if not confirm:
             raise BackendError("CONFIRMATION_REQUIRED", "confirm=true is required.", "hvdc", "build_parametric_lcc_model")
         if not isinstance(expected_plan_hash, str) or _PLAN_HASH.fullmatch(expected_plan_hash) is None:
@@ -743,6 +752,37 @@ class ParametricLccBuilderService:
             lease.release(lease.token)
             raise
         return {key: value for key, value in initial.items() if key != "plan"}
+
+    async def shutdown(self, timeout_s: float = 5.0) -> None:
+        """Interrupt active builds and await their lease-release paths."""
+        self._closing = True
+        terminal = {"published", "failed", "timed_out", "interrupted"}
+        for record in self._statuses.values():
+            if record.get("state") not in terminal:
+                record["state"] = "interrupted"
+        tasks = tuple(task for task in self._tasks.values() if not task.done())
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            done, pending = await asyncio.wait(tasks, timeout=timeout_s)
+            for task in done:
+                try:
+                    task.result()
+                except BaseException:
+                    pass
+            if pending:
+                raise PendingCleanupError(tuple(pending))
+        await asyncio.sleep(0)
+        for build_id, lease in tuple(self._leases.items()):
+            record = self._statuses.get(build_id)
+            try:
+                if record is not None:
+                    AtomicJournal(self.workspace_root, build_id).write(record)
+            finally:
+                try:
+                    lease.release(lease.token)
+                finally:
+                    self._leases.pop(build_id, None)
 
     async def _run_executor(
         self,

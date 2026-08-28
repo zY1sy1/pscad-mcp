@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Collection, Mapping
 from datetime import datetime, timedelta, timezone
 import logging
 import re
@@ -91,6 +91,10 @@ class LearningService:
         except BaseException:
             self._store.close()
             raise
+
+    def close(self) -> None:
+        """Close the durable learning store."""
+        self._store.close()
 
     @property
     def session_id(self) -> str:
@@ -249,9 +253,18 @@ class LearningService:
     def _latest_registered_invocation(
         self,
         primary_tool: str | None,
+        *,
+        allowed_tool_names: Collection[str] | None = None,
     ) -> tuple[str | None, StoredInvocation | None]:
         latest = self._store.latest_invocation(self._session_id, primary_tool)
-        if latest is None or latest.tool_name not in self._registered_tool_names:
+        if (
+            latest is None
+            or latest.tool_name not in self._registered_tool_names
+            or (
+                allowed_tool_names is not None
+                and latest.tool_name not in allowed_tool_names
+            )
+        ):
             if primary_tool is None:
                 return None, None
             return primary_tool, None
@@ -335,15 +348,23 @@ class LearningService:
         self,
         failure_kind: GoalFailureKind,
         primary_tool: str | None,
+        *,
+        allowed_tool_names: Collection[str] | None = None,
     ) -> dict[str, object]:
         with self._lock:
             normalized_kind = self._normalize_failure_kind(failure_kind)
             if primary_tool is not None:
                 self._require_registered_tool(primary_tool)
+                if (
+                    allowed_tool_names is not None
+                    and primary_tool not in allowed_tool_names
+                ):
+                    raise _invalid_argument("learning", _INVALID_TOOL_MESSAGE)
 
             now = self._now()
             effective_tool, correlated_invocation = self._latest_registered_invocation(
-                primary_tool
+                primary_tool,
+                allowed_tool_names=allowed_tool_names,
             )
             self._store.record_goal_failure(
                 GoalFailureEvent(
@@ -515,6 +536,17 @@ class LearningRuntime:
             ):
                 self._service.register_tool_name(name)
 
+    def close(self) -> None:
+        """Close an initialized service without triggering lazy creation."""
+        with self._lock:
+            service = self._service
+            if service is None:
+                return
+            close = getattr(service, "close")
+            close()
+            if self._service is service:
+                self._service = None
+
     def _log_config_issue(self, issue: str) -> None:
         if not self._availability_warning_emitted:
             _LOGGER.warning(
@@ -652,6 +684,8 @@ class LearningRuntime:
         self,
         failure_kind: GoalFailureKind,
         primary_tool: str | None,
+        *,
+        allowed_tool_names: Collection[str] | None = None,
     ) -> dict[str, object]:
         service = self._ensure_service()
         if service is None:
@@ -662,7 +696,11 @@ class LearningRuntime:
                 }
             return self._unavailable_result()
         try:
-            return service.record_goal_failure(failure_kind, primary_tool)
+            return service.record_goal_failure(
+                failure_kind,
+                primary_tool,
+                allowed_tool_names=allowed_tool_names,
+            )
         except BackendError:
             raise
         except Exception as error:

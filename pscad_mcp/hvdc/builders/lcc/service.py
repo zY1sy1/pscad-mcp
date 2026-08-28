@@ -14,6 +14,7 @@ from typing import Any, Callable
 from ....core.backend.base import BackendError
 from ....core.path_policy import PathPolicy, WorkspaceNotConfiguredError
 from ....core.service import ConfirmationRequired
+from ....runtime import PendingCleanupError
 from .acceptance import evaluate_acceptance
 from .assets import LccAssetSet, load_packaged_asset_set, sha256_file
 from .catalog import parse_catalog
@@ -96,6 +97,7 @@ class LccBuilderService:
         self._tasks: dict[str, asyncio.Task[Any]] = {}
         self._records: dict[str, LccBuildRecord | dict[str, Any]] = {}
         self._leases: dict[str, WorkspaceBuildLease] = {}
+        self._closing = False
 
     def _inventory_for(self, asset_set: LccAssetSet) -> Any:
         if self.inventory is not None:
@@ -206,6 +208,13 @@ class LccBuilderService:
         blueprint: str = "cigre_lcc_monopole_v1",
         confirm: bool = False,
     ) -> dict[str, Any]:
+        if self._closing:
+            raise _service_error(
+                "LCC_BUILD_CONFLICT",
+                "The fixed LCC builder is shutting down.",
+                "build_lcc_model",
+                reason="service_closing",
+            )
         if not confirm:
             raise ConfirmationRequired("build_lcc_model")
         request = LccPlanRequest(project_name, folder, simulation_duration_s, blueprint)
@@ -245,6 +254,56 @@ class LccBuilderService:
             "plan_hash": plan.plan_hash,
             "target_path": plan.target_path,
         }
+
+    async def shutdown(self, timeout_s: float = 5.0) -> None:
+        """Interrupt active builds and await their lease-release paths."""
+        self._closing = True
+        terminal = {
+            LccBuildState.PUBLISHED,
+            LccBuildState.FAILED,
+            LccBuildState.TIMED_OUT,
+            LccBuildState.INTERRUPTED,
+        }
+        for build_id, record in tuple(self._records.items()):
+            if isinstance(record, LccBuildRecord) and record.state not in terminal:
+                self._records[build_id] = replace(
+                    record,
+                    state=LccBuildState.INTERRUPTED,
+                    history=record.history
+                    + ({"state": LccBuildState.INTERRUPTED.value},),
+                )
+            elif isinstance(record, dict) and record.get("state") not in {
+                state.value for state in terminal
+            }:
+                record["state"] = LccBuildState.INTERRUPTED.value
+        tasks = tuple(task for task in self._tasks.values() if not task.done())
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            done, pending = await asyncio.wait(tasks, timeout=timeout_s)
+            for task in done:
+                try:
+                    task.result()
+                except BaseException:
+                    pass
+            if pending:
+                raise PendingCleanupError(tuple(pending))
+        await asyncio.sleep(0)
+        for build_id, lease in tuple(self._leases.items()):
+            record = self._records.get(build_id)
+            try:
+                if record is not None:
+                    payload = (
+                        record.to_dict()
+                        if isinstance(record, LccBuildRecord)
+                        else dict(record)
+                    )
+                    AtomicJournal(self.workspace_root, build_id).write(payload)
+            finally:
+                try:
+                    lease.release(lease.token)
+                finally:
+                    self._leases.pop(build_id, None)
 
     async def _run_build(
         self,

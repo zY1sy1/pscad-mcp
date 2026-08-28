@@ -16,6 +16,7 @@ from pscad_mcp.hvdc.builders.lcc.parametric_models import (
     ParametricLccRequest,
 )
 from pscad_mcp.hvdc.builders.lcc.parametric_service import ParametricLccBuilderService
+from pscad_mcp.runtime import PendingCleanupError
 
 
 FIXTURES = Path(__file__).parent / "fixtures" / "lcc_parametric"
@@ -642,3 +643,106 @@ def test_configured_executor_failure_is_contained_and_releases_lease(tmp_path):
     assert status["state"] == "failed"
     assert status["error"]["code"] == "LCC_BUILD_FAILED"
     assert not (values["workspace"] / ".pscad-mcp" / "lcc-build.lock").exists()
+
+
+def test_shutdown_interrupts_parametric_build_and_releases_lease(tmp_path):
+    values = _inputs(tmp_path)
+    entered = asyncio.Event()
+
+    async def blocking_executor(*args, **kwargs):
+        entered.set()
+        await asyncio.Event().wait()
+
+    service = ParametricLccBuilderService(
+        pscad_service=object(),
+        workspace_root=values["workspace"],
+        executor_factory=blocking_executor,
+    )
+    plan = _plan(service, values)
+
+    async def exercise():
+        started = await service.build_parametric_model(
+            values["request"],
+            template_path=values["template_path"],
+            project_name=values["project_name"],
+            folder=values["folder"],
+            expected_plan_hash=plan["plan_hash"],
+            confirm=True,
+        )
+        await entered.wait()
+        await service.shutdown(timeout_s=0.2)
+        with pytest.raises(BackendError) as raised:
+            await service.build_parametric_model(
+                values["request"],
+                template_path=values["template_path"],
+                project_name=values["project_name"],
+                folder=values["folder"],
+                expected_plan_hash=plan["plan_hash"],
+                confirm=True,
+            )
+        return started, raised.value
+
+    started, error = asyncio.run(exercise())
+    assert service.get_status(started["build_id"])["state"] == "interrupted"
+    assert error.code == "LCC_BUILD_CONFLICT"
+    assert service._tasks == {}
+    assert service._leases == {}
+    assert not (values["workspace"] / ".pscad-mcp" / "lcc-build.lock").exists()
+
+
+def test_shutdown_releases_parametric_lease_when_task_never_started(tmp_path):
+    values = _inputs(tmp_path)
+
+    async def blocking_executor(*args, **kwargs):
+        await asyncio.Event().wait()
+
+    service = ParametricLccBuilderService(
+        pscad_service=object(),
+        workspace_root=values["workspace"],
+        executor_factory=blocking_executor,
+    )
+    plan = _plan(service, values)
+
+    async def exercise():
+        started = await service.build_parametric_model(
+            values["request"],
+            template_path=values["template_path"],
+            project_name=values["project_name"],
+            folder=values["folder"],
+            expected_plan_hash=plan["plan_hash"],
+            confirm=True,
+        )
+        await service.shutdown(timeout_s=0.2)
+        return started
+
+    started = asyncio.run(exercise())
+    assert service.get_status(started["build_id"])["state"] == "interrupted"
+    assert service._leases == {}
+    assert not (values["workspace"] / ".pscad-mcp" / "lcc-build.lock").exists()
+
+
+def test_shutdown_reports_live_parametric_builder_task_as_pending(tmp_path):
+    service = ParametricLccBuilderService(workspace_root=tmp_path)
+
+    async def exercise():
+        release = asyncio.Event()
+
+        async def stubborn():
+            while not release.is_set():
+                try:
+                    await release.wait()
+                except asyncio.CancelledError:
+                    continue
+
+        task = asyncio.create_task(stubborn())
+        service._tasks["pending"] = task
+        await asyncio.sleep(0)
+        try:
+            with pytest.raises(PendingCleanupError) as raised:
+                await service.shutdown(timeout_s=0.02)
+            assert task in raised.value.pending_tasks
+        finally:
+            release.set()
+            await task
+
+    asyncio.run(exercise())

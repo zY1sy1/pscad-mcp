@@ -1,0 +1,163 @@
+"""Bounded, always-on PSCAD MCP capability discovery."""
+
+from __future__ import annotations
+
+from collections.abc import Iterable, Mapping
+from typing import Any
+
+from mcp.server.fastmcp import FastMCP
+
+from ..core.connection_manager import pscad_manager
+from .catalog import FULL_TOOL_NAMES, TOOL_GROUPS, TOOL_SPECS, ToolProfile
+from .identifiers import (
+    BACKEND_NAME_PATTERN,
+    PSCAD_VERSION_PATTERN,
+    bounded_identifier,
+)
+from .registration import register_tool
+
+
+_UNKNOWN_CONNECTION = {
+    "connected": False,
+    "backend": None,
+    "version": None,
+}
+_KNOWN_BACKENDS = frozenset().union(
+    *(spec.backend_support for spec in TOOL_SPECS.values())
+)
+
+
+def _bounded_connection(connection: object) -> dict[str, bool | str | None]:
+    if not isinstance(connection, Mapping):
+        return dict(_UNKNOWN_CONNECTION)
+    try:
+        connected = connection.get("connected") is True
+        raw_backend = connection.get("backend")
+        raw_version = connection.get("version")
+        backend = bounded_identifier(
+            raw_backend,
+            BACKEND_NAME_PATTERN,
+        )
+        version = bounded_identifier(
+            raw_version,
+            PSCAD_VERSION_PATTERN,
+        )
+        invalid_version = raw_version is not None and version is None
+        if not connected or backend not in _KNOWN_BACKENDS or invalid_version:
+            return dict(_UNKNOWN_CONNECTION)
+    except Exception:
+        return dict(_UNKNOWN_CONNECTION)
+    return {
+        "connected": True,
+        "backend": backend,
+        "version": version,
+    }
+
+
+def _catalog_names(values: Iterable[object]) -> frozenset[str]:
+    try:
+        names: set[str] = set()
+        for index, value in enumerate(values):
+            if index >= len(FULL_TOOL_NAMES):
+                return frozenset()
+            if type(value) is str and value in FULL_TOOL_NAMES:
+                names.add(value)
+    except Exception:
+        return frozenset()
+    return frozenset(names)
+
+
+def _bounded_profile(profile: object) -> tuple[str, frozenset[str]]:
+    try:
+        if not isinstance(profile, ToolProfile):
+            return "invalid", frozenset()
+        groups = profile.groups
+        if (
+            type(groups) is not frozenset
+            or not groups
+            or len(groups) > len(TOOL_GROUPS)
+            or any(type(group) is not str for group in groups)
+            or not groups <= TOOL_GROUPS.keys()
+        ):
+            return "invalid", frozenset()
+        bounded_groups = frozenset(groups)
+        label = (
+            "full"
+            if type(profile.label) is str
+            and profile.label == "full"
+            and bounded_groups == TOOL_GROUPS.keys()
+            else ",".join(sorted(bounded_groups))
+        )
+        return label, bounded_groups
+    except Exception:
+        return "invalid", frozenset()
+
+
+def build_capability_payload(
+    *,
+    profile: object,
+    registered_names: Iterable[object],
+    connection: object,
+) -> dict[str, Any]:
+    """Build a deterministic capability response without exposing raw values."""
+    profile_label, registered_groups = _bounded_profile(profile)
+    registered = _catalog_names(registered_names)
+    bounded_connection = _bounded_connection(connection)
+    connected = bounded_connection["connected"] is True
+    backend = bounded_connection["backend"]
+    records: list[dict[str, str | None]] = []
+
+    for name in sorted(FULL_TOOL_NAMES):
+        spec = TOOL_SPECS[name]
+        limitation_code = None
+        if not spec.backend_support:
+            state = "supported"
+        elif not connected:
+            state = "unknown"
+        elif backend in spec.backend_support:
+            state = "supported"
+        else:
+            state = "unavailable"
+            limitation_code = spec.limitation_code or "CAPABILITY_UNAVAILABLE"
+        records.append(
+            {
+                "name": name,
+                "group": spec.group,
+                "state": state,
+                "limitation_code": limitation_code,
+            }
+        )
+
+    return {
+        "profile": profile_label,
+        "registered_groups": sorted(registered_groups),
+        "registered_tools": sorted(registered),
+        "inactive_tools": sorted(FULL_TOOL_NAMES - registered),
+        "connection": bounded_connection,
+        "capabilities": records,
+    }
+
+
+def register_capability_tool(mcp: FastMCP) -> None:
+    """Register capability discovery after all profile-selected tools."""
+    profile = mcp._pscad_tool_profile
+
+    async def get_pscad_capabilities() -> dict[str, Any]:
+        """Discover the active PSCAD MCP profile and bounded backend capabilities."""
+        try:
+            connection = await pscad_manager.get_status()
+        except Exception:
+            connection = _UNKNOWN_CONNECTION
+        registered_names = getattr(mcp, "_pscad_registered_tool_names", set())
+        return build_capability_payload(
+            profile=profile,
+            registered_names=registered_names,
+            connection=connection,
+        )
+
+    register_tool(
+        mcp,
+        get_pscad_capabilities,
+        record_learning=False,
+        force=True,
+    )

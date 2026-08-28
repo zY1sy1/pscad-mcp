@@ -10,6 +10,7 @@ from pscad_mcp.core.executor import RobustExecutor
 from pscad_mcp.core.path_policy import PathPolicy
 from pscad_mcp.core.service import PscadService
 from pscad_mcp.hvdc.service import HvdcDomainService
+from pscad_mcp.runtime import PendingCleanupError
 
 
 def _write_project(path):
@@ -114,6 +115,70 @@ def test_application_wide_scenario_reservation_rejects_concurrent_start(tmp_path
     assert error.details["active_scenario_id"] == first["scenario_id"]
     assert terminal["status"] == "completed"
     assert service._active_scenario_id is None
+
+
+def test_shutdown_marks_scenario_interrupted_and_rejects_new_scenarios(tmp_path):
+    source = tmp_path / "case.pscx"
+    _write_project(source)
+    class StoppableBackend(BlockingBackend):
+        async def stop_simulation(self, project_name):
+            self.stopped = True
+            self.release_run.set()
+            return "stopped"
+
+    backend = StoppableBackend()
+    service = HvdcDomainService(
+        backend, path_policy=PathPolicy(workspace_root=str(tmp_path))
+    )
+
+    async def exercise():
+        started = await service.run_scenario(
+            str(source), _scenario(source), confirm=True
+        )
+        await asyncio.wait_for(backend.run_entered.wait(), 0.1)
+        await service.shutdown(timeout_s=0.2)
+        with pytest.raises(BackendError) as raised:
+            await service.run_scenario(
+                str(source), _scenario(source), confirm=True
+            )
+        return started, raised.value
+
+    started, error = asyncio.run(exercise())
+    record = service._scenarios[started["scenario_id"]]
+    assert record["status"] == "interrupted"
+    assert error.code == "HVDC_SCENARIO_CONFLICT"
+    assert service._scenario_tasks == {}
+    assert service._scenario_run_tasks == {}
+    assert service._scenario_operation_tasks == {}
+    assert service._scenario_cleanup_tasks == {}
+    assert service._active_scenario_id is None
+
+
+def test_shutdown_reports_live_hvdc_cleanup_task_as_pending(tmp_path):
+    service = HvdcDomainService(path_policy=PathPolicy(workspace_root=str(tmp_path)))
+
+    async def exercise():
+        release = asyncio.Event()
+
+        async def stubborn():
+            while not release.is_set():
+                try:
+                    await release.wait()
+                except asyncio.CancelledError:
+                    continue
+
+        task = asyncio.create_task(stubborn())
+        service._scenario_cleanup_tasks["pending"] = task
+        await asyncio.sleep(0)
+        try:
+            with pytest.raises(PendingCleanupError) as raised:
+                await service.shutdown(timeout_s=0.02)
+            assert task in raised.value.pending_tasks
+        finally:
+            release.set()
+            await task
+
+    asyncio.run(exercise())
 
 
 def test_timeout_attempts_stop_and_releases_reservation_only_when_contained(tmp_path):

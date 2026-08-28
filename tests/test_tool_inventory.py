@@ -1,4 +1,5 @@
 from pscad_mcp.main import create_server
+from pscad_mcp.tools.catalog import COMPATIBILITY_TOOL_NAMES, FULL_TOOL_NAMES
 
 
 HVDC_TOOLS = {
@@ -35,13 +36,13 @@ PARAMETRIC_LCC_TOOLS = {
 }
 
 
-def test_server_preserves_the_exact_60_generic_tools_and_adds_hvdc_tools():
-    tools = create_server()._tool_manager.list_tools()
-    names = [tool.name for tool in tools]
+def test_server_preserves_the_compatibility_inventory():
+    tools = create_server(environ={})._tool_manager.list_tools()
+    names = {tool.name for tool in tools}
 
-    assert len(set(names)) == 83
-    assert len(set(names) - HVDC_TOOLS - LEARNING_TOOLS - LCC_TOOLS - PARAMETRIC_LCC_TOOLS) == 60
-    assert HVDC_TOOLS <= set(names)
-    assert LEARNING_TOOLS <= set(names)
-    assert LCC_TOOLS <= set(names)
-    assert PARAMETRIC_LCC_TOOLS <= set(names)
+    assert names == FULL_TOOL_NAMES
+    assert COMPATIBILITY_TOOL_NAMES <= names
+    assert HVDC_TOOLS <= COMPATIBILITY_TOOL_NAMES
+    assert LEARNING_TOOLS <= COMPATIBILITY_TOOL_NAMES
+    assert LCC_TOOLS <= COMPATIBILITY_TOOL_NAMES
+    assert PARAMETRIC_LCC_TOOLS <= COMPATIBILITY_TOOL_NAMES

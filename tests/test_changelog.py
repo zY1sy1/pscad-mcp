@@ -1,6 +1,12 @@
 from pathlib import Path
 
 
+def _unreleased_section(text: str) -> str:
+    match = text.split("## [Unreleased]", maxsplit=1)
+    assert len(match) == 2
+    return match[1].split("## [", maxsplit=1)[0]
+
+
 def test_changelog_describes_current_release_boundary():
     text = (Path(__file__).parents[1] / "CHANGELOG.md").read_text(encoding="utf-8").lower()
 
@@ -12,6 +18,39 @@ def test_changelog_describes_current_release_boundary():
     assert "contract" in text
     assert "silent learning" in text
     assert "83" in text
+
+
+def test_unreleased_describes_horizontal_mcp_hardening():
+    text = (Path(__file__).parents[1] / "CHANGELOG.md").read_text(encoding="utf-8")
+    unreleased = _unreleased_section(text).lower()
+
+    for phrase in (
+        "horizontal hardening",
+        "tool annotations",
+        "runtime lifecycle",
+        "local documentation",
+    ):
+        assert phrase in unreleased
+
+
+def test_unreleased_distinguishes_compatibility_inventory_from_current_total():
+    text = (Path(__file__).parents[1] / "CHANGELOG.md").read_text(encoding="utf-8")
+    unreleased = _unreleased_section(text).lower()
+
+    assert "83 compatibility tools" in unreleased
+    for phrase in (
+        "60 generic tools",
+        "ten hvdc tools",
+        "three learning tools",
+        "four fixed lcc tools",
+        "six parametric lcc tools",
+        "get_pscad_capabilities",
+        "current total is 84",
+    ):
+        assert phrase in unreleased
+    assert "inventory is now 83 tools" not in unreleased
+
+
 def test_readmes_document_the_fixed_lcc_builder_boundary():
     root = Path(__file__).parents[1]
     english = (root / "README.md").read_text(encoding="utf-8").lower()

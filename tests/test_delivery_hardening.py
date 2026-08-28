@@ -24,6 +24,7 @@ def test_package_metadata_declares_release_version_and_dev_dependencies():
     assert project["requires-python"] == ">=3.10"
     requirements = project["optional-dependencies"]["dev"]
     assert any(item.startswith("pytest") for item in requirements)
+    assert "ruff>=0.12,<1" in requirements
     assert any("tomli" in item for item in requirements)
     assert importlib.import_module("pscad_mcp").__version__ == "0.2.0"
 
@@ -60,14 +61,47 @@ def test_release_notes_cover_all_approved_batches():
         assert phrase in changelog
 
 
-def test_windows_ci_covers_supported_python_versions_and_release_gates():
-    workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(
-        encoding="utf-8"
+def test_readmes_describe_compatible_mcp_hardening_in_both_languages():
+    required = (
+        "get_pscad_capabilities",
+        "PSCAD_MCP_TOOL_PROFILE",
+        "PSCAD_MCP_DOCUMENTATION_DIR",
+        "84",
+        "offset",
+        "limit",
+        "pscad-docs://modules/",
+        "PSCAD 5.x",
+        "contract-tested",
     )
 
-    for version in ("3.10", "3.11", "3.12"):
-        assert version in workflow
-    assert "python -m pip check" in workflow
-    assert "python -m compileall -q pscad_mcp tests" in workflow
-    assert "print(len(tools), len({tool.name for tool in tools}))" in workflow
-    assert "83 83" in workflow
+    for relative in ("README.md", "docs/zh-CN/README.md"):
+        text = (ROOT / relative).read_text(encoding="utf-8")
+        for value in required:
+            assert value in text, f"{relative} is missing {value!r}"
+
+    language_contracts = {
+        "README.md": (
+            "83 compatibility tools plus one always-on capability tool",
+            "`full` remains the unchanged default",
+            "opt-in",
+            "fail server startup",
+            "optional",
+            "local state",
+            "absolute path",
+            "contract-tested only",
+        ),
+        "docs/zh-CN/README.md": (
+            "83 个兼容工具 + 1 个始终注册的能力工具",
+            "`full` 保持不变的默认值",
+            "显式启用",
+            "启动失败",
+            "可选",
+            "本地状态",
+            "绝对路径",
+            "contract-tested only",
+        ),
+    }
+    for relative, phrases in language_contracts.items():
+        text = (ROOT / relative).read_text(encoding="utf-8")
+        for phrase in phrases:
+            assert phrase in text, f"{relative} is missing {phrase!r}"

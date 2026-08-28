@@ -24,12 +24,25 @@ def _service() -> LccBuilderService:
     return _builder_service
 
 
+async def shutdown_lcc_builder_service(timeout_s: float = 5.0) -> None:
+    """Close the existing fixed-builder singleton without initializing it."""
+    global _builder_service, _builder_backend
+    service = _builder_service
+    if service is None:
+        return
+    await service.shutdown(timeout_s=timeout_s)
+    if _builder_service is service:
+        _builder_service = None
+        _builder_backend = None
+
+
 async def plan_lcc_model(
     project_name: str,
     folder: str | None = None,
     simulation_duration_s: float | None = None,
     blueprint: str = "cigre_lcc_monopole_v1",
 ) -> dict[str, Any]:
+    """Plan a fixed CIGRE LCC model build without changing the workspace."""
     return _service().plan_model(project_name, folder, simulation_duration_s, blueprint)
 
 
@@ -41,6 +54,7 @@ async def build_lcc_model(
     blueprint: str = "cigre_lcc_monopole_v1",
     confirm: bool = False,
 ) -> dict[str, Any]:
+    """Start a confirmed fixed CIGRE LCC model build from a matching plan."""
     return await _service().build_model(
         project_name,
         expected_plan_hash,
@@ -52,6 +66,7 @@ async def build_lcc_model(
 
 
 async def get_lcc_build_status(build_id: str) -> dict[str, Any]:
+    """Get the current status and evidence for a fixed LCC model build."""
     return _service().get_build_status(build_id)
 
 
@@ -60,6 +75,7 @@ async def validate_lcc_model(
     blueprint: str = "cigre_lcc_monopole_v1",
     output_file: str | None = None,
 ) -> dict[str, Any]:
+    """Validate a fixed LCC model and optional output evidence."""
     return _service().validate_model(project_name, blueprint, output_file)
 
 
@@ -73,5 +89,6 @@ __all__ = [
     "get_lcc_build_status",
     "plan_lcc_model",
     "register_lcc_tools",
+    "shutdown_lcc_builder_service",
     "validate_lcc_model",
 ]

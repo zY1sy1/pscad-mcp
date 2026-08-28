@@ -21,6 +21,7 @@ dependencies = [
 dev = [
     "pytest>=8,<9",
     "pytest-asyncio>=0.23,<1",
+    "ruff>=0.12,<1",
     "tomli>=2,<3; python_version < '3.11'",
 ]
 windows = [

@@ -1,3 +1,4 @@
+from functools import wraps
 from typing import Any, Literal
 
 from mcp.server.fastmcp import FastMCP
@@ -18,12 +19,9 @@ FailureKindValue = Literal[
 ]
 
 
-async def record_goal_failure(
-    failure_kind: str,
-    primary_tool: str | None = None,
-) -> dict[str, Any]:
+def _failure_kind(failure_kind: str) -> GoalFailureKind:
     try:
-        kind = GoalFailureKind(failure_kind)
+        return GoalFailureKind(failure_kind)
     except (TypeError, ValueError) as error:
         raise BackendError(
             "INVALID_ARGUMENT",
@@ -31,8 +29,15 @@ async def record_goal_failure(
             "learning",
             "record_goal_failure",
         ) from error
+
+
+async def record_goal_failure(
+    failure_kind: str,
+    primary_tool: str | None = None,
+) -> dict[str, Any]:
+    """Record a bounded goal-level failure signal for local improvement review."""
     return learning_runtime.record_goal_failure(
-        kind,
+        _failure_kind(failure_kind),
         primary_tool,
     )
 
@@ -42,6 +47,7 @@ async def review_improvement_backlog(
     min_evidence: int = 3,
     mark_notified: bool = False,
 ) -> dict[str, Any]:
+    """Review bounded local improvement candidates and optionally mark them notified."""
     return learning_runtime.review(
         limit=limit,
         min_evidence=min_evidence,
@@ -52,12 +58,38 @@ async def review_improvement_backlog(
 async def clear_learning_history(
     confirm: bool = False,
 ) -> dict[str, Any]:
+    """Clear local learning history and backlog records after confirmation."""
     return learning_runtime.clear(confirm=confirm)
+
+
+def _bind_record_goal_failure(mcp: FastMCP):
+    @wraps(record_goal_failure)
+    async def bound(
+        failure_kind: str,
+        primary_tool: str | None = None,
+    ) -> dict[str, Any]:
+        eligible_names = frozenset(
+            getattr(mcp, "_pscad_learning_tool_names", set())
+        )
+        if primary_tool is not None and primary_tool not in eligible_names:
+            raise BackendError(
+                "INVALID_ARGUMENT",
+                "The supplied tool name is not registered.",
+                "learning",
+                "learning",
+            )
+        return learning_runtime.record_goal_failure(
+            _failure_kind(failure_kind),
+            primary_tool,
+            allowed_tool_names=eligible_names,
+        )
+
+    return bound
 
 
 def register_learning_tools(mcp: FastMCP) -> None:
     for function in (
-        record_goal_failure,
+        _bind_record_goal_failure(mcp),
         review_improvement_backlog,
         clear_learning_history,
     ):

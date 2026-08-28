@@ -6,10 +6,14 @@ from typing import Any
 
 import pytest
 from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp.exceptions import ToolError
 from mcp.types import CallToolResult
 
 from pscad_mcp.core.backend.base import BackendError
 from pscad_mcp.core.service import PscadService
+from pscad_mcp.tools import registration as tool_registration
+from pscad_mcp.tools.catalog import TOOL_SPECS, ToolSpec, parse_tool_profile
+from pscad_mcp.tools.learning_tools import record_goal_failure
 from pscad_mcp.tools.registration import register_tool
 from tests.backend_fakes import ImmediateExecutor
 
@@ -29,8 +33,234 @@ class ScalarRecorder:
         self.events.append(metadata)
 
 
+@pytest.fixture
+def catalog_test_tool(monkeypatch):
+    test_specs = dict(TOOL_SPECS)
+    monkeypatch.setattr(tool_registration, "TOOL_SPECS", test_specs)
+
+    def catalog(function):
+        test_specs[function.__name__] = ToolSpec(
+            name=function.__name__,
+            group="learning",
+            description="Temporary catalogued tool for learning wrapper tests.",
+            read_only=False,
+            destructive=False,
+            idempotent=False,
+            open_world=False,
+            backend_support=frozenset(),
+        )
+
+    return catalog
+
+
+@pytest.fixture
+def register_catalogued_test_tool(catalog_test_tool):
+    def register(server, function, **kwargs):
+        catalog_test_tool(function)
+        register_tool(server, function, **kwargs)
+
+    return register
+
+
+def test_unresolved_annotations_fail_before_registration_side_effects(
+    catalog_test_tool,
+):
+    async def invalid_annotations(value: str) -> str:
+        return value
+
+    invalid_annotations.__annotations__ = {
+        "value": "MissingParameter",
+        "return": "MissingReturn",
+    }
+    catalog_test_tool(invalid_annotations)
+    recorder = ScalarRecorder()
+    server = FastMCP("invalid-annotations")
+
+    with pytest.raises(NameError, match="MissingParameter"):
+        register_tool(server, invalid_annotations, recorder=recorder)
+
+    assert server._tool_manager.get_tool("invalid_annotations") is None
+    assert getattr(server, "_pscad_registered_tool_names", set()) == set()
+    assert recorder.names == []
+    assert recorder.events == []
+
+    async def valid_annotations(value: str) -> str:
+        return value
+
+    valid_annotations.__name__ = "invalid_annotations"
+    register_tool(server, valid_annotations, recorder=recorder)
+    assert server._tool_manager.get_tool("invalid_annotations") is not None
+    assert recorder.names == ["invalid_annotations"]
+
+
+def test_native_same_name_tool_is_not_replaced_or_recorded(catalog_test_tool):
+    async def native_tool() -> str:
+        return "native"
+
+    async def replacement_tool() -> str:
+        return "replacement"
+
+    native_tool.__name__ = "native_conflict"
+    replacement_tool.__name__ = "native_conflict"
+    catalog_test_tool(replacement_tool)
+    recorder = ScalarRecorder()
+    server = FastMCP("native-conflict")
+    server.add_tool(native_tool)
+    original = server._tool_manager.get_tool("native_conflict")
+
+    with pytest.raises(ValueError, match="^native_conflict$"):
+        register_tool(server, replacement_tool, recorder=recorder)
+
+    assert server._tool_manager.get_tool("native_conflict") is original
+    assert getattr(server, "_pscad_registered_tool_names", set()) == set()
+    assert recorder.names == []
+    assert recorder.events == []
+
+
+def test_inactive_tool_has_no_registration_or_learning_side_effects(monkeypatch):
+    recorder = ScalarRecorder()
+    server = FastMCP("inactive-tool")
+    server._pscad_tool_profile = parse_tool_profile(
+        {"PSCAD_MCP_TOOL_PROFILE": "core"}
+    )
+
+    def unexpected_side_effect(*args, **kwargs):
+        raise AssertionError("inactive tool must return before registration work")
+
+    catalog_checks = []
+
+    class ObservedCatalog(dict):
+        def __contains__(self, name):
+            catalog_checks.append(name)
+            return super().__contains__(name)
+
+    manager_checks = []
+    original_get_tool = server._tool_manager.get_tool
+
+    def observe_manager_check(name):
+        manager_checks.append(name)
+        return original_get_tool(name)
+
+    monkeypatch.setattr(tool_registration, "TOOL_SPECS", ObservedCatalog(TOOL_SPECS))
+    monkeypatch.setattr(server._tool_manager, "get_tool", observe_manager_check)
+    monkeypatch.setattr(server, "add_tool", unexpected_side_effect)
+    monkeypatch.setattr(tool_registration.inspect, "signature", unexpected_side_effect)
+    monkeypatch.setattr(
+        tool_registration,
+        "get_type_hints",
+        unexpected_side_effect,
+    )
+
+    register_tool(server, record_goal_failure, recorder=recorder)
+
+    assert catalog_checks == ["record_goal_failure"]
+    assert manager_checks == ["record_goal_failure"]
+    assert getattr(server, "_pscad_registered_tool_names", set()) == set()
+    assert recorder.names == []
+    assert recorder.events == []
+
+
+@pytest.mark.parametrize("duplicate_source", ["manager", "private"])
+def test_inactive_profile_still_rejects_duplicate_tools(duplicate_source):
+    server = FastMCP("inactive-duplicate")
+    server._pscad_tool_profile = parse_tool_profile(
+        {"PSCAD_MCP_TOOL_PROFILE": "core"}
+    )
+    if duplicate_source == "manager":
+        server.add_tool(record_goal_failure)
+    else:
+        server._pscad_registered_tool_names = {"record_goal_failure"}
+
+    with pytest.raises(ValueError, match=r"^record_goal_failure$"):
+        register_tool(server, record_goal_failure)
+
+
+def test_postprocessing_failure_rolls_back_and_allows_same_name_retry(
+    catalog_test_tool,
+    monkeypatch,
+):
+    async def partial_registration() -> str:
+        return "registered"
+
+    catalog_test_tool(partial_registration)
+    recorder = ScalarRecorder()
+    server = FastMCP("postprocessing-rollback")
+    original_get_tool = server._tool_manager.get_tool
+    original_remove_tool = server.remove_tool
+    lookup_count = 0
+
+    def fail_after_add(name):
+        nonlocal lookup_count
+        lookup_count += 1
+        if lookup_count == 2:
+            monkeypatch.setattr(
+                server._tool_manager,
+                "get_tool",
+                original_get_tool,
+            )
+            raise RuntimeError("postprocessing failed")
+        return original_get_tool(name)
+
+    def remove_then_report_missing(name):
+        original_remove_tool(name)
+        raise ToolError(f"Unknown tool: {name}")
+
+    monkeypatch.setattr(server._tool_manager, "get_tool", fail_after_add)
+    monkeypatch.setattr(server, "remove_tool", remove_then_report_missing)
+
+    with pytest.raises(RuntimeError, match="^postprocessing failed$"):
+        register_tool(server, partial_registration, recorder=recorder)
+
+    assert original_get_tool("partial_registration") is None
+    assert getattr(server, "_pscad_registered_tool_names", set()) == set()
+    assert recorder.names == []
+    assert recorder.events == []
+
+    register_tool(server, partial_registration, recorder=recorder)
+    assert original_get_tool("partial_registration") is not None
+    assert recorder.names == ["partial_registration"]
+
+
+def test_missing_post_add_tool_is_a_bounded_registration_failure(
+    catalog_test_tool,
+    monkeypatch,
+):
+    async def missing_post_add() -> str:
+        return "registered"
+
+    catalog_test_tool(missing_post_add)
+    recorder = ScalarRecorder()
+    server = FastMCP("missing-post-add")
+    original_get_tool = server._tool_manager.get_tool
+    lookup_count = 0
+
+    def hide_after_add(name):
+        nonlocal lookup_count
+        lookup_count += 1
+        if lookup_count == 2:
+            monkeypatch.setattr(
+                server._tool_manager,
+                "get_tool",
+                original_get_tool,
+            )
+            return None
+        return original_get_tool(name)
+
+    monkeypatch.setattr(server._tool_manager, "get_tool", hide_after_add)
+
+    with pytest.raises(RuntimeError, match="^missing_post_add$"):
+        register_tool(server, missing_post_add, recorder=recorder)
+
+    assert original_get_tool("missing_post_add") is None
+    assert getattr(server, "_pscad_registered_tool_names", set()) == set()
+    assert recorder.names == []
+    assert recorder.events == []
+
+
 @pytest.mark.asyncio
-async def test_wrapper_preserves_success_and_records_only_scalars():
+async def test_wrapper_preserves_success_and_records_only_scalars(
+    register_catalogued_test_tool,
+):
     result_object = {"secret_result": "DO_NOT_STORE"}
     calls = 0
 
@@ -46,7 +276,7 @@ async def test_wrapper_preserves_success_and_records_only_scalars():
         "pscad_mcp.tools.registration.pscad_manager.learning_snapshot",
         return_value={"backend": "legacy", "pscad_version": "4.6.2"},
     ):
-        register_tool(server, sample, recorder=recorder)
+        register_catalogued_test_tool(server, sample, recorder=recorder)
         _, structured = await server._tool_manager.call_tool(
             "sample",
             {"project_name": "SECRET_PROJECT"},
@@ -69,7 +299,9 @@ async def test_wrapper_preserves_success_and_records_only_scalars():
 
 
 @pytest.mark.asyncio
-async def test_wrapper_classifies_returned_and_raised_stable_errors():
+async def test_wrapper_classifies_returned_and_raised_stable_errors(
+    register_catalogued_test_tool,
+):
     async def returned_error():
         return {
             "error": {
@@ -87,8 +319,8 @@ async def test_wrapper_classifies_returned_and_raised_stable_errors():
 
     recorder = ScalarRecorder()
     server = FastMCP("test")
-    register_tool(server, returned_error, recorder=recorder)
-    register_tool(server, raised_error, recorder=recorder)
+    register_catalogued_test_tool(server, returned_error, recorder=recorder)
+    register_catalogued_test_tool(server, raised_error, recorder=recorder)
     await server._tool_manager.call_tool(
         "returned_error", {}, convert_result=True
     )
@@ -105,7 +337,9 @@ async def test_wrapper_classifies_returned_and_raised_stable_errors():
 
 
 @pytest.mark.asyncio
-async def test_wrapper_discards_malformed_error_metadata_without_echoing_it():
+async def test_wrapper_discards_malformed_error_metadata_without_echoing_it(
+    register_catalogued_test_tool,
+):
     async def malformed_error():
         return {
             "error": {
@@ -121,7 +355,7 @@ async def test_wrapper_discards_malformed_error_metadata_without_echoing_it():
         "pscad_mcp.tools.registration.pscad_manager.learning_snapshot",
         return_value={"backend": "legacy", "pscad_version": "4.6.2"},
     ):
-        register_tool(server, malformed_error, recorder=recorder)
+        register_catalogued_test_tool(server, malformed_error, recorder=recorder)
         await server._tool_manager.call_tool(
             "malformed_error", {}, convert_result=True
         )
@@ -132,12 +366,18 @@ async def test_wrapper_discards_malformed_error_metadata_without_echoing_it():
 
 
 @pytest.mark.asyncio
-async def test_recorder_failure_never_replaces_original_result():
+async def test_recorder_failure_never_replaces_original_result(
+    register_catalogued_test_tool,
+):
     async def sample():
         return "original"
 
     server = FastMCP("test")
-    register_tool(server, sample, recorder=ScalarRecorder(fail=True))
+    register_catalogued_test_tool(
+        server,
+        sample,
+        recorder=ScalarRecorder(fail=True),
+    )
     _, structured = await server._tool_manager.call_tool(
         "sample", {}, convert_result=True
     )
@@ -145,7 +385,9 @@ async def test_recorder_failure_never_replaces_original_result():
 
 
 @pytest.mark.asyncio
-async def test_record_learning_false_skips_names_snapshots_and_events():
+async def test_record_learning_false_skips_names_snapshots_and_events(
+    register_catalogued_test_tool,
+):
     async def maintenance():
         return {"reviewed": True}
 
@@ -154,7 +396,7 @@ async def test_record_learning_false_skips_names_snapshots_and_events():
     with patch(
         "pscad_mcp.tools.registration.pscad_manager.learning_snapshot"
     ) as snapshot:
-        register_tool(
+        register_catalogued_test_tool(
             server,
             maintenance,
             recorder=recorder,
@@ -169,14 +411,16 @@ async def test_record_learning_false_skips_names_snapshots_and_events():
 
 
 @pytest.mark.asyncio
-async def test_unwrapped_result_with_result_key_is_preserved():
+async def test_unwrapped_result_with_result_key_is_preserved(
+    register_catalogued_test_tool,
+):
     result_object = {"result": "original", "value": "kept"}
 
     async def sample() -> dict[str, Any]:
         return result_object
 
     server = FastMCP("test")
-    register_tool(server, sample, record_learning=False)
+    register_catalogued_test_tool(server, sample, record_learning=False)
     tool = server._tool_manager._tools["sample"]
     assert tool.fn_metadata.output_schema is not None
     assert tool.fn_metadata.wrap_output is False
@@ -189,14 +433,17 @@ async def test_unwrapped_result_with_result_key_is_preserved():
 
 @pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
 @pytest.mark.asyncio
-async def test_nonfinite_float_is_not_reinserted_into_structured_result(value):
+async def test_nonfinite_float_is_not_reinserted_into_structured_result(
+    value,
+    register_catalogued_test_tool,
+):
     result_object = {"value": value}
 
     async def sample() -> dict[str, float]:
         return result_object
 
     server = FastMCP("test")
-    register_tool(server, sample, record_learning=False)
+    register_catalogued_test_tool(server, sample, record_learning=False)
     _, structured = await server._tool_manager.call_tool(
         "sample", {}, convert_result=True
     )
@@ -207,7 +454,9 @@ async def test_nonfinite_float_is_not_reinserted_into_structured_result(value):
 
 
 @pytest.mark.asyncio
-async def test_future_annotations_and_call_tool_result_register_cleanly():
+async def test_future_annotations_and_call_tool_result_register_cleanly(
+    register_catalogued_test_tool,
+):
     future_result = {"status": "ready"}
     call_result = CallToolResult(content=[], structuredContent={"ok": True})
 
@@ -218,8 +467,16 @@ async def test_future_annotations_and_call_tool_result_register_cleanly():
         return call_result
 
     server = FastMCP("annotation-test")
-    register_tool(server, future_annotated, record_learning=False)
-    register_tool(server, call_result_tool, record_learning=False)
+    register_catalogued_test_tool(
+        server,
+        future_annotated,
+        record_learning=False,
+    )
+    register_catalogued_test_tool(
+        server,
+        call_result_tool,
+        record_learning=False,
+    )
 
     _, structured = await server._tool_manager.call_tool(
         "future_annotated", {}, convert_result=True

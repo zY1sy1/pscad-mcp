@@ -1,12 +1,12 @@
 # PSCAD MCP 中文使用与验收说明
 
-本项目把 PSCAD 自动化封装为 83 个 MCP 工具，其中原有通用服务契约保持 60 个工具，并增加 HVDC、静默学习、固定 CIGRE LCC 与参数化 LCC 领域工具，可供 Codex、GitHub Copilot CLI 等支持 stdio MCP 的客户端调用。项目采用双后端：
+本项目把 PSCAD 自动化封装为 84 个 MCP 工具，即 83 个兼容工具 + 1 个始终注册的能力工具。其中原有通用服务契约保持 60 个工具，并增加 HVDC、静默学习、固定 CIGRE LCC 与参数化 LCC 领域工具，可供 Codex、GitHub Copilot CLI 等支持 stdio MCP 的客户端调用。项目采用双后端：
 
 - PSCAD 4.6.x：`mhrc.automation`，当前已在本机 PSCAD 4.6.2 x64 许可环境做真实验收；
 - PSCAD 5.x：`mhi.pscad` 3.1.x，当前完成契约测试，但由于本机没有 PSCAD 5.x，不能声称端到端真实验收通过；
 - 结果文件：`mhi.psout` 1.3.x。
 
-完整工具库存为 83 = 60 个通用工具 + 10 个 HVDC 工具 + 3 个学习工具 + 4 个固定 CIGRE LCC 工具 + 6 个参数化 LCC 工具；原有 60 个通用工具的名称和默认返回形状保持不变。
+兼容工具库存为 83 = 60 个通用工具 + 10 个 HVDC 工具 + 3 个学习工具 + 4 个固定 CIGRE LCC 工具 + 6 个参数化 LCC 工具；再加上始终注册的 `get_pscad_capabilities`，本分支总数为 84。原有 60 个通用工具的名称和默认返回形状保持不变。
 
 Legacy PSCAD 4.6.2 后端只支持启动新的受管 Automation 实例，不能附加到用户普通方式打开的 GUI。受管窗口默认可见；默认检测到已有 PSCAD 进程时会在启动前返回 `EXTERNAL_PSCAD_PRESENT`。`repair_connection` 使用连接时缓存的进程归属：自有实例会先正常退出，外部进程不会被终止。
 
@@ -31,7 +31,7 @@ Legacy PSCAD 4.6.2 后端只支持启动新的受管 Automation 实例，不能�
 
 ## 功能范围
 
-服务器固定注册 83 个工具，其中以下七组共 60 个通用工具：
+默认 `full` 配置注册全部 83 个兼容工具和 1 个能力工具，其中以下七组共 60 个通用工具：
 
 - 应用与文档 7 个：连接、状态、修复、退出、文档同步/列出/读取；
 - 工程与参数 12 个：加载、列出、运行、暂停、停止、运行状态、元件查询、参数读取/写入/校验、工程设置读取/写入；
@@ -41,6 +41,27 @@ Legacy PSCAD 4.6.2 后端只支持启动新的受管 Automation 实例，不能�
 - 画布 12 个：元件、导线、母线、连接、端口连接、注释、图框、控制框、对象列表、空位搜索、批量删除；
 - 元件操作 10 个：位置、旋转、镜像、克隆、端口、启用/禁用、删除。
 - 静默学习 3 个：`record_goal_failure`、`review_improvement_backlog`、`clear_learning_history`。
+
+### 兼容发现、工具配置、分页和本地文档
+
+`PSCAD_MCP_TOOL_PROFILE` 的 `full` 保持不变的默认值，因此现有客户端仍会
+获得全部 83 个兼容工具，并额外获得始终注册的 `get_pscad_capabilities`。
+只有显式启用逗号分隔的 `core`、`hvdc`、`lcc`、`parametric_lcc`、`learning`
+子集时才会减少兼容工具；这是 opt-in 行为。空值、未知组或其他无效配置会使
+服务器启动失败，不会静默改变工具库存。`get_pscad_capabilities` 可报告当前
+profile、已注册工具、后端支持和明确的能力限制。
+
+分页参数均为可选，不改变原调用的默认结果。受支持的列表工具接受 `offset` 和
+`limit`；`read_documentation` 接受 `offset` 和 `max_chars`。同步后的模块也可通过
+`pscad-docs://modules/` 下的 MCP resource 及其有界 URI 形式读取。
+
+生成的 API 文档仅在调用 `sync_documentation` 时写入本地状态。Windows 默认根
+目录为 `%LOCALAPPDATA%\pscad-mcp\docs`；该目录不可用时退回用户主目录下的状态
+目录。可以用 `PSCAD_MCP_DOCUMENTATION_DIR` 覆盖，但其值必须是绝对路径。为保持
+可移植性，示例配置不会预填机器专用文档路径。
+
+PSCAD 5.x 当前仍是 contract-tested only；本分支不声称真实 PSCAD 5.x 端到端
+验收 `PASS`。
 
 ### 固定 CIGRE LCC 构建器
 
@@ -126,6 +147,8 @@ PSCAD 4.6.x 还需要安装与许可证配套的官方 Automation Library wheel�
 | `PSCAD_MCP_LEGACY_EXISTING_POLICY` | `reject` | `reject` 拒绝已有外部 PSCAD；`allow` 只允许另启受管实例，并不接管外部 GUI |
 | `PSCAD_MCP_WORKSPACE` | `D:\PSCAD-Workspace` | 限制工程、保存和结果文件的可访问根目录 |
 | `PSCAD_MCP_ALLOW_UNSCOPED_PATHS` | `false` | 仅受控开发环境允许未配置工作区时访问路径 |
+| `PSCAD_MCP_TOOL_PROFILE` | `full` | 默认暴露全部兼容工具；显式选择工具组时为 opt-in |
+| `PSCAD_MCP_DOCUMENTATION_DIR` | 可选绝对路径 | 覆盖本地生成文档根目录；不设置时使用本地状态目录 |
 | `PSCAD_MCP_LEARNING_ENABLED` | `true` | 默认启用本地标量元数据学习；接受 `1/true/yes/on` 和 `0/false/no/off` |
 | `PSCAD_MCP_LEARNING_DB` | 可选绝对路径 | 覆盖本地 SQLite 路径，不记录工具参数或结果 |
 | `PSCAD_MCP_LEARNING_BACKLOG` | 可选绝对路径 | 覆盖生成的 `improvement-backlog.md` 路径 |
@@ -143,6 +166,7 @@ $env:PSCAD_MCP_LEGACY_MINIMIZE = "false"
 $env:PSCAD_MCP_LEGACY_EXISTING_POLICY = "reject"
 $env:PSCAD_MCP_WORKSPACE = "D:\PSCAD-Workspace"
 $env:PSCAD_MCP_ALLOW_UNSCOPED_PATHS = "false"
+$env:PSCAD_MCP_TOOL_PROFILE = "full"
 $env:PSCAD_MCP_LEARNING_ENABLED = "true"
 $env:PSCAD_MCP_LEARNING_RETENTION_DAYS = "90"
 $env:PSCAD_MCP_LEARNING_MAX_EVENTS = "20000"
@@ -169,6 +193,7 @@ PSCAD_MCP_LEGACY_MINIMIZE = 'false'
 PSCAD_MCP_LEGACY_EXISTING_POLICY = 'reject'
 PSCAD_MCP_WORKSPACE = 'C:/path/to/PSCAD-Workspace'
 PSCAD_MCP_ALLOW_UNSCOPED_PATHS = 'false'
+PSCAD_MCP_TOOL_PROFILE = 'full'
 PSCAD_MCP_LEARNING_ENABLED = 'true'
 PSCAD_MCP_LEARNING_RETENTION_DAYS = '90'
 PSCAD_MCP_LEARNING_MAX_EVENTS = '20000'
@@ -281,7 +306,7 @@ git diff --check
 git status --short --branch
 ```
 
-工具数量应输出 `83 83`。真实 PSCAD 5.x 必须在安装并运行对应版本后另做相同级别验收。
+默认 `full` 工具数量应输出 `84 84`。真实 PSCAD 5.x 必须在安装并运行对应版本后另做相同级别验收。
 
 ## 常见故障
 

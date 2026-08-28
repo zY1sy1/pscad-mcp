@@ -1,9 +1,21 @@
-from typing import Any, Optional
+from typing import Annotated, Any, Optional
 
 from mcp.server.fastmcp import FastMCP
+from pydantic import Field
 
 from ..core.connection_manager import pscad_manager
+from .pagination import PaginationLimit, PaginationOffset, slice_items
 from .registration import register_tool
+
+CanvasParameters = Annotated[
+    Optional[dict[str, Any]],
+    Field(
+        description=(
+            'Canvas parameter_name keys mapped to component or bus values; '
+            'example {"R": 1.0, "Name": "Bus1"}.'
+        )
+    ),
+]
 
 
 async def add_component(
@@ -13,7 +25,7 @@ async def add_component(
     x: int = 1,
     y: int = 1,
     orient: int = 0,
-    parameters: Optional[dict[str, Any]] = None,
+    parameters: CanvasParameters = None,
     canvas_name: str = "Main",
 ) -> dict[str, Any]:
     """Add a library component to a canvas."""
@@ -35,7 +47,7 @@ async def create_component(
     x: int = 1,
     y: int = 1,
     orient: int = 0,
-    parameters: Optional[dict[str, Any]] = None,
+    parameters: CanvasParameters = None,
     canvas_name: str = "Main",
 ) -> dict[str, Any]:
     """Create a component from a scoped definition such as master:source3."""
@@ -64,7 +76,7 @@ async def create_wire(
 async def create_bus(
     project_name: str,
     vertices: list[list[int]],
-    parameters: Optional[dict[str, Any]] = None,
+    parameters: CanvasParameters = None,
     canvas_name: str = "Main",
 ) -> dict[str, Any]:
     """Create an electrical bus through the supplied vertices."""
@@ -158,12 +170,17 @@ async def create_control_frame(
 
 
 async def list_canvas_components(
-    project_name: str, canvas_name: str = "Main"
+    project_name: str,
+    canvas_name: str = "Main",
+    offset: PaginationOffset = 0,
+    limit: PaginationLimit = None,
 ) -> list[dict[str, Any]]:
     """List normalized objects on a canvas."""
-    return await pscad_manager.service.list_canvas_components(
+    slice_items([], offset, limit, "list_canvas_components")
+    values = await pscad_manager.service.list_canvas_components(
         project_name, canvas_name=canvas_name
     )
+    return slice_items(values, offset, limit, "list_canvas_components")
 
 
 async def find_empty_space(

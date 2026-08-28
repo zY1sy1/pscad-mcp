@@ -1,7 +1,18 @@
-from typing import Any, Dict, List
+from typing import Annotated, Any, Dict, List
 from mcp.server.fastmcp import FastMCP
+from pydantic import Field
 from ..core.connection_manager import pscad_manager
 from .registration import register_tool
+
+SimulationTaskParameters = Annotated[
+    Dict[str, Any],
+    Field(
+        description=(
+            'Supported keys controlgroup, volley, and affinity; example '
+            '{"controlgroup": "A", "volley": 2, "affinity": 1}.'
+        )
+    ),
+]
 
 async def list_simulation_sets(project_name: str) -> List[str]:
     """List all simulation sets defined in the PSCAD application."""
@@ -58,7 +69,7 @@ async def get_simulation_task_parameters(
 
 
 async def set_simulation_task_parameters(
-    sim_set_name: str, task_name: str, parameters: Dict[str, Any]
+    sim_set_name: str, task_name: str, parameters: SimulationTaskParameters
 ) -> Dict[str, Any]:
     """Update supported simulation task parameters and verify read-back."""
     return await pscad_manager.service.set_simulation_task_parameters(

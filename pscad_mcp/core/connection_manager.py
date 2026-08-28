@@ -1,8 +1,9 @@
 import logging
 import importlib
+import inspect
 import os
 from typing import Optional, Any
-from .executor import robust_executor
+from .executor import PendingSettlementError, robust_executor
 from .pscad_adapter import PscadAdapter
 from .backend.legacy import LegacyBackend
 from .backend.modern import ModernBackend
@@ -81,6 +82,7 @@ class PSCADConnectionManager:
         if cls._instance is None:
             cls._instance = super(PSCADConnectionManager, cls).__new__(cls)
             cls._instance._adapter = PscadAdapter(robust_executor)
+            cls._instance._executor = robust_executor
             cls._instance._service = PscadService(
                 _default_backend_factory,
                 executor=robust_executor,
@@ -151,6 +153,33 @@ class PSCADConnectionManager:
     async def heartbeat(self) -> dict:
         status = await self.get_status()
         return {"alive": status["alive"], "busy": status["busy"]}
+
+    async def shutdown_connection(self) -> None:
+        """Release PSCAD only after all worker calls have settled."""
+        if self._executor.pending_settlements():
+            raise PendingSettlementError(
+                "PSCAD connection shutdown is blocked by pending settlements."
+            )
+        result = self.service.shutdown()
+        if hasattr(result, "__await__"):
+            await result
+
+    async def shutdown_executor(self) -> None:
+        """Close the shared worker without abandoning in-flight calls."""
+        self._executor.shutdown_if_settled()
+
+    async def shutdown(self, timeout_s: float = 5.0) -> None:
+        """Direct shutdown entry point without invoking the server lifecycle."""
+        self._executor.begin_shutdown()
+        settled = self._executor.wait_for_settlements(timeout_s)
+        if inspect.isawaitable(settled):
+            settled = await settled
+        if not settled:
+            raise PendingSettlementError(
+                "PSCAD shutdown is blocked by pending settlements."
+            )
+        await self.shutdown_connection()
+        await self.shutdown_executor()
 
 # Global singleton
 pscad_manager = PSCADConnectionManager()

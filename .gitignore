@@ -71,3 +71,6 @@ venv.bak/
 # Repository-local learning state
 .pscad-mcp/learning/
 
+# Locally generated PSCAD API documentation
+docs/raw/
+docs/md/

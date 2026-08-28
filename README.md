@@ -1,6 +1,6 @@
 # PSCAD MCP for Codex and GitHub Copilot CLI
 
-`pscad-mcp` is a Windows Model Context Protocol (MCP) server for PSCAD automation. It uses `mhrc.automation` for PSCAD 4.6.x and `mhi.pscad` for PSCAD 5.x behind one stable 60-tool generic service contract, plus separate HVDC, silent-learning, fixed CIGRE LCC, and parametric LCC domain layers. The current inventory is 83 tools.
+`pscad-mcp` is a Windows Model Context Protocol (MCP) server for PSCAD automation. It uses `mhrc.automation` for PSCAD 4.6.x and `mhi.pscad` for PSCAD 5.x behind one stable 60-tool generic service contract, plus separate HVDC, silent-learning, fixed CIGRE LCC, and parametric LCC domain layers. The current inventory is 84 tools: 83 compatibility tools plus one always-on capability tool.
 
 中文安装、配置、安全和验收说明：[docs/zh-CN/README.md](docs/zh-CN/README.md)
 
@@ -61,9 +61,10 @@ external process.
 
 ## Tool coverage
 
-The complete inventory is 83 = 60 generic tools, 10 HVDC tools, 3 learning
-tools, 4 fixed CIGRE LCC tools, and 6 parametric LCC tools. The generic 60-tool contract keeps its
-existing names and default return shapes.
+The 83 compatibility tools are 83 = 60 generic tools, 10 HVDC tools, 3 learning
+tools, 4 fixed CIGRE LCC tools, and 6 parametric LCC tools. The always-on
+`get_pscad_capabilities` discovery tool brings the current-branch total to 84.
+The generic 60-tool contract keeps its existing names and default return shapes.
 
 The server currently exposes tool groups for:
 
@@ -75,6 +76,31 @@ The server currently exposes tool groups for:
 - simulation-set operations
 - project creation, save, and build tasks
 - simulation output capture and file parsing
+
+### Compatible discovery, profiles, pagination, and documentation
+
+`full` remains the unchanged default for `PSCAD_MCP_TOOL_PROFILE`, so existing
+clients receive all 83 compatibility tools plus the always-on
+`get_pscad_capabilities` tool. Selecting a comma-separated subset of `core`,
+`hvdc`, `lcc`, `parametric_lcc`, and `learning` is opt-in. Empty, unknown, or
+otherwise invalid profile values fail server startup instead of silently
+changing the exposed inventory. `get_pscad_capabilities` reports the active
+profile, registered tools, backend support, and explicit limitations.
+
+Pagination is optional and does not change existing default results. The
+bounded list operations accept `offset` and `limit`; `read_documentation`
+accepts `offset` and `max_chars`. Synced modules are also available as MCP
+resources under `pscad-docs://modules/`, including bounded URI variants.
+
+Generated API documentation lives in local state and is created only when
+`sync_documentation` is called. On Windows the default root is
+`%LOCALAPPDATA%\pscad-mcp\docs`; a platform home-state fallback is used when
+that location is unavailable. `PSCAD_MCP_DOCUMENTATION_DIR` may override the
+root, but it must be an absolute path. This documentation path is deliberately
+absent from the portable configuration example.
+
+Modern PSCAD 5.x support remains contract-tested only; no real PSCAD 5.x
+end-to-end acceptance PASS is claimed by this branch.
 
 The HVDC domain layer adds ten tools without changing the original generic
 inventory: `inspect_hvdc_project`, `get_hvdc_assets`, `get_hvdc_mappings`,
@@ -473,6 +499,7 @@ PSCAD_MCP_LEGACY_MINIMIZE = 'false'
 PSCAD_MCP_LEGACY_EXISTING_POLICY = 'reject'
 PSCAD_MCP_WORKSPACE = 'C:/path/to/PSCAD-Workspace'
 PSCAD_MCP_ALLOW_UNSCOPED_PATHS = 'false'
+PSCAD_MCP_TOOL_PROFILE = 'full'
 PSCAD_MCP_LEARNING_ENABLED = 'true'
 PSCAD_MCP_LEARNING_RETENTION_DAYS = '90'
 PSCAD_MCP_LEARNING_MAX_EVENTS = '20000'
@@ -524,10 +551,11 @@ This project can generate PSCAD API reference snapshots that are easier for LLMs
 py -3 -m pscad_mcp.utils.doc_manager
 ```
 
-Generated files are written to:
-
-- `docs\raw` for raw extracted output
-- `docs\md` for enriched Markdown
+Generated files are written lazily to local state, not to tracked repository
+directories. The default Windows root is `%LOCALAPPDATA%\pscad-mcp\docs`; set
+`PSCAD_MCP_DOCUMENTATION_DIR` to an absolute path if an explicit local root is
+required. Use `list_documentation`, `read_documentation`, or the
+`pscad-docs://modules/` MCP resources after synchronization.
 
 ### Run tests
 

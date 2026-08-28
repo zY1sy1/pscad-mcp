@@ -7,6 +7,8 @@ from mcp.server.fastmcp import FastMCP
 from pscad_mcp.learning.config import LearningConfig
 from pscad_mcp.learning.recorder import InvocationRecorder
 from pscad_mcp.learning.service import LearningRuntime
+from pscad_mcp.tools import registration as tool_registration
+from pscad_mcp.tools.catalog import TOOL_SPECS, ToolSpec
 from pscad_mcp.tools.registration import register_tool
 
 
@@ -33,10 +35,32 @@ def _config(tmp_path):
     )
 
 
+@pytest.fixture
+def register_catalogued_test_tool(monkeypatch):
+    test_specs = dict(TOOL_SPECS)
+    monkeypatch.setattr(tool_registration, "TOOL_SPECS", test_specs)
+
+    def register(server, function, **kwargs):
+        test_specs[function.__name__] = ToolSpec(
+            name=function.__name__,
+            group="learning",
+            description="Temporary catalogued tool for learning privacy tests.",
+            read_only=False,
+            destructive=False,
+            idempotent=False,
+            open_world=False,
+            backend_support=frozenset(),
+        )
+        register_tool(server, function, **kwargs)
+
+    return register
+
+
 @pytest.mark.asyncio
 async def test_sensitive_content_never_reaches_learning_artifacts_or_results(
     tmp_path,
     caplog,
+    register_catalogued_test_tool,
 ):
     async def successful(project_path: str, prompt: str):
         assert project_path == "SECRET_PROJECT_PATH"
@@ -63,7 +87,7 @@ async def test_sensitive_content_never_reaches_learning_artifacts_or_results(
     recorder = InvocationRecorder(runtime)
     server = FastMCP("privacy-test")
     for function in (successful, returned_error, raised_error):
-        register_tool(server, function, recorder=recorder)
+        register_catalogued_test_tool(server, function, recorder=recorder)
 
     await server._tool_manager.call_tool(
         "successful",
@@ -100,13 +124,18 @@ async def test_sensitive_content_never_reaches_learning_artifacts_or_results(
 async def test_renderer_fault_cannot_replace_a_tool_result_or_leak_its_message(
     tmp_path,
     caplog,
+    register_catalogued_test_tool,
 ):
     async def successful():
         return {"value": "original"}
 
     runtime = LearningRuntime(config_loader=lambda: _config(tmp_path))
     server = FastMCP("renderer-fault-test")
-    register_tool(server, successful, recorder=InvocationRecorder(runtime))
+    register_catalogued_test_tool(
+        server,
+        successful,
+        recorder=InvocationRecorder(runtime),
+    )
     with patch(
         "pscad_mcp.learning.service.render_backlog",
         side_effect=OSError("SECRET_RENDERER_PATH"),

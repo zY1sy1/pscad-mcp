@@ -1,11 +1,22 @@
-import os
-import pydoc
+import ast
+import importlib.metadata
+import importlib.util
 import inspect
 import logging
+import os
+import pydoc
 import re
-import ast
-import importlib.util
-from typing import List, Dict, Any, Optional
+import stat
+import threading
+import time
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
+from pathlib import Path
+from tempfile import NamedTemporaryFile
+from typing import Any, ClassVar
+
+from .. import __version__
+from ..core.backend.base import BackendError
 
 logger = logging.getLogger("pscad-mcp.doc_manager")
 
@@ -14,29 +25,31 @@ class SourceAnalyzer:
     Parses Python source files using AST to extract metadata 
     that pydoc might miss (decorators like @rmi, type hints, etc.)
     """
-    def __init__(self, file_path: str):
-        self.file_path = file_path
+    def __init__(self, file_path: str | os.PathLike[str]):
+        self.file_path = Path(file_path)
         self.classes = {}
         self.functions = {}
         self._analyze()
 
     def _analyze(self):
-        if not os.path.exists(self.file_path):
+        if not self.file_path.exists():
             return
             
         try:
-            with open(self.file_path, "r", encoding="utf-8") as f:
-                tree = ast.parse(f.read())
+            tree = ast.parse(self.file_path.read_text(encoding="utf-8"))
                 
             for node in tree.body:
                 if isinstance(node, ast.ClassDef):
                     self.classes[node.name] = self._parse_class(node)
                 elif isinstance(node, ast.FunctionDef):
                     self.functions[node.name] = self._parse_function(node)
-        except Exception as e:
-            logger.error(f"AST Analysis failed for {self.file_path}: {e}")
+        except Exception as error:
+            logger.error(
+                "Source analysis failed after %s.",
+                type(error).__name__,
+            )
 
-    def _parse_class(self, node: ast.ClassDef) -> Dict[str, Any]:
+    def _parse_class(self, node: ast.ClassDef) -> dict[str, Any]:
         methods = {}
         for item in node.body:
             if isinstance(item, ast.FunctionDef):
@@ -47,7 +60,7 @@ class SourceAnalyzer:
             "bases": [ast.dump(b) for b in node.bases]
         }
 
-    def _parse_function(self, node: ast.FunctionDef) -> Dict[str, Any]:
+    def _parse_function(self, node: ast.FunctionDef) -> dict[str, Any]:
         decorators = []
         for d in node.decorator_list:
             if isinstance(d, ast.Name):
@@ -77,7 +90,7 @@ class DocumentationManager:
     Handles extraction and synchronization of mhi-pscad documentation.
     Produces LLM-friendly Markdown output enriched with source analysis.
     """
-    MODULES = [
+    MODULES: ClassVar[tuple[str, ...]] = (
         "mhi.pscad", 
         "mhi.pscad.project", 
         "mhi.pscad.canvas", 
@@ -97,20 +110,436 @@ class DocumentationManager:
         "mhi.pscad.wizard",
         "mhi.pscad.form",
         "mhi.pscad.certificate",
-        "mhi.pscad.annotation"
-    ]
+        "mhi.pscad.annotation",
+    )
 
-    def __init__(self, docs_dir: str = "docs"):
-        self.base_dir = os.path.abspath(docs_dir)
-        self.md_dir = os.path.join(self.base_dir, "md")
-        self.raw_dir = os.path.join(self.base_dir, "raw")
-        
-        # Ensure directory structure exists
-        os.makedirs(self.md_dir, exist_ok=True)
-        os.makedirs(self.raw_dir, exist_ok=True)
+    SETTING = "PSCAD_MCP_DOCUMENTATION_DIR"
+    _SYNC_LOCKS: ClassVar[dict[Path, threading.RLock]] = {}
+    _SYNC_LOCKS_GUARD: ClassVar[threading.Lock] = threading.Lock()
+    _REPLACE_ATTEMPTS: ClassVar[int] = 6
+    _REPLACE_RETRY_DELAY: ClassVar[float] = 0.02
+    _RETRYABLE_WINDOWS_REPLACE_ERRORS: ClassVar[frozenset[int]] = frozenset(
+        {5, 32, 33}
+    )
 
-    def sync(self) -> List[str]:
+    def __init__(
+        self,
+        docs_dir: str | os.PathLike[str],
+        *,
+        issue: str | None = None,
+    ):
+        self.base_dir = Path(docs_dir).expanduser().resolve()
+        self.md_dir = self.base_dir / "md"
+        self.raw_dir = self.base_dir / "raw"
+        self.issue = issue
+
+    @classmethod
+    def from_environ(cls, environ: Mapping[str, str]) -> "DocumentationManager":
+        if cls.SETTING in environ:
+            override = environ.get(cls.SETTING)
+            if type(override) is str:
+                normalized = str.strip(override)
+                try:
+                    candidate = Path(normalized)
+                    if normalized and candidate.is_absolute():
+                        return cls(candidate)
+                except (OSError, ValueError):
+                    pass
+            return cls(cls._default_root(environ), issue=cls.SETTING)
+
+        return cls(cls._default_root(environ))
+
+    @staticmethod
+    def _default_root(environ: Mapping[str, str]) -> Path:
+        local_app_data = environ.get("LOCALAPPDATA")
+        if type(local_app_data) is str:
+            normalized = str.strip(local_app_data)
+            try:
+                candidate = Path(normalized)
+                if normalized and candidate.is_absolute():
+                    return candidate / "pscad-mcp" / "docs"
+            except (OSError, ValueError):
+                pass
+        return Path.home() / ".local" / "state" / "pscad-mcp" / "docs"
+
+    def raise_for_issue(self, operation: str) -> None:
+        if self.issue is None:
+            return
+        raise BackendError(
+            "DOCUMENTATION_CONFIG_INVALID",
+            "The documentation storage configuration is invalid.",
+            "server",
+            operation,
+            {"setting": self.issue},
+        )
+
+    @staticmethod
+    def _package_version() -> str:
+        try:
+            return importlib.metadata.version("pscad-mcp")
+        except importlib.metadata.PackageNotFoundError:
+            return __version__
+
+    @classmethod
+    def _sync_lock_for(cls, base_dir: Path) -> threading.RLock:
+        with cls._SYNC_LOCKS_GUARD:
+            lock = cls._SYNC_LOCKS.get(base_dir)
+            if lock is None:
+                lock = threading.RLock()
+                cls._SYNC_LOCKS[base_dir] = lock
+            return lock
+
+    @contextmanager
+    def coordinated_access(self) -> Iterator[None]:
+        """Serialize documentation reads and writes for one storage root."""
+        with self._sync_lock_for(self.base_dir):
+            yield
+
+    @staticmethod
+    def storage_error(operation: str, directory: str) -> BackendError:
+        safe_operation = (
+            operation
+            if operation
+            in {
+                "sync_documentation",
+                "list_documentation",
+                "read_documentation",
+            }
+            else "documentation"
+        )
+        safe_directory = directory if directory in {"md", "raw"} else "generated"
+        return BackendError(
+            "DOCUMENTATION_STORAGE_INVALID",
+            "The documentation storage boundary is invalid.",
+            "server",
+            safe_operation,
+            {"directory": safe_directory},
+        )
+
+    @classmethod
+    def _storage_error(cls, directory: str) -> BackendError:
+        return cls.storage_error("sync_documentation", directory)
+
+    @staticmethod
+    def _is_reparse_point(path: Path) -> bool:
+        metadata = path.lstat()
+        attributes = getattr(metadata, "st_file_attributes", 0)
+        reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+        return bool(attributes & reparse_flag)
+
+    @classmethod
+    def _validate_storage_base(
+        cls,
+        base_dir: Path,
+        *,
+        operation: str = "sync_documentation",
+        directory: str = "generated",
+    ) -> None:
+        try:
+            if (
+                base_dir.is_symlink()
+                or cls._is_reparse_point(base_dir)
+                or not base_dir.is_dir()
+                or base_dir.resolve(strict=True) != base_dir
+            ):
+                raise cls.storage_error(operation, directory)
+        except BackendError:
+            raise
+        except Exception as error:
+            logger.error(
+                "Documentation base validation failed after %s.",
+                type(error).__name__,
+            )
+            raise cls.storage_error(operation, directory) from None
+
+    @classmethod
+    def _validate_storage_directory(
+        cls,
+        base_dir: Path,
+        directory: Path,
+        *,
+        operation: str = "sync_documentation",
+    ) -> None:
+        label = directory.name if directory.name in {"md", "raw"} else "generated"
+        try:
+            if directory != base_dir / label or directory.parent != base_dir:
+                raise cls.storage_error(operation, label)
+            cls._validate_storage_base(
+                base_dir,
+                operation=operation,
+                directory=label,
+            )
+            if (
+                directory.is_symlink()
+                or cls._is_reparse_point(directory)
+                or not directory.is_dir()
+            ):
+                raise cls.storage_error(operation, label)
+            resolved_base = base_dir.resolve(strict=True)
+            resolved_directory = directory.resolve(strict=True)
+            if (
+                resolved_base != base_dir
+                or resolved_directory != directory
+                or resolved_directory.parent != resolved_base
+            ):
+                raise cls.storage_error(operation, label)
+        except BackendError:
+            raise
+        except Exception as error:
+            logger.error(
+                "Documentation storage validation for %s failed after %s.",
+                label,
+                type(error).__name__,
+            )
+            raise cls.storage_error(operation, label) from None
+
+    def validate_read_directory(self, operation: str) -> bool:
+        self.raise_for_issue(operation)
+        try:
+            self.md_dir.lstat()
+        except FileNotFoundError:
+            return False
+        except Exception:
+            raise self.storage_error(operation, "md") from None
+        self._validate_storage_directory(
+            self.base_dir,
+            self.md_dir,
+            operation=operation,
+        )
+        return True
+
+    def validate_read_target(self, target: Path, operation: str) -> Path:
+        if not self.validate_read_directory(operation):
+            raise FileNotFoundError from None
+        candidate = Path(target)
+        try:
+            if candidate.parent != self.md_dir:
+                raise self.storage_error(operation, "md")
+            candidate.lstat()
+            if (
+                candidate.is_symlink()
+                or self._is_reparse_point(candidate)
+                or not candidate.is_file()
+                or candidate.resolve(strict=True).parent != self.md_dir
+            ):
+                raise self.storage_error(operation, "md")
+        except FileNotFoundError:
+            raise
+        except BackendError:
+            raise
+        except Exception:
+            raise self.storage_error(operation, "md") from None
+        if not self.validate_read_directory(operation):
+            raise FileNotFoundError from None
+        return candidate
+
+    @classmethod
+    def _validate_storage_target(
+        cls,
+        base_dir: Path,
+        destination: Path,
+    ) -> None:
+        parent = destination.parent
+        cls._validate_storage_directory(base_dir, parent)
+        try:
+            if destination.is_symlink() or (
+                destination.exists() and cls._is_reparse_point(destination)
+            ):
+                raise cls._storage_error(parent.name)
+        except BackendError:
+            raise
+        except Exception as error:
+            logger.error(
+                "Documentation destination validation for %s failed after %s.",
+                parent.name,
+                type(error).__name__,
+            )
+            raise cls._storage_error(parent.name) from None
+
+    @classmethod
+    def _validate_temporary_file(
+        cls,
+        temporary_path: Path,
+        destination_parent: Path,
+    ) -> None:
+        try:
+            if (
+                temporary_path.is_symlink()
+                or cls._is_reparse_point(temporary_path)
+                or not temporary_path.is_file()
+                or temporary_path.resolve(strict=True).parent != destination_parent
+            ):
+                raise cls._storage_error(destination_parent.name)
+        except BackendError:
+            raise
+        except Exception as error:
+            logger.error(
+                "Documentation temporary-file validation for %s failed after %s.",
+                destination_parent.name,
+                type(error).__name__,
+            )
+            raise cls._storage_error(destination_parent.name) from None
+
+    def _prepare_base_storage(self) -> None:
+        missing_components = []
+        existing_ancestor = self.base_dir
+        while True:
+            try:
+                existing_ancestor.lstat()
+                break
+            except FileNotFoundError:
+                if existing_ancestor.parent == existing_ancestor:
+                    raise self._storage_error("generated") from None
+                missing_components.append(existing_ancestor)
+                existing_ancestor = existing_ancestor.parent
+            except Exception as error:
+                logger.error(
+                    "Documentation ancestor inspection failed after %s.",
+                    type(error).__name__,
+                )
+                raise self._storage_error("generated") from None
+
+        existing_components = (
+            *reversed(existing_ancestor.parents),
+            existing_ancestor,
+        )
+        for component in existing_components:
+            self._validate_storage_base(component)
+
+        parent = existing_ancestor
+        for component in reversed(missing_components):
+            self._validate_storage_base(parent)
+            try:
+                component.mkdir()
+            except FileExistsError:
+                pass
+            except Exception as error:
+                logger.error(
+                    "Documentation directory creation failed after %s.",
+                    type(error).__name__,
+                )
+                raise self._storage_error("generated") from None
+            self._validate_storage_base(parent)
+            self._validate_storage_base(component)
+            parent = component
+
+    def _prepare_storage(self) -> None:
+        try:
+            self._prepare_base_storage()
+        except BackendError:
+            raise
+        except Exception as error:
+            logger.error(
+                "Documentation base preparation failed after %s.",
+                type(error).__name__,
+            )
+            raise self._storage_error("generated") from None
+
+        for directory in (self.md_dir, self.raw_dir):
+            try:
+                self._validate_storage_base(
+                    self.base_dir,
+                    directory=directory.name,
+                )
+                directory.mkdir(exist_ok=True)
+                self._validate_storage_base(
+                    self.base_dir,
+                    directory=directory.name,
+                )
+                self._validate_storage_directory(self.base_dir, directory)
+            except BackendError:
+                raise
+            except Exception as error:
+                logger.error(
+                    "Documentation storage preparation for %s failed after %s.",
+                    directory.name,
+                    type(error).__name__,
+                )
+                raise self._storage_error(directory.name) from None
+
+    @classmethod
+    def _is_retryable_replace_error(cls, error: OSError) -> bool:
+        if os.name != "nt":
+            return False
+        return isinstance(error, PermissionError) or getattr(
+            error,
+            "winerror",
+            None,
+        ) in cls._RETRYABLE_WINDOWS_REPLACE_ERRORS
+
+    @classmethod
+    def _replace_with_retry(
+        cls,
+        temporary_path: Path,
+        destination: Path,
+        *,
+        base_dir: Path | None,
+    ) -> None:
+        for attempt in range(cls._REPLACE_ATTEMPTS):
+            if base_dir is not None:
+                cls._validate_storage_target(base_dir, destination)
+                cls._validate_temporary_file(
+                    temporary_path,
+                    destination.parent,
+                )
+            try:
+                os.replace(temporary_path, destination)
+                return
+            except OSError as error:
+                if (
+                    not cls._is_retryable_replace_error(error)
+                    or attempt + 1 == cls._REPLACE_ATTEMPTS
+                ):
+                    raise
+                time.sleep(cls._REPLACE_RETRY_DELAY)
+
+    @classmethod
+    def _atomic_write(
+        cls,
+        target: Path,
+        content: str,
+        *,
+        base_dir: Path | None = None,
+    ) -> None:
+        destination = Path(target)
+        temporary_path: Path | None = None
+        try:
+            if base_dir is not None:
+                cls._validate_storage_target(base_dir, destination)
+            with NamedTemporaryFile(
+                mode="w",
+                encoding="utf-8",
+                newline="",
+                dir=destination.parent,
+                prefix=f".{destination.name}.",
+                suffix=".tmp",
+                delete=False,
+            ) as temporary:
+                temporary_path = Path(temporary.name)
+                temporary.write(content)
+                temporary.flush()
+                os.fsync(temporary.fileno())
+            cls._replace_with_retry(
+                temporary_path,
+                destination,
+                base_dir=base_dir,
+            )
+            temporary_path = None
+        finally:
+            if temporary_path is not None:
+                try:
+                    temporary_path.unlink()
+                except FileNotFoundError:
+                    pass
+
+    def sync(self) -> list[str]:
         """Synchronize reference files from the installed mhi-pscad library."""
+        self.raise_for_issue("sync_documentation")
+        with self._sync_lock_for(self.base_dir):
+            return self._sync_locked()
+
+    def _sync_locked(self) -> list[str]:
+        self._prepare_storage()
         results = []
         for mod_name in self.MODULES:
             try:
@@ -125,24 +554,32 @@ class DocumentationManager:
                 # 2. Get raw output via pydoc
                 try:
                     raw_doc = pydoc.render_doc(mod_name, renderer=pydoc.plaintext)
-                except Exception as e:
-                    logger.warning(f"pydoc failed for {mod_name}, falling back to manual: {e}")
+                except Exception as error:
+                    logger.warning(
+                        "pydoc failed for %s after %s; using manual inspection.",
+                        mod_name,
+                        type(error).__name__,
+                    )
                     raw_doc = self._manual_inspect_raw(mod_name)
                 
-                raw_path = os.path.join(self.raw_dir, f"{mod_name.replace('.', '_')}.txt")
-                with open(raw_path, "w", encoding="utf-8") as f:
-                    f.write(raw_doc)
+                raw_path = self.raw_dir / f"{mod_name.replace('.', '_')}.txt"
+                self._atomic_write(raw_path, raw_doc, base_dir=self.base_dir)
 
                 # 3. Process into enriched markdown
                 enriched_md = self._extract_enriched_markdown(mod_name, raw_doc, analyzer)
-                md_path = os.path.join(self.md_dir, f"{mod_name.replace('.', '_')}.md")
-                with open(md_path, "w", encoding="utf-8") as f:
-                    f.write(enriched_md)
+                md_path = self.md_dir / f"{mod_name.replace('.', '_')}.md"
+                self._atomic_write(md_path, enriched_md, base_dir=self.base_dir)
 
                 results.append(f"Synced {mod_name} (Enriched)")
-            except Exception as e:
-                logger.error(f"Failed to sync {mod_name}: {str(e)}")
-                results.append(f"Failed {mod_name}: {str(e)}")
+            except BackendError:
+                raise
+            except Exception as error:
+                logger.error(
+                    "Failed to sync %s after %s.",
+                    mod_name,
+                    type(error).__name__,
+                )
+                results.append(f"Failed {mod_name}: {type(error).__name__}")
         return results
 
     def _clean_pydoc(self, text: str) -> str:
@@ -151,30 +588,50 @@ class DocumentationManager:
         text = re.sub(r'.\x08', '', text)
         return text
 
-    def _extract_enriched_markdown(self, mod_name: str, raw_doc: str, analyzer: Optional[SourceAnalyzer]) -> str:
+    def _extract_enriched_markdown(
+        self,
+        mod_name: str,
+        raw_doc: str,
+        analyzer: SourceAnalyzer | None,
+    ) -> str:
         """Process raw pydoc text and enrich with AST analysis."""
         clean_doc = self._clean_pydoc(raw_doc)
         lines = clean_doc.splitlines()
-        md_lines = [f"# Module {mod_name}\n"]
-        
-        if analyzer and analyzer.file_path:
-            md_lines.append(f"*Source: {analyzer.file_path}*\n")
+        md_lines = [
+            f"# Module {mod_name} (pscad-mcp {self._package_version()})\n"
+        ]
 
         skip_inheritance_for = {
             "builtins.object", "builtins.int", "builtins.tuple", 
             "enum.Enum", "enum.IntEnum", "enum.ReprEnum", "enum.EnumType"
         }
         
+        in_file_section = False
         in_skipped_inheritance = False
         current_class = None
         
         for line in lines:
             stripped = line.strip()
+            is_top_level_heading = (
+                bool(stripped)
+                and not line[:1].isspace()
+                and stripped.isupper()
+            )
+
+            if in_file_section:
+                if not is_top_level_heading:
+                    continue
+                in_file_section = False
+
+            if is_top_level_heading and stripped == "FILE":
+                in_file_section = True
+                continue
+
             if not stripped:
                 md_lines.append("")
                 continue
             
-            if line.isupper() and not line.startswith(" "):
+            if is_top_level_heading:
                 md_lines.append(f"## {stripped}")
                 continue
             
@@ -249,11 +706,11 @@ class DocumentationManager:
                     doc = getattr(obj, "__doc__", "No docstring")
                     output.append(f"\n--- {name} ---\n{doc}\n")
             return "\n".join(output)
-        except Exception as e:
-            return f"CRITICAL FAILURE: {str(e)}"
+        except Exception as error:
+            return f"MANUAL_INSPECTION_FAILED: {type(error).__name__}"
 
-# Shared instance
-doc_manager = DocumentationManager()
+# Shared instance. Path resolution is intentionally lazy and performs no writes.
+doc_manager = DocumentationManager.from_environ(os.environ)
 
 if __name__ == "__main__":
     import logging

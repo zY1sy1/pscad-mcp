@@ -15,6 +15,8 @@ $venvDir = Join-Path $tempRoot "venv"
 $probeDir = Join-Path $tempRoot "probe"
 
 New-Item -ItemType Directory -Path $wheelDir, $probeDir | Out-Null
+$previousPythonPath = $env:PYTHONPATH
+Remove-Item Env:PYTHONPATH -ErrorAction SilentlyContinue
 
 try {
     & $python -m pip wheel $repoRoot --no-deps --wheel-dir $wheelDir
@@ -47,22 +49,27 @@ try {
 import importlib.metadata as metadata
 import pscad_mcp
 from pscad_mcp.main import create_server
+from pscad_mcp.tools.catalog import FULL_TOOL_NAMES
 from pscad_mcp.hvdc.builders.lcc.assets import load_packaged_asset_set
 
 installed = metadata.version('pscad-mcp')
-assert installed == pscad_mcp.__version__, (installed, pscad_mcp.__version__)
+if installed != pscad_mcp.__version__:
+    raise RuntimeError(f'Installed version mismatch: {installed!r} != {pscad_mcp.__version__!r}')
 tools = create_server()._tool_manager.list_tools()
-assert len(tools) == 77
-assert len({tool.name for tool in tools}) == 77
+if {tool.name for tool in tools} != FULL_TOOL_NAMES:
+    raise RuntimeError('Installed tool inventory does not match FULL_TOOL_NAMES')
 assets = load_packaged_asset_set()
-assert assets.name == 'cigre_lcc_monopole_v1'
-assert assets.pscad_version.startswith('4.')
-print(f'{installed} {len(tools)} {len(assets.hashes)}')
+if assets.name != 'cigre_lcc_monopole_v1':
+    raise RuntimeError(f'Unexpected packaged asset set: {assets.name!r}')
+if not assets.pscad_version.startswith('4.'):
+    raise RuntimeError(f'Unexpected packaged asset PSCAD version: {assets.pscad_version!r}')
+print(f'{installed} {len(FULL_TOOL_NAMES)} {len(assets.hashes)}')
 "@
 
-    $previousPythonPath = $env:PYTHONPATH
     $previousNoUserSite = $env:PYTHONNOUSERSITE
+    $previousToolProfile = $env:PSCAD_MCP_TOOL_PROFILE
     Remove-Item Env:PYTHONPATH -ErrorAction SilentlyContinue
+    Remove-Item Env:PSCAD_MCP_TOOL_PROFILE -ErrorAction SilentlyContinue
     $env:PYTHONNOUSERSITE = "1"
     try {
         Push-Location $probeDir
@@ -82,8 +89,18 @@ print(f'{installed} {len(tools)} {len(assets.hashes)}')
         } else {
             $env:PYTHONNOUSERSITE = $previousNoUserSite
         }
+        if ($null -eq $previousToolProfile) {
+            Remove-Item Env:PSCAD_MCP_TOOL_PROFILE -ErrorAction SilentlyContinue
+        } else {
+            $env:PSCAD_MCP_TOOL_PROFILE = $previousToolProfile
+        }
     }
 } finally {
+    if ($null -eq $previousPythonPath) {
+        Remove-Item Env:PYTHONPATH -ErrorAction SilentlyContinue
+    } else {
+        $env:PYTHONPATH = $previousPythonPath
+    }
     if (Test-Path -LiteralPath $tempRoot) {
         Remove-Item -LiteralPath $tempRoot -Recurse -Force
     }

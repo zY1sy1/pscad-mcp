@@ -1,9 +1,13 @@
-from typing import List, Dict, Any, Optional
-import os
+import asyncio
+from typing import Any
+
 from mcp.server.fastmcp import FastMCP
+
+from ..core.backend.base import BackendError
 from ..core.connection_manager import pscad_manager
-from ..utils.doc_manager import doc_manager
 from ..core.path_policy import PathPolicy
+from ..utils.doc_manager import doc_manager
+from .pagination import PaginationLimit, PaginationOffset, slice_items, slice_text
 from .registration import register_tool
 
 path_policy = PathPolicy()
@@ -12,7 +16,7 @@ async def get_local_pscad() -> str:
     """Attach to a running local PSCAD instance or launch a new one."""
     return await pscad_manager.attach_local()
 
-async def get_pscad_status() -> Dict[str, Any]:
+async def get_pscad_status() -> dict[str, Any]:
     """Get detailed health and status of the PSCAD instance."""
     try:
         return await pscad_manager.get_status()
@@ -23,45 +27,163 @@ async def get_pscad_status() -> Dict[str, Any]:
             **pscad_manager.error_payload(e, "get_pscad_status"),
         }
 
-async def sync_documentation() -> List[str]:
+async def sync_documentation() -> list[str]:
     """Synchronize AI reference files with the currently installed library version."""
-    return doc_manager.sync()
+    return await asyncio.to_thread(doc_manager.sync)
 
-async def list_documentation() -> List[str]:
-    """List available PSCAD API documentation modules that can be read."""
-    if not os.path.exists(doc_manager.md_dir):
+
+def _list_documentation_locked() -> list[str]:
+    try:
+        if not doc_manager.validate_read_directory("list_documentation"):
+            return ["No documentation found. Run sync_documentation first."]
+        paths = tuple(doc_manager.md_dir.iterdir())
+        docs = [
+            path.stem.replace("_", ".")
+            for path in paths
+            if path.is_file() and path.suffix == ".md"
+        ]
+        if not doc_manager.validate_read_directory("list_documentation"):
+            return ["No documentation found. Run sync_documentation first."]
+    except FileNotFoundError:
         return ["No documentation found. Run sync_documentation first."]
-    
-    docs = []
-    for f in os.listdir(doc_manager.md_dir):
-        if f.endswith(".md"):
-            # Return original module names (e.g. mhi_pscad_types.md -> mhi.pscad.types)
-            module_name = f[:-3].replace("_", ".")
-            docs.append(module_name)
+    except BackendError:
+        raise
+    except Exception:
+        raise doc_manager.storage_error("list_documentation", "md") from None
     return sorted(docs)
 
-async def read_documentation(module_name: str) -> str:
-    """Read the Markdown documentation for a specific PSCAD module (e.g., 'mhi.pscad.types')."""
-    # Normalize input
+
+def _list_documentation_sync() -> list[str]:
+    with doc_manager.coordinated_access():
+        return _list_documentation_locked()
+
+
+async def list_documentation(
+    offset: PaginationOffset = 0,
+    limit: PaginationLimit = None,
+) -> list[str]:
+    """List available PSCAD API documentation modules that can be read."""
+    slice_items([], offset, limit, "list_documentation")
+    values = await asyncio.to_thread(_list_documentation_sync)
+    return slice_items(values, offset, limit, "list_documentation")
+
+
+def _documentation_not_found(module_name: str) -> str:
+    available = ", ".join(_list_documentation_locked())
+    return (
+        f"Error: Documentation for '{module_name}' not found. "
+        f"Available modules: {available}"
+    )
+
+
+def _read_documentation_sync(module_name: str) -> str:
+    doc_manager.raise_for_issue("read_documentation")
     normalized_name = module_name.replace(".", "_")
     if not normalized_name.endswith(".md"):
         normalized_name += ".md"
-        
-    try:
-        filepath = path_policy.resolve_child(
-            doc_manager.md_dir,
-            normalized_name,
-            suffixes={".md"},
-            must_exist=True,
+    with doc_manager.coordinated_access():
+        try:
+            if not doc_manager.validate_read_directory("read_documentation"):
+                filepath = None
+            else:
+                filepath = path_policy.resolve_child(
+                    doc_manager.md_dir,
+                    normalized_name,
+                    suffixes={".md"},
+                    must_exist=True,
+                )
+                filepath = doc_manager.validate_read_target(
+                    filepath,
+                    "read_documentation",
+                )
+        except (FileNotFoundError, ValueError):
+            filepath = None
+        except BackendError:
+            raise
+        except Exception:
+            raise doc_manager.storage_error("read_documentation", "md") from None
+
+        if filepath is None:
+            return _documentation_not_found(module_name)
+
+        try:
+            content = filepath.read_text(encoding="utf-8")
+            doc_manager.validate_read_target(filepath, "read_documentation")
+            return content
+        except FileNotFoundError:
+            return _documentation_not_found(module_name)
+        except BackendError:
+            raise
+        except Exception:
+            raise doc_manager.storage_error("read_documentation", "md") from None
+
+
+async def read_documentation(
+    module_name: str,
+    offset: PaginationOffset = 0,
+    max_chars: PaginationLimit = None,
+) -> str:
+    """Read the Markdown documentation for a specific PSCAD module (e.g., 'mhi.pscad.types')."""
+    slice_text("", offset, max_chars, "read_documentation")
+    value = await asyncio.to_thread(_read_documentation_sync, module_name)
+    return slice_text(value, offset, max_chars, "read_documentation")
+
+
+def register_documentation_resources(mcp: FastMCP) -> None:
+    def resource_module_name(module_name: str) -> str:
+        # FastMCP 1.29 treats the query delimiter as a regex quantifier while
+        # extracting URI-template fields, so the preceding field retains it.
+        return module_name.removesuffix("?")
+
+    @mcp.resource(
+        "pscad-docs://modules/{module_name}?offset={offset}&max_chars={max_chars}",
+        name="pscad_documentation_module_slice",
+        description="Read a bounded slice of one local PSCAD API documentation module.",
+        mime_type="text/markdown",
+    )
+    async def documentation_slice(
+        module_name: str,
+        offset: int,
+        max_chars: int,
+    ) -> str:
+        return await read_documentation(
+            resource_module_name(module_name),
+            offset=offset,
+            max_chars=max_chars,
         )
-    except (FileNotFoundError, ValueError):
-        filepath = None
-    
-    if filepath is None:
-        return f"Error: Documentation for '{module_name}' not found. Available modules: {', '.join(await list_documentation())}"
-        
-    with open(filepath, "r", encoding="utf-8") as f:
-        return f.read()
+
+    @mcp.resource(
+        "pscad-docs://modules/{module_name}?offset={offset}",
+        name="pscad_documentation_module_from_offset",
+        description="Read one local PSCAD API documentation module from an offset.",
+        mime_type="text/markdown",
+    )
+    async def documentation_from_offset(module_name: str, offset: int) -> str:
+        return await read_documentation(
+            resource_module_name(module_name),
+            offset=offset,
+        )
+
+    @mcp.resource(
+        "pscad-docs://modules/{module_name}?max_chars={max_chars}",
+        name="pscad_documentation_module_max_chars",
+        description="Read a bounded prefix of one local PSCAD API documentation module.",
+        mime_type="text/markdown",
+    )
+    async def documentation_max_chars(module_name: str, max_chars: int) -> str:
+        return await read_documentation(
+            resource_module_name(module_name),
+            max_chars=max_chars,
+        )
+
+    @mcp.resource(
+        "pscad-docs://modules/{module_name}",
+        name="pscad_documentation_module",
+        description="Read one locally generated PSCAD API documentation module.",
+        mime_type="text/markdown",
+    )
+    async def documentation_module(module_name: str) -> str:
+        return await read_documentation(module_name)
 
 async def repair_connection() -> str:
     """Force-reset the connection to PSCAD."""

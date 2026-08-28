@@ -6,6 +6,14 @@ All notable changes to this project are documented here.
 
 ### Changed
 
+- Horizontal hardening preserves the 83-tool compatibility surface while adding
+  one always-on capability discovery tool, complete tool annotations, opt-in
+  tool profiles, and compatible pagination.
+- Runtime lifecycle cleanup is now idempotent and bounded across repeated MCP
+  lifespan entry, executor work, background tasks, and shutdown.
+- Local documentation is generated lazily in user state, can be served through
+  MCP resources, and is no longer tracked as generated repository output.
+
 - Parameterized LCC execution now carries reviewed real-template selectors through
   deterministic plans, validates bindings before acquiring a workspace lease,
   stages PSCX changes atomically, and records bounded source/staging/read-back
@@ -29,9 +37,10 @@ All notable changes to this project are documented here.
 - LCC planning now fails closed without live PSCAD definition inventory;
   output-channel creation, final-project identity, waveform ownership, asset
   fingerprints, and acceptance-report evidence are checked explicitly.
-- The MCP inventory is now 83 tools: the original 60 generic tools, ten HVDC
-  tools, three learning tools, four fixed LCC tools, and six parametric LCC
-  tools.
+- The compatibility inventory is 83 compatibility tools: 60 generic tools,
+  ten HVDC tools, three learning tools, four fixed LCC tools,
+  and six parametric LCC tools. With the always-on `get_pscad_capabilities`
+  discovery tool, the current total is 84.
 
 - HVDC strict control now supports explicit backend timing and output-channel
   provider hooks, bounded simulation-clock polling, stalled-clock detection,
