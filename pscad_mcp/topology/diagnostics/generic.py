@@ -435,7 +435,16 @@ def _attached_points(topology: ProjectTopology) -> set[tuple]:
         for label in topology.labels
         if label.location is not None
     )
+    net_keys_by_port: dict[str, set[str]] = defaultdict(set)
+    for net in topology.nets:
+        for port_key in net.port_keys:
+            net_keys_by_port[port_key].add(net.key)
     for boundary in topology.boundary_links:
+        if not (
+            net_keys_by_port[boundary.outer_port_key]
+            & net_keys_by_port[boundary.inner_port_key]
+        ):
+            continue
         points.add(
             (
                 boundary.namespace,

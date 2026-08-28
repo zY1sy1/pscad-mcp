@@ -233,6 +233,129 @@ def test_unresolved_hierarchy_boundary_does_not_claim_required_port_is_open():
     assert [item.code for item in findings] == ["TOPOLOGY_INCOMPLETE"]
 
 
+def test_invalid_hierarchy_boundary_does_not_attach_wire_endpoints():
+    component = TopologyComponent(
+        key="Main:1",
+        canvas_key="Main",
+        object_id="1",
+        definition="test:child",
+        ports=(
+            TopologyPort(
+                key="Main:1:IN",
+                component_key="Main:1",
+                name="IN",
+                absolute=(99, 0),
+                kind="electrical",
+                dimension=1,
+            ),
+        ),
+    )
+    conductors = (
+        TopologyConductor(
+            "Main:10", "Main", "10", "wire", "electrical", ((0, 0), (20, 0))
+        ),
+        TopologyConductor(
+            "Main/1:Child:10",
+            "Main/1:Child",
+            "10",
+            "wire",
+            "electrical",
+            ((0, 0), (20, 0)),
+        ),
+    )
+    boundary = TopologyBoundaryLink(
+        key="Main:1:IN->Main/1:Child:IN",
+        outer_port_key="Main:1:IN",
+        outer_canvas_key="Main",
+        outer_point=(20, 0),
+        inner_port_key="Main/1:Child:IN",
+        inner_canvas_key="Main/1:Child",
+        inner_point=(0, 0),
+        namespace="electrical",
+        dimension=1,
+    )
+    topology = build_connectivity(
+        ProjectTopology(
+            "case",
+            "4.6.2",
+            components=(component,),
+            conductors=conductors,
+            boundary_links=(boundary,),
+        )
+    ).topology
+
+    endpoints = {
+        finding.objects[0]
+        for finding in diagnose_generic(topology)
+        if finding.code == "WIRE_DANGLING_ENDPOINT"
+    }
+
+    assert endpoints == {
+        "Main:10@(0,0)",
+        "Main:10@(20,0)",
+        "Main/1:Child:10@(0,0)",
+        "Main/1:Child:10@(20,0)",
+    }
+
+
+def test_unresolved_hierarchy_boundary_does_not_attach_inner_wire_endpoint():
+    component = TopologyComponent(
+        key="Main:1",
+        canvas_key="Main",
+        object_id="1",
+        definition="test:child",
+        ports=(
+            TopologyPort(
+                key="Main:1:IN",
+                component_key="Main:1",
+                name="IN",
+                absolute=(20, 0),
+                kind="electrical",
+                dimension=1,
+            ),
+        ),
+    )
+    conductor = TopologyConductor(
+        "Main/1:Child:10",
+        "Main/1:Child",
+        "10",
+        "wire",
+        "electrical",
+        ((0, 0), (20, 0)),
+    )
+    boundary = TopologyBoundaryLink(
+        key="Main:1:IN->Main/1:Child:IN",
+        outer_port_key="Main:1:IN",
+        outer_canvas_key="Main",
+        outer_point=(20, 0),
+        inner_port_key="Main/1:Child:IN",
+        inner_canvas_key="Main/1:Child",
+        inner_point=(0, 0),
+        namespace="electrical",
+        dimension=1,
+    )
+    topology = build_connectivity(
+        ProjectTopology(
+            "case",
+            "4.6.2",
+            components=(component,),
+            conductors=(conductor,),
+            boundary_links=(boundary,),
+        )
+    ).topology
+
+    endpoints = {
+        finding.objects[0]
+        for finding in diagnose_generic(topology)
+        if finding.code == "WIRE_DANGLING_ENDPOINT"
+    }
+
+    assert endpoints == {
+        "Main/1:Child:10@(0,0)",
+        "Main/1:Child:10@(20,0)",
+    }
+
+
 def test_unknown_namespace_evidence_stays_unresolved_and_is_not_inferred():
     component = TopologyComponent(
         key="Main:1",
