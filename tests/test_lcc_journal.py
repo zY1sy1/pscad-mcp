@@ -94,7 +94,7 @@ def test_atomic_journal_cleans_temp_file_and_preserves_previous_on_dump_failure(
 
 def test_workspace_build_lease_acquires_metadata_and_releases_matching_token(tmp_path):
     lease = WorkspaceBuildLease.acquire(tmp_path, "build-1")
-    lock_path = tmp_path / ".pscad-mcp" / "lcc-build.lock"
+    lock_path = tmp_path / ".pscad-mcp" / "builder-build.lock"
     metadata = _read_json(lock_path)
 
     assert metadata["build_id"] == "build-1"
@@ -111,7 +111,7 @@ def test_workspace_build_lease_acquires_metadata_and_releases_matching_token(tmp
 
 def test_workspace_build_lease_rejects_live_owner_and_corrupt_or_malformed_metadata(tmp_path, monkeypatch):
     lease = WorkspaceBuildLease.acquire(tmp_path, "build-1")
-    lock_path = tmp_path / ".pscad-mcp" / "lcc-build.lock"
+    lock_path = tmp_path / ".pscad-mcp" / "builder-build.lock"
 
     monkeypatch.setattr(journal_module.psutil, "pid_exists", lambda pid: True)
     _assert_backend_code(lambda: WorkspaceBuildLease.acquire(tmp_path, "build-2"), "LCC_BUILD_CONFLICT")
@@ -142,7 +142,7 @@ def test_workspace_build_lease_rejects_live_owner_and_corrupt_or_malformed_metad
 def test_workspace_build_lease_recovers_dead_owner_after_marking_old_journal_interrupted(tmp_path, monkeypatch):
     old_journal = AtomicJournal(tmp_path, "old-build")
     old_path = old_journal.write({"build_id": "old-build", "state": "components_placed", "history": [{"state": "components_placed"}]})
-    lock_path = tmp_path / ".pscad-mcp" / "lcc-build.lock"
+    lock_path = tmp_path / ".pscad-mcp" / "builder-build.lock"
     lock_path.write_text(
         json.dumps(
             {
@@ -171,7 +171,7 @@ def test_workspace_build_lease_recovers_dead_owner_after_marking_old_journal_int
 
 def test_workspace_build_lease_release_with_mismatched_token_does_not_remove_another_owner(tmp_path):
     lease = WorkspaceBuildLease.acquire(tmp_path, "build-1")
-    lock_path = tmp_path / ".pscad-mcp" / "lcc-build.lock"
+    lock_path = tmp_path / ".pscad-mcp" / "builder-build.lock"
     original = _read_json(lock_path)
 
     assert lease.release(token="wrong-token") is False
@@ -184,7 +184,7 @@ def test_workspace_build_lease_release_with_mismatched_token_does_not_remove_ano
 
 def test_workspace_build_lease_release_preserves_lock_replaced_after_owner_validation(tmp_path, monkeypatch):
     lease = WorkspaceBuildLease.acquire(tmp_path, "build-1")
-    lock_path = tmp_path / ".pscad-mcp" / "lcc-build.lock"
+    lock_path = tmp_path / ".pscad-mcp" / "builder-build.lock"
     replacement = {
         "build_id": "replacement-build",
         "pid": os.getpid(),
@@ -195,7 +195,7 @@ def test_workspace_build_lease_release_preserves_lock_replaced_after_owner_valid
     original_remove = journal_module._remove_matching_lock
 
     def replace_before_conditional_remove(path, expected_token):
-        replacement_path = path.with_name("lcc-build.lock.replacement")
+        replacement_path = path.with_name("builder-build.lock.replacement")
         replacement_path.write_text(json.dumps(replacement), encoding="utf-8")
         os.replace(replacement_path, path)
         return original_remove(path, expected_token)
@@ -209,7 +209,7 @@ def test_workspace_build_lease_release_preserves_lock_replaced_after_owner_valid
 def test_workspace_build_lease_stale_recovery_preserves_lock_replaced_before_removal(tmp_path, monkeypatch):
     old_journal = AtomicJournal(tmp_path, "old-build")
     old_path = old_journal.write({"build_id": "old-build", "state": "components_placed"})
-    lock_path = tmp_path / ".pscad-mcp" / "lcc-build.lock"
+    lock_path = tmp_path / ".pscad-mcp" / "builder-build.lock"
     lock_path.write_text(
         json.dumps(
             {
@@ -232,7 +232,7 @@ def test_workspace_build_lease_stale_recovery_preserves_lock_replaced_before_rem
     original_remove = journal_module._remove_matching_lock
 
     def replace_before_conditional_remove(path, expected_token):
-        replacement_path = path.with_name("lcc-build.lock.replacement")
+        replacement_path = path.with_name("builder-build.lock.replacement")
         replacement_path.write_text(json.dumps(replacement), encoding="utf-8")
         os.replace(replacement_path, path)
         return original_remove(path, expected_token)
@@ -247,7 +247,7 @@ def test_workspace_build_lease_stale_recovery_preserves_lock_replaced_before_rem
 def test_workspace_build_lease_rejects_stale_lock_journal_outside_workspace(tmp_path, monkeypatch):
     outside = tmp_path.parent / "lcc-outside-journal.json"
     outside.write_text(json.dumps({"build_id": "old-build", "state": "published"}), encoding="utf-8")
-    lock_path = tmp_path / ".pscad-mcp" / "lcc-build.lock"
+    lock_path = tmp_path / ".pscad-mcp" / "builder-build.lock"
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     lock_path.write_text(
         json.dumps(
@@ -271,7 +271,7 @@ def test_workspace_build_lease_rejects_stale_lock_journal_outside_workspace(tmp_
 
 def test_workspace_build_lease_release_preserves_replacement_installed_after_tombstone_move(tmp_path, monkeypatch):
     lease = WorkspaceBuildLease.acquire(tmp_path, "build-1")
-    lock_path = tmp_path / ".pscad-mcp" / "lcc-build.lock"
+    lock_path = tmp_path / ".pscad-mcp" / "builder-build.lock"
     replacement = {
         "build_id": "replacement-build",
         "pid": os.getpid(),
@@ -287,7 +287,7 @@ def test_workspace_build_lease_release_preserves_replacement_installed_after_tom
         original_replace(source, destination)
         if Path(source) == lock_path and Path(destination).name.endswith(".pending") and not moved:
             moved = True
-            replacement_path = lock_path.with_name("lcc-build.lock.replacement")
+            replacement_path = lock_path.with_name("builder-build.lock.replacement")
             replacement_path.write_text(json.dumps(replacement), encoding="utf-8")
             original_replace(replacement_path, lock_path)
 

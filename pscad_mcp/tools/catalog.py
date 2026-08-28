@@ -147,6 +147,17 @@ TOOL_GROUPS = MappingProxyType(
                 "diagnose_project_topology",
             }
         ),
+        "mmc": frozenset(
+            {
+                "audit_mmc_template",
+                "derive_mmc_parameters",
+                "plan_parametric_mmc_model",
+                "build_parametric_mmc_model",
+                "get_parametric_mmc_build_status",
+                "recommend_mmc_simulation",
+                "validate_mmc_model",
+            }
+        ),
     }
 )
 
@@ -652,6 +663,46 @@ COMPATIBILITY_TOOL_SPECS = MappingProxyType(
         "diagnose_project_topology": _spec(
             "diagnose_project_topology",
             "Run read-only topology diagnostics with optional explicit inference.",
+            read_only=True,
+            idempotent=True,
+        ),
+        "audit_mmc_template": _spec(
+            "audit_mmc_template",
+            "Audit a packaged or supplied MMC template without modifying PSCAD state.",
+            read_only=True,
+            idempotent=True,
+        ),
+        "derive_mmc_parameters": _spec(
+            "derive_mmc_parameters",
+            "Derive deterministic parameters for a parametric MMC request.",
+            read_only=True,
+            idempotent=True,
+        ),
+        "plan_parametric_mmc_model": _spec(
+            "plan_parametric_mmc_model",
+            "Plan a parameterized MMC model build.",
+            read_only=True,
+            idempotent=True,
+        ),
+        "build_parametric_mmc_model": _spec(
+            "build_parametric_mmc_model",
+            "Build a parameterized MMC model after confirmation.",
+        ),
+        "get_parametric_mmc_build_status": _spec(
+            "get_parametric_mmc_build_status",
+            "Get the status of a parameterized MMC build.",
+            read_only=True,
+            idempotent=True,
+        ),
+        "recommend_mmc_simulation": _spec(
+            "recommend_mmc_simulation",
+            "Recommend executable normal and fault MMC simulation scenarios.",
+            read_only=True,
+            idempotent=True,
+        ),
+        "validate_mmc_model": _spec(
+            "validate_mmc_model",
+            "Validate a parameterized MMC model and its acceptance evidence.",
             read_only=True,
             idempotent=True,
         ),

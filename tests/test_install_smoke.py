@@ -28,6 +28,7 @@ import pscad_mcp
 from pscad_mcp.main import create_server
 from pscad_mcp.tools.catalog import FULL_TOOL_NAMES
 from pscad_mcp.hvdc.builders.lcc.assets import load_packaged_asset_set
+from pscad_mcp.hvdc.builders.mmc.assets import load_packaged_asset_set as load_mmc_assets
 
 installed = metadata.version('pscad-mcp')
 expected_version = {expected_version!r}
@@ -44,7 +45,10 @@ if assets.name != 'cigre_lcc_monopole_v1':
     raise RuntimeError(f'Unexpected packaged asset set: {{assets.name!r}}')
 if not assets.pscad_version.startswith('4.'):
     raise RuntimeError(f'Unexpected packaged asset PSCAD version: {{assets.pscad_version!r}}')
-print(installed, len(FULL_TOOL_NAMES), len(assets.hashes))
+mmc_assets = load_mmc_assets()
+if mmc_assets.name != 'cigre_b4_p2p_avm_v1' or len(mmc_assets.hashes) != 8:
+    raise RuntimeError('Unexpected packaged MMC asset set')
+print(installed, len(FULL_TOOL_NAMES), len(assets.hashes), len(mmc_assets.hashes))
 """
 
 
@@ -105,4 +109,4 @@ def test_built_wheel_is_installable_and_exposes_tools():
             env=env,
         )
         assert probe.returncode == 0, probe.stderr
-        assert probe.stdout.strip() == f"{expected_version} {len(FULL_TOOL_NAMES)} 6"
+        assert probe.stdout.strip() == f"{expected_version} {len(FULL_TOOL_NAMES)} 6 8"

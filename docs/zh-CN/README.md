@@ -1,12 +1,13 @@
 # PSCAD MCP 中文使用与验收说明
 
-本项目把 PSCAD 自动化封装为 86 个 MCP 工具，其中原有通用服务契约保持 60 个工具，并增加只读拓扑诊断、HVDC、静默学习、固定 CIGRE LCC、参数化 LCC 与始终注册的能力工具，可供 Codex、GitHub Copilot CLI 等支持 stdio MCP 的客户端调用。项目采用双后端；PSCAD 5.x 当前为 contract-tested only：
+本项目把 PSCAD 自动化封装为 93 个 MCP 工具，其中原有通用服务契约保持 60 个工具，并增加只读拓扑诊断、HVDC、静默学习、固定 CIGRE LCC、参数化 LCC、参数化双引擎 MMC 与始终注册的能力工具，可供 Codex、GitHub Copilot CLI 等支持 stdio MCP 的客户端调用。项目采用双后端；PSCAD 5.x 当前为 contract-tested only：
 
 - PSCAD 4.6.x：`mhrc.automation`，当前已在本机 PSCAD 4.6.2 x64 许可环境做真实验收；
 - PSCAD 5.x：`mhi.pscad` 3.1.x，当前完成契约测试，但由于本机没有 PSCAD 5.x，不能声称端到端真实验收通过；
 - 结果文件：`mhi.psout` 1.3.x。
 
-完整工具库存为 86 = 60 个通用工具 + 2 个拓扑工具 + 10 个 HVDC 工具 + 3 个学习工具 + 4 个固定 CIGRE LCC 工具 + 6 个参数化 LCC 工具 + 1 个始终注册的 `get_pscad_capabilities` 能力工具；原有 60 个通用工具的名称和默认返回形状保持不变。
+完整工具库存为 93 = 60 个通用工具 + 2 个拓扑工具 + 10 个 HVDC 工具 + 3 个学习工具 + 4 个固定 CIGRE LCC 工具 + 6 个参数化 LCC 工具 + 7 个参数化 MMC 工具 + 1 个始终注册的 `get_pscad_capabilities` 能力工具；原有 60 个通用工具的名称和默认返回形状保持不变。
+其中 92 个兼容/领域工具 + 1 个始终注册的能力工具。
 
 Legacy PSCAD 4.6.2 后端只支持启动新的受管 Automation 实例，不能附加到用户普通方式打开的 GUI。受管窗口默认可见；默认检测到已有 PSCAD 进程时会在启动前返回 `EXTERNAL_PSCAD_PRESENT`。`repair_connection` 使用连接时缓存的进程归属：自有实例会先正常退出，外部进程不会被终止。
 
@@ -44,9 +45,9 @@ Legacy PSCAD 4.6.2 后端只支持启动新的受管 Automation 实例，不能�
 
 ### 兼容发现、工具配置、分页和本地文档
 
-默认 `full` 配置保持不变，并额外注册始终可用的
+`full` 保持不变的默认值，并额外注册始终可用的
 `get_pscad_capabilities`。`PSCAD_MCP_TOOL_PROFILE` 可显式选择
-`core`、`hvdc`、`lcc`、`parametric_lcc` 和 `learning`；空值、未知组或其他
+`core`、`hvdc`、`lcc`、`parametric_lcc` 和 `learning`；显式启用这些组，空值、未知组或其他
 非法值会导致启动失败。能力工具报告当前 profile、已注册工具、后端支持和
 明确限制。
 
@@ -113,6 +114,24 @@ PSCAD 5.x、故障或换相失败验收、MMC 构建均不可用。
 
 当前实现的 PSCAD 4.6.2 授权验收尚未通过；在 opt-in 实机验收
 通过前，不得把该功能描述为已自治构建并验收的 CIGRE LCC 模型。
+
+### 参数化双引擎 MMC
+
+MMC 领域新增七个工具：`audit_mmc_template`、`derive_mmc_parameters`、
+`plan_parametric_mmc_model`、`build_parametric_mmc_model`、
+`get_parametric_mmc_build_status`、`recommend_mmc_simulation` 和
+`validate_mmc_model`。同一请求可选择 `detailed_pwm`、`average_value` 或
+`both`，当前范围限定为 PSCAD 4.6.2。详细 PWM 引擎是 read-only official
+template（官方模板只读），默认使用 `H_MMC_Mono_DC.pscx` 和 `intermediate.pslx`（位于
+`ModelsInProgress`）；执行前后验证 source immutability（源文件不可变）。
+
+每个引擎提供 four 个 preplanned candidates（预规划候选）。能力边界明确记录为
+`intrinsic_dc_fault_blocking=false`、`individual_cell_balance_not_modeled`、
+`device_stress_not_modeled`、`switching_harmonics_not_modeled` 和
+`thermal_not_modeled`。流程依次使用上述七个工具；状态
+`inspected`、`designed`、`planned`、`built`、`simulated`、`accepted` 分开记录。
+发布工程带有 `_scenario_source.pscx` 和 `derived_project`；无授权证据时保留
+`NOT_RUN_ON_INTEGRATED_COMMIT`，不能提前声明 accepted。
 
 ### 参数化 LCC 真实模板执行边界
 
@@ -326,7 +345,7 @@ git diff --check
 git status --short --branch
 ```
 
-工具数量应输出 `86 86`。真实 PSCAD 5.x 必须在安装并运行对应版本后另做相同级别验收。
+工具数量应输出 `93 93`。真实 PSCAD 5.x 必须在安装并运行对应版本后另做相同级别验收。
 
 ## 常见故障
 

@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<project version="4.6.2" name="synthetic_mmc_shape">
+  <dependencies>
+    <Library name="intermediate" path="intermediate.pslx" />
+  </dependencies>
+  <definitions>
+    <Definition classid="UserCmpDefn" name="Main">
+      <schematic classid="UserCanvas">
+        <User classid="UserCmp" id="converter-p" name="STATION_P" defn="intermediate:MMCPwmConverter">
+          <paramlist>
+            <param name="rated_dc_voltage_kv" value="640" />
+            <param name="active_power_mw" value="1000" />
+            <param name="startup_snapshot" value="C:\missing\synthetic_startup.snp" />
+            <param name="line_database" value="C:\synthetic\line_database.dbl" />
+          </paramlist>
+        </User>
+        <User classid="UserCmp" id="converter-vdc" name="STATION_VDC" defn="intermediate:MMCPwmConverter">
+          <paramlist>
+            <param name="rated_dc_voltage_kv" value="640" />
+            <param name="active_power_mw" value="1000" />
+            <param name="line_constants" value="C:\synthetic\line_constants.tlo" />
+          </paramlist>
+        </User>
+      </schematic>
+    </Definition>
+  </definitions>
+</project>

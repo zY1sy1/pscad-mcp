@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "pscad_version": "4.6.2",
+  "files": {
+    "PROVENANCE.md": "4f24a30c25df09e700633a08d202e89b226c3fcb526f2eab29b5876d99e7e071",
+    "acceptance.json": "8be955c0e6ac7777cdc33ba94e341317ce0d2e147aa3c69a8f4d45d418380bdf",
+    "blueprint.json": "28b82ba931a5a59243c3c76091e135d68e89795e83d0aea6b1da2500545ae507",
+    "catalog-pscad-4.6.2.json": "1bdd4302dd92d4ad262c513924f076681d7ffa0a0bd3a84d15dc662971c4bd84",
+    "controls.json": "c486f36c4812b6c069c027969dce92ee2983f5dafa0229d285a9380dcf9b8fcd",
+    "golden.json": "2e7815ae02084861088cc7765750ea50b9ca7e3124fb2ec3b1deb9dc0a12e720",
+    "library/cigre_mmc_avm_v1.pslx": "9945f2e7088110d776f427246b95161c0e29df7a1c8825f27bd07fb5315cc77f",
+    "operating-sequence.json": "1bcf4aa8fddcebdee2da82b23c6a14a40f7bc5a4aae37fda288df9509a5ba6e3"
+  }
+}

@@ -1,6 +1,6 @@
 # PSCAD MCP for Codex and GitHub Copilot CLI
 
-`pscad-mcp` is a Windows Model Context Protocol (MCP) server for PSCAD automation. It uses `mhrc.automation` for PSCAD 4.6.x and `mhi.pscad` for PSCAD 5.x behind one stable 60-tool generic service contract, plus read-only topology diagnostics, HVDC, silent-learning, fixed CIGRE LCC, and parametric LCC domain layers. The current inventory is 86 tools: 85 compatibility/domain tools plus one always-on capability tool.
+`pscad-mcp` is a Windows Model Context Protocol (MCP) server for PSCAD automation. It uses `mhrc.automation` for PSCAD 4.6.x and `mhi.pscad` for PSCAD 5.x behind one stable 60-tool generic service contract, plus read-only topology diagnostics, HVDC, silent-learning, fixed CIGRE LCC, parametric LCC, and parametric MMC domain layers. The current inventory is 93 tools: 92 compatibility/domain tools plus one always-on capability tool.
 
 中文安装、配置、安全和验收说明：[docs/zh-CN/README.md](docs/zh-CN/README.md)
 
@@ -61,9 +61,9 @@ external process.
 
 ## Tool coverage
 
-The complete inventory is 86 = 60 generic tools, 2 topology tools, 10 HVDC
+The complete inventory is 93 = 60 generic tools, 2 topology tools, 10 HVDC
 tools, 3 learning tools, 4 fixed CIGRE LCC tools, 6 parametric LCC tools,
-and one always-on `get_pscad_capabilities` tool.
+7 parametric MMC tools, and one always-on `get_pscad_capabilities` tool.
 The generic 60-tool contract keeps its existing names and default return
 shapes.
 
@@ -186,6 +186,31 @@ LCC acceptance.
 Licensed acceptance has not passed for the PSCAD 4.6.2 implementation branch,
 so the feature must not be described as an autonomously constructed
 accepted CIGRE LCC model until the opt-in real acceptance test passes.
+
+### Parametric dual-engine MMC
+
+The MMC layer adds exactly seven tools: `audit_mmc_template`,
+`derive_mmc_parameters`, `plan_parametric_mmc_model`,
+`build_parametric_mmc_model`, `get_parametric_mmc_build_status`,
+`recommend_mmc_simulation`, and `validate_mmc_model`. A request may select
+`detailed_pwm`, `average_value`, or both under PSCAD 4.6.2. The detailed-PWM
+engine is a read-only official template adapter; its default sources are
+`H_MMC_Mono_DC.pscx` and `intermediate.pslx` under `ModelsInProgress`.
+Audit and planning hash installed sources, while execution uses an isolated
+copy and enforces source immutability. Plans expose four preplanned candidates
+per engine and explicit limits: `intrinsic_dc_fault_blocking=false`,
+`individual_cell_balance_not_modeled`, `device_stress_not_modeled`,
+`switching_harmonics_not_modeled`, and `thermal_not_modeled`.
+
+Use `audit_mmc_template`, `derive_mmc_parameters`, and
+`plan_parametric_mmc_model` before `build_parametric_mmc_model`; review the
+parent plan hash, poll `get_parametric_mmc_build_status`, obtain scenarios from
+`recommend_mmc_simulation`, then call `validate_mmc_model`. Published outputs
+include an independent `_scenario_source.pscx` and a `derived_project`; the
+scenario can be passed unchanged to `run_hvdc_scenario`. Structural states
+`inspected`, `designed`, `planned`, `built`, `simulated`, and `accepted` are
+distinct, and `NOT_RUN_ON_INTEGRATED_COMMIT` remains explicit until licensed
+evidence exists.
 
 Read-only HVDC inspection may scan an existing absolute `.pscx` source such as
 `C:\\PSCADFiles\\Breaker\\TEST1\\difforder_new.pscx`; all scenario mutations

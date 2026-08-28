@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-08-28T13:59:03+08:00",
+  "updated_at": "2026-08-28T16:08:37+08:00",
   "policy": "A licensed PASS applies only to the named scope and commit. It must not be inherited by another builder, domain workflow, or later commit.",
   "scopes": [
     {
@@ -85,6 +85,28 @@
         "commit": "8872a96f72c039ebca1925b8e6a6cfa8763e7d19"
       },
       "note": "MMC Stage A remains on codex/mmc-autonomous-builder and has no licensed acceptance claim."
+    },
+    {
+      "scope": "parametric_mmc",
+      "implementation_status": "INTEGRATION_BRANCH",
+      "licensed_status": "INCOMPLETE_ANALYSIS",
+      "evidence": {
+        "report_path": "D:/PSCAD-Workspace/mmc-parametric-acceptance/mmc-parametric-acceptance-20260828T080837223737Z/mmc-parametric-acceptance-report.json",
+        "sha256": "18975323c2b563d308a81d6e1743ef866bfb66d193be2de04cd4284917d5d4e5",
+        "commit": "aec74dd52f8f4e6d523aba652eff3eec1456198c"
+      },
+      "attempt": {
+        "timestamp": "2026-08-28T16:08:37+08:00",
+        "failure_stage": "scenario_preflight_and_avm_definition_inventory",
+        "failure_code": "HVDC_TIMED_CONTROL_UNAVAILABLE; LCC_DEFINITION_MISSING",
+        "blocking_dependency": "master:dc_bus",
+        "build_evidence": true,
+        "output_evidence": false,
+        "source_hashes_unchanged": true,
+        "preexisting_workspace_immutable": true,
+        "owned_process_cleaned": true
+      },
+      "note": "The opt-in PSCAD 4.6.2 Legacy matrix generated and verified public tline.exe line constants, staged and built the detailed-PWM candidate, then stopped safely because the Legacy backend does not expose strict EMTDC timed-control capability. The AVM child stopped during live definition inventory because installed master.pslx has no master:dc_bus. No licensed PASS is claimed."
     }
   ]
 }

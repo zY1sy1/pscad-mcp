@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "control_contract": "mmc-control-v1",
+  "stations": {
+    "STATION_P": {"active": "P", "reactive": "Q", "dc_voltage": null},
+    "STATION_VDC": {"active": null, "reactive": "Q", "dc_voltage": "Vdc"}
+  },
+  "bandwidth_hz": {"pll": 10.0, "outer": 20.0, "energy": 40.0, "circulating": 60.0, "inner": 120.0},
+  "modulation_bounds": [0.0, 1.0],
+  "avm_limitations": ["submodule_balance_not_modeled", "switching_stress_not_modeled", "switching_harmonics_not_modeled"],
+  "blocked_state_path": "half_bridge_diode_equivalent",
+  "intrinsic_dc_fault_blocking": false
+}

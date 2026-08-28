@@ -38,6 +38,15 @@ TOPOLOGY_TOOLS = {
     "inspect_project_topology",
     "diagnose_project_topology",
 }
+PARAMETRIC_MMC_TOOLS = {
+    "audit_mmc_template",
+    "derive_mmc_parameters",
+    "plan_parametric_mmc_model",
+    "build_parametric_mmc_model",
+    "get_parametric_mmc_build_status",
+    "recommend_mmc_simulation",
+    "validate_mmc_model",
+}
 
 
 def test_server_preserves_the_compatibility_inventory():
@@ -51,3 +60,4 @@ def test_server_preserves_the_compatibility_inventory():
     assert LCC_TOOLS <= COMPATIBILITY_TOOL_NAMES
     assert PARAMETRIC_LCC_TOOLS <= COMPATIBILITY_TOOL_NAMES
     assert TOPOLOGY_TOOLS <= COMPATIBILITY_TOOL_NAMES
+    assert PARAMETRIC_MMC_TOOLS <= COMPATIBILITY_TOOL_NAMES

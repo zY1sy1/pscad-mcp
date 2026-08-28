@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<project version="4.6.2">
+  <definitions>
+    <Definition classid="UserCmpDefn" name="StationP">
+      <Port name="dc" x="54" y="0" mode="out" dimension="electrical" />
+    </Definition>
+    <Definition classid="UserCmpDefn" name="StationVdc">
+      <Port name="dc" x="-54" y="0" mode="in" dimension="electrical" />
+    </Definition>
+    <Definition classid="UserCmpDefn" name="Main">
+      <schematic classid="UserCanvas">
+        <User classid="UserCmp" id="station-p" name="STATION_P" defn="local:StationP" x="100" y="100" orientation="0" />
+        <User classid="UserCmp" id="station-vdc" name="STATION_VDC" defn="local:StationVdc" x="300" y="100" orientation="0" />
+        <Wire id="dc-wire" classid="WireOrthogonal" x="0" y="0">
+          <Vertex x="154" y="100" />
+          <Vertex x="246" y="100" />
+        </Wire>
+      </schematic>
+    </Definition>
+  </definitions>
+</project>

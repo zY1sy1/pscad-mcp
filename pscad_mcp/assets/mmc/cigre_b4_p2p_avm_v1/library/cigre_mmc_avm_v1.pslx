@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="utf-8"?>
+<pslx>
+  <metadata schema_version="1" authoring="repository" />
+  <library scope="cigre_mmc_avm_v1">
+    <definition name="cigre_mmc_avm_v1:MMCAverageArm">
+      <external_ports>
+        <port name="AC" kind="electrical" dimension="1" />
+        <port name="DC_POS" kind="electrical" dimension="1" />
+        <port name="DC_NEG" kind="electrical" dimension="1" />
+        <port name="V_INSERTED" kind="signal" dimension="1" />
+        <port name="I_ARM" kind="signal" dimension="1" />
+        <port name="ENERGY" kind="signal" dimension="1" />
+      </external_ports>
+      <equations version="mmc-avm-v1">
+        <state name="energy" equation="W_arm = 0.5 * C_eq * V_cap_eq^2" />
+        <state name="energy_derivative" equation="dW_arm/dt = v_inserted * i_arm - p_loss_arm" />
+        <arm_current upper="i_upper = I_dc / 3 + i_phase / 2 + i_circulating" lower="i_lower = I_dc / 3 - i_phase / 2 + i_circulating" />
+        <modulation lower="0" upper="1" />
+        <blocked_state conduction_path="half_bridge_diode_equivalent" intrinsic_dc_fault_blocking="false" />
+      </equations>
+    </definition>
+    <definition name="cigre_mmc_avm_v1:MMCStationControl">
+      <external_ports>
+        <port name="P_ORDER" kind="signal" dimension="1" />
+        <port name="Q_ORDER" kind="signal" dimension="1" />
+        <port name="VDC_ORDER" kind="signal" dimension="1" />
+        <port name="GATES" kind="signal" dimension="6" />
+      </external_ports>
+      <control_block definition="master:pi_controller" />
+    </definition>
+    <definition name="cigre_mmc_avm_v1:MMCEnergyControl">
+      <external_ports>
+        <port name="ENERGY_REF" kind="signal" dimension="1" />
+        <port name="ENERGY" kind="signal" dimension="1" />
+        <port name="I_CIRC" kind="signal" dimension="1" />
+      </external_ports>
+      <control_block definition="master:pi_controller" />
+    </definition>
+    <definition name="cigre_mmc_avm_v1:MMCInitialization">
+      <external_ports>
+        <port name="RESET" kind="signal" dimension="1" />
+        <port name="READY" kind="signal" dimension="1" />
+      </external_ports>
+      <initialization mode="blocked_precharge" />
+    </definition>
+    <definition name="cigre_mmc_avm_v1:MMCDimensionedSignal">
+      <external_ports>
+        <port name="SIGNAL" kind="signal" dimension="3" />
+      </external_ports>
+    </definition>
+    <definition name="cigre_mmc_avm_v1:MMCSequenceSignal">
+      <external_ports>
+        <port name="STATE" kind="signal" dimension="1" />
+      </external_ports>
+    </definition>
+  </library>
+</pslx>

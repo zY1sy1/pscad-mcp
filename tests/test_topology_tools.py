@@ -57,4 +57,4 @@ async def test_diagnose_tool_defaults_to_generic_plus_hvdc_auto():
 def test_topology_tools_are_registered_exactly_once():
     names = {tool.name for tool in create_server()._tool_manager.list_tools()}
     assert {"inspect_project_topology", "diagnose_project_topology"} <= names
-    assert len(names) == 86
+    assert len(names) == 93

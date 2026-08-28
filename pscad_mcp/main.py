@@ -16,6 +16,7 @@ from .tools.hvdc_tools import register_hvdc_tools
 from .tools.lcc_parametric_tools import register_lcc_parametric_tools
 from .tools.lcc_tools import register_lcc_tools
 from .tools.learning_tools import register_learning_tools
+from .tools.mmc_tools import register_mmc_tools
 from .tools.project_tools import register_project_tools
 from .tools.simset_tools import register_simset_tools
 from .tools.topology_tools import register_topology_tools
@@ -68,6 +69,7 @@ def create_server(environ: Mapping[str, str] | None = None) -> FastMCP:
     register_hvdc_tools(mcp)
     register_lcc_tools(mcp)
     register_lcc_parametric_tools(mcp)
+    register_mmc_tools(mcp)
     register_learning_tools(mcp)
     register_capability_tool(mcp)
     register_documentation_resources(mcp)

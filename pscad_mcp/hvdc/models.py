@@ -54,7 +54,7 @@ class HvdcProjectEvidence:
     components: tuple[HvdcComponentRecord, ...] = ()
     labels: tuple[HvdcLabelRecord, ...] = ()
     connections: tuple[HvdcConnectionRecord, ...] = ()
-    warnings: tuple[str, ...] = ()
+    warnings: tuple[str | dict[str, Any], ...] = ()
 
 
 @dataclass(frozen=True)

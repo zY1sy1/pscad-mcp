@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "phases": [
+    "blocked_precharge",
+    "ready_to_deblock",
+    "forward_ramp",
+    "forward_steady",
+    "power_reversal",
+    "reverse_steady"
+  ],
+  "failure_conditions": ["protection", "pll", "energy", "current", "modulation", "stalled_emtdc_clock"]
+}

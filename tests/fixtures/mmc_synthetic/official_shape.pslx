@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<library version="4.6.2" name="intermediate" namespace="intermediate">
+  <Definition classid="UserCmpDefn" name="MMCPwmConverter">
+    <Port name="dc_positive" x="54" y="-12" mode="electrical" />
+    <Port name="dc_negative" x="54" y="12" mode="electrical" />
+    <Parameter name="rated_dc_voltage_kv" writable="true" />
+    <Parameter name="active_power_mw" writable="true" />
+  </Definition>
+</library>

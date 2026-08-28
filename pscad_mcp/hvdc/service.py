@@ -15,6 +15,7 @@ from ..runtime import PendingCleanupError
 from ..topology.adapters.hvdc import topology_to_hvdc_evidence
 from ..topology.models import ProjectTopology
 from .classifier import classify_topology, extract_assets
+from .builders.mmc.inspection import inspect_mmc_evidence
 from .mappings import MappingResolution, resolve_mappings
 from .models import HvdcProjectEvidence
 from .profiles import list_profiles, load_profile, register_profile
@@ -380,6 +381,7 @@ class HvdcDomainService:
         canvas_name: str,
     ) -> dict[str, Any]:
         topology = classify_topology(evidence)
+        mmc_report = inspect_mmc_evidence(evidence) if topology.family == "mmc" else None
         assets = extract_assets(evidence)
         profile_name = "hvdc_breaker_difforder" if any(asset.kind == "breaker" for asset in assets) else "auto"
         mappings: MappingResolution
@@ -401,6 +403,9 @@ class HvdcDomainService:
             "warnings": list(evidence.warnings) + list(mappings.warnings),
             "confidence": topology.confidence,
         }
+        if mmc_report is not None:
+            result["mmc"] = mmc_report
+            result["unresolved"] = [*result["unresolved"], *mmc_report["unresolved_questions"]]
         return result
 
     async def _live_evidence(

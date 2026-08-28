@@ -18,6 +18,7 @@ def test_acceptance_status_manifest_separates_live_acceptance_scopes():
         "parametric_lcc",
         "hvdc_scenarios",
         "mmc_stage_a",
+        "parametric_mmc",
     }
     assert scopes["legacy_core_462"]["licensed_status"] == "PASS_HISTORICAL"
     topology = scopes["unified_topology_462"]
@@ -39,6 +40,13 @@ def test_acceptance_status_manifest_separates_live_acceptance_scopes():
     }
     assert scopes["hvdc_scenarios"]["licensed_status"] == "PARTIAL"
     assert scopes["mmc_stage_a"]["licensed_status"] == "NOT_INTEGRATED"
+    assert scopes["parametric_mmc"]["implementation_status"] == "INTEGRATION_BRANCH"
+    assert scopes["parametric_mmc"]["licensed_status"] in {
+        "NOT_RUN_ON_INTEGRATED_COMMIT",
+        "PASS",
+        "FAIL",
+        "INCOMPLETE_ANALYSIS",
+    }
 
 
 def test_live_pass_requires_durable_evidence_identity():
