@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-08-28T02:00:21+08:00",
+  "updated_at": "2026-08-28T13:47:49+08:00",
   "policy": "A licensed PASS applies only to the named scope and commit. It must not be inherited by another builder, domain workflow, or later commit.",
   "scopes": [
     {
@@ -19,12 +19,17 @@
       "implementation_status": "INTEGRATION_BRANCH",
       "licensed_status": "PASS",
       "pscad_version": "4.6.2",
+      "rule_version": "generic+hvdc-v1",
       "evidence": {
-        "report_path": "D:/PSCAD-Workspace/topology-acceptance/topology-acceptance-20260828-015848-7747211/topology-acceptance-report.json",
-        "sha256": "1083f8b9516457542026a75cf4b416d2ca022dfd88747e55ae189e61aa0ebb56",
-        "commit": "a78d5e0e9bafe06221d32fe1153b66593fb61a7a"
+        "report_path": "D:/PSCAD-Workspace/topology-acceptance/topology-acceptance-20260828-134632-8931764/topology-acceptance-report.json",
+        "sha256": "98aa48983827503d2eb1234d2a03811014717529af156437f94448c52710fe8a",
+        "commit": "8f337edc1fd7c2b0d3e8cff2848973d7f62cd89d",
+        "truth_manifest_path": "D:/PSCAD-Workspace/topology-truth-unified-candidate.json",
+        "truth_manifest_sha256": "56b8ebff5777bd66a1e26951e51547806e9e4987869b0e749693eb75447b42f0",
+        "truth_review_path": "D:/PSCAD-Workspace/topology-sources-unified-candidate/truth-review-unified-candidate.json",
+        "truth_review_sha256": "2c4c0c3839ee10c8bb431d9ee9e0cde6cbe70dcff178beab968103ec4115fa0d"
       },
-      "note": "Licensed read-only Phase 1 topology acceptance passed for generic-v1 on the named commit. This scope does not imply HVDC, LCC, MMC, PSCAD 5.x, or later-commit acceptance."
+      "note": "Licensed read-only unified topology acceptance passed for generic+hvdc-v1 on the named commit, including exact canonical HVDC/LCC diagnostic codes. This scope does not imply mutating HVDC workflows, fixed or parametric LCC builders, MMC, PSCAD 5.x, or later-commit acceptance."
     },
     {
       "scope": "fixed_cigre_lcc",

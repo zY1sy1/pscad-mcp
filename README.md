@@ -104,11 +104,13 @@ The runner refuses source projects inside the acceptance workspace and refuses
 to start while PSCAD is open. A `PASS` report must preserve project and object
 inventory hashes, match complete confirmed-net and diagnostic truth, remain
 deterministic, and satisfy the 500/2,000-object performance gates. The named
-`unified_topology_462` Phase 1 scope passed these gates on licensed PSCAD 4.6.2;
-its exact report, SHA-256, and tested commit are recorded in
-`docs/acceptance-status.json`. That generic-only result does not imply HVDC,
-LCC, MMC, PSCAD 5.x, or later-commit acceptance, and no acceptance status is
-inferred from the non-licensed contract suite.
+`unified_topology_462` scope passed the final `generic+hvdc-v1` gate on licensed
+PSCAD 4.6.2, including exact canonical HVDC/LCC diagnostic codes. Its report,
+truth manifest and review hashes, SHA-256, and tested commit are recorded in
+`docs/acceptance-status.json`. This read-only diagnostic result does not imply
+mutating HVDC workflows, fixed or parametric LCC builders, MMC, PSCAD 5.x, or
+later-commit acceptance, and no acceptance status is inferred from the
+non-licensed contract suite.
 
 The HVDC domain layer adds ten tools without changing the original generic
 inventory: `inspect_hvdc_project`, `get_hvdc_assets`, `get_hvdc_mappings`,

@@ -64,10 +64,12 @@ HVDC 规则消费同一份 canonical 已确认拓扑；显式指定 `ruleset="ge
 runner 会拒绝位于验收工作区内的源工程，也会在已有 PSCAD 进程时拒绝启动。
 `PASS` 报告必须证明工程哈希和对象清单哈希未变化、完整确认网络和诊断真值精确
 匹配、拓扑结果确定，并满足 500/2,000 对象性能门限。命名范围
-`unified_topology_462` 已在 licensed PSCAD 4.6.2 上通过 Phase 1 门禁，精确报告、
-SHA-256 和受测提交记录在 `docs/acceptance-status.json`。该结果仅对应 generic
-规则，不代表 HVDC、LCC、MMC、PSCAD 5.x 或后续提交已通过；非许可契约测试也
-不能替代该实机状态。
+`unified_topology_462` 已在 licensed PSCAD 4.6.2 上通过最终
+`generic+hvdc-v1` 门禁，其中包括 canonical HVDC/LCC 诊断码的精确验证；报告、
+truth manifest/review 哈希、SHA-256 和受测提交均记录在
+`docs/acceptance-status.json`。该只读诊断结果不代表 HVDC 变更工作流、固定或
+参数化 LCC 构建器、MMC、PSCAD 5.x 或后续提交已通过；非许可契约测试也不能
+替代该实机状态。
 
 ### 固定 CIGRE LCC 构建器
 
