@@ -346,7 +346,7 @@ async def run_program_preflight(
     static_runner: Callable[[PreflightRequest], dict[str, Any]] = run_static_preflight,
     session_runner: Callable[..., Any] = run_licensed_session_preflight,
 ) -> dict[str, Any]:
-    static = static_runner(request)
+    static = await asyncio.to_thread(static_runner, request)
     if static["status"] == "PASS":
         licensed = await session_runner(
             service,

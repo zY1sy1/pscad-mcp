@@ -267,3 +267,42 @@ def test_program_preflight_combines_commit_session_and_source_immutability(tmp_p
     assert result["status"] == "PASS"
     assert result["commit"] == value.expected_commit
     assert result["source_immutability_status"] == "PASS"
+
+
+def test_program_preflight_runs_sync_static_probe_outside_event_loop(tmp_path):
+    from pscad_mcp.acceptance.preflight import run_program_preflight
+
+    value = request(tmp_path)
+    master_hash = hashlib.sha256(value.master_path.read_bytes()).hexdigest()
+    compiler_hash = hashlib.sha256(
+        value.compiler_configuration.read_bytes()
+    ).hexdigest()
+    compiler_executable_hash = hashlib.sha256(
+        value.compiler_executable.read_bytes()
+    ).hexdigest()
+
+    async def nested_probe():
+        return {
+            "status": "PASS",
+            "master_sha256": master_hash,
+            "compiler_configuration_sha256": compiler_hash,
+            "compiler_executable_sha256": compiler_executable_hash,
+        }
+
+    def static_runner(candidate):
+        assert candidate == value
+        return asyncio.run(nested_probe())
+
+    async def session_runner(service, *, workspace_root):
+        return {"status": "PASS"}
+
+    result = asyncio.run(
+        run_program_preflight(
+            value,
+            object(),
+            static_runner=static_runner,
+            session_runner=session_runner,
+        )
+    )
+
+    assert result["status"] == "PASS"
