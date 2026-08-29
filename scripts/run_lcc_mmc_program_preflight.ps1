@@ -4,6 +4,11 @@ param(
     [string]$MasterLibrary = 'C:\Program Files (x86)\PSCAD46\master.pslx',
     [string]$CompilerConfiguration = 'C:\Program Files (x86)\PSCAD46\fortran_compilers.xml',
     [string]$CompilerExecutable = 'C:\Program Files (x86)\GFortran\4.6\bin\gfortran.exe',
+    [string[]]$ReadOnlySource = @(
+        'D:\pscad-mcp-example-inspection-20260829\cigre_lcc_bidirectional\Cigre_LCC_Bidirectional.pscx',
+        'C:\Users\Public\Documents\PSCAD\4.6\Examples\ModelsInProgress\H_MMC_Mono_DC.pscx',
+        'C:\Users\Public\Documents\PSCAD\4.6\Examples\ModelsInProgress\intermediate.pslx'
+    ),
     [string]$Python
 )
 
@@ -36,6 +41,11 @@ if (-not (Test-Path -LiteralPath $CompilerConfiguration -PathType Leaf)) {
 }
 if (-not (Test-Path -LiteralPath $CompilerExecutable -PathType Leaf)) {
     throw "Compiler executable was not found: $CompilerExecutable"
+}
+foreach ($source in $ReadOnlySource) {
+    if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
+        throw "Read-only source was not found: $source"
+    }
 }
 
 $commit = (& git -C $repoRoot rev-parse HEAD).Trim()
@@ -70,15 +80,21 @@ $env:PSCAD_MCP_WORKSPACE = $Workspace
 try {
     Push-Location $repoRoot
     try {
-        & $Python -m pscad_mcp.acceptance.preflight_cli `
-            --repository-root $repoRoot `
-            --workspace-root $Workspace `
-            --master-path $MasterLibrary `
-            --compiler-configuration $CompilerConfiguration `
-            --compiler-executable $CompilerExecutable `
-            --expected-commit $commit `
-            --expected-branch $branch `
-            --output $report
+        $preflightArguments = @(
+            '-m', 'pscad_mcp.acceptance.preflight_cli',
+            '--repository-root', $repoRoot,
+            '--workspace-root', $Workspace,
+            '--master-path', $MasterLibrary,
+            '--compiler-configuration', $CompilerConfiguration,
+            '--compiler-executable', $CompilerExecutable,
+            '--expected-commit', $commit,
+            '--expected-branch', $branch,
+            '--output', $report
+        )
+        foreach ($source in $ReadOnlySource) {
+            $preflightArguments += @('--read-only-source', $source)
+        }
+        & $Python @preflightArguments
         $preflightExitCode = $LASTEXITCODE
     } finally {
         Pop-Location

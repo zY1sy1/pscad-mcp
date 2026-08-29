@@ -154,6 +154,60 @@ class TestBackendApplicationLifecycle(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(raised.exception.details["processes"], [existing])
         self.assertIsNone(module.launch_kwargs)
 
+    async def test_legacy_cleans_owned_app_when_post_launch_probe_fails(self):
+        app = FakeApplication()
+        module = FakeLegacyAutomation(app)
+        probe_calls = 0
+
+        def process_probe():
+            nonlocal probe_calls
+            probe_calls += 1
+            if probe_calls == 1:
+                return []
+            raise RuntimeError("post-launch probe failed")
+
+        backend = LegacyBackend(
+            ImmediateExecutor(),
+            version="4.6.2",
+            x64=True,
+            automation_module=module,
+            process_probe=process_probe,
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "post-launch probe failed"):
+            await backend.attach()
+
+        self.assertTrue(app.quit_called)
+        self.assertFalse(backend.owns_process)
+        self.assertFalse((await backend.heartbeat()).alive)
+
+    async def test_legacy_cleans_owned_app_when_initial_heartbeat_fails(self):
+        app = FakeApplication()
+        alive_calls = 0
+
+        def fail_first_heartbeat():
+            nonlocal alive_calls
+            alive_calls += 1
+            if alive_calls == 1:
+                raise RuntimeError("initial heartbeat failed")
+            return app.alive
+
+        app.is_alive = fail_first_heartbeat
+        backend = LegacyBackend(
+            ImmediateExecutor(),
+            version="4.6.2",
+            x64=True,
+            automation_module=FakeLegacyAutomation(app),
+            process_probe=list,
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "initial heartbeat failed"):
+            await backend.attach()
+
+        self.assertTrue(app.quit_called)
+        self.assertFalse(backend.owns_process)
+        self.assertFalse((await backend.heartbeat()).alive)
+
     async def test_explicit_allow_policy_starts_a_separate_owned_instance(self):
         app = FakeApplication()
         app._proc = SimpleNamespace(pid=9876)

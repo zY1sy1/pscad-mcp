@@ -77,8 +77,9 @@ def test_powershell_runner_uses_report_cli_and_checks_cleanup():
         ROOT / "scripts" / "run_lcc_mmc_program_preflight.ps1"
     ).read_text(encoding="utf-8")
 
-    assert "-m pscad_mcp.acceptance.preflight_cli" in script
-    assert "--expected-commit $commit" in script
+    assert "pscad_mcp.acceptance.preflight_cli" in script
+    assert "'--expected-commit', $commit" in script
+    assert "'--read-only-source', $source" in script
     assert "program-preflight-report.json" in script
     assert "ConvertFrom-Json" in script
     assert "PROGRAM_PREFLIGHT_SHA256=" in script

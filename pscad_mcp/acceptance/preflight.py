@@ -16,9 +16,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from ..core.path_policy import PathPolicy
 from ..core.process_inventory import list_pscad_processes
-from ..core.service import PscadService
+from ..core.service import discover_output_candidates
 
 
 @dataclass(frozen=True)
@@ -30,6 +29,7 @@ class PreflightRequest:
     compiler_executable: Path
     expected_commit: str
     expected_branch: str
+    read_only_sources: tuple[Path, ...] = ()
     backend: str = "legacy"
     pscad_version: str = "4.6.2"
     x64: bool = True
@@ -125,22 +125,15 @@ def _legacy_numbered_output_probe(workspace: Path) -> bool:
         ) as raw_probe:
             probe = Path(raw_probe)
             project = probe / "PREFLIGHT_CASE.pscx"
-            project.write_text("<project />", encoding="ascii")
             generated = probe / "PREFLIGHT_CASE.gf42"
             generated.mkdir()
             output = generated / "PREFLIGHT_CASE_01.out"
             output.write_bytes(b"preflight")
             started_after = max(0.0, output.stat().st_mtime - 0.001)
-            service = PscadService(
-                lambda: object(),
-                path_policy=PathPolicy(workspace_root=str(workspace)),
-            )
-            discovered = asyncio.run(
-                service.discover_output_files(
-                    str(project),
-                    started_after=started_after,
-                    max_files=10,
-                )
+            discovered = discover_output_candidates(
+                project,
+                started_after=started_after,
+                max_files=10,
             )
             return discovered == [str(output.resolve())]
     except (OSError, RuntimeError):
@@ -169,6 +162,9 @@ def run_static_preflight(
     master = request.master_path.resolve()
     compiler = request.compiler_configuration.resolve()
     compiler_executable = request.compiler_executable.resolve()
+    read_only_sources = tuple(
+        Path(os.path.abspath(path)) for path in request.read_only_sources
+    )
     git = dict(git_reader(repo))
     processes = [dict(item) for item in process_reader()]
     compiler_identities = (
@@ -187,6 +183,7 @@ def run_static_preflight(
         and not _inside(master, workspace)
         and not _inside(compiler, workspace)
         and not _inside(compiler_executable, workspace)
+        and all(not _inside(source, workspace) for source in read_only_sources)
     )
     master_ok = master.is_file() and not master.is_symlink()
     compiler_ok = (
@@ -201,6 +198,10 @@ def run_static_preflight(
     )
     automation_ok = module_finder(request.automation_module)
     processes_ok = not processes
+    read_only_sources_ok = all(
+        source.is_file() and not source.is_symlink()
+        for source in read_only_sources
+    )
     output_discovery_ok = (
         workspace_ok and output_discovery_probe(workspace)
     )
@@ -211,6 +212,7 @@ def run_static_preflight(
         "compiler": "PASS" if compiler_ok else "FAIL",
         "automation": "PASS" if automation_ok else "FAIL",
         "processes": "PASS" if processes_ok else "FAIL",
+        "read_only_sources": "PASS" if read_only_sources_ok else "FAIL",
         "legacy_numbered_output_discovery": (
             "PASS" if output_discovery_ok else "FAIL"
         ),
@@ -236,6 +238,11 @@ def run_static_preflight(
         "compiler_identities": compiler_identities,
         "automation_module": request.automation_module,
         "external_pscad_processes": processes,
+        "read_only_source_hashes": {
+            source.resolve().as_posix(): _sha256(source)
+            for source in read_only_sources
+            if source.is_file() and not source.is_symlink()
+        },
         "backend": request.backend,
         "pscad_version": request.pscad_version,
         "x64": request.x64,
@@ -369,6 +376,11 @@ async def run_program_preflight(
         if request.compiler_executable.is_file()
         else None
     )
+    read_only_sources_after = {
+        path.resolve().as_posix(): _sha256(path)
+        for path in request.read_only_sources
+        if path.is_file() and not path.is_symlink()
+    }
     source_immutability = {
         "master_before": static.get("master_sha256"),
         "master_after": master_after,
@@ -376,6 +388,8 @@ async def run_program_preflight(
         "compiler_after": compiler_after,
         "compiler_executable_before": static.get("compiler_executable_sha256"),
         "compiler_executable_after": compiler_executable_after,
+        "read_only_sources_before": static.get("read_only_source_hashes"),
+        "read_only_sources_after": read_only_sources_after,
     }
     before_values = (
         source_immutability["master_before"],
@@ -388,6 +402,9 @@ async def run_program_preflight(
         == source_immutability["compiler_after"]
         and source_immutability["compiler_executable_before"]
         == source_immutability["compiler_executable_after"]
+        and isinstance(source_immutability["read_only_sources_before"], Mapping)
+        and source_immutability["read_only_sources_before"]
+        == source_immutability["read_only_sources_after"]
     )
     return {
         "schema_version": 1,

@@ -286,23 +286,40 @@ class LegacyBackend:
 
         self._app = await self.executor.run_safe(launch)
         self.owns_process = True
-        process = getattr(self._app, "_proc", None)
-        raw_pid = getattr(process, "pid", None)
         try:
-            self._managed_pid = int(raw_pid) if raw_pid is not None else None
-        except (TypeError, ValueError, OverflowError):
-            self._managed_pid = None
-        after_launch = bounded_process_records(
-            await self.executor.run_safe(self.process_probe)
-        )
-        managed_record = next(
-            (item for item in after_launch if item["pid"] == self._managed_pid),
-            None,
-        )
-        self._managed_executable = (
-            str(managed_record["exe"]) if managed_record else None
-        )
-        return await self.heartbeat()
+            process = getattr(self._app, "_proc", None)
+            raw_pid = getattr(process, "pid", None)
+            try:
+                self._managed_pid = int(raw_pid) if raw_pid is not None else None
+            except (TypeError, ValueError, OverflowError):
+                self._managed_pid = None
+            after_launch = bounded_process_records(
+                await self.executor.run_safe(self.process_probe)
+            )
+            managed_record = next(
+                (item for item in after_launch if item["pid"] == self._managed_pid),
+                None,
+            )
+            self._managed_executable = (
+                str(managed_record["exe"]) if managed_record else None
+            )
+            return await self.heartbeat()
+        except BaseException as attach_error:
+            try:
+                await self.quit()
+            except Exception as cleanup_error:  # noqa: BLE001 - vendor cleanup
+                raise BackendError(
+                    "ATTACH_CLEANUP_FAILED",
+                    "Legacy PSCAD launch failed and the owned process could not "
+                    "be closed.",
+                    self.name,
+                    "attach",
+                    {
+                        "attach_error": str(attach_error)[:1024],
+                        "cleanup_error": str(cleanup_error)[:1024],
+                    },
+                ) from attach_error
+            raise
 
     async def heartbeat(self) -> BackendInfo:
         if self._app is None:

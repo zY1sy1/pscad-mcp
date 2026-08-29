@@ -45,6 +45,12 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--compiler-executable", type=Path, required=True)
     parser.add_argument("--expected-commit", required=True)
     parser.add_argument("--expected-branch", required=True)
+    parser.add_argument(
+        "--read-only-source",
+        action="append",
+        default=[],
+        type=Path,
+    )
     parser.add_argument("--output", type=Path, required=True)
     return parser
 
@@ -74,6 +80,7 @@ def main(
         compiler_executable=args.compiler_executable,
         expected_commit=args.expected_commit,
         expected_branch=args.expected_branch,
+        read_only_sources=tuple(args.read_only_source),
     )
     payload = asyncio.run(runner(request, service_factory(workspace)))
     write_preflight_report(output, payload)

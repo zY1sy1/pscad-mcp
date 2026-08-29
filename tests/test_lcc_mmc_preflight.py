@@ -62,6 +62,7 @@ def test_static_preflight_reports_all_required_checks(tmp_path):
         "compiler": "PASS",
         "automation": "PASS",
         "processes": "PASS",
+        "read_only_sources": "PASS",
         "legacy_numbered_output_discovery": "PASS",
     }
     assert len(report["master_sha256"]) == 64
@@ -142,6 +143,27 @@ def test_default_probe_discovers_legacy_numbered_output_parts(tmp_path):
 
     assert report["status"] == "PASS"
     assert report["checks"]["legacy_numbered_output_discovery"] == "PASS"
+
+
+def test_default_output_probe_never_creates_pscad_project(monkeypatch, tmp_path):
+    value = request(tmp_path)
+    original_write_text = Path.write_text
+
+    def reject_project_write(path, *args, **kwargs):
+        if path.suffix.casefold() == ".pscx":
+            raise AssertionError("static preflight must not create PSCX files")
+        return original_write_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "write_text", reject_project_write)
+
+    report = run_static_preflight(
+        value,
+        git_reader=lambda root: clean_git(value),
+        module_finder=lambda name: True,
+        process_reader=list,
+    )
+
+    assert report["status"] == "PASS"
 
 
 class SessionService:
@@ -249,6 +271,7 @@ def test_program_preflight_combines_commit_session_and_source_immutability(tmp_p
             "master_sha256": master_hash,
             "compiler_configuration_sha256": compiler_hash,
             "compiler_executable_sha256": compiler_executable_hash,
+            "read_only_source_hashes": {},
         }
 
     async def session_runner(service, *, workspace_root):
@@ -287,6 +310,7 @@ def test_program_preflight_runs_sync_static_probe_outside_event_loop(tmp_path):
             "master_sha256": master_hash,
             "compiler_configuration_sha256": compiler_hash,
             "compiler_executable_sha256": compiler_executable_hash,
+            "read_only_source_hashes": {},
         }
 
     def static_runner(candidate):
@@ -306,3 +330,53 @@ def test_program_preflight_runs_sync_static_probe_outside_event_loop(tmp_path):
     )
 
     assert result["status"] == "PASS"
+
+
+def test_program_preflight_detects_declared_source_mutation(tmp_path):
+    from pscad_mcp.acceptance.preflight import run_program_preflight
+
+    value = request(tmp_path)
+    source = tmp_path / "official.pscx"
+    source.write_text("before", encoding="utf-8")
+    value = PreflightRequest(
+        repository_root=value.repository_root,
+        workspace_root=value.workspace_root,
+        master_path=value.master_path,
+        compiler_configuration=value.compiler_configuration,
+        compiler_executable=value.compiler_executable,
+        expected_commit=value.expected_commit,
+        expected_branch=value.expected_branch,
+        read_only_sources=(source,),
+    )
+    source_hash = hashlib.sha256(source.read_bytes()).hexdigest()
+
+    def static_runner(candidate):
+        return {
+            "status": "PASS",
+            "master_sha256": hashlib.sha256(
+                value.master_path.read_bytes()
+            ).hexdigest(),
+            "compiler_configuration_sha256": hashlib.sha256(
+                value.compiler_configuration.read_bytes()
+            ).hexdigest(),
+            "compiler_executable_sha256": hashlib.sha256(
+                value.compiler_executable.read_bytes()
+            ).hexdigest(),
+            "read_only_source_hashes": {source.as_posix(): source_hash},
+        }
+
+    async def session_runner(service, *, workspace_root):
+        source.write_text("after", encoding="utf-8")
+        return {"status": "PASS"}
+
+    result = asyncio.run(
+        run_program_preflight(
+            value,
+            object(),
+            static_runner=static_runner,
+            session_runner=session_runner,
+        )
+    )
+
+    assert result["status"] == "FAIL"
+    assert result["source_immutability_status"] == "FAIL"
