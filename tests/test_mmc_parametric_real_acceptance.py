@@ -277,6 +277,12 @@ async def _run_case(
     source_root.mkdir()
     staged_library = source_root / "intermediate.pslx"
     shutil.copy2(config["library"], staged_library)
+    support_source = config["library"].parent / "Obj_Files_2016_03_25"
+    if support_source.is_dir():
+        shutil.copytree(
+            support_source,
+            source_root / "Obj_Files_2016_03_25",
+        )
     staged_template = rebind_template_line_constants(
         config["template"], artifacts, source_root / "H_MMC_Mono_DC.pscx"
     )

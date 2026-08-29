@@ -82,8 +82,14 @@ def _require_scenario_method(service: object, name: str):
 def _readback_matches(expected: Any, observed: Any) -> bool:
     if observed == expected:
         return True
-    if isinstance(expected, (int, float)) and not isinstance(expected, bool) and isinstance(observed, str):
-        match = re.match(r"^\s*([-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[Ee][-+]?\d+)?)", observed)
+    if (
+        isinstance(expected, (int, float))
+        and not isinstance(expected, bool)
+        and isinstance(observed, str)
+    ):
+        match = re.match(
+            r"^\s*([-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[Ee][-+]?\d+)?)", observed
+        )
         if match:
             try:
                 return float(match.group(1)) == float(expected)
@@ -126,7 +132,11 @@ async def _loaded_project_identity(service: object, fallback: str) -> str:
         else:
             name = getattr(project, "name", None)
             kind = getattr(project, "type", None)
-        if isinstance(name, str) and isinstance(kind, str) and kind.casefold() == "case":
+        if (
+            isinstance(name, str)
+            and isinstance(kind, str)
+            and kind.casefold() == "case"
+        ):
             if re.sub(r"[^A-Za-z0-9_]", "_", name) == normalized:
                 matches.append(name)
     if len(matches) == 1:
@@ -141,8 +151,12 @@ async def _loaded_project_identity(service: object, fallback: str) -> str:
 
 def _source_files(plan: MmcEnginePlan) -> dict[str, Path]:
     if plan.engine != "detailed_pwm":
-        raise _error("MMC_PLAN_INVALID", "The PWM engine requires a detailed_pwm child plan.")
-    if set(plan.source_paths) != set(_SOURCE_NAMES) or set(plan.source_hashes) != set(_SOURCE_NAMES):
+        raise _error(
+            "MMC_PLAN_INVALID", "The PWM engine requires a detailed_pwm child plan."
+        )
+    if set(plan.source_paths) != set(_SOURCE_NAMES) or set(plan.source_hashes) != set(
+        _SOURCE_NAMES
+    ):
         raise _error(
             "MMC_PLAN_INVALID",
             "The PWM plan must bind exactly one project and one sibling library.",
@@ -151,9 +165,25 @@ def _source_files(plan: MmcEnginePlan) -> dict[str, Path]:
         name: Path(plan.source_paths[name]).expanduser().resolve()
         for name in _SOURCE_NAMES
     }
-    if result["project"].suffix.casefold() != ".pscx" or result["library"].suffix.casefold() != ".pslx":
-        raise _error("MMC_PLAN_INVALID", "The PWM source pair must be PSCX and PSLX files.")
+    if (
+        result["project"].suffix.casefold() != ".pscx"
+        or result["library"].suffix.casefold() != ".pslx"
+    ):
+        raise _error(
+            "MMC_PLAN_INVALID", "The PWM source pair must be PSCX and PSLX files."
+        )
     return result
+
+
+def _copy_library_support(library: Path, stage: Path) -> Path | None:
+    """Copy the official library's compiler object tree when present."""
+
+    support = library.parent / "Obj_Files_2016_03_25"
+    if not support.is_dir():
+        return None
+    target = stage / support.name
+    shutil.copytree(support, target)
+    return target
 
 
 def _verify_sources(plan: MmcEnginePlan, sources: Mapping[str, Path]) -> None:
@@ -195,7 +225,9 @@ def _preflight_dependencies(plan: MmcEnginePlan) -> None:
             continue
         resolved_value = dependency.get("resolved_value")
         expected_hash = dependency.get("expected_sha256")
-        resolved = Path(str(resolved_value)).expanduser().resolve() if resolved_value else None
+        resolved = (
+            Path(str(resolved_value)).expanduser().resolve() if resolved_value else None
+        )
         if (
             resolved is None
             or not resolved.is_file()
@@ -224,13 +256,19 @@ def _candidate(plan: MmcEnginePlan, candidate_id: str | None) -> MmcCandidate:
     )
 
 
-def _staging_paths(plan: MmcEnginePlan, candidate: MmcCandidate) -> tuple[Path, Path, Path]:
+def _staging_paths(
+    plan: MmcEnginePlan, candidate: MmcCandidate
+) -> tuple[Path, Path, Path]:
     workspace = Path(plan.workspace).expanduser().resolve()
-    stage = (workspace / ".mmc-candidates" / plan.plan_hash / candidate.candidate_id).resolve()
+    stage = (
+        workspace / ".mmc-candidates" / plan.plan_hash / candidate.candidate_id
+    ).resolve()
     try:
         stage.relative_to(workspace)
     except ValueError as error:
-        raise _error("MMC_LAYOUT_INVALID", "The PWM staging path escapes the workspace.") from error
+        raise _error(
+            "MMC_LAYOUT_INVALID", "The PWM staging path escapes the workspace."
+        ) from error
     if stage.exists() or stage.is_symlink():
         raise _error(
             "MMC_BUILD_CONFLICT",
@@ -279,7 +317,9 @@ async def _apply_and_read_back(
     observed = await _require_method(service, "get_component_parameters")(
         project_name, component_id
     )
-    if not isinstance(observed, Mapping) or not _readback_matches(value, observed.get(parameter)):
+    if not isinstance(observed, Mapping) or not _readback_matches(
+        value, observed.get(parameter)
+    ):
         raise _error(
             "MMC_POSTCONDITION_FAILED",
             "A PWM parameter read-back differed from the immutable plan.",
@@ -374,13 +414,9 @@ async def _execute_scenarios(
     results: list[dict[str, Any]] = []
     run_method = _require_scenario_method(scenario_service, "run_scenario")
     analyze_method = _require_scenario_method(scenario_service, "analyze_results")
-    for scenario in _bound_scenarios(
-        plan, scenarios, source_project, derived_project
-    ):
+    for scenario in _bound_scenarios(plan, scenarios, source_project, derived_project):
         try:
-            started = await run_method(
-                str(source_project), scenario, confirm=True
-            )
+            started = await run_method(str(source_project), scenario, confirm=True)
             scenario_id = (
                 started.get("scenario_id") if isinstance(started, Mapping) else None
             )
@@ -412,9 +448,10 @@ async def _execute_scenarios(
                     scenario_id=scenario_id,
                 )
             analysis = await analyze_method(scenario_id)
-            if not isinstance(analysis, Mapping) or str(
-                analysis.get("verdict", "")
-            ).upper() != "PASS":
+            if (
+                not isinstance(analysis, Mapping)
+                or str(analysis.get("verdict", "")).upper() != "PASS"
+            ):
                 raise _error(
                     "MMC_ACCEPTANCE_FAILED",
                     "A completed PWM scenario lacked passing analysis evidence.",
@@ -428,9 +465,12 @@ async def _execute_scenarios(
                 )
             metrics = analysis.get("metrics")
             channels = analysis.get("resolved_channels")
-            if not isinstance(metrics, list) or not metrics or not isinstance(
-                channels, list
-            ) or not channels:
+            if (
+                not isinstance(metrics, list)
+                or not metrics
+                or not isinstance(channels, list)
+                or not channels
+            ):
                 raise _error(
                     "MMC_OUTPUT_INCOMPLETE",
                     "Passing PWM analysis lacked metric or channel evidence.",
@@ -447,9 +487,7 @@ async def _execute_scenarios(
                 }
             )
         finally:
-            _verify_scenario_source(
-                source_project, source_hash, str(scenario["name"])
-            )
+            _verify_scenario_source(source_project, source_hash, str(scenario["name"]))
     return results
 
 
@@ -473,10 +511,19 @@ class PwmTemplateEngine:
         stage.mkdir(parents=True)
         shutil.copy2(sources["project"], staged_project)
         shutil.copy2(sources["library"], staged_library)
-        if not hmac.compare_digest(_sha256(staged_project), plan.source_hashes["project"]):
-            raise _error("MMC_POSTCONDITION_FAILED", "The staged PWM project copy hash differs.")
-        if not hmac.compare_digest(_sha256(staged_library), plan.source_hashes["library"]):
-            raise _error("MMC_POSTCONDITION_FAILED", "The staged PWM library copy hash differs.")
+        staged_support = _copy_library_support(sources["library"], stage)
+        if not hmac.compare_digest(
+            _sha256(staged_project), plan.source_hashes["project"]
+        ):
+            raise _error(
+                "MMC_POSTCONDITION_FAILED", "The staged PWM project copy hash differs."
+            )
+        if not hmac.compare_digest(
+            _sha256(staged_library), plan.source_hashes["library"]
+        ):
+            raise _error(
+                "MMC_POSTCONDITION_FAILED", "The staged PWM library copy hash differs."
+            )
 
         project_name = staged_project.stem
         try:
@@ -486,7 +533,11 @@ class PwmTemplateEngine:
             project_name = await _loaded_project_identity(service, project_name)
             for dependency in plan.dependencies:
                 policy = dependency.get("repair_policy")
-                if policy == "remove_if_missing" and not dependency.get("exists", False) and dependency.get("kind") != "startup_snapshot":
+                if (
+                    policy == "remove_if_missing"
+                    and not dependency.get("exists", False)
+                    and dependency.get("kind") != "startup_snapshot"
+                ):
                     await _apply_and_read_back(
                         service,
                         project_name,
@@ -494,7 +545,10 @@ class PwmTemplateEngine:
                         str(dependency["parameter"]),
                         "",
                     )
-                elif policy == "verified_rebind" and dependency.get("kind") != "line_constants":
+                elif (
+                    policy == "verified_rebind"
+                    and dependency.get("kind") != "line_constants"
+                ):
                     await _apply_and_read_back(
                         service,
                         project_name,
@@ -521,7 +575,9 @@ class PwmTemplateEngine:
                 for key, value in requested_settings.items()
                 if key in available_settings
             }
-            await _require_method(service, "set_project_settings")(project_name, settings)
+            await _require_method(service, "set_project_settings")(
+                project_name, settings
+            )
             observed_settings = await _require_method(service, "get_project_settings")(
                 project_name
             )
@@ -563,10 +619,16 @@ class PwmTemplateEngine:
                 "candidate_path": str(stage),
                 "project_path": str(staged_project),
                 "library_path": str(staged_library),
+                **(
+                    {"library_support_path": str(staged_support)}
+                    if staged_support is not None
+                    else {}
+                ),
                 "written_paths": (
                     str(staged_project),
                     str(staged_library),
                     str(scenario_source),
+                    *((str(staged_support),) if staged_support is not None else ()),
                 ),
                 "source_hashes": dict(plan.source_hashes),
                 "project_sha256": _sha256(staged_project),
@@ -599,9 +661,7 @@ class PwmTemplateEngine:
                 "MMC_ACCEPTANCE_FAILED",
                 "The detailed PWM candidate lacks complete scenario evidence.",
             )
-        observed = [
-            item.get("name") for item in scenarios if isinstance(item, Mapping)
-        ]
+        observed = [item.get("name") for item in scenarios if isinstance(item, Mapping)]
         if observed != list(plan.scenarios) or any(
             not isinstance(item, Mapping)
             or item.get("status") != "completed"
