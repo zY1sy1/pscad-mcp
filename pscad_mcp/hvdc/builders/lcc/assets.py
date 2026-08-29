@@ -136,6 +136,17 @@ def _read_hashed_file(path: Path) -> tuple[bytes, str]:
     return payload, hashlib.sha256(payload).hexdigest()
 
 
+_TEXT_ASSET_SUFFIXES = frozenset({".json", ".md", ".pslx"})
+
+
+def _canonical_asset_payload(relative: str, payload: bytes) -> bytes:
+    """Normalize repository text assets before applying manifest hashes."""
+
+    if PurePosixPath(relative).suffix.casefold() not in _TEXT_ASSET_SUFFIXES:
+        return payload
+    return payload.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+
+
 def canonical_json(value: Any) -> bytes:
     return json.dumps(
         value,
@@ -315,7 +326,9 @@ def load_asset_set(asset_root: str | Path) -> LccAssetSet:
     files: dict[str, bytes] = {}
     for relative, expected in hashes.items():
         path = _relative_child(root, relative)
-        payload, observed = _read_hashed_file(path)
+        payload, _raw_observed = _read_hashed_file(path)
+        payload = _canonical_asset_payload(relative, payload)
+        observed = hashlib.sha256(payload).hexdigest()
         if observed != expected:
             raise _asset_error(
                 "LCC_ASSET_MISMATCH",

@@ -120,6 +120,16 @@ def test_load_asset_set_validates_hashes_before_returning_records(tmp_path):
     assert asset_set.root is None
 
 
+def test_text_asset_hashes_are_stable_across_line_endings(tmp_path):
+    root, files = _asset_root(tmp_path)
+    for relative, payload in files.items():
+        (root / relative).write_bytes(payload.replace(b"\n", b"\r\n"))
+
+    asset_set = load_asset_set(root)
+
+    assert asset_set.library_bytes == files["library/cigre_lcc_v1.pslx"]
+
+
 def test_mutated_file_is_rejected(tmp_path):
     root, _ = _asset_root(tmp_path)
     path = root / "library/cigre_lcc_v1.pslx"
