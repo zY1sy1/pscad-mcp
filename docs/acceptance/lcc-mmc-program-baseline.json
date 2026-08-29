@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
   "baseline_id": "lcc-mmc-program-wp0-2026-08-30",
-  "generated_at_utc": "2026-08-29T19:54:00Z",
+  "generated_at_utc": "2026-08-29T20:20:52.907493Z",
   "repository": {
-    "base_commit": "27a852d608c7ec6d8775b74275c99fbc0b63d0cc",
+    "base_commit": "9b12dd707d9ee07ff719d5819baa8ecb614045b6",
     "branch": "codex/lcc-mmc-wp0-baseline",
     "worktree_clean": true
   },
@@ -75,8 +75,8 @@
     {
       "source_id": "environment.wp0_program_preflight",
       "kind": "environment_preflight",
-      "path": "D:/PSCAD-Workspace/lcc-mmc-program-preflight/preflight-20260830-035235-417/program-preflight-report.json",
-      "sha256": "dabb9c492f456947f991895ca1cbc5c6be9a90e4ea0e5e3fbf1d436574977498",
+      "path": "D:/PSCAD-Workspace/lcc-mmc-program-preflight/preflight-20260830-042048-243/program-preflight-report.json",
+      "sha256": "e42c9835d2268a486ff61975e323fc315ac6b66ddd867e9d12f480d49df116d7",
       "availability": "verified_local_current_commit"
     }
   ],
