@@ -37,3 +37,16 @@ def test_factory_rejects_existing_destination_and_never_overwrites(tmp_path: Pat
         factory.plan("case")
     assert raised.value.code == "BLANK_BUILD_CONFLICT"
     assert target.read_text(encoding="ascii") == "existing"
+
+
+def test_factory_rejects_a_dangling_symlink_destination(tmp_path: Path):
+    target = tmp_path / "case.pscx"
+    try:
+        target.symlink_to(tmp_path / "missing.pscx")
+    except OSError as error:
+        pytest.skip(f"file symlinks unavailable: {error}")
+
+    with pytest.raises(BackendError) as raised:
+        BlankProjectFactory(tmp_path).plan("case")
+
+    assert raised.value.code == "BLANK_BUILD_CONFLICT"

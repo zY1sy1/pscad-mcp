@@ -6,6 +6,17 @@ All notable changes to this project are documented here.
 
 ### Changed
 
+- Blank LCC lifecycle tools now accept an audited official PSCAD 4.6 template,
+  extract its real converter definitions into a valid companion PSLX, preserve
+  numbered legacy OUT evidence, and run a waveform-backed commutation-fault
+  acceptance before publication. Missing templates fail with
+  `LCC_TEMPLATE_REQUIRED`; synthetic contract XML is never loaded as a native
+  PSCAD library.
+- Legacy OUT reading now skips PSCAD description headers and treats numbered
+  `*_NN.out` files as one dataset. MMC template audits record explicit
+  `FullCellR_n`/`FiringHBridge` topology evidence while retaining the
+  fail-closed `V_inserted` requirement for full-bridge fault acceptance.
+
 - Horizontal hardening preserves the 83-tool compatibility surface while adding
   one always-on capability discovery tool, complete tool annotations, opt-in
   tool profiles, and compatible pagination.

@@ -590,7 +590,7 @@ COMPATIBILITY_TOOL_SPECS = MappingProxyType(
             idempotent=True,
         ),
         "plan_blank_lcc_model": _spec("plan_blank_lcc_model", "Plan a blank-project LCC model build without changing the workspace.", read_only=True, idempotent=True),
-        "build_blank_lcc_model": _spec("build_blank_lcc_model", "Start a confirmed blank-project LCC model build."),
+        "build_blank_lcc_model": _spec("build_blank_lcc_model", "Start a confirmed blank-project LCC model build.", backend_support=frozenset({"legacy"}), limitation_code="LCC_BUILD_UNAVAILABLE"),
         "get_blank_lcc_build_status": _spec("get_blank_lcc_build_status", "Get blank-project LCC build status.", read_only=True, idempotent=True, backend_support=_SERVER_LOCAL),
         "validate_blank_lcc_model": _spec("validate_blank_lcc_model", "Validate a blank-project LCC model.", read_only=True, idempotent=True, backend_support=_SERVER_LOCAL),
         "build_lcc_model": _spec(
@@ -727,7 +727,7 @@ COMPATIBILITY_TOOL_SPECS = MappingProxyType(
             idempotent=True,
         ),
         "plan_blank_mmc_model": _spec("plan_blank_mmc_model", "Plan a blank-project MMC model build without changing the workspace.", read_only=True, idempotent=True),
-        "build_blank_mmc_model": _spec("build_blank_mmc_model", "Start a confirmed blank-project MMC model build."),
+        "build_blank_mmc_model": _spec("build_blank_mmc_model", "Start a confirmed blank-project MMC model build.", backend_support=frozenset({"legacy"}), limitation_code="MMC_BUILD_UNAVAILABLE"),
         "get_blank_mmc_build_status": _spec("get_blank_mmc_build_status", "Get blank-project MMC build status.", read_only=True, idempotent=True, backend_support=_SERVER_LOCAL),
         "validate_blank_mmc_model": _spec("validate_blank_mmc_model", "Validate a blank-project MMC model.", read_only=True, idempotent=True, backend_support=_SERVER_LOCAL),
         "plan_pscad_project_build": _spec(

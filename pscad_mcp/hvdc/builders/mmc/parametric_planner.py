@@ -117,6 +117,7 @@ def _engine_plan(
     asset_hashes: dict[str, str],
     source_bindings: tuple[dict[str, Any], ...],
     dependencies: tuple[dict[str, Any], ...],
+    capabilities: Mapping[str, Any] | None = None,
 ) -> MmcEnginePlan:
     if engine == "detailed_pwm":
         operations = (
@@ -130,6 +131,10 @@ def _engine_plan(
             {"kind": "execute_fixed_builder"}, {"kind": "compile"},
             {"kind": "run_scenarios"}, {"kind": "validate"},
         )
+    declared_capabilities = {
+        "intrinsic_dc_fault_blocking": False,
+        **dict(capabilities or {}),
+    }
     payload = {
         "engine": engine,
         "target_name": target_name,
@@ -144,7 +149,7 @@ def _engine_plan(
         "operations": operations,
         "settings": candidates[0].settings,
         "scenarios": STANDARD_SCENARIOS,
-        "capabilities": {"intrinsic_dc_fault_blocking": False},
+        "capabilities": declared_capabilities,
     }
     return MmcEnginePlan(
         engine=engine,
@@ -161,7 +166,7 @@ def _engine_plan(
         operations=operations,
         settings=dict(candidates[0].settings),
         scenarios=STANDARD_SCENARIOS,
-        capabilities={"intrinsic_dc_fault_blocking": False},
+        capabilities=declared_capabilities,
     )
 
 
@@ -219,10 +224,27 @@ def create_parametric_plan(
             bindings = tuple(dict(item) for item in (*audit.get("role_bindings", ()), *audit.get("writable_parameter_bindings", ())))
             dependencies = tuple(dict(item) for item in audit.get("absolute_paths", ()))
             plan_source_paths, plan_source_hashes, plan_asset_hashes = source_paths, source_hashes, {}
+            native_timing = bool(
+                isinstance(audit.get("template_native_controls"), Mapping)
+                and audit["template_native_controls"].get("available") is True
+            )
+            native_topology = audit.get("submodule_topology")
+            declared_topology = (
+                native_topology.get("declared")
+                if isinstance(native_topology, Mapping)
+                and isinstance(native_topology.get("declared"), str)
+                else "unknown"
+            )
+            capabilities = {
+                "template_native_timing": native_timing,
+                "native_schedule": False,
+                "template_submodule_topology": declared_topology,
+            }
         else:
             bindings = ()
             dependencies = ()
             plan_source_paths, plan_source_hashes, plan_asset_hashes = {}, {}, asset_hashes
+            capabilities = {}
         plans.append(
             _engine_plan(
                 engine=engine,
@@ -235,6 +257,7 @@ def create_parametric_plan(
                 asset_hashes=plan_asset_hashes,
                 source_bindings=bindings,
                 dependencies=dependencies,
+                capabilities=capabilities,
             )
         )
     parent_payload = {

@@ -47,3 +47,31 @@ def test_blank_mmc_plan_records_full_bridge_contract(tmp_path):
     assert planned["capabilities"]["intrinsic_dc_fault_blocking"] is True
     assert planned["component_contract"]["arms"] == 6
     assert planned["component_contract"]["submodules_per_arm"] == 4
+
+
+def test_blank_mmc_plan_records_native_template_capability(tmp_path, monkeypatch):
+    template = tmp_path / "template.pscx"
+    library = tmp_path / "library.pslx"
+    template.write_text("template", encoding="ascii")
+    library.write_text("library", encoding="ascii")
+    monkeypatch.setattr(
+        "pscad_mcp.hvdc.builders.mmc.template_audit.audit_mmc_template",
+        lambda *_args: {
+            "compatible": True,
+            "submodule_topology": {"declared": "full_bridge"},
+            "template_native_controls": {"available": True},
+        },
+    )
+    request = BlankMmcRequest.from_dict(
+        {
+            "project_name": "MMC_BLANK",
+            "folder": str(tmp_path),
+            "template_path": str(template),
+            "library_path": str(library),
+        }
+    )
+
+    planned = plan_blank_mmc(request, workspace_root=str(tmp_path))
+
+    assert planned["capabilities"]["template_submodule_topology"] == "full_bridge"
+    assert planned["capabilities"]["template_native_timing"] is True

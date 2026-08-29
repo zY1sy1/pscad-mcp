@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from ....core.backend.base import BackendError
 from ..common.blank import BlankProjectFactory
 from ..common.serialization import content_hash
 from .models import SubmoduleTopology
@@ -20,6 +21,8 @@ class BlankMmcRequest:
     control_profile: str = "active_reactive_dc_voltage"
     fault_profile: str = "dc_pole_to_pole_and_recovery"
     parameterization: Mapping[str, Any] = None  # type: ignore[assignment]
+    template_path: str | None = None
+    library_path: str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -48,6 +51,8 @@ class BlankMmcRequest:
                 value.get("fault_profile", "dc_pole_to_pole_and_recovery")
             ),
             parameterization=value.get("parameterization"),
+            template_path=value.get("template_path"),
+            library_path=value.get("library_path"),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -59,6 +64,8 @@ class BlankMmcRequest:
             "control_profile": self.control_profile,
             "fault_profile": self.fault_profile,
             "parameterization": dict(self.parameterization),
+            "template_path": self.template_path,
+            "library_path": self.library_path,
         }
 
 
@@ -117,6 +124,32 @@ def plan_blank_mmc(request: BlankMmcRequest, *, workspace_root: str) -> dict[str
         ],
         "capabilities": topology.capabilities(topology),
     }
+    if request.template_path or request.library_path:
+        if not request.template_path or not request.library_path:
+            raise ValueError("template_path and library_path must be supplied together")
+        from .template_audit import audit_mmc_template
+
+        audit = audit_mmc_template(request.template_path, request.library_path)
+        observed = audit.get("submodule_topology", {})
+        declared = observed.get("declared") if isinstance(observed, Mapping) else "unknown"
+        if declared not in {topology.value, "unknown"}:
+            raise BackendError(
+                "MMC_TEMPLATE_TOPOLOGY_MISMATCH",
+                "The official MMC template topology differs from the request.",
+                "hvdc",
+                "plan_blank_mmc_model",
+                {"requested": topology.value, "observed": declared},
+            )
+        payload["native_template"] = audit
+        payload["capabilities"] = {
+            **payload["capabilities"],
+            "template_submodule_topology": declared,
+            "template_native_timing": bool(
+                isinstance(audit.get("template_native_controls"), Mapping)
+                and audit["template_native_controls"].get("available") is True
+            ),
+            "native_schedule": False,
+        }
     payload["plan_hash"] = content_hash(payload)
     return payload
 

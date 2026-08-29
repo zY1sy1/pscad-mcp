@@ -1,5 +1,6 @@
 from pscad_mcp.hvdc.builders.lcc.blank import BlankLccRequest, plan_blank_lcc
 from pscad_mcp.hvdc.builders.lcc.acceptance import evaluate_commutation_fault
+from tests.test_lcc_native_template import _template
 
 
 def test_blank_lcc_request_reserves_ratings_and_operation_modes(tmp_path):
@@ -24,3 +25,18 @@ def test_lcc_commutation_fault_requires_indication_bounded_response_and_recovery
         "recovered": True,
     })
     assert result["verdict"] == "PASS"
+
+
+def test_blank_lcc_logical_plan_records_native_template_evidence(tmp_path):
+    source = _template(tmp_path / "official.pscx")
+    request = BlankLccRequest.from_dict(
+        {
+            "project_name": "LCC_BLANK",
+            "folder": str(tmp_path),
+            "template_path": str(source),
+        }
+    )
+
+    planned = plan_blank_lcc(request, workspace_root=tmp_path)
+
+    assert planned["native_template"]["source"] == str(source.resolve())

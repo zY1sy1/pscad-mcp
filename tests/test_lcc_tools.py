@@ -55,3 +55,21 @@ def test_lcc_wrappers_forward_values_through_builder_service(monkeypatch):
         ("status", ("build",)),
         ("validate", ("Project", "bp", "output.pscx")),
     ]
+
+
+def test_fixed_lcc_shutdown_closes_blank_builder_slot(monkeypatch):
+    calls = []
+
+    async def blank_shutdown(*, timeout_s):
+        calls.append(timeout_s)
+
+    monkeypatch.setattr(
+        "pscad_mcp.tools.blank_builder_tools.shutdown_blank_builder_services",
+        blank_shutdown,
+    )
+    monkeypatch.setattr(lcc_tools, "_builder_service", None)
+    monkeypatch.setattr(lcc_tools, "_builder_backend", None)
+
+    asyncio.run(lcc_tools.shutdown_lcc_builder_service(timeout_s=0.4))
+
+    assert calls == [0.4]

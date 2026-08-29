@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import hmac
+import math
 import re
 import shutil
 from collections.abc import Mapping, Sequence
@@ -25,6 +26,82 @@ _PARAMETER_BINDINGS = {
     "fref": "frequency_hz",
 }
 _TERMINAL_SCENARIO_STATES = {"completed", "failed", "timed_out"}
+
+
+def _legacy_scalar(value: Any, reference: Any) -> Any:
+    """Keep the scalar representation PSCAD returned for a setting."""
+
+    if isinstance(reference, str):
+        return str(value)
+    return value
+
+
+def _seconds_to_microseconds(value: Any, setting: str) -> int | float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise _error(
+            "MMC_PLAN_INVALID",
+            "A PWM time setting must be a finite positive number of seconds.",
+            setting=setting,
+            value=value,
+        )
+    converted = float(value) * 1_000_000.0
+    if not math.isfinite(converted) or converted <= 0:
+        raise _error(
+            "MMC_PLAN_INVALID",
+            "A PWM time setting must be a finite positive number of seconds.",
+            setting=setting,
+            value=value,
+        )
+    rounded = round(converted)
+    return int(rounded) if abs(converted - rounded) < 1e-9 else converted
+
+
+def _legacy_output_settings(
+    available: Mapping[str, Any],
+    requested: Mapping[str, Any],
+    output_stem: str,
+) -> dict[str, Any]:
+    """Translate planner settings to PSCAD 4.6.2 project settings.
+
+    PSCAD 4.x stores ``time_step`` and ``sample_step`` in microseconds and
+    only writes channel files when ``PlotType`` is enabled.  The planner uses
+    SI seconds so that the same contract can be shared with the modern
+    backend.  Unknown settings remain filtered out by the live inventory.
+    """
+
+    if not isinstance(available, Mapping):
+        raise _error(
+            "MMC_POSTCONDITION_FAILED",
+            "PSCAD returned invalid project settings before PWM execution.",
+            observed=available,
+        )
+    if not isinstance(output_stem, str) or not re.fullmatch(
+        r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", output_stem
+    ):
+        raise _error(
+            "MMC_PLAN_INVALID",
+            "The PWM output identity is not workspace-safe.",
+            output_stem=output_stem,
+        )
+    result: dict[str, Any] = {}
+    if "time_step" in available and "time_step_s" in requested:
+        value = _seconds_to_microseconds(requested["time_step_s"], "time_step_s")
+        result["time_step"] = _legacy_scalar(value, available["time_step"])
+    if "sample_step" in available and "output_step_s" in requested:
+        value = _seconds_to_microseconds(requested["output_step_s"], "output_step_s")
+        result["sample_step"] = _legacy_scalar(value, available["sample_step"])
+    if "PlotType" in available:
+        result["PlotType"] = _legacy_scalar(1, available["PlotType"])
+    if "output_filename" in available:
+        # The 4.x generator normalizes hyphens in the project identity when it
+        # creates the ``.gf42`` directory and legacy OUT basename.
+        normalized_stem = re.sub(r"[^A-Za-z0-9_]", "_", output_stem)
+        result["output_filename"] = f"{normalized_stem}.out"
+    # Preserve any planner setting that already uses the native PSCAD key.
+    for key, value in requested.items():
+        if key in available and key not in result:
+            result[key] = value
+    return result
 
 
 def _error(code: str, message: str, **details: object) -> BackendError:
@@ -180,6 +257,17 @@ def _copy_library_support(library: Path, stage: Path) -> Path | None:
 
     support = library.parent / "Obj_Files_2016_03_25"
     if not support.is_dir():
+        try:
+            referenced = "Obj_Files_2016_03_25" in library.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            referenced = False
+        if referenced:
+            raise _error(
+                "MMC_COMPILER_SUPPORT_MISSING",
+                "The audited MMC library references a missing compiler object tree.",
+                library=str(library),
+                support=str(support),
+            )
         return None
     target = stage / support.name
     shutil.copytree(support, target)
@@ -410,6 +498,8 @@ async def _execute_scenarios(
     derived_project: Path,
     scenarios: Sequence[Mapping[str, Any]] | None,
 ) -> list[dict[str, Any]]:
+    if not plan.scenarios:
+        return []
     source_hash = _sha256(source_project)
     results: list[dict[str, Any]] = []
     run_method = _require_scenario_method(scenario_service, "run_scenario")
@@ -564,17 +654,11 @@ class PwmTemplateEngine:
             available_settings = await _require_method(service, "get_project_settings")(
                 project_name
             )
-            if not isinstance(available_settings, Mapping):
-                raise _error(
-                    "MMC_POSTCONDITION_FAILED",
-                    "PSCAD returned invalid project parameters before PWM settings were applied.",
-                    observed=available_settings,
-                )
-            settings = {
-                key: value
-                for key, value in requested_settings.items()
-                if key in available_settings
-            }
+            settings = _legacy_output_settings(
+                available_settings,
+                requested_settings,
+                staged_project.stem,
+            )
             await _require_method(service, "set_project_settings")(
                 project_name, settings
             )

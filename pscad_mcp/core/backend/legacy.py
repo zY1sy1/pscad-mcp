@@ -65,6 +65,61 @@ _SavedTopologyRecord = tuple[
 ]
 
 
+def _static_output_channels(project_path: Path) -> list[dict[str, Any]]:
+    """Read the output selector contract persisted in a PSCX file.
+
+    PSCAD 4.6.2 does not expose ``ProjectCommands.output_channels``.  The
+    output block is nevertheless part of the saved PSCX contract and is safe
+    to inspect before a run.  This fallback is deliberately metadata-only: it
+    does not infer channels from component names or claim a runtime waveform.
+    """
+
+    root = ET.parse(project_path).getroot()
+    output = next(
+        (item for item in root.iter() if str(item.tag).split("}")[-1].casefold() == "output"),
+        None,
+    )
+    if output is None:
+        return []
+    result: list[dict[str, Any]] = []
+    analog = next(
+        (item for item in output if str(item.tag).split("}")[-1].casefold() == "analog"),
+        None,
+    )
+    if analog is None:
+        return []
+    for position, channel in enumerate(analog):
+        if str(channel.tag).split("}")[-1].casefold() != "channel":
+            continue
+        name = channel.get("name")
+        if not isinstance(name, str) or not name.strip():
+            continue
+        raw_index = channel.get("index")
+        try:
+            call_id: int | None = int(raw_index) if raw_index is not None else position
+        except (TypeError, ValueError):
+            call_id = position
+        group = channel.get("group") or "Main"
+        record: dict[str, Any] = {
+            "path": f"{group}/{name}",
+            "call_id": call_id,
+            "units": channel.get("unit", ""),
+            "description": name,
+        }
+        for source, target in (("dim", "dimension"), ("min", "min"), ("max", "max")):
+            value = channel.get(source)
+            if value is None:
+                continue
+            try:
+                record[target] = int(value) if source == "dim" else float(value)
+            except (TypeError, ValueError):
+                # Preserve the selector even when optional display metadata is
+                # malformed; runtime result parsing will validate samples.
+                continue
+        result.append(record)
+    return result
+
+
 class LegacyBackend:
     name = "legacy"
     _canvas_grid = 18
@@ -1468,15 +1523,36 @@ class LegacyBackend:
     async def get_output_channels(self, project_name: str) -> list[dict[str, Any]]:
         project = await self._project(project_name)
         provider = getattr(project, "output_channels", None)
-        if not callable(provider):
-            raise BackendError(
-                "CAPABILITY_UNAVAILABLE",
-                "Legacy PSCAD does not expose verified output-channel metadata.",
-                self.name,
-                "get_output_channels",
-                {"project_name": project_name, "backend_version": self.version},
-            )
-        values = await self.executor.run_safe(provider)
+        if callable(provider):
+            values = await self.executor.run_safe(provider)
+        else:
+            source = self.definition_paths.get(project_name)
+            if source is None or not source.is_file() or source.is_symlink():
+                raise BackendError(
+                    "CAPABILITY_UNAVAILABLE",
+                    "Legacy PSCAD does not expose verified output-channel metadata.",
+                    self.name,
+                    "get_output_channels",
+                    {"project_name": project_name, "backend_version": self.version},
+                )
+            try:
+                values = await asyncio.to_thread(_static_output_channels, source)
+            except (OSError, ET.ParseError) as error:
+                raise BackendError(
+                    "CAPABILITY_UNAVAILABLE",
+                    "The saved PSCX output-channel metadata could not be read.",
+                    self.name,
+                    "get_output_channels",
+                    {"project_name": project_name, "path": str(source)},
+                ) from error
+            if not values:
+                raise BackendError(
+                    "CAPABILITY_UNAVAILABLE",
+                    "The saved PSCX project declares no output channels.",
+                    self.name,
+                    "get_output_channels",
+                    {"project_name": project_name, "path": str(source)},
+                )
         if isinstance(values, MappingABC):
             values = values.get("channels", values.get("output_channels", []))
         if not isinstance(values, (list, tuple)):

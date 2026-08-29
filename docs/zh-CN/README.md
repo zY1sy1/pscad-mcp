@@ -115,6 +115,23 @@ PSCAD 5.x、故障或换相失败验收、MMC 构建均不可用。
 当前实现的 PSCAD 4.6.2 授权验收尚未通过；在 opt-in 实机验收
 通过前，不得把该功能描述为已自治构建并验收的 CIGRE LCC 模型。
 
+### Blank LCC 与官方工程
+
+`plan_blank_lcc_model`/`build_blank_lcc_model` 需要一个真实的 PSCAD 4.6
+官方 LCC 工程路径：在请求中传 `template_path`，或设置
+`PSCAD_MCP_LCC_TEMPLATE`。工具只读审计并记录源文件 SHA-256，然后在工作区
+派生副本中运行。`source3`、`xfmr-3p2w`、`g6p200`、`inductor` 等通用器件仍
+从安装的 Master Library 解析；Master 中没有的 `Rectifier`、`Inverter`、
+`InvCtl` 等换流器定义，会从官方工程提取为可被 PSCAD 加载的
+`cigre_lcc_v1.pslx` companion library。这里的 companion 是“缺失定义的真实
+封装库副本”，不是把 catalog 中的逻辑 XML 冒充成 Master 元件，也不会改写
+官方源工程。
+
+PSCAD 4.x 会把一个运行结果拆成 `*_01.out`、`*_02.out` 等文件；构建器会把
+这些分片及 `.inf` 元数据保存到 `<工程名>.outputs`，因此之后可以用
+`validate_blank_lcc_model` 复读同一份证据。未提供官方模板时工具返回
+`LCC_TEMPLATE_REQUIRED`，不会伪造可编译的 companion。
+
 ### 参数化双引擎 MMC
 
 MMC 领域新增七个工具：`audit_mmc_template`、`derive_mmc_parameters`、
@@ -132,6 +149,15 @@ template（官方模板只读），默认使用 `H_MMC_Mono_DC.pscx` 和 `interm
 `inspected`、`designed`、`planned`、`built`、`simulated`、`accepted` 分开记录。
 发布工程带有 `_scenario_source.pscx` 和 `derived_project`；无授权证据时保留
 `NOT_RUN_ON_INTEGRATED_COMMIT`，不能提前声明 accepted。
+
+模板审计还会记录原生子模块证据：同时出现 `FullCellR_n` 与
+`FiringHBridge` 时声明 `template_submodule_topology=full_bridge`，半桥定义则声明
+`half_bridge`。这只是结构能力证据；如果输出没有显式 `V_inserted` 通道，直流
+故障验收仍是 `INCOMPLETE_ANALYSIS`，半桥永远不会复用全桥的阻断结论。
+
+`plan_blank_mmc_model` 可直接审计同一对官方 PSCX/PSLX 源文件，并记录编译对象树
+哈希。原生故障运行会保留派生场景和输出证据；官方模板缺少 `V_inserted` 时返回
+`MMC_ACCEPTANCE_INCOMPLETE`，而不是把半桥或不完整通道推断成全桥 `PASS`。
 
 ### 通用 PSCAD Blueprint Builder
 
@@ -198,6 +224,7 @@ PSCAD 4.6.x 还需要安装与许可证配套的官方 Automation Library wheel�
 | `PSCAD_MCP_LEGACY_MINIMIZE` | `false` | `false` 默认显示受管窗口；`true` 显式最小化 |
 | `PSCAD_MCP_LEGACY_EXISTING_POLICY` | `reject` | `reject` 拒绝已有外部 PSCAD；`allow` 只允许另启受管实例，并不接管外部 GUI |
 | `PSCAD_MCP_WORKSPACE` | `D:\PSCAD-Workspace` | 限制工程、保存和结果文件的可访问根目录 |
+| `PSCAD_MCP_LCC_TEMPLATE` | `C:\Users\335\Downloads\Cigre_LCC_Bidirectional.pscx` | blank LCC 使用的官方 PSCAD 4.6 源工程（只读） |
 | `PSCAD_MCP_ALLOW_UNSCOPED_PATHS` | `false` | 仅受控开发环境允许未配置工作区时访问路径 |
 | `PSCAD_MCP_LEARNING_ENABLED` | `true` | 默认启用本地标量元数据学习；接受 `1/true/yes/on` 和 `0/false/no/off` |
 | `PSCAD_MCP_LEARNING_DB` | 可选绝对路径 | 覆盖本地 SQLite 路径，不记录工具参数或结果 |
@@ -215,6 +242,7 @@ $env:PSCAD_MCP_LAUNCH_TIMEOUT = "30"
 $env:PSCAD_MCP_LEGACY_MINIMIZE = "false"
 $env:PSCAD_MCP_LEGACY_EXISTING_POLICY = "reject"
 $env:PSCAD_MCP_WORKSPACE = "D:\PSCAD-Workspace"
+$env:PSCAD_MCP_LCC_TEMPLATE = "C:\Users\335\Downloads\Cigre_LCC_Bidirectional.pscx"
 $env:PSCAD_MCP_ALLOW_UNSCOPED_PATHS = "false"
 $env:PSCAD_MCP_LEARNING_ENABLED = "true"
 $env:PSCAD_MCP_LEARNING_RETENTION_DAYS = "90"

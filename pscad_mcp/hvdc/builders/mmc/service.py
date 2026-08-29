@@ -13,6 +13,7 @@ from typing import Any, Callable
 from ....core.backend.base import BackendError
 from ....core.path_policy import PathPolicy, WorkspaceNotConfiguredError
 from ....core.service import ConfirmationRequired
+from ....runtime import PendingCleanupError
 from .acceptance import evaluate_acceptance
 from .assets import load_packaged_asset_set, sha256_file
 from .catalog import MmcCatalog, parse_catalog
@@ -170,6 +171,32 @@ class MmcBuilderService:
         except BaseException:
             pass
         self._tasks.pop(build_id, None)
+
+    async def shutdown(self, timeout_s: float = 5.0) -> None:
+        """Cancel active fixed MMC builds and release their workspace leases."""
+
+        self._closing = True
+        tasks = tuple(task for task in self._tasks.values() if not task.done())
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            done, pending = await asyncio.wait(tasks, timeout=max(0.0, timeout_s))
+            if pending:
+                raise PendingCleanupError(tuple(pending))
+            for task in done:
+                try:
+                    task.result()
+                except BaseException:  # noqa: BLE001 - consume terminal cancellation
+                    pass
+        for build_id, lease in tuple(self._leases.items()):
+            record = self._records.get(build_id)
+            try:
+                if record is not None:
+                    payload = record.to_dict() if isinstance(record, MmcBuildRecord) else dict(record)
+                    AtomicJournal(self.workspace_root, build_id).write(payload)
+            finally:
+                lease.release(lease.token)
+                self._leases.pop(build_id, None)
 
     def _journal_path(self, build_id: str) -> Path:
         return AtomicJournal(self.workspace_root, build_id).path

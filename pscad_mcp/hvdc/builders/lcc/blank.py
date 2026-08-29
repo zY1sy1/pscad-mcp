@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from ....core.backend.base import BackendError
 from ..common.blank import BlankProjectFactory
 from ..common.serialization import content_hash
 
@@ -18,6 +19,7 @@ class BlankLccRequest:
     ratings: Mapping[str, Any] = None  # type: ignore[assignment]
     operation_modes: tuple[str, ...] = ()
     parameterization: Mapping[str, Any] = None  # type: ignore[assignment]
+    template_path: str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -37,6 +39,7 @@ class BlankLccRequest:
         return cls(
             project_name=str(value.get("project_name", "")),
             folder=value.get("folder"),
+            template_path=value.get("template_path"),
             topology=str(value.get("topology", "single_pole_12_pulse")),
             ratings=value.get("ratings"),
             operation_modes=tuple(value.get("operation_modes", ())),
@@ -47,6 +50,7 @@ class BlankLccRequest:
         return {
             "project_name": self.project_name,
             "folder": self.folder,
+            "template_path": self.template_path,
             "topology": self.topology,
             "ratings": dict(self.ratings),
             "operation_modes": list(self.operation_modes),
@@ -100,6 +104,19 @@ def plan_blank_lcc(
         if isinstance(inventory, Mapping)
         else None,
     }
+    if request.template_path:
+        from .native_template import audit_native_lcc_template
+
+        audit = audit_native_lcc_template(request.template_path)
+        if not audit.compatible:
+            raise BackendError(
+                "LCC_TEMPLATE_INCOMPATIBLE",
+                "The supplied native LCC template failed its audit.",
+                "hvdc",
+                "plan_blank_lcc_model",
+                {"errors": list(audit.errors)},
+            )
+        payload["native_template"] = audit.to_dict()
     payload["plan_hash"] = content_hash(payload)
     return payload
 

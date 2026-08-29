@@ -114,6 +114,15 @@ class BlankProjectFactory:
                 if folder is None
                 else self.path_policy.resolve(folder)
             )
+            raw_target = Path(parent) / filename
+            if raw_target.is_symlink():
+                raise BackendError(
+                    "BLANK_BUILD_CONFLICT",
+                    "The blank-project destination already exists.",
+                    "hvdc",
+                    "plan_blank_project",
+                    {"target_path": str(raw_target)},
+                )
             target = self.path_policy.resolve_child(
                 str(parent), filename, suffixes={".pscx"}
             )

@@ -188,6 +188,25 @@ Licensed acceptance has not passed for the PSCAD 4.6.2 implementation branch,
 so the feature must not be described as an autonomously constructed
 accepted CIGRE LCC model until the opt-in real acceptance test passes.
 
+### Blank LCC template path
+
+`plan_blank_lcc_model` and `build_blank_lcc_model` use a real PSCAD 4.6
+example when `template_path` is supplied (or when
+`PSCAD_MCP_LCC_TEMPLATE` is set). The source is audited and hashed, then copied
+to a new workspace staging directory. The builder extracts the official
+`Rectifier`, `Inverter`, `InvCtl`, and related definitions into a valid
+`cigre_lcc_v1.pslx` companion library; generic elements such as `source3`,
+`xfmr-3p2w`, `g6p200`, and `inductor` remain resolved from the installed Master
+Library. The source example is never modified. Builds retain numbered legacy
+OUT parts and their `.inf` metadata under `<project>.outputs` so a later
+`validate_blank_lcc_model` call can reread the same evidence.
+
+The converter-specific definitions are not present in the Master Library, so a
+blank LCC request without an official template fails with `LCC_TEMPLATE_REQUIRED`
+rather than loading a logical contract XML as if it were a PSCAD-instantiable
+library. The companion is an extracted, workspace-local copy, not a replacement
+for the vendor Master Library.
+
 ### Parametric dual-engine MMC
 
 The MMC layer adds exactly seven tools: `audit_mmc_template`,
@@ -212,6 +231,20 @@ scenario can be passed unchanged to `run_hvdc_scenario`. Structural states
 `inspected`, `designed`, `planned`, `built`, `simulated`, and `accepted` are
 distinct, and `NOT_RUN_ON_INTEGRATED_COMMIT` remains explicit until licensed
 evidence exists.
+
+The template audit records explicit native cell evidence. Official 4.6 examples
+that contain `FullCellR_n` with `FiringHBridge` are reported as
+`template_submodule_topology=full_bridge`; examples using half-cell controls
+report `half_bridge`. This declaration does not create a missing waveform
+channel: native DC-fault acceptance remains `INCOMPLETE_ANALYSIS` until an
+explicit `V_inserted` trace is present, and half-bridge projects never reuse the
+full-bridge blocking verdict.
+
+`plan_blank_mmc_model` can use the same official project/library pair and records
+the detected topology and compiler-object hashes. Its native fault runner keeps
+the derived scenario and output evidence when the template lacks an explicit
+`V_inserted` trace, returning `MMC_ACCEPTANCE_INCOMPLETE`; this is an intentional
+evidence boundary, not a half-bridge-to-full-bridge inference.
 
 ### Generic PSCAD Blueprint Builder
 

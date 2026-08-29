@@ -207,6 +207,8 @@ def test_project_settings_metadata_accounts_for_parameter_grid_mutation():
         ("get_lcc_build_status", "open_world", True),
         ("validate_lcc_model", "backend_support", frozenset()),
         ("plan_parametric_lcc_model", "backend_support", frozenset()),
+        ("build_blank_lcc_model", "backend_support", frozenset({"legacy"})),
+        ("build_blank_mmc_model", "backend_support", frozenset({"legacy"})),
     ],
 )
 def test_capability_metadata_matches_verified_execution_boundaries(
