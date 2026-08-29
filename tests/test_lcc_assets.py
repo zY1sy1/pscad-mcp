@@ -64,9 +64,42 @@ def _blueprint():
 
 def _write_asset_files(root: Path) -> dict[str, bytes]:
     library = b"<pslx><definition name='cigre_lcc_v1:LCC12PulseBridge'/></pslx>"
+    registry = {
+        "schema_version": 1,
+        "name": "test_master_bindings_v1",
+        "pscad_version": "4.6.2",
+        "bindings": [
+            {
+                "logical_name": "master:test",
+                "physical_definition": "resistor",
+                "shape": {"kind": "direct"},
+                "ports": [
+                    {
+                        "logical": "IN",
+                        "physical": "A",
+                        "kind": "electrical",
+                        "dimension": 1,
+                        "occurrence": 0,
+                    }
+                ],
+                "parameters": [],
+                "fixed_parameters": [],
+                "evidence_parameters": [],
+            }
+        ],
+    }
     files = {
         "blueprint.json": json.dumps(_blueprint(), sort_keys=True).encode("utf-8"),
-        "catalog-pscad-4.6.2.json": b'{"name":"catalog"}',
+        "catalog-pscad-4.6.2.json": json.dumps(
+            {
+                "name": "catalog",
+                "master_binding_registry": "master-bindings-pscad-4.6.2.json",
+            },
+            sort_keys=True,
+        ).encode("utf-8"),
+        "master-bindings-pscad-4.6.2.json": json.dumps(
+            registry, sort_keys=True
+        ).encode("utf-8"),
         "acceptance.json": b'{"checks":[]}',
         "golden.json": b'{"channels":{}}',
         "PROVENANCE.md": b"public source\n",
@@ -118,6 +151,33 @@ def test_load_asset_set_validates_hashes_before_returning_records(tmp_path):
     assert asset_set.hashes["library/cigre_lcc_v1.pslx"] == sha256_file(library)
     assert asset_set.library_bytes == files["library/cigre_lcc_v1.pslx"]
     assert asset_set.root is None
+
+
+def test_load_asset_set_exposes_manifest_hashed_master_registry(tmp_path):
+    root, _ = _asset_root(tmp_path)
+
+    asset_set = load_asset_set(root)
+
+    assert asset_set.master_bindings.schema_version == 1
+    assert asset_set.master_bindings.pscad_version == "4.6.2"
+    assert (
+        asset_set.master_binding_hash
+        == asset_set.hashes["master-bindings-pscad-4.6.2.json"]
+    )
+
+
+def test_catalog_registry_reference_mismatch_is_rejected(tmp_path):
+    root, files = _asset_root(tmp_path)
+    files["catalog-pscad-4.6.2.json"] = json.dumps(
+        {"name": "catalog", "master_binding_registry": "wrong.json"},
+        sort_keys=True,
+    ).encode("utf-8")
+    (root / "catalog-pscad-4.6.2.json").write_bytes(
+        files["catalog-pscad-4.6.2.json"]
+    )
+    _write_manifest(root, files)
+
+    _assert_error(lambda: load_asset_set(root), "LCC_ASSET_MISMATCH")
 
 
 def test_text_asset_hashes_are_stable_across_line_endings(tmp_path):

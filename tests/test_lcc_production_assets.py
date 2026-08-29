@@ -10,7 +10,6 @@ import pytest
 from pscad_mcp.hvdc.builders.lcc.assets import load_asset_set
 from pscad_mcp.hvdc.builders.lcc.validator import validate_companion_library
 
-
 ASSET_ROOT = Path(__file__).parents[1] / "pscad_mcp" / "assets" / "lcc" / "cigre_lcc_monopole_v1"
 
 
@@ -31,7 +30,11 @@ def test_production_asset_set_has_fixed_identity_and_complete_contract():
     assert len(asset_set.golden["channels"]) == 11
     assert set(asset_set.hashes) == {
         "PROVENANCE.md", "acceptance.json", "blueprint.json", "catalog-pscad-4.6.2.json", "golden.json", "library/cigre_lcc_v1.pslx",
+        "master-bindings-pscad-4.6.2.json",
     }
+    assert asset_set.master_bindings is not None
+    assert len(asset_set.master_bindings.bindings) == 8
+    assert asset_set.master_binding_hash == asset_set.hashes["master-bindings-pscad-4.6.2.json"]
     assert "Szechtman" in asset_set.provenance
     assert validate_companion_library(ASSET_ROOT / asset_set.companion_library)["valid"] is True
 

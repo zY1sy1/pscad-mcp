@@ -13,9 +13,12 @@ from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
 
 from ....core.backend.base import BackendError
+from ....core.master_bindings import (
+    MasterBindingRegistry,
+    parse_master_binding_registry,
+)
 from .models import LccBlueprint
 from .schema import parse_blueprint
-
 
 _SUPPORTED_NAME = "cigre_lcc_monopole_v1"
 _SUPPORTED_PSCAD_VERSION = "4.6.2"
@@ -86,6 +89,8 @@ class LccAssetSet:
     library_bytes: bytes
     files: dict[str, bytes]
     root: None = None
+    master_bindings: MasterBindingRegistry | None = None
+    master_binding_hash: str | None = None
 
 
 def _asset_error(code: str, message: str, operation: str, **details: Any) -> BackendError:
@@ -346,6 +351,7 @@ def load_asset_set(asset_root: str | Path) -> LccAssetSet:
         "acceptance.json",
         "golden.json",
         "PROVENANCE.md",
+        "master-bindings-pscad-4.6.2.json",
         companion_library,
     }
     missing_required = sorted(required - set(files))
@@ -374,19 +380,50 @@ def load_asset_set(asset_root: str | Path) -> LccAssetSet:
             manifest_name=name,
             blueprint_name=blueprint.name,
         )
+    catalog = _json_record(files, "catalog-pscad-4.6.2.json")
+    registry_asset = catalog.get("master_binding_registry")
+    if registry_asset != "master-bindings-pscad-4.6.2.json":
+        raise _asset_error(
+            "LCC_ASSET_MISMATCH",
+            "The LCC catalog does not reference the verified Master binding registry.",
+            "load_lcc_asset_set",
+            expected="master-bindings-pscad-4.6.2.json",
+            observed=registry_asset,
+        )
+    try:
+        master_bindings = parse_master_binding_registry(
+            _json_record(files, registry_asset)
+        )
+    except BackendError as error:
+        raise _asset_error(
+            "LCC_ASSET_MISMATCH",
+            "The packaged Master binding registry is invalid.",
+            "load_lcc_asset_set",
+            registry_error=error.to_dict(),
+        ) from error
+    if master_bindings.pscad_version != pscad_version:
+        raise _asset_error(
+            "LCC_ASSET_MISMATCH",
+            "The Master binding registry PSCAD version does not match the asset set.",
+            "load_lcc_asset_set",
+            asset_version=pscad_version,
+            registry_version=master_bindings.pscad_version,
+        )
     return LccAssetSet(
         name=name,
         schema_version=schema_version,
         pscad_version=pscad_version,
         companion_library=companion_library,
         blueprint=blueprint,
-        catalog=_json_record(files, "catalog-pscad-4.6.2.json"),
+        catalog=catalog,
         acceptance=_json_record(files, "acceptance.json"),
         golden=_json_record(files, "golden.json"),
         provenance=provenance,
         hashes=dict(hashes),
         library_bytes=bytes(files[companion_library]),
         files=dict(files),
+        master_bindings=master_bindings,
+        master_binding_hash=hashes[registry_asset],
     )
 
 
