@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
+import stat
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -15,9 +17,11 @@ from .baseline import (
     LICENSED_STATUSES,
     PROGRAM_SCOPES,
     SCOPE_BUILDER_PATHS,
+    is_utc_timestamp,
 )
 
 _COMMIT = re.compile(r"^[0-9a-f]{40}$")
+_MAX_REPORT_BYTES = 16 * 1024 * 1024
 
 
 def _error(reason: str, message: str, **details: Any) -> BackendError:
@@ -30,12 +34,101 @@ def _error(reason: str, message: str, **details: Any) -> BackendError:
     )
 
 
-def _sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        for block in iter(lambda: stream.read(1024 * 1024), b""):
-            digest.update(block)
-    return digest.hexdigest()
+def _identity(value: os.stat_result) -> tuple[int, int, int, int]:
+    return (
+        int(value.st_dev),
+        int(value.st_ino),
+        int(value.st_size),
+        int(value.st_mtime_ns),
+    )
+
+
+def _is_reparse_point(value: os.stat_result) -> bool:
+    attributes = int(getattr(value, "st_file_attributes", 0))
+    marker = int(getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400))
+    return stat.S_ISLNK(value.st_mode) or bool(attributes & marker)
+
+
+def _read_regular_report(path: Path) -> tuple[Path, bytes, tuple[int, int, int, int]]:
+    absolute = Path(os.path.abspath(path))
+    for component in [*reversed(absolute.parents), absolute]:
+        try:
+            component_stat = os.lstat(component)
+        except OSError as error:
+            raise _error(
+                "not_regular_file",
+                "Evidence path must be a regular file.",
+                path=str(absolute),
+            ) from error
+        if _is_reparse_point(component_stat):
+            raise _error(
+                "reparse_path_component",
+                "Evidence path cannot contain symlink or reparse components.",
+                path=str(absolute),
+                component=str(component),
+            )
+    try:
+        with absolute.open("rb") as stream:
+            opened_stat = os.fstat(stream.fileno())
+            if not stat.S_ISREG(opened_stat.st_mode):
+                raise _error(
+                    "not_regular_file",
+                    "Evidence path must be a regular file.",
+                    path=str(absolute),
+                )
+            raw = stream.read(_MAX_REPORT_BYTES + 1)
+    except BackendError:
+        raise
+    except OSError as error:
+        raise _error(
+            "not_regular_file",
+            "Evidence path must be a readable regular file.",
+            path=str(absolute),
+        ) from error
+    if len(raw) > _MAX_REPORT_BYTES:
+        raise _error(
+            "report_too_large",
+            "Evidence report exceeds the bounded size limit.",
+            path=str(absolute),
+            max_bytes=_MAX_REPORT_BYTES,
+        )
+    return absolute.resolve(strict=True), raw, _identity(opened_stat)
+
+
+def _require_unchanged(
+    path: Path,
+    identity: tuple[int, int, int, int],
+    expected: bytes,
+) -> None:
+    try:
+        current = os.stat(path, follow_symlinks=False)
+    except OSError as error:
+        raise _error(
+            "evidence_changed",
+            "Evidence path changed while it was being indexed.",
+            path=str(path),
+        ) from error
+    if _is_reparse_point(current) or _identity(current) != identity:
+        raise _error(
+            "evidence_changed",
+            "Evidence path changed while it was being indexed.",
+            path=str(path),
+        )
+    try:
+        with path.open("rb") as stream:
+            observed = stream.read(_MAX_REPORT_BYTES + 1)
+    except OSError as error:
+        raise _error(
+            "evidence_changed",
+            "Evidence path changed while it was being indexed.",
+            path=str(path),
+        ) from error
+    if observed != expected:
+        raise _error(
+            "evidence_changed",
+            "Evidence path changed while it was being indexed.",
+            path=str(path),
+        )
 
 
 def _kind_matches_state(kind: str, state: str) -> bool:
@@ -83,6 +176,11 @@ def build_run_metadata(
             "invalid_durable_commit",
             "Run metadata requires a full commit.",
         )
+    if not is_utc_timestamp(generated_at_utc):
+        raise _error(
+            "invalid_timestamp",
+            "Run metadata requires a UTC RFC3339 timestamp.",
+        )
     if capability_state not in CAPABILITY_STATES:
         raise _error(
             "unknown_state",
@@ -128,21 +226,16 @@ def index_explicit_reports(
                 index=index,
             )
         path = Path(str(descriptor["path"])).expanduser()
-        if path.is_symlink() or not path.is_file():
-            raise _error(
-                "not_regular_file",
-                "Evidence path must be a regular file.",
-                path=str(path),
-            )
-        resolved = path.resolve()
+        resolved, raw, opened_identity = _read_regular_report(path)
         try:
-            payload = json.loads(resolved.read_text(encoding="utf-8"))
+            payload = json.loads(raw.decode("utf-8"))
         except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
             raise _error(
                 "invalid_json",
                 "Evidence report must be UTF-8 JSON.",
                 path=str(resolved),
             ) from error
+        _require_unchanged(resolved, opened_identity, raw)
         if not isinstance(payload, Mapping):
             raise _error(
                 "not_object",
@@ -195,6 +288,12 @@ def index_explicit_reports(
                 path=str(resolved),
             )
         generated_at_utc = _owned_text(payload, "generated_at_utc", resolved)
+        if not is_utc_timestamp(generated_at_utc):
+            raise _error(
+                "invalid_timestamp",
+                "Evidence report timestamp must be UTC RFC3339.",
+                path=str(resolved),
+            )
         status = payload.get("status")
         if status not in LICENSED_STATUSES:
             raise _error(
@@ -229,7 +328,7 @@ def index_explicit_reports(
                 "commit": report_commit,
                 "generated_at_utc": generated_at_utc,
                 "path": resolved.as_posix(),
-                "sha256": _sha256(resolved),
+                "sha256": hashlib.sha256(raw).hexdigest(),
                 "availability": "verified_local",
             }
         )

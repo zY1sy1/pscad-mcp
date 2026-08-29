@@ -74,6 +74,26 @@ def valid_baseline() -> dict[str, object]:
     }
 
 
+def write_transition_report(tmp_path: Path, **overrides: object) -> Path:
+    report = copy.deepcopy(valid_baseline()["reports"][0])
+    payload = {
+        key: value
+        for key, value in report.items()
+        if key not in {"path", "sha256", "availability"}
+    }
+    payload.update(
+        {
+            "schema_version": 1,
+            "run_id": "transition-run",
+            "generated_at_utc": "2026-08-30T00:00:00Z",
+            **overrides,
+        }
+    )
+    path = tmp_path / f"{payload['run_id']}.json"
+    path.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
+    return path
+
+
 def subject():
     from pscad_mcp.acceptance.baseline import validate_program_baseline
 
@@ -144,6 +164,23 @@ def test_compile_report_cannot_claim_accepted_capability():
     assert failure.value.details["reason"] == "kind_state_mismatch"
 
 
+@pytest.mark.parametrize(
+    "field",
+    ["baseline", "report"],
+)
+def test_generated_timestamps_must_be_utc_rfc3339(field):
+    payload = valid_baseline()
+    if field == "baseline":
+        payload["generated_at_utc"] = "yesterday"
+    else:
+        payload["reports"][0]["generated_at_utc"] = "2026-08-30 00:00:00"
+
+    with pytest.raises(BackendError) as failure:
+        subject()(payload)
+
+    assert failure.value.details["reason"] == "invalid_timestamp"
+
+
 def test_duplicate_scope_and_run_id_are_rejected():
     payload = valid_baseline()
     payload["reports"].append(copy.deepcopy(payload["reports"][0]))
@@ -160,12 +197,13 @@ def transition_subject():
     return apply_scope_report
 
 
-def test_report_updates_only_its_owned_scope():
+def test_report_updates_only_its_owned_scope(tmp_path):
     baseline = valid_baseline()
-    report = copy.deepcopy(baseline["reports"][0])
-    report["run_id"] = "master-binding-20260830-new"
-    report["sha256"] = "3" * 64
-    report["status"] = "INCOMPLETE_ANALYSIS"
+    report = write_transition_report(
+        tmp_path,
+        run_id="master-binding-20260830-new",
+        status="INCOMPLETE_ANALYSIS",
+    )
 
     updated = transition_subject()(
         baseline,
@@ -177,26 +215,34 @@ def test_report_updates_only_its_owned_scope():
     assert baseline["scopes"][0]["licensed_status"] == "PASS"
 
 
-def test_cross_scope_or_wrong_owner_transition_is_rejected():
+def test_cross_scope_or_wrong_owner_transition_is_rejected(tmp_path):
     baseline = valid_baseline()
-    report = copy.deepcopy(baseline["reports"][0])
-    report["scope"] = "mmc.parametric"
+    cross_scope = write_transition_report(
+        tmp_path,
+        run_id="cross-scope",
+        scope="mmc.parametric",
+        builder_path="mmc.parametric_orchestrator",
+    )
 
     with pytest.raises(BackendError) as failure:
-        transition_subject()(baseline, report, owner_work_package="WP1")
+        transition_subject()(baseline, cross_scope, owner_work_package="WP1")
 
     assert failure.value.code == "PROGRAM_SCOPE_CONFLICT"
 
+    wrong_owner = write_transition_report(tmp_path, run_id="wrong-owner")
     with pytest.raises(BackendError) as failure:
-        transition_subject()(baseline, baseline["reports"][0], owner_work_package="WP2")
+        transition_subject()(baseline, wrong_owner, owner_work_package="WP2")
 
     assert failure.value.details["reason"] == "scope_owner_mismatch"
 
 
-def test_cross_builder_transition_is_rejected():
+def test_cross_builder_transition_is_rejected(tmp_path):
     baseline = valid_baseline()
-    report = copy.deepcopy(baseline["reports"][0])
-    report["builder_path"] = "lcc.parametric"
+    report = write_transition_report(
+        tmp_path,
+        run_id="cross-builder",
+        builder_path="lcc.parametric",
+    )
 
     with pytest.raises(BackendError) as failure:
         transition_subject()(baseline, report, owner_work_package="WP1")
@@ -204,10 +250,13 @@ def test_cross_builder_transition_is_rejected():
     assert failure.value.details["reason"] == "builder_path_mismatch"
 
 
-def test_historical_commit_never_updates_current_scope():
+def test_historical_commit_never_updates_current_scope(tmp_path):
     baseline = valid_baseline()
-    report = copy.deepcopy(baseline["reports"][0])
-    report["commit"] = "f" * 40
+    report = write_transition_report(
+        tmp_path,
+        run_id="historical-commit",
+        commit="f" * 40,
+    )
 
     with pytest.raises(BackendError) as failure:
         transition_subject()(baseline, report, owner_work_package="WP1")
@@ -215,10 +264,12 @@ def test_historical_commit_never_updates_current_scope():
     assert failure.value.details["reason"] == "historical_commit"
 
 
-def test_run_id_cannot_be_reused_with_different_evidence():
+def test_run_id_cannot_be_reused_with_different_evidence(tmp_path):
     baseline = valid_baseline()
-    report = copy.deepcopy(baseline["reports"][0])
-    report["sha256"] = "f" * 64
+    report = write_transition_report(
+        tmp_path,
+        run_id="master-binding-20260829-173320-618412",
+    )
 
     with pytest.raises(BackendError) as failure:
         transition_subject()(baseline, report, owner_work_package="WP1")
@@ -226,11 +277,9 @@ def test_run_id_cannot_be_reused_with_different_evidence():
     assert failure.value.details["reason"] == "run_id_reuse"
 
 
-def test_compile_pass_does_not_promote_scope_to_accepted():
+def test_compile_pass_does_not_promote_scope_to_accepted(tmp_path):
     baseline = valid_baseline()
-    report = copy.deepcopy(baseline["reports"][0])
-    report["run_id"] = "compile-run-2"
-    report["sha256"] = "4" * 64
+    report = write_transition_report(tmp_path, run_id="compile-run-2")
 
     updated = transition_subject()(
         baseline,
@@ -240,6 +289,17 @@ def test_compile_pass_does_not_promote_scope_to_accepted():
 
     assert updated["scopes"][0]["licensed_status"] == "PASS"
     assert updated["scopes"][0]["capability_state"] == "compiled"
+
+
+def test_transition_rejects_unindexed_fabricated_report(tmp_path):
+    baseline = valid_baseline()
+    report = tmp_path / "does-not-exist.json"
+
+    with pytest.raises(BackendError) as failure:
+        transition_subject()(baseline, report, owner_work_package="WP1")
+
+    assert failure.value.code == "PROGRAM_EVIDENCE_INVALID"
+    assert failure.value.details["reason"] == "not_regular_file"
 
 
 def test_checked_in_program_baseline_is_valid_and_scoped():

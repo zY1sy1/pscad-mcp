@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -157,3 +158,62 @@ def test_shared_run_metadata_rejects_kind_state_mismatch():
         )
 
     assert failure.value.details["reason"] == "kind_state_mismatch"
+
+
+def test_shared_run_metadata_rejects_non_utc_timestamp():
+    from pscad_mcp.acceptance.evidence import build_run_metadata
+
+    with pytest.raises(BackendError) as failure:
+        build_run_metadata(
+            run_id="run-4",
+            scope="lcc.master_bindings",
+            kind="licensed_compile",
+            capability_state="compiled",
+            commit=COMMIT,
+            generated_at_utc="2026-08-30T08:00:00+08:00",
+        )
+
+    assert failure.value.details["reason"] == "invalid_timestamp"
+
+
+def test_report_beneath_symlinked_parent_is_rejected(tmp_path):
+    real_parent = tmp_path / "real"
+    real_parent.mkdir()
+    report = real_parent / "report.json"
+    write_report(report)
+    alias_parent = tmp_path / "alias"
+    try:
+        alias_parent.symlink_to(real_parent, target_is_directory=True)
+    except OSError as error:
+        pytest.skip(f"directory symlink creation unavailable: {error}")
+
+    with pytest.raises(BackendError) as failure:
+        subject()([descriptor(alias_parent / "report.json")])
+
+    assert failure.value.details["reason"] == "reparse_path_component"
+
+
+def test_report_replaced_during_parse_is_rejected(monkeypatch, tmp_path):
+    from pscad_mcp.acceptance import evidence
+
+    report = tmp_path / "report.json"
+    write_report(report)
+    original = report.read_bytes()
+    original_loads = evidence.json.loads
+
+    def replace_during_parse(value):
+        payload = original_loads(value)
+        replacement = dict(payload)
+        replacement["status"] = "FAIL"
+        report.write_text(json.dumps(replacement), encoding="utf-8")
+        return payload
+
+    monkeypatch.setattr(evidence.json, "loads", replace_during_parse)
+
+    with pytest.raises(BackendError) as failure:
+        subject()([descriptor(report)])
+
+    assert failure.value.details["reason"] == "evidence_changed"
+    assert hashlib.sha256(original).hexdigest() != hashlib.sha256(
+        report.read_bytes()
+    ).hexdigest()

@@ -15,7 +15,7 @@
     "master_path": "C:/Program Files (x86)/PSCAD46/master.pslx",
     "master_sha256": "062a614e68d8b18541f42b6bac95e0777d4de6f923fdf3d558ca8ff40255d939",
     "compiler": {
-      "identity": "gfortran-4.6.2-x86",
+      "identity": "gfortran",
       "configuration_path": "C:/Program Files (x86)/PSCAD46/fortran_compilers.xml",
       "configuration_sha256": "bd6183220badfa7a32f5419e8563d9b5c598fc370d50970d9e0bfaba092f6ca1",
       "executable_path": "C:/Program Files (x86)/GFortran/4.6/bin/gfortran.exe",

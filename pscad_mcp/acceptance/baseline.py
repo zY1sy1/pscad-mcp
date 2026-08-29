@@ -7,6 +7,8 @@ import hashlib
 import json
 import re
 from collections.abc import Mapping, Sequence
+from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 from ..core.backend.base import BackendError
@@ -53,6 +55,9 @@ LICENSED_STATUSES = frozenset(
 
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _COMMIT = re.compile(r"^[0-9a-f]{40}$")
+_UTC_TIMESTAMP = re.compile(
+    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z$"
+)
 _TOP = {
     "schema_version",
     "baseline_id",
@@ -158,6 +163,27 @@ def _commit(value: Any, field: str) -> str:
     text = _text(value, field)
     if _COMMIT.fullmatch(text) is None:
         raise _error(field, "not_commit", f"{field} must be a full git commit.")
+    return text
+
+
+def is_utc_timestamp(value: Any) -> bool:
+    if not isinstance(value, str) or _UTC_TIMESTAMP.fullmatch(value) is None:
+        return False
+    try:
+        datetime.fromisoformat(value[:-1] + "+00:00")
+    except ValueError:
+        return False
+    return True
+
+
+def _utc_timestamp(value: Any, field: str) -> str:
+    text = _text(value, field)
+    if not is_utc_timestamp(text):
+        raise _error(
+            field,
+            "invalid_timestamp",
+            f"{field} must be a UTC RFC3339 timestamp.",
+        )
     return text
 
 
@@ -326,7 +352,7 @@ def _validate_reports(
                 "Report status is invalid.",
             )
         item["commit"] = _commit(item["commit"], f"{field}.commit")
-        item["generated_at_utc"] = _text(
+        item["generated_at_utc"] = _utc_timestamp(
             item["generated_at_utc"], f"{field}.generated_at_utc"
         )
         item["path"] = _text(item["path"], f"{field}.path")
@@ -452,7 +478,9 @@ def validate_program_baseline(value: Any) -> dict[str, Any]:
     normalized = {
         "schema_version": 1,
         "baseline_id": _text(top["baseline_id"], "baseline_id"),
-        "generated_at_utc": _text(top["generated_at_utc"], "generated_at_utc"),
+        "generated_at_utc": _utc_timestamp(
+            top["generated_at_utc"], "generated_at_utc"
+        ),
         "repository": repository,
         "environment": environment,
         "sources": sources,
@@ -479,12 +507,14 @@ def program_baseline_sha256(value: Any) -> str:
 
 def apply_scope_report(
     baseline: Any,
-    report: Mapping[str, Any],
+    report_path: str | Path,
     *,
     owner_work_package: str,
 ) -> dict[str, Any]:
+    from .evidence import index_explicit_reports
+
     current = validate_program_baseline(baseline)
-    candidate = _record(report, "report", _REPORT)
+    candidate = index_explicit_reports([{"path": str(report_path)}])[0]
     scope_name = _text(candidate["scope"], "report.scope")
     builder_path = _text(candidate["builder_path"], "report.builder_path")
     if (
