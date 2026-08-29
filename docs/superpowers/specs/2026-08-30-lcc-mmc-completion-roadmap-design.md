@@ -2,7 +2,7 @@
 
 **日期：** 2026-08-30
 
-**状态：** 已确认设计，待用户审阅书面版本
+**状态：** 执行中；WP0 已完成并等待合并，WP1 在合并后解锁
 
 **主要读者：** 后续执行任务的 Codex 工程代理
 
@@ -270,6 +270,9 @@ fixture 和数据审计可以并行，但最终集成必须按依赖顺序进行
 
 ## 8. WP0：验收基线与证据清单
 
+**完成记录：**
+[`2026-08-30-lcc-mmc-wp0-baseline-design.md`](2026-08-30-lcc-mmc-wp0-baseline-design.md)
+
 ### 8.1 目标
 
 为后续所有工作包建立唯一、机器可读的 current-truth baseline，使任何 Codex
@@ -371,6 +374,11 @@ fixture 和数据审计可以并行，但最终集成必须按依赖顺序进行
 
 只有 current commit、Master、官方模板、compiler 和现有报告都完成 hash
 登记后，WP1 才能开始。
+
+本分支已满足上述条件。最终只读 licensed preflight 在 commit
+`5cbe907dfe08820cbf4f511162de0f98a369052f` 上 PASS，报告 SHA-256 为
+`fe77de2364573d6d2bd6e701a038fe12191b2d5961fdaa1dde80e2bf48274d7f`；
+合并 WP0 分支后允许开始 WP1，不能提前继承任何 LCC historical PASS。
 
 ## 9. WP1：LCC 工程路径收口
 
@@ -1091,5 +1099,6 @@ Codex 不得在一个 turn 中同时实现两个 licensed 工作包，也不得�
 
 ## 22. 下一步
 
-书面版本经用户确认后，不直接开始 WP1 或 MMC 实现。下一步只为 WP0 创建独立
-设计细化和 implementation plan。WP0 完成并合并后，再启动 WP1。
+下一步先审阅并合并 WP0 分支。合并后为 WP1 创建独立设计细化和
+implementation plan；不直接修改 LCC 电气模型，也不并行启动会占用 PSCAD
+Legacy 单实例的 MMC work package。
