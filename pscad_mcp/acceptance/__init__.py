@@ -11,7 +11,13 @@ from .baseline import (
     validate_program_baseline,
 )
 from .evidence import build_run_metadata, index_explicit_reports
-from .preflight import PreflightRequest, run_static_preflight
+from .preflight import (
+    PreflightRequest,
+    run_licensed_session_preflight,
+    run_program_preflight,
+    run_static_preflight,
+    write_preflight_report,
+)
 
 __all__ = [
     "CAPABILITY_STATES",
@@ -24,6 +30,9 @@ __all__ = [
     "canonical_program_baseline",
     "index_explicit_reports",
     "program_baseline_sha256",
+    "run_licensed_session_preflight",
+    "run_program_preflight",
     "run_static_preflight",
     "validate_program_baseline",
+    "write_preflight_report",
 ]

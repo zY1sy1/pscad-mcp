@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import hashlib
 from pathlib import Path
 
 from pscad_mcp.acceptance.preflight import PreflightRequest, run_static_preflight
@@ -140,3 +142,128 @@ def test_default_probe_discovers_legacy_numbered_output_parts(tmp_path):
 
     assert report["status"] == "PASS"
     assert report["checks"]["legacy_numbered_output_discovery"] == "PASS"
+
+
+class SessionService:
+    def __init__(self, *, alive: bool = True) -> None:
+        self.alive = alive
+        self.calls = []
+
+    async def attach_local(self):
+        self.calls.append("attach_local")
+        return "attached"
+
+    async def status(self):
+        self.calls.append("status")
+        return {
+            "connected": self.alive,
+            "licensed": True,
+            "backend": "legacy",
+            "version": "4.6.2",
+            "x64": True,
+            "alive": self.alive,
+            "busy": False,
+            "owns_process": True,
+        }
+
+    async def quit_pscad(self, *, confirm=False):
+        self.calls.append(("quit_pscad", confirm))
+        return "quit"
+
+
+def test_licensed_session_probe_attaches_reads_and_quits_without_project_creation(
+    tmp_path,
+):
+    from pscad_mcp.acceptance.preflight import run_licensed_session_preflight
+
+    service = SessionService()
+    result = asyncio.run(
+        run_licensed_session_preflight(
+            service,
+            workspace_root=tmp_path,
+            process_reader=list,
+        )
+    )
+
+    assert result["status"] == "PASS"
+    assert service.calls == ["attach_local", "status", ("quit_pscad", True)]
+    assert "create_project" not in service.calls
+    assert result["projects_before"] == result["projects_after"] == {}
+
+
+def test_licensed_session_probe_reports_runtime_and_cleanup_failure(tmp_path):
+    from pscad_mcp.acceptance.preflight import run_licensed_session_preflight
+
+    service = SessionService(alive=False)
+    process_snapshots = iter(
+        [[], [{"pid": 99, "name": "PSCAD.exe", "exe": "C:/PSCAD.exe"}]]
+    )
+    result = asyncio.run(
+        run_licensed_session_preflight(
+            service,
+            workspace_root=tmp_path,
+            process_reader=lambda: next(process_snapshots),
+        )
+    )
+
+    assert result["status"] == "FAIL"
+    assert result["checks"]["runtime"] == "FAIL"
+    assert result["checks"]["cleanup"] == "FAIL"
+
+
+def test_preexisting_pscad_process_prevents_attach(tmp_path):
+    from pscad_mcp.acceptance.preflight import run_licensed_session_preflight
+
+    service = SessionService()
+    result = asyncio.run(
+        run_licensed_session_preflight(
+            service,
+            workspace_root=tmp_path,
+            process_reader=lambda: [
+                {"pid": 12, "name": "PSCAD.exe", "exe": "C:/PSCAD.exe"}
+            ],
+        )
+    )
+
+    assert result["status"] == "FAIL"
+    assert result["checks"]["process_conflict"] == "FAIL"
+    assert service.calls == []
+
+
+def test_program_preflight_combines_commit_session_and_source_immutability(tmp_path):
+    from pscad_mcp.acceptance.preflight import run_program_preflight
+
+    value = request(tmp_path)
+    master_hash = hashlib.sha256(value.master_path.read_bytes()).hexdigest()
+    compiler_hash = hashlib.sha256(
+        value.compiler_configuration.read_bytes()
+    ).hexdigest()
+    compiler_executable_hash = hashlib.sha256(
+        value.compiler_executable.read_bytes()
+    ).hexdigest()
+
+    def static_runner(candidate):
+        assert candidate == value
+        return {
+            "status": "PASS",
+            "master_sha256": master_hash,
+            "compiler_configuration_sha256": compiler_hash,
+            "compiler_executable_sha256": compiler_executable_hash,
+        }
+
+    async def session_runner(service, *, workspace_root):
+        assert workspace_root == value.workspace_root
+        return {"status": "PASS"}
+
+    result = asyncio.run(
+        run_program_preflight(
+            value,
+            object(),
+            static_runner=static_runner,
+            session_runner=session_runner,
+        )
+    )
+
+    assert result["status"] == "PASS"
+    assert result["commit"] == value.expected_commit
+    assert result["source_immutability_status"] == "PASS"

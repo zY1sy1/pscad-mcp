@@ -5,11 +5,14 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import importlib.util
+import json
+import os
 import subprocess
 import tempfile
 import xml.etree.ElementTree as ET
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -237,3 +240,199 @@ def run_static_preflight(
         "pscad_version": request.pscad_version,
         "x64": request.x64,
     }
+
+
+def _project_inventory(workspace: Path) -> dict[str, str]:
+    result = {}
+    for path in sorted(workspace.rglob("*"), key=lambda value: value.as_posix()):
+        if path.is_symlink() or not path.is_file():
+            continue
+        if path.suffix.casefold() not in {".pscx", ".pslx", ".pswx"}:
+            continue
+        result[path.relative_to(workspace).as_posix()] = _sha256(path)
+    return result
+
+
+def _exception_record(error: Exception) -> dict[str, str]:
+    return {
+        "type": type(error).__name__[:128],
+        "message": str(error)[:1024],
+    }
+
+
+async def run_licensed_session_preflight(
+    service: Any,
+    *,
+    workspace_root: Path,
+    process_reader: Callable[[], Sequence[Mapping[str, Any]]] = _process_reader,
+) -> dict[str, Any]:
+    workspace = workspace_root.resolve()
+    existing = [dict(item) for item in process_reader()]
+    projects_before = _project_inventory(workspace)
+    if existing:
+        return {
+            "schema_version": 1,
+            "status": "FAIL",
+            "checks": {
+                "process_conflict": "FAIL",
+                "runtime": "FAIL",
+                "cleanup": "FAIL",
+                "no_project_mutation": "PASS",
+            },
+            "runtime": {},
+            "attach_error": None,
+            "quit_error": None,
+            "processes_before": existing,
+            "remaining_processes": existing,
+            "projects_before": projects_before,
+            "projects_after": projects_before,
+        }
+    attach_error = None
+    runtime: Mapping[str, Any] = {}
+    quit_error = None
+    attached = False
+    try:
+        await service.attach_local()
+        attached = True
+        value = await service.status()
+        runtime = value if isinstance(value, Mapping) else {}
+    except Exception as error:  # noqa: BLE001 - vendor failure is report evidence
+        attach_error = _exception_record(error)
+    finally:
+        if attached:
+            try:
+                await service.quit_pscad(confirm=True)
+            except Exception as error:  # noqa: BLE001 - cleanup failure is evidence
+                quit_error = _exception_record(error)
+    remaining = [dict(item) for item in process_reader()]
+    projects_after = _project_inventory(workspace)
+    runtime_ok = (
+        attach_error is None
+        and runtime.get("connected") is True
+        and runtime.get("alive") is True
+        and runtime.get("licensed") is True
+        and runtime.get("backend") == "legacy"
+        and runtime.get("version") == "4.6.2"
+        and runtime.get("x64") is True
+    )
+    cleanup_ok = quit_error is None and not remaining
+    projects_ok = projects_before == projects_after
+    checks = {
+        "process_conflict": "PASS",
+        "runtime": "PASS" if runtime_ok else "FAIL",
+        "cleanup": "PASS" if cleanup_ok else "FAIL",
+        "no_project_mutation": "PASS" if projects_ok else "FAIL",
+    }
+    return {
+        "schema_version": 1,
+        "status": (
+            "PASS" if all(value == "PASS" for value in checks.values()) else "FAIL"
+        ),
+        "checks": checks,
+        "runtime": dict(runtime),
+        "attach_error": attach_error,
+        "quit_error": quit_error,
+        "processes_before": existing,
+        "remaining_processes": remaining,
+        "projects_before": projects_before,
+        "projects_after": projects_after,
+    }
+
+
+async def run_program_preflight(
+    request: PreflightRequest,
+    service: Any,
+    *,
+    static_runner: Callable[[PreflightRequest], dict[str, Any]] = run_static_preflight,
+    session_runner: Callable[..., Any] = run_licensed_session_preflight,
+) -> dict[str, Any]:
+    static = static_runner(request)
+    if static["status"] == "PASS":
+        licensed = await session_runner(
+            service,
+            workspace_root=request.workspace_root,
+        )
+    else:
+        licensed = {
+            "schema_version": 1,
+            "status": "NOT_RUN",
+            "reason": "static_preflight_failed",
+        }
+    master_after = _sha256(request.master_path) if request.master_path.is_file() else None
+    compiler_after = (
+        _sha256(request.compiler_configuration)
+        if request.compiler_configuration.is_file()
+        else None
+    )
+    compiler_executable_after = (
+        _sha256(request.compiler_executable)
+        if request.compiler_executable.is_file()
+        else None
+    )
+    source_immutability = {
+        "master_before": static.get("master_sha256"),
+        "master_after": master_after,
+        "compiler_before": static.get("compiler_configuration_sha256"),
+        "compiler_after": compiler_after,
+        "compiler_executable_before": static.get("compiler_executable_sha256"),
+        "compiler_executable_after": compiler_executable_after,
+    }
+    before_values = (
+        source_immutability["master_before"],
+        source_immutability["compiler_before"],
+        source_immutability["compiler_executable_before"],
+    )
+    immutable = all(isinstance(value, str) for value in before_values) and (
+        source_immutability["master_before"] == source_immutability["master_after"]
+        and source_immutability["compiler_before"]
+        == source_immutability["compiler_after"]
+        and source_immutability["compiler_executable_before"]
+        == source_immutability["compiler_executable_after"]
+    )
+    return {
+        "schema_version": 1,
+        "kind": "lcc_mmc_program_preflight",
+        "commit": request.expected_commit,
+        "generated_at_utc": (
+            datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        ),
+        "status": (
+            "PASS"
+            if static["status"] == licensed["status"] == "PASS" and immutable
+            else "FAIL"
+        ),
+        "static": static,
+        "licensed_session": licensed,
+        "source_immutability": source_immutability,
+        "source_immutability_status": "PASS" if immutable else "FAIL",
+    }
+
+
+def write_preflight_report(path: Path, payload: Mapping[str, Any]) -> Path:
+    encoded = json.dumps(
+        dict(payload),
+        allow_nan=False,
+        ensure_ascii=True,
+        sort_keys=True,
+        indent=2,
+    ).encode("ascii") + b"\n"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="wb",
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            dir=path.parent,
+            delete=False,
+        ) as stream:
+            temporary = Path(stream.name)
+            stream.write(encoded)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+        temporary = None
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+    return path
