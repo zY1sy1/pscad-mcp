@@ -129,6 +129,29 @@ class RecordingPscadService:
         self._call("get_component_parameters", project_name, component_id)
         return dict(self.components[component_id]["parameters"])
 
+    async def verify_master_binding_state(
+        self,
+        project_name: str,
+        component_ids: dict[str, int],
+        expected_master_sha256: str,
+        expected_registry_sha256: str,
+        *,
+        refresh_components: bool = True,
+    ) -> dict[str, Any]:
+        self._call(
+            "verify_master_binding_state",
+            project_name,
+            component_ids,
+            expected_master_sha256,
+            expected_registry_sha256,
+            refresh_components=refresh_components,
+        )
+        return {
+            "master_sha256": expected_master_sha256,
+            "registry_sha256": expected_registry_sha256,
+            "components": dict(component_ids),
+        }
+
     async def get_component_ports(self, project_name: str, component_id: int) -> list[dict[str, Any]]:
         self._call("get_component_ports", project_name, component_id)
         return []

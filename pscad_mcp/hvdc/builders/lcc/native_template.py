@@ -591,6 +591,7 @@ def materialize_native_lcc_bundle(
     sample_step_us: int = 250,
     fault_resistance_ohm: float = 1e-6,
     fault_phase_mask: tuple[int, int, int] = (1, 1, 1),
+    master_registry: AuditedMasterRegistry | None = None,
 ) -> dict[str, Any]:
     """Create a derived case and valid companion library from a PSCX source."""
 
@@ -611,7 +612,10 @@ def materialize_native_lcc_bundle(
         raise _error("LCC_BUILD_CONFLICT", "Derived native outputs must be distinct from the source and each other.", "materialize_lcc_native_template")
     if project_path.exists() or project_path.is_symlink() or library_path.exists() or library_path.is_symlink():
         raise _error("LCC_BUILD_CONFLICT", "A derived native output already exists.", "materialize_lcc_native_template", project=str(project_path), library=str(library_path))
-    audit = audit_native_lcc_template(source_path)
+    audit = audit_native_lcc_template(
+        source_path,
+        master_registry=master_registry,
+    )
     if not audit.compatible:
         raise _error("LCC_TEMPLATE_INCOMPATIBLE", "The native LCC template failed its audit.", "materialize_lcc_native_template", errors=list(audit.errors))
     root, payload = _parse(source_path, "materialize_lcc_native_template")
@@ -788,7 +792,10 @@ def materialize_native_lcc_bundle(
         library_path.unlink(missing_ok=True)
         raise
     try:
-        project_audit = audit_native_lcc_template(project_path)
+        project_audit = audit_native_lcc_template(
+            project_path,
+            master_registry=master_registry,
+        )
         allowed_external_fault = {
             "fault_timer_not_unique",
             "fault_timer_parameters_missing",

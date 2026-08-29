@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-from types import SimpleNamespace
 
 import pytest
 
@@ -12,7 +11,12 @@ from pscad_mcp.core.path_policy import PathPolicy
 from pscad_mcp.core.service import PscadService
 from pscad_mcp.hvdc.builders.lcc.assets import load_packaged_asset_set
 from tests.backend_fakes import FakeLegacyAutomation, ImmediateExecutor
-from tests.test_backend_components import ComponentApp, LegacyComponentProject
+from tests.test_backend_components import (
+    ComponentApp,
+    LegacyComponentProject,
+    StatefulComponent,
+    WireOrthogonal,
+)
 from tests.test_master_binding_registry import _master_fixture_xml
 
 
@@ -35,16 +39,32 @@ async def _runtime_backend(tmp_path):
     master.write_text(_master_fixture_xml(), encoding="utf-8")
     project = LegacyComponentProject()
     project.main.wires = []
+    original_find_all = project.main.find_all
+
+    def find_all(*names, **parameters):
+        values = original_find_all(*names, **parameters)
+        return values if names or parameters else values + list(project.main.wires)
 
     def add_wire(*vertices):
-        wire = SimpleNamespace(
-            id=10_000 + len(project.main.wires),
-            vertices=tuple(vertices),
+        wire = WireOrthogonal(
+            10_000 + len(project.main.wires),
+            vertices,
+            project.main,
         )
+        original_delete = wire.delete
+
+        def delete():
+            original_delete()
+            project.main.wires = [
+                item for item in project.main.wires if item is not wire
+            ]
+
+        wire.delete = delete
         project.main.wires.append(wire)
         return wire
 
     project.main.add_wire = add_wire
+    project.main.find_all = find_all
     backend = LegacyBackend(
         ImmediateExecutor(),
         version="4.6.2",
@@ -177,7 +197,11 @@ def test_legacy_expands_filter_and_grounds_each_neutral(tmp_path):
             0,
             {"Branch_MVAR": 50.0, "Tuning_Hz": 300.0},
         )
-        physical = project.main.components[1:]
+        physical = [
+            item
+            for item in project.main.components[1:]
+            if isinstance(item, StatefulComponent)
+        ]
         parameters = await backend.get_component_parameters("case", created.id)
         ports = await backend.get_component_ports("case", created.id)
         return created, physical, project.main.wires, parameters, ports
@@ -200,7 +224,7 @@ def test_legacy_expands_filter_and_grounds_each_neutral(tmp_path):
         assert item.values["f0"] == pytest.approx(50.0)
         assert item.values["dentry"] == 1
         assert item.values["V"] == pytest.approx(132.79056191361394)
-    assert [wire.vertices for wire in wires] == [
+    assert [tuple(wire.vertices) for wire in wires] == [
         ((360, 144), (414, 144)),
         ((360, 252), (414, 252)),
         ((360, 360), (414, 360)),
@@ -317,3 +341,131 @@ def test_filter_binding_evidence_lists_grounding_members(tmp_path):
     assert roles.count("component") == 3
     assert roles.count("neutral_ground") == 3
     assert roles.count("neutral_wire") == 3
+
+
+def test_master_binding_evidence_rejects_physical_parameter_drift(tmp_path):
+    async def exercise():
+        backend, project, _master = await _runtime_backend(tmp_path)
+        created = await backend.add_component(
+            "case",
+            "Main",
+            "master",
+            "smoothing_reactor",
+            (36, 36),
+            0,
+            {"Inductance_mH": 100.0},
+        )
+        project.main.components[-1].values["L"] = 0.2
+        with pytest.raises(BackendError) as failure:
+            await backend.get_master_binding_evidence("case", created.id)
+        return failure.value
+
+    error = asyncio.run(exercise())
+
+    assert error.code == "MASTER_READBACK_FAILED"
+    assert error.details["physical_parameter"] == "L"
+
+
+def test_filter_binding_evidence_rejects_missing_neutral_wire(tmp_path):
+    async def exercise():
+        backend, project, _master = await _runtime_backend(tmp_path)
+        created = await backend.add_component(
+            "case",
+            "Main",
+            "master",
+            "ac_filter_branch",
+            (360, 180),
+            0,
+            {"Branch_MVAR": 50.0, "Tuning_Hz": 300.0},
+        )
+        project.main.wires[-1].delete()
+        with pytest.raises(BackendError) as failure:
+            await backend.get_master_binding_evidence("case", created.id)
+        return failure.value
+
+    error = asyncio.run(exercise())
+
+    assert error.code == "MASTER_READBACK_FAILED"
+    assert error.details["role"] == "neutral_wire"
+
+
+def test_deleting_logical_filter_removes_all_owned_members_and_caches(tmp_path):
+    async def exercise():
+        backend, project, _master = await _runtime_backend(tmp_path)
+        created = await backend.add_component(
+            "case",
+            "Main",
+            "master",
+            "ac_filter_branch",
+            (360, 180),
+            0,
+            {"Branch_MVAR": 50.0, "Tuning_Hz": 300.0},
+        )
+        await backend.delete_component("case", created.id)
+        return backend, project, created.id
+
+    backend, project, logical_id = asyncio.run(exercise())
+
+    assert [
+        item for item in project.main.components if isinstance(item, StatefulComponent)
+    ] == [project.main.components[0]]
+    assert project.main.wires == []
+    assert ("case", logical_id) not in backend._component_bindings
+    assert ("case", logical_id) not in backend._composite_components
+    assert ("case", logical_id) not in backend._component_binding_members
+
+
+def test_disconnect_clears_master_binding_runtime_state(tmp_path):
+    async def exercise():
+        backend, _project, _master = await _runtime_backend(tmp_path)
+        await backend.add_component(
+            "case",
+            "Main",
+            "master",
+            "smoothing_reactor",
+            (36, 36),
+            0,
+            {"Inductance_mH": 100.0},
+        )
+        await backend.disconnect()
+        return backend
+
+    backend = asyncio.run(exercise())
+
+    assert backend._component_bindings == {}
+    assert backend._composite_components == {}
+    assert backend._component_binding_members == {}
+    assert backend._audited_master_registry is None
+
+
+def test_filter_expansion_rolls_back_partial_members(tmp_path):
+    async def exercise():
+        backend, project, _master = await _runtime_backend(tmp_path)
+        original_add_component = project.main.add_component
+        calls = 0
+
+        def failing_add_component(*args, **kwargs):
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                return None
+            return original_add_component(*args, **kwargs)
+
+        project.main.add_component = failing_add_component
+        before_components = list(project.main.components)
+        with pytest.raises(BackendError):
+            await backend.add_component(
+                "case",
+                "Main",
+                "master",
+                "ac_filter_branch",
+                (360, 180),
+                0,
+                {"Branch_MVAR": 50.0, "Tuning_Hz": 300.0},
+            )
+        return project, before_components
+
+    project, before_components = asyncio.run(exercise())
+
+    assert project.main.components == before_components
+    assert project.main.wires == []

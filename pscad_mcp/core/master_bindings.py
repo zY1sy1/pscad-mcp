@@ -4,18 +4,20 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any
+from xml.etree import ElementTree as ET
 
 from .backend.base import BackendError
 from .definition_metadata import (
     DefinitionMetadata,
     ParameterMetadata,
     PortMetadata,
-    read_definition_metadata_matches,
+    read_definition_metadata_document,
 )
 
 _TOP_LEVEL_FIELDS = {"schema_version", "name", "pscad_version", "bindings"}
@@ -135,6 +137,12 @@ def _number(value: Any, field: str, *, positive: bool = False) -> float:
             field=field,
         )
     result = float(value)
+    if not math.isfinite(result):
+        raise _error(
+            "MASTER_BINDING_MISSING",
+            f"{field} must be finite.",
+            field=field,
+        )
     if positive and result <= 0:
         raise _error(
             "MASTER_BINDING_MISSING",
@@ -632,6 +640,23 @@ def _parse_transform(value: Any) -> Mapping[str, Any]:
                 "lookup_bundle requires at least one case.",
                 field="transform.cases",
             )
+        ambiguous = any(
+            all(
+                _same_transform_value(left_value, right_value)
+                for left_value, right_value in zip(
+                    left[direction], right[direction]
+                )
+            )
+            for index, left in enumerate(cases)
+            for right in cases[index + 1 :]
+            for direction in ("logical", "physical")
+        )
+        if ambiguous:
+            raise _error(
+                "MASTER_BINDING_AMBIGUOUS",
+                "lookup_bundle cases must be unique in both directions.",
+                field="transform.cases",
+            )
         parsed["cases"] = cases
     return _freeze(parsed)
 
@@ -1038,6 +1063,50 @@ def _validate_parameter_contract(
         )
 
 
+def _validate_bound_physical_value(
+    binding: MasterBinding,
+    name: str,
+    value: Any,
+    metadata: ParameterMetadata,
+) -> None:
+    parameter_type = (metadata.type or "").casefold()
+    valid = True
+    numeric: float | None = None
+    if parameter_type in {"real", "integer", "choice"}:
+        try:
+            numeric = _numeric(value)
+            valid = math.isfinite(numeric)
+        except (TypeError, ValueError):
+            valid = False
+    elif parameter_type == "text":
+        valid = isinstance(value, str)
+    if valid and parameter_type == "integer" and numeric is not None:
+        valid = numeric.is_integer()
+    if valid and metadata.choices:
+        valid = any(
+            _same_transform_value(value, choice)
+            for choice in metadata.choices
+        )
+    if valid and numeric is not None and metadata.minimum is not None:
+        valid = numeric >= float(metadata.minimum)
+    if valid and numeric is not None and metadata.maximum is not None:
+        valid = numeric <= float(metadata.maximum)
+    if not valid:
+        raise _runtime_error(
+            "MASTER_PARAMETER_MISMATCH",
+            "A fixed or lookup Master value is outside the live parameter contract.",
+            "audit_master_bindings",
+            logical_name=binding.logical_name,
+            physical_definition=binding.physical_definition,
+            physical_parameter=name,
+            observed=value,
+            parameter_type=metadata.type,
+            choices=list(metadata.choices),
+            minimum=metadata.minimum,
+            maximum=metadata.maximum,
+        )
+
+
 def _port_evidence(port: PortMetadata) -> dict[str, Any]:
     return {
         "physical": port.name,
@@ -1072,6 +1141,24 @@ def _definition_evidence(
             contract,
             metadata.parameters.get(name),
         )
+    for fixed in binding.fixed_parameters:
+        _validate_bound_physical_value(
+            binding,
+            fixed.physical,
+            fixed.value,
+            metadata.parameters[fixed.physical],
+        )
+    for parameter in binding.parameters:
+        if parameter.transform["kind"] != "lookup_bundle":
+            continue
+        for case in parameter.transform["cases"]:
+            for name, value in zip(parameter.physical, case["physical"]):
+                _validate_bound_physical_value(
+                    binding,
+                    name,
+                    value,
+                    metadata.parameters[name],
+                )
     result = {
         "logical_name": binding.logical_name,
         "physical_definition": binding.physical_definition,
@@ -1130,9 +1217,19 @@ def audit_master_bindings(
             path=str(path),
         ) from error
     source_hash = hashlib.sha256(payload).hexdigest()
+    try:
+        metadata_document = read_definition_metadata_document(payload)
+    except (ET.ParseError, OverflowError, TypeError, ValueError) as error:
+        raise _runtime_error(
+            "MASTER_BINDING_MISSING",
+            "The live Master source is not valid definition XML.",
+            "audit_master_bindings",
+            path=str(path),
+            exception=type(error).__name__,
+        ) from error
     definitions: dict[str, Mapping[str, Any]] = {}
     for binding in registry.bindings:
-        matches = read_definition_metadata_matches(path, binding.physical_definition)
+        matches = metadata_document.get(binding.physical_definition, ())
         if not matches:
             raise _runtime_error(
                 "MASTER_BINDING_MISSING",
@@ -1152,9 +1249,50 @@ def audit_master_bindings(
                 matches=len(matches),
                 path=str(path),
             )
-        definitions[binding.logical_name] = _freeze(
-            _definition_evidence(binding, matches[0])
-        )
+        evidence = _definition_evidence(binding, matches[0])
+        if binding.shape["kind"] == "phase_expand":
+            neutral = binding.shape["neutral"]
+            ground_definition = str(neutral["ground_definition"])
+            ground_matches = metadata_document.get(ground_definition, ())
+            if not ground_matches:
+                raise _runtime_error(
+                    "MASTER_BINDING_MISSING",
+                    "The declared filter ground definition is absent.",
+                    "audit_master_bindings",
+                    logical_name=binding.logical_name,
+                    ground_definition=ground_definition,
+                )
+            if len(ground_matches) != 1:
+                raise _runtime_error(
+                    "MASTER_BINDING_AMBIGUOUS",
+                    "The declared filter ground definition is duplicated.",
+                    "audit_master_bindings",
+                    logical_name=binding.logical_name,
+                    ground_definition=ground_definition,
+                    matches=len(ground_matches),
+                )
+            ground_binding = MasterPortBinding(
+                logical="__ground__",
+                physical=str(neutral["ground_port"]),
+                kind="electrical",
+                dimension=1,
+                occurrence=int(neutral["ground_occurrence"]),
+            )
+            try:
+                selected_ground = _select_port(
+                    ground_matches[0],
+                    replace(
+                        binding,
+                        physical_definition=ground_definition,
+                    ),
+                    ground_binding,
+                )
+            except BackendError as error:
+                error.details["ground_definition"] = ground_definition
+                raise
+            evidence["ground_definition"] = ground_definition
+            evidence["ground_port"] = _port_evidence(selected_ground)
+        definitions[binding.logical_name] = _freeze(evidence)
     return AuditedMasterRegistry(
         registry=registry,
         master_path=str(path),

@@ -18,6 +18,16 @@ from pscad_mcp.hvdc.builders.lcc.assets import load_packaged_asset_set, sha256_f
 
 ACCEPTANCE_ENABLED = os.getenv("PSCAD_MCP_MASTER_BINDING_ACCEPTANCE") == "1"
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
+_EXPECTED_LOGICAL_NAMES = {
+    "master:three_phase_source",
+    "master:converter_transformer",
+    "master:ac_filter_branch",
+    "master:smoothing_reactor",
+    "master:dc_line_section",
+    "master:ac_meter",
+    "master:dc_meter",
+    "master:ground",
+}
 
 
 def validate_master_binding_compile_report(payload: object) -> dict[str, object]:
@@ -66,6 +76,31 @@ def validate_master_binding_compile_report(payload: object) -> dict[str, object]
         for item in bindings
     ):
         raise ValueError("Every Master binding requires physical read-back evidence")
+    if logical_names != _EXPECTED_LOGICAL_NAMES:
+        raise ValueError("Master binding acceptance requires the exact logical names")
+    filter_binding = next(
+        item
+        for item in bindings
+        if item["logical_name"] == "master:ac_filter_branch"
+    )
+    members = filter_binding["observed_instances"]
+    roles = [item.get("role") for item in members if isinstance(item, dict)]
+    wires = [
+        item
+        for item in members
+        if isinstance(item, dict) and item.get("role") == "neutral_wire"
+    ]
+    if (
+        roles.count("component") != 3
+        or roles.count("neutral_ground") != 3
+        or roles.count("neutral_wire") != 3
+        or any(
+            not isinstance(wire.get("endpoints"), list)
+            or len(wire["endpoints"]) != 2
+            for wire in wires
+        )
+    ):
+        raise ValueError("Master binding acceptance requires full filter expansion")
     compile_evidence = payload["compile"]
     project = payload["project"]
     if payload["status"] == "PASS" and (
@@ -185,6 +220,7 @@ class TestMasterBindingRealAcceptance(unittest.IsolatedAsyncioTestCase):
                 "master:ground": (900, 540),
             }
             binding_reports: list[dict[str, object]] = []
+            component_ids: dict[str, int] = {}
             for logical_name, logical_parameters in parameters.items():
                 resolved = audited.resolve_component(
                     logical_name,
@@ -201,6 +237,7 @@ class TestMasterBindingRealAcceptance(unittest.IsolatedAsyncioTestCase):
                     binding_evidence=resolved.to_evidence(),
                 )
                 component_id = int(created["id"])
+                component_ids[logical_name] = component_id
                 observed = await backend.get_master_binding_evidence(
                     project_name,
                     component_id,
@@ -215,12 +252,19 @@ class TestMasterBindingRealAcceptance(unittest.IsolatedAsyncioTestCase):
                 )
                 binding_reports.append(observed)
             report["bindings"] = binding_reports
+            binding_gate = await backend.verify_master_binding_state(
+                project_name,
+                component_ids,
+                audited.master_sha256,
+                audited.registry.sha256,
+            )
             await service.save_project(project_name, confirm=True)
             compile_result = await service.build_project(project_name)
             await service.save_project(project_name, confirm=True)
             report["compile"] = {
                 "success": True,
                 "result": compile_result,
+                "binding_gate": binding_gate,
             }
             report["project"] = {
                 "name": project_name,
@@ -275,6 +319,64 @@ def test_master_binding_compile_report_fails_closed() -> None:
 
     with unittest.TestCase().assertRaisesRegex(ValueError, "Master source"):
         validate_master_binding_compile_report(payload)
+
+
+def _otherwise_valid_report(logical_names: list[str]) -> dict[str, object]:
+    bindings = [
+        {
+            "logical_name": name,
+            "verification_state": "verified",
+            "observed_instances": [{"role": "component"}],
+        }
+        for name in logical_names
+    ]
+    for binding in bindings:
+        if binding["logical_name"] == "master:ac_filter_branch":
+            binding["observed_instances"] = [
+                *({"role": "component"} for _ in range(3)),
+                *({"role": "neutral_ground"} for _ in range(3)),
+                *({"role": "neutral_wire", "endpoints": [[0, 0], [18, 0]]} for _ in range(3)),
+            ]
+    return {
+        "schema_version": 1,
+        "status": "PASS",
+        "pscad_version": "4.6.2",
+        "master_path": "C:/PSCAD46/master.pslx",
+        "master_before_sha256": "a" * 64,
+        "master_after_sha256": "a" * 64,
+        "registry_sha256": "c" * 64,
+        "bindings": bindings,
+        "compile": {"success": True},
+        "project": {"sha256": "d" * 64},
+    }
+
+
+def test_master_binding_compile_report_requires_exact_names_and_filter_members() -> None:
+    expected_names = [
+        "master:three_phase_source",
+        "master:converter_transformer",
+        "master:ac_filter_branch",
+        "master:smoothing_reactor",
+        "master:dc_line_section",
+        "master:ac_meter",
+        "master:dc_meter",
+        "master:ground",
+    ]
+    wrong_names = [*expected_names[:-1], "master:wrong"]
+    with unittest.TestCase().assertRaisesRegex(ValueError, "exact logical"):
+        validate_master_binding_compile_report(
+            _otherwise_valid_report(wrong_names)
+        )
+
+    missing_wire = _otherwise_valid_report(expected_names)
+    filter_binding = next(
+        item
+        for item in missing_wire["bindings"]
+        if item["logical_name"] == "master:ac_filter_branch"
+    )
+    filter_binding["observed_instances"].pop()
+    with unittest.TestCase().assertRaisesRegex(ValueError, "filter expansion"):
+        validate_master_binding_compile_report(missing_wire)
 
 
 __all__ = [

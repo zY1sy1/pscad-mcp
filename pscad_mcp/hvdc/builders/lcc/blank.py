@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from ....core.backend.base import BackendError
+from ....core.master_bindings import AuditedMasterRegistry
 from ..common.blank import BlankProjectFactory
 from ..common.serialization import content_hash
 
@@ -107,7 +108,14 @@ def plan_blank_lcc(
     if request.template_path:
         from .native_template import audit_native_lcc_template
 
-        audit = audit_native_lcc_template(request.template_path)
+        audit = audit_native_lcc_template(
+            request.template_path,
+            master_registry=(
+                inventory
+                if isinstance(inventory, AuditedMasterRegistry)
+                else None
+            ),
+        )
         if not audit.compatible:
             raise BackendError(
                 "LCC_TEMPLATE_INCOMPATIBLE",

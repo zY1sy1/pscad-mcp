@@ -7,9 +7,29 @@ from pathlib import Path
 import pytest
 
 from pscad_mcp.core.backend.base import BackendError
+from pscad_mcp.core.master_bindings import audit_master_bindings
+from pscad_mcp.hvdc.builders.lcc.assets import load_packaged_asset_set
 from pscad_mcp.hvdc.builders.lcc.blank import BlankLccRequest
 from pscad_mcp.hvdc.builders.lcc.blank_service import BlankLccBuilderService
 from tests.test_lcc_native_template import _template
+from tests.test_master_binding_registry import _master_fixture_xml
+
+
+def _master_registry(tmp_path: Path, *, include_pgb: bool = True):
+    definitions = "<Definition name='tfault'><svg /></Definition>"
+    if include_pgb:
+        definitions += "<Definition name='pgb'><svg /></Definition>"
+    master = tmp_path / "master.pslx"
+    master.write_text(
+        _master_fixture_xml().replace(
+            "</pslx>",
+            definitions + "</pslx>",
+        ),
+        encoding="utf-8",
+    )
+    assets = load_packaged_asset_set()
+    assert assets.master_bindings is not None
+    return audit_master_bindings(master, assets.master_bindings)
 
 
 class _NativeLccServiceFake:
@@ -94,6 +114,81 @@ def test_blank_lcc_native_plan_records_source_and_fault_contract(tmp_path: Path)
     assert plan["companion"]["namespace"] == "cigre_lcc_v1"
     assert len(plan["plan_hash"]) == 64
     assert not workspace.exists()
+
+
+def test_blank_lcc_service_records_live_master_audit(tmp_path: Path) -> None:
+    source = _template(tmp_path / "official.pscx")
+    workspace = tmp_path / "workspace"
+    audited = _master_registry(tmp_path)
+    service = BlankLccBuilderService(
+        None,
+        workspace_root=workspace,
+        master_registry=audited,
+    )
+
+    plan = service.plan_model(
+        "LCC_CASE",
+        folder=str(workspace),
+        template_path=str(source),
+    )
+
+    assert plan["native_template"]["master_sha256"] == audited.master_sha256
+    assert (
+        plan["native_template"]["master_binding_registry_sha256"]
+        == audited.registry.sha256
+    )
+
+
+def test_blank_lcc_service_reads_live_master_inventory_bridge(tmp_path: Path) -> None:
+    source = _template(tmp_path / "official.pscx")
+    audited = _master_registry(tmp_path)
+
+    class LiveInventoryBridge:
+        def __init__(self):
+            self.calls = 0
+
+        async def get_lcc_inventory(self, catalog, registry):
+            self.calls += 1
+            return {
+                "master_path": audited.master_path,
+                "master_sha256": audited.master_sha256,
+                "master_binding_registry_sha256": audited.registry.sha256,
+                "definitions": {},
+            }
+
+    bridge = LiveInventoryBridge()
+    service = BlankLccBuilderService(
+        bridge,
+        workspace_root=tmp_path / "workspace",
+    )
+
+    plan = service.plan_model(
+        "LCC_CASE",
+        folder=str(tmp_path / "workspace"),
+        template_path=str(source),
+    )
+
+    assert bridge.calls == 1
+    assert plan["native_template"]["master_sha256"] == audited.master_sha256
+
+
+def test_blank_lcc_service_rejects_missing_master_reference(tmp_path: Path) -> None:
+    source = _template(tmp_path / "official.pscx")
+    service = BlankLccBuilderService(
+        None,
+        workspace_root=tmp_path / "workspace",
+        master_registry=_master_registry(tmp_path, include_pgb=False),
+    )
+
+    with pytest.raises(BackendError) as failure:
+        service.plan_model(
+            "LCC_CASE",
+            folder=str(tmp_path / "workspace"),
+            template_path=str(source),
+        )
+
+    assert failure.value.code == "LCC_TEMPLATE_INCOMPATIBLE"
+    assert "master_reference_missing:pgb" in failure.value.details["errors"]
 
 
 def test_blank_lcc_service_honors_template_and_folder_from_request(tmp_path: Path) -> None:

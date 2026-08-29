@@ -1153,6 +1153,31 @@ class PscadService:
             project_name, component_id
         )
 
+    async def verify_master_binding_state(
+        self,
+        project_name: str,
+        component_ids: Mapping[str, int],
+        expected_master_sha256: str,
+        expected_registry_sha256: str,
+        *,
+        refresh_components: bool = True,
+    ) -> dict[str, Any]:
+        verifier = getattr(self.backend, "verify_master_binding_state", None)
+        if not callable(verifier):
+            raise BackendError(
+                "MASTER_BINDING_MISSING",
+                "The active backend cannot verify Master binding state.",
+                getattr(self.backend, "name", "service"),
+                "verify_master_binding_state",
+            )
+        return await verifier(
+            project_name,
+            dict(component_ids),
+            expected_master_sha256,
+            expected_registry_sha256,
+            refresh_components=refresh_components,
+        )
+
     async def set_component_parameters(
         self,
         project_name: str,

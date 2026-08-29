@@ -18,10 +18,15 @@ from pathlib import Path
 from typing import Any
 
 from ....core.backend.base import BackendError
+from ....core.master_bindings import (
+    AuditedMasterRegistry,
+    audit_master_bindings,
+)
 from ....core.path_policy import PathPolicy
 from ....core.service import ConfirmationRequired
 from ....runtime import PendingCleanupError
 from ..common.serialization import content_hash
+from .assets import load_packaged_asset_set
 from .blank import BlankLccRequest
 from .executor import _select_output_dataset
 from .journal import AtomicJournal, WorkspaceBuildLease
@@ -161,6 +166,11 @@ def _plan_payload(
             "pscad_version": audit.get("pscad_version"),
             "definitions": list(audit.get("definitions", ())),
             "output_channels": list(audit.get("output_channels", ())),
+            "master_sha256": audit.get("master_sha256"),
+            "master_binding_registry_sha256": audit.get(
+                "master_binding_registry_sha256"
+            ),
+            "master_references": list(audit.get("master_references", ())),
         },
         "companion": {
             "namespace": "cigre_lcc_v1",
@@ -198,7 +208,13 @@ def _plan_payload(
 class BlankLccBuilderService:
     """Build a real CIGRE LCC example into a new contained workspace target."""
 
-    def __init__(self, pscad_service: Any, *, workspace_root: str | Path) -> None:
+    def __init__(
+        self,
+        pscad_service: Any,
+        *,
+        workspace_root: str | Path,
+        master_registry: AuditedMasterRegistry | None = None,
+    ) -> None:
         self.pscad_service = pscad_service
         self.workspace_root = _workspace_root(workspace_root)
         self.path_policy = PathPolicy(workspace_root=str(self.workspace_root))
@@ -207,6 +223,55 @@ class BlankLccBuilderService:
         self._tasks: dict[str, asyncio.Task[Any]] = {}
         self._leases: dict[str, WorkspaceBuildLease] = {}
         self._closing = False
+        self._injected_master_registry = master_registry
+
+    def _master_registry(self) -> AuditedMasterRegistry | None:
+        if self._injected_master_registry is not None:
+            return self._injected_master_registry
+        bridge = getattr(self.pscad_service, "get_lcc_inventory", None)
+        if not callable(bridge):
+            return None
+        assets = load_packaged_asset_set()
+        if assets.master_bindings is None:
+            raise _error(
+                "MASTER_BINDING_MISSING",
+                "The packaged Master binding registry is unavailable.",
+                "audit_blank_lcc_master_bindings",
+            )
+        inventory = _run_sync(
+            lambda: bridge(
+                assets.catalog,
+                assets.master_bindings.to_dict(),
+            )
+        )
+        if not isinstance(inventory, Mapping):
+            raise _error(
+                "MASTER_BINDING_MISSING",
+                "The PSCAD service returned invalid Master inventory evidence.",
+                "audit_blank_lcc_master_bindings",
+            )
+        master_path = inventory.get("master_path")
+        if not isinstance(master_path, str):
+            raise _error(
+                "MASTER_BINDING_MISSING",
+                "The live Master inventory does not identify its source.",
+                "audit_blank_lcc_master_bindings",
+            )
+        audited = audit_master_bindings(
+            master_path,
+            assets.master_bindings,
+        )
+        if (
+            inventory.get("master_sha256") != audited.master_sha256
+            or inventory.get("master_binding_registry_sha256")
+            != audited.registry.sha256
+        ):
+            raise _error(
+                "MASTER_SOURCE_CHANGED",
+                "The live Master inventory changed during blank LCC audit.",
+                "audit_blank_lcc_master_bindings",
+            )
+        return audited
 
     def _compose(
         self,
@@ -229,7 +294,10 @@ class BlankLccBuilderService:
                 "plan_blank_lcc_model",
                 template=str(template),
             )
-        audit = audit_native_lcc_template(template).to_dict()
+        audit = audit_native_lcc_template(
+            template,
+            master_registry=self._master_registry(),
+        ).to_dict()
         if not audit.get("compatible"):
             raise _error(
                 "LCC_TEMPLATE_INCOMPATIBLE",
@@ -361,7 +429,14 @@ class BlankLccBuilderService:
 
     async def _run(self, build_id: str, plan: dict[str, Any], journal: AtomicJournal, lease: WorkspaceBuildLease) -> dict[str, Any]:
         try:
-            record = await _execute_native_plan(plan, self.pscad_service, self.workspace_root, build_id=build_id, journal=journal)
+            record = await _execute_native_plan(
+                plan,
+                self.pscad_service,
+                self.workspace_root,
+                build_id=build_id,
+                journal=journal,
+                master_registry=self._master_registry(),
+            )
         except asyncio.CancelledError:
             record = {"build_id": build_id, "state": "interrupted", "plan_hash": plan["plan_hash"], "plan": copy.deepcopy(plan), "error": _error("LCC_BUILD_FAILED", "The blank LCC build was interrupted.", "build_blank_lcc_model").to_dict(), "result": None, "history": [{"state": "validated"}, {"state": "interrupted"}], "workspace": str(self.workspace_root)}
         except BaseException as error:  # noqa: BLE001 - lifecycle records must capture every failure class
@@ -404,7 +479,10 @@ class BlankLccBuilderService:
         project = _contained(candidate, self.workspace_root, label="project", operation="validate_blank_lcc_model")
         if not project.is_file() or project.is_symlink():
             raise _error("NOT_FOUND", "The blank LCC project was not found.", "validate_blank_lcc_model", project_name=str(project))
-        audit = audit_native_lcc_template(project).to_dict()
+        audit = audit_native_lcc_template(
+            project,
+            master_registry=self._master_registry(),
+        ).to_dict()
         external_library = project.parent / "cigre_lcc_v1.pslx"
         valid = bool(audit.get("compatible")) or (external_library.is_file() and set(audit.get("errors", ())) <= {"fault_timer_not_unique", "fault_timer_parameters_missing"})
         result: dict[str, Any] = {"valid": valid, "project_file": str(project), "project_sha256": _sha256(project), "output_file": None, "accepted": False, "native_template": audit}
@@ -445,10 +523,29 @@ async def _read_async(reader: Any, output_file: str) -> Any:
         return await reader(output_file)
 
 
-async def _execute_native_plan(plan: Mapping[str, Any], service: Any, workspace: Path, *, build_id: str, journal: AtomicJournal) -> dict[str, Any]:
+async def _execute_native_plan(
+    plan: Mapping[str, Any],
+    service: Any,
+    workspace: Path,
+    *,
+    build_id: str,
+    journal: AtomicJournal,
+    master_registry: AuditedMasterRegistry | None = None,
+) -> dict[str, Any]:
     source = Path(str(plan["native_template"]["source"])).expanduser().resolve()
     if not source.is_file() or source.is_symlink() or _sha256(source) != str(plan["native_template"]["source_sha256"]):
         raise _error("LCC_PLAN_STALE", "The official LCC source changed after planning.", "build_blank_lcc_model", source=str(source))
+    if master_registry is not None and (
+        plan["native_template"].get("master_sha256")
+        != master_registry.master_sha256
+        or plan["native_template"].get("master_binding_registry_sha256")
+        != master_registry.registry.sha256
+    ):
+        raise _error(
+            "MASTER_SOURCE_CHANGED",
+            "The Master binding evidence changed after blank LCC planning.",
+            "build_blank_lcc_model",
+        )
     staging = Path(str(plan["staging_path"])).resolve()
     project = staging / f"{Path(str(plan['target_path'])).stem}.pscx"
     library = staging / "cigre_lcc_v1.pslx"
@@ -462,6 +559,7 @@ async def _execute_native_plan(plan: Mapping[str, Any], service: Any, workspace:
         fault_duration_s=float(plan["fault"]["duration_s"]),
         time_duration_s=float(plan["settings"]["simulation_duration_s"]),
         fault_resistance_ohm=float(plan["fault"]["resistance_ohm"]),
+        master_registry=master_registry,
     )
     loader = getattr(service, "load_projects", None)
     settings_writer = getattr(service, "set_project_settings", None)

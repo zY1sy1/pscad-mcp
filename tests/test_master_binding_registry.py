@@ -197,6 +197,42 @@ def test_registry_rejects_duplicate_logical_names():
 
 
 @pytest.mark.parametrize(
+    "cases",
+    [
+        [
+            {"logical": ["A"], "physical": [0]},
+            {"logical": ["A"], "physical": [1]},
+        ],
+        [
+            {"logical": ["A"], "physical": [0]},
+            {"logical": ["B"], "physical": [0]},
+        ],
+        [
+            {"logical": [1], "physical": [0]},
+            {"logical": ["1"], "physical": [1]},
+        ],
+        [
+            {"logical": ["A"], "physical": [1]},
+            {"logical": ["B"], "physical": ["1"]},
+        ],
+    ],
+)
+def test_registry_rejects_ambiguous_lookup_bundles(cases):
+    module = _subject()
+    binding = _minimal_binding()
+    binding["parameters"][0]["transform"] = {
+        "kind": "lookup_bundle",
+        "cases": cases,
+    }
+
+    with pytest.raises(BackendError) as failure:
+        module.parse_master_binding_registry(_registry_payload(binding))
+
+    assert failure.value.code == "MASTER_BINDING_AMBIGUOUS"
+    assert failure.value.details["field"] == "transform.cases"
+
+
+@pytest.mark.parametrize(
     ("mutation", "field"),
     [
         (lambda binding: binding["ports"][0].update(dimension=0), "dimension"),
@@ -220,6 +256,21 @@ def test_registry_rejects_invalid_port_and_transform_contracts(mutation, field):
 
     assert failure.value.code == "MASTER_BINDING_MISSING"
     assert failure.value.details["field"] == field
+
+
+def test_registry_rejects_non_finite_transform_constants():
+    module = _subject()
+    binding = _minimal_binding()
+    binding["parameters"][0]["transform"] = {
+        "kind": "scale",
+        "factor": float("nan"),
+    }
+
+    with pytest.raises(BackendError) as failure:
+        module.parse_master_binding_registry(_registry_payload(binding))
+
+    assert failure.value.code == "MASTER_BINDING_MISSING"
+    assert failure.value.details["field"] == "transform.factor"
 
 
 def test_packaged_registry_contains_exact_fixed_catalog_bindings():
@@ -341,6 +392,98 @@ def test_audit_rejects_wrong_parameter_type(tmp_path):
     assert failure.value.code == "MASTER_PARAMETER_MISMATCH"
     assert failure.value.details["physical_parameter"] == "L"
     assert failure.value.details["expected_type"] == "Real"
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "code"),
+    [
+        ("ground_definition", "missing_ground", "MASTER_BINDING_MISSING"),
+        ("ground_port", "MISSING", "MASTER_BINDING_MISSING"),
+        ("ground_occurrence", 99, "MASTER_BINDING_AMBIGUOUS"),
+    ],
+)
+def test_audit_rejects_invalid_filter_ground_contract(
+    tmp_path,
+    field,
+    value,
+    code,
+):
+    module = _subject()
+    payload = json.loads(
+        (ASSET_ROOT / "master-bindings-pscad-4.6.2.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    filter_binding = next(
+        item
+        for item in payload["bindings"]
+        if item["logical_name"] == "master:ac_filter_branch"
+    )
+    filter_binding["shape"]["neutral"][field] = value
+    registry = module.parse_master_binding_registry(payload)
+
+    with pytest.raises(BackendError) as failure:
+        module.audit_master_bindings(
+            _write_master_fixture(tmp_path),
+            registry,
+        )
+
+    assert failure.value.code == code
+    assert failure.value.details["ground_definition"] == filter_binding["shape"][
+        "neutral"
+    ]["ground_definition"]
+
+
+@pytest.mark.parametrize(
+    ("logical_name", "physical_parameter", "invalid_value"),
+    [
+        ("master:three_phase_source", "View", 999),
+        ("master:converter_transformer", "YD2", 999),
+    ],
+)
+def test_audit_rejects_fixed_or_lookup_values_outside_live_contract(
+    tmp_path,
+    logical_name,
+    physical_parameter,
+    invalid_value,
+):
+    module = _subject()
+    payload = json.loads(
+        (ASSET_ROOT / "master-bindings-pscad-4.6.2.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    binding = next(
+        item for item in payload["bindings"] if item["logical_name"] == logical_name
+    )
+    fixed = next(
+        (
+            item
+            for item in binding["fixed_parameters"]
+            if item["physical"] == physical_parameter
+        ),
+        None,
+    )
+    if fixed is not None:
+        fixed["value"] = invalid_value
+    else:
+        parameter = next(
+            item
+            for item in binding["parameters"]
+            if physical_parameter in item["physical"]
+        )
+        index = parameter["physical"].index(physical_parameter)
+        parameter["transform"]["cases"][0]["physical"][index] = invalid_value
+    registry = module.parse_master_binding_registry(payload)
+
+    with pytest.raises(BackendError) as failure:
+        module.audit_master_bindings(
+            _write_master_fixture(tmp_path),
+            registry,
+        )
+
+    assert failure.value.code == "MASTER_PARAMETER_MISMATCH"
+    assert failure.value.details["physical_parameter"] == physical_parameter
 
 
 def test_resolver_round_trips_reactor_transform(tmp_path):

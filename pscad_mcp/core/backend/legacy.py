@@ -328,6 +328,10 @@ class LegacyBackend:
         self._managed_pid = None
         self._managed_executable = None
         self._component_orientations.clear()
+        self._component_bindings.clear()
+        self._composite_components.clear()
+        self._component_binding_members.clear()
+        self._audited_master_registry = None
         self._running_projects.clear()
         self._paused_projects.clear()
         self._run_activity_seen.clear()
@@ -408,10 +412,12 @@ class LegacyBackend:
         unloader = getattr(project, "unload", None)
         if callable(unloader):
             await self.executor.run_safe(unloader)
+            self._clear_project_binding_state(project_name)
             return
         app_unloader = getattr(self._require_app(), "unload", None)
         if callable(app_unloader):
             await self.executor.run_safe(app_unloader, project_name)
+            self._clear_project_binding_state(project_name)
             return
         raise BackendError(
             "BLUEPRINT_RELOAD_UNAVAILABLE",
@@ -420,6 +426,16 @@ class LegacyBackend:
             "unload_project",
             {"project_name": project_name},
         )
+
+    def _clear_project_binding_state(self, project_name: str) -> None:
+        for cache in (
+            self._component_orientations,
+            self._component_bindings,
+            self._composite_components,
+            self._component_binding_members,
+        ):
+            for key in [key for key in cache if key[0] == project_name]:
+                cache.pop(key, None)
 
     async def list_projects(self) -> list[ProjectInfo]:
         values = await self.executor.run_safe(self._require_app().list_projects)
@@ -2184,11 +2200,66 @@ class LegacyBackend:
                 }
             ],
         )
+        wire_members = [
+            member for member in members if member["role"] == "neutral_wire"
+        ]
+        wires_by_id: dict[int, Any] = {}
+        if wire_members:
+            canvas = await self._canvas(project_name, "Main")
+            for item in list(await self.executor.run_safe(canvas.find_all)):
+                try:
+                    object_id = self._component_id(item)
+                except (TypeError, ValueError):
+                    continue
+                wires_by_id[object_id] = item
         observed_instances: list[dict[str, Any]] = []
         logical_source: Mapping[str, Any] | None = None
         for member in members:
             if member["role"] == "neutral_wire":
-                observed_instances.append(dict(member))
+                wire_id = int(member["wire_id"])
+                wire = wires_by_id.get(wire_id)
+                if wire is None:
+                    raise BackendError(
+                        "MASTER_READBACK_FAILED",
+                        "A filter neutral wire is missing from the canvas.",
+                        self.name,
+                        "get_master_binding_evidence",
+                        {
+                            "component_id": component_id,
+                            "wire_id": wire_id,
+                            "role": "neutral_wire",
+                        },
+                    )
+                vertices = await self._absolute_wire_vertices(wire)
+                actual_endpoints = (
+                    [list(vertices[0]), list(vertices[-1])]
+                    if len(vertices) >= 2
+                    else []
+                )
+                expected_endpoints = list(member["endpoints"])
+                if not actual_endpoints or {
+                    tuple(actual_endpoints[0]),
+                    tuple(actual_endpoints[1]),
+                } != {
+                    tuple(expected_endpoints[0]),
+                    tuple(expected_endpoints[1]),
+                }:
+                    raise BackendError(
+                        "MASTER_READBACK_FAILED",
+                        "A filter neutral wire endpoint drifted.",
+                        self.name,
+                        "get_master_binding_evidence",
+                        {
+                            "component_id": component_id,
+                            "wire_id": wire_id,
+                            "role": "neutral_wire",
+                            "expected_endpoints": expected_endpoints,
+                            "observed_endpoints": actual_endpoints,
+                        },
+                    )
+                observed_instances.append(
+                    {**dict(member), "endpoints": actual_endpoints}
+                )
                 continue
             physical_id = int(member["component_id"])
             _canvas, physical = await self._component_proxy(
@@ -2199,6 +2270,54 @@ class LegacyBackend:
             parameters = dict(
                 await self.executor.run_safe(physical.get_parameters)
             )
+            if member["role"] == "component":
+                expected_definition = f"master:{binding.physical_definition}"
+                if info.definition != expected_definition:
+                    raise BackendError(
+                        "MASTER_READBACK_FAILED",
+                        "A bound physical component definition drifted.",
+                        self.name,
+                        "get_master_binding_evidence",
+                        {
+                            "component_id": physical_id,
+                            "expected_definition": expected_definition,
+                            "observed_definition": info.definition,
+                        },
+                    )
+                for name, expected in binding.physical_parameters.items():
+                    if name not in parameters or not self._settings_values_match(
+                        expected,
+                        parameters[name],
+                    ):
+                        raise BackendError(
+                            "MASTER_READBACK_FAILED",
+                            "A bound physical component parameter drifted.",
+                            self.name,
+                            "get_master_binding_evidence",
+                            {
+                                "component_id": physical_id,
+                                "physical_parameter": name,
+                                "expected": expected,
+                                "observed": parameters.get(name),
+                            },
+                        )
+            elif member["role"] == "neutral_ground":
+                neutral = binding._binding.shape.get("neutral", {})
+                expected_definition = (
+                    f"master:{neutral.get('ground_definition', '')}"
+                )
+                if info.definition != expected_definition:
+                    raise BackendError(
+                        "MASTER_READBACK_FAILED",
+                        "A filter neutral ground definition drifted.",
+                        self.name,
+                        "get_master_binding_evidence",
+                        {
+                            "component_id": physical_id,
+                            "expected_definition": expected_definition,
+                            "observed_definition": info.definition,
+                        },
+                    )
             observed_instances.append(
                 {
                     **dict(member),
@@ -2222,6 +2341,76 @@ class LegacyBackend:
         )
         evidence["observed_instances"] = observed_instances
         return evidence
+
+    async def verify_master_binding_state(
+        self,
+        project_name: str,
+        component_ids: Mapping[str, int],
+        expected_master_sha256: str,
+        expected_registry_sha256: str,
+        *,
+        refresh_components: bool = True,
+    ) -> dict[str, Any]:
+        """Gate compile/publication on current source and component evidence."""
+
+        audited = self._audited_master_registry
+        if audited is None:
+            raise BackendError(
+                "MASTER_BINDING_MISSING",
+                "No audited Master registry is active.",
+                self.name,
+                "verify_master_binding_state",
+            )
+        if audited.registry.sha256 != expected_registry_sha256:
+            raise BackendError(
+                "MASTER_SOURCE_CHANGED",
+                "The active Master binding registry differs from the plan.",
+                self.name,
+                "verify_master_binding_state",
+                {
+                    "reason": "registry_hash_changed",
+                    "expected_registry_sha256": expected_registry_sha256,
+                    "observed_registry_sha256": audited.registry.sha256,
+                },
+            )
+        master_path = Path(audited.master_path)
+        try:
+            observed_master_sha256 = await asyncio.to_thread(
+                lambda: hashlib.sha256(master_path.read_bytes()).hexdigest()
+            )
+        except OSError as error:
+            raise BackendError(
+                "MASTER_SOURCE_CHANGED",
+                "The planned Master source can no longer be read.",
+                self.name,
+                "verify_master_binding_state",
+                {"path": str(master_path)},
+            ) from error
+        if observed_master_sha256 != expected_master_sha256:
+            raise BackendError(
+                "MASTER_SOURCE_CHANGED",
+                "The Master source differs from the build plan.",
+                self.name,
+                "verify_master_binding_state",
+                {
+                    "reason": "master_hash_changed",
+                    "path": str(master_path),
+                    "expected_master_sha256": expected_master_sha256,
+                    "observed_master_sha256": observed_master_sha256,
+                },
+            )
+        refreshed: dict[str, Any] = {}
+        if refresh_components:
+            for logical_id, component_id in component_ids.items():
+                refreshed[str(logical_id)] = await self.get_master_binding_evidence(
+                    project_name,
+                    int(component_id),
+                )
+        return {
+            "master_sha256": observed_master_sha256,
+            "registry_sha256": audited.registry.sha256,
+            "components": refreshed,
+        }
 
     async def set_component_parameters(
         self, project_name: str, component_id: int, parameters: Any
@@ -2793,9 +2982,35 @@ class LegacyBackend:
     async def delete_components(
         self, project_name: str, component_ids: Sequence[int]
     ) -> None:
-        unique_ids = list(dict.fromkeys(int(value) for value in component_ids))
-        if not unique_ids:
+        requested_ids = list(dict.fromkeys(int(value) for value in component_ids))
+        if not requested_ids:
             raise ValueError("component_ids must not be empty.")
+        binding_owner_ids = [
+            component_id
+            for component_id in requested_ids
+            if (project_name, component_id) in self._component_binding_members
+        ]
+        expanded_ids: list[int] = []
+        owned_wire_ids: set[int] = set()
+        for component_id in requested_ids:
+            members = self._component_binding_members.get(
+                (project_name, component_id),
+                (),
+            )
+            if not members:
+                expanded_ids.append(component_id)
+                continue
+            expanded_ids.extend(
+                int(member["component_id"])
+                for member in members
+                if "component_id" in member
+            )
+            owned_wire_ids.update(
+                int(member["wire_id"])
+                for member in members
+                if "wire_id" in member
+            )
+        unique_ids = list(dict.fromkeys(expanded_ids))
         canvas = await self._canvas(project_name, "Main")
 
         targets = []
@@ -2838,16 +3053,37 @@ class LegacyBackend:
             if type(value).__name__ != "WireOrthogonal":
                 continue
             vertices = await self._absolute_wire_vertices(value)
+            wire_id = self._component_id(value)
+            if wire_id in owned_wire_ids:
+                seen_wire_ids.add(wire_id)
+                wires.append(value)
+                selection_bounds[wire_id] = self._selection_bounds(
+                    vertices,
+                    padding=self._canvas_grid,
+                )
+                continue
             endpoints = {tuple(vertices[0]), tuple(vertices[-1])} if vertices else set()
             if not endpoints.intersection(target_ports):
                 continue
-            wire_id = self._component_id(value)
             if wire_id in seen_wire_ids:
                 continue
             seen_wire_ids.add(wire_id)
             wires.append(value)
             selection_bounds[wire_id] = self._selection_bounds(
                 vertices, padding=self._canvas_grid
+            )
+
+        missing_owned_wires = sorted(owned_wire_ids - seen_wire_ids)
+        if missing_owned_wires:
+            raise BackendError(
+                "MASTER_READBACK_FAILED",
+                "Owned composite wires are missing before deletion.",
+                self.name,
+                "delete_components",
+                {
+                    "project": project_name,
+                    "wire_ids": missing_owned_wires,
+                },
             )
 
         await self._execute_deletion_plan(
@@ -2857,6 +3093,11 @@ class LegacyBackend:
             wires,
             selection_bounds,
         )
+        for component_id in binding_owner_ids:
+            key = (project_name, component_id)
+            self._component_bindings.pop(key, None)
+            self._composite_components.pop(key, None)
+            self._component_binding_members.pop(key, None)
 
     async def _absolute_wire_vertices(self, wire: Any) -> list[tuple[int, int]]:
         vertices = [
@@ -3187,14 +3428,36 @@ class LegacyBackend:
                     "add_component",
                     {"logical_definition": logical_definition},
                 )
-            return await self._add_three_phase_filter(
-                project_name,
-                canvas_name,
-                location,
-                orientation,
-                logical_definition,
-                binding,
-            )
+            before_ids = await self._canvas_object_ids(canvas)
+            try:
+                return await self._add_three_phase_filter(
+                    project_name,
+                    canvas_name,
+                    location,
+                    orientation,
+                    logical_definition,
+                    binding,
+                )
+            except BaseException as error:
+                try:
+                    await self._rollback_canvas_objects(
+                        project_name,
+                        canvas,
+                        before_ids,
+                    )
+                except BaseException as rollback_error:
+                    raise BackendError(
+                        "PARTIAL_COMPLETION",
+                        "Filter expansion failed and rollback was incomplete.",
+                        self.name,
+                        "add_component",
+                        {
+                            "logical_definition": logical_definition,
+                            "failure": type(error).__name__,
+                            "rollback_failure": type(rollback_error).__name__,
+                        },
+                    ) from error
+                raise
         component = await self.executor.run_safe(
             canvas.add_component, library, definition, *location
         )
@@ -3291,6 +3554,46 @@ class LegacyBackend:
             ]
         return info
 
+    async def _rollback_canvas_objects(
+        self,
+        project_name: str,
+        canvas: Any,
+        before_ids: set[int],
+    ) -> None:
+        current = list(await self.executor.run_safe(canvas.find_all))
+        added: list[tuple[int, Any]] = []
+        for item in current:
+            try:
+                object_id = self._component_id(item)
+            except (TypeError, ValueError):
+                continue
+            if object_id not in before_ids:
+                added.append((object_id, item))
+        for object_id, item in reversed(added):
+            deleter = getattr(item, "delete", None)
+            if not callable(deleter):
+                raise BackendError(
+                    "PARTIAL_COMPLETION",
+                    "A partially created filter object cannot be deleted.",
+                    self.name,
+                    "rollback_filter_expansion",
+                    {"object_id": object_id},
+                )
+            await self.executor.run_safe(deleter)
+            self._component_orientations.pop((project_name, object_id), None)
+        remaining = await self._canvas_object_ids(canvas)
+        if remaining != before_ids:
+            raise BackendError(
+                "PARTIAL_COMPLETION",
+                "Filter expansion rollback did not restore the canvas snapshot.",
+                self.name,
+                "rollback_filter_expansion",
+                {
+                    "expected_ids": sorted(before_ids),
+                    "observed_ids": sorted(remaining),
+                },
+            )
+
     async def _add_three_phase_filter(
         self,
         project_name: str,
@@ -3322,10 +3625,10 @@ class LegacyBackend:
             )
         definition_evidence = audited.definitions[logical_definition]
         neutral_evidence = definition_evidence.get("neutral_port")
-        ground_evidence = audited.definitions["master:ground"][
-            "selected_ports"
-        ]["GND"]
-        if not isinstance(neutral_evidence, Mapping):
+        ground_evidence = definition_evidence.get("ground_port")
+        if not isinstance(neutral_evidence, Mapping) or not isinstance(
+            ground_evidence, Mapping
+        ):
             raise BackendError(
                 "MASTER_BINDING_MISSING",
                 "The filter neutral port lacks audited evidence.",

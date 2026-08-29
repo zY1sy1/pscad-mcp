@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from pscad_mcp.core.backend.base import BackendError
 from pscad_mcp.hvdc.builders.lcc.assets import load_packaged_asset_set
 from pscad_mcp.hvdc.builders.lcc.executor import LccExecutor, _legacy_project_settings
 from pscad_mcp.hvdc.builders.lcc.executor import execute_build as _execute_build
@@ -154,7 +155,12 @@ def test_executor_forwards_master_binding_evidence_to_service(tmp_path):
             arguments["binding"] = binding
             operation = replace(operation, arguments=arguments)
         operations.append(operation)
-    plan = replace(plan, operations=tuple(operations))
+    plan = replace(
+        plan,
+        operations=tuple(operations),
+        master_sha256="b" * 64,
+        master_binding_registry_sha256="a" * 64,
+    )
     service = RecordingPscadService()
 
     record = asyncio.run(
@@ -179,6 +185,71 @@ def test_executor_forwards_master_binding_evidence_to_service(tmp_path):
         if operation.kind == "place_component" and operation.target == "source"
     )
     assert call[2]["binding_evidence"] == planned_binding
+    verification_calls = [
+        item for item in service.calls if item[0] == "verify_master_binding_state"
+    ]
+    assert len(verification_calls) == 3
+    assert [item[2]["refresh_components"] for item in verification_calls] == [
+        True,
+        True,
+        False,
+    ]
+
+
+class MasterSourceChangedAfterPlacementService(RecordingPscadService):
+    async def verify_master_binding_state(self, *args, **kwargs):
+        await super().verify_master_binding_state(*args, **kwargs)
+        raise BackendError(
+            "MASTER_SOURCE_CHANGED",
+            "Master changed after placement.",
+            "legacy",
+            "verify_master_binding_state",
+        )
+
+
+def test_executor_rechecks_master_source_before_compile(tmp_path):
+    plan = _plan(tmp_path)
+    binding = {
+        "logical_name": "master:source",
+        "physical_definition": "source3",
+        "physical_parameters": {},
+        "evidence_parameters": {},
+        "instances": ["default"],
+        "selected_ports": {},
+        "registry_sha256": "a" * 64,
+        "master_sha256": "b" * 64,
+        "verification_state": "verified",
+    }
+    operations = []
+    for operation in plan.operations:
+        if operation.kind == "place_component" and operation.target == "source":
+            arguments = dict(operation.arguments)
+            arguments["binding"] = binding
+            operation = replace(operation, arguments=arguments)
+        operations.append(operation)
+    plan = replace(
+        plan,
+        operations=tuple(operations),
+        master_sha256="b" * 64,
+        master_binding_registry_sha256="a" * 64,
+    )
+    service = MasterSourceChangedAfterPlacementService()
+
+    record = asyncio.run(
+        execute_build(
+            plan,
+            service,
+            tmp_path,
+            build_id="build-master-source-changed",
+            poll_interval_s=0,
+        )
+    )
+
+    assert record.state.value == "failed"
+    assert record.error["code"] == "MASTER_SOURCE_CHANGED"
+    names = [call[0] for call in service.calls]
+    assert "verify_master_binding_state" in names
+    assert "build_project" not in names
 
 
 def test_executor_forwards_trusted_threshold_registry_to_acceptance(tmp_path, monkeypatch):

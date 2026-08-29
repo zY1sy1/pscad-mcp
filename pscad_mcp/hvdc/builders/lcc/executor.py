@@ -943,8 +943,60 @@ class LccExecutor:
 
     async def _compile(self, operation: LccPlanOperation) -> None:
         self._operation_started(operation)
+        await self._verify_master_binding_state()
         await self.service.build_project(self.project_name)
         self._operation_completed(LccBuildState.COMPILED)
+
+    async def _verify_master_binding_state(
+        self,
+        *,
+        project_name: str | None = None,
+        refresh_components: bool = True,
+    ) -> None:
+        master_sha256 = self.plan.master_sha256
+        registry_sha256 = self.plan.master_binding_registry_sha256
+        if master_sha256 is None and registry_sha256 is None:
+            return
+        if not isinstance(master_sha256, str) or not isinstance(
+            registry_sha256, str
+        ):
+            raise _error(
+                "MASTER_BINDING_MISSING",
+                "The build plan has incomplete Master hash evidence.",
+                "verify_master_binding_state",
+            )
+        verifier = getattr(self.service, "verify_master_binding_state", None)
+        if not callable(verifier):
+            raise _error(
+                "MASTER_BINDING_MISSING",
+                "The PSCAD service cannot verify Master binding state.",
+                "verify_master_binding_state",
+            )
+        bound_targets = {
+            operation.target
+            for operation in self.plan.operations
+            if operation.kind == "place_component"
+            and isinstance(operation.arguments.get("binding"), dict)
+        }
+        component_ids = {
+            target: self.component_ids[target]
+            for target in sorted(bound_targets)
+            if target in self.component_ids
+        }
+        if refresh_components and set(component_ids) != bound_targets:
+            raise _error(
+                "MASTER_READBACK_FAILED",
+                "Not every planned Master component is available for refresh.",
+                "verify_master_binding_state",
+                missing_components=sorted(bound_targets - set(component_ids)),
+            )
+        await verifier(
+            project_name or self.project_name,
+            component_ids,
+            master_sha256,
+            registry_sha256,
+            refresh_components=refresh_components,
+        )
 
     async def _simulate(self, operation: LccPlanOperation) -> None:
         self._operation_started(operation)
@@ -1184,6 +1236,7 @@ class LccExecutor:
 
     async def _publish(self, operation: LccPlanOperation) -> None:
         self._operation_started(operation)
+        await self._verify_master_binding_state()
         if self.target_path is None:
             self._raise_postcondition("The build plan has no final target path.")
         if self.target_path.exists() or self.target_path.is_symlink():
@@ -1228,6 +1281,10 @@ class LccExecutor:
         self._validate_graph(self.target_path)
         final_project_name = final_path.stem
         await self.service.build_project(final_project_name)
+        await self._verify_master_binding_state(
+            project_name=final_project_name,
+            refresh_components=False,
+        )
         self._validate_graph(self.target_path)
         try:
             final_project_hash = sha256_file(self.target_path)

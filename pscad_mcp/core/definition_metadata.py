@@ -223,12 +223,25 @@ def read_definition_metadata_matches(
 ) -> tuple[DefinitionMetadata, ...]:
     """Return every exact definition match in source order."""
 
-    root = ET.parse(Path(file_path)).getroot()
-    return tuple(
-        _metadata_from_definition(definition)
-        for definition in root.findall(".//Definition")
-        if definition.get("name") == definition_name
-    )
+    document = read_definition_metadata_document(Path(file_path).read_bytes())
+    return document.get(definition_name, ())
+
+
+def read_definition_metadata_document(
+    payload: bytes,
+) -> dict[str, tuple[DefinitionMetadata, ...]]:
+    """Parse one immutable XML byte snapshot into definition metadata."""
+
+    root = ET.fromstring(payload)
+    grouped: dict[str, list[DefinitionMetadata]] = {}
+    for definition in root.findall(".//Definition"):
+        name = definition.get("name")
+        if not name:
+            continue
+        grouped.setdefault(name, []).append(
+            _metadata_from_definition(definition)
+        )
+    return {name: tuple(values) for name, values in grouped.items()}
 
 
 def read_definition_metadata(
