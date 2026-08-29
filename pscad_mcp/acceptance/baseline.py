@@ -475,3 +475,80 @@ def canonical_program_baseline(value: Any) -> bytes:
 
 def program_baseline_sha256(value: Any) -> str:
     return hashlib.sha256(canonical_program_baseline(value)).hexdigest()
+
+
+def apply_scope_report(
+    baseline: Any,
+    report: Mapping[str, Any],
+    *,
+    owner_work_package: str,
+) -> dict[str, Any]:
+    current = validate_program_baseline(baseline)
+    candidate = _record(report, "report", _REPORT)
+    scope_name = _text(candidate["scope"], "report.scope")
+    builder_path = _text(candidate["builder_path"], "report.builder_path")
+    if (
+        scope_name not in SCOPE_BUILDER_PATHS
+        or builder_path != SCOPE_BUILDER_PATHS[scope_name]
+    ):
+        raise BackendError(
+            "PROGRAM_SCOPE_CONFLICT",
+            "The report builder_path does not own the requested scope.",
+            "acceptance",
+            "apply_scope_report",
+            {"reason": "builder_path_mismatch", "scope": scope_name},
+        )
+    commit = _commit(candidate["commit"], "report.commit")
+    if commit != current["repository"]["base_commit"]:
+        raise BackendError(
+            "PROGRAM_SCOPE_CONFLICT",
+            "Historical evidence cannot update current program truth.",
+            "acceptance",
+            "apply_scope_report",
+            {"reason": "historical_commit", "scope": scope_name},
+        )
+    matching = [item for item in current["scopes"] if item["scope"] == scope_name]
+    if (
+        len(matching) != 1
+        or matching[0]["owner_work_package"] != owner_work_package
+    ):
+        raise BackendError(
+            "PROGRAM_SCOPE_CONFLICT",
+            "The report does not belong to the requested work package scope.",
+            "acceptance",
+            "apply_scope_report",
+            {"reason": "scope_owner_mismatch", "scope": scope_name},
+        )
+    status = _text(candidate["status"], "report.status")
+    if status not in LICENSED_STATUSES:
+        raise _error(
+            "report.status",
+            "unknown_status",
+            "Report status is invalid.",
+        )
+    run_id = _text(candidate["run_id"], "report.run_id")
+    previous = next(
+        (item for item in current["reports"] if item["run_id"] == run_id),
+        None,
+    )
+    if previous is not None and previous != candidate:
+        raise BackendError(
+            "PROGRAM_SCOPE_CONFLICT",
+            "A run_id cannot be reused for different evidence.",
+            "acceptance",
+            "apply_scope_report",
+            {"reason": "run_id_reuse", "run_id": run_id},
+        )
+    reports = [item for item in current["reports"] if item["run_id"] != run_id]
+    reports.append(dict(candidate))
+    scope = matching[0]
+    scope["licensed_status"] = status
+    scope["evidence_run_id"] = run_id
+    scope["capability_state"] = _text(
+        candidate["capability_state"],
+        "report.capability_state",
+    )
+    updated = dict(current)
+    updated["reports"] = reports
+    updated["scopes"] = current["scopes"]
+    return validate_program_baseline(updated)

@@ -147,3 +147,91 @@ def test_duplicate_scope_and_run_id_are_rejected():
         subject()(payload)
 
     assert failure.value.details["reason"] == "duplicate_run_id"
+
+
+def transition_subject():
+    from pscad_mcp.acceptance.baseline import apply_scope_report
+
+    return apply_scope_report
+
+
+def test_report_updates_only_its_owned_scope():
+    baseline = valid_baseline()
+    report = copy.deepcopy(baseline["reports"][0])
+    report["run_id"] = "master-binding-20260830-new"
+    report["sha256"] = "3" * 64
+    report["status"] = "INCOMPLETE_ANALYSIS"
+
+    updated = transition_subject()(
+        baseline,
+        report,
+        owner_work_package="WP1",
+    )
+
+    assert updated["scopes"][0]["licensed_status"] == "INCOMPLETE_ANALYSIS"
+    assert baseline["scopes"][0]["licensed_status"] == "PASS"
+
+
+def test_cross_scope_or_wrong_owner_transition_is_rejected():
+    baseline = valid_baseline()
+    report = copy.deepcopy(baseline["reports"][0])
+    report["scope"] = "mmc.parametric"
+
+    with pytest.raises(BackendError) as failure:
+        transition_subject()(baseline, report, owner_work_package="WP1")
+
+    assert failure.value.code == "PROGRAM_SCOPE_CONFLICT"
+
+    with pytest.raises(BackendError) as failure:
+        transition_subject()(baseline, baseline["reports"][0], owner_work_package="WP2")
+
+    assert failure.value.details["reason"] == "scope_owner_mismatch"
+
+
+def test_cross_builder_transition_is_rejected():
+    baseline = valid_baseline()
+    report = copy.deepcopy(baseline["reports"][0])
+    report["builder_path"] = "lcc.parametric"
+
+    with pytest.raises(BackendError) as failure:
+        transition_subject()(baseline, report, owner_work_package="WP1")
+
+    assert failure.value.details["reason"] == "builder_path_mismatch"
+
+
+def test_historical_commit_never_updates_current_scope():
+    baseline = valid_baseline()
+    report = copy.deepcopy(baseline["reports"][0])
+    report["commit"] = "f" * 40
+
+    with pytest.raises(BackendError) as failure:
+        transition_subject()(baseline, report, owner_work_package="WP1")
+
+    assert failure.value.details["reason"] == "historical_commit"
+
+
+def test_run_id_cannot_be_reused_with_different_evidence():
+    baseline = valid_baseline()
+    report = copy.deepcopy(baseline["reports"][0])
+    report["sha256"] = "f" * 64
+
+    with pytest.raises(BackendError) as failure:
+        transition_subject()(baseline, report, owner_work_package="WP1")
+
+    assert failure.value.details["reason"] == "run_id_reuse"
+
+
+def test_compile_pass_does_not_promote_scope_to_accepted():
+    baseline = valid_baseline()
+    report = copy.deepcopy(baseline["reports"][0])
+    report["run_id"] = "compile-run-2"
+    report["sha256"] = "4" * 64
+
+    updated = transition_subject()(
+        baseline,
+        report,
+        owner_work_package="WP1",
+    )
+
+    assert updated["scopes"][0]["licensed_status"] == "PASS"
+    assert updated["scopes"][0]["capability_state"] == "compiled"
