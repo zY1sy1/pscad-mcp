@@ -7,9 +7,10 @@ import json
 import secrets
 import threading
 import uuid
+from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from ....core.backend.base import BackendError
 from ....core.path_policy import PathPolicy, WorkspaceNotConfiguredError
@@ -108,8 +109,13 @@ class LccBuilderService:
         bridge = getattr(self.pscad_service, "get_lcc_inventory", None)
         if callable(bridge):
             try:
+                registry = asset_set.master_bindings
                 return _run_coroutine_sync(
-                    lambda: bridge(asset_set.catalog)
+                    lambda: (
+                        bridge(asset_set.catalog, registry.to_dict())
+                        if registry is not None
+                        else bridge(asset_set.catalog)
+                    )
                 )
             except BackendError:
                 raise

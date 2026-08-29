@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import math
 import os
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import asdict
-import inspect
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Awaitable, Callable
+from typing import TYPE_CHECKING, Any
 
 from .backend.base import BackendError, BackendInfo, ParameterGridRequest
 from .executor import (
@@ -775,7 +775,11 @@ class PscadService:
     async def get_project_definitions(self, project_name: str) -> list[str]:
         return await self.backend.project_definitions(project_name)
 
-    async def get_lcc_inventory(self, catalog: Mapping[str, Any]) -> dict[str, Any]:
+    async def get_lcc_inventory(
+        self,
+        catalog: Mapping[str, Any],
+        master_binding_registry: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
         """Return live Master evidence plus declared packaged companion assets."""
 
         if not isinstance(catalog, Mapping):
@@ -785,7 +789,13 @@ class PscadService:
                 "service",
                 "get_lcc_inventory",
             )
-        inventory = await self.backend.lcc_definition_inventory(catalog)
+        inventory = (
+            await self.backend.lcc_definition_inventory(
+                catalog, master_binding_registry
+            )
+            if master_binding_registry is not None
+            else await self.backend.lcc_definition_inventory(catalog)
+        )
         if not isinstance(inventory, Mapping):
             raise BackendError(
                 "UNEXPECTED_RESPONSE",
@@ -818,11 +828,19 @@ class PscadService:
                 "ports": list(item.get("ports", ())) if isinstance(item.get("ports", ()), Sequence) else [],
                 "source": "packaged_companion",
             }
-        return {
+        result = {
             "pscad_version": inventory.get("pscad_version"),
             "definitions": definitions,
             "source": "live_pscad_plus_packaged_companion",
         }
+        for key in (
+            "master_path",
+            "master_sha256",
+            "master_binding_registry_sha256",
+        ):
+            if key in inventory:
+                result[key] = inventory[key]
+        return result
 
     async def list_simulation_sets(self, project_name: str) -> list[str]:
         return await self.backend.list_simulation_sets(project_name)

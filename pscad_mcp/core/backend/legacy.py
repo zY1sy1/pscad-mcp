@@ -11,12 +11,13 @@ import re
 import shutil
 import tempfile
 import time
+import xml.etree.ElementTree as ET
+from collections.abc import Callable, Mapping, Sequence
 from collections.abc import Mapping as MappingABC
 from decimal import Decimal, InvalidOperation
 from importlib.resources import as_file, files
 from pathlib import Path
-from typing import Any, Callable, Mapping, Sequence
-import xml.etree.ElementTree as ET
+from typing import Any
 
 from ...topology.geometry import GeometryError, absolute_port
 from ...topology.hashing import canonical_sha256
@@ -36,26 +37,30 @@ from ..definition_metadata import (
     master_definition_binding,
     read_definition_metadata,
 )
+from ..master_bindings import (
+    MasterBindingRegistry,
+    audit_master_bindings,
+    parse_master_binding_registry,
+)
 from ..process_inventory import bounded_process_records
 from ..pscad_adapter import PscadAdapter
+from . import legacy_support
 from .base import (
     BackendError,
     BackendInfo,
     ComponentInfo,
     ParameterGridRequest,
     PortInfo,
-    ProjectMessage,
     ProjectInfo,
+    ProjectMessage,
     RunState,
     SimulationSetInfo,
     SimulationTaskInfo,
 )
-from . import legacy_support
 from .run_control import (
     STOPPED_RUN_STATUSES,
     require_single_active_target,
 )
-
 
 _RUN_STATE_MISSING = object()
 _SavedTopologyRecord = tuple[
@@ -1152,7 +1157,11 @@ class LegacyBackend:
         return [str(value) for value in values]
 
     async def lcc_definition_inventory(
-        self, catalog: Mapping[str, Any]
+        self,
+        catalog: Mapping[str, Any],
+        master_binding_registry: Mapping[str, Any]
+        | MasterBindingRegistry
+        | None = None,
     ) -> dict[str, Any]:
         """Read the requested Master definitions from the installed 4.6.2 library.
 
@@ -1196,6 +1205,66 @@ class LegacyBackend:
                 self.name,
                 "lcc_definition_inventory",
             )
+
+        if master_binding_registry is not None:
+            registry = (
+                master_binding_registry
+                if isinstance(master_binding_registry, MasterBindingRegistry)
+                else parse_master_binding_registry(master_binding_registry)
+            )
+            audited = await asyncio.to_thread(
+                audit_master_bindings,
+                master_path,
+                registry,
+            )
+
+            def plain(value: Any) -> Any:
+                if isinstance(value, Mapping):
+                    return {str(key): plain(item) for key, item in value.items()}
+                if isinstance(value, (tuple, list)):
+                    return [plain(item) for item in value]
+                return value
+
+            definitions: dict[str, dict[str, Any]] = {}
+            for scoped_name, _item in entries:
+                if (
+                    not isinstance(scoped_name, str)
+                    or ":" not in scoped_name
+                    or scoped_name.split(":", 1)[0].casefold() != "master"
+                ):
+                    continue
+                try:
+                    evidence = plain(audited.definitions[scoped_name])
+                except KeyError as error:
+                    raise BackendError(
+                        "MASTER_BINDING_MISSING",
+                        f"No verified Master binding exists for '{scoped_name}'.",
+                        self.name,
+                        "lcc_definition_inventory",
+                        {"definition": scoped_name},
+                    ) from error
+                selected_ports = evidence["selected_ports"]
+                binding = registry.by_logical_name[scoped_name]
+                evidence["ports"] = [
+                    {
+                        "name": port.logical,
+                        "physical": port.physical,
+                        "occurrence": port.occurrence,
+                        "dimension": selected_ports[port.logical]["dimension"],
+                        "kind": selected_ports[port.logical]["kind"],
+                    }
+                    for port in binding.ports
+                ]
+                evidence["source"] = "live_master"
+                definitions[scoped_name] = evidence
+            return {
+                "pscad_version": self.version,
+                "definitions": definitions,
+                "source": "pscad_live",
+                "master_path": str(master_path),
+                "master_sha256": audited.master_sha256,
+                "master_binding_registry_sha256": registry.sha256,
+            }
 
         definitions: dict[str, dict[str, Any]] = {}
         for scoped_name, item in entries:
