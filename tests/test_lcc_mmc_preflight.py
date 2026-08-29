@@ -1,0 +1,142 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+from pscad_mcp.acceptance.preflight import PreflightRequest, run_static_preflight
+
+
+def request(tmp_path: Path) -> PreflightRequest:
+    repo = tmp_path / "repo"
+    workspace = tmp_path / "workspace"
+    install = tmp_path / "PSCAD46"
+    repo.mkdir()
+    workspace.mkdir()
+    install.mkdir()
+    master = install / "master.pslx"
+    master.write_text("<pslx />", encoding="utf-8")
+    compiler = install / "fortran_compilers.xml"
+    compiler.write_text(
+        "<compilers><compiler name='MHRC' version='4.6.2' "
+        "exe_name='gfortran.exe' emtdc='gf46' compiler_type='x86'/></compilers>",
+        encoding="utf-8",
+    )
+    compiler_executable = install / "gfortran.exe"
+    compiler_executable.write_bytes(b"fake-gfortran")
+    return PreflightRequest(
+        repository_root=repo,
+        workspace_root=workspace,
+        master_path=master,
+        compiler_configuration=compiler,
+        compiler_executable=compiler_executable,
+        expected_commit="dadd739e2abc14dcc7de73149da7fd7f0c0ca763",
+        expected_branch="main",
+    )
+
+
+def clean_git(value: PreflightRequest) -> dict[str, object]:
+    return {
+        "commit": value.expected_commit,
+        "branch": value.expected_branch,
+        "clean": True,
+    }
+
+
+def test_static_preflight_reports_all_required_checks(tmp_path):
+    value = request(tmp_path)
+
+    report = run_static_preflight(
+        value,
+        git_reader=lambda root: clean_git(value),
+        module_finder=lambda name: name == "mhrc.automation",
+        process_reader=list,
+        output_discovery_probe=lambda workspace: True,
+    )
+
+    assert report["status"] == "PASS"
+    assert report["checks"] == {
+        "repository": "PASS",
+        "workspace": "PASS",
+        "master": "PASS",
+        "compiler": "PASS",
+        "automation": "PASS",
+        "processes": "PASS",
+        "legacy_numbered_output_discovery": "PASS",
+    }
+    assert len(report["master_sha256"]) == 64
+    assert len(report["compiler_configuration_sha256"]) == 64
+    assert len(report["compiler_executable_sha256"]) == 64
+
+
+def test_source_inside_workspace_and_external_pscad_are_failures(tmp_path):
+    value = request(tmp_path)
+    source_inside = value.workspace_root / "master.pslx"
+    source_inside.write_text("<pslx />", encoding="utf-8")
+    value = PreflightRequest(
+        repository_root=value.repository_root,
+        workspace_root=value.workspace_root,
+        master_path=source_inside,
+        compiler_configuration=value.compiler_configuration,
+        compiler_executable=value.compiler_executable,
+        expected_commit=value.expected_commit,
+        expected_branch=value.expected_branch,
+    )
+
+    report = run_static_preflight(
+        value,
+        git_reader=lambda root: clean_git(value),
+        module_finder=lambda name: True,
+        process_reader=lambda: [{"pid": 12, "name": "PSCAD.exe"}],
+        output_discovery_probe=lambda workspace: True,
+    )
+
+    assert report["status"] == "FAIL"
+    assert report["checks"]["workspace"] == "FAIL"
+    assert report["checks"]["processes"] == "FAIL"
+
+
+def test_dirty_or_wrong_commit_repository_fails(tmp_path):
+    value = request(tmp_path)
+
+    report = run_static_preflight(
+        value,
+        git_reader=lambda root: {
+            "commit": "f" * 40,
+            "branch": "feature",
+            "clean": False,
+        },
+        module_finder=lambda name: True,
+        process_reader=list,
+        output_discovery_probe=lambda workspace: True,
+    )
+
+    assert report["status"] == "FAIL"
+    assert report["checks"]["repository"] == "FAIL"
+
+
+def test_legacy_numbered_output_discovery_failure_is_explicit(tmp_path):
+    value = request(tmp_path)
+
+    report = run_static_preflight(
+        value,
+        git_reader=lambda root: clean_git(value),
+        module_finder=lambda name: True,
+        process_reader=list,
+        output_discovery_probe=lambda workspace: False,
+    )
+
+    assert report["status"] == "FAIL"
+    assert report["checks"]["legacy_numbered_output_discovery"] == "FAIL"
+
+
+def test_default_probe_discovers_legacy_numbered_output_parts(tmp_path):
+    value = request(tmp_path)
+
+    report = run_static_preflight(
+        value,
+        git_reader=lambda root: clean_git(value),
+        module_finder=lambda name: True,
+        process_reader=list,
+    )
+
+    assert report["status"] == "PASS"
+    assert report["checks"]["legacy_numbered_output_discovery"] == "PASS"
