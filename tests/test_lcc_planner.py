@@ -1,15 +1,13 @@
 import copy
 from dataclasses import replace
-from pathlib import Path
 
 import pytest
 
 from pscad_mcp.core.backend.base import BackendError
+from pscad_mcp.core.master_bindings import parse_master_binding_registry
 from pscad_mcp.hvdc.builders.lcc.assets import LccAssetSet
-from pscad_mcp.hvdc.builders.lcc.models import LccBlueprint
 from pscad_mcp.hvdc.builders.lcc.planner import LccPlanRequest, create_plan
 from pscad_mcp.hvdc.builders.lcc.schema import parse_blueprint
-
 
 BLUEPRINT = {
     "schema_version": 1,
@@ -119,6 +117,94 @@ def _asset_set(blueprint=None, catalog=None):
     )
 
 
+def _bound_asset_set():
+    registry = parse_master_binding_registry(
+        {
+            "schema_version": 1,
+            "name": "planner_test_registry",
+            "pscad_version": "4.6.2",
+            "bindings": [
+                {
+                    "logical_name": "master:source3",
+                    "physical_definition": "source3",
+                    "shape": {"kind": "direct"},
+                    "ports": [
+                        {
+                            "logical": "ac",
+                            "physical": "N3",
+                            "kind": "electrical",
+                            "dimension": 3,
+                            "occurrence": 0,
+                        }
+                    ],
+                    "parameters": [
+                        {
+                            "logical": ["Amplitude"],
+                            "physical": ["Vm"],
+                            "transform": {"kind": "identity"},
+                            "physical_contracts": {
+                                "Vm": {"type": "Real", "unit": "kV"}
+                            },
+                        }
+                    ],
+                    "fixed_parameters": [],
+                    "evidence_parameters": [],
+                }
+            ],
+        }
+    )
+    assets = _asset_set()
+    hashes = dict(assets.hashes)
+    hashes["master-bindings-pscad-4.6.2.json"] = "b" * 64
+    return replace(
+        assets,
+        hashes=hashes,
+        master_bindings=registry,
+        master_binding_hash="b" * 64,
+    )
+
+
+def _bound_inventory(*, master_sha256: str = "a" * 64):
+    registry = _bound_asset_set().master_bindings
+    assert registry is not None
+    return {
+        "pscad_version": "4.6.2",
+        "master_sha256": master_sha256,
+        "master_binding_registry_sha256": registry.sha256,
+        "definitions": {
+            "master:source3": {
+                "physical_definition": "source3",
+                "verification_state": "verified",
+                "ports": [
+                    {
+                        "name": "ac",
+                        "physical": "N3",
+                        "occurrence": 0,
+                        "dimension": 3,
+                        "kind": "electrical",
+                    }
+                ],
+                "selected_ports": {
+                    "ac": {
+                        "physical": "N3",
+                        "occurrence": 0,
+                        "kind": "electrical",
+                        "dimension": 3,
+                        "raw_dimension": 3,
+                        "model": "Natural",
+                        "type": "NonRemovable",
+                        "mode": None,
+                        "condition": "View==1",
+                        "offset": [36, 0],
+                        "instance": None,
+                    }
+                },
+            },
+            "cigre_lcc_v1:LCC12PulseBridge": {"ports": ["ac"]},
+        },
+    }
+
+
 def _request(**overrides):
     values = {"project_name": "CIGRE_LCC", "folder": None, "simulation_duration_s": None, "blueprint": "cigre_lcc_monopole_v1"}
     values.update(overrides)
@@ -155,6 +241,59 @@ def test_create_plan_is_deterministic_and_side_effect_free(tmp_path):
         "publish",
     ]
     assert list(tmp_path.iterdir()) == []
+
+
+def test_plan_contains_resolved_master_evidence_and_hashes(tmp_path):
+    assets = _bound_asset_set()
+    inventory = _bound_inventory()
+
+    plan = create_plan(_request(), assets, inventory, tmp_path)
+
+    source = next(
+        operation
+        for operation in plan.operations
+        if operation.kind == "place_component" and operation.target == "source"
+    )
+    assert source.arguments["definition"] == "master:source3"
+    assert source.arguments["binding"]["physical_definition"] == "source3"
+    assert source.arguments["binding"]["physical_parameters"] == {"Vm": 230.0}
+    assert source.arguments["binding"]["selected_ports"]["ac"]["physical"] == "N3"
+    assert plan.master_sha256 == "a" * 64
+    assert (
+        plan.master_binding_registry_sha256
+        == assets.master_bindings.sha256
+    )
+
+
+def test_plan_hash_changes_when_live_master_hash_changes(tmp_path):
+    assets = _bound_asset_set()
+
+    first = create_plan(_request(), assets, _bound_inventory(), tmp_path)
+    second = create_plan(
+        _request(),
+        assets,
+        _bound_inventory(master_sha256="c" * 64),
+        tmp_path,
+    )
+
+    assert first.plan_hash != second.plan_hash
+
+
+def test_bound_plan_rejects_missing_or_mismatched_registry_evidence(tmp_path):
+    assets = _bound_asset_set()
+    missing = _bound_inventory()
+    del missing["master_binding_registry_sha256"]
+    mismatched = _bound_inventory()
+    mismatched["master_binding_registry_sha256"] = "f" * 64
+
+    _assert_code(
+        lambda: create_plan(_request(), assets, missing, tmp_path),
+        "MASTER_BINDING_MISSING",
+    )
+    _assert_code(
+        lambda: create_plan(_request(), assets, mismatched, tmp_path),
+        "MASTER_SOURCE_CHANGED",
+    )
 
 
 def test_planner_rejects_existing_destination(tmp_path):

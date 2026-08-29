@@ -9,6 +9,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
+from ....core.master_bindings import AuditedMasterRegistry
 from ....core.path_policy import PathPolicy, WorkspaceNotConfiguredError
 from .assets import (
     LccAssetSet,
@@ -16,7 +17,13 @@ from .assets import (
     load_parametric_catalog,
     validate_parametric_blueprint_asset,
 )
-from .catalog import LccCatalog, LccDefinitionSpec, parse_catalog, require_definition, require_port, validate_parameters
+from .catalog import (
+    LccCatalog,
+    parse_catalog,
+    require_definition,
+    require_port,
+    validate_parameters,
+)
 from .models import (
     LccAcceptanceCheck,
     LccBuildPlan,
@@ -25,8 +32,11 @@ from .models import (
     LccPlanOperation,
 )
 from .parametric_models import DerivedParameterReport
-from .routing import absolute_port, route_intersects_rectangles, validate_orthogonal_route
-
+from .routing import (
+    absolute_port,
+    route_intersects_rectangles,
+    validate_orthogonal_route,
+)
 
 PHASES = (
     "materialize_library",
@@ -108,6 +118,80 @@ def _inventory_definitions(inventory: Any) -> dict[str, set[str]]:
                     ports.add(port["name"])
         definitions[name] = ports
     return definitions
+
+
+def _audited_master_registry(
+    asset_set: LccAssetSet,
+    inventory: Any,
+) -> AuditedMasterRegistry | None:
+    registry = asset_set.master_bindings
+    if registry is None:
+        return None
+    if not isinstance(inventory, Mapping):
+        raise _error(
+            "MASTER_BINDING_MISSING",
+            "A live Master inventory is required for the packaged binding registry.",
+        )
+    observed_registry_hash = inventory.get("master_binding_registry_sha256")
+    if not isinstance(observed_registry_hash, str):
+        raise _error(
+            "MASTER_BINDING_MISSING",
+            "The live inventory does not contain a Master binding registry hash.",
+        )
+    if observed_registry_hash != registry.sha256:
+        raise _error(
+            "MASTER_SOURCE_CHANGED",
+            "The live inventory was audited with a different Master binding registry.",
+            expected_registry_sha256=registry.sha256,
+            observed_registry_sha256=observed_registry_hash,
+        )
+    master_sha256 = inventory.get("master_sha256")
+    if (
+        not isinstance(master_sha256, str)
+        or len(master_sha256) != 64
+        or any(character not in "0123456789abcdef" for character in master_sha256)
+    ):
+        raise _error(
+            "MASTER_BINDING_MISSING",
+            "The live inventory does not contain a valid Master source hash.",
+            observed_master_sha256=master_sha256,
+        )
+    definitions_value = inventory.get("definitions")
+    if not isinstance(definitions_value, Mapping):
+        raise _error(
+            "MASTER_BINDING_MISSING",
+            "The live inventory does not contain Master definition evidence.",
+        )
+    definitions: dict[str, Mapping[str, Any]] = {}
+    for binding in registry.bindings:
+        evidence = definitions_value.get(binding.logical_name)
+        if not isinstance(evidence, Mapping):
+            raise _error(
+                "MASTER_BINDING_MISSING",
+                "A registry binding is missing from the live inventory.",
+                logical_name=binding.logical_name,
+            )
+        if (
+            evidence.get("verification_state") != "verified"
+            or evidence.get("physical_definition")
+            != binding.physical_definition
+            or not isinstance(evidence.get("selected_ports"), Mapping)
+        ):
+            raise _error(
+                "MASTER_BINDING_MISSING",
+                "A live Master definition lacks verified physical evidence.",
+                logical_name=binding.logical_name,
+                expected_physical_definition=binding.physical_definition,
+                observed_physical_definition=evidence.get("physical_definition"),
+                verification_state=evidence.get("verification_state"),
+            )
+        definitions[binding.logical_name] = evidence
+    return AuditedMasterRegistry(
+        registry=registry,
+        master_path=str(inventory.get("master_path", "")),
+        master_sha256=master_sha256,
+        definitions=definitions,
+    )
 
 
 def _component_rectangles(components: Sequence[LccComponentSpec], catalog: LccCatalog) -> dict[str, tuple[int, int, int, int]]:
@@ -218,7 +302,7 @@ def _resolve_paths(request: LccPlanRequest, workspace: str | Path | PathPolicy) 
             target_path=str(final_path),
         )
     staging = folder / ".pscad-mcp" / "lcc-builds" / f"{Path(filename).stem}.staging"
-    default_duration = request_duration = None
+    request_duration = None
     return final_path, staging, project_name, request_duration
 
 
@@ -434,7 +518,9 @@ def create_plan(
             asset_version=asset_set.pscad_version,
         )
     inventory_definitions = _inventory_definitions(inventory)
+    audited_master = _audited_master_registry(asset_set, inventory)
     normalized_components: list[LccComponentSpec] = []
+    resolved_master_components: dict[str, dict[str, Any]] = {}
     component_map = {component.logical_id: component for component in blueprint.components}
     measurement_map = {
         record.get("logical_id"): record
@@ -530,6 +616,13 @@ def create_plan(
                 definition=component.definition,
             )
         normalized_parameters = validate_parameters(definition, dict(component.parameters))
+        if component.definition.startswith("master:") and audited_master is not None:
+            resolved_master_components[component.logical_id] = (
+                audited_master.resolve_component(
+                    component.definition,
+                    normalized_parameters,
+                ).to_evidence()
+            )
         normalized_components.append(replace(component, parameters=normalized_parameters))
         for port_name in component.ports:
             port = require_port(definition, port_name)
@@ -602,21 +695,35 @@ def create_plan(
     add("set_settings", "set_project_settings", project_name, {"settings": settings})
     for component in blueprint.components:
         phase = _operation_kind(component)
+        arguments = {
+            "definition": component.definition,
+            "canvas": component.canvas,
+            "location": list(component.location),
+            "orientation": component.orientation,
+            "parameters": dict(component.parameters),
+            "ports": list(component.ports),
+        }
+        if component.logical_id in resolved_master_components:
+            arguments["binding"] = resolved_master_components[component.logical_id]
         add(
             phase,
             "place_component",
             component.logical_id,
-            {
-                "definition": component.definition,
-                "canvas": component.canvas,
-                "location": list(component.location),
-                "orientation": component.orientation,
-                "parameters": dict(component.parameters),
-                "ports": list(component.ports),
-            },
+            arguments,
         )
     for component in blueprint.components:
-        add("verify_parameters", "verify_parameters", component.logical_id, {"parameters": dict(component.parameters)})
+        arguments = {
+            "definition": component.definition,
+            "parameters": dict(component.parameters),
+        }
+        if component.logical_id in resolved_master_components:
+            arguments["binding"] = resolved_master_components[component.logical_id]
+        add(
+            "verify_parameters",
+            "verify_parameters",
+            component.logical_id,
+            arguments,
+        )
     for net in blueprint.nets:
         route = _net_route(net, component_map, catalog)
         phase = "connect_electrical" if net.kind == "electrical" else "connect_data"
@@ -650,6 +757,12 @@ def create_plan(
         "pscad_version": asset_set.pscad_version,
         "asset_hashes": dict(asset_set.hashes),
         "catalog_identity": catalog.identity,
+        "master_sha256": (
+            audited_master.master_sha256 if audited_master is not None else None
+        ),
+        "master_binding_registry_sha256": (
+            audited_master.registry.sha256 if audited_master is not None else None
+        ),
         "project_settings": settings,
         "operations": [operation.to_dict() for operation in operations],
         "acceptance_contract": [check.to_dict() for check in checks],
@@ -666,4 +779,8 @@ def create_plan(
         pscad_version=asset_set.pscad_version,
         catalog_identity=catalog.identity,
         metadata=payload["request"],
+        master_sha256=payload["master_sha256"],
+        master_binding_registry_sha256=payload[
+            "master_binding_registry_sha256"
+        ],
     )

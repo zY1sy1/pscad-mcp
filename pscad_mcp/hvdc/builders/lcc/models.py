@@ -219,6 +219,8 @@ class LccBuildPlan(_JsonRecord):
     pscad_version: str | None = None
     catalog_identity: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+    master_sha256: str | None = None
+    master_binding_registry_sha256: str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "asset_hashes", _freeze(self.asset_hashes))
