@@ -9,8 +9,14 @@ from typing import Any
 
 from ....core.backend.base import BackendError
 
-
-_CATALOG_KEYS = {"schema_version", "name", "pscad_version", "identity", "definitions"}
+_CATALOG_KEYS = {
+    "schema_version",
+    "name",
+    "pscad_version",
+    "identity",
+    "definitions",
+    "master_binding_registry",
+}
 _DEFINITION_KEYS = {"scoped_name", "definition", "ports", "parameters", "bounding_box", "metadata"}
 _PORT_KEYS = {"name", "kind", "dimension", "offset", "role"}
 _PARAMETER_KEYS = {
@@ -66,6 +72,7 @@ class LccCatalog:
     pscad_version: str
     identity: str
     definitions: dict[str, LccDefinitionSpec]
+    master_binding_registry: str | None = None
 
 
 def _error(code: str, message: str, operation: str, **details: Any) -> BackendError:
@@ -264,6 +271,14 @@ def parse_catalog(data: Mapping[str, Any]) -> LccCatalog:
     name = _text(catalog["name"], "catalog.name")
     pscad_version = _text(catalog["pscad_version"], "catalog.pscad_version")
     identity = _text(catalog["identity"], "catalog.identity")
+    master_binding_registry = (
+        _text(
+            catalog["master_binding_registry"],
+            "catalog.master_binding_registry",
+        )
+        if "master_binding_registry" in catalog
+        else None
+    )
     definitions_value = catalog["definitions"]
     definitions: dict[str, LccDefinitionSpec] = {}
     if isinstance(definitions_value, Mapping):
@@ -282,6 +297,7 @@ def parse_catalog(data: Mapping[str, Any]) -> LccCatalog:
         pscad_version=pscad_version,
         identity=identity,
         definitions=definitions,
+        master_binding_registry=master_binding_registry,
     )
 
 

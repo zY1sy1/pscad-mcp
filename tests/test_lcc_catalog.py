@@ -10,7 +10,6 @@ from pscad_mcp.hvdc.builders.lcc.catalog import (
     validate_parameters,
 )
 
-
 CATALOG = {
     "schema_version": 1,
     "name": "cigre_lcc_monopole_v1",
@@ -66,6 +65,18 @@ def test_catalog_uses_exact_scoped_definition_and_port_contracts():
     _assert_code(
         lambda: require_port(definition, "A", kind="electrical", dimension=12),
         "LCC_PORT_MISMATCH",
+    )
+
+
+def test_catalog_preserves_master_binding_registry_reference():
+    candidate = copy.deepcopy(CATALOG)
+    candidate["master_binding_registry"] = "master-bindings-pscad-4.6.2.json"
+
+    catalog = parse_catalog(candidate)
+
+    assert (
+        catalog.master_binding_registry
+        == "master-bindings-pscad-4.6.2.json"
     )
 
 
