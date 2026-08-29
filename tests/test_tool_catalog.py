@@ -38,6 +38,10 @@ LCC_TOOL_NAMES = frozenset(
         "build_lcc_model",
         "get_lcc_build_status",
         "validate_lcc_model",
+        "plan_blank_lcc_model",
+        "build_blank_lcc_model",
+        "get_blank_lcc_build_status",
+        "validate_blank_lcc_model",
     }
 )
 PARAMETRIC_LCC_TOOL_NAMES = frozenset(
@@ -62,6 +66,8 @@ MMC_TOOL_NAMES = frozenset({
     "audit_mmc_template", "derive_mmc_parameters", "plan_parametric_mmc_model",
     "build_parametric_mmc_model", "get_parametric_mmc_build_status",
     "recommend_mmc_simulation", "validate_mmc_model",
+    "plan_blank_mmc_model", "build_blank_mmc_model",
+    "get_blank_mmc_build_status", "validate_blank_mmc_model",
 })
 BLUEPRINT_TOOL_NAMES = frozenset({
     "plan_pscad_project_build", "build_pscad_project",
@@ -100,11 +106,11 @@ def test_catalog_locks_group_boundaries_and_immutable_values():
     assert {name: len(tools) for name, tools in TOOL_GROUPS.items()} == {
         "core": 60,
         "hvdc": 10,
-        "lcc": 4,
+        "lcc": 8,
         "parametric_lcc": 6,
         "learning": 3,
         "topology": 2,
-        "mmc": 7,
+        "mmc": 11,
         "blueprint": 4,
     }
     assert TOOL_GROUPS["hvdc"] == HVDC_TOOL_NAMES
@@ -173,7 +179,7 @@ def test_catalog_descriptions_match_registered_function_docstrings():
         for tool in create_server(environ={})._tool_manager.list_tools()
     }
 
-    assert len(by_name) == 97
+    assert len(by_name) == 105
     for name, spec in TOOL_SPECS.items():
         assert inspect.getdoc(by_name[name].fn) == spec.description, name
 
@@ -204,6 +210,8 @@ def test_project_settings_metadata_accounts_for_parameter_grid_mutation():
         ("get_lcc_build_status", "open_world", True),
         ("validate_lcc_model", "backend_support", frozenset()),
         ("plan_parametric_lcc_model", "backend_support", frozenset()),
+        ("build_blank_lcc_model", "backend_support", frozenset({"legacy"})),
+        ("build_blank_mmc_model", "backend_support", frozenset({"legacy"})),
     ],
 )
 def test_capability_metadata_matches_verified_execution_boundaries(

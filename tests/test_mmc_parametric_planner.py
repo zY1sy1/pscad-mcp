@@ -51,3 +51,46 @@ def test_planner_rejects_existing_final_target(tmp_path: Path) -> None:
             avm_assets(),
         )
     assert raised.value.code == "MMC_BUILD_CONFLICT"
+
+
+def test_planner_preserves_explicit_template_native_timing_evidence(tmp_path: Path) -> None:
+    audit = replace(
+        pwm_audit(),
+        template_native_controls={
+            "available": True,
+            "time_basis": "EMTDC",
+            "mechanism": "embedded_time_sig_fault_timer",
+        },
+    )
+
+    plan = create_parametric_plan(
+        parse_parametric_request(valid_request(model_fidelity="detailed_pwm")),
+        "MMC_CASE",
+        tmp_path,
+        audit,
+        avm_assets(),
+    )
+
+    assert plan.engine_plans[0].capabilities["template_native_timing"] is True
+    assert plan.engine_plans[0].capabilities["native_schedule"] is False
+
+
+def test_planner_preserves_native_submodule_topology_evidence(tmp_path: Path) -> None:
+    request = valid_request(model_fidelity="detailed_pwm")
+    audit = pwm_audit()
+    report = audit.to_dict()
+    report["submodule_topology"] = {
+        "declared": "full_bridge",
+        "full_cell_instances": 4,
+        "firing_hbridge_instances": 3,
+    }
+
+    plan = create_parametric_plan(
+        request,
+        "MMC_CASE",
+        tmp_path,
+        report,
+        avm_assets(),
+    )
+
+    assert plan.engine_plans[0].capabilities["template_submodule_topology"] == "full_bridge"

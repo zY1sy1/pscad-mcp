@@ -7,6 +7,7 @@ from mcp.server.fastmcp import FastMCP
 from .runtime import PROCESS_RUNTIME_LIFESPAN
 from .tools.app_tools import register_app_tools, register_documentation_resources
 from .tools.blueprint_tools import register_blueprint_tools
+from .tools.blank_builder_tools import register_blank_builder_tools
 from .tools.canvas_tools import register_canvas_tools
 from .tools.capability_tools import register_capability_tool
 from .tools.catalog import parse_tool_profile
@@ -76,6 +77,7 @@ def create_server(environ: Mapping[str, str] | None = None) -> FastMCP:
     register_documentation_resources(mcp)
     register_topology_tools(mcp)
     register_blueprint_tools(mcp)
+    register_blank_builder_tools(mcp)
 
     logger.info("PSCAD MCP Server initialized with modular tools.")
     return mcp

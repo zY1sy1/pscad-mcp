@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from pscad_mcp.hvdc.builders.lcc.executor import execute_build as _execute_build
+from pscad_mcp.hvdc.builders.lcc.executor import _legacy_project_settings
 from pscad_mcp.hvdc.builders.lcc.executor import LccExecutor
 from pscad_mcp.hvdc.builders.lcc.assets import load_packaged_asset_set
 from pscad_mcp.hvdc.builders.lcc.models import (
@@ -214,6 +215,45 @@ def test_execute_build_reads_waveforms_from_a_discovered_output_file(tmp_path):
     assert "get_project_output" not in names
     assert service.discovered_project_name == str(service.project_file.resolve())
     assert record.result["output_file"] == str((service.project_file.parent / "result.out").resolve())
+
+
+class GroupedOutputFileService(OutputFileRecordingService):
+    async def discover_output_files(
+        self,
+        project_name: str,
+        *,
+        started_after: float,
+        max_files: int = 100,
+    ) -> list[str]:
+        self.discovered_project_name = project_name
+        self._call("discover_output_files", project_name, started_after, max_files)
+        root = Path(project_name).parent
+        outputs = []
+        for index in range(1, 4):
+            output = root / f"result_{index:02d}.out"
+            output.write_text("placeholder", encoding="utf-8")
+            outputs.append(str(output))
+        return outputs
+
+
+def test_execute_build_treats_legacy_output_parts_as_one_dataset(tmp_path):
+    service = GroupedOutputFileService()
+
+    record = asyncio.run(
+        execute_build(
+            _plan(tmp_path),
+            service,
+            tmp_path,
+            build_id="build-output-parts",
+            poll_interval_s=0,
+        )
+    )
+
+    assert record.state.value == "published"
+    assert record.result["output_file"].endswith("result_01.out")
+    read_calls = [call for call in service.calls if call[0] == "read_output_file"]
+    assert len(read_calls) == 1
+    assert read_calls[0][1][0].endswith("result_01.out")
 
 
 class ExternalOutputFileService(OutputFileRecordingService):
@@ -601,3 +641,21 @@ def test_execute_build_without_assets_cannot_fabricate_acceptance_pass(tmp_path)
     assert record.state.value == "failed"
     assert record.error["code"] == "LCC_ACCEPTANCE_FAILED"
     assert record.result["verdict"] == "INCOMPLETE_ANALYSIS"
+
+
+def test_legacy_project_settings_map_seconds_to_pscad_46_microseconds():
+    mapped = _legacy_project_settings(
+        {
+            "simulation_duration_s": 1.0,
+            "time_step_s": 0.00005,
+            "output_step_s": 0.00025,
+            "output_enabled": True,
+            "compiler_target": "fortran",
+        }
+    )
+    assert mapped == {
+        "time_duration": 1.0,
+        "time_step": 50,
+        "sample_step": 250,
+        "PlotType": 1,
+    }

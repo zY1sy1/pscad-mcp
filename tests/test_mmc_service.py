@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import replace
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -11,9 +9,7 @@ from pscad_mcp.core.backend.base import BackendError
 from pscad_mcp.core.path_policy import PathPolicy
 from pscad_mcp.core.service import ConfirmationRequired
 from pscad_mcp.hvdc.builders.mmc.models import MmcBuildRecord, MmcBuildState
-from pscad_mcp.hvdc.builders.mmc.planner import MmcPlanRequest
 from pscad_mcp.hvdc.builders.mmc.service import MmcBuilderService
-
 from tests.mmc_builder_fakes import RecordingMmcService
 from tests.test_mmc_planner import ASSET, INVENTORY
 
@@ -104,3 +100,12 @@ def test_validation_reads_waveform_without_mutating_pscad(tmp_path, monkeypatch)
     assert result["accepted"] is False
     assert result["acceptance"]["verdict"] == "INCOMPLETE_ANALYSIS"
     assert [call[0] for call in pscad.calls] == ["read_output_file"]
+
+
+def test_mmc_builder_shutdown_is_idempotent_without_initializing_work(tmp_path):
+    service = _service(tmp_path)
+
+    asyncio.run(service.shutdown(timeout_s=0.25))
+    asyncio.run(service.shutdown(timeout_s=0.25))
+
+    assert not (tmp_path / ".pscad-mcp" / "builder-build.lock").exists()

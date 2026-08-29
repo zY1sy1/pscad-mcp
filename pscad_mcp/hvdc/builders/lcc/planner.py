@@ -217,7 +217,7 @@ def _resolve_paths(request: LccPlanRequest, workspace: str | Path | PathPolicy) 
             "The planned final destination already exists.",
             target_path=str(final_path),
         )
-    staging = workspace_root / ".pscad-mcp" / "lcc-builds" / f"{Path(filename).stem}.staging"
+    staging = folder / ".pscad-mcp" / "lcc-builds" / f"{Path(filename).stem}.staging"
     default_duration = request_duration = None
     return final_path, staging, project_name, request_duration
 
@@ -452,12 +452,20 @@ def create_plan(
             measurement_endpoints.setdefault((component_id, port_name), []).append(logical_id)
     for endpoint, logical_ids in sorted(measurement_endpoints.items()):
         if len(logical_ids) > 1:
-            raise _error(
-                "LCC_BLUEPRINT_INVALID",
-                "Multiple measurements cannot share one component port without an explicit derived-signal contract.",
-                endpoint=list(endpoint),
-                measurements=sorted(logical_ids),
-            )
+            records = [measurement_map[logical_id] for logical_id in logical_ids]
+            roots = [record for record in records if record.get("derived_from") is None]
+            derived = [record for record in records if record.get("derived_from") is not None]
+            if len(roots) != 1 or any(
+                not isinstance(record.get("derived_from"), str)
+                or record["derived_from"] not in logical_ids
+                for record in derived
+            ):
+                raise _error(
+                    "LCC_BLUEPRINT_INVALID",
+                    "Multiple measurements cannot share one component port without an explicit derived-signal contract.",
+                    endpoint=list(endpoint),
+                    measurements=sorted(logical_ids),
+                )
     output_paths = [output.path for output in blueprint.outputs]
     if len(output_paths) != len(set(output_paths)):
         raise _error(

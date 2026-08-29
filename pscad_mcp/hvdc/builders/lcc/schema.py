@@ -79,7 +79,7 @@ _OUTPUT_KEYS = {
     "measurement",
 }
 _CANVAS_KEYS = {"name", "width", "height", "grid"}
-_MEASUREMENT_KEYS = {"logical_id", "kind", "component", "port", "channels"}
+_MEASUREMENT_KEYS = {"logical_id", "kind", "component", "port", "channels", "derived_from"}
 _ASSERTION_KEYS = {"kind", "logical_id", "expected", "message"}
 _PARAMETRIC_TOP_LEVEL_KEYS = {
     "topology",
@@ -463,6 +463,8 @@ def _parse_measurements(value: Any) -> tuple[dict[str, Any], ...]:
                 _text(channel, f"{context}.channels[{channel_index}]")
                 for channel_index, channel in enumerate(channels)
             )
+        if "derived_from" in record:
+            output["derived_from"] = _text(record["derived_from"], f"{context}.derived_from")
         parsed.append(output)
     return tuple(parsed)
 

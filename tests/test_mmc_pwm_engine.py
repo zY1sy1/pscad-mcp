@@ -1,10 +1,15 @@
 import asyncio
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
 from pscad_mcp.core.backend.base import BackendError
 from pscad_mcp.hvdc.builders.mmc.engines.pwm import execute_pwm_candidate
+from pscad_mcp.hvdc.builders.mmc.engines.pwm import (
+    _copy_library_support,
+    _legacy_output_settings,
+)
 from tests.mmc_parametric_fakes import (
     RecordingMmcService,
     make_synthetic_official_shape,
@@ -59,7 +64,10 @@ class ProductionOutputShapeService(RecordingMmcService):
 class SanitizingProjectNameService(ProductionOutputShapeService):
     async def list_projects(self) -> list[dict[str, str]]:
         self._record("list_projects")
-        return [{"name": "master", "type": "Library"}, {"name": "MMC_CASE_pwm__pwm_0", "type": "Case"}]
+        return [
+            {"name": "master", "type": "Library"},
+            {"name": "MMC_CASE_pwm__pwm_0", "type": "Case"},
+        ]
 
 
 class RootParameterOnlyService(ProductionOutputShapeService):
@@ -67,10 +75,39 @@ class RootParameterOnlyService(ProductionOutputShapeService):
         self._record("get_project_settings", project_name)
         return {"VdcBase": 640.0, "Sbase": 1000.0}
 
-    async def set_project_settings(self, project_name: str, settings: dict[str, object]) -> str:
+    async def set_project_settings(
+        self, project_name: str, settings: dict[str, object]
+    ) -> str:
         self._record("set_project_settings", project_name, settings)
         assert set(settings) <= {"VdcBase", "Sbase"}
         return "set"
+
+
+class LegacyOutputSettingsService(ProductionOutputShapeService):
+    def __init__(self, workspace: Path) -> None:
+        super().__init__(workspace)
+        self.settings = {
+            "PlotType": "0",
+            "output_filename": "noname.out",
+            "time_step": "50",
+            "sample_step": "250",
+        }
+
+    async def get_project_settings(self, project_name: str) -> dict[str, object]:
+        self._record("get_project_settings", project_name)
+        return dict(self.settings)
+
+    async def set_project_settings(
+        self, project_name: str, settings: dict[str, object]
+    ) -> str:
+        self._record("set_project_settings", project_name, settings)
+        self.settings.update(settings)
+        return "set"
+
+
+class NoScenarioService(RecordingMmcService):
+    run_scenario = None
+    analyze_results = None
 
 
 class MutatingFailedScenarioDomain(CompletedScenarioDomain):
@@ -110,7 +147,9 @@ def test_pwm_engine_copies_then_mutates_only_staging(tmp_path: Path) -> None:
     source_hashes = (sha256(project), sha256(library))
     service = RecordingMmcService(tmp_path)
 
-    result = asyncio.run(execute_pwm_candidate(pwm_plan(project, library, tmp_path), service))
+    result = asyncio.run(
+        execute_pwm_candidate(pwm_plan(project, library, tmp_path), service)
+    )
 
     assert result["state"] == "accepted"
     assert (sha256(project), sha256(library)) == source_hashes
@@ -120,28 +159,124 @@ def test_pwm_engine_copies_then_mutates_only_staging(tmp_path: Path) -> None:
     assert not (tmp_path / "MMC_CASE_pwm.pscx").exists()
 
 
+def test_legacy_output_settings_enable_disk_channels_and_convert_time_units() -> None:
+    settings = _legacy_output_settings(
+        {
+            "PlotType": "0",
+            "output_filename": "noname.out",
+            "time_step": "50",
+            "sample_step": "250",
+        },
+        {"time_step_s": 10e-6, "output_step_s": 50e-6},
+        "MMC_CASE_pwm__pwm_0",
+    )
+
+    assert settings == {
+        "PlotType": "1",
+        "output_filename": "MMC_CASE_pwm__pwm_0.out",
+        "time_step": "10",
+        "sample_step": "50",
+    }
+
+
+def test_pwm_engine_configures_legacy_output_before_build(tmp_path: Path) -> None:
+    project, library = make_synthetic_official_shape(tmp_path / "source")
+    service = LegacyOutputSettingsService(tmp_path)
+
+    result = asyncio.run(
+        execute_pwm_candidate(pwm_plan(project, library, tmp_path), service)
+    )
+
+    assert result["state"] == "accepted"
+    writes = [args[1] for name, args in service.calls if name == "set_project_settings"]
+    assert writes
+    assert writes[0]["PlotType"] == "1"
+    assert writes[0]["output_filename"] == "MMC_CASE_pwm__pwm_0.out"
+    assert writes[0]["time_step"] == "10"
+    assert writes[0]["sample_step"] == "50"
+
+
+def test_pwm_engine_accepts_an_explicitly_empty_scenario_plan(tmp_path: Path) -> None:
+    project, library = make_synthetic_official_shape(tmp_path / "source")
+    service = NoScenarioService(tmp_path)
+    plan = replace(pwm_plan(project, library, tmp_path), scenarios=())
+
+    result = asyncio.run(execute_pwm_candidate(plan, service))
+
+    assert result["state"] == "accepted"
+    assert result["scenario_results"] == []
+
+
+def test_pwm_engine_copies_sibling_compiler_object_tree(tmp_path: Path) -> None:
+    project, library = make_synthetic_official_shape(tmp_path / "source")
+    support = library.parent / "Obj_Files_2016_03_25" / "gf42"
+    support.mkdir(parents=True)
+    (support / "MMC_2016_03_25_Exp.obj").write_bytes(b"object")
+    stage = tmp_path / "stage"
+    stage.mkdir()
+
+    copied = _copy_library_support(library, stage)
+
+    assert copied == stage / "Obj_Files_2016_03_25"
+    assert (copied / "gf42" / "MMC_2016_03_25_Exp.obj").read_bytes() == b"object"
+
+
+def test_pwm_engine_rejects_a_library_with_missing_compiler_object_tree(
+    tmp_path: Path,
+) -> None:
+    project, library = make_synthetic_official_shape(tmp_path / "source")
+    text = library.read_text(encoding="utf-8").replace(
+        "</library>",
+        '<param name="object" value="Obj_Files_2016_03_25\\\\$(Compiler)\\\\x.obj" /></library>',
+    )
+    library.write_text(text, encoding="utf-8")
+    stage = tmp_path / "stage"
+    stage.mkdir()
+
+    with pytest.raises(BackendError) as raised:
+        _copy_library_support(library, stage)
+
+    assert raised.value.code == "MMC_COMPILER_SUPPORT_MISSING"
+
+
 def test_pwm_engine_uses_pscad_loaded_project_identity(tmp_path: Path) -> None:
     project, library = make_synthetic_official_shape(tmp_path / "source")
     service = SanitizingProjectNameService(tmp_path)
 
-    result = asyncio.run(execute_pwm_candidate(pwm_plan(project, library, tmp_path), service))
+    result = asyncio.run(
+        execute_pwm_candidate(pwm_plan(project, library, tmp_path), service)
+    )
 
     assert result["state"] == "accepted"
-    mutation_names = [args[0] for name, args in service.calls if name in {
-        "set_component_parameters", "set_project_settings", "save_project", "build_project"
-    }]
+    mutation_names = [
+        args[0]
+        for name, args in service.calls
+        if name
+        in {
+            "set_component_parameters",
+            "set_project_settings",
+            "save_project",
+            "build_project",
+        }
+    ]
     assert mutation_names
     assert all(name == "MMC_CASE_pwm__pwm_0" for name in mutation_names)
 
 
-def test_pwm_engine_filters_abstract_settings_to_pscad_project_parameters(tmp_path: Path) -> None:
+def test_pwm_engine_filters_abstract_settings_to_pscad_project_parameters(
+    tmp_path: Path,
+) -> None:
     project, library = make_synthetic_official_shape(tmp_path / "source")
     service = RootParameterOnlyService(tmp_path)
 
-    result = asyncio.run(execute_pwm_candidate(pwm_plan(project, library, tmp_path), service))
+    result = asyncio.run(
+        execute_pwm_candidate(pwm_plan(project, library, tmp_path), service)
+    )
 
     assert result["state"] == "accepted"
-    settings_calls = [args for name, args in service.calls if name == "set_project_settings"]
+    settings_calls = [
+        args for name, args in service.calls if name == "set_project_settings"
+    ]
     assert settings_calls == [("MMC_CASE_pwm__pwm-0", {})]
 
 
@@ -184,9 +319,7 @@ def test_pwm_engine_rejects_incomplete_analysis_even_when_runs_complete(
             execute_pwm_candidate(
                 plan,
                 service,
-                scenario_service=CompletedScenarioDomain(
-                    verdict="INCOMPLETE_ANALYSIS"
-                ),
+                scenario_service=CompletedScenarioDomain(verdict="INCOMPLETE_ANALYSIS"),
                 scenarios=_scenario_payloads(plan),
             )
         )
@@ -214,7 +347,9 @@ def test_pwm_engine_reports_source_mutation_even_when_scenario_fails(
     assert raised.value.code == "MMC_POSTCONDITION_FAILED"
 
 
-def test_pwm_engine_stops_before_pscad_when_line_dependency_is_unresolved(tmp_path: Path) -> None:
+def test_pwm_engine_stops_before_pscad_when_line_dependency_is_unresolved(
+    tmp_path: Path,
+) -> None:
     plan = pwm_plan_with_unresolved_line_constants(tmp_path)
     service = RecordingMmcService(tmp_path)
 
@@ -243,7 +378,9 @@ def test_pwm_engine_rejects_parameter_readback_mismatch(tmp_path: Path) -> None:
     service = RecordingMmcService(tmp_path, mismatch_readback=True)
 
     with pytest.raises(BackendError) as raised:
-        asyncio.run(execute_pwm_candidate(pwm_plan(project, library, tmp_path), service))
+        asyncio.run(
+            execute_pwm_candidate(pwm_plan(project, library, tmp_path), service)
+        )
 
     assert raised.value.code == "MMC_POSTCONDITION_FAILED"
     assert "save_project" not in [name for name, _ in service.calls]
@@ -263,12 +400,16 @@ def test_pwm_engine_rejects_parameter_readback_mismatch(tmp_path: Path) -> None:
         "analyze_results",
     ],
 )
-def test_pwm_engine_stops_at_public_mutation_boundary(tmp_path: Path, boundary: str) -> None:
+def test_pwm_engine_stops_at_public_mutation_boundary(
+    tmp_path: Path, boundary: str
+) -> None:
     project, library = make_synthetic_official_shape(tmp_path / "source")
     service = RecordingMmcService(tmp_path, fail_on=boundary)
 
     with pytest.raises(RuntimeError, match=f"injected failure at {boundary}"):
-        asyncio.run(execute_pwm_candidate(pwm_plan(project, library, tmp_path), service))
+        asyncio.run(
+            execute_pwm_candidate(pwm_plan(project, library, tmp_path), service)
+        )
 
     names = [name for name, _ in service.calls]
     assert names[-1] == boundary

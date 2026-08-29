@@ -10,7 +10,6 @@ from ..core.connection_manager import pscad_manager
 from ..hvdc.builders.lcc.service import LccBuilderService
 from .registration import register_tool
 
-
 _builder_service: LccBuilderService | None = None
 _builder_backend: Any = None
 
@@ -28,12 +27,16 @@ async def shutdown_lcc_builder_service(timeout_s: float = 5.0) -> None:
     """Close the existing fixed-builder singleton without initializing it."""
     global _builder_service, _builder_backend
     service = _builder_service
-    if service is None:
-        return
-    await service.shutdown(timeout_s=timeout_s)
-    if _builder_service is service:
-        _builder_service = None
-        _builder_backend = None
+    if service is not None:
+        await service.shutdown(timeout_s=timeout_s)
+        if _builder_service is service:
+            _builder_service = None
+            _builder_backend = None
+    # Blank builders share the same workspace lease and must be closed during
+    # the existing fixed-LCC runtime shutdown slot.
+    from .blank_builder_tools import shutdown_blank_builder_services
+
+    await shutdown_blank_builder_services(timeout_s=timeout_s)
 
 
 async def plan_lcc_model(

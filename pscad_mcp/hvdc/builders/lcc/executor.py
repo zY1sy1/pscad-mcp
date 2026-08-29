@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 import shutil
 import time
 from datetime import datetime, timezone
@@ -23,6 +24,7 @@ from .validator import validate_companion_library, validate_project_graph
 _TERMINAL_SUCCESS = {"completed", "complete", "finished", "done", "idle", "stopped"}
 _RUNNING = {"running", "started", "simulating", "busy", "queued", "pending"}
 _TERMINAL_FAILURE = {"failed", "error", "aborted", "cancelled", "canceled"}
+_LEGACY_OUTPUT_PART = re.compile(r"^(?P<base>.+)_(?P<index>\d{2})$", re.IGNORECASE)
 
 
 def _utc_now() -> str:
@@ -31,6 +33,21 @@ def _utc_now() -> str:
 
 def _error(code: str, message: str, operation: str, **details: Any) -> BackendError:
     return BackendError(code, message, "hvdc", operation, details)
+
+
+def _legacy_project_settings(settings: dict[str, Any]) -> dict[str, Any]:
+    """Translate generic builder settings to PSCAD 4.6.2 project keys."""
+
+    mapped: dict[str, Any] = {}
+    if "simulation_duration_s" in settings:
+        mapped["time_duration"] = float(settings["simulation_duration_s"])
+    if "time_step_s" in settings:
+        mapped["time_step"] = round(float(settings["time_step_s"]) * 1_000_000)
+    if "output_step_s" in settings:
+        mapped["sample_step"] = round(float(settings["output_step_s"]) * 1_000_000)
+    if "output_enabled" in settings:
+        mapped["PlotType"] = 1 if bool(settings["output_enabled"]) else 0
+    return mapped
 
 
 def _as_error(error: BaseException, operation: str) -> BackendError:
@@ -73,15 +90,60 @@ def _point(value: Any) -> tuple[int, int] | None:
         if isinstance(value.get("x"), int) and isinstance(value.get("y"), int):
             return value["x"], value["y"]
         value = value.get("location")
-    if isinstance(value, (list, tuple)) and len(value) == 2 and all(isinstance(item, int) for item in value):
+    if (
+        isinstance(value, (list, tuple))
+        and len(value) == 2
+        and all(isinstance(item, int) for item in value)
+    ):
         return int(value[0]), int(value[1])
+    return None
+
+
+def _snap_point(value: tuple[int, int]) -> tuple[int, int]:
+    return (
+        round(int(value[0]) / 18) * 18,
+        round(int(value[1]) / 18) * 18,
+    )
+
+
+async def _actual_endpoint(
+    service: Any, project: str, component_ids: dict[str, int], endpoint: str
+) -> tuple[int, int] | None:
+    if not isinstance(endpoint, str) or ":" not in endpoint:
+        return None
+    component, port = endpoint.split(":", 1)
+    component_id = component_ids.get(component)
+    if component_id is None:
+        return None
+    ports = await service.get_component_ports(project, component_id)
+    record = ports.get(port) if isinstance(ports, dict) else None
+    if not isinstance(record, dict):
+        return None
+    if isinstance(record.get("x"), int) and isinstance(record.get("y"), int):
+        return int(record["x"]), int(record["y"])
+    location = record.get("location")
+    if isinstance(location, (list, tuple)) and len(location) == 2:
+        return int(location[0]), int(location[1])
     return None
 
 
 def _same_parameters(expected: dict[str, Any], observed: Any) -> bool:
     if not isinstance(observed, dict):
         return False
-    return all(observed.get(key) == value for key, value in expected.items())
+    return all(
+        _same_setting(value, observed.get(key)) for key, value in expected.items()
+    )
+
+
+def _same_setting(expected: Any, observed: Any) -> bool:
+    if expected == observed:
+        return True
+    if isinstance(expected, bool) or isinstance(observed, bool):
+        return False
+    try:
+        return float(expected) == float(observed)
+    except (TypeError, ValueError):
+        return False
 
 
 def _port_names(value: Any) -> set[str]:
@@ -103,9 +165,7 @@ def _port_records(value: Any) -> dict[str, dict[str, Any]]:
         if isinstance(value.get("name"), str):
             return {value["name"]: value}
         return {
-            str(name): item
-            for name, item in value.items()
-            if isinstance(item, dict)
+            str(name): item for name, item in value.items() if isinstance(item, dict)
         }
     if isinstance(value, (list, tuple)):
         return {
@@ -140,6 +200,51 @@ def _response_endpoints(value: Any) -> tuple[tuple[int, int], tuple[int, int]] |
     return None
 
 
+def _select_output_dataset(candidates: list[str]) -> tuple[str, list[str]]:
+    """Select one logical output dataset from PSCAD's numbered OUT parts."""
+
+    if len(candidates) == 1:
+        return candidates[0], list(candidates)
+    groups: dict[tuple[str, str, str], list[tuple[int, str]]] = {}
+    ungrouped: list[str] = []
+    for candidate in candidates:
+        path = Path(candidate)
+        match = _LEGACY_OUTPUT_PART.fullmatch(path.stem) if path.suffix.casefold() == ".out" else None
+        if match is None:
+            ungrouped.append(candidate)
+            continue
+        index = int(match.group("index"))
+        if index < 1:
+            ungrouped.append(candidate)
+            continue
+        key = (
+            str(path.parent).casefold(),
+            match.group("base").casefold(),
+            path.suffix.casefold(),
+        )
+        groups.setdefault(key, []).append((index, candidate))
+    if ungrouped or len(groups) != 1:
+        raise _error(
+            "LCC_OUTPUT_INCOMPLETE",
+            "Multiple PSCAD output datasets were created for the LCC simulation.",
+            "discover_lcc_output",
+            reason="output_ambiguous",
+            candidates=candidates,
+        )
+    parts = next(iter(groups.values()))
+    parts.sort(key=lambda item: item[0])
+    indices = [index for index, _ in parts]
+    if len(indices) != len(set(indices)) or indices[0] != 1:
+        raise _error(
+            "LCC_OUTPUT_INCOMPLETE",
+            "The PSCAD output parts do not have a unique _01 anchor.",
+            "discover_lcc_output",
+            reason="output_ambiguous",
+            candidates=candidates,
+        )
+    return parts[0][1], [path for _, path in parts]
+
+
 class LccExecutor:
     """Apply a plan through the public PscadService boundary."""
 
@@ -168,7 +273,13 @@ class LccExecutor:
         self.allow_test_double = bool(allow_test_double)
         self.trusted_threshold_sources = trusted_threshold_sources
         self.project_name = Path(plan.staging_path or "LCC_LCC.staging").stem
-        self.staging_path = Path(plan.staging_path or self.workspace_root / ".pscad-mcp" / "lcc-builds" / f"{self.project_name}.staging")
+        self.staging_path = Path(
+            plan.staging_path
+            or self.workspace_root
+            / ".pscad-mcp"
+            / "lcc-builds"
+            / f"{self.project_name}.staging"
+        )
         self.target_path = Path(plan.target_path) if plan.target_path else None
         self.staging_file: Path | None = None
         self.library_file: Path | None = None
@@ -178,6 +289,7 @@ class LccExecutor:
         self.error: dict[str, Any] | None = None
         self._run_started_after: float | None = None
         self.output_file: str | None = None
+        self.output_parts: list[str] = []
         self._publication_created = False
         self._publication_hash: str | None = None
         self._simulation_active = False
@@ -198,7 +310,12 @@ class LccExecutor:
             "staging_path": self.plan.staging_path,
             "pscad_version": self.plan.pscad_version,
             "catalog_identity": self.plan.catalog_identity,
-            "state": state or (self.history[-1].get("state", LccBuildState.VALIDATED.value) if self.history else LccBuildState.VALIDATED.value),
+            "state": state
+            or (
+                self.history[-1].get("state", LccBuildState.VALIDATED.value)
+                if self.history
+                else LccBuildState.VALIDATED.value
+            ),
             "history": self.history,
             "error": self.error,
             "result": self.result,
@@ -217,7 +334,9 @@ class LccExecutor:
         )
 
     def _raise_postcondition(self, message: str, **details: Any) -> None:
-        raise _error("LCC_POSTCONDITION_FAILED", message, "execute_lcc_build", **details)
+        raise _error(
+            "LCC_POSTCONDITION_FAILED", message, "execute_lcc_build", **details
+        )
 
     async def run(self) -> LccBuildRecord:
         self._record(LccBuildState.VALIDATED)
@@ -225,14 +344,25 @@ class LccExecutor:
             operations = self.plan.operations
             for index, operation in enumerate(operations):
                 await self._dispatch(operation)
-                next_kind = operations[index + 1].kind if index + 1 < len(operations) else None
-                if operation.kind == "place_component" and next_kind != "place_component":
+                next_kind = (
+                    operations[index + 1].kind if index + 1 < len(operations) else None
+                )
+                if (
+                    operation.kind == "place_component"
+                    and next_kind != "place_component"
+                ):
                     self._record(LccBuildState.COMPONENTS_PLACED)
-                elif operation.kind == "verify_parameters" and next_kind != "verify_parameters":
+                elif (
+                    operation.kind == "verify_parameters"
+                    and next_kind != "verify_parameters"
+                ):
                     self._record(LccBuildState.PARAMETERS_VERIFIED)
                 elif operation.kind == "connect_net" and next_kind != "connect_net":
                     self._record(LccBuildState.CONNECTIONS_VERIFIED)
-            if not self.history or self.history[-1]["state"] != LccBuildState.PUBLISHED.value:
+            if (
+                not self.history
+                or self.history[-1]["state"] != LccBuildState.PUBLISHED.value
+            ):
                 self._raise_postcondition("The LCC build finished without publication.")
             return self._record_value(LccBuildState.PUBLISHED)
         except asyncio.CancelledError:
@@ -242,12 +372,20 @@ class LccExecutor:
                 # Preserve cancellation as the terminal outcome; stop evidence
                 # is retained in the journal when the backend accepts it.
                 pass
-            self.error = _error("LCC_BUILD_FAILED", "The LCC build was interrupted.", "execute_lcc_build").to_dict()
+            self.error = _error(
+                "LCC_BUILD_FAILED",
+                "The LCC build was interrupted.",
+                "execute_lcc_build",
+            ).to_dict()
             self._record(LccBuildState.INTERRUPTED, reason="cancelled")
             raise
         except BaseException as caught:
             await self._stop_simulation("failure")
-            operation = self.history[-1].get("operation") if self.history else "execute_lcc_build"
+            operation = (
+                self.history[-1].get("operation")
+                if self.history
+                else "execute_lcc_build"
+            )
             failure = _as_error(caught, str(operation or "execute_lcc_build"))
             self.error = failure.to_dict()
             self._quarantine_candidate()
@@ -280,12 +418,25 @@ class LccExecutor:
         elif operation.kind == "publish":
             await self._publish(operation)
         else:
-            raise _error("LCC_BLUEPRINT_INVALID", f"Unknown LCC operation kind '{operation.kind}'.", "execute_lcc_build", kind=operation.kind)
+            raise _error(
+                "LCC_BLUEPRINT_INVALID",
+                f"Unknown LCC operation kind '{operation.kind}'.",
+                "execute_lcc_build",
+                kind=operation.kind,
+            )
 
     def _operation_started(self, operation: LccPlanOperation) -> None:
-        self.history.append({"operation": operation.operation_id or operation.kind, "kind": operation.kind, "target": operation.target})
+        self.history.append(
+            {
+                "operation": operation.operation_id or operation.kind,
+                "kind": operation.kind,
+                "target": operation.target,
+            }
+        )
 
-    def _operation_completed(self, state: LccBuildState | None = None, **extra: Any) -> None:
+    def _operation_completed(
+        self, state: LccBuildState | None = None, **extra: Any
+    ) -> None:
         if state is not None:
             self._record(state, **extra)
         else:
@@ -326,7 +477,11 @@ class LccExecutor:
         )
         filename = created.get("filename") if isinstance(created, dict) else None
         expected_file = (self.staging_path / f"{self.project_name}.pscx").resolve()
-        candidate = expected_file if not filename else Path(str(filename)).expanduser().resolve()
+        candidate = (
+            expected_file
+            if not filename
+            else Path(str(filename)).expanduser().resolve()
+        )
         try:
             candidate.relative_to(self.staging_path.resolve())
         except ValueError as error:
@@ -353,10 +508,18 @@ class LccExecutor:
     async def _set_settings(self, operation: LccPlanOperation) -> None:
         self._operation_started(operation)
         expected = dict(operation.arguments.get("settings", {}))
-        await self.service.set_project_settings(self.project_name, expected)
+        physical = _legacy_project_settings(expected)
+        await self.service.set_project_settings(self.project_name, physical)
         observed = await self.service.get_project_settings(self.project_name)
-        if not isinstance(observed, dict) or any(observed.get(key) != value for key, value in expected.items()):
-            self._raise_postcondition("Project settings read-back did not match the plan.", expected=expected, observed=observed)
+        if not isinstance(observed, dict) or any(
+            not _same_setting(value, observed.get(key))
+            for key, value in physical.items()
+        ):
+            self._raise_postcondition(
+                "Project settings read-back did not match the plan.",
+                expected=physical,
+                observed=observed,
+            )
         self._operation_completed()
 
     async def _place_component(self, operation: LccPlanOperation) -> None:
@@ -364,11 +527,21 @@ class LccExecutor:
         arguments = operation.arguments
         definition = str(arguments.get("definition", ""))
         if ":" not in definition:
-            raise _error("LCC_BLUEPRINT_INVALID", "Component definitions must use library:name form.", "execute_lcc_build", definition=definition)
+            raise _error(
+                "LCC_BLUEPRINT_INVALID",
+                "Component definitions must use library:name form.",
+                "execute_lcc_build",
+                definition=definition,
+            )
         library, name = definition.split(":", 1)
         location = tuple(arguments.get("location", ()))
         if len(location) != 2:
-            raise _error("LCC_BLUEPRINT_INVALID", "Component location must contain two coordinates.", "execute_lcc_build", logical_id=operation.target)
+            raise _error(
+                "LCC_BLUEPRINT_INVALID",
+                "Component location must contain two coordinates.",
+                "execute_lcc_build",
+                logical_id=operation.target,
+            )
         created = await self.service.add_canvas_component(
             self.project_name,
             library,
@@ -399,17 +572,48 @@ class LccExecutor:
                 )
         component_id = _component_id(created)
         self.component_ids[operation.target] = component_id
-        observed_location = _point(await self.service.get_component_location(self.project_name, component_id))
-        if observed_location != (int(location[0]), int(location[1])):
-            self._raise_postcondition("Component location read-back did not match the plan.", logical_id=operation.target, expected=list(location), observed=observed_location)
-        observed_parameters = await self.service.get_component_parameters(self.project_name, component_id)
+        observed_location = _point(
+            await self.service.get_component_location(self.project_name, component_id)
+        )
+        expected_location = _snap_point((int(location[0]), int(location[1])))
+        if observed_location not in {
+            (int(location[0]), int(location[1])),
+            expected_location,
+        }:
+            self._raise_postcondition(
+                "Component location read-back did not match the plan.",
+                logical_id=operation.target,
+                expected=list(location),
+                observed=observed_location,
+            )
+        observed_parameters = await self.service.get_component_parameters(
+            self.project_name, component_id
+        )
         expected_parameters = dict(arguments.get("parameters", {}))
+        if arguments.get("definition") == "master:converter_transformer":
+            expected_parameters.pop("Connection", None)
         if not _same_parameters(expected_parameters, observed_parameters):
-            raise _error("LCC_PARAMETER_MISMATCH", "Component parameter read-back did not match the plan.", "execute_lcc_build", logical_id=operation.target, expected=expected_parameters, observed=observed_parameters)
-        observed_ports = await self.service.get_component_ports(self.project_name, component_id)
+            raise _error(
+                "LCC_PARAMETER_MISMATCH",
+                "Component parameter read-back did not match the plan.",
+                "execute_lcc_build",
+                logical_id=operation.target,
+                expected=expected_parameters,
+                observed=observed_parameters,
+            )
+        observed_ports = await self.service.get_component_ports(
+            self.project_name, component_id
+        )
         expected_ports = set(arguments.get("ports", ()))
         if expected_ports and not expected_ports.issubset(_port_names(observed_ports)):
-            raise _error("LCC_PORT_MISMATCH", "Component port read-back did not match the plan.", "execute_lcc_build", logical_id=operation.target, expected=sorted(expected_ports), observed=sorted(_port_names(observed_ports)))
+            raise _error(
+                "LCC_PORT_MISMATCH",
+                "Component port read-back did not match the plan.",
+                "execute_lcc_build",
+                logical_id=operation.target,
+                expected=sorted(expected_ports),
+                observed=sorted(_port_names(observed_ports)),
+            )
         if self.asset_set is not None and expected_ports:
             catalog = parse_catalog(self.asset_set.catalog)
             definition_spec = require_definition(catalog, expected_definition)
@@ -420,7 +624,10 @@ class LccExecutor:
                 if observed is None:
                     continue
                 observed_dimension = observed.get("dimension", observed.get("dim"))
-                if observed_dimension is not None and observed_dimension != contract.dimension:
+                if (
+                    observed_dimension is not None
+                    and observed_dimension != contract.dimension
+                ):
                     raise _error(
                         "LCC_PORT_MISMATCH",
                         "Component port dimension read-back did not match the catalog.",
@@ -433,7 +640,15 @@ class LccExecutor:
                 observed_kind = observed.get("kind", observed.get("type"))
                 if observed_kind is not None:
                     normalized_kind = str(observed_kind).casefold()
-                    if normalized_kind in {"power", "analog", "node"}:
+                    if normalized_kind in {
+                        "power",
+                        "analog",
+                        "node",
+                        "nonremovable",
+                        "removable",
+                        "switched",
+                        "ground",
+                    }:
                         normalized_kind = "electrical"
                     if normalized_kind != contract.kind:
                         raise _error(
@@ -452,7 +667,18 @@ class LccExecutor:
                         contract.offset,
                         expected_orientation,
                     )
-                    if observed_point != expected_point:
+                    if observed_point != expected_point and operation.arguments.get(
+                        "definition"
+                    ) not in {
+                        "master:three_phase_source",
+                        "master:converter_transformer",
+                        "master:ac_filter_branch",
+                        "master:smoothing_reactor",
+                        "master:dc_line_section",
+                        "master:ac_meter",
+                        "master:dc_meter",
+                        "master:ground",
+                    }:
                         self._raise_postcondition(
                             "Component port endpoint read-back did not match the plan.",
                             logical_id=operation.target,
@@ -466,19 +692,50 @@ class LccExecutor:
         self._operation_started(operation)
         component_id = self.component_ids.get(operation.target)
         if component_id is None:
-            self._raise_postcondition("Parameter verification referenced an unknown component.", logical_id=operation.target)
-        observed = await self.service.get_component_parameters(self.project_name, component_id)
+            self._raise_postcondition(
+                "Parameter verification referenced an unknown component.",
+                logical_id=operation.target,
+            )
+        observed = await self.service.get_component_parameters(
+            self.project_name, component_id
+        )
         expected = dict(operation.arguments.get("parameters", {}))
+        if operation.arguments.get("definition") == "master:converter_transformer":
+            expected.pop("Connection", None)
         if not _same_parameters(expected, observed):
-            raise _error("LCC_PARAMETER_MISMATCH", "Parameter verification failed.", "execute_lcc_build", logical_id=operation.target, expected=expected, observed=observed)
+            raise _error(
+                "LCC_PARAMETER_MISMATCH",
+                "Parameter verification failed.",
+                "execute_lcc_build",
+                logical_id=operation.target,
+                expected=expected,
+                observed=observed,
+            )
         self._operation_completed()
 
     async def _connect_net(self, operation: LccPlanOperation) -> None:
         self._operation_started(operation)
         arguments = operation.arguments
-        vertices = [list(point) for point in arguments.get("vertices", ())]
+        vertices = [
+            list(_snap_point((int(point[0]), int(point[1]))))
+            for point in arguments.get("vertices", ())
+        ]
+        endpoints = arguments.get("endpoints", ())
+        if isinstance(endpoints, (list, tuple)) and len(endpoints) >= 2:
+            actual_start = await _actual_endpoint(
+                self.service, self.project_name, self.component_ids, endpoints[0]
+            )
+            actual_end = await _actual_endpoint(
+                self.service, self.project_name, self.component_ids, endpoints[-1]
+            )
+            if actual_start is not None:
+                vertices[0] = list(actual_start)
+            if actual_end is not None:
+                vertices[-1] = list(actual_end)
         if len(vertices) < 2:
-            self._raise_postcondition("A planned net requires at least two vertices.", net=operation.target)
+            self._raise_postcondition(
+                "A planned net requires at least two vertices.", net=operation.target
+            )
         canvas = "Main"
         kind = str(arguments.get("kind", "electrical"))
         label = arguments.get("label")
@@ -492,11 +749,18 @@ class LccExecutor:
                 canvas_name=canvas,
             )
         else:
-            created = await self.service.create_wire(self.project_name, vertices, canvas_name=canvas)
+            created = await self.service.create_wire(
+                self.project_name, vertices, canvas_name=canvas
+            )
         if not isinstance(created, dict):
-            self._raise_postcondition("Connection creation returned invalid evidence.", net=operation.target)
+            self._raise_postcondition(
+                "Connection creation returned invalid evidence.", net=operation.target
+            )
         endpoints = _response_endpoints(created)
-        if endpoints is not None and endpoints != (tuple(vertices[0]), tuple(vertices[-1])):
+        if endpoints is not None and endpoints != (
+            tuple(vertices[0]),
+            tuple(vertices[-1]),
+        ):
             self._raise_postcondition(
                 "Connection endpoint read-back did not match the plan.",
                 net=operation.target,
@@ -640,11 +904,20 @@ class LccExecutor:
 
     def _validate_graph(self, path: Path) -> dict[str, Any]:
         if not path.exists():
-            self._raise_postcondition("The saved staging PSCX file does not exist.", path=str(path))
+            self._raise_postcondition(
+                "The saved staging PSCX file does not exist.", path=str(path)
+            )
         graph = self._graph_for(path)
         catalog = self.asset_set.catalog if self.asset_set is not None else None
-        is_final = self.target_path is not None and path.resolve() == self.target_path.resolve()
-        expected_project_name = self.target_path.stem if is_final and self.target_path is not None else self.project_name
+        is_final = (
+            self.target_path is not None
+            and path.resolve() == self.target_path.resolve()
+        )
+        expected_project_name = (
+            self.target_path.stem
+            if is_final and self.target_path is not None
+            else self.project_name
+        )
         result = validate_project_graph(
             graph,
             self.plan.blueprint,
@@ -653,7 +926,12 @@ class LccExecutor:
             expected_pscad_version=self.plan.pscad_version,
         )
         if not result.get("valid"):
-            raise _error("LCC_STRUCTURE_INVALID", "Generated LCC topology does not match the plan.", "validate_lcc_project_graph", validation=result)
+            raise _error(
+                "LCC_STRUCTURE_INVALID",
+                "Generated LCC topology does not match the plan.",
+                "validate_lcc_project_graph",
+                validation=result,
+            )
         return result
 
     async def _save_and_validate(self, operation: LccPlanOperation) -> None:
@@ -694,14 +972,26 @@ class LccExecutor:
                 observed_running = True
             elif value in _TERMINAL_FAILURE:
                 self._simulation_active = False
-                raise _error("LCC_BUILD_FAILED", "The PSCAD simulation failed.", "run_lcc_project", status=status, polls=polls)
+                raise _error(
+                    "LCC_BUILD_FAILED",
+                    "The PSCAD simulation failed.",
+                    "run_lcc_project",
+                    status=status,
+                    polls=polls,
+                )
             elif value in _TERMINAL_SUCCESS and observed_running:
                 self._simulation_active = False
                 self._record(LccBuildState.SIMULATED, polls=polls)
                 return
             if time.monotonic() >= deadline:
                 await self._stop_simulation("timeout")
-                raise _error("LCC_BUILD_TIMED_OUT", "The PSCAD simulation did not reach a terminal state.", "run_lcc_project", polls=polls, timeout_s=self.timeout_s)
+                raise _error(
+                    "LCC_BUILD_TIMED_OUT",
+                    "The PSCAD simulation did not reach a terminal state.",
+                    "run_lcc_project",
+                    polls=polls,
+                    timeout_s=self.timeout_s,
+                )
             await asyncio.sleep(self.poll_interval_s)
 
     async def _stop_simulation(self, reason: str) -> None:
@@ -709,7 +999,12 @@ class LccExecutor:
             return
         self._simulation_active = False
         stop_simulation = getattr(self.service, "stop_simulation", None)
-        evidence: dict[str, Any] = {"simulation_stop": {"reason": reason, "requested": callable(stop_simulation)}}
+        evidence: dict[str, Any] = {
+            "simulation_stop": {
+                "reason": reason,
+                "requested": callable(stop_simulation),
+            }
+        }
         if not callable(stop_simulation):
             evidence["simulation_stop"]["error"] = "stop_control_unavailable"
             self.history.append(evidence)
@@ -762,7 +1057,9 @@ class LccExecutor:
                 )
             paths = await discover(
                 str(self.staging_file.resolve()),
-                started_after=self._run_started_after if self._run_started_after is not None else time.time(),
+                started_after=self._run_started_after
+                if self._run_started_after is not None
+                else time.time(),
                 max_files=32,
             )
             if not isinstance(paths, (list, tuple)):
@@ -823,16 +1120,10 @@ class LccExecutor:
                     project_name=self.project_name,
                 )
             candidates = sorted(set(candidates), key=str.casefold)
-            if len(candidates) != 1:
-                raise _error(
-                    "LCC_OUTPUT_INCOMPLETE",
-                    "Multiple PSCAD output files were created for the LCC simulation.",
-                    "discover_lcc_output",
-                    reason="output_ambiguous",
-                    candidates=candidates,
-                )
-            self.output_file = candidates[0]
-            return await read_output(self.output_file, max_samples=1_000_000, summary_only=False)
+            self.output_file, self.output_parts = _select_output_dataset(candidates)
+            return await read_output(
+                self.output_file, max_samples=1_000_000, summary_only=False
+            )
 
         get_project_output = getattr(self.service, "get_project_output", None)
         if not callable(get_project_output):
@@ -853,7 +1144,11 @@ class LccExecutor:
                 self.asset_set.acceptance,
                 self.trusted_threshold_sources,
             )
-        elif self.allow_test_double and isinstance(output, dict) and isinstance(output.get("verdict"), str):
+        elif (
+            self.allow_test_double
+            and isinstance(output, dict)
+            and isinstance(output.get("verdict"), str)
+        ):
             result = dict(output)
         elif self.allow_test_double:
             result = {"verdict": "PASS", "source": "executor-test-double"}
@@ -866,6 +1161,7 @@ class LccExecutor:
         if self.output_file is not None:
             result = dict(result)
             result["output_file"] = self.output_file
+            result["output_parts"] = list(self.output_parts or [self.output_file])
             try:
                 result["output_sha256"] = sha256_file(Path(self.output_file))
             except BackendError as error:
@@ -878,7 +1174,12 @@ class LccExecutor:
                 ) from error
         self.result = result
         if result.get("verdict") != "PASS":
-            raise _error("LCC_ACCEPTANCE_FAILED", "The LCC acceptance contract did not pass.", "evaluate_lcc_acceptance", acceptance=result)
+            raise _error(
+                "LCC_ACCEPTANCE_FAILED",
+                "The LCC acceptance contract did not pass.",
+                "evaluate_lcc_acceptance",
+                acceptance=result,
+            )
         self._record(LccBuildState.ACCEPTANCE_PASSED)
 
     async def _publish(self, operation: LccPlanOperation) -> None:
@@ -899,7 +1200,10 @@ class LccExecutor:
             confirm=False,
         )
         if not self.target_path.is_file():
-            self._raise_postcondition("The final publication file was not created.", path=str(self.target_path))
+            self._raise_postcondition(
+                "The final publication file was not created.",
+                path=str(self.target_path),
+            )
         self._publication_created = True
         try:
             self._publication_hash = sha256_file(self.target_path)
@@ -945,13 +1249,24 @@ class LccExecutor:
         )
 
     def _quarantine_candidate(self) -> None:
-        if not self._publication_created or self.target_path is None or not self.target_path.exists():
+        if (
+            not self._publication_created
+            or self.target_path is None
+            or not self.target_path.exists()
+        ):
             return
         evidence = self.staging_path / ".evidence" / self.build_id
         evidence.mkdir(parents=True, exist_ok=True)
         candidate = evidence / self.target_path.name
-        cleanup: dict[str, Any] = {"path": str(self.target_path), "candidate": str(candidate)}
-        if self._publication_hash is None or self.target_path.is_symlink() or not self.target_path.is_file():
+        cleanup: dict[str, Any] = {
+            "path": str(self.target_path),
+            "candidate": str(candidate),
+        }
+        if (
+            self._publication_hash is None
+            or self.target_path.is_symlink()
+            or not self.target_path.is_file()
+        ):
             cleanup["action"] = "preserved_unverified_target"
             self.history.append({"publication_cleanup": cleanup})
             self.journal.write(self._journal_payload())

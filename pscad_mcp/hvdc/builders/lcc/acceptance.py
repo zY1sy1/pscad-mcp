@@ -58,6 +58,24 @@ def _incomplete(message: str, **details: Any) -> BackendError:
     return _backend_error("LCC_ACCEPTANCE_INCOMPLETE", message, **details)
 
 
+def evaluate_commutation_fault(evidence: Mapping[str, Any]) -> dict[str, Any]:
+    """Evaluate the bounded, explicit LCC commutation-failure contract."""
+
+    checks = {
+        "disturbance": bool(evidence.get("disturbance")),
+        "failure_indication": bool(evidence.get("failure_indication")),
+        "bounded_dc_response": False,
+        "recovered": bool(evidence.get("recovered")),
+    }
+    try:
+        peak = float(evidence.get("dc_current_peak_ka"))
+        limit = float(evidence.get("dc_current_limit_ka"))
+        checks["bounded_dc_response"] = math.isfinite(peak) and math.isfinite(limit) and 0 <= peak <= limit
+    except (TypeError, ValueError):
+        checks["bounded_dc_response"] = False
+    return {"verdict": "PASS" if all(checks.values()) else "FAIL", "checks": checks}
+
+
 def _is_sequence(value: Any) -> bool:
     return isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray))
 
@@ -1382,6 +1400,7 @@ __all__ = [
     "MAX_CHANNEL_SAMPLES",
     "align_positive_zero_crossing",
     "evaluate_acceptance",
+    "evaluate_commutation_fault",
     "interpolate_to_grid",
     "normalized_errors",
     "validate_parametric_acceptance_contract",

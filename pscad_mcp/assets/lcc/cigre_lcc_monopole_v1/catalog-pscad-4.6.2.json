@@ -17,7 +17,7 @@
         "Phase_deg": {"type": "float", "minimum": -360, "maximum": 360, "unit": "deg"}
       },
       "bounding_box": [-10, -10, 10, 30],
-      "metadata": {"library": "master", "characterized_for": "4.6.2"}
+      "metadata": {"library": "master", "characterized_for": "4.6.2", "master_definition": "source3", "port_mapping": {"A": "A", "B": "B", "C": "C"}, "parameter_mapping": {"Amplitude_kV": "Vm", "Frequency_Hz": "F", "Phase_deg": "Ph"}}
     },
     {
       "scoped_name": "master:converter_transformer",
@@ -35,7 +35,7 @@
         "Connection": {"type": "enum", "enum": ["Y-Y", "Y-delta"]}
       },
       "bounding_box": [-40, -30, 40, 30],
-      "metadata": {"library": "master", "characterized_for": "4.6.2"}
+      "metadata": {"library": "master", "characterized_for": "4.6.2", "master_definition": "umec-xfmr-6w5L", "port_mapping": {"HV_A": "A1", "HV_B": "B1", "HV_C": "C1", "LV_A": "A2", "LV_B": "B2", "LV_C": "C2"}, "parameter_mapping": {"Ratio": "V2", "PhaseShift_deg": "Lead"}}
     },
     {
       "scoped_name": "master:ac_filter_branch",
@@ -52,7 +52,7 @@
         "Tuning_Hz": {"type": "float", "minimum": 40, "maximum": 1000, "unit": "Hz"}
       },
       "bounding_box": [-40, -30, 40, 30],
-      "metadata": {"library": "master", "characterized_for": "4.6.2"}
+      "metadata": {"library": "master", "characterized_for": "4.6.2", "master_definition": "cfilter", "instances": 3, "port_mapping": {"IN_A": "A", "OUT_A": "B", "IN_B": "A", "OUT_B": "B", "IN_C": "A", "OUT_C": "B"}, "parameter_mapping": {"Branch_MVAR": "Q", "Tuning_Hz": "f0"}}
     },
     {
       "scoped_name": "master:smoothing_reactor",
@@ -62,7 +62,7 @@
       ],
       "parameters": {"Inductance_mH": {"type": "float", "minimum": 0, "maximum": 1000, "unit": "mH"}},
       "bounding_box": [-20, -10, 20, 10],
-      "metadata": {"library": "master", "characterized_for": "4.6.2"}
+      "metadata": {"library": "master", "characterized_for": "4.6.2", "master_definition": "inductor", "port_mapping": {"IN": "A", "OUT": "B"}, "parameter_mapping": {"Inductance_mH": "L", "Inductance_scale": 0.001}}
     },
     {
       "scoped_name": "master:dc_line_section",
@@ -75,7 +75,7 @@
         "Resistance_ohm": {"type": "float", "minimum": 0, "maximum": 1000, "unit": "ohm"}
       },
       "bounding_box": [-50, -10, 50, 10],
-      "metadata": {"library": "master", "characterized_for": "4.6.2"}
+      "metadata": {"library": "master", "characterized_for": "4.6.2", "master_definition": "dc_mac_2w", "port_mapping": {"IN": "F1", "OUT": "F2"}, "parameter_mapping": {"Length_km": "D"}}
     },
     {
       "scoped_name": "master:ac_meter",
@@ -86,7 +86,7 @@
       ],
       "parameters": {},
       "bounding_box": [-20, -10, 20, 30],
-      "metadata": {"library": "master", "characterized_for": "4.6.2"}
+      "metadata": {"library": "master", "characterized_for": "4.6.2", "master_definition": "multimeter", "port_mapping": {"A": "A", "B": "B"}}
     },
     {
       "scoped_name": "master:dc_meter",
@@ -96,14 +96,14 @@
       ],
       "parameters": {},
       "bounding_box": [-20, -10, 20, 10],
-      "metadata": {"library": "master", "characterized_for": "4.6.2"}
+      "metadata": {"library": "master", "characterized_for": "4.6.2", "master_definition": "voltmeter", "port_mapping": {"IN": "N1", "OUT": "N2"}}
     },
     {
       "scoped_name": "master:ground",
       "ports": [{"name": "GND", "kind": "electrical", "dimension": 1, "offset": [0, 0]}],
       "parameters": {},
       "bounding_box": [-10, -10, 10, 10],
-      "metadata": {"library": "master", "characterized_for": "4.6.2"}
+      "metadata": {"library": "master", "characterized_for": "4.6.2", "master_definition": "ground", "port_mapping": {"GND": "A"}}
     },
     {
       "scoped_name": "cigre_lcc_v1:LCC12PulseBridge",

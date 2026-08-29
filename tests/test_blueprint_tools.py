@@ -17,7 +17,7 @@ BLUEPRINT_TOOLS = {
 def test_blueprint_tools_are_registered_with_exact_names():
     names = {tool.name for tool in create_server()._tool_manager.list_tools()}
     assert BLUEPRINT_TOOLS <= names
-    assert len(names) == 97
+    assert len(names) == 105
 
 
 def test_blueprint_wrappers_forward_complete_values(monkeypatch):

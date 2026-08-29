@@ -25,7 +25,7 @@
     {"logical_id": "rectifier_filter", "definition": "master:ac_filter_branch", "location": {"x": 330, "y": 100}, "parameters": {"Branch_MVAR": 50.0, "Tuning_Hz": 300.0}, "ports": ["IN_A", "IN_B", "IN_C", "OUT_A", "OUT_B", "OUT_C"], "role": "power"},
     {"logical_id": "rectifier_bridge", "definition": "cigre_lcc_v1:LCC12PulseBridge", "location": {"x": 450, "y": 100}, "parameters": {"ValveDrop_V": 1.0}, "ports": ["ACY_A", "ACY_B", "ACY_C", "ACD_A", "ACD_B", "ACD_C", "DC_POS", "DC_NEG", "GATES"], "role": "power"},
     {"logical_id": "rectifier_control", "definition": "cigre_lcc_v1:RectifierControl", "location": {"x": 450, "y": 300}, "parameters": {"AlphaOrder_deg": 15.0}, "ports": ["VDC", "IDC", "IORDER", "ENABLE", "GATES", "ALPHA"], "role": "control"},
-    {"logical_id": "rectifier_ac_meter", "definition": "master:ac_meter", "location": {"x": 180, "y": 300}, "parameters": {}, "ports": ["A", "B", "C"], "role": "measurement"},
+    {"logical_id": "rectifier_ac_meter", "definition": "master:ac_meter", "location": {"x": 180, "y": 300}, "parameters": {}, "ports": ["A", "B"], "role": "measurement"},
     {"logical_id": "rectifier_dc_meter", "definition": "master:dc_meter", "location": {"x": 550, "y": 100}, "parameters": {}, "ports": ["IN", "OUT"], "role": "measurement"},
     {"logical_id": "dc_smoothing_reactor", "definition": "master:smoothing_reactor", "location": {"x": 700, "y": 100}, "parameters": {"Inductance_mH": 100.0}, "ports": ["IN", "OUT"], "role": "power"},
     {"logical_id": "dc_line", "definition": "master:dc_line_section", "location": {"x": 900, "y": 100}, "parameters": {"Length_km": 300.0, "Resistance_ohm": 10.0}, "ports": ["IN", "OUT"], "role": "power"},
@@ -35,7 +35,7 @@
     {"logical_id": "inverter_filter", "definition": "master:ac_filter_branch", "location": {"x": 1370, "y": 100}, "parameters": {"Branch_MVAR": 50.0, "Tuning_Hz": 300.0}, "ports": ["IN_A", "IN_B", "IN_C", "OUT_A", "OUT_B", "OUT_C"], "role": "power"},
     {"logical_id": "inverter_transformer", "definition": "master:converter_transformer", "location": {"x": 1450, "y": 100}, "parameters": {"Ratio": 1.0, "PhaseShift_deg": 30.0, "Connection": "Y-delta"}, "ports": ["HV_A", "HV_B", "HV_C", "LV_A", "LV_B", "LV_C"], "role": "power"},
     {"logical_id": "inverter_source", "definition": "master:three_phase_source", "location": {"x": 1600, "y": 100}, "parameters": {"Amplitude_kV": 230.0, "Frequency_Hz": 50.0, "Phase_deg": 0.0}, "ports": ["A", "B", "C"], "role": "power"},
-    {"logical_id": "inverter_ac_meter", "definition": "master:ac_meter", "location": {"x": 1520, "y": 300}, "parameters": {}, "ports": ["A", "B", "C"], "role": "measurement"},
+    {"logical_id": "inverter_ac_meter", "definition": "master:ac_meter", "location": {"x": 1520, "y": 300}, "parameters": {}, "ports": ["A", "B"], "role": "measurement"},
     {"logical_id": "rectifier_ground", "definition": "master:ground", "location": {"x": 550, "y": 500}, "parameters": {}, "ports": ["GND"], "role": "power"},
     {"logical_id": "inverter_ground", "definition": "master:ground", "location": {"x": 1150, "y": 500}, "parameters": {}, "ports": ["GND"], "role": "power"}
   ],
@@ -78,8 +78,8 @@
     {"logical_id": "q_inv_measurement", "kind": "electrical", "component": "inverter_ac_meter", "port": "B", "channels": ["Main/Q_INV"]},
     {"logical_id": "alpha_measurement", "kind": "data", "component": "rectifier_control", "port": "ALPHA", "channels": ["Main/ALPHA_RECT"]},
     {"logical_id": "gamma_measurement", "kind": "data", "component": "inverter_control", "port": "GAMMA", "channels": ["Main/GAMMA_INV"]},
-    {"logical_id": "mu_measurement", "kind": "data", "component": "rectifier_control", "port": "ALPHA", "channels": ["Main/MU_RECT"]},
-    {"logical_id": "vac_rect_measurement", "kind": "electrical", "component": "rectifier_ac_meter", "port": "A", "channels": ["Main/VAC_RECT_A"]}
+    {"logical_id": "mu_measurement", "kind": "data", "component": "rectifier_control", "port": "ALPHA", "channels": ["Main/MU_RECT"], "derived_from": "alpha_measurement"},
+    {"logical_id": "vac_rect_measurement", "kind": "electrical", "component": "rectifier_ac_meter", "port": "A", "channels": ["Main/VAC_RECT_A"], "derived_from": "p_rect_measurement"}
   ],
   "outputs": [
     {"logical_id": "vdc_rect", "path": "Main/VDC_RECT", "units": "kV", "role": "rectifier_dc_voltage", "measurement": "vdc_rect_measurement"},

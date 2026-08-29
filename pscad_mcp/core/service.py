@@ -1065,7 +1065,14 @@ class PscadService:
                 direct = project_path.with_suffix(suffix)
                 if direct.is_file():
                     candidates.append(direct)
-            generated_name = re.compile(rf"{re.escape(project_path.stem)}\.gf\d+", re.IGNORECASE)
+            # PSCAD 4.x replaces punctuation (notably ``-``) with ``_`` when
+            # naming its compiler directory.  Search both the persisted file
+            # stem and that deterministic normalized identity.
+            normalized_stem = re.sub(r"[^A-Za-z0-9_]", "_", project_path.stem)
+            generated_name = re.compile(
+                rf"(?:{re.escape(project_path.stem)}|{re.escape(normalized_stem)})\.gf\d+",
+                re.IGNORECASE,
+            )
             generated = sorted(
                 (
                     child
