@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from pathlib import Path
 import xml.etree.ElementTree as ET
+from dataclasses import dataclass, field
+from pathlib import Path
 
 
 @dataclass(frozen=True)
@@ -17,12 +17,31 @@ class PortMetadata:
     model: str | None = None
     kind: str | None = None
     page: bool = False
+    mode: str | None = None
+    condition: str | None = None
+    occurrence: int = 0
+
+
+@dataclass(frozen=True)
+class ParameterMetadata:
+    name: str
+    type: str | None
+    unit: str | None
+    minimum: int | float | None
+    maximum: int | float | None
+    choices: tuple[str, ...]
+    default: object
+    intent: str | None
+    readonly: bool
 
 
 @dataclass(frozen=True)
 class DefinitionMetadata:
     ports: tuple[PortMetadata, ...]
     parameter_ranges: dict[str, object]
+    parameters: dict[str, ParameterMetadata] = field(default_factory=dict)
+    name: str = ""
+    description: str | None = None
 
 
 @dataclass(frozen=True)
@@ -112,22 +131,32 @@ def _number(value: str) -> int | float:
     return int(numeric) if numeric.is_integer() else numeric
 
 
-def read_definition_metadata(
-    file_path: str | Path,
-    definition_name: str,
-) -> DefinitionMetadata:
-    """Return static definition metadata without modifying the PSCAD file."""
-    root = ET.parse(Path(file_path)).getroot()
-    definition = root.find(f".//Definition[@name='{definition_name}']")
-    if definition is None:
-        raise KeyError(f"Definition '{definition_name}' was not found in {file_path}.")
+def _default_value(parameter: ET.Element) -> object:
+    value = parameter.find("value")
+    raw = (value.text or "").strip() if value is not None else ""
+    if not raw:
+        return None
+    parameter_type = (parameter.get("type") or "").casefold()
+    if parameter_type in {"real", "integer", "choice"}:
+        try:
+            return _number(raw)
+        except ValueError:
+            return raw
+    return raw
 
+
+def _metadata_from_definition(definition: ET.Element) -> DefinitionMetadata:
     ports = []
+    occurrences: dict[str, int] = {}
     for port in definition.findall(".//svg/port"):
         raw_dim = port.get("dim")
+        name = str(port.get("name", ""))
+        occurrence = occurrences.get(name, 0)
+        occurrences[name] = occurrence + 1
+        condition = (port.text or "").strip() or None
         ports.append(
             PortMetadata(
-                name=str(port.get("name", "")),
+                name=name,
                 x=int(port.get("x", "0")),
                 y=int(port.get("y", "0")),
                 dim=int(raw_dim) if raw_dim not in {None, ""} else None,
@@ -136,27 +165,83 @@ def read_definition_metadata(
                 kind=port.get("kind"),
                 page=(port.get("page") or "").strip().casefold()
                 in {"1", "true", "yes", "on"},
+                mode=port.get("mode"),
+                condition=condition,
+                occurrence=occurrence,
             )
         )
 
     ranges: dict[str, object] = {}
+    parameters: dict[str, ParameterMetadata] = {}
     for parameter in definition.findall(".//form//parameter"):
         name = parameter.get("name")
         if not name:
             continue
-        choices = []
-        for choice in parameter.findall("choice"):
-            text = (choice.text or "").strip()
-            choices.append(text.split("=", 1)[0].strip())
+        choices = tuple(
+            (choice.text or "").strip().split("=", 1)[0].strip()
+            for choice in parameter.findall("choice")
+        )
+        minimum_raw = parameter.get("min", "").strip()
+        maximum_raw = parameter.get("max", "").strip()
+        minimum = _number(minimum_raw) if minimum_raw else None
+        maximum = _number(maximum_raw) if maximum_raw else None
         if choices:
-            ranges[name] = choices
-            continue
-        minimum = parameter.get("min", "").strip()
-        maximum = parameter.get("max", "").strip()
-        if minimum or maximum:
-            ranges[name] = (
-                _number(minimum) if minimum else None,
-                _number(maximum) if maximum else None,
-            )
+            ranges[name] = list(choices)
+        elif minimum_raw or maximum_raw:
+            ranges[name] = (minimum, maximum)
+        parameters[name] = ParameterMetadata(
+            name=name,
+            type=parameter.get("type"),
+            unit=parameter.get("unit"),
+            minimum=minimum,
+            maximum=maximum,
+            choices=choices,
+            default=_default_value(parameter),
+            intent=parameter.get("intent"),
+            readonly=(parameter.get("readonly") or "").strip().casefold()
+            in {"1", "true", "yes", "on"},
+        )
 
-    return DefinitionMetadata(tuple(ports), ranges)
+    description_node = definition.find("./paramlist/param[@name='Description']")
+    description = (
+        description_node.get("value")
+        if description_node is not None
+        else None
+    )
+    return DefinitionMetadata(
+        tuple(ports),
+        ranges,
+        parameters,
+        str(definition.get("name", "")),
+        description,
+    )
+
+
+def read_definition_metadata_matches(
+    file_path: str | Path,
+    definition_name: str,
+) -> tuple[DefinitionMetadata, ...]:
+    """Return every exact definition match in source order."""
+
+    root = ET.parse(Path(file_path)).getroot()
+    return tuple(
+        _metadata_from_definition(definition)
+        for definition in root.findall(".//Definition")
+        if definition.get("name") == definition_name
+    )
+
+
+def read_definition_metadata(
+    file_path: str | Path,
+    definition_name: str,
+) -> DefinitionMetadata:
+    """Return static definition metadata without modifying the PSCAD file."""
+    matches = read_definition_metadata_matches(file_path, definition_name)
+    if not matches:
+        raise KeyError(f"Definition '{definition_name}' was not found in {file_path}.")
+    if len(matches) != 1:
+        raise KeyError(
+            f"Definition '{definition_name}' is ambiguous in {file_path}: "
+            f"found {len(matches)} matches."
+        )
+    return matches[0]
