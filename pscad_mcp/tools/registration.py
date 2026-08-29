@@ -261,10 +261,14 @@ def register_tool(
         )
         for parameter in signature.parameters.values()
     ]
-    parameter_descriptions = {
-        parameter.name: _annotation_description(parameter.annotation)
-        for parameter in resolved_parameters
-    }
+    parameter_descriptions: dict[str, str | None] = {}
+    for parameter in signature.parameters.values():
+        description = _annotation_description(
+            resolved_annotations.get(parameter.name, parameter.annotation)
+        )
+        if not isinstance(description, str):
+            description = _annotation_description(parameter.annotation)
+        parameter_descriptions[parameter.name] = description
     return_annotation = resolved_annotations.get("return", Any)
 
     @wraps(function)

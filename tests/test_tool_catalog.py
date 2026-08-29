@@ -1,8 +1,9 @@
 from dataclasses import FrozenInstanceError
 import inspect
-from typing import Any
+from typing import Annotated, Any
 
 from mcp.server.fastmcp import FastMCP
+from pydantic import Field
 from pscad_mcp.main import create_server
 from pscad_mcp.tools.catalog import (
     COMPATIBILITY_TOOL_SPECS,
@@ -12,6 +13,7 @@ from pscad_mcp.tools.catalog import (
     TOOL_SPECS,
 )
 from pscad_mcp.tools.project_tools import list_projects
+import pscad_mcp.tools.registration as registration
 from pscad_mcp.tools.registration import _register_with_original_result, register_tool
 import pytest
 
@@ -258,6 +260,37 @@ def test_registration_uses_original_parameter_description_when_model_metadata_is
         bare_set_component_parameters,
         parameter_descriptions={"parameters": expected},
     )
+
+    tool = server._tool_manager.get_tool("set_component_parameters")
+    assert tool is not None
+    assert tool.parameters["properties"]["parameters"]["description"] == expected
+
+
+def test_registration_recovers_description_from_raw_signature_when_type_hints_strip_extras(
+    monkeypatch,
+):
+    expected = 'Component parameter_name keys mapped to values; example {"R": 1.0}.'
+
+    async def annotated_set_component_parameters(
+        project_name: str,
+        component_id: int,
+        parameters: Annotated[dict[str, Any], Field(description=expected)],
+    ) -> str:
+        return f"{project_name}:{component_id}:{parameters}"
+
+    annotated_set_component_parameters.__name__ = "set_component_parameters"
+    original_get_type_hints = registration.get_type_hints
+
+    def strip_extras(function, **kwargs):
+        hints = original_get_type_hints(function, **kwargs)
+        return {
+            name: dict[str, Any] if name == "parameters" else annotation
+            for name, annotation in hints.items()
+        }
+
+    monkeypatch.setattr(registration, "get_type_hints", strip_extras)
+    server = FastMCP("raw-signature-fallback")
+    register_tool(server, annotated_set_component_parameters, record_learning=False)
 
     tool = server._tool_manager.get_tool("set_component_parameters")
     assert tool is not None
