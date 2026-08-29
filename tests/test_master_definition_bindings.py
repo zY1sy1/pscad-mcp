@@ -202,8 +202,8 @@ def test_legacy_expands_filter_and_grounds_each_neutral(tmp_path):
         assert item.values["V"] == pytest.approx(132.79056191361394)
     assert [wire.vertices for wire in wires] == [
         ((360, 144), (414, 144)),
-        ((360, 264), (414, 264)),
-        ((360, 384), (414, 384)),
+        ((360, 252), (414, 252)),
+        ((360, 360), (414, 360)),
     ]
     assert parameters == {
         "Branch_MVAR": pytest.approx(50.0),
@@ -258,3 +258,62 @@ def test_service_preserves_legacy_add_component_signature_without_binding(tmp_pa
     )
 
     assert created["definition"] == "master:resistor"
+
+
+def test_legacy_exposes_physical_binding_readback_evidence(tmp_path):
+    async def exercise():
+        backend, _project, _master = await _runtime_backend(tmp_path)
+        created = await backend.add_component(
+            "case",
+            "Main",
+            "master",
+            "smoothing_reactor",
+            (36, 36),
+            0,
+            {"Inductance_mH": 100.0},
+        )
+        return await backend.get_master_binding_evidence("case", created.id)
+
+    evidence = asyncio.run(exercise())
+
+    assert evidence["logical_name"] == "master:smoothing_reactor"
+    assert evidence["physical_definition"] == "inductor"
+    assert evidence["logical_parameters"] == {
+        "Inductance_mH": pytest.approx(100.0)
+    }
+    assert evidence["observed_instances"] == [
+        {
+            "role": "component",
+            "instance": "default",
+            "component_id": evidence["observed_instances"][0]["component_id"],
+            "definition": "master:inductor",
+            "parameters": {
+                **evidence["observed_instances"][0]["parameters"],
+                "L": pytest.approx(0.1),
+            },
+        }
+    ]
+    assert len(evidence["master_sha256"]) == 64
+    assert len(evidence["registry_sha256"]) == 64
+
+
+def test_filter_binding_evidence_lists_grounding_members(tmp_path):
+    async def exercise():
+        backend, _project, _master = await _runtime_backend(tmp_path)
+        created = await backend.add_component(
+            "case",
+            "Main",
+            "master",
+            "ac_filter_branch",
+            (360, 180),
+            0,
+            {"Branch_MVAR": 50.0, "Tuning_Hz": 300.0},
+        )
+        return await backend.get_master_binding_evidence("case", created.id)
+
+    evidence = asyncio.run(exercise())
+
+    roles = [item["role"] for item in evidence["observed_instances"]]
+    assert roles.count("component") == 3
+    assert roles.count("neutral_ground") == 3
+    assert roles.count("neutral_wire") == 3

@@ -87,8 +87,8 @@
         "kind": "phase_expand",
         "instances": [
           {"name": "A", "offset": [0, 0]},
-          {"name": "B", "offset": [0, 120]},
-          {"name": "C", "offset": [0, 240]}
+          {"name": "B", "offset": [0, 108]},
+          {"name": "C", "offset": [0, 216]}
         ],
         "neutral": {
           "physical_port": "N",

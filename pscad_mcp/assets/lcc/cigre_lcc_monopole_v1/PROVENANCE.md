@@ -24,3 +24,27 @@ this asset, and no user project XML, parameter set, or schematic was copied.
 
 Compilation in a licensed PSCAD 4.6.2 installation remains a required release
 gate and is recorded separately from this provenance ledger.
+
+## Master binding ledger
+
+`master-bindings-pscad-4.6.2.json` is the authoritative physical binding for
+the eight logical Master entries in this asset set. It was audited against the
+installed PSCAD 4.6.2 `master.pslx`; no vendor definition body is copied into
+the registry or companion library.
+
+- `three_phase_source -> source3`, with three-phase `View=0`.
+- `converter_transformer -> xfmr-3p2w`, matching the component used by the
+  official CIGRE LCC examples inspected on 2026-08-29.
+- `ac_filter_branch -> cfilter`, expanded into three instances with explicit
+  neutral grounds, per-phase MVA, and harmonic-order conversion.
+- `smoothing_reactor -> inductor`, converting mH to H.
+- `dc_line_section -> resistor`, using the catalog's total resistance. The
+  rejected `dc_mac_2w` candidate is a DC machine, not a transmission line.
+- `ac_meter` and `dc_meter -> multimeter`, with explicit modes that retain the
+  required electrical pair.
+- `ground -> ground`.
+
+The official examples informed component identity and semantics only. They are
+not redistributed by this asset package. Licensed Master-binding compile
+reports are generated under the configured acceptance workspace and remain
+separate from the packaged provenance and from full-model waveform acceptance.

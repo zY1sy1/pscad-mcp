@@ -24,6 +24,8 @@ from typing import Any
 from xml.etree import ElementTree as ET
 
 from ....core.backend.base import BackendError
+from ....core.definition_metadata import read_definition_metadata_matches
+from ....core.master_bindings import AuditedMasterRegistry
 
 _MAX_TEMPLATE_BYTES = 32 * 1024 * 1024
 _REQUIRED_DEFINITIONS = {"station", "main", "rectifier", "inverter", "rectifier_ac", "inverter_ac"}
@@ -307,6 +309,9 @@ class NativeLccTemplateAudit:
     definitions: tuple[str, ...]
     output_channels: tuple[dict[str, Any], ...]
     fault_timer: dict[str, Any] = field(default_factory=dict)
+    master_sha256: str | None = None
+    master_binding_registry_sha256: str | None = None
+    master_references: tuple[dict[str, Any], ...] = ()
     errors: tuple[str, ...] = ()
     warnings: tuple[str, ...] = ()
 
@@ -314,7 +319,11 @@ class NativeLccTemplateAudit:
         return asdict(self)
 
 
-def audit_native_lcc_template(source: str | Path) -> NativeLccTemplateAudit:
+def audit_native_lcc_template(
+    source: str | Path,
+    *,
+    master_registry: AuditedMasterRegistry | None = None,
+) -> NativeLccTemplateAudit:
     path = _regular(source, "audit_lcc_native_template")
     root, payload = _parse(path, "audit_lcc_native_template")
     version = (root.get("version") or root.get("pscad_version") or "").strip() or None
@@ -348,6 +357,62 @@ def audit_native_lcc_template(source: str | Path) -> NativeLccTemplateAudit:
             "container": _definition_name(definition),
             "parameters": {key: values[key] for key in ("TF", "DF") if key in values},
         }
+    master_references: list[dict[str, Any]] = []
+    if master_registry is not None:
+        live_hash = _sha256(Path(master_registry.master_path))
+        if live_hash != master_registry.master_sha256:
+            errors.append("master_source_changed")
+        references = sorted(
+            {
+                _scoped_definition(component)
+                for component in _components(root)
+                if _scoped_definition(component).casefold().startswith("master:")
+            },
+            key=str.casefold,
+        )
+        for reference in references:
+            if reference in master_registry.registry.by_logical_name:
+                evidence = master_registry.definitions.get(reference)
+                state = (
+                    evidence.get("verification_state")
+                    if isinstance(evidence, Mapping)
+                    else None
+                )
+                if state != "verified":
+                    errors.append(f"master_reference_unverified:{reference}")
+                master_references.append(
+                    {
+                        "reference": reference,
+                        "physical_definition": (
+                            evidence.get("physical_definition")
+                            if isinstance(evidence, Mapping)
+                            else None
+                        ),
+                        "verification_state": state or "missing",
+                        "source": "binding_registry",
+                    }
+                )
+                continue
+            physical_definition = reference.split(":", 1)[1]
+            matches = read_definition_metadata_matches(
+                master_registry.master_path,
+                physical_definition,
+            )
+            if len(matches) != 1:
+                error_kind = "missing" if not matches else "ambiguous"
+                errors.append(
+                    f"master_reference_{error_kind}:{physical_definition}"
+                )
+            master_references.append(
+                {
+                    "reference": reference,
+                    "physical_definition": physical_definition,
+                    "verification_state": (
+                        "verified" if len(matches) == 1 else "missing"
+                    ),
+                    "source": "live_master",
+                }
+            )
     # Absolute paths are not necessarily invalid PSCAD values, but they make a
     # portable derived case non-reproducible and therefore remain explicit.
     for element in root.iter():
@@ -364,6 +429,17 @@ def audit_native_lcc_template(source: str | Path) -> NativeLccTemplateAudit:
         definitions=names,
         output_channels=tuple(channels),
         fault_timer=fault_timer,
+        master_sha256=(
+            master_registry.master_sha256
+            if master_registry is not None
+            else None
+        ),
+        master_binding_registry_sha256=(
+            master_registry.registry.sha256
+            if master_registry is not None
+            else None
+        ),
+        master_references=tuple(master_references),
         errors=tuple(sorted(set(errors))),
         warnings=tuple(sorted(set(warnings))),
     )

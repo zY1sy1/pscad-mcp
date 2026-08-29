@@ -713,7 +713,6 @@ def create_plan(
         )
     for component in blueprint.components:
         arguments = {
-            "definition": component.definition,
             "parameters": dict(component.parameters),
         }
         if component.logical_id in resolved_master_components:
@@ -757,16 +756,15 @@ def create_plan(
         "pscad_version": asset_set.pscad_version,
         "asset_hashes": dict(asset_set.hashes),
         "catalog_identity": catalog.identity,
-        "master_sha256": (
-            audited_master.master_sha256 if audited_master is not None else None
-        ),
-        "master_binding_registry_sha256": (
-            audited_master.registry.sha256 if audited_master is not None else None
-        ),
         "project_settings": settings,
         "operations": [operation.to_dict() for operation in operations],
         "acceptance_contract": [check.to_dict() for check in checks],
     }
+    if audited_master is not None:
+        payload["master_sha256"] = audited_master.master_sha256
+        payload["master_binding_registry_sha256"] = (
+            audited_master.registry.sha256
+        )
     plan_hash = hashlib.sha256(canonical_json(payload)).hexdigest()
     return LccBuildPlan(
         blueprint=blueprint,
@@ -779,8 +777,8 @@ def create_plan(
         pscad_version=asset_set.pscad_version,
         catalog_identity=catalog.identity,
         metadata=payload["request"],
-        master_sha256=payload["master_sha256"],
-        master_binding_registry_sha256=payload[
+        master_sha256=payload.get("master_sha256"),
+        master_binding_registry_sha256=payload.get(
             "master_binding_registry_sha256"
-        ],
+        ),
     )

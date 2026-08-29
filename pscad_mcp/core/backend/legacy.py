@@ -191,6 +191,9 @@ class LegacyBackend:
         self._composite_components: dict[
             tuple[str, int], dict[str, tuple[int, str]]
         ] = {}
+        self._component_binding_members: dict[
+            tuple[str, int], list[dict[str, Any]]
+        ] = {}
         self._topology_definition_cache: dict[
             tuple[str, str, str], DefinitionMetadata
         ] = {}
@@ -2128,6 +2131,98 @@ class LegacyBackend:
             return values
         return binding.logical_parameters(values)
 
+    async def get_master_binding_evidence(
+        self,
+        project_name: str,
+        component_id: int,
+    ) -> dict[str, Any]:
+        """Return fresh physical read-back for one logical Master component."""
+
+        key = (project_name, int(component_id))
+        binding = self._component_bindings.get(key)
+        audited = self._audited_master_registry
+        if binding is None or audited is None:
+            raise BackendError(
+                "MASTER_BINDING_MISSING",
+                "The component has no audited Master binding state.",
+                self.name,
+                "get_master_binding_evidence",
+                {"project": project_name, "component_id": component_id},
+            )
+        master_path = Path(audited.master_path)
+        try:
+            observed_master_hash = await asyncio.to_thread(
+                lambda: hashlib.sha256(master_path.read_bytes()).hexdigest()
+            )
+        except OSError as error:
+            raise BackendError(
+                "MASTER_SOURCE_CHANGED",
+                "The audited Master source can no longer be read.",
+                self.name,
+                "get_master_binding_evidence",
+                {"path": str(master_path)},
+            ) from error
+        if observed_master_hash != binding.master_sha256:
+            raise BackendError(
+                "MASTER_SOURCE_CHANGED",
+                "The Master source changed before binding read-back.",
+                self.name,
+                "get_master_binding_evidence",
+                {
+                    "expected_master_sha256": binding.master_sha256,
+                    "observed_master_sha256": observed_master_hash,
+                },
+            )
+
+        members = self._component_binding_members.get(
+            key,
+            [
+                {
+                    "role": "component",
+                    "instance": "default",
+                    "component_id": int(component_id),
+                }
+            ],
+        )
+        observed_instances: list[dict[str, Any]] = []
+        logical_source: Mapping[str, Any] | None = None
+        for member in members:
+            if member["role"] == "neutral_wire":
+                observed_instances.append(dict(member))
+                continue
+            physical_id = int(member["component_id"])
+            _canvas, physical = await self._component_proxy(
+                project_name,
+                physical_id,
+            )
+            info = await self._component_info(physical)
+            parameters = dict(
+                await self.executor.run_safe(physical.get_parameters)
+            )
+            observed_instances.append(
+                {
+                    **dict(member),
+                    "definition": info.definition,
+                    "parameters": parameters,
+                }
+            )
+            if member["role"] == "component" and logical_source is None:
+                logical_source = parameters
+        if logical_source is None:
+            raise BackendError(
+                "MASTER_READBACK_FAILED",
+                "No physical component was available for logical read-back.",
+                self.name,
+                "get_master_binding_evidence",
+                {"project": project_name, "component_id": component_id},
+            )
+        evidence = binding.to_evidence()
+        evidence["logical_parameters"] = binding.logical_parameters(
+            logical_source
+        )
+        evidence["observed_instances"] = observed_instances
+        return evidence
+
     async def set_component_parameters(
         self, project_name: str, component_id: int, parameters: Any
     ) -> None:
@@ -3187,6 +3282,13 @@ class LegacyBackend:
         self._component_orientations[(project_name, info.id)] = orientation
         if binding is not None:
             self._component_bindings[(project_name, info.id)] = binding
+            self._component_binding_members[(project_name, info.id)] = [
+                {
+                    "role": "component",
+                    "instance": "default",
+                    "component_id": info.id,
+                }
+            ]
         return info
 
     async def _add_three_phase_filter(
@@ -3247,7 +3349,7 @@ class LegacyBackend:
             return transforms[orientation]
 
         physical_ids: dict[str, int] = {}
-        ground_ids: dict[str, int] = {}
+        members: list[dict[str, Any]] = []
         physical_parameters = dict(binding.physical_parameters)
         instances = tuple(shape["instances"])
         neutral = shape["neutral"]
@@ -3311,6 +3413,13 @@ class LegacyBackend:
                         },
                     )
             physical_ids[phase] = physical_info.id
+            members.append(
+                {
+                    "role": "component",
+                    "instance": phase,
+                    "component_id": physical_info.id,
+                }
+            )
             self._component_orientations[(project_name, physical_info.id)] = orientation
 
             ground_offset = oriented(neutral["ground_offset"])
@@ -3341,7 +3450,13 @@ class LegacyBackend:
                     "add_component",
                     {"phase": phase, "observed_definition": ground_info.definition},
                 )
-            ground_ids[phase] = ground_info.id
+            members.append(
+                {
+                    "role": "neutral_ground",
+                    "instance": phase,
+                    "component_id": ground_info.id,
+                }
+            )
             self._component_orientations[(project_name, ground_info.id)] = 0
 
             neutral_offset = oriented(neutral_evidence["offset"])
@@ -3370,6 +3485,14 @@ class LegacyBackend:
                     "add_component",
                     {"phase": phase},
                 )
+            members.append(
+                {
+                    "role": "neutral_wire",
+                    "instance": phase,
+                    "wire_id": self._component_id(wire),
+                    "endpoints": [list(neutral_point), list(ground_point)],
+                }
+            )
 
         first_phase = str(instances[0]["name"])
         first_id = physical_ids[first_phase]
@@ -3383,6 +3506,7 @@ class LegacyBackend:
         )
         self._component_orientations[(project_name, first_id)] = orientation
         self._component_bindings[(project_name, first_id)] = binding
+        self._component_binding_members[(project_name, first_id)] = members
         self._composite_components[(project_name, first_id)] = {
             port.logical: (
                 physical_ids[str(port.instance)],

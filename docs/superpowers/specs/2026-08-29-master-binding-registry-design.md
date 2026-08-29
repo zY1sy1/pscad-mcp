@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-29
 
-**Status:** Approved direction, pending written-spec review
+**Status:** Implemented; licensed PSCAD 4.6.2 Master-binding compile gate passed 2026-08-30
 
 ## Goal
 
@@ -210,6 +210,12 @@ Against PSCAD 4.6.2 and a timestamped copy of the fixed LCC blueprint:
 
 The smoke acceptance is a mapping/compile gate. It does not by itself claim the
 separate LCC commutation-fault or MMC fault-acceptance scopes.
+
+The 2026-08-30 licensed run verified all eight logical bindings, read back the
+physical definitions and converted parameters, observed three `cfilter`, three
+neutral-ground, and three neutral-wire members for the filter expansion,
+compiled the generated case, and confirmed the installed Master source stayed
+at SHA-256 `062a614e68d8b18541f42b6bac95e0777d4de6f923fdf3d558ca8ff40255d939`.
 
 ## Compatibility and Rollout
 

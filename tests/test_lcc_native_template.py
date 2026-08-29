@@ -5,11 +5,14 @@ from pathlib import Path
 import pytest
 
 from pscad_mcp.core.backend.base import BackendError
+from pscad_mcp.core.master_bindings import audit_master_bindings
+from pscad_mcp.hvdc.builders.lcc.assets import load_packaged_asset_set
 from pscad_mcp.hvdc.builders.lcc.native_template import (
     audit_native_lcc_template,
     evaluate_native_lcc_commutation,
     materialize_native_lcc_bundle,
 )
+from tests.test_master_binding_registry import _master_fixture_xml
 
 
 def _template(path: Path) -> Path:
@@ -64,6 +67,36 @@ def test_audit_requires_the_official_lcc_roles_and_fault_timer(tmp_path: Path) -
     assert report.pscad_version == "4.6.2"
     assert set(report.definitions) >= {"Main", "Station", "Rectifier", "Inverter"}
     assert report.fault_timer["definition"] == "master:tfault"
+
+
+def test_native_audit_verifies_retained_master_references(tmp_path: Path) -> None:
+    source = _template(tmp_path / "official.pscx")
+    master = tmp_path / "master.pslx"
+    master.write_text(
+        _master_fixture_xml().replace(
+            "</pslx>",
+            "<Definition name='tfault'><svg /></Definition>"
+            "<Definition name='pgb'><svg /></Definition>"
+            "</pslx>",
+        ),
+        encoding="utf-8",
+    )
+    assets = load_packaged_asset_set()
+    assert assets.master_bindings is not None
+    audited = audit_master_bindings(master, assets.master_bindings)
+
+    report = audit_native_lcc_template(source, master_registry=audited)
+
+    assert report.master_sha256 == audited.master_sha256
+    assert report.master_binding_registry_sha256 == audited.registry.sha256
+    assert {item["reference"] for item in report.master_references} == {
+        "master:pgb",
+        "master:tfault",
+    }
+    assert all(
+        item["verification_state"] == "verified"
+        for item in report.master_references
+    )
 
 
 def test_materialize_bundle_rewrites_identity_and_extracts_real_library(

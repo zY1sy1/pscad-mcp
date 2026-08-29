@@ -184,6 +184,24 @@ evidence. Build output channels also require an explicit public
 licensed reference run is generated, so the current branch cannot pass real
 LCC acceptance.
 
+The fixed catalog's eight `master:*` contracts are resolved through the
+manifest-hashed `master-bindings-pscad-4.6.2.json` registry. Plans record both
+the complete registry hash and the live `master.pslx` hash, and execution
+rejects either source changing before component creation. The registry uses
+`source3`, `xfmr-3p2w`, three grounded `cfilter` instances, `inductor`,
+`resistor`, configured `multimeter` instances, and `ground`. In particular,
+`dc_mac_2w` is not a line component: PSCAD describes it as a two-winding DC
+machine and its `D` field is mechanical damping. The line contract therefore
+maps total `Resistance_ohm` to `resistor:R`; `Length_km` remains explicit,
+hash-covered engineering evidence rather than a fabricated PSCAD parameter.
+
+The opt-in `PSCAD_MCP_MASTER_BINDING_ACCEPTANCE=1` test audits all eight
+bindings, instantiates and reads back every physical component, expands and
+grounds all filter phases, compiles the case, and proves the Master source is
+unchanged. Passing this compile-only gate demonstrates that the Master binding
+runtime is usable; it does not replace full CIGRE waveform or commutation-fault
+acceptance.
+
 Licensed acceptance has not passed for the PSCAD 4.6.2 implementation branch,
 so the feature must not be described as an autonomously constructed
 accepted CIGRE LCC model until the opt-in real acceptance test passes.

@@ -256,6 +256,22 @@ def test_packaged_registry_contains_exact_fixed_catalog_bindings():
     )
 
 
+def test_filter_expansion_offsets_are_pscad_grid_aligned():
+    module = _subject()
+    registry = _packaged_registry(module)
+    shape = registry.by_logical_name["master:ac_filter_branch"].shape
+
+    assert all(
+        coordinate % 18 == 0
+        for instance in shape["instances"]
+        for coordinate in instance["offset"]
+    )
+    assert all(
+        coordinate % 18 == 0
+        for coordinate in shape["neutral"]["ground_offset"]
+    )
+
+
 def test_registry_hash_is_stable_for_key_order():
     module = _subject()
     payload = _registry_payload()

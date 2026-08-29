@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import copy
+import math
 from dataclasses import asdict, dataclass, field
 from enum import Enum
-from typing import Any
+from typing import Any, NoReturn
 
 
 class _FrozenDict(dict[str, Any]):
@@ -32,10 +33,10 @@ class _FrozenDict(dict[str, Any]):
     def update(self, *args: Any, **kwargs: Any) -> None:
         raise TypeError("LCC record mappings are immutable")
 
-    def __ior__(self, other: Any) -> "_FrozenDict":
+    def __ior__(self, other: Any) -> NoReturn:
         raise TypeError("LCC record mappings are immutable")
 
-    def __deepcopy__(self, memo: dict[int, Any]) -> "_FrozenDict":
+    def __deepcopy__(self, memo: dict[int, Any]) -> _FrozenDict:
         copied = _FrozenDict()
         memo[id(self)] = copied
         for key, value in self.items():
@@ -68,7 +69,7 @@ def _json_safe(value: Any) -> Any:
     if value is None or isinstance(value, (str, bool, int)):
         return value
     if isinstance(value, float):
-        if value != value or value in (float("inf"), float("-inf")):
+        if not math.isfinite(value):
             raise TypeError("LCC records cannot contain non-finite floats")
         return value
     if isinstance(value, dict):
