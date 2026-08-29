@@ -1,10 +1,15 @@
 from __future__ import annotations
 
 import copy
+import json
+from pathlib import Path
 
 import pytest
 
 from pscad_mcp.core.backend.base import BackendError
+
+ROOT = Path(__file__).parents[1]
+PROGRAM_BASELINE = ROOT / "docs" / "acceptance" / "lcc-mmc-program-baseline.json"
 
 
 def valid_baseline() -> dict[str, object]:
@@ -235,3 +240,63 @@ def test_compile_pass_does_not_promote_scope_to_accepted():
 
     assert updated["scopes"][0]["licensed_status"] == "PASS"
     assert updated["scopes"][0]["capability_state"] == "compiled"
+
+
+def test_checked_in_program_baseline_is_valid_and_scoped():
+    payload = json.loads(PROGRAM_BASELINE.read_text(encoding="utf-8"))
+
+    result = subject()(payload)
+    scopes = {item["scope"]: item for item in result["scopes"]}
+
+    assert set(scopes) == {
+        "lcc.master_bindings",
+        "lcc.blank_native",
+        "lcc.fixed_autonomous",
+        "lcc.parametric",
+        "mmc.blank_native_full_bridge",
+        "mmc.detailed_pwm_full_bridge",
+        "mmc.avm_full_bridge",
+        "mmc.avm_half_bridge",
+        "mmc.parametric",
+    }
+    assert result["reports"] == []
+    assert scopes["lcc.master_bindings"]["licensed_status"] == (
+        "NOT_RUN_ON_CURRENT_COMMIT"
+    )
+    assert scopes["lcc.blank_native"]["licensed_status"] == (
+        "NOT_RUN_ON_CURRENT_COMMIT"
+    )
+    assert scopes["mmc.blank_native_full_bridge"]["licensed_status"] == (
+        "NOT_RUN_ON_CURRENT_COMMIT"
+    )
+    assert scopes["mmc.parametric"]["licensed_status"] == "INCOMPLETE_ANALYSIS"
+    assert all(item["evidence_run_id"] is None for item in scopes.values())
+
+
+def test_program_baseline_does_not_replace_topology_status_manifest():
+    topology = json.loads(
+        (ROOT / "docs" / "acceptance-status.json").read_text(encoding="utf-8")
+    )
+    program = json.loads(PROGRAM_BASELINE.read_text(encoding="utf-8"))
+
+    assert {item["scope"] for item in topology["scopes"]}.isdisjoint(
+        {item["scope"] for item in program["scopes"]}
+    )
+
+
+def test_program_baseline_marks_non_durable_runs_as_historical_sources():
+    program = json.loads(PROGRAM_BASELINE.read_text(encoding="utf-8"))
+    sources = {item["source_id"]: item for item in program["sources"]}
+
+    assert sources["history.master_binding_compile"]["availability"] == (
+        "verified_local_historical_commit_unknown"
+    )
+    assert sources["history.blank_lcc_official_template"]["availability"] == (
+        "verified_local_historical_commit_unknown"
+    )
+    assert sources["history.blank_mmc_official_template"]["availability"] == (
+        "verified_local_historical_commit_unknown"
+    )
+    assert sources["history.mmc_parametric_orchestrator"]["availability"] == (
+        "verified_local_historical_commit"
+    )

@@ -134,6 +134,13 @@ mutating HVDC workflows, fixed or parametric LCC builders, MMC, PSCAD 5.x, or
 later-commit acceptance, and no acceptance status is inferred from the
 non-licensed contract suite.
 
+The LCC/MMC implementation program has a separate scoped current-truth
+baseline at `docs/acceptance/lcc-mmc-program-baseline.json`. It records the
+exact evidence commit, PSCAD/Master/compiler identities, official read-only
+sources, packaged assets, historical runs, and nine builder-owned scopes. It
+does not replace the topology status manifest. A `PASS` never transfers across
+scopes, commits, or builder paths within an orchestration family.
+
 The HVDC domain layer adds ten tools without changing the original generic
 inventory: `inspect_hvdc_project`, `get_hvdc_assets`, `get_hvdc_mappings`,
 `validate_hvdc_project`, `run_hvdc_scenario`, `get_hvdc_scenario_status`,

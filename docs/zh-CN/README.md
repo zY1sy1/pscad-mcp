@@ -21,6 +21,12 @@ Legacy PSCAD 4.6.2 后端只支持启动新的受管 Automation 实例，不能�
 领域流程或更新后的提交。README 中“PSCAD 4.6.2 已做真实验收”特指通用 Legacy
 核心工作流，不表示 LCC 或 MMC 已取得最终实机 `PASS`。
 
+LCC/MMC 实现计划使用独立的当前真值基线
+[`docs/acceptance/lcc-mmc-program-baseline.json`](../acceptance/lcc-mmc-program-baseline.json)。
+它登记 exact evidence commit、PSCAD/Master/compiler 身份、官方只读源、随包资产、
+历史运行和九个 builder-owned scope，不替代 topology 状态表。任何 `PASS` 都不能
+跨 scope、跨 commit 或在同一编排族的不同 builder path 之间继承。
+
 ## PSCAD 4.6.2 已验证行为与限制
 
 - 新建空算例和库使用随包分发、由 PSCAD 保存的模板；新建和另存会同时改写工程根身份及精确的工程自命名空间引用，并由 PSCAD 回读验证名称和类型。新目标会先尝试原生另存，未产生有效目标时回退；已有目标始终先保存当前操作副本，再通过原子替换生成目标。
