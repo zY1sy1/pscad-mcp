@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 import shutil
 import time
 from datetime import datetime, timezone
@@ -23,6 +24,7 @@ from .validator import validate_companion_library, validate_project_graph
 _TERMINAL_SUCCESS = {"completed", "complete", "finished", "done", "idle", "stopped"}
 _RUNNING = {"running", "started", "simulating", "busy", "queued", "pending"}
 _TERMINAL_FAILURE = {"failed", "error", "aborted", "cancelled", "canceled"}
+_LEGACY_OUTPUT_PART = re.compile(r"^(?P<base>.+)_(?P<index>\d{2})$", re.IGNORECASE)
 
 
 def _utc_now() -> str:
@@ -198,6 +200,51 @@ def _response_endpoints(value: Any) -> tuple[tuple[int, int], tuple[int, int]] |
     return None
 
 
+def _select_output_dataset(candidates: list[str]) -> tuple[str, list[str]]:
+    """Select one logical output dataset from PSCAD's numbered OUT parts."""
+
+    if len(candidates) == 1:
+        return candidates[0], list(candidates)
+    groups: dict[tuple[str, str, str], list[tuple[int, str]]] = {}
+    ungrouped: list[str] = []
+    for candidate in candidates:
+        path = Path(candidate)
+        match = _LEGACY_OUTPUT_PART.fullmatch(path.stem) if path.suffix.casefold() == ".out" else None
+        if match is None:
+            ungrouped.append(candidate)
+            continue
+        index = int(match.group("index"))
+        if index < 1:
+            ungrouped.append(candidate)
+            continue
+        key = (
+            str(path.parent).casefold(),
+            match.group("base").casefold(),
+            path.suffix.casefold(),
+        )
+        groups.setdefault(key, []).append((index, candidate))
+    if ungrouped or len(groups) != 1:
+        raise _error(
+            "LCC_OUTPUT_INCOMPLETE",
+            "Multiple PSCAD output datasets were created for the LCC simulation.",
+            "discover_lcc_output",
+            reason="output_ambiguous",
+            candidates=candidates,
+        )
+    parts = next(iter(groups.values()))
+    parts.sort(key=lambda item: item[0])
+    indices = [index for index, _ in parts]
+    if len(indices) != len(set(indices)) or indices[0] != 1:
+        raise _error(
+            "LCC_OUTPUT_INCOMPLETE",
+            "The PSCAD output parts do not have a unique _01 anchor.",
+            "discover_lcc_output",
+            reason="output_ambiguous",
+            candidates=candidates,
+        )
+    return parts[0][1], [path for _, path in parts]
+
+
 class LccExecutor:
     """Apply a plan through the public PscadService boundary."""
 
@@ -242,6 +289,7 @@ class LccExecutor:
         self.error: dict[str, Any] | None = None
         self._run_started_after: float | None = None
         self.output_file: str | None = None
+        self.output_parts: list[str] = []
         self._publication_created = False
         self._publication_hash: str | None = None
         self._simulation_active = False
@@ -1072,15 +1120,7 @@ class LccExecutor:
                     project_name=self.project_name,
                 )
             candidates = sorted(set(candidates), key=str.casefold)
-            if len(candidates) != 1:
-                raise _error(
-                    "LCC_OUTPUT_INCOMPLETE",
-                    "Multiple PSCAD output files were created for the LCC simulation.",
-                    "discover_lcc_output",
-                    reason="output_ambiguous",
-                    candidates=candidates,
-                )
-            self.output_file = candidates[0]
+            self.output_file, self.output_parts = _select_output_dataset(candidates)
             return await read_output(
                 self.output_file, max_samples=1_000_000, summary_only=False
             )
@@ -1121,6 +1161,7 @@ class LccExecutor:
         if self.output_file is not None:
             result = dict(result)
             result["output_file"] = self.output_file
+            result["output_parts"] = list(self.output_parts or [self.output_file])
             try:
                 result["output_sha256"] = sha256_file(Path(self.output_file))
             except BackendError as error:

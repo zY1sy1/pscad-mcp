@@ -16,6 +16,51 @@ _PSOUT_DIAGNOSTIC_LIMIT = 128
 _PSOUT_CHANNEL_LIMIT = 256
 
 
+def _legacy_numeric_row(line: str) -> list[float] | None:
+    """Parse one legacy OUT row, returning ``None`` for text headers."""
+
+    fields = line.split()
+    if not fields:
+        return None
+    try:
+        first = float(fields[0])
+    except (TypeError, ValueError, OverflowError):
+        return None
+    try:
+        values = [first, *(float(value) for value in fields[1:])]
+    except (TypeError, ValueError, OverflowError) as error:
+        raise ValueError("Legacy PSCAD output contains a malformed numeric row.") from error
+    if not all(math.isfinite(value) for value in values):
+        raise ValueError("Legacy PSCAD output contains a non-finite numeric row.")
+    return values
+
+
+def _legacy_next_nonblank(stream: Any) -> str:
+    line = stream.readline()
+    while line and not line.strip():
+        line = stream.readline()
+    return line
+
+
+def _legacy_first_numeric_row(stream: Any) -> str:
+    """Consume PSCAD's optional description header and return the first row."""
+
+    line = _legacy_next_nonblank(stream)
+    if not line:
+        return line
+    fields = line.split()
+    try:
+        float(fields[0])
+    except (IndexError, TypeError, ValueError, OverflowError):
+        line = _legacy_next_nonblank(stream)
+        if not line:
+            return line
+    # A numeric first field means this is data; malformed remaining fields are
+    # reported by the strict parser below instead of being treated as a header.
+    _legacy_numeric_row(line)
+    return line
+
+
 class PscadAdapter:
     """Version-sensitive boundary around the MHI PSCAD and PSOUT APIs."""
 
@@ -333,7 +378,11 @@ class PscadAdapter:
             Path(f"{basename}_01.out"),
         )
         with first_output.open(encoding="utf-8") as stream:
-            sample_count = sum(1 for line in stream if line.strip())
+            sample_count = sum(
+                1
+                for line in stream
+                if line.strip() and _legacy_numeric_row(line) is not None
+            )
         step = max(1, (sample_count + max_samples - 1) // max_samples)
         file_count = (
             (max(item["call_id"] for item in selected) + 9) // 10
@@ -352,14 +401,13 @@ class PscadAdapter:
                 )
                 for index in range(1, file_count + 1)
             ]
+            buffered = [_legacy_first_numeric_row(stream) for stream in streams]
             row_index = 0
             while True:
-                rows = []
-                for stream in streams:
-                    line = stream.readline()
-                    while line and not line.strip():
-                        line = stream.readline()
-                    rows.append(line)
+                if row_index == 0:
+                    rows = buffered
+                else:
+                    rows = [_legacy_next_nonblank(stream) for stream in streams]
                 if not rows[0]:
                     if any(rows[1:]):
                         raise ValueError("Legacy PSCAD output files have different lengths.")
@@ -367,7 +415,9 @@ class PscadAdapter:
                 if any(not row for row in rows[1:]):
                     raise ValueError("Legacy PSCAD output files have different lengths.")
                 if row_index % step == 0 and len(domains) < max_samples:
-                    parsed = [[float(value) for value in row.split()] for row in rows]
+                    parsed = [_legacy_numeric_row(row) for row in rows]
+                    if any(values is None for values in parsed):
+                        raise ValueError("Legacy PSCAD output contains an unexpected text row.")
                     times = [row[0] for row in parsed]
                     if any(value != times[0] for value in times[1:]):
                         raise ValueError("Legacy PSCAD output file time columns differ.")

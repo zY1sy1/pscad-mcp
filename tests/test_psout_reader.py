@@ -299,6 +299,24 @@ class TestPsoutReader(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["channels"][0]["path"], "Main/IDC")
         self.assertEqual(result["channels"][0]["values"], [1.5, 2.5])
 
+    async def test_reads_legacy_out_with_pscad_description_header(self):
+        with tempfile.TemporaryDirectory() as directory:
+            basename = Path(directory) / "official"
+            basename.with_suffix(".inf").write_text(
+                'PGB(1) Output Desc="IDC" Group="Main" Max=2 Min=-2 Units="kA"\n',
+                encoding="utf-8",
+            )
+            Path(f"{basename}_01.out").write_text(
+                "PSCAD example output\n0.0 1.5\n0.1 2.5\n",
+                encoding="utf-8",
+            )
+            adapter = PscadAdapter(ImmediateExecutor(), psout_module=FakePsout())
+
+            result = await adapter.read_psout(f"{basename}_01.out")
+
+        self.assertEqual(result["channels"][0]["path"], "Main/IDC")
+        self.assertEqual(result["channels"][0]["values"], [1.5, 2.5])
+
     async def test_reads_trace_values_and_domains(self):
         adapter = PscadAdapter(ImmediateExecutor(), psout_module=FakePsout())
 
