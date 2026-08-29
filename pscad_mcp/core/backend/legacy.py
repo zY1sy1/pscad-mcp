@@ -38,7 +38,9 @@ from ..definition_metadata import (
     read_definition_metadata,
 )
 from ..master_bindings import (
+    AuditedMasterRegistry,
     MasterBindingRegistry,
+    ResolvedMasterComponent,
     audit_master_bindings,
     parse_master_binding_registry,
 )
@@ -183,8 +185,9 @@ class LegacyBackend:
         }
         self._component_orientations: dict[tuple[str, int], int] = {}
         self._component_bindings: dict[
-            tuple[str, int], tuple[str, dict[str, str], dict[str, str]]
+            tuple[str, int], ResolvedMasterComponent
         ] = {}
+        self._audited_master_registry: AuditedMasterRegistry | None = None
         self._composite_components: dict[
             tuple[str, int], dict[str, tuple[int, str]]
         ] = {}
@@ -1217,6 +1220,7 @@ class LegacyBackend:
                 master_path,
                 registry,
             )
+            self._audited_master_registry = audited
 
             def plain(value: Any) -> Any:
                 if isinstance(value, Mapping):
@@ -2122,9 +2126,7 @@ class LegacyBackend:
         binding = self._component_bindings.get((project_name, int(component_id)))
         if binding is None:
             return values
-        _logical, _ports, parameter_map = binding
-        reverse = {physical: logical for logical, physical in parameter_map.items()}
-        return {reverse.get(key, key): value for key, value in values.items()}
+        return binding.logical_parameters(values)
 
     async def set_component_parameters(
         self, project_name: str, component_id: int, parameters: Any
@@ -2293,23 +2295,102 @@ class LegacyBackend:
         _include_composite: bool = True,
     ) -> list[PortInfo]:
         composite = self._composite_components.get((project_name, int(component_id)))
+        runtime_binding = self._component_bindings.get(
+            (project_name, int(component_id))
+        )
         if composite and _include_composite:
             result: list[PortInfo] = []
             for logical_name, (physical_id, physical_name) in composite.items():
-                origin = await self.get_component_location(project_name, physical_id)
-                offset = {"A": (0, -54), "B": (0, 54)}.get(physical_name)
-                if offset is not None:
-                    result.append(
-                        PortInfo(
-                            logical_name,
-                            origin[0] + offset[0],
-                            origin[1] + offset[1],
-                            1,
-                            "NonRemovable",
-                        )
+                if runtime_binding is None:
+                    raise BackendError(
+                        "MASTER_READBACK_FAILED",
+                        "Composite Master port evidence is unavailable.",
+                        self.name,
+                        "get_component_ports",
+                        {"component_id": component_id},
                     )
+                evidence = runtime_binding.selected_ports[logical_name]
+                physical_canvas, physical_component = await self._component_proxy(
+                    project_name,
+                    physical_id,
+                )
+                offset = evidence["offset"]
+                location = await self._legacy_static_port_location(
+                    project_name,
+                    physical_canvas,
+                    physical_component,
+                    int(offset[0]),
+                    int(offset[1]),
+                )
+                if location is None:
+                    raise BackendError(
+                        "MASTER_READBACK_FAILED",
+                        "Composite Master port location could not be read back.",
+                        self.name,
+                        "get_component_ports",
+                        {
+                            "component_id": component_id,
+                            "logical_port": logical_name,
+                            "physical_port": physical_name,
+                        },
+                    )
+                result.append(
+                    PortInfo(
+                        logical_name,
+                        int(location[0]),
+                        int(location[1]),
+                        int(evidence["dimension"]),
+                        str(evidence.get("type") or evidence["kind"]),
+                    )
+                )
             return result
         canvas, component = await self._component_proxy(project_name, component_id)
+        if runtime_binding is not None:
+            result = []
+            for logical_name, evidence in runtime_binding.selected_ports.items():
+                offset = evidence.get("offset")
+                if (
+                    not isinstance(offset, (list, tuple))
+                    or len(offset) != 2
+                ):
+                    raise BackendError(
+                        "MASTER_READBACK_FAILED",
+                        "The selected Master port has no static offset evidence.",
+                        self.name,
+                        "get_component_ports",
+                        {
+                            "component_id": component_id,
+                            "logical_port": logical_name,
+                        },
+                    )
+                location = await self._legacy_static_port_location(
+                    project_name,
+                    canvas,
+                    component,
+                    int(offset[0]),
+                    int(offset[1]),
+                )
+                if location is None:
+                    raise BackendError(
+                        "MASTER_READBACK_FAILED",
+                        "The selected Master port location could not be read back.",
+                        self.name,
+                        "get_component_ports",
+                        {
+                            "component_id": component_id,
+                            "logical_port": logical_name,
+                        },
+                    )
+                result.append(
+                    PortInfo(
+                        str(logical_name),
+                        int(location[0]),
+                        int(location[1]),
+                        int(evidence["dimension"]),
+                        str(evidence.get("type") or evidence["kind"]),
+                    )
+                )
+            return result
         port_names = list(getattr(component, "port_names", []))
         ports_method = getattr(component, "ports", None)
         metadata = (
@@ -2927,40 +3008,98 @@ class LegacyBackend:
         location: tuple[int, int],
         orientation: int,
         parameters: Any,
+        binding_evidence: Mapping[str, Any] | None = None,
     ) -> ComponentInfo:
         if orientation not in range(8):
             raise ValueError("orientation must be between 0 and 7.")
         canvas = await self._canvas(project_name, canvas_name)
         logical_definition = f"{library}:{definition}"
+        binding: ResolvedMasterComponent | None = None
+        audited = self._audited_master_registry
+        if (
+            library == "master"
+            and audited is not None
+            and logical_definition in audited.registry.by_logical_name
+        ):
+            master_path = Path(audited.master_path)
+            try:
+                observed_master_hash = await asyncio.to_thread(
+                    lambda: hashlib.sha256(master_path.read_bytes()).hexdigest()
+                )
+            except OSError as error:
+                raise BackendError(
+                    "MASTER_SOURCE_CHANGED",
+                    "The audited Master source can no longer be read.",
+                    self.name,
+                    "add_component",
+                    {"path": str(master_path)},
+                ) from error
+            if observed_master_hash != audited.master_sha256:
+                raise BackendError(
+                    "MASTER_SOURCE_CHANGED",
+                    "The Master source changed after binding audit.",
+                    self.name,
+                    "add_component",
+                    {
+                        "path": str(master_path),
+                        "expected_master_sha256": audited.master_sha256,
+                        "observed_master_sha256": observed_master_hash,
+                    },
+                )
+            binding = audited.resolve_component(
+                logical_definition,
+                dict(parameters or {}),
+            )
+            if binding_evidence is not None and canonical_sha256(
+                binding.to_evidence()
+            ) != canonical_sha256(binding_evidence):
+                raise BackendError(
+                    "MASTER_READBACK_FAILED",
+                    "The runtime Master binding does not match the build plan.",
+                    self.name,
+                    "add_component",
+                    {
+                        "logical_definition": logical_definition,
+                        "expected_binding": dict(binding_evidence),
+                        "observed_binding": binding.to_evidence(),
+                    },
+                )
+            definition = binding.physical_definition
+            parameters = dict(binding.physical_parameters)
+        if library == "master":
+            if binding is None:
+                try:
+                    resolved = master_definition_binding(logical_definition)
+                except KeyError:
+                    resolved = None
+                if resolved is not None:
+                    definition = resolved.definition
+                    parameters = {
+                        resolved.parameter_map.get(key, key): (
+                            float(value) * 0.001
+                            if key == "Inductance_mH"
+                            else value
+                        )
+                        for key, value in dict(parameters or {}).items()
+                        if key != "Connection"
+                    }
         if logical_definition == "master:ac_filter_branch":
+            if binding is None:
+                raise BackendError(
+                    "MASTER_BINDING_MISSING",
+                    "Three-phase filter expansion requires an audited Master binding.",
+                    self.name,
+                    "add_component",
+                    {"logical_definition": logical_definition},
+                )
             return await self._add_three_phase_filter(
                 project_name,
                 canvas_name,
                 location,
                 orientation,
-                parameters,
                 logical_definition,
+                binding,
             )
-        binding = None
-        if library == "master":
-            try:
-                resolved = master_definition_binding(logical_definition)
-            except KeyError:
-                resolved = None
-            if resolved is not None:
-                binding = (
-                    resolved.definition,
-                    dict(resolved.port_map),
-                    dict(resolved.parameter_map),
-                )
-                definition = resolved.definition
-                parameters = {
-                    binding[2].get(key, key): (
-                        float(value) * 0.001 if key == "Inductance_mH" else value
-                    )
-                    for key, value in dict(parameters or {}).items()
-                    if key != "Connection"
-                }
         component = await self.executor.run_safe(
             canvas.add_component, library, definition, *location
         )
@@ -2980,9 +3119,49 @@ class LegacyBackend:
             rotations = orientation - 4 if orientation >= 4 else orientation
             for _ in range(rotations):
                 await self.executor.run_safe(command, "IDM_ROTATERIGHT")
-        info = await self._component_info(component)
+        physical_info = await self._component_info(component)
         if binding is not None:
-            info = ComponentInfo(info.id, info.name, logical_definition, info.location)
+            expected_physical_definition = f"master:{binding.physical_definition}"
+            if physical_info.definition != expected_physical_definition:
+                raise BackendError(
+                    "MASTER_READBACK_FAILED",
+                    "Created Master component definition did not match the binding.",
+                    self.name,
+                    "add_component",
+                    {
+                        "logical_definition": logical_definition,
+                        "expected_physical_definition": expected_physical_definition,
+                        "observed_physical_definition": physical_info.definition,
+                    },
+                )
+            observed_parameters = dict(
+                await self.executor.run_safe(component.get_parameters)
+            )
+            for name, expected in binding.physical_parameters.items():
+                if name not in observed_parameters or not self._settings_values_match(
+                    expected,
+                    observed_parameters[name],
+                ):
+                    raise BackendError(
+                        "MASTER_READBACK_FAILED",
+                        "Created Master component parameters did not match the binding.",
+                        self.name,
+                        "add_component",
+                        {
+                            "logical_definition": logical_definition,
+                            "physical_parameter": name,
+                            "expected": expected,
+                            "observed": observed_parameters.get(name),
+                        },
+                    )
+            info = ComponentInfo(
+                physical_info.id,
+                physical_info.name,
+                logical_definition,
+                physical_info.location,
+            )
+        else:
+            info = physical_info
         requested_location = {"x": location[0], "y": location[1]}
         snapped_location = {
             "x": round(location[0] / self._canvas_grid) * self._canvas_grid,
@@ -3007,11 +3186,7 @@ class LegacyBackend:
             )
         self._component_orientations[(project_name, info.id)] = orientation
         if binding is not None:
-            self._component_bindings[(project_name, info.id)] = (
-                logical_definition,
-                binding[1],
-                binding[2],
-            )
+            self._component_bindings[(project_name, info.id)] = binding
         return info
 
     async def _add_three_phase_filter(
@@ -3020,29 +3195,78 @@ class LegacyBackend:
         canvas_name: str,
         location: tuple[int, int],
         orientation: int,
-        parameters: Any,
         logical_definition: str,
+        binding: ResolvedMasterComponent,
     ) -> ComponentInfo:
-        """Expand the logical three-phase filter into three Master cfilters."""
+        """Expand and ground a registry-verified three-phase C-filter."""
 
         canvas = await self._canvas(project_name, canvas_name)
+        audited = self._audited_master_registry
+        if audited is None:
+            raise BackendError(
+                "MASTER_BINDING_MISSING",
+                "The audited Master registry is unavailable for filter expansion.",
+                self.name,
+                "add_component",
+            )
+        shape = binding._binding.shape
+        if shape.get("kind") != "phase_expand":
+            raise BackendError(
+                "MASTER_BINDING_MISSING",
+                "The filter binding does not declare phase expansion.",
+                self.name,
+                "add_component",
+                {"logical_definition": logical_definition},
+            )
+        definition_evidence = audited.definitions[logical_definition]
+        neutral_evidence = definition_evidence.get("neutral_port")
+        ground_evidence = audited.definitions["master:ground"][
+            "selected_ports"
+        ]["GND"]
+        if not isinstance(neutral_evidence, Mapping):
+            raise BackendError(
+                "MASTER_BINDING_MISSING",
+                "The filter neutral port lacks audited evidence.",
+                self.name,
+                "add_component",
+                {"logical_definition": logical_definition},
+            )
+
+        def oriented(offset: Sequence[int]) -> tuple[int, int]:
+            x, y = int(offset[0]), int(offset[1])
+            transforms = {
+                0: (x, y),
+                1: (-y, x),
+                2: (-x, -y),
+                3: (y, -x),
+                4: (-x, y),
+                5: (-y, -x),
+                6: (x, -y),
+                7: (y, x),
+            }
+            return transforms[orientation]
+
         physical_ids: dict[str, int] = {}
-        logical_parameters = dict(parameters or {})
-        physical_parameters = {
-            "Q": logical_parameters.get("Branch_MVAR", 0.0),
-            "f0": logical_parameters.get("Tuning_Hz", 300.0),
-        }
-        for phase, offset in {"A": 0, "B": 120, "C": 240}.items():
+        ground_ids: dict[str, int] = {}
+        physical_parameters = dict(binding.physical_parameters)
+        instances = tuple(shape["instances"])
+        neutral = shape["neutral"]
+        for instance in instances:
+            phase = str(instance["name"])
+            instance_offset = oriented(instance["offset"])
+            physical_location = (
+                int(location[0]) + instance_offset[0],
+                int(location[1]) + instance_offset[1],
+            )
             physical = await self.executor.run_safe(
                 canvas.add_component,
                 "master",
-                "cfilter",
-                int(location[0]),
-                int(location[1]) + offset,
+                binding.physical_definition,
+                *physical_location,
             )
             if physical is None or not self._is_user_component(physical):
                 raise BackendError(
-                    "POSTCONDITION_FAILED",
+                    "MASTER_READBACK_FAILED",
                     "Three-phase filter expansion did not return a user component.",
                     self.name,
                     "add_component",
@@ -3054,31 +3278,117 @@ class LegacyBackend:
                     await self.executor.run_safe(command, "IDM_FLIP")
                 for _ in range(orientation - 4 if orientation >= 4 else orientation):
                     await self.executor.run_safe(command, "IDM_ROTATERIGHT")
-            physical_ids[phase] = self._component_id(physical)
-        first_id = physical_ids["A"]
+            physical_info = await self._component_info(physical)
+            if physical_info.definition != f"master:{binding.physical_definition}":
+                raise BackendError(
+                    "MASTER_READBACK_FAILED",
+                    "Expanded filter definition did not match the binding.",
+                    self.name,
+                    "add_component",
+                    {
+                        "phase": phase,
+                        "observed_definition": physical_info.definition,
+                    },
+                )
+            observed_parameters = dict(
+                await self.executor.run_safe(physical.get_parameters)
+            )
+            for name, expected in physical_parameters.items():
+                if name not in observed_parameters or not self._settings_values_match(
+                    expected,
+                    observed_parameters[name],
+                ):
+                    raise BackendError(
+                        "MASTER_READBACK_FAILED",
+                        "Expanded filter parameters did not match the binding.",
+                        self.name,
+                        "add_component",
+                        {
+                            "phase": phase,
+                            "physical_parameter": name,
+                            "expected": expected,
+                            "observed": observed_parameters.get(name),
+                        },
+                    )
+            physical_ids[phase] = physical_info.id
+            self._component_orientations[(project_name, physical_info.id)] = orientation
+
+            ground_offset = oriented(neutral["ground_offset"])
+            ground_location = (
+                physical_location[0] + ground_offset[0],
+                physical_location[1] + ground_offset[1],
+            )
+            ground = await self.executor.run_safe(
+                canvas.add_component,
+                "master",
+                str(neutral["ground_definition"]),
+                *ground_location,
+            )
+            if ground is None or not self._is_user_component(ground):
+                raise BackendError(
+                    "MASTER_READBACK_FAILED",
+                    "Filter neutral grounding did not create a ground component.",
+                    self.name,
+                    "add_component",
+                    {"phase": phase},
+                )
+            ground_info = await self._component_info(ground)
+            if ground_info.definition != f"master:{neutral['ground_definition']}":
+                raise BackendError(
+                    "MASTER_READBACK_FAILED",
+                    "Filter neutral ground definition did not match the binding.",
+                    self.name,
+                    "add_component",
+                    {"phase": phase, "observed_definition": ground_info.definition},
+                )
+            ground_ids[phase] = ground_info.id
+            self._component_orientations[(project_name, ground_info.id)] = 0
+
+            neutral_offset = oriented(neutral_evidence["offset"])
+            neutral_point = (
+                physical_location[0] + neutral_offset[0],
+                physical_location[1] + neutral_offset[1],
+            )
+            ground_port_offset = (
+                int(ground_evidence["offset"][0]),
+                int(ground_evidence["offset"][1]),
+            )
+            ground_point = (
+                ground_location[0] + ground_port_offset[0],
+                ground_location[1] + ground_port_offset[1],
+            )
+            wire = await self.executor.run_safe(
+                canvas.add_wire,
+                neutral_point,
+                ground_point,
+            )
+            if wire is None:
+                raise BackendError(
+                    "MASTER_READBACK_FAILED",
+                    "Filter neutral grounding did not create a wire.",
+                    self.name,
+                    "add_component",
+                    {"phase": phase},
+                )
+
+        first_phase = str(instances[0]["name"])
+        first_id = physical_ids[first_phase]
         _canvas, first = await self._component_proxy(project_name, first_id)
-        info = await self._component_info(first)
-        info = ComponentInfo(info.id, info.name, logical_definition, info.location)
-        self._component_orientations[(project_name, first_id)] = orientation
-        self._component_bindings[(project_name, first_id)] = (
+        physical_info = await self._component_info(first)
+        info = ComponentInfo(
+            physical_info.id,
+            physical_info.name,
             logical_definition,
-            {
-                "IN_A": "A",
-                "OUT_A": "B",
-                "IN_B": "A",
-                "OUT_B": "B",
-                "IN_C": "A",
-                "OUT_C": "B",
-            },
-            {"Branch_MVAR": "Q", "Tuning_Hz": "f0"},
+            physical_info.location,
         )
+        self._component_orientations[(project_name, first_id)] = orientation
+        self._component_bindings[(project_name, first_id)] = binding
         self._composite_components[(project_name, first_id)] = {
-            "IN_A": (physical_ids["A"], "A"),
-            "OUT_A": (physical_ids["A"], "B"),
-            "IN_B": (physical_ids["B"], "A"),
-            "OUT_B": (physical_ids["B"], "B"),
-            "IN_C": (physical_ids["C"], "A"),
-            "OUT_C": (physical_ids["C"], "B"),
+            port.logical: (
+                physical_ids[str(port.instance)],
+                port.physical,
+            )
+            for port in binding._binding.ports
         }
         return info
 

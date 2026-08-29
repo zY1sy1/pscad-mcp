@@ -8,17 +8,15 @@ from pathlib import Path
 
 import pytest
 
-from pscad_mcp.hvdc.builders.lcc.executor import execute_build as _execute_build
-from pscad_mcp.hvdc.builders.lcc.executor import _legacy_project_settings
-from pscad_mcp.hvdc.builders.lcc.executor import LccExecutor
 from pscad_mcp.hvdc.builders.lcc.assets import load_packaged_asset_set
+from pscad_mcp.hvdc.builders.lcc.executor import LccExecutor, _legacy_project_settings
+from pscad_mcp.hvdc.builders.lcc.executor import execute_build as _execute_build
 from pscad_mcp.hvdc.builders.lcc.models import (
     LccBlueprint,
     LccBuildPlan,
     LccComponentSpec,
     LccPlanOperation,
 )
-
 from tests.lcc_builder_fakes import RecordingPscadService
 
 
@@ -134,6 +132,53 @@ def test_execute_build_verifies_mutations_and_publishes_after_acceptance(tmp_pat
     assert journal_payload["state"] == "published"
     assert journal_payload["plan"]["plan_hash"] == "plan-hash"
     assert journal_payload["target_path"] == str(Path(_plan(tmp_path).target_path))
+
+
+def test_executor_forwards_master_binding_evidence_to_service(tmp_path):
+    plan = _plan(tmp_path)
+    binding = {
+        "logical_name": "master:source",
+        "physical_definition": "source3",
+        "physical_parameters": {"Vm": 230.0},
+        "evidence_parameters": {},
+        "instances": ["default"],
+        "selected_ports": {},
+        "registry_sha256": "a" * 64,
+        "master_sha256": "b" * 64,
+        "verification_state": "verified",
+    }
+    operations = []
+    for operation in plan.operations:
+        if operation.kind == "place_component" and operation.target == "source":
+            arguments = dict(operation.arguments)
+            arguments["binding"] = binding
+            operation = replace(operation, arguments=arguments)
+        operations.append(operation)
+    plan = replace(plan, operations=tuple(operations))
+    service = RecordingPscadService()
+
+    record = asyncio.run(
+        execute_build(
+            plan,
+            service,
+            tmp_path,
+            build_id="build-binding-evidence",
+            poll_interval_s=0,
+        )
+    )
+
+    assert record.state.value == "published"
+    call = next(
+        call
+        for call in service.calls
+        if call[0] == "add_canvas_component" and call[1][2] == "source"
+    )
+    planned_binding = next(
+        operation.arguments["binding"]
+        for operation in plan.operations
+        if operation.kind == "place_component" and operation.target == "source"
+    )
+    assert call[2]["binding_evidence"] == planned_binding
 
 
 def test_executor_forwards_trusted_threshold_registry_to_acceptance(tmp_path, monkeypatch):
@@ -486,6 +531,14 @@ class MismatchedDefinitionService(RecordingPscadService):
         return created
 
 
+class MismatchedTransformerConnectionService(RecordingPscadService):
+    async def get_component_parameters(self, project_name, component_id):
+        observed = await super().get_component_parameters(project_name, component_id)
+        if component_id == 1:
+            observed["Connection"] = "Y-Y"
+        return observed
+
+
 class MismatchedOrientationService(RecordingPscadService):
     async def add_canvas_component(self, *args, **kwargs):
         created = await super().add_canvas_component(*args, **kwargs)
@@ -523,6 +576,50 @@ def test_execute_build_rejects_component_identity_drift(tmp_path, service_type, 
     assert record.state.value == "failed"
     assert record.error["code"] == "LCC_POSTCONDITION_FAILED"
     assert reason in record.error["details"]
+    assert "run_project" not in [call[0] for call in service.calls]
+
+
+def test_execute_build_verifies_transformer_connection_readback(tmp_path):
+    plan = _plan(tmp_path)
+    components = list(plan.blueprint.components)
+    components[0] = replace(
+        components[0],
+        definition="master:converter_transformer",
+        parameters={"LogicalId": "source", "Connection": "Y-delta"},
+    )
+    operations = []
+    for operation in plan.operations:
+        if operation.target == "source" and operation.kind in {
+            "place_component",
+            "verify_parameters",
+        }:
+            arguments = dict(operation.arguments)
+            arguments["definition"] = "master:converter_transformer"
+            arguments["parameters"] = {
+                "LogicalId": "source",
+                "Connection": "Y-delta",
+            }
+            operation = replace(operation, arguments=arguments)
+        operations.append(operation)
+    plan = replace(
+        plan,
+        blueprint=replace(plan.blueprint, components=tuple(components)),
+        operations=tuple(operations),
+    )
+    service = MismatchedTransformerConnectionService()
+
+    record = asyncio.run(
+        execute_build(
+            plan,
+            service,
+            tmp_path,
+            build_id="build-transformer-connection",
+            poll_interval_s=0,
+        )
+    )
+
+    assert record.state.value == "failed"
+    assert record.error["code"] == "LCC_PARAMETER_MISMATCH"
     assert "run_project" not in [call[0] for call in service.calls]
 
 

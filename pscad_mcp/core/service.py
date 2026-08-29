@@ -1353,18 +1353,23 @@ class PscadService:
         parameters: dict[str, Any] | None,
         *,
         canvas_name: str = "Main",
+        binding_evidence: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
-        return asdict(
-            await self.backend.add_component(
-                project_name,
-                canvas_name,
-                library,
-                name,
-                (x, y),
-                orientation,
-                dict(parameters or {}),
-            )
+        arguments = (
+            project_name,
+            canvas_name,
+            library,
+            name,
+            (x, y),
+            orientation,
+            dict(parameters or {}),
         )
+        component = (
+            await self.backend.add_component(*arguments, binding_evidence)
+            if binding_evidence is not None
+            else await self.backend.add_component(*arguments)
+        )
+        return asdict(component)
 
     async def create_canvas_component(
         self,

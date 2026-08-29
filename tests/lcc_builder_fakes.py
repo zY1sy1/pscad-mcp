@@ -91,8 +91,20 @@ class RecordingPscadService:
         parameters: dict[str, Any] | None,
         *,
         canvas_name: str = "Main",
+        binding_evidence: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        self._call("add_canvas_component", project_name, library, name, x, y, orientation, parameters, canvas_name=canvas_name)
+        self._call(
+            "add_canvas_component",
+            project_name,
+            library,
+            name,
+            x,
+            y,
+            orientation,
+            parameters,
+            canvas_name=canvas_name,
+            binding_evidence=binding_evidence,
+        )
         component_id = self.next_component_id
         self.next_component_id += 1
         logical_id = str((parameters or {}).get("LogicalId", name))
@@ -104,6 +116,7 @@ class RecordingPscadService:
             "y": y,
             "orientation": orientation,
             "parameters": dict(parameters or {}),
+            "binding_evidence": binding_evidence,
         }
         return {"id": component_id, "name": logical_id, "definition": f"{library}:{name}", "location": {"x": x, "y": y}}
 

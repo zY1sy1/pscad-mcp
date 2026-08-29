@@ -20,7 +20,6 @@ from .project_graph import read_project_graph
 from .routing import absolute_port
 from .validator import validate_companion_library, validate_project_graph
 
-
 _TERMINAL_SUCCESS = {"completed", "complete", "finished", "done", "idle", "stopped"}
 _RUNNING = {"running", "started", "simulating", "busy", "queued", "pending"}
 _TERMINAL_FAILURE = {"failed", "error", "aborted", "cancelled", "canceled"}
@@ -551,6 +550,11 @@ class LccExecutor:
             int(arguments.get("orientation", 0)),
             dict(arguments.get("parameters", {})),
             canvas_name=str(arguments.get("canvas", "Main")),
+            binding_evidence=(
+                dict(arguments["binding"])
+                if isinstance(arguments.get("binding"), dict)
+                else None
+            ),
         )
         expected_definition = f"{library}:{name}"
         if isinstance(created, dict) and created.get("definition") is not None:
@@ -590,8 +594,6 @@ class LccExecutor:
             self.project_name, component_id
         )
         expected_parameters = dict(arguments.get("parameters", {}))
-        if arguments.get("definition") == "master:converter_transformer":
-            expected_parameters.pop("Connection", None)
         if not _same_parameters(expected_parameters, observed_parameters):
             raise _error(
                 "LCC_PARAMETER_MISMATCH",
@@ -700,8 +702,6 @@ class LccExecutor:
             self.project_name, component_id
         )
         expected = dict(operation.arguments.get("parameters", {}))
-        if operation.arguments.get("definition") == "master:converter_transformer":
-            expected.pop("Connection", None)
         if not _same_parameters(expected, observed):
             raise _error(
                 "LCC_PARAMETER_MISMATCH",

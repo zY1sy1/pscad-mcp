@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Mapping
 import time
-from typing import Any, Sequence
+from collections.abc import Mapping, Sequence
+from typing import Any
 
 from ...topology.hashing import canonical_sha256
 from ...topology.models import (
@@ -19,21 +19,20 @@ from ...topology.models import (
     TopologyPort,
     TopologySnapshot,
 )
-
 from ..pscad_adapter import PscadAdapter
 from ..pscad_config import _version_key
 from .base import (
     BackendError,
     BackendInfo,
     ComponentInfo,
+    JsonDict,
     ParameterGridRequest,
     PortInfo,
-    ProjectMessage,
     ProjectInfo,
+    ProjectMessage,
     RunState,
     SimulationSetInfo,
     SimulationTaskInfo,
-    JsonDict,
 )
 from .run_control import (
     STOPPED_RUN_STATUSES,
@@ -1350,7 +1349,7 @@ class ModernBackend:
         location = (
             await self.executor.run_safe(location_method)
             if location_method is not None
-            else getattr(component, "location")
+            else component.location
         )
         return ComponentInfo(
             int(component.id),
@@ -1406,7 +1405,7 @@ class ModernBackend:
         value = (
             await self.executor.run_safe(method)
             if method is not None
-            else getattr(component, "location")
+            else component.location
         )
         return int(value[0]), int(value[1])
 
@@ -1508,7 +1507,15 @@ class ModernBackend:
         location: tuple[int, int],
         orientation: int,
         parameters: Any,
+        binding_evidence: Mapping[str, Any] | None = None,
     ) -> ComponentInfo:
+        if binding_evidence is not None:
+            raise BackendError(
+                "MASTER_BINDING_MISSING",
+                "Versioned PSCAD 4.6.2 Master binding evidence is not supported by the modern backend.",
+                self.name,
+                "add_component",
+            )
         canvas = await self._canvas(project_name, canvas_name)
         component = await self.adapter.call(
             canvas,

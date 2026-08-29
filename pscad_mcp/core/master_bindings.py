@@ -1072,7 +1072,7 @@ def _definition_evidence(
             contract,
             metadata.parameters.get(name),
         )
-    return {
+    result = {
         "logical_name": binding.logical_name,
         "physical_definition": binding.physical_definition,
         "description": metadata.description,
@@ -1092,6 +1092,19 @@ def _definition_evidence(
         "shape": _thaw(binding.shape),
         "verification_state": "verified",
     }
+    if binding.shape["kind"] == "phase_expand":
+        neutral = binding.shape["neutral"]
+        neutral_binding = MasterPortBinding(
+            logical="__neutral__",
+            physical=str(neutral["physical_port"]),
+            kind="electrical",
+            dimension=1,
+            occurrence=int(neutral["occurrence"]),
+        )
+        result["neutral_port"] = _port_evidence(
+            _select_port(metadata, binding, neutral_binding)
+        )
+    return result
 
 
 def audit_master_bindings(
