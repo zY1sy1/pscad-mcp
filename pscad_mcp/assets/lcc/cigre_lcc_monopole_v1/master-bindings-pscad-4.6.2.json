@@ -1,0 +1,215 @@
+{
+  "schema_version": 1,
+  "name": "cigre_lcc_monopole_master_bindings_v1",
+  "pscad_version": "4.6.2",
+  "bindings": [
+    {
+      "logical_name": "master:three_phase_source",
+      "physical_definition": "source3",
+      "shape": {"kind": "direct"},
+      "ports": [
+        {"logical": "A", "physical": "A", "kind": "electrical", "dimension": 1, "occurrence": 0},
+        {"logical": "B", "physical": "B", "kind": "electrical", "dimension": 1, "occurrence": 0},
+        {"logical": "C", "physical": "C", "kind": "electrical", "dimension": 1, "occurrence": 0}
+      ],
+      "parameters": [
+        {
+          "logical": ["Amplitude_kV"],
+          "physical": ["Vm"],
+          "transform": {"kind": "identity"},
+          "physical_contracts": {"Vm": {"type": "Real", "unit": "kV"}}
+        },
+        {
+          "logical": ["Frequency_Hz"],
+          "physical": ["F"],
+          "transform": {"kind": "identity"},
+          "physical_contracts": {"F": {"type": "Real", "unit": "Hz"}}
+        },
+        {
+          "logical": ["Phase_deg"],
+          "physical": ["Ph"],
+          "transform": {"kind": "identity"},
+          "physical_contracts": {"Ph": {"type": "Real", "unit": "deg"}}
+        }
+      ],
+      "fixed_parameters": [
+        {"physical": "View", "value": 0, "contract": {"type": "Choice", "unit": null, "choices": ["0", "1"]}}
+      ],
+      "evidence_parameters": []
+    },
+    {
+      "logical_name": "master:converter_transformer",
+      "physical_definition": "xfmr-3p2w",
+      "shape": {"kind": "direct"},
+      "ports": [
+        {"logical": "HV_A", "physical": "A1", "kind": "electrical", "dimension": 1, "occurrence": 0},
+        {"logical": "HV_B", "physical": "B1", "kind": "electrical", "dimension": 1, "occurrence": 0},
+        {"logical": "HV_C", "physical": "C1", "kind": "electrical", "dimension": 1, "occurrence": 0},
+        {"logical": "LV_A", "physical": "A2", "kind": "electrical", "dimension": 1, "occurrence": 0},
+        {"logical": "LV_B", "physical": "B2", "kind": "electrical", "dimension": 1, "occurrence": 0},
+        {"logical": "LV_C", "physical": "C2", "kind": "electrical", "dimension": 1, "occurrence": 0}
+      ],
+      "parameters": [
+        {
+          "logical": ["Ratio"],
+          "physical": ["V2"],
+          "transform": {"kind": "ratio_from_fixed_base", "base": 230.0},
+          "physical_contracts": {"V2": {"type": "Real", "unit": "kV"}}
+        },
+        {
+          "logical": ["Connection", "PhaseShift_deg"],
+          "physical": ["YD1", "YD2", "Lead"],
+          "transform": {
+            "kind": "lookup_bundle",
+            "cases": [
+              {"logical": ["Y-Y", 0.0], "physical": [0, 0, 1]},
+              {"logical": ["Y-delta", 30.0], "physical": [0, 1, 1]}
+            ]
+          },
+          "physical_contracts": {
+            "YD1": {"type": "Choice", "unit": null, "choices": ["0", "1"]},
+            "YD2": {"type": "Choice", "unit": null, "choices": ["0", "1"]},
+            "Lead": {"type": "Choice", "unit": null, "choices": ["1", "2"]}
+          }
+        }
+      ],
+      "fixed_parameters": [
+        {"physical": "V1", "value": 230.0, "contract": {"type": "Real", "unit": "kV"}},
+        {"physical": "f", "value": 50.0, "contract": {"type": "Real", "unit": "Hz"}},
+        {"physical": "View", "value": 0, "contract": {"type": "Choice", "unit": null, "choices": ["0", "1", "2"]}}
+      ],
+      "evidence_parameters": []
+    },
+    {
+      "logical_name": "master:ac_filter_branch",
+      "physical_definition": "cfilter",
+      "shape": {
+        "kind": "phase_expand",
+        "instances": [
+          {"name": "A", "offset": [0, 0]},
+          {"name": "B", "offset": [0, 120]},
+          {"name": "C", "offset": [0, 240]}
+        ],
+        "neutral": {
+          "physical_port": "N",
+          "occurrence": 0,
+          "ground_definition": "ground",
+          "ground_port": "A",
+          "ground_occurrence": 0,
+          "ground_offset": [54, -36]
+        }
+      },
+      "ports": [
+        {"logical": "IN_A", "physical": "A", "kind": "electrical", "dimension": 1, "occurrence": 0, "instance": "A"},
+        {"logical": "OUT_A", "physical": "B", "kind": "electrical", "dimension": 1, "occurrence": 0, "instance": "A"},
+        {"logical": "IN_B", "physical": "A", "kind": "electrical", "dimension": 1, "occurrence": 0, "instance": "B"},
+        {"logical": "OUT_B", "physical": "B", "kind": "electrical", "dimension": 1, "occurrence": 0, "instance": "B"},
+        {"logical": "IN_C", "physical": "A", "kind": "electrical", "dimension": 1, "occurrence": 0, "instance": "C"},
+        {"logical": "OUT_C", "physical": "B", "kind": "electrical", "dimension": 1, "occurrence": 0, "instance": "C"}
+      ],
+      "parameters": [
+        {
+          "logical": ["Branch_MVAR"],
+          "physical": ["Q"],
+          "transform": {"kind": "scale", "factor": 0.3333333333333333},
+          "physical_contracts": {"Q": {"type": "Real", "unit": "MVA"}}
+        },
+        {
+          "logical": ["Tuning_Hz"],
+          "physical": ["h"],
+          "transform": {"kind": "harmonic_order", "fundamental_hz": 50.0},
+          "physical_contracts": {"h": {"type": "Real", "unit": null}}
+        }
+      ],
+      "fixed_parameters": [
+        {"physical": "dentry", "value": 1, "contract": {"type": "Choice", "unit": null, "choices": ["0", "1"]}},
+        {"physical": "f0", "value": 50.0, "contract": {"type": "Real", "unit": "Hz"}},
+        {"physical": "V", "value": 132.79056191361394, "contract": {"type": "Real", "unit": "kV"}}
+      ],
+      "evidence_parameters": []
+    },
+    {
+      "logical_name": "master:smoothing_reactor",
+      "physical_definition": "inductor",
+      "shape": {"kind": "direct"},
+      "ports": [
+        {"logical": "IN", "physical": "A", "kind": "electrical", "dimension": 1, "occurrence": 0},
+        {"logical": "OUT", "physical": "B", "kind": "electrical", "dimension": 1, "occurrence": 0}
+      ],
+      "parameters": [
+        {
+          "logical": ["Inductance_mH"],
+          "physical": ["L"],
+          "transform": {"kind": "scale", "factor": 0.001},
+          "physical_contracts": {"L": {"type": "Real", "unit": "H"}}
+        }
+      ],
+      "fixed_parameters": [],
+      "evidence_parameters": []
+    },
+    {
+      "logical_name": "master:dc_line_section",
+      "physical_definition": "resistor",
+      "shape": {"kind": "direct"},
+      "ports": [
+        {"logical": "IN", "physical": "A", "kind": "electrical", "dimension": 1, "occurrence": 0},
+        {"logical": "OUT", "physical": "B", "kind": "electrical", "dimension": 1, "occurrence": 0}
+      ],
+      "parameters": [
+        {
+          "logical": ["Resistance_ohm"],
+          "physical": ["R"],
+          "transform": {"kind": "identity"},
+          "physical_contracts": {"R": {"type": "Real", "unit": "ohm"}}
+        }
+      ],
+      "fixed_parameters": [],
+      "evidence_parameters": [
+        {"logical": "Length_km", "type": "float", "unit": "km", "minimum": 0.0}
+      ]
+    },
+    {
+      "logical_name": "master:ac_meter",
+      "physical_definition": "multimeter",
+      "shape": {"kind": "direct"},
+      "ports": [
+        {"logical": "A", "physical": "A", "kind": "electrical", "dimension": 1, "occurrence": 1},
+        {"logical": "B", "physical": "B", "kind": "electrical", "dimension": 1, "occurrence": 1}
+      ],
+      "parameters": [],
+      "fixed_parameters": [
+        {"physical": "MeasP", "value": 1, "contract": {"type": "Choice", "unit": null, "choices": ["0", "1"]}},
+        {"physical": "MeasQ", "value": 1, "contract": {"type": "Choice", "unit": null, "choices": ["0", "1"]}},
+        {"physical": "Freq", "value": 50.0, "contract": {"type": "Real", "unit": "Hz"}},
+        {"physical": "BaseV", "value": 230.0, "contract": {"type": "Real", "unit": "kV"}}
+      ],
+      "evidence_parameters": []
+    },
+    {
+      "logical_name": "master:dc_meter",
+      "physical_definition": "multimeter",
+      "shape": {"kind": "direct"},
+      "ports": [
+        {"logical": "IN", "physical": "A", "kind": "electrical", "dimension": 1, "occurrence": 1},
+        {"logical": "OUT", "physical": "B", "kind": "electrical", "dimension": 1, "occurrence": 1}
+      ],
+      "parameters": [],
+      "fixed_parameters": [
+        {"physical": "MeasV", "value": 1, "contract": {"type": "Choice", "unit": null, "choices": ["0", "1"]}},
+        {"physical": "MeasI", "value": 1, "contract": {"type": "Choice", "unit": null, "choices": ["0", "1"]}}
+      ],
+      "evidence_parameters": []
+    },
+    {
+      "logical_name": "master:ground",
+      "physical_definition": "ground",
+      "shape": {"kind": "direct"},
+      "ports": [
+        {"logical": "GND", "physical": "A", "kind": "electrical", "dimension": 1, "occurrence": 0}
+      ],
+      "parameters": [],
+      "fixed_parameters": [],
+      "evidence_parameters": []
+    }
+  ]
+}
