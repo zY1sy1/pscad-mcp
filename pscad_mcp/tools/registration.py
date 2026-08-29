@@ -160,7 +160,12 @@ def _json_safe_copy(value: Any, seen: set[int] | None = None) -> Any:
     return None
 
 
-def _register_with_original_result(mcp: FastMCP, guarded: Callable[..., Any]) -> None:
+def _register_with_original_result(
+    mcp: FastMCP,
+    guarded: Callable[..., Any],
+    *,
+    parameter_descriptions: Mapping[str, str | None] | None = None,
+) -> None:
     # FastMCP validates and then model-dumps structured output, which copies JSON-safe values.
     name = guarded.__name__
     spec = TOOL_SPECS[name]
@@ -178,6 +183,8 @@ def _register_with_original_result(mcp: FastMCP, guarded: Callable[..., Any]) ->
             for parameter in inspect.signature(guarded).parameters.values():
                 field = tool.fn_metadata.arg_model.model_fields.get(parameter.name)
                 description = getattr(field, "description", None)
+                if not isinstance(description, str):
+                    description = (parameter_descriptions or {}).get(parameter.name)
                 if not isinstance(description, str):
                     description = _annotation_description(parameter.annotation)
                 schema = properties.get(parameter.name)
@@ -254,6 +261,10 @@ def register_tool(
         )
         for parameter in signature.parameters.values()
     ]
+    parameter_descriptions = {
+        parameter.name: _annotation_description(parameter.annotation)
+        for parameter in resolved_parameters
+    }
     return_annotation = resolved_annotations.get("return", Any)
 
     @wraps(function)
@@ -317,7 +328,11 @@ def register_tool(
     )
     guarded.__annotations__ = resolved_annotations
     guarded.__annotations__["return"] = error_aware_return
-    _register_with_original_result(mcp, guarded)
+    _register_with_original_result(
+        mcp,
+        guarded,
+        parameter_descriptions=parameter_descriptions,
+    )
     if registered_names is None:
         registered_names = set()
         setattr(mcp, "_pscad_registered_tool_names", registered_names)

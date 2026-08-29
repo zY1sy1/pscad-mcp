@@ -1,5 +1,6 @@
 from dataclasses import FrozenInstanceError
 import inspect
+from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 from pscad_mcp.main import create_server
@@ -11,7 +12,7 @@ from pscad_mcp.tools.catalog import (
     TOOL_SPECS,
 )
 from pscad_mcp.tools.project_tools import list_projects
-from pscad_mcp.tools.registration import register_tool
+from pscad_mcp.tools.registration import _register_with_original_result, register_tool
 import pytest
 
 
@@ -238,6 +239,29 @@ def test_failed_fastmcp_registration_does_not_reserve_the_tool_name(monkeypatch)
 
     register_tool(server, list_projects, record_learning=False)
     assert server._tool_manager.get_tool("list_projects") is not None
+
+
+def test_registration_uses_original_parameter_description_when_model_metadata_is_empty():
+    async def bare_set_component_parameters(
+        project_name: str,
+        component_id: int,
+        parameters: dict[str, Any],
+    ) -> str:
+        return f"{project_name}:{component_id}:{parameters}"
+
+    bare_set_component_parameters.__name__ = "set_component_parameters"
+    server = FastMCP("metadata-fallback")
+    expected = 'Component parameter_name keys mapped to values; example {"R": 1.0}.'
+
+    _register_with_original_result(
+        server,
+        bare_set_component_parameters,
+        parameter_descriptions={"parameters": expected},
+    )
+
+    tool = server._tool_manager.get_tool("set_component_parameters")
+    assert tool is not None
+    assert tool.parameters["properties"]["parameters"]["description"] == expected
 
 
 def test_complex_inputs_have_model_facing_shape_examples():
