@@ -19,12 +19,12 @@ The first implementation covers the eight Master definitions currently used by
 | Logical definition | PSCAD 4.6.2 definition | Shape or transform |
 | --- | --- | --- |
 | `master:three_phase_source` | `source3` | Select electrical `A`, `B`, `C`; ignore auxiliary transfer ports |
-| `master:converter_transformer` | `umec-xfmr-6w5L` | Select the six winding terminals; map connection/phase controls explicitly |
+| `master:converter_transformer` | `xfmr-3p2w` | Select the six winding terminals; use the component present in the official CIGRE LCC examples and map connection/phase controls explicitly |
 | `master:ac_filter_branch` | `cfilter` | Expand one logical three-phase branch into three two-terminal instances; connect `N` explicitly |
 | `master:smoothing_reactor` | `inductor` | `IN -> A`, `OUT -> B`, convert `Inductance_mH` to `L` in henries |
-| `master:dc_line_section` | `dc_mac_2w` | `IN -> F1`, `OUT -> F2`, map line length to `D` |
+| `master:dc_line_section` | `resistor` | `IN -> A`, `OUT -> B`; the fixed blueprint models its declared total line resistance, while length remains explicit engineering evidence |
 | `master:ac_meter` | `multimeter` | Use the real `A`/`B` measurement pair and explicit measurement mode |
-| `master:dc_meter` | `voltmeter` | `IN -> N1`, `OUT -> N2` |
+| `master:dc_meter` | `multimeter` | `IN -> A`, `OUT -> B`; enable instantaneous voltage and current so the series path is retained |
 | `master:ground` | `ground` | `GND -> A` |
 
 “Every Master element” means every Master entry in this fixed catalog, not all
@@ -52,17 +52,24 @@ uniform:
   describes phase-labelled input/output ports.
 - `inductor` uses one physical `L` parameter; the catalog's numeric
   `Inductance_scale` must be a transform, never a physical parameter name.
-- `source3`, `umec-xfmr-6w5L`, and `dc_mac_2w` expose auxiliary and transfer
+- `source3` and `xfmr-3p2w` expose auxiliary and conditional
   ports in addition to the power terminals.
 - `multimeter` has duplicate removable/non-removable `A` and `B` metadata;
   the binding must select the electrical pair deterministically.
-- `umec-xfmr-6w5L` represents winding connection with `YD1`, `YD2`, and
+- `xfmr-3p2w` represents winding connection with `YD1`, `YD2`, and
   `Lead`, while the logical catalog uses `Connection` and `PhaseShift_deg`;
   this requires an enumerated transform and a documented voltage-base rule.
-- `dc_mac_2w` declares its `D` parameter with a `pu` unit in the installed
-  metadata. A line-length request in kilometres therefore needs a reviewed
-  line-base conversion (or an explicit `MASTER_TRANSFORM_UNSUPPORTED` result);
-  it must never be sent as an unscaled numeric value.
+- Direct inspection confirmed that `dc_mac_2w` is the vendor's "Two winding
+  DC Machine" and that `D` means mechanical damping. It is therefore rejected
+  as a line binding. The fixed catalog supplies total line resistance, so the
+  executable lumped representation is `resistor:R`; `Length_km` is retained in
+  the plan as reviewed, hash-covered engineering evidence and is never sent to
+  PSCAD as a fake physical parameter.
+
+The semantic correction above is backed by the installed 4.6.2 Master source
+and by the official CIGRE LCC examples downloaded on 2026-08-29. Those examples
+use `master:xfmr-3p2w` for the converter transformers and use explicit passive
+DC-network elements rather than `dc_mac_2w`.
 
 ## Architecture
 
@@ -123,12 +130,14 @@ and ground. The registry supplies two explicit adapters:
 - `phase_expand`: one logical `cfilter` becomes three physical `cfilter`
   instances, each with its own `A`/`B` phase path and `N` connected to the
   declared ground net;
-- `parameter_transform`: logical units and enum values are converted before
+- `parameter_transform`: logical units, enum values, and reviewed fixed-model
+  constants are converted before
   the physical component is created, with the converted value included in
   read-back evidence.
 
 The registry must include reviewed transform definitions for transformer
-connection/phase values and for the line-length base used by `dc_mac_2w`. A
+connection/phase values, the fixed transformer voltage base, the filter's
+per-phase rating and harmonic order, and the line's total resistance. A
 binding is considered complete only when those transforms are executable for
 the request; the presence of a same-named physical parameter is not enough.
 
