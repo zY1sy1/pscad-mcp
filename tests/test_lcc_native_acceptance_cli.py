@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 from pscad_mcp.hvdc.builders.lcc.native_acceptance_cli import main
+
+ROOT = Path(__file__).parents[1]
 
 
 def test_run_action_writes_external_report_without_touching_baseline(tmp_path):
@@ -127,3 +130,15 @@ def test_promote_action_calls_explicit_baseline_promotion(tmp_path):
     assert result == 0
     assert calls[0][0] == tmp_path / "baseline.json"
     assert calls[0][1] == tmp_path / "report.json"
+
+
+def test_powershell_runner_is_run_only_and_checks_cleanup():
+    script = (
+        ROOT / "scripts" / "run_blank_lcc_native_acceptance.ps1"
+    ).read_text(encoding="utf-8")
+    assert "native_acceptance_cli" in script
+    assert "'run'" in script
+    assert "'promote'" not in script
+    assert "NATIVE_LCC_REPORT_SHA256=" in script
+    assert "Get-Process" in script
+    assert "source_after" in script or "sources.template.after" in script
