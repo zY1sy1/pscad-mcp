@@ -10,5 +10,11 @@
       </svg>
     </Definition>
     <Definition name="annotation" classid="UserCmpDefn"><svg /></Definition>
+    <Definition name="nodelabel" classid="UserCmpDefn">
+      <svg><port name="A" x="0" y="0" dim="1" kind="electrical">true</port></svg>
+    </Definition>
+    <Definition name="datalabel" classid="UserCmpDefn">
+      <svg><port name="A" x="0" y="0" dim="1" model="Transfer">true</port></svg>
+    </Definition>
   </definitions>
 </project>

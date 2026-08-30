@@ -1,7 +1,7 @@
 <project name="MixedV2" version="4.6.2" Target="EMTDC">
   <definitions>
     <Definition name="Controller" classid="UserCmpDefn">
-      <form><parameter name="View" type="Integer"><value>0</value></parameter></form>
+      <form><category name="Configuration"><parameter name="View" type="Integer"><value>0</value></parameter></category></form>
       <svg>
         <port name="IN" x="-18" y="0" dim="1" model="Transfer" page="true" required="true">true</port>
         <Port name="IN" x="0" y="-18" dim="1" model="Transfer">View==1</Port>
@@ -18,6 +18,7 @@
         <User id="103" name="DATA" defn="master:datalabel" x="0" y="36">
           <paramlist><param name="Name" value="ENABLE" /></paramlist>
         </User>
+        <User id="104" name="NOTE" defn="master:annotation" x="72" y="36" />
         <Wire id="201" classid="WireOrthogonal" kind="electrical" x="0" y="0">
           <vertex x="0" y="0" /><vertex x="36" y="0" />
         </Wire>

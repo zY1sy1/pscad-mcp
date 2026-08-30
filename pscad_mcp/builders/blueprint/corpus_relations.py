@@ -2,16 +2,32 @@
 
 from __future__ import annotations
 
+import re
+import unicodedata
 from collections import defaultdict
 from dataclasses import dataclass
 
 from ...core.backend.base import BackendError
+from ...core.definition_metadata import (
+    DefinitionMetadata,
+    ParameterMetadata,
+    PortMetadata,
+)
+from ...topology.geometry import GeometryError, absolute_port
 from ...topology.hashing import canonical_sha256
+from .corpus_conditions import ConditionUnresolved, evaluate_condition
 from .corpus_models import ProjectGraph
 from .corpus_relation_models import (
     CorpusComponentOccurrence,
     CorpusConductorOccurrence,
+    CorpusDefinitionClassification,
+    CorpusInstancePort,
     CorpusLabelOccurrence,
+)
+from .definition_catalog import (
+    CatalogDefinition,
+    DefinitionCatalog,
+    classify_definition,
 )
 from .models import FrozenDict, freeze
 
@@ -32,6 +48,19 @@ class ExpandedHierarchy:
     labels: tuple[CorpusLabelOccurrence, ...]
     boundaries: tuple[PendingHierarchyBoundary, ...]
     source_to_occurrences: FrozenDict
+
+
+@dataclass(frozen=True)
+class MaterializedPorts:
+    classifications: tuple[CorpusDefinitionClassification, ...]
+    ports: tuple[CorpusInstancePort, ...]
+
+
+@dataclass(frozen=True)
+class _ResolvedDefinition:
+    key: str
+    definition: CatalogDefinition
+    port_keys: tuple[str, ...]
 
 
 def _relation_error(message: str, **details: object) -> BackendError:
@@ -101,6 +130,7 @@ def expand_hierarchy_occurrences(graph: ProjectGraph) -> ExpandedHierarchy:
     children_by_parent = defaultdict(list)
     root_edges = []
     relevant_edge_keys = set()
+    called_components = set()
     for connection in hierarchy:
         if len(connection.endpoints) != 2:
             raise _relation_error(
@@ -116,6 +146,7 @@ def expand_hierarchy_occurrences(graph: ProjectGraph) -> ExpandedHierarchy:
                 relationship=connection.key,
             )
         relevant_edge_keys.add(connection.key)
+        called_components.add(child)
         if parent in components_by_key:
             children_by_parent[parent].append((connection, child))
         else:
@@ -230,18 +261,11 @@ def expand_hierarchy_occurrences(graph: ProjectGraph) -> ExpandedHierarchy:
                 for port in (() if child_definition is None else child_definition.ports)
                 if port.page
             )
-            has_content = bool(
-                components_by_canvas[child_canvas.key]
-                or conductors_by_canvas[child_canvas.key]
-                or page_ports
-            )
-            if not explicit_children:
-                if has_content:
-                    raise _relation_error(
-                        "Local child canvas lacks explicit hierarchy evidence.",
-                        component=source_component.key,
-                    )
-                continue
+            if source_component.key not in called_components:
+                raise _relation_error(
+                    "Local child canvas lacks explicit hierarchy evidence.",
+                    component=source_component.key,
+                )
             if source_component.definition_key in active_definitions:
                 raise _relation_error(
                     "Hierarchy definition cycle was detected.",
@@ -262,19 +286,20 @@ def expand_hierarchy_occurrences(graph: ProjectGraph) -> ExpandedHierarchy:
                 child_path,
                 (*active_definitions, source_component.definition_key),
             )
-            boundaries.append(
-                PendingHierarchyBoundary(
-                    key=_occurrence_key(
-                        "hierarchy",
-                        child_path,
-                        source_component.key,
-                    ),
-                    parent_component_key=key,
-                    child_canvas_key=child_canvas_key,
-                    page_port_names=page_ports,
-                    hierarchy_path=child_path,
+            if page_ports:
+                boundaries.append(
+                    PendingHierarchyBoundary(
+                        key=_occurrence_key(
+                            "hierarchy",
+                            child_path,
+                            source_component.key,
+                        ),
+                        parent_component_key=key,
+                        child_canvas_key=child_canvas_key,
+                        page_port_names=page_ports,
+                        hierarchy_path=child_path,
+                    )
                 )
-            )
         return canvas_key
 
     for source_canvas_key in sorted(root_canvases):
@@ -301,4 +326,265 @@ def expand_hierarchy_occurrences(graph: ProjectGraph) -> ExpandedHierarchy:
                 for key, values in sorted(source_occurrences.items())
             }
         ),
+    )
+
+
+def _split_definition_key(key: str) -> tuple[str, str]:
+    parts = key.split(":", 2)
+    if len(parts) != 3 or parts[0] != "definition" or not all(parts[1:]):
+        raise _relation_error("Component definition identity is invalid.", definition=key)
+    return parts[1], parts[2]
+
+
+def _local_port_dimension(
+    value: str,
+    definition_key: str,
+    port_name: str,
+) -> int | None:
+    if not value:
+        return None
+    try:
+        return int(value)
+    except ValueError:
+        raise _relation_error(
+            "Project-local port dimension is invalid.",
+            definition=definition_key,
+            port=port_name,
+        ) from None
+
+
+def _local_catalog_definition(graph: ProjectGraph, key: str) -> _ResolvedDefinition:
+    definition = next((item for item in graph.definitions if item.key == key), None)
+    if definition is None:
+        raise _relation_error("Project-local definition is unavailable.", definition=key)
+    ports = tuple(
+        PortMetadata(
+            name=port.name,
+            x=port.offset[0],
+            y=port.offset[1],
+            dim=_local_port_dimension(port.dimension, key, port.name),
+            type=port.type or None,
+            model=port.model or None,
+            kind=port.kind or None,
+            page=port.page,
+            mode=port.mode or None,
+            condition=port.condition,
+            occurrence=port.occurrence,
+        )
+        for port in definition.ports
+    )
+    parameters = {
+        parameter.name: ParameterMetadata(
+            name=parameter.name,
+            type=parameter.type or None,
+            unit=parameter.units or None,
+            minimum=None,
+            maximum=None,
+            choices=(),
+            default=parameter.default,
+            intent=parameter.intent or None,
+            readonly=False,
+        )
+        for parameter in definition.parameters
+    }
+    metadata = DefinitionMetadata(
+        ports=ports,
+        parameter_ranges={},
+        parameters=parameters,
+        name=definition.name,
+    )
+    return _ResolvedDefinition(
+        key=key,
+        definition=CatalogDefinition(
+            namespace="user",
+            pscad_version=graph.pscad_version,
+            physical_name=definition.name,
+            source_sha256=graph.source_sha256,
+            metadata=metadata,
+        ),
+        port_keys=tuple(port.key for port in definition.ports),
+    )
+
+
+def _key_part(value: str) -> str:
+    normalized = unicodedata.normalize("NFKC", value).strip().casefold()
+    normalized = re.sub(r"[^\w.-]+", "-", normalized, flags=re.UNICODE)
+    return re.sub(r"-+", "-", normalized).strip("-.") or "unnamed"
+
+
+def _external_port_key(definition_key: str, port: PortMetadata) -> str:
+    return f"{definition_key}/port:{_key_part(port.name)}#{port.occurrence}"
+
+
+def _resolve_definition(
+    graph: ProjectGraph,
+    catalog: DefinitionCatalog,
+    key: str,
+) -> _ResolvedDefinition:
+    namespace, physical_name = _split_definition_key(key)
+    if namespace == "user":
+        return _local_catalog_definition(graph, key)
+    definition = catalog.require(
+        namespace,
+        graph.pscad_version,
+        physical_name,
+    )
+    return _ResolvedDefinition(
+        key=key,
+        definition=definition,
+        port_keys=tuple(
+            _external_port_key(key, port) for port in definition.metadata.ports
+        ),
+    )
+
+
+def _port_namespace(port: PortMetadata) -> str:
+    declared = (port.kind or "").strip().casefold()
+    if declared in {"electrical", "natural"}:
+        return "electrical"
+    if declared in {"data", "signal", "transfer"}:
+        return "data"
+    model = (port.model or "").strip().casefold()
+    if model == "natural":
+        return "electrical"
+    if model == "transfer":
+        return "data"
+    mode = (port.mode or "").strip().casefold()
+    if mode == "electrical":
+        return "electrical"
+    return "unknown"
+
+
+def _port_dimension(port: PortMetadata) -> int:
+    dimension = int(port.dim or 1)
+    if dimension < 1:
+        raise ValueError("port dimension must be positive")
+    return dimension
+
+
+def _port_error(
+    code: str,
+    message: str,
+    component_key: str,
+    definition_key: str,
+    port_name: str | None = None,
+) -> BackendError:
+    details = {
+        "component": component_key,
+        "definition": definition_key,
+    }
+    if port_name is not None:
+        details["port"] = port_name
+    return BackendError(code, message, "corpus", "materialize_instance_ports", details)
+
+
+def materialize_instance_ports(
+    graph: ProjectGraph,
+    catalog: DefinitionCatalog,
+    expanded: ExpandedHierarchy | None = None,
+) -> MaterializedPorts:
+    if graph.schema_version != 2 or graph.normalization_profile != "pscad-xml-v2":
+        raise _relation_error("Port materialization requires a schema-v2 graph.")
+    occurrences = expanded or expand_hierarchy_occurrences(graph)
+    source_components = {item.key: item for item in graph.components}
+    referenced_keys = {item.definition_key for item in occurrences.components}
+    referenced_keys.update(
+        source_components[item.source_component_key].definition_key
+        for item in occurrences.labels
+    )
+    resolved = {
+        key: _resolve_definition(graph, catalog, key)
+        for key in sorted(referenced_keys)
+    }
+    classifications = tuple(
+        CorpusDefinitionClassification(
+            key=key,
+            namespace=item.definition.namespace,
+            pscad_version=item.definition.pscad_version,
+            physical_name=item.definition.physical_name,
+            classification=classify_definition(item.definition),
+            port_contract_keys=item.port_keys,
+            source_sha256=item.definition.source_sha256,
+        )
+        for key, item in sorted(resolved.items())
+    )
+
+    ports = []
+    for component in sorted(occurrences.components, key=lambda item: item.key):
+        contract = resolved[component.definition_key]
+        if classify_definition(contract.definition) == "non_connective":
+            continue
+        defaults = {
+            name: parameter.default
+            for name, parameter in contract.definition.metadata.parameters.items()
+            if parameter.default is not None
+        }
+        for port, definition_port_key in zip(
+            contract.definition.metadata.ports,
+            contract.port_keys,
+            strict=True,
+        ):
+            try:
+                active = evaluate_condition(
+                    port.condition,
+                    component.parameters,
+                    defaults,
+                )
+            except ConditionUnresolved as error:
+                raise _port_error(
+                    "CORPUS_PORT_CONDITION_UNRESOLVED",
+                    "Conditional port cannot be evaluated deterministically.",
+                    component.key,
+                    component.definition_key,
+                    port.name,
+                ) from error
+            namespace = _port_namespace(port)
+            if namespace == "unknown":
+                raise _port_error(
+                    "CORPUS_RELATION_INCOMPLETE",
+                    "Port namespace cannot be classified.",
+                    component.key,
+                    component.definition_key,
+                    port.name,
+                )
+            try:
+                dimension = _port_dimension(port)
+                absolute = absolute_port(
+                    component.location,
+                    (port.x, port.y),
+                    component.orientation,
+                )
+            except (GeometryError, TypeError, ValueError) as error:
+                raise _port_error(
+                    "CORPUS_PORT_GEOMETRY_UNRESOLVED",
+                    "Port geometry cannot be resolved.",
+                    component.key,
+                    component.definition_key,
+                    port.name,
+                ) from error
+            ports.append(
+                CorpusInstancePort(
+                    key=(
+                        f"{component.key}/port:{_key_part(port.name)}"
+                        f"#{port.occurrence}"
+                    ),
+                    component_key=component.key,
+                    source_component_key=component.source_component_key,
+                    definition_port_key=definition_port_key,
+                    name=port.name,
+                    occurrence=port.occurrence,
+                    relative=(port.x, port.y),
+                    absolute=absolute,
+                    namespace=namespace,
+                    dimension=dimension,
+                    active=active,
+                    source_sha256=contract.definition.source_sha256,
+                )
+            )
+    keys = [item.key for item in ports]
+    if len(keys) != len(set(keys)):
+        raise _relation_error("Materialized instance-port keys are ambiguous.")
+    return MaterializedPorts(
+        classifications=classifications,
+        ports=tuple(sorted(ports, key=lambda item: item.key)),
     )

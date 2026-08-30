@@ -101,7 +101,13 @@ class DefinitionCatalog:
                 raise _catalog_error(
                     "CORPUS_DEFINITION_SOURCE_MISMATCH",
                     "Definition source changed during generation.",
-                )
+    )
+
+
+def classify_definition(definition: CatalogDefinition) -> str:
+    """Classify one exact definition without inferring missing ports."""
+
+    return "port_bearing" if definition.metadata.ports else "non_connective"
 
 
 def load_definition_catalog(
