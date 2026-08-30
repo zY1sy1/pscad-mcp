@@ -489,9 +489,10 @@ class BlueprintVerification:
     source_hash_verified: bool
     operations_empty: bool
     status: str
+    confirmed_relation_signature: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        result = {
             "project_id": self.project_id,
             "blueprint_name": self.blueprint_name,
             "graph_signature": self.graph_signature,
@@ -499,6 +500,11 @@ class BlueprintVerification:
             "operations_empty": self.operations_empty,
             "status": self.status,
         }
+        if self.confirmed_relation_signature is not None:
+            result["confirmed_relation_signature"] = (
+                self.confirmed_relation_signature
+            )
+        return result
 
 
 @dataclass(frozen=True)

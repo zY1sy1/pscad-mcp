@@ -1,13 +1,16 @@
 from __future__ import annotations
 
-from dataclasses import replace
 import hashlib
-from pathlib import Path
 import shutil
+from dataclasses import replace
+from pathlib import Path
 
 import pytest
 
-from pscad_mcp.builders.blueprint.corpus_extractor import extract_project
+from pscad_mcp.builders.blueprint.corpus_extractor import (
+    extract_project,
+    graph_signature,
+)
 from pscad_mcp.builders.blueprint.corpus_models import CorpusSource
 from pscad_mcp.builders.blueprint.corpus_verifier import (
     generate_blueprint_candidate,
@@ -16,7 +19,7 @@ from pscad_mcp.builders.blueprint.corpus_verifier import (
 from pscad_mcp.builders.blueprint.corpus_writer import canonical_json
 from pscad_mcp.builders.blueprint.schema import parse_blueprint
 from pscad_mcp.core.backend.base import BackendError
-
+from tests.test_blueprint_corpus_v2_models import relation_graph
 
 FIXTURES = Path(__file__).parent / "fixtures" / "blueprint_corpus"
 
@@ -141,3 +144,51 @@ def test_unresolved_output_is_retained_as_non_required_evidence(tmp_path):
 
     assert value["acceptance"]["outputs"][0]["required"] is False
     assert verify_blueprint_candidate(value, graph).status == "verified"
+
+
+def test_v2_blueprint_remains_read_only_and_relation_bound():
+    graph = relation_graph()
+    source = CorpusSource(
+        project_id=graph.project_id,
+        basename="fixture.pscx",
+        byte_length=1,
+        sha256=graph.source_sha256,
+        pscad_versions=(graph.pscad_version,),
+        dependencies=(),
+    )
+
+    value = generate_blueprint_candidate(source, graph)
+    parsed = parse_blueprint(value)
+    verification = verify_blueprint_candidate(value, graph, source)
+
+    assert parsed.identity.schema_version == 1
+    assert parsed.identity.name == "fixture-v2-existing-v2"
+    assert parsed.identity.inspection_profile == "corpus-existing-project-v2"
+    assert parsed.operations == ()
+    assert parsed.source_package["handling_policy"] == "read_only"
+    assert parsed.publication.delivery_package is False
+    assert verification.graph_signature == graph_signature(graph)
+    assert verification.confirmed_relation_signature == (
+        graph.confirmed_relation_signature
+    )
+
+
+@pytest.mark.parametrize(
+    "field",
+    ["confirmed_relation_signature", "definition_catalog_signature"],
+)
+def test_v2_blueprint_rejects_missing_relationship_signature(field):
+    graph = replace(relation_graph(), **{field: None})
+    source = CorpusSource(
+        graph.project_id,
+        "fixture.pscx",
+        1,
+        graph.source_sha256,
+        (graph.pscad_version,),
+        (),
+    )
+
+    with pytest.raises(BackendError) as raised:
+        generate_blueprint_candidate(source, graph)
+
+    assert raised.value.code == "CORPUS_BLUEPRINT_MISMATCH"
