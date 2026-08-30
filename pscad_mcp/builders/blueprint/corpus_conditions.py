@@ -14,6 +14,8 @@ _TOKEN = re.compile(
     r"(?P<number>[0-9]+(?:\.[0-9]+)?))"
 )
 _COMPARISONS = frozenset({"==", "!=", ">"})
+_MAX_TOKENS = 256
+_MAX_NESTING = 64
 
 
 class ConditionUnresolved(ValueError):
@@ -56,16 +58,32 @@ _Scalar: TypeAlias = bool | Decimal
 def _tokens(expression: str) -> tuple[_Token, ...]:
     result = []
     position = 0
+    nesting = 0
     while position < len(expression):
         match = _TOKEN.match(expression, position)
         if match is None or match.end() == position:
             raise ConditionUnresolved("unsupported conditional-port syntax")
         if match.group("op") is not None:
-            result.append(_Token("op", match.group("op")))
+            value = match.group("op")
+            result.append(_Token("op", value))
+            if value == "(":
+                nesting += 1
+                if nesting > _MAX_NESTING:
+                    raise ConditionUnresolved(
+                        "conditional-port grouping is too deep"
+                    )
+            elif value == ")":
+                nesting -= 1
+                if nesting < 0:
+                    raise ConditionUnresolved(
+                        "conditional-port grouping is invalid"
+                    )
         elif match.group("identifier") is not None:
             result.append(_Token("identifier", match.group("identifier")))
         else:
             result.append(_Token("number", match.group("number")))
+        if len(result) > _MAX_TOKENS:
+            raise ConditionUnresolved("conditional-port expression is too complex")
         position = match.end()
     return tuple(result)
 

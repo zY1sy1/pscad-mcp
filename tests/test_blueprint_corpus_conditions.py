@@ -95,6 +95,18 @@ def test_evaluate_condition_short_circuits_unresolved_branches():
     assert evaluate_condition("false && Missing", {}, {}) is False
 
 
+@pytest.mark.parametrize(
+    "expression",
+    [
+        "(" * 65 + "true" + ")" * 65,
+        "!" * 257 + "true",
+    ],
+)
+def test_evaluate_condition_rejects_excessive_expression_complexity(expression):
+    with pytest.raises(ConditionUnresolved):
+        evaluate_condition(expression, {}, {})
+
+
 @pytest.mark.parametrize("expression", [None, "", "   "])
 def test_empty_condition_is_active(expression):
     assert evaluate_condition(expression, {}, {}) is True
