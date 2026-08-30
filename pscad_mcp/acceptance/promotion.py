@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import os
 import subprocess
@@ -52,17 +53,25 @@ def advance_and_apply_scope_report(
     repository_branch: str,
     expected_scope: str,
     owner_work_package: str,
-    explicit_exclusions: Sequence[Any],
+    explicit_exclusions: Sequence[str],
     expected_report_sha256: str | None = None,
 ) -> dict[str, Any]:
     current = validate_program_baseline(baseline)
-    indexed = index_explicit_reports([{"path": str(report_path)}])[0]
-    actual_hash = indexed["sha256"]
-    if expected_report_sha256 is not None and actual_hash != expected_report_sha256:
+    raw_hash = hashlib.sha256(Path(report_path).read_bytes()).hexdigest()
+    if expected_report_sha256 is not None and raw_hash != expected_report_sha256:
         raise _error(
             "report_hash_mismatch",
             "Selected report hash does not match the expected hash.",
             expected=expected_report_sha256,
+            actual=raw_hash,
+        )
+    indexed = index_explicit_reports([{"path": str(report_path)}])[0]
+    actual_hash = indexed["sha256"]
+    if actual_hash != raw_hash:
+        raise _error(
+            "report_hash_mismatch",
+            "Selected report hash changed while it was being indexed.",
+            expected=raw_hash,
             actual=actual_hash,
         )
     if indexed["status"] != "PASS":
@@ -102,19 +111,25 @@ def advance_and_apply_scope_report(
         report_path,
         owner_work_package=owner_work_package,
     )
+    target_scope = next(item for item in candidate["scopes"] if item["scope"] == expected_scope)
     promoted = next(
-        item for item in candidate["reports"] if item["run_id"] == indexed["run_id"]
+        (item for item in candidate["reports"] if item["run_id"] == target_scope["evidence_run_id"]),
+        None,
     )
-    if promoted["sha256"] != actual_hash:
+    if (
+        promoted is None
+        or promoted["run_id"] != indexed["run_id"]
+        or promoted["sha256"] != raw_hash
+    ):
         raise _error(
             "report_hash_mismatch",
             "Selected report changed during promotion.",
-            expected=actual_hash,
-            actual=promoted["sha256"],
+            expected=raw_hash,
+            actual=promoted["sha256"] if promoted is not None else None,
         )
     for scope in candidate["scopes"]:
         if scope["scope"] == expected_scope:
-            scope["explicit_exclusions"] = [str(item) for item in explicit_exclusions]
+            scope["explicit_exclusions"] = list(explicit_exclusions)
             break
     return validate_program_baseline(candidate)
 
@@ -152,7 +167,7 @@ def promote_program_report(
     *,
     expected_scope: str,
     owner_work_package: str,
-    explicit_exclusions: Sequence[Any],
+    explicit_exclusions: Sequence[str],
     repository_root: str | Path | None = None,
     git_reader: Callable[[Path], Mapping[str, Any]] = _git_reader,
     expected_report_sha256: str | None = None,
@@ -160,7 +175,7 @@ def promote_program_report(
     baseline_file = Path(baseline_path)
     root = (Path(repository_root) if repository_root is not None else baseline_file.parents[2]).resolve()
     identity = dict(git_reader(root))
-    if not identity.get("clean"):
+    if identity.get("clean") is not True:
         raise _error("worktree_not_clean", "Repository worktree must be clean.")
     if not identity.get("branch"):
         raise _error("detached_head", "Repository checkout must be on a named branch.")
