@@ -18,6 +18,11 @@ from .preflight import (
     run_static_preflight,
     write_preflight_report,
 )
+from .promotion import (
+    advance_and_apply_scope_report,
+    promote_program_report,
+    write_program_baseline,
+)
 
 __all__ = [
     "CAPABILITY_STATES",
@@ -25,14 +30,17 @@ __all__ = [
     "PROGRAM_SCOPES",
     "SCOPE_BUILDER_PATHS",
     "PreflightRequest",
+    "advance_and_apply_scope_report",
     "apply_scope_report",
     "build_run_metadata",
     "canonical_program_baseline",
     "index_explicit_reports",
     "program_baseline_sha256",
+    "promote_program_report",
     "run_licensed_session_preflight",
     "run_program_preflight",
     "run_static_preflight",
     "validate_program_baseline",
     "write_preflight_report",
+    "write_program_baseline",
 ]

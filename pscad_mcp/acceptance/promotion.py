@@ -1,0 +1,187 @@
+"""Commit-aware promotion of program baseline acceptance evidence."""
+
+from __future__ import annotations
+
+import copy
+import json
+import os
+import subprocess
+import tempfile
+from collections.abc import Callable, Mapping, Sequence
+from pathlib import Path
+from typing import Any
+
+from ..core.backend.base import BackendError
+from .baseline import apply_scope_report, validate_program_baseline
+from .evidence import index_explicit_reports
+
+
+def _error(reason: str, message: str, **details: Any) -> BackendError:
+    return BackendError(
+        "PROGRAM_PROMOTION_REJECTED",
+        message,
+        "acceptance",
+        "promote_program_report",
+        {"reason": reason, **details},
+    )
+
+
+def _git_reader(root: Path) -> dict[str, Any]:
+    def run(*args: str) -> str:
+        result = subprocess.run(
+            ["git", *args],
+            cwd=root,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        return result.stdout.strip()
+
+    return {
+        "commit": run("rev-parse", "HEAD"),
+        "branch": run("branch", "--show-current"),
+        "clean": not bool(run("status", "--porcelain")),
+    }
+
+
+def advance_and_apply_scope_report(
+    baseline: Mapping[str, Any],
+    report_path: str | Path,
+    *,
+    repository_commit: str,
+    repository_branch: str,
+    expected_scope: str,
+    owner_work_package: str,
+    explicit_exclusions: Sequence[Any],
+    expected_report_sha256: str | None = None,
+) -> dict[str, Any]:
+    current = validate_program_baseline(baseline)
+    indexed = index_explicit_reports([{"path": str(report_path)}])[0]
+    actual_hash = indexed["sha256"]
+    if expected_report_sha256 is not None and actual_hash != expected_report_sha256:
+        raise _error(
+            "report_hash_mismatch",
+            "Selected report hash does not match the expected hash.",
+            expected=expected_report_sha256,
+            actual=actual_hash,
+        )
+    if indexed["status"] != "PASS":
+        raise _error("report_not_pass", "Only PASS reports can be promoted.")
+    if indexed["commit"] != repository_commit:
+        raise _error(
+            "commit_mismatch",
+            "Selected report commit does not match the repository checkout.",
+            report_commit=indexed["commit"],
+            repository_commit=repository_commit,
+        )
+    if indexed["scope"] != expected_scope:
+        raise _error(
+            "scope_mismatch",
+            "Selected report scope does not match the requested scope.",
+            report_scope=indexed["scope"],
+            expected_scope=expected_scope,
+        )
+
+    candidate = copy.deepcopy(current)
+    candidate["repository"] = {
+        **candidate["repository"],
+        "base_commit": repository_commit,
+        "branch": repository_branch,
+        "worktree_clean": True,
+    }
+    reports_by_id = {item["run_id"]: item for item in candidate["reports"]}
+    for scope in candidate["scopes"]:
+        evidence_id = scope["evidence_run_id"]
+        report = reports_by_id.get(evidence_id)
+        if report is not None and report["commit"] != repository_commit:
+            scope["licensed_status"] = "NOT_RUN_ON_CURRENT_COMMIT"
+            scope["evidence_run_id"] = None
+    candidate["generated_at_utc"] = indexed["generated_at_utc"]
+    candidate = apply_scope_report(
+        candidate,
+        report_path,
+        owner_work_package=owner_work_package,
+    )
+    promoted = next(
+        item for item in candidate["reports"] if item["run_id"] == indexed["run_id"]
+    )
+    if promoted["sha256"] != actual_hash:
+        raise _error(
+            "report_hash_mismatch",
+            "Selected report changed during promotion.",
+            expected=actual_hash,
+            actual=promoted["sha256"],
+        )
+    for scope in candidate["scopes"]:
+        if scope["scope"] == expected_scope:
+            scope["explicit_exclusions"] = [str(item) for item in explicit_exclusions]
+            break
+    return validate_program_baseline(candidate)
+
+
+def write_program_baseline(path: str | Path, payload: Mapping[str, Any]) -> Path:
+    destination = Path(path)
+    validated = validate_program_baseline(payload)
+    raw = (
+        json.dumps(validated, allow_nan=False, ensure_ascii=True, sort_keys=False, indent=2)
+        + "\n"
+    ).encode("ascii")
+    temporary: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="wb", dir=destination.parent, prefix=f".{destination.name}.", delete=False
+        ) as stream:
+            temporary = Path(stream.name)
+            stream.write(raw)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, destination)
+    except BaseException:
+        if temporary is not None:
+            try:
+                temporary.unlink()
+            except FileNotFoundError:
+                pass
+        raise
+    return destination
+
+
+def promote_program_report(
+    baseline_path: str | Path,
+    report_path: str | Path,
+    *,
+    expected_scope: str,
+    owner_work_package: str,
+    explicit_exclusions: Sequence[Any],
+    repository_root: str | Path | None = None,
+    git_reader: Callable[[Path], Mapping[str, Any]] = _git_reader,
+    expected_report_sha256: str | None = None,
+) -> dict[str, Any]:
+    baseline_file = Path(baseline_path)
+    root = (Path(repository_root) if repository_root is not None else baseline_file.parents[2]).resolve()
+    identity = dict(git_reader(root))
+    if not identity.get("clean"):
+        raise _error("worktree_not_clean", "Repository worktree must be clean.")
+    if not identity.get("branch"):
+        raise _error("detached_head", "Repository checkout must be on a named branch.")
+    with baseline_file.open(encoding="utf-8") as stream:
+        baseline = json.load(stream)
+    updated = advance_and_apply_scope_report(
+        baseline,
+        report_path,
+        repository_commit=str(identity["commit"]),
+        repository_branch=str(identity["branch"]),
+        expected_scope=expected_scope,
+        owner_work_package=owner_work_package,
+        explicit_exclusions=explicit_exclusions,
+        expected_report_sha256=expected_report_sha256,
+    )
+    write_program_baseline(baseline_file, updated)
+    return updated
+
+
+__all__ = [
+    "advance_and_apply_scope_report",
+    "promote_program_report",
+    "write_program_baseline",
+]
