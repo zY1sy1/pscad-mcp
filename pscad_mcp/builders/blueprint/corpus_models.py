@@ -5,6 +5,18 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from .corpus_relation_models import (
+    CorpusCandidateEdge,
+    CorpusComponentOccurrence,
+    CorpusConductorOccurrence,
+    CorpusConfirmedNet,
+    CorpusDefinitionClassification,
+    CorpusHierarchyRelation,
+    CorpusInstancePort,
+    CorpusLabelOccurrence,
+    CorpusPortNetMembership,
+    CorpusUnresolvedEvidence,
+)
 from .models import FrozenDict, json_safe
 
 
@@ -281,9 +293,23 @@ class ProjectGraph:
     connections: tuple[CorpusConnection, ...] = ()
     output_channels: tuple[CorpusOutputChannel, ...] = ()
     warnings: tuple[CorpusWarning, ...] = ()
+    schema_version: int = 1
+    normalization_profile: str = "pscad-xml-v1"
+    definition_classifications: tuple[CorpusDefinitionClassification, ...] = ()
+    component_occurrences: tuple[CorpusComponentOccurrence, ...] = ()
+    conductor_occurrences: tuple[CorpusConductorOccurrence, ...] = ()
+    label_occurrences: tuple[CorpusLabelOccurrence, ...] = ()
+    instance_ports: tuple[CorpusInstancePort, ...] = ()
+    confirmed_nets: tuple[CorpusConfirmedNet, ...] = ()
+    port_net_memberships: tuple[CorpusPortNetMembership, ...] = ()
+    hierarchy_relations: tuple[CorpusHierarchyRelation, ...] = ()
+    candidate_edges: tuple[CorpusCandidateEdge, ...] = ()
+    unresolved_evidence: tuple[CorpusUnresolvedEvidence, ...] = ()
+    confirmed_relation_signature: str | None = None
+    definition_catalog_signature: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        result = {
             "project_id": self.project_id,
             "source_sha256": self.source_sha256,
             "dependency_hashes": json_safe(self.dependency_hashes),
@@ -298,6 +324,46 @@ class ProjectGraph:
             "output_channels": [channel.to_dict() for channel in self.output_channels],
             "warnings": [warning.to_dict() for warning in self.warnings],
         }
+        if self.schema_version == 2:
+            result.update(
+                {
+                    "schema_version": 2,
+                    "normalization_profile": self.normalization_profile,
+                    "definition_classifications": [
+                        item.to_dict() for item in self.definition_classifications
+                    ],
+                    "component_occurrences": [
+                        item.to_dict() for item in self.component_occurrences
+                    ],
+                    "conductor_occurrences": [
+                        item.to_dict() for item in self.conductor_occurrences
+                    ],
+                    "label_occurrences": [
+                        item.to_dict() for item in self.label_occurrences
+                    ],
+                    "instance_ports": [
+                        item.to_dict() for item in self.instance_ports
+                    ],
+                    "confirmed_nets": [
+                        item.to_dict() for item in self.confirmed_nets
+                    ],
+                    "port_net_memberships": [
+                        item.to_dict() for item in self.port_net_memberships
+                    ],
+                    "hierarchy_relations": [
+                        item.to_dict() for item in self.hierarchy_relations
+                    ],
+                    "candidate_edges": [
+                        item.to_dict() for item in self.candidate_edges
+                    ],
+                    "unresolved_evidence": [
+                        item.to_dict() for item in self.unresolved_evidence
+                    ],
+                    "confirmed_relation_signature": self.confirmed_relation_signature,
+                    "definition_catalog_signature": self.definition_catalog_signature,
+                }
+            )
+        return result
 
 
 @dataclass(frozen=True)
