@@ -1249,7 +1249,11 @@ async def run_native_lcc_acceptance(
                 "cleanup",
                 RuntimeError("source or process cleanup mismatch"),
             )
-        normalized = validate_native_lcc_acceptance_report(report)
+        try:
+            normalized = validate_native_lcc_acceptance_report(report)
+        except BaseException as error:  # noqa: BLE001 - persist contract failures
+            report = _fail_report(request, report, "report", error)
+            normalized = validate_native_lcc_acceptance_report(report)
         write_preflight_report(request.report_path, normalized)
         indexed = index_explicit_reports([{"path": str(request.report_path)}])[0]
         if (

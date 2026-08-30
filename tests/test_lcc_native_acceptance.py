@@ -412,6 +412,14 @@ class FakeBuilder:
         return None
 
 
+class InvalidReportBuilder(FakeBuilder):
+    def _published_record(self):
+        record = super()._published_record()
+        channels = record["result"]["acceptance"]["evidence"]["channels"]
+        channels["dc_current"]["units"] = None
+        return record
+
+
 def native_request(tmp_path):
     from pscad_mcp.hvdc.builders.lcc.native_acceptance import (
         NativeLccAcceptanceRequest,
@@ -494,3 +502,29 @@ def test_orchestrator_writes_fail_report_and_never_claims_pass_on_cleanup_failur
     assert result["status"] == "FAIL"
     assert result["capability_state"] == "failed"
     assert result["failure"]["stage"] == "cleanup"
+
+
+def test_orchestrator_persists_fail_when_pass_report_contract_is_invalid(tmp_path):
+    from pscad_mcp.hvdc.builders.lcc.native_acceptance import (
+        run_native_lcc_acceptance,
+    )
+
+    request = native_request(tmp_path)
+    service = FakePscadService()
+    result = asyncio.run(
+        run_native_lcc_acceptance(
+            request,
+            service=service,
+            builder=InvalidReportBuilder(
+                request.workspace_root,
+                request.template_path,
+            ),
+            process_reader=list,
+            poll_interval_s=0,
+        )
+    )
+
+    assert result["status"] == "FAIL"
+    assert result["failure"]["stage"] == "report"
+    assert request.report_path.is_file()
+    assert service.calls == ["attach_local", ("quit_pscad", True)]
