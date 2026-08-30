@@ -226,6 +226,11 @@ Library. The source example is never modified. Builds retain numbered legacy
 OUT parts and their `.inf` metadata under `<project>.outputs` so a later
 `validate_blank_lcc_model` call can reread the same evidence.
 
+The blank/native LCC path has current-commit licensed simulation evidence only
+when `docs/acceptance/lcc-mmc-program-baseline.json` names an indexed PASS
+report for `lcc.blank_native`. This is `simulated`, not fixed-autonomous or final
+`accepted` evidence; independent-golden acceptance remains a WP6 gate.
+
 The converter-specific definitions are not present in the Master Library, so a
 blank LCC request without an official template fails with `LCC_TEMPLATE_REQUIRED`
 rather than loading a logical contract XML as if it were a PSCAD-instantiable

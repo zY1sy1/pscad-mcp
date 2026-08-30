@@ -138,6 +138,12 @@ PSCAD 4.x 会把一个运行结果拆成 `*_01.out`、`*_02.out` 等文件；构
 `validate_blank_lcc_model` 复读同一份证据。未提供官方模板时工具返回
 `LCC_TEMPLATE_REQUIRED`，不会伪造可编译的 companion。
 
+blank/native LCC 只有在
+`docs/acceptance/lcc-mmc-program-baseline.json` 为 `lcc.blank_native` 指向当前
+提交的 indexed PASS report 时，才具有 licensed simulation evidence。该状态是
+`simulated`，不代表 fixed autonomous 或最终 `accepted`；independent golden
+仍由 WP6 验收。
+
 ### 参数化双引擎 MMC
 
 MMC 领域新增七个工具：`audit_mmc_template`、`derive_mmc_parameters`、

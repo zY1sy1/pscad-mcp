@@ -319,18 +319,29 @@ def test_checked_in_program_baseline_is_valid_and_scoped():
         "mmc.avm_half_bridge",
         "mmc.parametric",
     }
-    assert result["reports"] == []
     assert scopes["lcc.master_bindings"]["licensed_status"] == (
         "NOT_RUN_ON_CURRENT_COMMIT"
     )
-    assert scopes["lcc.blank_native"]["licensed_status"] == (
-        "NOT_RUN_ON_CURRENT_COMMIT"
-    )
+    native = scopes["lcc.blank_native"]
+    assert native["capability_state"] == "simulated"
+    assert native["licensed_status"] == "PASS"
+    assert isinstance(native["evidence_run_id"], str)
+    reports = {item["run_id"]: item for item in result["reports"]}
+    evidence = reports[native["evidence_run_id"]]
+    assert evidence["scope"] == "lcc.blank_native"
+    assert evidence["builder_path"] == "lcc.blank_native"
+    assert evidence["kind"] == "licensed_simulation"
+    assert evidence["status"] == "PASS"
+    assert evidence["commit"] == result["repository"]["base_commit"]
     assert scopes["mmc.blank_native_full_bridge"]["licensed_status"] == (
         "NOT_RUN_ON_CURRENT_COMMIT"
     )
     assert scopes["mmc.parametric"]["licensed_status"] == "INCOMPLETE_ANALYSIS"
-    assert all(item["evidence_run_id"] is None for item in scopes.values())
+    assert all(
+        item["evidence_run_id"] is None
+        for name, item in scopes.items()
+        if name != "lcc.blank_native"
+    )
 
 
 def test_program_baseline_does_not_replace_topology_status_manifest():
