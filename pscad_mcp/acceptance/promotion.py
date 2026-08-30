@@ -14,7 +14,7 @@ from typing import Any
 
 from ..core.backend.base import BackendError
 from .baseline import apply_scope_report, validate_program_baseline
-from .evidence import index_explicit_reports
+from .evidence import _read_regular_report, index_explicit_reports
 
 
 def _error(reason: str, message: str, **details: Any) -> BackendError:
@@ -45,6 +45,11 @@ def _git_reader(root: Path) -> dict[str, Any]:
     }
 
 
+def _report_sha256(path: str | Path) -> str:
+    _resolved, raw, _identity = _read_regular_report(Path(path))
+    return hashlib.sha256(raw).hexdigest()
+
+
 def advance_and_apply_scope_report(
     baseline: Mapping[str, Any],
     report_path: str | Path,
@@ -57,7 +62,7 @@ def advance_and_apply_scope_report(
     expected_report_sha256: str | None = None,
 ) -> dict[str, Any]:
     current = validate_program_baseline(baseline)
-    raw_hash = hashlib.sha256(Path(report_path).read_bytes()).hexdigest()
+    raw_hash = _report_sha256(report_path)
     if expected_report_sha256 is not None and raw_hash != expected_report_sha256:
         raise _error(
             "report_hash_mismatch",
@@ -107,11 +112,30 @@ def advance_and_apply_scope_report(
             scope["evidence_run_id"] = None
     candidate["generated_at_utc"] = indexed["generated_at_utc"]
     before_apply = copy.deepcopy(candidate)
-    candidate = apply_scope_report(
-        candidate,
-        report_path,
-        owner_work_package=owner_work_package,
-    )
+    try:
+        candidate = apply_scope_report(
+            candidate,
+            report_path,
+            owner_work_package=owner_work_package,
+        )
+    except BackendError as error:
+        try:
+            current_hash = _report_sha256(report_path)
+        except BackendError as read_error:
+            raise _error(
+                "report_hash_mismatch",
+                "Selected report became unreadable during promotion.",
+                expected=raw_hash,
+                actual=None,
+            ) from read_error
+        if current_hash != raw_hash:
+            raise _error(
+                "report_hash_mismatch",
+                "Selected report changed during promotion.",
+                expected=raw_hash,
+                actual=current_hash,
+            ) from error
+        raise
     target_scope = next(
         item for item in candidate["scopes"] if item["scope"] == expected_scope
     )

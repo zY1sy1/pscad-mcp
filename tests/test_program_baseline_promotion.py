@@ -279,3 +279,35 @@ def test_promotion_rejects_cross_scope_swap_when_target_already_references_repor
             explicit_exclusions=EXCLUSIONS,
         )
     assert failure.value.details["reason"] == "report_hash_mismatch"
+
+
+def test_promotion_converts_malformed_apply_swap_to_hash_mismatch(
+    tmp_path, monkeypatch
+):
+    from pscad_mcp.acceptance import promotion
+
+    baseline = baseline_with_blank_scope()
+    report = write_report(tmp_path / "report.json")
+    real_apply = promotion.apply_scope_report
+
+    def replace_then_apply(candidate, report_path, *, owner_work_package):
+        Path(report_path).write_text("{malformed", encoding="utf-8")
+        return real_apply(
+            candidate,
+            report_path,
+            owner_work_package=owner_work_package,
+        )
+
+    monkeypatch.setattr(promotion, "apply_scope_report", replace_then_apply)
+    with pytest.raises(BackendError) as failure:
+        promotion.advance_and_apply_scope_report(
+            baseline,
+            report,
+            repository_commit=NEW_COMMIT,
+            repository_branch="codex/lcc-wp1a-native-acceptance",
+            expected_scope="lcc.blank_native",
+            owner_work_package="WP1",
+            explicit_exclusions=EXCLUSIONS,
+        )
+    assert failure.value.code == "PROGRAM_PROMOTION_REJECTED"
+    assert failure.value.details["reason"] == "report_hash_mismatch"
