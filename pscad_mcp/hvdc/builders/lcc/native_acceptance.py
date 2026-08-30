@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import copy
 import hashlib
 import json
@@ -9,14 +10,20 @@ import math
 import os
 import re
 import stat
+import time
 from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from ....acceptance.evidence import build_run_metadata, index_explicit_reports
+from ....acceptance.preflight import write_preflight_report
 from ....acceptance.promotion import promote_program_report
 from ....core.backend.base import BackendError
 from ....core.master_bindings import parse_master_binding_registry
+from ....core.process_inventory import list_pscad_processes
+from .journal import AtomicJournal
 
 NATIVE_SCOPE = "lcc.blank_native"
 NATIVE_BUILDER_PATH = "lcc.blank_native"
@@ -710,6 +717,547 @@ def promote_native_lcc_report(
     )
 
 
+@dataclass(frozen=True)
+class NativeLccAcceptanceRequest:
+    repository_root: Path
+    workspace_root: Path
+    template_path: Path
+    master_path: Path
+    report_path: Path
+    project_name: str
+    commit: str
+    branch: str
+    registry_sha256: str
+    registry_file_sha256: str
+    asset_manifest_sha256: str
+    preflight: Mapping[str, Any]
+    simulation_duration_s: float = 2.5
+
+
+def _artifact(path: Path) -> dict[str, str]:
+    resolved = _regular_path(path, "artifact")
+    return {"path": resolved.as_posix(), "sha256": _sha256(resolved)}
+
+
+def _history(record: Mapping[str, Any]) -> list[str]:
+    values = record.get("history")
+    if not isinstance(values, Sequence) or isinstance(values, (str, bytes)):
+        raise BackendError(
+            "LCC_NATIVE_HISTORY_INVALID",
+            "Native build history is not an array.",
+            "hvdc",
+            "run_native_lcc_acceptance",
+        )
+    result = []
+    for item in values:
+        if not isinstance(item, Mapping) or not isinstance(item.get("state"), str):
+            raise BackendError(
+                "LCC_NATIVE_HISTORY_INVALID",
+                "Native build history entry has no state.",
+                "hvdc",
+                "run_native_lcc_acceptance",
+            )
+        result.append(str(item["state"]))
+    return result
+
+
+def _journal_path(workspace: Path, build_id: str) -> Path:
+    return AtomicJournal(workspace, build_id).path
+
+
+def _metadata(
+    request: NativeLccAcceptanceRequest,
+    run_id: str,
+    capability_state: str,
+) -> dict[str, Any]:
+    return build_run_metadata(
+        run_id=run_id,
+        scope=NATIVE_SCOPE,
+        kind=NATIVE_KIND,
+        capability_state=capability_state,
+        commit=request.commit,
+        generated_at_utc=(
+            datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        ),
+    )
+
+
+def _source_evidence(
+    request: NativeLccAcceptanceRequest,
+    template_before: str,
+    master_before: str,
+) -> dict[str, Any]:
+    asset_root = (
+        request.repository_root
+        / "pscad_mcp"
+        / "assets"
+        / "lcc"
+        / "cigre_lcc_monopole_v1"
+    )
+    return {
+        "template": {
+            "path": request.template_path.resolve().as_posix(),
+            "before": template_before,
+            "after": template_before,
+        },
+        "master": {
+            "path": request.master_path.resolve().as_posix(),
+            "before": master_before,
+            "after": master_before,
+        },
+        "registry": {
+            "path": (
+                asset_root / "master-bindings-pscad-4.6.2.json"
+            ).resolve().as_posix(),
+            "file_sha256": request.registry_file_sha256,
+            "registry_sha256": request.registry_sha256,
+        },
+        "asset_manifest": {
+            "path": (asset_root / "manifest.json").resolve().as_posix(),
+            "sha256": request.asset_manifest_sha256,
+        },
+    }
+
+
+def _initial_fail_report(
+    request: NativeLccAcceptanceRequest,
+    run_id: str,
+    template_before: str,
+    master_before: str,
+) -> dict[str, Any]:
+    return {
+        **_metadata(request, run_id, "failed"),
+        "status": "FAIL",
+        "repository": {
+            "branch": request.branch,
+            "commit": request.commit,
+            "clean": True,
+        },
+        "preflight": {
+            "status": str(request.preflight["status"]),
+            "sha256": str(request.preflight["sha256"]),
+            "snapshot": copy.deepcopy(request.preflight["snapshot"]),
+        },
+        "sources": _source_evidence(
+            request,
+            template_before,
+            master_before,
+        ),
+        "build": {
+            "project_name": request.project_name,
+            "workspace": request.workspace_root.resolve().as_posix(),
+            "build_id": None,
+            "plan_hash": None,
+            "journal_path": None,
+            "journal_sha256": None,
+            "history": [],
+            "terminal_state": "not_started",
+        },
+        "artifacts": {
+            "project": None,
+            "library": None,
+            "scenario": None,
+            "selected_output": None,
+            "output_parts": [],
+            "output_metadata": [],
+        },
+        "acceptance": None,
+        "runtime": {
+            "backend": "legacy",
+            "version": "4.6.2",
+            "x64": True,
+            "licensed": False,
+            "managed_pid": None,
+            "quit_error": None,
+            "remaining_processes": [],
+        },
+        "explicit_exclusions": list(NATIVE_EXCLUSIONS),
+        "failure": {
+            "stage": "not_started",
+            "code": "NOT_STARTED",
+            "message": "Acceptance has not completed.",
+        },
+    }
+
+
+def _fail_report(
+    request: NativeLccAcceptanceRequest,
+    current: Mapping[str, Any],
+    stage: str,
+    error: BaseException,
+) -> dict[str, Any]:
+    report = copy.deepcopy(dict(current))
+    report.update(_metadata(request, str(report["run_id"]), "failed"))
+    report["status"] = "FAIL"
+    report["acceptance"] = None
+    report["failure"] = {
+        "stage": stage,
+        "code": error.code if isinstance(error, BackendError) else type(error).__name__,
+        "message": str(error)[:1024] or type(error).__name__,
+    }
+    if report["build"]["terminal_state"] == "published":
+        report["build"]["terminal_state"] = "failed"
+    return report
+
+
+def write_native_lcc_setup_failure_report(
+    request: NativeLccAcceptanceRequest,
+    error: BaseException,
+    *,
+    process_reader: Callable[[], Sequence[Mapping[str, Any]]] = (
+        list_pscad_processes
+    ),
+) -> dict[str, Any]:
+    template_before = _sha256(
+        _regular_path(request.template_path, "sources.template")
+    )
+    master_before = _sha256(_regular_path(request.master_path, "sources.master"))
+    report = _initial_fail_report(
+        request,
+        request.report_path.parent.name,
+        template_before,
+        master_before,
+    )
+    report = _fail_report(request, report, "setup", error)
+    report["runtime"]["remaining_processes"] = [
+        dict(value) for value in process_reader()
+    ]
+    normalized = validate_native_lcc_acceptance_report(report)
+    write_preflight_report(request.report_path, normalized)
+    index_explicit_reports([{"path": str(request.report_path)}])
+    return normalized
+
+
+def _build_evidence_from_record(
+    request: NativeLccAcceptanceRequest,
+    plan: Mapping[str, Any],
+    record: Mapping[str, Any],
+) -> dict[str, Any]:
+    build_id = str(record["build_id"])
+    journal = _journal_path(request.workspace_root, build_id)
+    return {
+        "project_name": request.project_name,
+        "workspace": request.workspace_root.resolve().as_posix(),
+        "build_id": build_id,
+        "plan_hash": str(plan["plan_hash"]),
+        "journal_path": journal.resolve().as_posix() if journal.is_file() else None,
+        "journal_sha256": _sha256(journal) if journal.is_file() else None,
+        "history": _history(record),
+        "terminal_state": str(record.get("state") or "unknown"),
+    }
+
+
+async def _pass_report_from_record(
+    request: NativeLccAcceptanceRequest,
+    plan: Mapping[str, Any],
+    record: Mapping[str, Any],
+    service: Any,
+    template_before: str,
+    master_before: str,
+) -> dict[str, Any]:
+    if (
+        record.get("state") != "published"
+        or tuple(_history(record)) != SUCCESS_HISTORY
+    ):
+        raise BackendError(
+            "LCC_NATIVE_HISTORY_INVALID",
+            "Native build did not reach the exact published history.",
+            "hvdc",
+            "run_native_lcc_acceptance",
+        )
+    result = record.get("result")
+    if not isinstance(result, Mapping) or not isinstance(
+        result.get("acceptance"),
+        Mapping,
+    ):
+        raise BackendError(
+            "LCC_NATIVE_RESULT_INVALID",
+            "Native result is incomplete.",
+            "hvdc",
+            "run_native_lcc_acceptance",
+        )
+    acceptance = result["acceptance"]
+    checks = acceptance.get("checks")
+    evidence = acceptance.get("evidence")
+    if (
+        acceptance.get("verdict") != "PASS"
+        or not isinstance(checks, Mapping)
+        or not isinstance(evidence, Mapping)
+    ):
+        raise BackendError(
+            "LCC_ACCEPTANCE_FAILED",
+            "Native physical checks did not pass.",
+            "hvdc",
+            "run_native_lcc_acceptance",
+        )
+    if any(checks.get(name) is not True for name in REQUIRED_CHECKS):
+        raise BackendError(
+            "LCC_ACCEPTANCE_FAILED",
+            "A required native check is false.",
+            "hvdc",
+            "run_native_lcc_acceptance",
+        )
+
+    build = _build_evidence_from_record(request, plan, record)
+    selected_output = Path(str(result["output_file"]))
+    raw_output_parts = result.get("output_parts")
+    if not isinstance(raw_output_parts, Sequence) or isinstance(
+        raw_output_parts,
+        (str, bytes),
+    ):
+        raise BackendError(
+            "LCC_NATIVE_RESULT_INVALID",
+            "Native output parts are incomplete.",
+            "hvdc",
+            "run_native_lcc_acceptance",
+        )
+    output_parts = [Path(str(value)) for value in raw_output_parts]
+    output_base = re.sub(r"_\d{2}$", "", selected_output.stem)
+    output_metadata = [
+        selected_output.with_name(output_base + suffix)
+        for suffix in (".inf", ".infx")
+        if selected_output.with_name(output_base + suffix).is_file()
+    ]
+    runtime = await service.status()
+    if not isinstance(runtime, Mapping):
+        raise BackendError(
+            "LCC_NATIVE_RUNTIME_INVALID",
+            "Native runtime status is not an object.",
+            "hvdc",
+            "run_native_lcc_acceptance",
+        )
+    session = runtime.get("session")
+    managed_pid = session.get("managed_pid") if isinstance(session, Mapping) else None
+    acceptance_evidence = {
+        "fault_time_s": float(evidence["fault_time_s"]),
+        "fault_duration_s": float(evidence["fault_duration_s"]),
+        "current_limit_pu": float(evidence["current_limit_pu"]),
+        "dc_current_peak_pu": float(evidence["dc_current_peak_pu"]),
+        "recovery_window_s": float(evidence["recovery_window_s"]),
+        "channels": copy.deepcopy(evidence["channels"]),
+    }
+    return {
+        **_metadata(request, request.report_path.parent.name, NATIVE_CAPABILITY),
+        "status": "PASS",
+        "repository": {
+            "branch": request.branch,
+            "commit": request.commit,
+            "clean": True,
+        },
+        "preflight": {
+            "status": str(request.preflight["status"]),
+            "sha256": str(request.preflight["sha256"]),
+            "snapshot": copy.deepcopy(request.preflight["snapshot"]),
+        },
+        "sources": {
+            **_source_evidence(request, template_before, master_before),
+            "template": {
+                "path": request.template_path.resolve().as_posix(),
+                "before": template_before,
+                "after": _sha256(request.template_path),
+            },
+            "master": {
+                "path": request.master_path.resolve().as_posix(),
+                "before": master_before,
+                "after": _sha256(request.master_path),
+            },
+        },
+        "build": build,
+        "artifacts": {
+            "project": _artifact(Path(str(record["target_path"]))),
+            "library": _artifact(Path(str(result["final_library_path"]))),
+            "scenario": _artifact(Path(str(result["scenario_source"]))),
+            "selected_output": _artifact(selected_output),
+            "output_parts": [_artifact(path) for path in output_parts],
+            "output_metadata": [_artifact(path) for path in output_metadata],
+        },
+        "acceptance": {
+            "verdict": "PASS",
+            "checks": {name: True for name in REQUIRED_CHECKS},
+            "evidence": acceptance_evidence,
+        },
+        "runtime": {
+            "backend": str(runtime.get("backend")),
+            "version": str(runtime.get("version")),
+            "x64": runtime.get("x64") is True,
+            "licensed": runtime.get("licensed") is True,
+            "managed_pid": managed_pid,
+            "quit_error": None,
+            "remaining_processes": [],
+        },
+        "explicit_exclusions": list(NATIVE_EXCLUSIONS),
+        "failure": None,
+    }
+
+
+async def run_native_lcc_acceptance(
+    request: NativeLccAcceptanceRequest,
+    *,
+    service: Any,
+    builder: Any,
+    process_reader: Callable[[], Sequence[Mapping[str, Any]]] = (
+        list_pscad_processes
+    ),
+    poll_interval_s: float = 0.25,
+    timeout_s: float = 1200.0,
+) -> dict[str, Any]:
+    template_path = _regular_path(request.template_path, "sources.template")
+    master_path = _regular_path(request.master_path, "sources.master")
+    template_before = _sha256(template_path)
+    master_before = _sha256(master_path)
+    run_id = request.report_path.parent.name
+    report = _initial_fail_report(
+        request,
+        run_id,
+        template_before,
+        master_before,
+    )
+    failure: BaseException | None = None
+    failure_stage = "preflight"
+    try:
+        if request.preflight.get("status") != "PASS":
+            raise BackendError(
+                "LCC_NATIVE_PREFLIGHT_FAILED",
+                "Native acceptance preflight failed.",
+                "hvdc",
+                "run_native_lcc_acceptance",
+            )
+        failure_stage = "attach"
+        await service.attach_local()
+        runtime_status = await service.status()
+        if not isinstance(runtime_status, Mapping):
+            raise BackendError(
+                "LCC_NATIVE_RUNTIME_INVALID",
+                "Native runtime status is not an object.",
+                "hvdc",
+                "run_native_lcc_acceptance",
+            )
+        runtime_session = runtime_status.get("session")
+        report["runtime"].update(
+            {
+                "backend": str(runtime_status.get("backend")),
+                "version": str(runtime_status.get("version")),
+                "x64": runtime_status.get("x64") is True,
+                "licensed": runtime_status.get("licensed") is True,
+                "managed_pid": (
+                    runtime_session.get("managed_pid")
+                    if isinstance(runtime_session, Mapping)
+                    else None
+                ),
+            }
+        )
+        if report["runtime"]["licensed"] is not True:
+            raise BackendError(
+                "NOT_LICENSED",
+                "Native acceptance requires a licensed PSCAD runtime.",
+                "hvdc",
+                "run_native_lcc_acceptance",
+            )
+        failure_stage = "plan"
+        plan = builder.plan_model(
+            request.project_name,
+            folder=str(request.workspace_root),
+            simulation_duration_s=request.simulation_duration_s,
+            template_path=str(request.template_path),
+        )
+        failure_stage = "build"
+        started = await builder.build_model(
+            request.project_name,
+            str(plan["plan_hash"]),
+            folder=str(request.workspace_root),
+            simulation_duration_s=request.simulation_duration_s,
+            confirm=True,
+            template_path=str(request.template_path),
+        )
+        build_id = str(started["build_id"])
+        deadline = time.monotonic() + timeout_s
+        while True:
+            record = builder.get_build_status(build_id)
+            if record.get("state") in {"published", "failed", "interrupted"}:
+                break
+            if time.monotonic() >= deadline:
+                raise BackendError(
+                    "LCC_BUILD_TIMED_OUT",
+                    "Native acceptance timed out.",
+                    "hvdc",
+                    "run_native_lcc_acceptance",
+                )
+            await asyncio.sleep(poll_interval_s)
+        report["build"] = _build_evidence_from_record(request, plan, record)
+        if record.get("state") != "published":
+            error = (
+                record.get("error")
+                if isinstance(record.get("error"), Mapping)
+                else {}
+            )
+            raise BackendError(
+                str(error.get("code") or "LCC_BUILD_FAILED"),
+                str(error.get("message") or "Native LCC build failed."),
+                "hvdc",
+                "run_native_lcc_acceptance",
+                dict(error.get("details") or {}),
+            )
+        failure_stage = "validate"
+        report = await _pass_report_from_record(
+            request,
+            plan,
+            record,
+            service,
+            template_before,
+            master_before,
+        )
+    except BaseException as error:  # noqa: BLE001 - persist lifecycle failures
+        failure = error
+        report = _fail_report(request, report, failure_stage, error)
+    finally:
+        cleanup_error: BaseException | None = None
+        try:
+            await builder.shutdown(timeout_s=5.0)
+        except BaseException as error:  # noqa: BLE001 - cleanup controls verdict
+            cleanup_error = error
+        try:
+            await service.quit_pscad(confirm=True)
+        except BaseException as error:  # noqa: BLE001 - cleanup controls verdict
+            cleanup_error = cleanup_error or error
+        if cleanup_error is not None:
+            report["runtime"]["quit_error"] = str(cleanup_error)[:1024]
+            if failure is None:
+                failure = cleanup_error
+                report = _fail_report(request, report, "cleanup", cleanup_error)
+        report["sources"]["template"]["after"] = _sha256(template_path)
+        report["sources"]["master"]["after"] = _sha256(master_path)
+        report["runtime"]["remaining_processes"] = [
+            dict(value) for value in process_reader()
+        ]
+        if (
+            report["sources"]["template"]["before"]
+            != report["sources"]["template"]["after"]
+            or report["sources"]["master"]["before"]
+            != report["sources"]["master"]["after"]
+            or report["runtime"]["remaining_processes"]
+        ):
+            report = _fail_report(
+                request,
+                report,
+                "cleanup",
+                RuntimeError("source or process cleanup mismatch"),
+            )
+        normalized = validate_native_lcc_acceptance_report(report)
+        write_preflight_report(request.report_path, normalized)
+        indexed = index_explicit_reports([{"path": str(request.report_path)}])[0]
+        if (
+            indexed["status"] != normalized["status"]
+            or indexed["commit"] != request.commit
+        ):
+            raise BackendError(
+                "LCC_NATIVE_REPORT_INVALID",
+                "Written report did not re-index.",
+                "hvdc",
+                "run_native_lcc_acceptance",
+            )
+    return normalized
+
+
 __all__ = [
     "NATIVE_BUILDER_PATH",
     "NATIVE_CAPABILITY",
@@ -719,7 +1267,10 @@ __all__ = [
     "NATIVE_SCOPE",
     "REQUIRED_CHECKS",
     "SUCCESS_HISTORY",
+    "NativeLccAcceptanceRequest",
     "load_native_lcc_acceptance_report",
     "promote_native_lcc_report",
+    "run_native_lcc_acceptance",
     "validate_native_lcc_acceptance_report",
+    "write_native_lcc_setup_failure_report",
 ]

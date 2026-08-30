@@ -912,7 +912,27 @@ def evaluate_native_lcc_commutation(
         "fault_time_s": fault_time_s,
         "fault_duration_s": fault_duration_s,
         "current_limit_pu": current_limit_pu,
+        "recovery_window_s": float(recovery_delay_s),
     }
+    indicator_record: Mapping[str, Any] | None = None
+    channels: dict[str, dict[str, Any]] = {}
+
+    def channel_identity(
+        channel: tuple[Mapping[str, Any], list[float], list[float]],
+    ) -> dict[str, Any]:
+        record, times, _values = channel
+        return {
+            "path": str(record.get("path") or record.get("name") or ""),
+            "units": str(record.get("units", record.get("unit", ""))),
+            "samples": len(times),
+            "domain_start_s": float(times[0]),
+            "domain_end_s": float(times[-1]),
+        }
+
+    if fault is not None:
+        channels["fault_active"] = channel_identity(fault)
+    if current is not None:
+        channels["dc_current"] = channel_identity(current)
     fault_indices: list[int] = []
     if fault is not None:
         times, values = fault[1], fault[2]
@@ -942,6 +962,8 @@ def evaluate_native_lcc_commutation(
                 ]
             baseline = sum(pre[-min(len(pre), 20) :]) / max(1, min(len(pre), 20)) if pre else float("nan")
             checks["failure_indication"] = bool(during) and math.isfinite(baseline) and min(during) <= baseline - 1.0
+            if checks["failure_indication"]:
+                indicator_record = gamma[0]
             if after and math.isfinite(baseline):
                 tail = sum(after[-min(len(after), 20) :]) / max(1, min(len(after), 20))
                 checks["recovered"] = abs(tail - baseline) <= max(2.0, abs(baseline) * 0.2)
@@ -949,12 +971,36 @@ def evaluate_native_lcc_commutation(
             times, values = dc_voltage[1], dc_voltage[2]
             during = [value for time, value in zip(times, values) if fault_time_s <= time <= fault_time_s + fault_duration_s]
             checks["failure_indication"] = bool(during) and min(during) < -0.02
+            if checks["failure_indication"]:
+                indicator_record = dc_voltage[0]
         if not checks["failure_indication"] and ac_rms is not None:
             times, values = ac_rms[1], ac_rms[2]
             pre = [value for time, value in zip(times, values) if time < fault_time_s]
             during = [value for time, value in zip(times, values) if fault_time_s <= time <= fault_time_s + fault_duration_s]
             baseline = sum(pre[-min(len(pre), 20) :]) / max(1, min(len(pre), 20)) if pre else float("nan")
             checks["failure_indication"] = bool(during) and math.isfinite(baseline) and min(during) <= baseline * 0.8
+            if checks["failure_indication"]:
+                indicator_record = ac_rms[0]
+    if indicator_record is not None:
+        indicator_sample = _sample(indicator_record)
+        if indicator_sample is not None:
+            channels["failure_indicator"] = {
+                "path": str(
+                    indicator_record.get("path")
+                    or indicator_record.get("name")
+                    or ""
+                ),
+                "units": str(
+                    indicator_record.get(
+                        "units",
+                        indicator_record.get("unit", ""),
+                    )
+                ),
+                "samples": len(indicator_sample[0]),
+                "domain_start_s": float(indicator_sample[0][0]),
+                "domain_end_s": float(indicator_sample[0][-1]),
+            }
+    evidence["channels"] = channels
     if missing:
         verdict = "INCOMPLETE_ANALYSIS"
     else:
