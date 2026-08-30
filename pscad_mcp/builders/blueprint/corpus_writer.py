@@ -1215,6 +1215,147 @@ def _validate_v2_relations(graph: ProjectGraph) -> None:
             )
 
 
+def _v1_graph_projection(record: Mapping[str, Any]) -> dict[str, Any]:
+    result = {key: record[key] for key in _GRAPH_V1_FIELDS}
+    result["definitions"] = [
+        {
+            **{key: value for key, value in definition.items() if key != "ports"},
+            "ports": [
+                {
+                    key: value
+                    for key, value in port.items()
+                    if key
+                    in {
+                        "key",
+                        "name",
+                        "model",
+                        "dimension",
+                        "mode",
+                        "type",
+                        "offset",
+                    }
+                }
+                for port in definition["ports"]
+            ],
+        }
+        for definition in record["definitions"]
+    ]
+    result["connections"] = [
+        {key: value for key, value in connection.items() if key != "namespace"}
+        for connection in record["connections"]
+    ]
+    return result
+
+
+def _parse_v2_definition_evidence(
+    value: Any,
+    base: tuple[CorpusDefinition, ...],
+) -> tuple[CorpusDefinition, ...]:
+    base_by_key = {item.key: item for item in base}
+    result = []
+    for index, item in enumerate(_array(value, "graph.definitions")):
+        path = f"graph.definitions[{index}]"
+        record = _exact(
+            item,
+            {"key", "name", "class_id", "parameters", "ports", "canvas_key"},
+            path,
+        )
+        key = _string(record["key"], f"{path}.key")
+        definition = base_by_key.get(key)
+        if definition is None:
+            raise _error("Definition evidence is inconsistent.", path=path)
+        base_ports = {port.key: port for port in definition.ports}
+        ports = []
+        for port_index, port_item in enumerate(
+            _array(record["ports"], f"{path}.ports")
+        ):
+            port_path = f"{path}.ports[{port_index}]"
+            port_record = _exact(
+                port_item,
+                {
+                    "key",
+                    "name",
+                    "model",
+                    "dimension",
+                    "mode",
+                    "type",
+                    "offset",
+                    "occurrence",
+                    "kind",
+                    "condition",
+                    "page",
+                    "required",
+                },
+                port_path,
+            )
+            port_key = _string(port_record["key"], f"{port_path}.key")
+            base_port = base_ports.get(port_key)
+            if base_port is None:
+                raise _error("Definition-port evidence is inconsistent.", path=port_path)
+            required = port_record["required"]
+            if required is not None:
+                required = _boolean(required, f"{port_path}.required")
+            ports.append(
+                replace(
+                    base_port,
+                    occurrence=_integer(
+                        port_record["occurrence"],
+                        f"{port_path}.occurrence",
+                    ),
+                    kind=_string(
+                        port_record["kind"],
+                        f"{port_path}.kind",
+                        empty=True,
+                    ),
+                    condition=_optional_string(
+                        port_record["condition"],
+                        f"{port_path}.condition",
+                    ),
+                    page=_boolean(port_record["page"], f"{port_path}.page"),
+                    required=required,
+                )
+            )
+        if set(base_ports) != {port.key for port in ports}:
+            raise _error("Definition-port evidence is incomplete.", path=path)
+        result.append(replace(definition, ports=tuple(ports)))
+    if set(base_by_key) != {item.key for item in result}:
+        raise _error("Definition evidence is incomplete.", path="graph.definitions")
+    return tuple(result)
+
+
+def _parse_v2_connection_evidence(
+    value: Any,
+    base: tuple[CorpusConnection, ...],
+) -> tuple[CorpusConnection, ...]:
+    base_by_key = {item.key: item for item in base}
+    result = []
+    for index, item in enumerate(_array(value, "graph.connections")):
+        path = f"graph.connections[{index}]"
+        record = _exact(
+            item,
+            {
+                "key",
+                "canvas_key",
+                "kind",
+                "vertices",
+                "endpoints",
+                "source_definition",
+                "resolution",
+                "namespace",
+            },
+            path,
+        )
+        key = _string(record["key"], f"{path}.key")
+        connection = base_by_key.get(key)
+        namespace = _string(record["namespace"], f"{path}.namespace")
+        if connection is None or namespace not in {"electrical", "data", "unknown"}:
+            raise _error("Connection evidence is inconsistent.", path=path)
+        result.append(replace(connection, namespace=namespace))
+    if set(base_by_key) != {item.key for item in result}:
+        raise _error("Connection evidence is incomplete.", path="graph.connections")
+    return tuple(result)
+
+
 def _parse_graph_v2(value: Any) -> ProjectGraph:
     record = _exact(value, _GRAPH_V2_FIELDS, "graph")
     if type(record["schema_version"]) is not int or record["schema_version"] != 2:
@@ -1225,9 +1366,17 @@ def _parse_graph_v2(value: Any) -> ProjectGraph:
             path="graph.normalization_profile",
         )
 
-    base = _parse_graph_v1({key: record[key] for key in _GRAPH_V1_FIELDS})
+    base = _parse_graph_v1(_v1_graph_projection(record))
     graph = replace(
         base,
+        definitions=_parse_v2_definition_evidence(
+            record["definitions"],
+            base.definitions,
+        ),
+        connections=_parse_v2_connection_evidence(
+            record["connections"],
+            base.connections,
+        ),
         schema_version=2,
         normalization_profile="pscad-xml-v2",
         definition_classifications=_parse_definition_classifications(

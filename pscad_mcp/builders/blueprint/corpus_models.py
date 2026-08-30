@@ -155,9 +155,14 @@ class DefinitionPort:
     mode: str
     type: str
     offset: tuple[int, int]
+    occurrence: int = 0
+    kind: str = ""
+    condition: str | None = None
+    page: bool = False
+    required: bool | None = None
 
-    def to_dict(self) -> dict[str, Any]:
-        return {
+    def to_dict(self, schema_version: int = 1) -> dict[str, Any]:
+        result = {
             "key": self.key,
             "name": self.name,
             "model": self.model,
@@ -166,6 +171,17 @@ class DefinitionPort:
             "type": self.type,
             "offset": list(self.offset),
         }
+        if schema_version == 2:
+            result.update(
+                {
+                    "occurrence": self.occurrence,
+                    "kind": self.kind,
+                    "condition": self.condition,
+                    "page": self.page,
+                    "required": self.required,
+                }
+            )
+        return result
 
 
 @dataclass(frozen=True)
@@ -177,13 +193,13 @@ class CorpusDefinition:
     ports: tuple[DefinitionPort, ...]
     canvas_key: str | None
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self, schema_version: int = 1) -> dict[str, Any]:
         return {
             "key": self.key,
             "name": self.name,
             "class_id": self.class_id,
             "parameters": [parameter.to_dict() for parameter in self.parameters],
-            "ports": [port.to_dict() for port in self.ports],
+            "ports": [port.to_dict(schema_version) for port in self.ports],
             "canvas_key": self.canvas_key,
         }
 
@@ -237,9 +253,10 @@ class CorpusConnection:
     endpoints: tuple[str, ...]
     source_definition: str | None
     resolution: str
+    namespace: str = "unknown"
 
-    def to_dict(self) -> dict[str, Any]:
-        return {
+    def to_dict(self, schema_version: int = 1) -> dict[str, Any]:
+        result = {
             "key": self.key,
             "canvas_key": self.canvas_key,
             "kind": self.kind,
@@ -248,6 +265,9 @@ class CorpusConnection:
             "source_definition": self.source_definition,
             "resolution": self.resolution,
         }
+        if schema_version == 2:
+            result["namespace"] = self.namespace
+        return result
 
 
 @dataclass(frozen=True)
@@ -317,10 +337,16 @@ class ProjectGraph:
             "pscad_version": self.pscad_version,
             "target": self.target,
             "settings": json_safe(self.settings),
-            "definitions": [definition.to_dict() for definition in self.definitions],
+            "definitions": [
+                definition.to_dict(self.schema_version)
+                for definition in self.definitions
+            ],
             "canvases": [canvas.to_dict() for canvas in self.canvases],
             "components": [component.to_dict() for component in self.components],
-            "connections": [connection.to_dict() for connection in self.connections],
+            "connections": [
+                connection.to_dict(self.schema_version)
+                for connection in self.connections
+            ],
             "output_channels": [channel.to_dict() for channel in self.output_channels],
             "warnings": [warning.to_dict() for warning in self.warnings],
         }

@@ -1,17 +1,24 @@
 from __future__ import annotations
 
-from dataclasses import replace
 import hashlib
 import json
-from pathlib import Path
 import shutil
+from dataclasses import replace
+from pathlib import Path
 
 import pytest
 
-from pscad_mcp.builders.blueprint.corpus_extractor import ExtractionLimits, extract_project, graph_signature
-from pscad_mcp.builders.blueprint.corpus_models import CorpusDependency, CorpusSource, CorpusWarning
+from pscad_mcp.builders.blueprint.corpus_extractor import (
+    ExtractionLimits,
+    extract_project,
+    graph_signature,
+)
+from pscad_mcp.builders.blueprint.corpus_models import (
+    CorpusDependency,
+    CorpusSource,
+    CorpusWarning,
+)
 from pscad_mcp.core.backend.base import BackendError
-
 
 FIXTURES = Path(__file__).parent / "fixtures" / "blueprint_corpus"
 
@@ -322,3 +329,62 @@ def test_pscad_wire_branch_stub_is_a_bounded_builtin_definition(tmp_path):
 
     assert branch.source_definition == "definition:builtin:stub"
     assert nested.definition_key == "definition:user:main"
+
+
+def test_v2_extraction_preserves_port_and_conductor_evidence(tmp_path):
+    source_path = copy_fixture(tmp_path, "mixed-signal-v2.pscx")
+    before = source_path.read_bytes()
+    source = source_contract(source_path)
+
+    graph = extract_project(
+        tmp_path,
+        source,
+        schema_version=2,
+        normalization_profile="pscad-xml-v2",
+    )
+
+    controller = next(item for item in graph.definitions if item.name == "Controller")
+    assert [
+        (
+            port.name,
+            port.occurrence,
+            port.condition,
+            port.kind,
+            port.page,
+            port.required,
+        )
+        for port in controller.ports
+    ] == [
+        ("IN", 0, "true", "transfer", True, True),
+        ("IN", 1, "View==1", "transfer", False, None),
+    ]
+    assert {
+        connection.namespace
+        for connection in graph.connections
+        if connection.canvas_key is not None
+    } == {"data", "electrical"}
+    assert graph.schema_version == 2
+    assert graph.normalization_profile == "pscad-xml-v2"
+    assert source_path.read_bytes() == before
+
+
+def test_v1_extraction_omits_v2_port_and_namespace_fields(tmp_path):
+    graph = extract_fixture(tmp_path, "minimal.pscx")
+    value = graph.to_dict()
+
+    assert "occurrence" not in value["definitions"][0]["ports"][0]
+    assert "namespace" not in value["connections"][0]
+
+
+def test_extraction_rejects_a_mismatched_schema_profile(tmp_path):
+    source_path = copy_fixture(tmp_path, "minimal.pscx")
+
+    with pytest.raises(BackendError) as raised:
+        extract_project(
+            tmp_path,
+            source_contract(source_path),
+            schema_version=2,
+            normalization_profile="pscad-xml-v1",
+        )
+
+    assert raised.value.code == "CORPUS_XML_INVALID"
