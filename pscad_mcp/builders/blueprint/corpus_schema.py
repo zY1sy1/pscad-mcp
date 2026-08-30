@@ -2,17 +2,26 @@
 
 from __future__ import annotations
 
-from pathlib import PurePath
 import re
-from typing import Any, Mapping
+from collections.abc import Mapping
+from pathlib import PurePath
+from typing import Any
 
 from ...core.backend.base import BackendError
-from .corpus_models import CorpusDependency, CorpusSource, CorpusSpec
-
+from .corpus_models import (
+    CorpusDefinitionSource,
+    CorpusDependency,
+    CorpusSource,
+    CorpusSpec,
+)
 
 _SHA256 = re.compile(r"[0-9a-f]{64}")
 _PORTABLE_NAME = re.compile(r"[a-z0-9][a-z0-9._-]*")
 _DEPENDENCY_SUFFIXES = {".pscx", ".pslx", ".psmx"}
+_DEFINITION_SUFFIXES = {".pscx", ".pslx"}
+_SPEC_V1_FIELDS = {"schema_version", "normalization_profile", "name", "inclusion_policy", "exclusion_policy", "entry_points"}
+_SPEC_V2_FIELDS = _SPEC_V1_FIELDS | {"definition_sources"}
+_DEFINITION_POLICY = "ports-and-classification-v1"
 
 
 def _error(code: str, message: str, path: str) -> BackendError:
@@ -100,19 +109,34 @@ def _source(value: Any, index: int) -> CorpusSource:
     )
 
 
-def parse_corpus_spec(value: Any) -> CorpusSpec:
-    """Parse schema version 1 and reject non-portable or ambiguous fields."""
-
-    record = _exact(
-        value,
-        {"schema_version", "normalization_profile", "name", "inclusion_policy", "exclusion_policy", "entry_points"},
-        "corpus_spec",
+def _definition_source(value: Any, index: int) -> CorpusDefinitionSource:
+    path = f"corpus_spec.definition_sources[{index}]"
+    record = _exact(value, {"namespace", "basename", "byte_length", "sha256", "pscad_versions", "policy"}, path)
+    if record["policy"] != _DEFINITION_POLICY:
+        raise _error("CORPUS_SPEC_INVALID", f"{path}.policy must be {_DEFINITION_POLICY}.", f"{path}.policy")
+    return CorpusDefinitionSource(
+        namespace=_portable_name(record["namespace"], f"{path}.namespace"),
+        basename=_basename(record["basename"], f"{path}.basename", _DEFINITION_SUFFIXES),
+        byte_length=_positive_int(record["byte_length"], f"{path}.byte_length"),
+        sha256=_sha256(record["sha256"], f"{path}.sha256"),
+        pscad_versions=_versions(record["pscad_versions"], f"{path}.pscad_versions"),
+        policy=_DEFINITION_POLICY,
     )
-    version = record["schema_version"]
+
+
+def parse_corpus_spec(value: Any) -> CorpusSpec:
+    """Parse supported corpus schemas and reject non-portable or ambiguous fields."""
+
+    if not isinstance(value, Mapping) or not all(isinstance(key, str) for key in value):
+        raise _error("CORPUS_SPEC_INVALID", "corpus_spec must be an object.", "corpus_spec")
+    version = value.get("schema_version")
     if not isinstance(version, int) or isinstance(version, bool) or version < 1:
         raise _error("CORPUS_SPEC_INVALID", "schema_version must be a positive integer.", "corpus_spec.schema_version")
-    if version != 1:
-        raise _error("CORPUS_SPEC_UNSUPPORTED", "Only corpus schema version 1 is supported.", "corpus_spec.schema_version")
+    if version not in (1, 2):
+        raise _error("CORPUS_SPEC_UNSUPPORTED", "Only corpus schema versions 1 and 2 are supported.", "corpus_spec.schema_version")
+    record = _exact(value, _SPEC_V2_FIELDS if version == 2 else _SPEC_V1_FIELDS, "corpus_spec")
+    if version == 2 and record["normalization_profile"] != "pscad-xml-v2":
+        raise _error("CORPUS_SPEC_INVALID", "corpus_spec.normalization_profile must be pscad-xml-v2.", "corpus_spec.normalization_profile")
     entry_values = record["entry_points"]
     if not isinstance(entry_values, list) or not entry_values:
         raise _error("CORPUS_SPEC_INVALID", "entry_points must be a non-empty array.", "corpus_spec.entry_points")
@@ -121,11 +145,21 @@ def parse_corpus_spec(value: Any) -> CorpusSpec:
     basenames = [item.basename for item in entries]
     if len(set(project_ids)) != len(project_ids) or len(set(basenames)) != len(basenames):
         raise _error("CORPUS_SPEC_INVALID", "Entry-point project IDs and basenames must be unique.", "corpus_spec.entry_points")
+    definition_sources: tuple[CorpusDefinitionSource, ...] = ()
+    if version == 2:
+        definition_values = record["definition_sources"]
+        if not isinstance(definition_values, list) or not definition_values:
+            raise _error("CORPUS_SPEC_INVALID", "definition_sources must be a non-empty array.", "corpus_spec.definition_sources")
+        definition_sources = tuple(_definition_source(item, index) for index, item in enumerate(definition_values))
+        keys = [key for source in definition_sources for key in source.keys]
+        if len(set(keys)) != len(keys):
+            raise _error("CORPUS_SPEC_INVALID", "definition_sources namespace and version keys must be unique.", "corpus_spec.definition_sources")
     return CorpusSpec(
-        schema_version=1,
+        schema_version=version,
         normalization_profile=_portable_name(record["normalization_profile"], "corpus_spec.normalization_profile"),
         name=_portable_name(record["name"], "corpus_spec.name"),
         inclusion_policy=_portable_name(record["inclusion_policy"], "corpus_spec.inclusion_policy"),
         exclusion_policy=_portable_name(record["exclusion_policy"], "corpus_spec.exclusion_policy"),
         entry_points=entries,
+        definition_sources=definition_sources,
     )

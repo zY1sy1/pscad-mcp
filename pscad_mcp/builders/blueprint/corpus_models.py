@@ -45,6 +45,30 @@ class CorpusSource:
 
 
 @dataclass(frozen=True)
+class CorpusDefinitionSource:
+    namespace: str
+    basename: str
+    byte_length: int
+    sha256: str
+    pscad_versions: tuple[str, ...]
+    policy: str
+
+    @property
+    def keys(self) -> tuple[tuple[str, str], ...]:
+        return tuple((self.namespace, version) for version in self.pscad_versions)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "namespace": self.namespace,
+            "basename": self.basename,
+            "byte_length": self.byte_length,
+            "sha256": self.sha256,
+            "pscad_versions": list(self.pscad_versions),
+            "policy": self.policy,
+        }
+
+
+@dataclass(frozen=True)
 class CorpusSpec:
     schema_version: int
     normalization_profile: str
@@ -52,9 +76,10 @@ class CorpusSpec:
     inclusion_policy: str
     exclusion_policy: str
     entry_points: tuple[CorpusSource, ...]
+    definition_sources: tuple[CorpusDefinitionSource, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        result = {
             "schema_version": self.schema_version,
             "normalization_profile": self.normalization_profile,
             "name": self.name,
@@ -62,6 +87,9 @@ class CorpusSpec:
             "exclusion_policy": self.exclusion_policy,
             "entry_points": [entry.to_dict() for entry in self.entry_points],
         }
+        if self.schema_version == 2:
+            result["definition_sources"] = [source.to_dict() for source in self.definition_sources]
+        return result
 
 
 @dataclass(frozen=True)
