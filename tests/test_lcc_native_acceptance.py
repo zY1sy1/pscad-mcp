@@ -164,6 +164,19 @@ def test_valid_pass_report_is_normalized_without_mutation():
     assert payload == original
 
 
+def test_valid_pass_report_preserves_undeclared_observed_channel_units():
+    payload = valid_report()
+    channels = payload["acceptance"]["evidence"]["channels"]
+    channels["dc_current"]["units"] = ""
+    channels["failure_indicator"]["units"] = ""
+
+    normalized = subject()(payload)
+
+    observed = normalized["acceptance"]["evidence"]["channels"]
+    assert observed["dc_current"]["units"] == ""
+    assert observed["failure_indicator"]["units"] == ""
+
+
 @pytest.mark.parametrize(
     "mutation",
     [

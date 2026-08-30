@@ -114,6 +114,13 @@ def _text(value: Any, field: str) -> str:
     return value.strip()
 
 
+def _observed_units(value: Any, field: str) -> str:
+    # PSCAD 4.6 emits blank Units for some valid official-template PGB channels.
+    if not isinstance(value, str):
+        raise _error(field, f"{field} must be text.")
+    return value.strip()
+
+
 def _hash(value: Any, field: str) -> str:
     text = _text(value, field)
     if _HASH.fullmatch(text) is None:
@@ -414,7 +421,7 @@ def _validate_acceptance(value: Any) -> dict[str, Any]:
                 channel["path"],
                 f"acceptance.evidence.channels.{name}.path",
             ),
-            "units": _text(
+            "units": _observed_units(
                 channel["units"],
                 f"acceptance.evidence.channels.{name}.units",
             ),
