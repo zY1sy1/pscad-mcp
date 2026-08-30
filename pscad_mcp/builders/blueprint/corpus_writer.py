@@ -9,7 +9,7 @@ import re
 import shutil
 import tempfile
 import unicodedata
-from collections import Counter
+from collections import Counter, defaultdict
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import replace
 from pathlib import Path, PurePosixPath
@@ -1063,6 +1063,10 @@ def _validate_v2_relations(graph: ProjectGraph) -> None:
     labels = {item.key: item for item in graph.label_occurrences}
     ports = {item.key: item for item in graph.instance_ports}
     nets = {item.key: item for item in graph.confirmed_nets}
+    inner_port_owners = {
+        item.inner_port_key: f"boundary:{item.child_canvas_key}"
+        for item in graph.hierarchy_relations
+    }
     occurrence_canvases = {
         item.canvas_key
         for collection in (
@@ -1103,9 +1107,15 @@ def _validate_v2_relations(graph: ProjectGraph) -> None:
             path="graph.label_occurrences",
         )
     if any(
-        item.component_key not in components
-        or item.source_component_key
-        != components[item.component_key].source_component_key
+        (
+            item.component_key in components
+            and item.source_component_key
+            != components[item.component_key].source_component_key
+        )
+        or (
+            item.component_key not in components
+            and inner_port_owners.get(item.key) != item.component_key
+        )
         for item in graph.instance_ports
     ):
         raise _error(
@@ -1179,6 +1189,10 @@ def _validate_v2_relations(graph: ProjectGraph) -> None:
             path="graph.port_net_memberships",
         )
 
+    net_keys_by_port = defaultdict(set)
+    for net in graph.confirmed_nets:
+        for port_key in net.port_keys:
+            net_keys_by_port[port_key].add(net.key)
     for relation in graph.hierarchy_relations:
         outer = ports.get(relation.outer_port_key)
         inner = ports.get(relation.inner_port_key)
@@ -1188,7 +1202,15 @@ def _validate_v2_relations(graph: ProjectGraph) -> None:
             or outer is None
             or inner is None
             or outer.component_key != relation.parent_component_key
-            or components[inner.component_key].canvas_key != relation.child_canvas_key
+            or (
+                inner.component_key in components
+                and components[inner.component_key].canvas_key
+                != relation.child_canvas_key
+            )
+            or (
+                inner.component_key not in components
+                and inner.component_key != f"boundary:{relation.child_canvas_key}"
+            )
             or not outer.active
             or not inner.active
             or outer.namespace != relation.namespace
@@ -1203,6 +1225,14 @@ def _validate_v2_relations(graph: ProjectGraph) -> None:
         ):
             raise _error(
                 "Hierarchy relation references are invalid.",
+                path="graph.hierarchy_relations",
+            )
+        if not (
+            net_keys_by_port[relation.outer_port_key]
+            & net_keys_by_port[relation.inner_port_key]
+        ):
+            raise _error(
+                "Hierarchy relation is not confirmed by one net.",
                 path="graph.hierarchy_relations",
             )
 

@@ -5,7 +5,10 @@ from __future__ import annotations
 import re
 import unicodedata
 from collections import defaultdict
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field, replace
+from pathlib import Path
+from time import perf_counter_ns
 
 from ...core.backend.base import BackendError
 from ...core.definition_metadata import (
@@ -13,21 +16,39 @@ from ...core.definition_metadata import (
     ParameterMetadata,
     PortMetadata,
 )
+from ...topology.connectivity import build_connectivity
+from ...topology.diagnostics.generic import infer_candidate_edges
 from ...topology.geometry import GeometryError, absolute_port
-from ...topology.hashing import canonical_sha256
+from ...topology.hashing import canonical_sha256, topology_sha256
+from ...topology.models import (
+    EvidenceRef,
+    ProjectTopology,
+    TopologyBoundaryLink,
+    TopologyCanvas,
+    TopologyComponent,
+    TopologyConductor,
+    TopologyLabel,
+    TopologyPort,
+)
 from .corpus_conditions import ConditionUnresolved, evaluate_condition
-from .corpus_models import ProjectGraph
+from .corpus_models import CorpusSpec, ProjectGraph
 from .corpus_relation_models import (
+    CorpusCandidateEdge,
     CorpusComponentOccurrence,
     CorpusConductorOccurrence,
+    CorpusConfirmedNet,
     CorpusDefinitionClassification,
+    CorpusHierarchyRelation,
     CorpusInstancePort,
     CorpusLabelOccurrence,
+    CorpusPortNetMembership,
+    CorpusUnresolvedEvidence,
 )
 from .definition_catalog import (
     CatalogDefinition,
     DefinitionCatalog,
     classify_definition,
+    load_definition_catalog,
 )
 from .models import FrozenDict, freeze
 
@@ -37,6 +58,7 @@ class PendingHierarchyBoundary:
     key: str
     parent_component_key: str
     child_canvas_key: str
+    source_child_canvas_key: str
     page_port_names: tuple[str, ...]
     hierarchy_path: tuple[str, ...]
 
@@ -54,6 +76,14 @@ class ExpandedHierarchy:
 class MaterializedPorts:
     classifications: tuple[CorpusDefinitionClassification, ...]
     ports: tuple[CorpusInstancePort, ...]
+
+
+@dataclass(frozen=True)
+class RelationshipBuild:
+    graph: ProjectGraph
+    topology: ProjectTopology = field(compare=False, repr=False)
+    confirmed_topology_hash: str
+    phase_timings_ms: tuple[tuple[str, float], ...]
 
 
 @dataclass(frozen=True)
@@ -296,6 +326,7 @@ def expand_hierarchy_occurrences(graph: ProjectGraph) -> ExpandedHierarchy:
                         ),
                         parent_component_key=key,
                         child_canvas_key=child_canvas_key,
+                        source_child_canvas_key=child_canvas.key,
                         page_port_names=page_ports,
                         hierarchy_path=child_path,
                     )
@@ -587,4 +618,460 @@ def materialize_instance_ports(
     return MaterializedPorts(
         classifications=classifications,
         ports=tuple(sorted(ports, key=lambda item: item.key)),
+    )
+
+
+def _evidence(reference: str, fingerprint: str) -> tuple[EvidenceRef, ...]:
+    return (EvidenceRef("corpus", reference, fingerprint=fingerprint),)
+
+
+def _project_components(
+    expanded: ExpandedHierarchy,
+    ports: tuple[CorpusInstancePort, ...],
+    fingerprint: str,
+) -> tuple[TopologyComponent, ...]:
+    ports_by_component = defaultdict(list)
+    for port in ports:
+        if port.active:
+            ports_by_component[port.component_key].append(
+                TopologyPort(
+                    key=port.key,
+                    component_key=port.component_key,
+                    name=port.name,
+                    absolute=port.absolute,
+                    relative=port.relative,
+                    kind=port.namespace,
+                    dimension=port.dimension,
+                    active=True,
+                    evidence=_evidence(port.definition_port_key, port.source_sha256),
+                )
+            )
+    return tuple(
+        TopologyComponent(
+            key=item.key,
+            canvas_key=item.canvas_key,
+            object_id=item.key,
+            definition=item.definition_key,
+            name=item.name,
+            location=item.location,
+            orientation=item.orientation,
+            active=True,
+            parameters=tuple(sorted(item.parameters.items())),
+            ports=tuple(sorted(ports_by_component[item.key], key=lambda port: port.key)),
+            evidence=_evidence(item.source_component_key, fingerprint),
+        )
+        for item in sorted(expanded.components, key=lambda component: component.key)
+    )
+
+
+def _project_conductors(
+    expanded: ExpandedHierarchy,
+    fingerprint: str,
+) -> tuple[TopologyConductor, ...]:
+    return tuple(
+        TopologyConductor(
+            key=item.key,
+            canvas_key=item.canvas_key,
+            object_id=item.key,
+            kind=item.kind,
+            namespace=item.namespace,
+            vertices=item.vertices,
+            evidence=_evidence(item.source_connection_key, fingerprint),
+        )
+        for item in sorted(expanded.conductors, key=lambda conductor: conductor.key)
+    )
+
+
+def _project_labels(
+    expanded: ExpandedHierarchy,
+    fingerprint: str,
+) -> tuple[TopologyLabel, ...]:
+    return tuple(
+        TopologyLabel(
+            key=item.key,
+            canvas_key=item.canvas_key,
+            object_id=item.key,
+            name=item.name,
+            namespace=item.namespace,
+            scope=item.scope,
+            location=item.location,
+            evidence=_evidence(item.source_component_key, fingerprint),
+        )
+        for item in sorted(expanded.labels, key=lambda label: label.key)
+    )
+
+
+def _project_boundaries(
+    expanded: ExpandedHierarchy,
+    materialized: MaterializedPorts,
+    fingerprint: str,
+) -> tuple[
+    tuple[CorpusInstancePort, ...],
+    tuple[TopologyBoundaryLink, ...],
+    tuple[CorpusHierarchyRelation, ...],
+    dict[str, tuple[str, ...]],
+]:
+    components = {item.key: item for item in expanded.components}
+    ports_by_component_name = defaultdict(list)
+    for port in materialized.ports:
+        ports_by_component_name[(port.component_key, port.name)].append(port)
+    inner_ports = []
+    links = []
+    relations = []
+    page_ports_by_canvas = defaultdict(list)
+    for boundary in sorted(expanded.boundaries, key=lambda item: item.key):
+        parent = components[boundary.parent_component_key]
+        name_occurrences = defaultdict(int)
+        for name in boundary.page_port_names:
+            candidates = sorted(
+                ports_by_component_name[(parent.key, name)],
+                key=lambda item: item.occurrence,
+            )
+            index = name_occurrences[name]
+            name_occurrences[name] += 1
+            if index >= len(candidates):
+                raise _relation_error(
+                    "Hierarchy page port is absent from its parent component.",
+                    component=parent.key,
+                    port=name,
+                )
+            outer = candidates[index]
+            if not outer.active:
+                continue
+            owner = f"boundary:{boundary.child_canvas_key}"
+            inner_key = (
+                f"{boundary.child_canvas_key}:page:{_key_part(name)}"
+                f"#{outer.occurrence}"
+            )
+            inner = CorpusInstancePort(
+                key=inner_key,
+                component_key=owner,
+                source_component_key=outer.source_component_key,
+                definition_port_key=outer.definition_port_key,
+                name=name,
+                occurrence=outer.occurrence,
+                relative=outer.relative,
+                absolute=outer.relative,
+                namespace=outer.namespace,
+                dimension=outer.dimension,
+                active=True,
+                source_sha256=outer.source_sha256,
+            )
+            link_key = (
+                f"{boundary.key}:port:{_key_part(name)}#{outer.occurrence}"
+            )
+            inner_ports.append(inner)
+            page_ports_by_canvas[boundary.child_canvas_key].append(inner_key)
+            links.append(
+                TopologyBoundaryLink(
+                    key=link_key,
+                    outer_port_key=outer.key,
+                    outer_canvas_key=parent.canvas_key,
+                    outer_point=outer.absolute,
+                    inner_port_key=inner_key,
+                    inner_canvas_key=boundary.child_canvas_key,
+                    inner_point=inner.absolute,
+                    namespace=outer.namespace,
+                    dimension=outer.dimension,
+                    evidence=_evidence(boundary.key, fingerprint),
+                )
+            )
+            relations.append(
+                CorpusHierarchyRelation(
+                    key=link_key,
+                    parent_component_key=parent.key,
+                    child_canvas_key=boundary.child_canvas_key,
+                    outer_port_key=outer.key,
+                    inner_port_key=inner_key,
+                    namespace=outer.namespace,
+                    dimension=outer.dimension,
+                )
+            )
+    return (
+        tuple(sorted(inner_ports, key=lambda item: item.key)),
+        tuple(sorted(links, key=lambda item: item.key)),
+        tuple(sorted(relations, key=lambda item: item.key)),
+        {
+            key: tuple(sorted(values))
+            for key, values in sorted(page_ports_by_canvas.items())
+        },
+    )
+
+
+def _project_canvases(
+    graph: ProjectGraph,
+    expanded: ExpandedHierarchy,
+    boundaries: tuple[TopologyBoundaryLink, ...],
+    page_ports_by_canvas: Mapping[str, tuple[str, ...]],
+) -> tuple[TopologyCanvas, ...]:
+    source_canvases = {item.key: item for item in graph.canvases}
+    source_components = {item.key: item for item in graph.components}
+    source_connections = {item.key: item for item in graph.connections}
+    source_by_occurrence = {}
+    for item in expanded.components:
+        source_by_occurrence[item.canvas_key] = item.source_canvas_key
+    for item in expanded.conductors:
+        source = source_connections[item.source_connection_key]
+        if source.canvas_key is not None:
+            source_by_occurrence[item.canvas_key] = source.canvas_key
+    for item in expanded.labels:
+        source_by_occurrence[item.canvas_key] = source_components[
+            item.source_component_key
+        ].canvas_key
+    for item in expanded.boundaries:
+        source_by_occurrence[item.child_canvas_key] = item.source_child_canvas_key
+    parent_by_canvas = {}
+    component_by_key = {item.key: item for item in expanded.components}
+    for boundary in boundaries:
+        parent_by_canvas[boundary.inner_canvas_key] = component_by_key[
+            next(
+                item.parent_component_key
+                for item in expanded.boundaries
+                if boundary.key.startswith(item.key)
+            )
+        ].canvas_key
+    return tuple(
+        TopologyCanvas(
+            key=canvas_key,
+            name=source_canvases[source_key].name,
+            parent_key=parent_by_canvas.get(canvas_key),
+            page_ports=page_ports_by_canvas.get(canvas_key, ()),
+        )
+        for canvas_key, source_key in sorted(source_by_occurrence.items())
+    )
+
+
+def _unresolved_records(
+    topology: ProjectTopology,
+    ambiguous_crossings: tuple[tuple[str, str, tuple[int, int]], ...],
+    graph: ProjectGraph,
+) -> tuple[CorpusUnresolvedEvidence, ...]:
+    result = []
+    for item in topology.unresolved:
+        code, separator, identity = item.partition(":")
+        result.append(
+            CorpusUnresolvedEvidence(
+                code=code.upper(),
+                object_keys=(identity if separator else item,),
+                evidence=(item,),
+                classification="engineering",
+            )
+        )
+    for left, right, point in ambiguous_crossings:
+        result.append(
+            CorpusUnresolvedEvidence(
+                code="CROSSING_AMBIGUOUS",
+                object_keys=(left, right),
+                evidence=(f"{point[0]},{point[1]}",),
+                classification="engineering",
+            )
+        )
+    for warning in graph.warnings:
+        result.append(
+            CorpusUnresolvedEvidence(
+                code=warning.kind.upper(),
+                object_keys=(warning.path,),
+                evidence=(f"count:{warning.count}",),
+                classification="blocking" if warning.blocking else "engineering",
+            )
+        )
+    unique = {
+        (item.code, item.object_keys): item
+        for item in result
+    }
+    return tuple(sorted(unique.values(), key=lambda item: (item.code, item.object_keys)))
+
+
+def confirmed_relation_signature(graph: ProjectGraph) -> str:
+    return canonical_sha256(
+        {
+            "definition_classifications": [
+                item.to_dict() for item in graph.definition_classifications
+            ],
+            "component_occurrences": [
+                item.to_dict() for item in graph.component_occurrences
+            ],
+            "instance_ports": [item.to_dict() for item in graph.instance_ports],
+            "confirmed_nets": [item.to_dict() for item in graph.confirmed_nets],
+            "port_net_memberships": [
+                item.to_dict() for item in graph.port_net_memberships
+            ],
+            "hierarchy_relations": [
+                item.to_dict() for item in graph.hierarchy_relations
+            ],
+        }
+    )
+
+
+def build_relationship_truth(
+    raw_graph: ProjectGraph,
+    spec: CorpusSpec,
+    definition_bindings: Mapping[tuple[str, str], Path],
+    *,
+    infer: bool = True,
+) -> RelationshipBuild:
+    if spec.schema_version != 2 or spec.normalization_profile != "pscad-xml-v2":
+        raise _relation_error("Relationship truth requires a schema-v2 specification.")
+    matching_sources = [
+        source
+        for source in spec.entry_points
+        if source.project_id == raw_graph.project_id
+    ]
+    if (
+        len(matching_sources) != 1
+        or matching_sources[0].sha256 != raw_graph.source_sha256
+        or raw_graph.pscad_version not in matching_sources[0].pscad_versions
+    ):
+        raise _relation_error("Graph and source specification do not match.")
+
+    timings = {}
+    started = perf_counter_ns()
+    catalog = load_definition_catalog(spec.definition_sources, definition_bindings)
+    timings["definition_catalog"] = (perf_counter_ns() - started) / 1_000_000
+
+    started = perf_counter_ns()
+    expanded = expand_hierarchy_occurrences(raw_graph)
+    materialized = materialize_instance_ports(raw_graph, catalog, expanded)
+    timings["relationship_evidence"] = (perf_counter_ns() - started) / 1_000_000
+
+    inner_ports, boundary_links, hierarchy_relations, page_ports = (
+        _project_boundaries(
+            expanded,
+            materialized,
+            raw_graph.source_sha256,
+        )
+    )
+    topology = ProjectTopology(
+        project_name=raw_graph.name,
+        pscad_version=raw_graph.pscad_version,
+        canvases=_project_canvases(
+            raw_graph,
+            expanded,
+            boundary_links,
+            page_ports,
+        ),
+        components=_project_components(
+            expanded,
+            materialized.ports,
+            raw_graph.source_sha256,
+        ),
+        conductors=_project_conductors(expanded, raw_graph.source_sha256),
+        labels=_project_labels(expanded, raw_graph.source_sha256),
+        boundary_links=boundary_links,
+        unresolved=(),
+        source_fingerprints=(("corpus", raw_graph.source_sha256),),
+        source_capabilities=(
+            ("corpus.components", True),
+            ("corpus.conductors", True),
+            ("corpus.hierarchy", True),
+            ("corpus.labels", True),
+            ("corpus.ports", True),
+        ),
+        grid_step=18,
+    )
+    started = perf_counter_ns()
+    connectivity = build_connectivity(topology)
+    topology = connectivity.topology
+    timings["connectivity"] = (perf_counter_ns() - started) / 1_000_000
+
+    started = perf_counter_ns()
+    candidates = infer_candidate_edges(topology) if infer else ()
+    timings["inference"] = (perf_counter_ns() - started) / 1_000_000
+    if candidates:
+        topology = replace(topology, candidate_edges=candidates)
+
+    confirmed_nets = tuple(
+        CorpusConfirmedNet(
+            key=item.key,
+            namespace=item.namespace,
+            port_keys=item.port_keys,
+            conductor_keys=item.conductor_keys,
+            label_keys=item.label_keys,
+            junctions=item.junctions,
+        )
+        for item in topology.nets
+    )
+    net_keys_by_port = defaultdict(set)
+    for net in confirmed_nets:
+        for port_key in net.port_keys:
+            net_keys_by_port[port_key].add(net.key)
+    confirmed_hierarchy_relations = tuple(
+        item
+        for item in hierarchy_relations
+        if net_keys_by_port[item.outer_port_key]
+        & net_keys_by_port[item.inner_port_key]
+    )
+    confirmed_inner_port_keys = {
+        item.inner_port_key for item in confirmed_hierarchy_relations
+    }
+    all_ports = tuple(
+        sorted(
+            (
+                *materialized.ports,
+                *(
+                    item
+                    for item in inner_ports
+                    if item.key in confirmed_inner_port_keys
+                ),
+            ),
+            key=lambda item: item.key,
+        )
+    )
+    port_by_key = {item.key: item for item in all_ports}
+    memberships = []
+    for net in confirmed_nets:
+        for port_key in net.port_keys:
+            port = port_by_key.get(port_key)
+            if port is None:
+                raise _relation_error(
+                    "Confirmed net contains an unprojected port.",
+                    port=port_key,
+                )
+            memberships.append(
+                CorpusPortNetMembership(
+                    key=f"membership:{canonical_sha256((port_key, net.key))}",
+                    component_key=port.component_key,
+                    port_key=port_key,
+                    net_key=net.key,
+                    namespace=net.namespace,
+                )
+            )
+    candidate_records = tuple(
+        CorpusCandidateEdge(
+            left=item.left,
+            right=item.right,
+            confidence=item.confidence,
+            reasons=item.reasons,
+            counter_evidence=item.counter_evidence,
+        )
+        for item in candidates
+    )
+    graph = replace(
+        raw_graph,
+        definition_classifications=materialized.classifications,
+        component_occurrences=expanded.components,
+        conductor_occurrences=expanded.conductors,
+        label_occurrences=expanded.labels,
+        instance_ports=all_ports,
+        confirmed_nets=confirmed_nets,
+        port_net_memberships=tuple(sorted(memberships, key=lambda item: item.key)),
+        hierarchy_relations=confirmed_hierarchy_relations,
+        candidate_edges=candidate_records,
+        unresolved_evidence=_unresolved_records(
+            topology,
+            connectivity.ambiguous_crossings,
+            raw_graph,
+        ),
+        definition_catalog_signature=catalog.catalog_signature,
+    )
+    graph = replace(
+        graph,
+        confirmed_relation_signature=confirmed_relation_signature(graph),
+    )
+    catalog.verify_unchanged()
+    return RelationshipBuild(
+        graph=graph,
+        topology=topology,
+        confirmed_topology_hash=topology_sha256(topology),
+        phase_timings_ms=tuple(sorted(timings.items())),
     )
