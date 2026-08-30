@@ -174,6 +174,38 @@ def test_promote_program_report_rechecks_checkout_before_write(tmp_path):
     assert baseline_path.read_bytes() == baseline_before
 
 
+def test_promote_program_report_rejects_report_branch_mismatch(tmp_path):
+    from pscad_mcp.acceptance.promotion import promote_program_report
+
+    baseline_path = tmp_path / "docs" / "acceptance" / "baseline.json"
+    baseline_path.parent.mkdir(parents=True)
+    baseline_path.write_text(
+        json.dumps(baseline_with_blank_scope()),
+        encoding="utf-8",
+    )
+    baseline_before = baseline_path.read_bytes()
+    report = write_report(tmp_path / "report.json")
+
+    with pytest.raises(BackendError) as failure:
+        promote_program_report(
+            baseline_path,
+            report,
+            expected_scope="lcc.blank_native",
+            owner_work_package="WP1",
+            explicit_exclusions=EXCLUSIONS,
+            expected_repository_branch="codex/report-branch",
+            git_reader=lambda _root: {
+                "commit": NEW_COMMIT,
+                "branch": "codex/checkout-branch",
+                "clean": True,
+            },
+        )
+
+    assert failure.value.code == "PROGRAM_PROMOTION_REJECTED"
+    assert failure.value.details["reason"] == "branch_mismatch"
+    assert baseline_path.read_bytes() == baseline_before
+
+
 def test_promotion_rejects_report_hash_selected_before_domain_validation(tmp_path):
     baseline = baseline_with_blank_scope()
     report = write_report(tmp_path / "report.json", status="FAIL")

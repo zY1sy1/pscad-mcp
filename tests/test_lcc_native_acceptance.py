@@ -149,6 +149,45 @@ def valid_report() -> dict[str, object]:
     }
 
 
+def native_baseline_for_report(report: dict[str, object]) -> dict[str, object]:
+    from tests.test_lcc_mmc_program_baseline import valid_baseline
+
+    baseline = valid_baseline()
+    baseline["environment"]["master_path"] = report["sources"]["master"]["path"]
+    baseline["environment"]["master_sha256"] = report["sources"]["master"][
+        "after"
+    ]
+    baseline["sources"].append(
+        {
+            "source_id": "official.lcc.cigre_bidirectional.project",
+            "kind": "official_template",
+            "path": report["sources"]["template"]["path"],
+            "sha256": report["sources"]["template"]["after"],
+            "availability": "verified_local_read_only",
+        }
+    )
+    baseline["assets"].append(
+        {
+            "asset_id": "asset.lcc.fixed.manifest",
+            "scope": "lcc.fixed_autonomous",
+            "path": "pscad_mcp/assets/lcc/cigre_lcc_monopole_v1/manifest.json",
+            "sha256": report["sources"]["asset_manifest"]["sha256"],
+        }
+    )
+    baseline["scopes"].append(
+        {
+            "scope": "lcc.blank_native",
+            "builder_path": "lcc.blank_native",
+            "owner_work_package": "WP1",
+            "capability_state": "simulated",
+            "licensed_status": "NOT_RUN_ON_CURRENT_COMMIT",
+            "evidence_run_id": None,
+            "explicit_exclusions": ["current_commit_acceptance"],
+        }
+    )
+    return baseline
+
+
 def subject():
     from pscad_mcp.hvdc.builders.lcc.native_acceptance import (
         validate_native_lcc_acceptance_report,
@@ -257,6 +296,11 @@ def test_native_promotion_pins_validated_report_hash(monkeypatch, tmp_path):
         "_verify_native_report_files",
         lambda payload: None,
     )
+    monkeypatch.setattr(
+        native_acceptance,
+        "_validate_native_baseline_identities",
+        lambda baseline, payload: None,
+    )
 
     native_acceptance.promote_native_lcc_report(
         tmp_path / "baseline.json",
@@ -267,6 +311,90 @@ def test_native_promotion_pins_validated_report_hash(monkeypatch, tmp_path):
     assert calls[0][1]["expected_report_sha256"] == hashlib.sha256(
         report.read_bytes()
     ).hexdigest()
+
+
+def test_native_promotion_rejects_report_from_different_official_source(
+    monkeypatch, tmp_path
+):
+    from pscad_mcp.hvdc.builders.lcc import native_acceptance
+
+    payload = valid_report()
+    report = tmp_path / "report.json"
+    report.write_text(json.dumps(payload), encoding="utf-8")
+    baseline = native_baseline_for_report(payload)
+    baseline["sources"][-1]["sha256"] = "d" * 64
+    baseline_path = tmp_path / "baseline.json"
+    baseline_path.write_text(json.dumps(baseline), encoding="utf-8")
+    calls = []
+    monkeypatch.setattr(
+        native_acceptance,
+        "_verify_native_report_files",
+        lambda value: None,
+    )
+
+    with pytest.raises(BackendError) as failure:
+        native_acceptance.promote_native_lcc_report(
+            baseline_path,
+            report,
+            promotion_action=lambda *args, **kwargs: calls.append((args, kwargs)),
+        )
+
+    assert failure.value.code == "LCC_NATIVE_REPORT_INVALID"
+    assert failure.value.details["field"] == "sources.template"
+    assert calls == []
+
+
+def test_native_promotion_rejects_report_from_nonbaseline_compiler(
+    monkeypatch, tmp_path
+):
+    from pscad_mcp.hvdc.builders.lcc import native_acceptance
+
+    payload = valid_report()
+    snapshot = payload["preflight"]["snapshot"]
+    snapshot.update(
+        {
+            "compiler_configuration": (
+                "C:/Program Files (x86)/PSCAD46/fortran_compilers.xml"
+            ),
+            "compiler_configuration_sha256": "e" * 64,
+            "compiler_executable": (
+                "C:/Program Files (x86)/GFortran/4.6/bin/gfortran.exe"
+            ),
+            "compiler_executable_sha256": "3" * 64,
+        }
+    )
+    payload["preflight"]["sha256"] = hashlib.sha256(
+        json.dumps(
+            snapshot,
+            ensure_ascii=True,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("ascii")
+    ).hexdigest()
+    report = tmp_path / "report.json"
+    report.write_text(json.dumps(payload), encoding="utf-8")
+    baseline_path = tmp_path / "baseline.json"
+    baseline_path.write_text(
+        json.dumps(native_baseline_for_report(payload)),
+        encoding="utf-8",
+    )
+    calls = []
+    monkeypatch.setattr(
+        native_acceptance,
+        "_verify_native_report_files",
+        lambda value: None,
+    )
+
+    with pytest.raises(BackendError) as failure:
+        native_acceptance.promote_native_lcc_report(
+            baseline_path,
+            report,
+            promotion_action=lambda *args, **kwargs: calls.append((args, kwargs)),
+        )
+
+    assert failure.value.code == "LCC_NATIVE_REPORT_INVALID"
+    assert failure.value.details["field"] == "preflight.compiler_configuration"
+    assert calls == []
 
 
 class FakePscadService:
@@ -287,6 +415,14 @@ class FakePscadService:
 
     async def quit_pscad(self, *, confirm=False):
         self.calls.append(("quit_pscad", confirm))
+
+
+class WrongRuntimeService(FakePscadService):
+    async def status(self):
+        result = await super().status()
+        result["version"] = "5.0.0"
+        result["x64"] = False
+        return result
 
 
 class FakeBuilder:
@@ -420,6 +556,24 @@ class InvalidReportBuilder(FakeBuilder):
         return record
 
 
+class CompilerMutatingBuilder(FakeBuilder):
+    def __init__(self, workspace: Path, source: Path, compiler: Path) -> None:
+        super().__init__(workspace, source)
+        self.compiler = compiler
+
+    def _published_record(self):
+        record = super()._published_record()
+        self.compiler.write_bytes(b"changed compiler configuration")
+        return record
+
+
+class SourceRemovingBuilder(FakeBuilder):
+    def _published_record(self):
+        record = super()._published_record()
+        self.source.unlink()
+        return record
+
+
 def native_request(tmp_path):
     from pscad_mcp.hvdc.builders.lcc.native_acceptance import (
         NativeLccAcceptanceRequest,
@@ -429,6 +583,31 @@ def native_request(tmp_path):
     source.write_bytes(b"official")
     master = tmp_path / "master.pslx"
     master.write_bytes(b"master")
+    compiler_configuration = tmp_path / "fortran_compilers.xml"
+    compiler_configuration.write_bytes(b"compiler configuration")
+    compiler_executable = tmp_path / "gfortran.exe"
+    compiler_executable.write_bytes(b"compiler executable")
+    snapshot = copy.deepcopy(PREFLIGHT_SNAPSHOT)
+    snapshot.update(
+        {
+            "compiler_configuration": str(compiler_configuration),
+            "compiler_configuration_sha256": hashlib.sha256(
+                compiler_configuration.read_bytes()
+            ).hexdigest(),
+            "compiler_executable": str(compiler_executable),
+            "compiler_executable_sha256": hashlib.sha256(
+                compiler_executable.read_bytes()
+            ).hexdigest(),
+        }
+    )
+    preflight_hash = hashlib.sha256(
+        json.dumps(
+            snapshot,
+            ensure_ascii=True,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("ascii")
+    ).hexdigest()
     return NativeLccAcceptanceRequest(
         repository_root=tmp_path,
         workspace_root=tmp_path / "workspace",
@@ -443,8 +622,8 @@ def native_request(tmp_path):
         asset_manifest_sha256=HASH,
         preflight={
             "status": "PASS",
-            "sha256": PREFLIGHT_HASH,
-            "snapshot": PREFLIGHT_SNAPSHOT,
+            "sha256": preflight_hash,
+            "snapshot": snapshot,
         },
     )
 
@@ -528,3 +707,77 @@ def test_orchestrator_persists_fail_when_pass_report_contract_is_invalid(tmp_pat
     assert result["failure"]["stage"] == "report"
     assert request.report_path.is_file()
     assert service.calls == ["attach_local", ("quit_pscad", True)]
+
+
+def test_orchestrator_rejects_compiler_change_during_run(tmp_path):
+    from pscad_mcp.hvdc.builders.lcc.native_acceptance import (
+        run_native_lcc_acceptance,
+    )
+
+    request = native_request(tmp_path)
+    compiler = Path(request.preflight["snapshot"]["compiler_configuration"])
+    result = asyncio.run(
+        run_native_lcc_acceptance(
+            request,
+            service=FakePscadService(),
+            builder=CompilerMutatingBuilder(
+                request.workspace_root,
+                request.template_path,
+                compiler,
+            ),
+            process_reader=list,
+            poll_interval_s=0,
+        )
+    )
+
+    assert result["status"] == "FAIL"
+    assert result["failure"]["stage"] == "cleanup"
+    assert request.report_path.is_file()
+
+
+def test_orchestrator_persists_fail_when_source_becomes_unreadable(tmp_path):
+    from pscad_mcp.hvdc.builders.lcc.native_acceptance import (
+        run_native_lcc_acceptance,
+    )
+
+    request = native_request(tmp_path)
+    result = asyncio.run(
+        run_native_lcc_acceptance(
+            request,
+            service=FakePscadService(),
+            builder=SourceRemovingBuilder(
+                request.workspace_root,
+                request.template_path,
+            ),
+            process_reader=list,
+            poll_interval_s=0,
+        )
+    )
+
+    assert result["status"] == "FAIL"
+    assert result["failure"]["stage"] == "cleanup"
+    assert result["sources"]["template"]["after"] is None
+    assert request.report_path.is_file()
+
+
+def test_orchestrator_persists_fail_for_unexpected_runtime_identity(tmp_path):
+    from pscad_mcp.hvdc.builders.lcc.native_acceptance import (
+        run_native_lcc_acceptance,
+    )
+
+    request = native_request(tmp_path)
+    result = asyncio.run(
+        run_native_lcc_acceptance(
+            request,
+            service=WrongRuntimeService(),
+            builder=FakeBuilder(request.workspace_root, request.template_path),
+            process_reader=list,
+            poll_interval_s=0,
+        )
+    )
+
+    assert result["status"] == "FAIL"
+    assert result["failure"]["stage"] == "attach"
+    assert result["runtime"]["version"] == "5.0.0"
+    assert result["runtime"]["x64"] is False
+    assert request.report_path.is_file()

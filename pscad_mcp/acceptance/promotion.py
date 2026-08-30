@@ -243,6 +243,7 @@ def promote_program_report(
     repository_root: str | Path | None = None,
     git_reader: Callable[[Path], Mapping[str, Any]] = _git_reader,
     expected_report_sha256: str | None = None,
+    expected_repository_branch: str | None = None,
 ) -> dict[str, Any]:
     baseline_file = Path(baseline_path)
     root = (Path(repository_root) if repository_root is not None else baseline_file.parents[2]).resolve()
@@ -253,6 +254,16 @@ def promote_program_report(
         raise _error("detached_head", "Repository checkout must be on a named branch.")
     commit = str(identity["commit"])
     branch = str(identity["branch"])
+    if (
+        expected_repository_branch is not None
+        and branch != expected_repository_branch
+    ):
+        raise _error(
+            "branch_mismatch",
+            "Report and checkout branches differ.",
+            report_branch=expected_repository_branch,
+            repository_branch=branch,
+        )
     pinned_report_sha256 = expected_report_sha256 or _report_sha256(report_path)
     with baseline_file.open(encoding="utf-8") as stream:
         baseline = json.load(stream)

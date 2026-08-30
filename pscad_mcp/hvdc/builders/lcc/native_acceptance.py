@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from ....acceptance.baseline import validate_program_baseline
 from ....acceptance.evidence import build_run_metadata, index_explicit_reports
 from ....acceptance.preflight import write_preflight_report
 from ....acceptance.promotion import promote_program_report
@@ -226,7 +227,10 @@ def _validate_sources(value: Any, *, require_immutable: bool) -> dict[str, Any]:
             {"path", "before", "after"},
         )
         before = _hash(source["before"], f"sources.{name}.before")
-        after = _hash(source["after"], f"sources.{name}.after")
+        if source["after"] is None and not require_immutable:
+            after = None
+        else:
+            after = _hash(source["after"], f"sources.{name}.after")
         if require_immutable and before != after:
             raise _error(f"sources.{name}", f"{name} changed during acceptance.")
         result[name] = {
@@ -235,6 +239,13 @@ def _validate_sources(value: Any, *, require_immutable: bool) -> dict[str, Any]:
             "after": after,
         }
     return result
+
+
+def _cleanup_hash(path: Path) -> tuple[str | None, BaseException | None]:
+    try:
+        return _sha256(path), None
+    except BaseException as error:  # noqa: BLE001 - report unreadable inputs
+        return None, error
 
 
 def _validate_build(value: Any, *, require_published: bool) -> dict[str, Any]:
@@ -452,14 +463,18 @@ def _validate_runtime(value: Any, *, require_licensed: bool) -> dict[str, Any]:
             "remaining_processes",
         },
     )
-    if (
+    item["backend"] = _text(item["backend"], "runtime.backend")
+    item["version"] = _text(item["version"], "runtime.version")
+    if not isinstance(item["x64"], bool):
+        raise _error("runtime.x64", "x64 must be boolean.")
+    if not isinstance(item["licensed"], bool):
+        raise _error("runtime.licensed", "licensed must be boolean.")
+    if require_licensed and (
         item["backend"] != "legacy"
         or item["version"] != "4.6.2"
         or item["x64"] is not True
     ):
         raise _error("runtime", "Runtime identity is not Legacy 4.6.2 x64.")
-    if not isinstance(item["licensed"], bool):
-        raise _error("runtime.licensed", "licensed must be boolean.")
     if require_licensed and item["licensed"] is not True:
         raise _error("runtime.licensed", "PASS requires a licensed runtime.")
     if item["managed_pid"] is not None and (
@@ -699,6 +714,94 @@ def load_native_lcc_acceptance_report(
     return normalized, indexed
 
 
+def _identity_path(value: str | Path) -> str:
+    return os.path.normcase(os.path.abspath(Path(value).expanduser()))
+
+
+def _validate_native_baseline_identities(
+    baseline_path: Path,
+    report: Mapping[str, Any],
+) -> None:
+    try:
+        baseline_payload = json.loads(baseline_path.read_text(encoding="utf-8"))
+        baseline = validate_program_baseline(baseline_payload)
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, BackendError) as error:
+        raise _error("baseline", "Program baseline is invalid.") from error
+    official_sources = [
+        item
+        for item in baseline["sources"]
+        if item["source_id"] == "official.lcc.cigre_bidirectional.project"
+    ]
+    if len(official_sources) != 1:
+        raise _error(
+            "sources.template",
+            "Program baseline must name one official LCC source.",
+        )
+    official = official_sources[0]
+    template = report["sources"]["template"]
+    if (
+        _identity_path(official["path"]) != _identity_path(template["path"])
+        or official["sha256"] != template["after"]
+    ):
+        raise _error(
+            "sources.template",
+            "Native report does not use the baseline official LCC source.",
+        )
+    master = report["sources"]["master"]
+    environment = baseline["environment"]
+    if (
+        _identity_path(environment["master_path"])
+        != _identity_path(master["path"])
+        or environment["master_sha256"] != master["after"]
+    ):
+        raise _error(
+            "sources.master",
+            "Native report does not use the baseline Master source.",
+        )
+    manifests = [
+        item
+        for item in baseline["assets"]
+        if item["asset_id"] == "asset.lcc.fixed.manifest"
+    ]
+    if (
+        len(manifests) != 1
+        or manifests[0]["sha256"]
+        != report["sources"]["asset_manifest"]["sha256"]
+    ):
+        raise _error(
+            "sources.asset_manifest",
+            "Native report does not use the baseline LCC asset manifest.",
+        )
+    snapshot = report["preflight"]["snapshot"]
+    compiler = environment["compiler"]
+    if not isinstance(snapshot, Mapping):
+        raise _error("preflight", "Native preflight snapshot is invalid.")
+    for path_field, hash_field, baseline_path_field, baseline_hash_field in (
+        (
+            "compiler_configuration",
+            "compiler_configuration_sha256",
+            "configuration_path",
+            "configuration_sha256",
+        ),
+        (
+            "compiler_executable",
+            "compiler_executable_sha256",
+            "executable_path",
+            "executable_sha256",
+        ),
+    ):
+        if (
+            not isinstance(snapshot.get(path_field), str)
+            or _identity_path(snapshot[path_field])
+            != _identity_path(compiler[baseline_path_field])
+            or snapshot.get(hash_field) != compiler[baseline_hash_field]
+        ):
+            raise _error(
+                f"preflight.{path_field}",
+                "Native report does not use the baseline compiler input.",
+            )
+
+
 def promote_native_lcc_report(
     baseline_path: Path,
     report_path: Path,
@@ -714,6 +817,7 @@ def promote_native_lcc_report(
             "status",
             "Only native simulated/PASS evidence can be promoted.",
         )
+    _validate_native_baseline_identities(baseline_path, report)
     return promotion_action(
         baseline_path,
         report_path,
@@ -721,6 +825,7 @@ def promote_native_lcc_report(
         owner_work_package=NATIVE_OWNER,
         explicit_exclusions=NATIVE_EXCLUSIONS,
         expected_report_sha256=indexed["sha256"],
+        expected_repository_branch=report["repository"]["branch"],
     )
 
 
@@ -824,6 +929,36 @@ def _source_evidence(
             "sha256": request.asset_manifest_sha256,
         },
     }
+
+
+def _compiler_inputs(
+    request: NativeLccAcceptanceRequest,
+) -> tuple[tuple[Path, str], ...]:
+    snapshot = request.preflight.get("snapshot")
+    if not isinstance(snapshot, Mapping):
+        raise BackendError(
+            "LCC_NATIVE_PREFLIGHT_FAILED",
+            "Native preflight snapshot is unavailable.",
+            "hvdc",
+            "run_native_lcc_acceptance",
+        )
+    result = []
+    for path_field, hash_field in (
+        ("compiler_configuration", "compiler_configuration_sha256"),
+        ("compiler_executable", "compiler_executable_sha256"),
+    ):
+        path = _regular_path(snapshot.get(path_field), f"preflight.{path_field}")
+        expected = _hash(snapshot.get(hash_field), f"preflight.{hash_field}")
+        if _sha256(path) != expected:
+            raise BackendError(
+                "LCC_NATIVE_PREFLIGHT_FAILED",
+                "A compiler input changed after preflight.",
+                "hvdc",
+                "run_native_lcc_acceptance",
+                {"field": path_field},
+            )
+        result.append((path, expected))
+    return tuple(result)
 
 
 def _initial_fail_report(
@@ -1121,6 +1256,7 @@ async def run_native_lcc_acceptance(
     )
     failure: BaseException | None = None
     failure_stage = "preflight"
+    compiler_inputs: tuple[tuple[Path, str], ...] = ()
     try:
         if request.preflight.get("status") != "PASS":
             raise BackendError(
@@ -1129,6 +1265,7 @@ async def run_native_lcc_acceptance(
                 "hvdc",
                 "run_native_lcc_acceptance",
             )
+        compiler_inputs = _compiler_inputs(request)
         failure_stage = "attach"
         await service.attach_local()
         runtime_status = await service.status()
@@ -1153,6 +1290,17 @@ async def run_native_lcc_acceptance(
                 ),
             }
         )
+        if (
+            report["runtime"]["backend"] != "legacy"
+            or report["runtime"]["version"] != "4.6.2"
+            or report["runtime"]["x64"] is not True
+        ):
+            raise BackendError(
+                "LCC_NATIVE_RUNTIME_INVALID",
+                "Native acceptance requires Legacy PSCAD 4.6.2 x64.",
+                "hvdc",
+                "run_native_lcc_acceptance",
+            )
         if report["runtime"]["licensed"] is not True:
             raise BackendError(
                 "NOT_LICENSED",
@@ -1231,23 +1379,35 @@ async def run_native_lcc_acceptance(
             if failure is None:
                 failure = cleanup_error
                 report = _fail_report(request, report, "cleanup", cleanup_error)
-        report["sources"]["template"]["after"] = _sha256(template_path)
-        report["sources"]["master"]["after"] = _sha256(master_path)
+        template_after, template_error = _cleanup_hash(template_path)
+        master_after, master_error = _cleanup_hash(master_path)
+        report["sources"]["template"]["after"] = template_after
+        report["sources"]["master"]["after"] = master_after
         report["runtime"]["remaining_processes"] = [
             dict(value) for value in process_reader()
         ]
+        compiler_error: BaseException | None = None
+        compiler_changed = False
+        for path, expected in compiler_inputs:
+            observed, read_error = _cleanup_hash(path)
+            compiler_error = compiler_error or read_error
+            compiler_changed = compiler_changed or observed != expected
         if (
             report["sources"]["template"]["before"]
             != report["sources"]["template"]["after"]
             or report["sources"]["master"]["before"]
             != report["sources"]["master"]["after"]
+            or compiler_changed
             or report["runtime"]["remaining_processes"]
         ):
             report = _fail_report(
                 request,
                 report,
                 "cleanup",
-                RuntimeError("source or process cleanup mismatch"),
+                template_error
+                or master_error
+                or compiler_error
+                or RuntimeError("source, compiler, or process cleanup mismatch"),
             )
         try:
             normalized = validate_native_lcc_acceptance_report(report)
