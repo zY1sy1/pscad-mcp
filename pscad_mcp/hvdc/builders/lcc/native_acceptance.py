@@ -463,8 +463,10 @@ def _validate_runtime(value: Any, *, require_licensed: bool) -> dict[str, Any]:
             "remaining_processes",
         },
     )
-    item["backend"] = _text(item["backend"], "runtime.backend")
-    item["version"] = _text(item["version"], "runtime.version")
+    for name in ("backend", "version"):
+        if not isinstance(item[name], str):
+            raise _error(f"runtime.{name}", f"{name} must be text.")
+        item[name] = item[name].strip()
     if not isinstance(item["x64"], bool):
         raise _error("runtime.x64", "x64 must be boolean.")
     if not isinstance(item["licensed"], bool):
@@ -800,6 +802,32 @@ def _validate_native_baseline_identities(
                 f"preflight.{path_field}",
                 "Native report does not use the baseline compiler input.",
             )
+    if (
+        not isinstance(snapshot.get("master_path"), str)
+        or _identity_path(snapshot["master_path"])
+        != _identity_path(master["path"])
+        or snapshot.get("master_sha256") != master["after"]
+    ):
+        raise _error(
+            "preflight.master",
+            "Native preflight does not describe the report Master source.",
+        )
+    read_only_sources = snapshot.get("read_only_source_hashes")
+    if not isinstance(read_only_sources, Mapping) or len(read_only_sources) != 1:
+        raise _error(
+            "preflight.read_only_sources",
+            "Native preflight must describe one official LCC source.",
+        )
+    source_path, source_hash = next(iter(read_only_sources.items()))
+    if (
+        not isinstance(source_path, str)
+        or _identity_path(source_path) != _identity_path(template["path"])
+        or source_hash != template["after"]
+    ):
+        raise _error(
+            "preflight.read_only_sources",
+            "Native preflight does not describe the report LCC source.",
+        )
 
 
 def promote_native_lcc_report(

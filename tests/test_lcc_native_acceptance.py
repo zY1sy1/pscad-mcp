@@ -397,6 +397,57 @@ def test_native_promotion_rejects_report_from_nonbaseline_compiler(
     assert calls == []
 
 
+def test_native_promotion_rejects_preflight_for_different_master_and_template(
+    monkeypatch, tmp_path
+):
+    from pscad_mcp.hvdc.builders.lcc import native_acceptance
+
+    payload = valid_report()
+    baseline = native_baseline_for_report(payload)
+    compiler = baseline["environment"]["compiler"]
+    snapshot = payload["preflight"]["snapshot"]
+    snapshot.update(
+        {
+            "compiler_configuration": compiler["configuration_path"],
+            "compiler_configuration_sha256": compiler["configuration_sha256"],
+            "compiler_executable": compiler["executable_path"],
+            "compiler_executable_sha256": compiler["executable_sha256"],
+            "master_path": "C:/different/master.pslx",
+            "master_sha256": "0" * 64,
+            "read_only_source_hashes": {"D:/different.pscx": "1" * 64},
+        }
+    )
+    payload["preflight"]["sha256"] = hashlib.sha256(
+        json.dumps(
+            snapshot,
+            ensure_ascii=True,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("ascii")
+    ).hexdigest()
+    report = tmp_path / "report.json"
+    report.write_text(json.dumps(payload), encoding="utf-8")
+    baseline_path = tmp_path / "baseline.json"
+    baseline_path.write_text(json.dumps(baseline), encoding="utf-8")
+    calls = []
+    monkeypatch.setattr(
+        native_acceptance,
+        "_verify_native_report_files",
+        lambda value: None,
+    )
+
+    with pytest.raises(BackendError) as failure:
+        native_acceptance.promote_native_lcc_report(
+            baseline_path,
+            report,
+            promotion_action=lambda *args, **kwargs: calls.append((args, kwargs)),
+        )
+
+    assert failure.value.code == "LCC_NATIVE_REPORT_INVALID"
+    assert failure.value.details["field"] == "preflight.master"
+    assert calls == []
+
+
 class FakePscadService:
     def __init__(self) -> None:
         self.calls = []
@@ -422,6 +473,13 @@ class WrongRuntimeService(FakePscadService):
         result = await super().status()
         result["version"] = "5.0.0"
         result["x64"] = False
+        return result
+
+
+class BlankRuntimeService(FakePscadService):
+    async def status(self):
+        result = await super().status()
+        result["backend"] = ""
         return result
 
 
@@ -780,4 +838,26 @@ def test_orchestrator_persists_fail_for_unexpected_runtime_identity(tmp_path):
     assert result["failure"]["stage"] == "attach"
     assert result["runtime"]["version"] == "5.0.0"
     assert result["runtime"]["x64"] is False
+    assert request.report_path.is_file()
+
+
+def test_orchestrator_persists_fail_for_blank_runtime_identity(tmp_path):
+    from pscad_mcp.hvdc.builders.lcc.native_acceptance import (
+        run_native_lcc_acceptance,
+    )
+
+    request = native_request(tmp_path)
+    result = asyncio.run(
+        run_native_lcc_acceptance(
+            request,
+            service=BlankRuntimeService(),
+            builder=FakeBuilder(request.workspace_root, request.template_path),
+            process_reader=list,
+            poll_interval_s=0,
+        )
+    )
+
+    assert result["status"] == "FAIL"
+    assert result["failure"]["stage"] == "attach"
+    assert result["runtime"]["backend"] == ""
     assert request.report_path.is_file()
