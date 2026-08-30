@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
   "baseline_id": "lcc-mmc-program-wp0-2026-08-30",
-  "generated_at_utc": "2026-08-30T15:04:46.119585Z",
+  "generated_at_utc": "2026-08-30T15:21:13.496363Z",
   "repository": {
-    "base_commit": "4f965eb8a35e17a2f11404f3846e1b1c258898b4",
+    "base_commit": "c6ad59f3f7638f8b884ea4b95e44c21cd31ff56c",
     "branch": "codex/lcc-mmc-completion-roadmap",
     "worktree_clean": true
   },
@@ -151,6 +151,19 @@
       "path": "D:/PSCAD-Workspace/lcc-wp1a-native-acceptance/native-lcc-20260830-230408-448/native-lcc-acceptance-report.json",
       "sha256": "3b77a36b7078a6dc4ffa4be3ad4e80e98349a1ca5a17f73b1bfc65aab6bffc7a",
       "availability": "verified_local"
+    },
+    {
+      "run_id": "native-lcc-20260830-232036-018",
+      "scope": "lcc.blank_native",
+      "builder_path": "lcc.blank_native",
+      "kind": "licensed_simulation",
+      "capability_state": "simulated",
+      "status": "PASS",
+      "commit": "c6ad59f3f7638f8b884ea4b95e44c21cd31ff56c",
+      "generated_at_utc": "2026-08-30T15:21:13.496363Z",
+      "path": "D:/PSCAD-Workspace/lcc-wp1a-native-acceptance/native-lcc-20260830-232036-018/native-lcc-acceptance-report.json",
+      "sha256": "1fe448921d339f677fe6f70bfecc057615fd0eb7aee17dd897ab3292acaaf4be",
+      "availability": "verified_local"
     }
   ],
   "scopes": [
@@ -172,7 +185,7 @@
       "owner_work_package": "WP1",
       "capability_state": "simulated",
       "licensed_status": "PASS",
-      "evidence_run_id": "native-lcc-20260830-230408-448",
+      "evidence_run_id": "native-lcc-20260830-232036-018",
       "explicit_exclusions": [
         "fixed_autonomous",
         "parametric_lcc",
