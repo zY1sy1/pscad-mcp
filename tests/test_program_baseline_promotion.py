@@ -133,6 +133,47 @@ def test_promote_program_report_requires_clean_exact_checkout(tmp_path):
     assert failure.value.details["reason"] == "worktree_not_clean"
 
 
+def test_promote_program_report_rechecks_checkout_before_write(tmp_path):
+    from pscad_mcp.acceptance.promotion import promote_program_report
+
+    baseline_path = tmp_path / "docs" / "acceptance" / "baseline.json"
+    baseline_path.parent.mkdir(parents=True)
+    baseline_path.write_text(
+        json.dumps(baseline_with_blank_scope()),
+        encoding="utf-8",
+    )
+    baseline_before = baseline_path.read_bytes()
+    report = write_report(tmp_path / "report.json")
+    identities = iter(
+        [
+            {
+                "commit": NEW_COMMIT,
+                "branch": "codex/lcc-wp1a-native-acceptance",
+                "clean": True,
+            },
+            {
+                "commit": NEW_COMMIT,
+                "branch": "codex/lcc-wp1a-native-acceptance",
+                "clean": False,
+            },
+        ]
+    )
+
+    with pytest.raises(BackendError) as failure:
+        promote_program_report(
+            baseline_path,
+            report,
+            expected_scope="lcc.blank_native",
+            owner_work_package="WP1",
+            explicit_exclusions=EXCLUSIONS,
+            git_reader=lambda _root: next(identities),
+        )
+
+    assert failure.value.code == "PROGRAM_PROMOTION_REJECTED"
+    assert failure.value.details["reason"] == "checkout_changed"
+    assert baseline_path.read_bytes() == baseline_before
+
+
 def test_promotion_rejects_report_hash_selected_before_domain_validation(tmp_path):
     baseline = baseline_with_blank_scope()
     report = write_report(tmp_path / "report.json", status="FAIL")

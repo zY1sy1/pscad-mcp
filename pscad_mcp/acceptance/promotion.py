@@ -251,18 +251,38 @@ def promote_program_report(
         raise _error("worktree_not_clean", "Repository worktree must be clean.")
     if not identity.get("branch"):
         raise _error("detached_head", "Repository checkout must be on a named branch.")
+    commit = str(identity["commit"])
+    branch = str(identity["branch"])
+    pinned_report_sha256 = expected_report_sha256 or _report_sha256(report_path)
     with baseline_file.open(encoding="utf-8") as stream:
         baseline = json.load(stream)
     updated = advance_and_apply_scope_report(
         baseline,
         report_path,
-        repository_commit=str(identity["commit"]),
-        repository_branch=str(identity["branch"]),
+        repository_commit=commit,
+        repository_branch=branch,
         expected_scope=expected_scope,
         owner_work_package=owner_work_package,
         explicit_exclusions=explicit_exclusions,
-        expected_report_sha256=expected_report_sha256,
+        expected_report_sha256=pinned_report_sha256,
     )
+    confirmed = dict(git_reader(root))
+    if (
+        confirmed.get("clean") is not True
+        or str(confirmed.get("commit") or "") != commit
+        or str(confirmed.get("branch") or "") != branch
+    ):
+        raise _error(
+            "checkout_changed",
+            "Repository identity changed during promotion.",
+            expected={"commit": commit, "branch": branch, "clean": True},
+            observed={
+                "commit": confirmed.get("commit"),
+                "branch": confirmed.get("branch"),
+                "clean": confirmed.get("clean"),
+            },
+        )
+    _index_pinned_report(report_path, pinned_report_sha256)
     write_program_baseline(baseline_file, updated)
     return updated
 
