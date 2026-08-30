@@ -50,6 +50,50 @@ def _report_sha256(path: str | Path) -> str:
     return hashlib.sha256(raw).hexdigest()
 
 
+def _ensure_report_hash(
+    path: str | Path,
+    expected_sha256: str,
+    *,
+    cause: BaseException | None = None,
+) -> str:
+    try:
+        actual_sha256 = _report_sha256(path)
+    except BackendError as read_error:
+        raise _error(
+            "report_hash_mismatch",
+            "Selected report became unreadable during promotion.",
+            expected=expected_sha256,
+            actual=None,
+        ) from read_error
+    if actual_sha256 != expected_sha256:
+        raise _error(
+            "report_hash_mismatch",
+            "Selected report changed during promotion.",
+            expected=expected_sha256,
+            actual=actual_sha256,
+        ) from cause
+    return actual_sha256
+
+
+def _index_pinned_report(
+    path: str | Path,
+    expected_sha256: str,
+) -> dict[str, Any]:
+    try:
+        indexed = index_explicit_reports([{"path": str(path)}])[0]
+    except BackendError as error:
+        _ensure_report_hash(path, expected_sha256, cause=error)
+        raise
+    if indexed["sha256"] != expected_sha256:
+        raise _error(
+            "report_hash_mismatch",
+            "Selected report hash changed while it was being indexed.",
+            expected=expected_sha256,
+            actual=indexed["sha256"],
+        )
+    return indexed
+
+
 def advance_and_apply_scope_report(
     baseline: Mapping[str, Any],
     report_path: str | Path,
@@ -70,15 +114,7 @@ def advance_and_apply_scope_report(
             expected=expected_report_sha256,
             actual=raw_hash,
         )
-    indexed = index_explicit_reports([{"path": str(report_path)}])[0]
-    actual_hash = indexed["sha256"]
-    if actual_hash != raw_hash:
-        raise _error(
-            "report_hash_mismatch",
-            "Selected report hash changed while it was being indexed.",
-            expected=raw_hash,
-            actual=actual_hash,
-        )
+    indexed = _index_pinned_report(report_path, raw_hash)
     if indexed["status"] != "PASS":
         raise _error("report_not_pass", "Only PASS reports can be promoted.")
     if indexed["commit"] != repository_commit:
@@ -119,22 +155,7 @@ def advance_and_apply_scope_report(
             owner_work_package=owner_work_package,
         )
     except BackendError as error:
-        try:
-            current_hash = _report_sha256(report_path)
-        except BackendError as read_error:
-            raise _error(
-                "report_hash_mismatch",
-                "Selected report became unreadable during promotion.",
-                expected=raw_hash,
-                actual=None,
-            ) from read_error
-        if current_hash != raw_hash:
-            raise _error(
-                "report_hash_mismatch",
-                "Selected report changed during promotion.",
-                expected=raw_hash,
-                actual=current_hash,
-            ) from error
+        _ensure_report_hash(report_path, raw_hash, cause=error)
         raise
     target_scope = next(
         item for item in candidate["scopes"] if item["scope"] == expected_scope
@@ -162,7 +183,7 @@ def advance_and_apply_scope_report(
         for item in candidate["scopes"]
         if item["scope"] != expected_scope
     }
-    reindexed = index_explicit_reports([{"path": str(report_path)}])[0]
+    reindexed = _index_pinned_report(report_path, raw_hash)
     if (
         promoted is None
         or target_scope["licensed_status"] != "PASS"

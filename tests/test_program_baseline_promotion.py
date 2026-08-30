@@ -311,3 +311,31 @@ def test_promotion_converts_malformed_apply_swap_to_hash_mismatch(
         )
     assert failure.value.code == "PROGRAM_PROMOTION_REJECTED"
     assert failure.value.details["reason"] == "report_hash_mismatch"
+
+
+def test_promotion_converts_malformed_initial_index_swap_to_hash_mismatch(
+    tmp_path, monkeypatch
+):
+    from pscad_mcp.acceptance import promotion
+
+    baseline = baseline_with_blank_scope()
+    report = write_report(tmp_path / "report.json")
+    real_index = promotion.index_explicit_reports
+
+    def replace_then_index(values):
+        report.write_text("{malformed", encoding="utf-8")
+        return real_index(values)
+
+    monkeypatch.setattr(promotion, "index_explicit_reports", replace_then_index)
+    with pytest.raises(BackendError) as failure:
+        promotion.advance_and_apply_scope_report(
+            baseline,
+            report,
+            repository_commit=NEW_COMMIT,
+            repository_branch="codex/lcc-wp1a-native-acceptance",
+            expected_scope="lcc.blank_native",
+            owner_work_package="WP1",
+            explicit_exclusions=EXCLUSIONS,
+        )
+    assert failure.value.code == "PROGRAM_PROMOTION_REJECTED"
+    assert failure.value.details["reason"] == "report_hash_mismatch"
