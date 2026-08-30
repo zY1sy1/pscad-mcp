@@ -433,9 +433,11 @@ class CorpusProjectManifest:
     records_byte_length: int
     record_count: int
     record_counts: FrozenDict
+    confirmed_relation_signature: str | None = None
+    definition_catalog_signature: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        result = {
             "project_id": self.project_id,
             "source_sha256": self.source_sha256,
             "graph_path": self.graph_path,
@@ -448,6 +450,15 @@ class CorpusProjectManifest:
             "record_count": self.record_count,
             "record_counts": json_safe(self.record_counts),
         }
+        if self.confirmed_relation_signature is not None:
+            result["confirmed_relation_signature"] = (
+                self.confirmed_relation_signature
+            )
+        if self.definition_catalog_signature is not None:
+            result["definition_catalog_signature"] = (
+                self.definition_catalog_signature
+            )
+        return result
 
 
 @dataclass(frozen=True)

@@ -47,7 +47,7 @@ from .corpus_relation_models import (
 from .corpus_schema import parse_corpus_spec
 from .models import freeze, json_safe
 
-KIND_ORDER = {
+KIND_ORDER_V1 = {
     "project": 0,
     "definition": 1,
     "component": 2,
@@ -56,6 +56,20 @@ KIND_ORDER = {
     "connection": 5,
     "project_setting": 6,
     "output_channel": 7,
+}
+KIND_ORDER = KIND_ORDER_V1
+KIND_ORDER_V2 = {
+    **KIND_ORDER_V1,
+    "definition_classification": 8,
+    "component_occurrence": 9,
+    "conductor_occurrence": 10,
+    "label_occurrence": 11,
+    "instance_port": 12,
+    "confirmed_net": 13,
+    "port_net_membership": 14,
+    "hierarchy_relation": 15,
+    "candidate_edge": 16,
+    "unresolved_evidence": 17,
 }
 _SHA256 = re.compile(r"[0-9a-f]{64}")
 _ABSOLUTE_PATH = re.compile(r"(?<![A-Za-z0-9])(?:[A-Za-z]:[\\/]|\\\\)")
@@ -104,7 +118,13 @@ def canonical_json(value: Any) -> bytes:
 
 
 def canonical_jsonl(records: Iterable[CorpusRecord]) -> bytes:
-    ordered = sorted(records, key=lambda record: (KIND_ORDER[record.kind], record.record_key))
+    values = tuple(records)
+    versions = {record.schema_version for record in values}
+    if len(versions) > 1:
+        raise _error("Corpus record schema versions cannot be mixed.")
+    version = next(iter(versions), 1)
+    order = KIND_ORDER_V2 if version == 2 else KIND_ORDER_V1
+    ordered = sorted(values, key=lambda record: (order[record.kind], record.record_key))
     return b"".join(canonical_json(record.to_dict()) for record in ordered)
 
 
@@ -141,9 +161,10 @@ def _record(
     record_key: str,
     payload: Mapping[str, Any],
     resolved: bool,
+    verification_status: str | None = None,
 ) -> CorpusRecord:
     return CorpusRecord(
-        schema_version=1,
+        schema_version=graph.schema_version,
         normalization_profile=normalization_profile,
         corpus_name=corpus_name,
         project_id=graph.project_id,
@@ -152,7 +173,8 @@ def _record(
         record_key=record_key,
         payload=freeze(payload),
         resolved=resolved,
-        verification_status="offline_extracted" if resolved else "unresolved",
+        verification_status=verification_status
+        or ("offline_confirmed" if graph.schema_version == 2 and resolved else "offline_extracted" if resolved else "unresolved"),
     )
 
 
@@ -161,6 +183,11 @@ def derive_records(corpus_name: str, normalization_profile: str, graph: ProjectG
 
     records: list[CorpusRecord] = []
     project_resolved = not any(warning.blocking for warning in graph.warnings)
+    if graph.schema_version == 2:
+        project_resolved = project_resolved and not any(
+            item.classification == "blocking"
+            for item in graph.unresolved_evidence
+        )
     records.append(
         _record(
             corpus_name,
@@ -176,13 +203,29 @@ def derive_records(corpus_name: str, normalization_profile: str, graph: ProjectG
                 "settings": json_safe(graph.settings),
                 "canvases": [canvas.to_dict() for canvas in graph.canvases],
                 "warnings": [warning.to_dict() for warning in graph.warnings],
+                **(
+                    {
+                        "confirmed_relation_signature": graph.confirmed_relation_signature,
+                        "definition_catalog_signature": graph.definition_catalog_signature,
+                    }
+                    if graph.schema_version == 2
+                    else {}
+                ),
             },
             project_resolved,
         )
     )
     for definition in graph.definitions:
         records.append(
-            _record(corpus_name, normalization_profile, graph, "definition", definition.key, definition.to_dict(), True)
+            _record(
+                corpus_name,
+                normalization_profile,
+                graph,
+                "definition",
+                definition.key,
+                definition.to_dict(graph.schema_version),
+                True,
+            )
         )
         parameter_parts = _unique_key_parts(parameter.name for parameter in definition.parameters)
         for parameter in definition.parameters:
@@ -205,7 +248,10 @@ def derive_records(corpus_name: str, normalization_profile: str, graph: ProjectG
                     graph,
                     "port",
                     port.key,
-                    {"definition_key": definition.key, **port.to_dict()},
+                    {
+                        "definition_key": definition.key,
+                        **port.to_dict(graph.schema_version),
+                    },
                     True,
                 )
             )
@@ -229,7 +275,15 @@ def derive_records(corpus_name: str, normalization_profile: str, graph: ProjectG
     for connection in graph.connections:
         resolved = connection.resolution in {"explicit", "geometry_only"}
         records.append(
-            _record(corpus_name, normalization_profile, graph, "connection", connection.key, connection.to_dict(), resolved)
+            _record(
+                corpus_name,
+                normalization_profile,
+                graph,
+                "connection",
+                connection.key,
+                connection.to_dict(graph.schema_version),
+                resolved,
+            )
         )
     setting_parts = _unique_key_parts(graph.settings)
     for name, value in graph.settings.items():
@@ -256,7 +310,66 @@ def derive_records(corpus_name: str, normalization_profile: str, graph: ProjectG
                 channel.resolved,
             )
         )
-    records.sort(key=lambda record: (KIND_ORDER[record.kind], record.record_key))
+    if graph.schema_version == 2:
+        relation_collections = (
+            ("definition_classification", graph.definition_classifications),
+            ("component_occurrence", graph.component_occurrences),
+            ("conductor_occurrence", graph.conductor_occurrences),
+            ("label_occurrence", graph.label_occurrences),
+            ("instance_port", graph.instance_ports),
+            ("confirmed_net", graph.confirmed_nets),
+            ("port_net_membership", graph.port_net_memberships),
+            ("hierarchy_relation", graph.hierarchy_relations),
+        )
+        for kind, collection in relation_collections:
+            for item in collection:
+                records.append(
+                    _record(
+                        corpus_name,
+                        normalization_profile,
+                        graph,
+                        kind,
+                        item.key,
+                        item.to_dict(),
+                        True,
+                    )
+                )
+        for item in graph.candidate_edges:
+            key = "candidate:" + hashlib.sha256(
+                f"{item.left}\0{item.right}".encode()
+            ).hexdigest()
+            records.append(
+                _record(
+                    corpus_name,
+                    normalization_profile,
+                    graph,
+                    "candidate_edge",
+                    key,
+                    item.to_dict(),
+                    False,
+                    "candidate_only",
+                )
+            )
+        for item in graph.unresolved_evidence:
+            key = "unresolved:" + hashlib.sha256(
+                canonical_json(
+                    {"code": item.code, "object_keys": list(item.object_keys)}
+                )
+            ).hexdigest()
+            records.append(
+                _record(
+                    corpus_name,
+                    normalization_profile,
+                    graph,
+                    "unresolved_evidence",
+                    key,
+                    item.to_dict(),
+                    False,
+                    "unresolved",
+                )
+            )
+    order = KIND_ORDER_V2 if graph.schema_version == 2 else KIND_ORDER_V1
+    records.sort(key=lambda record: (order[record.kind], record.record_key))
     keys = [(record.kind, record.record_key) for record in records]
     if len(set(keys)) != len(keys):
         raise _error("Derived record keys are not unique.")
@@ -1470,10 +1583,17 @@ def _parse_record(value: Any) -> CorpusRecord:
         },
         "record",
     )
-    if parsed["schema_version"] != 1 or parsed["kind"] not in KIND_ORDER:
+    version = parsed["schema_version"]
+    if type(version) is not int or version not in {1, 2}:
         raise _error("Record schema or kind is unsupported.", path="record")
+    order = KIND_ORDER_V2 if version == 2 else KIND_ORDER_V1
+    if parsed["kind"] not in order:
+        raise _error("Record schema or kind is unsupported.", path="record")
+    expected_profile = f"pscad-xml-v{version}"
+    if parsed["normalization_profile"] != expected_profile:
+        raise _error("Record normalization profile is unsupported.", path="record")
     return CorpusRecord(
-        1,
+        version,
         _string(parsed["normalization_profile"], "record.normalization_profile"),
         _string(parsed["corpus_name"], "record.corpus_name"),
         _string(parsed["project_id"], "record.project_id"),
@@ -1498,17 +1618,33 @@ def _parse_manifest(value: Any) -> CorpusManifest:
         {"schema_version", "normalization_profile", "name", "source_spec_sha256", "project_count", "projects"},
         "manifest",
     )
-    if parsed["schema_version"] != 1:
+    version = parsed["schema_version"]
+    if type(version) is not int or version not in {1, 2}:
         raise _error("Manifest schema version is unsupported.", path="manifest.schema_version")
+    expected_profile = f"pscad-xml-v{version}"
+    if parsed["normalization_profile"] != expected_profile:
+        raise _error(
+            "Manifest normalization profile is unsupported.",
+            path="manifest.normalization_profile",
+        )
     projects: list[CorpusProjectManifest] = []
     for index, item in enumerate(_array(parsed["projects"], "manifest.projects")):
         path = f"manifest.projects[{index}]"
-        project = _exact(
-            item,
-            {
+        base_fields = {
                 "project_id", "source_sha256", "graph_path", "graph_sha256", "graph_byte_length", "graph_signature",
                 "records_path", "records_sha256", "records_byte_length", "record_count", "record_counts",
-            },
+        }
+        project = _exact(
+            item,
+            base_fields
+            | (
+                {
+                    "confirmed_relation_signature",
+                    "definition_catalog_signature",
+                }
+                if version == 2
+                else set()
+            ),
             path,
         )
         projects.append(
@@ -1524,10 +1660,22 @@ def _parse_manifest(value: Any) -> CorpusManifest:
                 _integer(project["records_byte_length"], f"{path}.records_byte_length", minimum=1),
                 _integer(project["record_count"], f"{path}.record_count", minimum=1),
                 freeze(_mapping(project["record_counts"], f"{path}.record_counts")),
+                _digest(
+                    project["confirmed_relation_signature"],
+                    f"{path}.confirmed_relation_signature",
+                )
+                if version == 2
+                else None,
+                _digest(
+                    project["definition_catalog_signature"],
+                    f"{path}.definition_catalog_signature",
+                )
+                if version == 2
+                else None,
             )
         )
     return CorpusManifest(
-        1,
+        version,
         _string(parsed["normalization_profile"], "manifest.normalization_profile"),
         _string(parsed["name"], "manifest.name"),
         _digest(parsed["source_spec_sha256"], "manifest.source_spec_sha256"),
@@ -1590,7 +1738,8 @@ def validate_candidate(root: str | Path, spec: CorpusSpec) -> CorpusManifest:
     if manifest_bytes != canonical_json(manifest.to_dict()):
         raise _error("Manifest is not canonical.", path="manifest.json")
     if (
-        manifest.name != spec.name
+        manifest.schema_version != spec.schema_version
+        or manifest.name != spec.name
         or manifest.normalization_profile != spec.normalization_profile
         or manifest.source_spec_sha256 != _sha256(source_bytes)
         or manifest.project_count != len(spec.entry_points)
@@ -1614,9 +1763,27 @@ def validate_candidate(root: str | Path, spec: CorpusSpec) -> CorpusManifest:
         if (
             graph.project_id != source.project_id
             or graph.source_sha256 != source.sha256
+            or graph.schema_version != spec.schema_version
+            or graph.normalization_profile != spec.normalization_profile
             or _sha256(graph_bytes) != project.graph_sha256
             or len(graph_bytes) != project.graph_byte_length
             or graph_signature(graph) != project.graph_signature
+            or (
+                spec.schema_version == 2
+                and (
+                    project.confirmed_relation_signature
+                    != graph.confirmed_relation_signature
+                    or project.definition_catalog_signature
+                    != graph.definition_catalog_signature
+                )
+            )
+            or (
+                spec.schema_version == 1
+                and (
+                    project.confirmed_relation_signature is not None
+                    or project.definition_catalog_signature is not None
+                )
+            )
         ):
             raise _error("Project graph evidence does not match its manifest.", path=project.graph_path)
 
@@ -1662,7 +1829,11 @@ def _write_candidate_files(directory: Path, spec: CorpusSpec, graphs: Sequence[P
     projects: list[CorpusProjectManifest] = []
     for source in spec.entry_points:
         graph = graph_map[source.project_id]
-        if graph.source_sha256 != source.sha256:
+        if (
+            graph.source_sha256 != source.sha256
+            or graph.schema_version != spec.schema_version
+            or graph.normalization_profile != spec.normalization_profile
+        ):
             raise _error("Graph source hash does not match the source specification.", path=source.project_id)
         graph_relative = f"graphs/{source.project_id}.json"
         records_relative = f"records/{source.project_id}.jsonl"
@@ -1684,10 +1855,16 @@ def _write_candidate_files(directory: Path, spec: CorpusSpec, graphs: Sequence[P
                 records_byte_length=len(records_bytes),
                 record_count=len(records),
                 record_counts=freeze(dict(sorted(Counter(record.kind for record in records).items()))),
+                confirmed_relation_signature=graph.confirmed_relation_signature
+                if spec.schema_version == 2
+                else None,
+                definition_catalog_signature=graph.definition_catalog_signature
+                if spec.schema_version == 2
+                else None,
             )
         )
     manifest = CorpusManifest(
-        schema_version=1,
+        schema_version=spec.schema_version,
         normalization_profile=spec.normalization_profile,
         name=spec.name,
         source_spec_sha256=_sha256(source_bytes),
