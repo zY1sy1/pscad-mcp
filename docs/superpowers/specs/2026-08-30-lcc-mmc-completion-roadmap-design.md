@@ -2,7 +2,7 @@
 
 **日期：** 2026-08-30
 
-**状态：** 执行中；WP0 已完成并等待合并，WP1 在合并后解锁
+**状态：** 执行中；WP0 与 WP1A 已完成，WP1B 已解锁
 
 **主要读者：** 后续执行任务的 Codex 工程代理
 
@@ -91,7 +91,7 @@ implementation plan，而是规定：
 | 路径 | 当前能力 | 实机状态 | 发布判断 |
 | --- | --- | --- | --- |
 | Master Binding Registry | 8 类逻辑 Master 元件完成 live audit、实例化、回读和 compile smoke | PASS | `compile_verified` |
-| blank/native LCC | 官方模板只读审计、隔离复制、companion 提取、故障仿真、输出保存 | 存在 `published`/PASS 运行记录 | 需要在当前提交重新验收 |
+| blank/native LCC | 官方模板只读审计、隔离复制、companion 提取、故障仿真、输出保存 | current-commit `simulated/PASS` | WP1A 完成；未 `accepted` |
 | fixed LCC builder | blueprint、planner、executor、journal、publication 和 acceptance 框架存在 | 最近固定路径报告为 `INCOMPLETE_ANALYSIS` | 未 accepted |
 | parametric LCC | 参数推导、模板审计、规划、构建和模式验证存在 | 未发现 licensed PASS 报告 | 未 accepted |
 
@@ -390,6 +390,9 @@ fixture 和数据审计可以并行，但最终集成必须按依赖顺序进行
 
 ### 9.2 WP1A：当前提交的 blank/native LCC 重验
 
+**完成状态：** 已完成。完成记录见
+[`2026-08-30-lcc-wp1a-native-acceptance-completion.md`](2026-08-30-lcc-wp1a-native-acceptance-completion.md)。
+
 任务：
 
 1. 使用当前提交重新审计官方 LCC 模板；
@@ -418,6 +421,9 @@ fixture 和数据审计可以并行，但最终集成必须按依赖顺序进行
 - 无 PSCAD 残留进程。
 
 ### 9.3 WP1B：fixed autonomous companion 物理化
+
+**解锁状态：** 已由 WP1A 的 current-commit `simulated/PASS` 解锁；该证据不
+替代 fixed-autonomous 或 independent-golden 验收。
 
 当前 `library/cigre_lcc_v1.pslx` 是 repository-authored 结构契约，包含桥、阀
 和控制的描述，但不能仅凭结构标签宣称是完整 PSCAD 物理模型。
