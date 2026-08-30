@@ -1,0 +1,14 @@
+<project name="master" version="4.6.3">
+  <definitions>
+    <Definition name="gain463" classid="UserCmpDefn">
+      <form>
+        <parameter name="View" type="Integer"><value>0</value></parameter>
+      </form>
+      <svg>
+        <port name="IN" x="-18" y="0" dim="1" model="Transfer">true</port>
+        <port name="OUT" x="18" y="0" dim="1" model="Transfer">View==0</port>
+      </svg>
+    </Definition>
+    <Definition name="annotation" classid="UserCmpDefn"><svg /></Definition>
+  </definitions>
+</project>

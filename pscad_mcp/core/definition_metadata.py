@@ -45,6 +45,13 @@ class DefinitionMetadata:
 
 
 @dataclass(frozen=True)
+class DefinitionMetadataSource:
+    name: str
+    version: str
+    definitions: dict[str, tuple[DefinitionMetadata, ...]]
+
+
+@dataclass(frozen=True)
 class MasterDefinitionBinding:
     """Maps a repository logical Master component to PSCAD 4.6.2."""
 
@@ -232,6 +239,12 @@ def read_definition_metadata_document(
 ) -> dict[str, tuple[DefinitionMetadata, ...]]:
     """Parse one immutable XML byte snapshot into definition metadata."""
 
+    return parse_definition_metadata_source(payload).definitions
+
+
+def parse_definition_metadata_source(payload: bytes) -> DefinitionMetadataSource:
+    """Parse source identity and definitions from one immutable XML snapshot."""
+
     root = ET.fromstring(payload)
     grouped: dict[str, list[DefinitionMetadata]] = {}
     for definition in root.findall(".//Definition"):
@@ -241,7 +254,11 @@ def read_definition_metadata_document(
         grouped.setdefault(name, []).append(
             _metadata_from_definition(definition)
         )
-    return {name: tuple(values) for name, values in grouped.items()}
+    return DefinitionMetadataSource(
+        name=str(root.get("name", "")),
+        version=str(root.get("version", "")),
+        definitions={name: tuple(values) for name, values in grouped.items()},
+    )
 
 
 def read_definition_metadata(
