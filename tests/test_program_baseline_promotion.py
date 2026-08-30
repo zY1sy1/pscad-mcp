@@ -216,3 +216,66 @@ def test_promotion_rejects_report_replaced_between_index_and_apply(tmp_path, mon
             explicit_exclusions=EXCLUSIONS,
         )
     assert failure.value.details["reason"] == "report_hash_mismatch"
+
+
+def test_promotion_rejects_cross_scope_swap_when_target_already_references_report(
+    tmp_path, monkeypatch
+):
+    from pscad_mcp.acceptance import promotion
+
+    baseline = baseline_with_blank_scope()
+    initial = write_report(tmp_path / "report.json")
+    baseline["reports"].append(
+        {
+            "run_id": "native-run-1",
+            "scope": "lcc.blank_native",
+            "builder_path": "lcc.blank_native",
+            "kind": "licensed_simulation",
+            "capability_state": "simulated",
+            "status": "PASS",
+            "commit": NEW_COMMIT,
+            "generated_at_utc": "2026-08-30T01:00:00Z",
+            "path": str(initial),
+            "sha256": hashlib.sha256(initial.read_bytes()).hexdigest(),
+            "availability": "verified_local",
+        }
+    )
+    blank_scope = next(
+        item for item in baseline["scopes"] if item["scope"] == "lcc.blank_native"
+    )
+    blank_scope["licensed_status"] = "INCOMPLETE_ANALYSIS"
+    blank_scope["evidence_run_id"] = "native-run-1"
+    swapped = {
+        "schema_version": 1,
+        "run_id": "swapped-master",
+        "scope": "lcc.master_bindings",
+        "builder_path": "lcc.master_binding_registry",
+        "kind": "licensed_compile",
+        "capability_state": "compiled",
+        "commit": NEW_COMMIT,
+        "generated_at_utc": "2026-08-30T01:00:00Z",
+        "status": "PASS",
+    }
+
+    real_apply = promotion.apply_scope_report
+
+    def replace_then_apply(candidate, report_path, *, owner_work_package):
+        Path(report_path).write_text(json.dumps(swapped), encoding="utf-8")
+        return real_apply(
+            candidate,
+            report_path,
+            owner_work_package=owner_work_package,
+        )
+
+    monkeypatch.setattr(promotion, "apply_scope_report", replace_then_apply)
+    with pytest.raises(BackendError) as failure:
+        promotion.advance_and_apply_scope_report(
+            baseline,
+            initial,
+            repository_commit=NEW_COMMIT,
+            repository_branch="codex/lcc-wp1a-native-acceptance",
+            expected_scope="lcc.blank_native",
+            owner_work_package="WP1",
+            explicit_exclusions=EXCLUSIONS,
+        )
+    assert failure.value.details["reason"] == "report_hash_mismatch"

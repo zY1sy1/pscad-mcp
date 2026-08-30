@@ -106,20 +106,47 @@ def advance_and_apply_scope_report(
             scope["licensed_status"] = "NOT_RUN_ON_CURRENT_COMMIT"
             scope["evidence_run_id"] = None
     candidate["generated_at_utc"] = indexed["generated_at_utc"]
+    before_apply = copy.deepcopy(candidate)
     candidate = apply_scope_report(
         candidate,
         report_path,
         owner_work_package=owner_work_package,
     )
-    target_scope = next(item for item in candidate["scopes"] if item["scope"] == expected_scope)
+    target_scope = next(
+        item for item in candidate["scopes"] if item["scope"] == expected_scope
+    )
     promoted = next(
-        (item for item in candidate["reports"] if item["run_id"] == target_scope["evidence_run_id"]),
+        (
+            item
+            for item in candidate["reports"]
+            if item["run_id"] == target_scope["evidence_run_id"]
+        ),
         None,
     )
+    expected_reports = {
+        item["run_id"]: item for item in before_apply["reports"]
+    }
+    expected_reports[indexed["run_id"]] = indexed
+    actual_reports = {item["run_id"]: item for item in candidate["reports"]}
+    before_other_scopes = {
+        item["scope"]: item
+        for item in before_apply["scopes"]
+        if item["scope"] != expected_scope
+    }
+    actual_other_scopes = {
+        item["scope"]: item
+        for item in candidate["scopes"]
+        if item["scope"] != expected_scope
+    }
+    reindexed = index_explicit_reports([{"path": str(report_path)}])[0]
     if (
         promoted is None
+        or target_scope["licensed_status"] != "PASS"
         or promoted["run_id"] != indexed["run_id"]
         or promoted["sha256"] != raw_hash
+        or actual_reports != expected_reports
+        or actual_other_scopes != before_other_scopes
+        or reindexed != indexed
     ):
         raise _error(
             "report_hash_mismatch",
