@@ -764,6 +764,31 @@ class FakeFixedBuilder:
         return None
 
 
+class PlanTargetOnlyFixedBuilder(FakeFixedBuilder):
+    def plan_model(
+        self,
+        project_name,
+        folder,
+        simulation_duration_s,
+        verification_profile,
+    ):
+        plan = super().plan_model(
+            project_name,
+            folder,
+            simulation_duration_s,
+            verification_profile,
+        )
+        return {
+            **plan,
+            "target_path": str(Path(folder) / f"{project_name}.pscx"),
+        }
+
+    def _published_record(self, project_name: str, folder: Path):
+        record = super()._published_record(project_name, folder)
+        record.pop("target_path")
+        return record
+
+
 def test_orchestrator_runs_component_gate_then_production_smoke(tmp_path):
     request = fixed_request(tmp_path)
     service = FakePscadService()
@@ -791,6 +816,33 @@ def test_orchestrator_runs_component_gate_then_production_smoke(tmp_path):
     assert builder.plan_calls[0]["simulation_duration_s"] == pytest.approx(0.1)
     assert request.report_path.is_file()
     assert service.calls == ["attach_local", ("quit_pscad", True)]
+
+
+def test_orchestrator_uses_plan_target_when_record_omits_duplicate_path(
+    tmp_path,
+):
+    request = fixed_request(tmp_path)
+    service = FakePscadService()
+    builder = PlanTargetOnlyFixedBuilder(request.workspace_root)
+
+    result = asyncio.run(
+        run_fixed_lcc_acceptance(
+            request,
+            service=service,
+            builder=builder,
+            companion_gate_action=lambda *_args, **_kwargs: (
+                _component_gate_for_run(request)
+            ),
+            master_audit_action=_fake_master_audit,
+            process_reader=service.processes,
+            poll_interval_s=0,
+        )
+    )
+
+    assert result["status"] == "PASS"
+    assert result["artifacts"]["project"]["path"].endswith(
+        "WP1B_FIXED_LCC.pscx"
+    )
 
 
 def test_orchestrator_persists_setup_fail_when_source_validation_drifts(

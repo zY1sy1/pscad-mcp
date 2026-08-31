@@ -1687,7 +1687,10 @@ def _pass_report_from_record(
             "component_gate": copy.deepcopy(dict(component_gate)),
             "build": _build_evidence(request, plan, record),
             "artifacts": {
-                "project": _artifact(record.get("target_path"), "artifacts.project"),
+                "project": _artifact(
+                    record.get("target_path") or plan.get("target_path"),
+                    "artifacts.project",
+                ),
                 "library": _artifact(library, "artifacts.library"),
                 "selected_output": _artifact(
                     selected_output,
