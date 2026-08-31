@@ -810,10 +810,11 @@ class LccExecutor:
                     contract.offset,
                     expected_orientation,
                 )
-                if observed_point is not None:
-                    if observed_point != observed_expected_point and operation.arguments.get(
-                        "definition"
-                    ) not in {
+                if (
+                    observed_point is not None
+                    and observed_point != observed_expected_point
+                    and operation.arguments.get("definition")
+                    not in {
                         "master:three_phase_source",
                         "master:converter_transformer",
                         "master:ac_filter_branch",
@@ -822,15 +823,16 @@ class LccExecutor:
                         "master:ac_meter",
                         "master:dc_meter",
                         "master:ground",
-                    }:
-                        self._raise_postcondition(
-                            "Component port endpoint read-back did not match the plan.",
-                            logical_id=operation.target,
-                            port=port_name,
-                            expected_endpoint=list(observed_expected_point),
-                            observed_endpoint=list(observed_point),
-                            orientation=expected_orientation,
-                        )
+                    }
+                ):
+                    self._raise_postcondition(
+                        "Component port endpoint read-back did not match the plan.",
+                        logical_id=operation.target,
+                        port=port_name,
+                        expected_endpoint=list(observed_expected_point),
+                        observed_endpoint=list(observed_point),
+                        orientation=expected_orientation,
+                    )
                 graph_ports.append(
                     GraphPort(
                         port_name,
