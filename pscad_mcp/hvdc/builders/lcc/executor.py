@@ -766,7 +766,7 @@ class LccExecutor:
                 vertices[0],
                 vertices[-1],
                 label,
-                kind == "electrical",
+                kind == "electrical" if label is not None else None,
                 canvas_name=canvas,
             )
         else:

@@ -821,6 +821,49 @@ class MismatchedConnectionService(RecordingPscadService):
         return created
 
 
+class StrictConnectionArgumentService(RecordingPscadService):
+    async def create_connection(
+        self,
+        project_name,
+        p1,
+        p2,
+        label,
+        electrical,
+        *,
+        canvas_name="Main",
+    ):
+        if (label is None) != (electrical is None):
+            raise ValueError(
+                "label and electrical must either both be provided or both omitted"
+            )
+        return await super().create_connection(
+            project_name,
+            p1,
+            p2,
+            label,
+            electrical,
+            canvas_name=canvas_name,
+        )
+
+
+def test_two_point_unlabeled_net_omits_electrical_flag(tmp_path):
+    service = StrictConnectionArgumentService()
+
+    record = asyncio.run(
+        execute_build(
+            _plan_with_connection(tmp_path),
+            service,
+            tmp_path,
+            build_id="build-unlabeled-connection",
+            poll_interval_s=0,
+        )
+    )
+
+    assert record.state.value == "published"
+    connection = next(call for call in service.calls if call[0] == "create_connection")
+    assert connection[1][3:5] == (None, None)
+
+
 class SnappedCompanionPortService(RecordingPscadService):
     async def add_canvas_component(self, *args, **kwargs):
         created = await super().add_canvas_component(*args, **kwargs)
