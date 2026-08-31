@@ -795,10 +795,14 @@ def create_plan(
                 required_channels=list(required_paths),
             )
         planned_outputs = tuple(output_by_path[path] for path in required_paths)
-    for output in planned_outputs:
-        add("create_outputs", "create_output", output.logical_id, output.to_dict())
+    if request.verification_profile != WP1B_SMOKE_PROFILE:
+        for output in planned_outputs:
+            add("create_outputs", "create_output", output.logical_id, output.to_dict())
     add("save_and_validate", "save_and_validate", project_name, {})
     add("compile", "compile", project_name, {})
+    if request.verification_profile == WP1B_SMOKE_PROFILE:
+        for output in planned_outputs:
+            add("create_outputs", "create_output", output.logical_id, output.to_dict())
     add("simulate", "simulate", project_name, {"duration_s": duration})
     if request.verification_profile == WP1B_SMOKE_PROFILE:
         add(

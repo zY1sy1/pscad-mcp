@@ -488,6 +488,10 @@ def test_wp1b_smoke_plan_uses_smoke_gate_and_hashes_profile(tmp_path):
         for item in full.operations
         if item.kind == "create_output"
     ] == [output.path for output in assets.blueprint.outputs]
+    smoke_kinds = [item.kind for item in smoke.operations]
+    assert smoke_kinds.index("save_and_validate") < smoke_kinds.index("compile")
+    assert smoke_kinds.index("compile") < smoke_kinds.index("create_output")
+    assert smoke_kinds.index("create_output") < smoke_kinds.index("simulate")
 
 
 def test_wp1b_smoke_plan_excludes_non_smoke_derived_outputs(tmp_path):
