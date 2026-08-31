@@ -24,6 +24,7 @@ from pscad_mcp.hvdc.builders.lcc.models import (
     LccComponentSpec,
     LccEndpoint,
     LccNetSpec,
+    LccOutputSpec,
     LccPlanOperation,
     LccRoute,
 )
@@ -512,6 +513,17 @@ class PredeclaredLegacyOutputService(RecordingPscadService):
         ]
 
 
+class UnavailablePredeclaredOutputService(PredeclaredLegacyOutputService):
+    async def get_output_channels(self, project_name):
+        self._call("get_output_channels", project_name)
+        raise BackendError(
+            "CAPABILITY_UNAVAILABLE",
+            "Legacy output metadata is unavailable.",
+            "legacy",
+            "get_output_channels",
+        )
+
+
 def test_legacy_predeclared_output_is_saved_before_static_verification(tmp_path):
     service = PredeclaredLegacyOutputService()
     executor = LccExecutor(_plan(tmp_path), service, tmp_path)
@@ -524,6 +536,52 @@ def test_legacy_predeclared_output_is_saved_before_static_verification(tmp_path)
     calls = [call[0] for call in service.calls]
     assert calls.index("create_output_channel") < calls.index("save_project")
     assert calls.index("save_project") < calls.index("get_output_channels")
+
+
+@pytest.mark.parametrize("selector", ["Main/VDC", "Main/UNKNOWN"])
+def test_wp1b_compiled_predeclared_output_falls_back_to_asset_contract(
+    tmp_path,
+    selector,
+):
+    plan = _plan_with_profile(tmp_path)
+    output = LccOutputSpec(
+        "vdc",
+        "Main/VDC",
+        "kV",
+        "dc_voltage",
+        measurement="vdc_measurement",
+    )
+    plan = replace(
+        plan,
+        blueprint=replace(plan.blueprint, outputs=(output,)),
+    )
+    assets = replace(
+        _fixed_smoke_assets(plan),
+        smoke={
+            **smoke_contract(),
+            "required_channels": ["Main/VDC"],
+            "enable_channels": ["Main/VDC"],
+            "ao_limits_rad": {"Main/VDC": [0.0, 1.0]},
+        },
+    )
+    service = UnavailablePredeclaredOutputService()
+    executor = LccExecutor(plan, service, tmp_path, asset_set=assets)
+    executor.history.append({"state": "compiled"})
+    operation = next(
+        item for item in plan.operations if item.kind == "create_output"
+    )
+    operation = replace(
+        operation,
+        arguments={**operation.arguments, "path": selector},
+    )
+
+    if selector == "Main/VDC":
+        asyncio.run(executor._create_output(operation))
+        assert executor.history[-1]["verification"] == "compiled_asset_contract"
+    else:
+        with pytest.raises(BackendError) as failure:
+            asyncio.run(executor._create_output(operation))
+        assert failure.value.code == "LCC_OUTPUT_INCOMPLETE"
 
 
 def _plan(tmp_path: Path) -> LccBuildPlan:

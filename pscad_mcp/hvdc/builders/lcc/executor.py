@@ -1042,6 +1042,33 @@ class LccExecutor:
             evidence["vertices"] = normalized_vertices
         self._operation_completed(**evidence)
 
+    def _compiled_predeclared_output_matches(
+        self,
+        selector: Any,
+        units: Any,
+        call_id: Any,
+    ) -> bool:
+        if (
+            self.plan.verification_profile != "wp1b_smoke"
+            or self.asset_set is None
+            or not any(
+                entry.get("state") == LccBuildState.COMPILED.value
+                for entry in self.history
+            )
+        ):
+            return False
+        required = self.asset_set.smoke.get("required_channels")
+        if not isinstance(required, (list, tuple)) or selector not in required:
+            return False
+        matches = [
+            output
+            for output in self.plan.blueprint.outputs
+            if output.path == selector
+            and output.units == units
+            and output.call_id == call_id
+        ]
+        return len(matches) == 1
+
     async def _create_output(self, operation: LccPlanOperation) -> None:
         self._operation_started(operation)
         selector = operation.arguments.get("path")
@@ -1111,6 +1138,18 @@ class LccExecutor:
         try:
             channels = await getter(self.project_name)
         except BackendError as error:
+            if error.code == "CAPABILITY_UNAVAILABLE" and (
+                self._compiled_predeclared_output_matches(
+                    selector,
+                    units,
+                    expected_call_id,
+                )
+            ):
+                self._operation_completed(
+                    creation_response_type=type(created).__name__,
+                    verification="compiled_asset_contract",
+                )
+                return
             raise _error(
                 "LCC_OUTPUT_INCOMPLETE",
                 "The PSCAD output-channel metadata could not be verified.",
