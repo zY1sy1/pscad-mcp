@@ -423,6 +423,24 @@ def test_companion_audit_rejects_swapped_inverter_dc_profile(tmp_path):
     assert failure.value.details["logical_port"] == "DP_INV"
 
 
+def test_companion_audit_requires_six_pulse_bridge_identity(tmp_path):
+    module = _subject()
+    other = _g6p200_binding()
+    other["logical_name"] = "master:other_bridge"
+    registry = module.parse_master_binding_registry(
+        _registry_payload_v2(other)
+    )
+
+    with pytest.raises(BackendError) as failure:
+        module.audit_companion_bindings(
+            _write_g6p200_master_fixture(tmp_path),
+            registry,
+        )
+
+    assert failure.value.code == "MASTER_BINDING_MISSING"
+    assert failure.value.details["logical_name"] == "master:six_pulse_bridge"
+
+
 def test_registry_rejects_unknown_top_level_fields():
     module = _subject()
     payload = _registry_payload()

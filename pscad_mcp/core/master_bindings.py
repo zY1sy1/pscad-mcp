@@ -1328,59 +1328,65 @@ def audit_companion_bindings(
         )
 
     bridge = definitions.get("master:six_pulse_bridge")
-    if bridge is not None:
-        selected = bridge["selected_ports"]
-        if "FPN" in selected or "FDT" in selected:
-            raise _runtime_error(
-                "MASTER_PORT_MISMATCH",
-                "FP=0 must not select external firing-vector ports.",
-                "audit_companion_bindings",
-            )
-        ao = selected.get("AO")
-        ao_condition = ao.get("condition") if isinstance(ao, Mapping) else None
+    if not isinstance(bridge, Mapping):
+        raise _runtime_error(
+            "MASTER_BINDING_MISSING",
+            "The six-pulse bridge companion binding is absent.",
+            "audit_companion_bindings",
+            logical_name="master:six_pulse_bridge",
+        )
+    selected = bridge["selected_ports"]
+    if "FPN" in selected or "FDT" in selected:
+        raise _runtime_error(
+            "MASTER_PORT_MISMATCH",
+            "FP=0 must not select external firing-vector ports.",
+            "audit_companion_bindings",
+        )
+    ao = selected.get("AO")
+    ao_condition = ao.get("condition") if isinstance(ao, Mapping) else None
+    if (
+        not isinstance(ao, Mapping)
+        or ao.get("occurrence") != 1
+        or "FP==0" not in str(ao_condition)
+        or "View==1" not in str(ao_condition)
+    ):
+        raise _runtime_error(
+            "MASTER_PORT_MISMATCH",
+            "The FP=0/View=1 AO port profile is not exact.",
+            "audit_companion_bindings",
+            logical_port="AO",
+            observed=ao,
+        )
+    expected_profiles = {
+        "DP_RECT": (2, "(UP)&&(View==1)"),
+        "DN_RECT": (3, "(UP)&&(View==1)"),
+        "DP_INV": (3, "!(UP)&&(View==1)"),
+        "DN_INV": (2, "!(UP)&&(View==1)"),
+    }
+    for logical_port, (occurrence, condition) in expected_profiles.items():
+        observed = selected.get(logical_port)
         if (
-            not isinstance(ao, Mapping)
-            or ao.get("occurrence") != 1
-            or "FP==0" not in str(ao_condition)
-            or "View==1" not in str(ao_condition)
+            not isinstance(observed, Mapping)
+            or observed.get("occurrence") != occurrence
+            or observed.get("condition") != condition
         ):
             raise _runtime_error(
                 "MASTER_PORT_MISMATCH",
-                "The FP=0/View=1 AO port profile is not exact.",
+                "The g6p200 DC terminal profile is not exact.",
                 "audit_companion_bindings",
-                logical_port="AO",
-                observed=ao,
+                logical_port=logical_port,
+                expected_occurrence=occurrence,
+                expected_condition=condition,
+                observed=observed,
             )
-        expected_profiles = {
-            "DP_RECT": (2, "(UP)&&(View==1)"),
-            "DN_RECT": (3, "(UP)&&(View==1)"),
-            "DP_INV": (3, "!(UP)&&(View==1)"),
-            "DN_INV": (2, "!(UP)&&(View==1)"),
-        }
-        for logical_port, (occurrence, condition) in expected_profiles.items():
-            observed = selected.get(logical_port)
-            if (
-                not isinstance(observed, Mapping)
-                or observed.get("occurrence") != occurrence
-                or observed.get("condition") != condition
-            ):
-                raise _runtime_error(
-                    "MASTER_PORT_MISMATCH",
-                    "The g6p200 DC terminal profile is not exact.",
-                    "audit_companion_bindings",
-                    logical_port=logical_port,
-                    expected_occurrence=occurrence,
-                    expected_condition=condition,
-                    observed=observed,
-                )
-        fixed = bridge["fixed_parameters"]
-        if fixed.get("FP") != 0 or fixed.get("View") != 1:
-            raise _runtime_error(
-                "MASTER_PARAMETER_MISMATCH",
-                "The six-pulse bridge must use FP=0 and View=1.",
-                "audit_companion_bindings",
-                observed=fixed,
-            )
+    fixed = bridge["fixed_parameters"]
+    if fixed.get("FP") != 0 or fixed.get("View") != 1:
+        raise _runtime_error(
+            "MASTER_PARAMETER_MISMATCH",
+            "The six-pulse bridge must use FP=0 and View=1.",
+            "audit_companion_bindings",
+            observed=fixed,
+        )
 
     return AuditedCompanionRegistry(
         registry=registry,
