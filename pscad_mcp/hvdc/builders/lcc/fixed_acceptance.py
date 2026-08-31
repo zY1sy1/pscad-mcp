@@ -2,15 +2,20 @@
 
 from __future__ import annotations
 
+import asyncio
 import copy
 import hashlib
+import inspect
 import json
 import math
 import os
 import re
 import stat
 import tempfile
+import time
 from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -18,9 +23,16 @@ from ....acceptance.baseline import validate_program_baseline
 from ....acceptance.evidence import build_run_metadata, index_explicit_reports
 from ....acceptance.promotion import promote_program_report
 from ....core.backend.base import BackendError
-from ....core.master_bindings import parse_master_binding_registry
+from ....core.master_bindings import (
+    audit_companion_bindings,
+    parse_master_binding_registry,
+)
+from ....core.process_inventory import list_pscad_processes
+from .assets import LccAssetSet, load_packaged_asset_set
 from .companion import audit_companion_library
-from .companion_gate import FIXTURES
+from .companion_gate import FIXTURES, run_companion_component_gate
+from .journal import AtomicJournal
+from .planner import WP1B_SMOKE_PROFILE
 
 FIXED_SCOPE = "lcc.fixed_autonomous"
 FIXED_BUILDER_PATH = "lcc.fixed_autonomous"
@@ -958,6 +970,17 @@ def _verify_audited_library(path: Path, expected_sha256: str, field: str) -> Non
         raise _error(field, f"{field} physical audit hash is inconsistent.")
 
 
+def _manifest_asset_sha256(path_value: str, field: str) -> str:
+    path = _regular_path(path_value, field)
+    try:
+        payload = path.read_bytes()
+    except OSError as error:
+        raise _error(field, f"{field} could not be read.") from error
+    if path.suffix.casefold() in {".json", ".md", ".pslx"}:
+        payload = payload.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+    return hashlib.sha256(payload).hexdigest()
+
+
 def _verify_manifest_sources(report: Mapping[str, Any]) -> None:
     sources = report["sources"]
     manifest_path = _verify_file(
@@ -984,7 +1007,11 @@ def _verify_manifest_sources(report: Mapping[str, Any]) -> None:
         expected_path = Path(os.path.abspath(root / Path(relative)))
         if (
             _identity_path(source["path"]) != _identity_path(expected_path)
-            or hashes.get(relative) != source["after"]
+            or hashes.get(relative)
+            != _manifest_asset_sha256(
+                source["path"],
+                f"sources.{source_name}",
+            )
         ):
             raise _error(
                 f"sources.{source_name}",
@@ -1201,6 +1228,684 @@ def _validate_fixed_baseline_identities(
         raise _error("baseline.scopes", "Program baseline fixed scope is invalid.")
 
 
+@dataclass(frozen=True)
+class FixedLccAcceptanceRequest:
+    repository_root: Path
+    workspace_root: Path
+    master_path: Path
+    registry_path: Path
+    asset_manifest_path: Path
+    report_path: Path
+    baseline_path: Path
+    project_name: str
+    commit: str
+    branch: str
+    preflight: Mapping[str, Any]
+    simulation_duration_s: float = _SMOKE_DURATION_S
+
+
+def _run_metadata(
+    request: FixedLccAcceptanceRequest,
+    run_id: str,
+    capability_state: str,
+) -> dict[str, Any]:
+    return build_run_metadata(
+        run_id=run_id,
+        scope=FIXED_SCOPE,
+        kind=FIXED_KIND,
+        capability_state=capability_state,
+        commit=request.commit,
+        generated_at_utc=(
+            datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        ),
+    )
+
+
+def _fixed_source_paths(
+    request: FixedLccAcceptanceRequest,
+) -> dict[str, Path]:
+    asset_root = request.asset_manifest_path.parent.resolve()
+    return {
+        "master": request.master_path.resolve(),
+        "registry": request.registry_path.resolve(),
+        "asset_manifest": request.asset_manifest_path.resolve(),
+        "catalog": (asset_root / _MANIFEST_SOURCES["catalog"]).resolve(),
+        "blueprint": (asset_root / _MANIFEST_SOURCES["blueprint"]).resolve(),
+        "library": (asset_root / _MANIFEST_SOURCES["library"]).resolve(),
+        "smoke_contract": (
+            asset_root / _MANIFEST_SOURCES["smoke_contract"]
+        ).resolve(),
+        "provenance": (asset_root / _MANIFEST_SOURCES["provenance"]).resolve(),
+    }
+
+
+def _validate_request_sources(
+    request: FixedLccAcceptanceRequest,
+    *,
+    require_preflight_pass: bool = True,
+) -> dict[str, str]:
+    repository_root = _regular_directory(
+        request.repository_root,
+        "request.repository_root",
+    )
+    workspace_root = _regular_directory(
+        request.workspace_root,
+        "request.workspace_root",
+    )
+    try:
+        request.report_path.resolve().relative_to(workspace_root)
+    except ValueError as error:
+        raise _error(
+            "request.report_path",
+            "The report path escaped the fresh run workspace.",
+        ) from error
+    if request.report_path.exists() or request.report_path.is_symlink():
+        raise _error(
+            "request.report_path",
+            "The report path already exists.",
+        )
+    if repository_root == workspace_root:
+        raise _error(
+            "request.workspace_root",
+            "The run workspace cannot be the repository root.",
+        )
+    if (
+        request.registry_path.resolve().parent
+        != request.asset_manifest_path.resolve().parent
+        or request.registry_path.name != _MANIFEST_SOURCES["registry"]
+        or request.asset_manifest_path.name != "manifest.json"
+    ):
+        raise _error(
+            "request.asset_manifest_path",
+            "Registry and manifest paths do not identify the fixed asset root.",
+        )
+    if not math.isclose(
+        float(request.simulation_duration_s),
+        _SMOKE_DURATION_S,
+        abs_tol=1e-12,
+    ):
+        raise _error(
+            "request.simulation_duration_s",
+            "Fixed acceptance requires the exact 0.1 s smoke duration.",
+        )
+    _text(request.project_name, "request.project_name")
+    _text(request.branch, "request.branch")
+    _run_metadata(request, request.report_path.parent.name, "failed")
+    _validate_preflight(
+        request.preflight,
+        require_pass=require_preflight_pass,
+    )
+    paths = _fixed_source_paths(request)
+    hashes = {
+        name: _sha256(_regular_path(path, f"request.sources.{name}"))
+        for name, path in paths.items()
+    }
+    if require_preflight_pass:
+        snapshot = request.preflight["snapshot"]
+        if (
+            _identity_path(snapshot["master_path"])
+            != _identity_path(paths["master"])
+            or snapshot["master_sha256"] != hashes["master"]
+        ):
+            raise _error(
+                "request.preflight.master",
+                "Preflight does not bind the requested Master source.",
+            )
+        _verify_preflight_files(request.preflight)
+    return hashes
+
+
+def _source_evidence(
+    request: FixedLccAcceptanceRequest,
+    assets: LccAssetSet,
+    source_hashes: Mapping[str, str],
+) -> dict[str, Any]:
+    paths = _fixed_source_paths(request)
+    result = {
+        name: {
+            "path": paths[name].as_posix(),
+            "before": source_hashes[name],
+            "after": source_hashes[name],
+        }
+        for name in SOURCE_KEYS - {"registry"}
+    }
+    result["registry"] = {
+        "path": paths["registry"].as_posix(),
+        "before": source_hashes["registry"],
+        "after": source_hashes["registry"],
+        "registry_sha256": assets.master_bindings.sha256,
+    }
+    return result
+
+
+def _initial_fail_report(
+    request: FixedLccAcceptanceRequest,
+    assets: LccAssetSet,
+    source_hashes: Mapping[str, str],
+) -> dict[str, Any]:
+    run_id = request.report_path.parent.name
+    return {
+        **_run_metadata(request, run_id, "failed"),
+        "status": "FAIL",
+        "repository": {
+            "branch": request.branch,
+            "commit": request.commit,
+            "clean": True,
+        },
+        "preflight": copy.deepcopy(dict(request.preflight)),
+        "sources": _source_evidence(request, assets, source_hashes),
+        "component_gate": None,
+        "build": {
+            "project_name": request.project_name,
+            "workspace": request.workspace_root.resolve().as_posix(),
+            "build_id": None,
+            "plan_hash": None,
+            "verification_profile": WP1B_SMOKE_PROFILE,
+            "journal_path": None,
+            "journal_sha256": None,
+            "history": [],
+            "terminal_state": "not_started",
+        },
+        "artifacts": {
+            "project": None,
+            "library": None,
+            "selected_output": None,
+            "output_parts": [],
+            "output_metadata": [],
+        },
+        "smoke": None,
+        "runtime": {
+            "backend": "legacy",
+            "version": "4.6.2",
+            "x64": True,
+            "licensed": False,
+            "managed_pid": None,
+            "quit_error": None,
+            "remaining_processes": [],
+        },
+        "explicit_exclusions": list(FIXED_EXCLUSIONS),
+        "failure": {
+            "stage": "not_started",
+            "code": "NOT_STARTED",
+            "message": "Fixed acceptance has not completed.",
+        },
+    }
+
+
+def _fail_report(
+    request: FixedLccAcceptanceRequest,
+    current: Mapping[str, Any],
+    stage: str,
+    error: BaseException,
+) -> dict[str, Any]:
+    report = copy.deepcopy(dict(current))
+    report.update(_run_metadata(request, str(report["run_id"]), "failed"))
+    report["status"] = "FAIL"
+    report["smoke"] = None
+    report["failure"] = {
+        "stage": stage,
+        "code": error.code if isinstance(error, BackendError) else type(error).__name__,
+        "message": str(error)[:1024] or type(error).__name__,
+    }
+    build = report.get("build")
+    if isinstance(build, dict) and build.get("terminal_state") == "published":
+        build["terminal_state"] = "failed"
+    return report
+
+
+def _runtime_from_status(value: Any) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        raise BackendError(
+            "LCC_FIXED_RUNTIME_INVALID",
+            "Fixed runtime status is not an object.",
+            "hvdc",
+            "run_fixed_lcc_acceptance",
+        )
+    session = value.get("session")
+    managed_pid = session.get("managed_pid") if isinstance(session, Mapping) else None
+    return {
+        "backend": str(value.get("backend") or ""),
+        "version": str(value.get("version") or ""),
+        "x64": value.get("x64") is True,
+        "licensed": value.get("licensed") is True,
+        "managed_pid": managed_pid,
+        "quit_error": None,
+        "remaining_processes": [],
+    }
+
+
+def _require_licensed_462_runtime(runtime: Mapping[str, Any]) -> None:
+    if (
+        runtime["backend"] != "legacy"
+        or runtime["version"] != "4.6.2"
+        or runtime["x64"] is not True
+        or runtime["licensed"] is not True
+    ):
+        raise BackendError(
+            "LCC_FIXED_RUNTIME_INVALID",
+            "Fixed acceptance requires licensed Legacy PSCAD 4.6.2 x64.",
+            "hvdc",
+            "run_fixed_lcc_acceptance",
+        )
+
+
+async def _maybe_await(value: Any) -> Any:
+    return await value if inspect.isawaitable(value) else value
+
+
+def _state_history(record: Mapping[str, Any]) -> list[str]:
+    history = record.get("history")
+    if not isinstance(history, Sequence) or isinstance(history, (str, bytes)):
+        raise _error("build.history", "Build history must be an array.")
+    return [
+        str(item["state"])
+        for item in history
+        if isinstance(item, Mapping) and isinstance(item.get("state"), str)
+    ]
+
+
+def _build_evidence(
+    request: FixedLccAcceptanceRequest,
+    plan: Mapping[str, Any],
+    record: Mapping[str, Any],
+) -> dict[str, Any]:
+    build_id = _text(record.get("build_id"), "build.build_id")
+    journal = AtomicJournal(request.workspace_root, build_id).path
+    return {
+        "project_name": request.project_name,
+        "workspace": request.workspace_root.resolve().as_posix(),
+        "build_id": build_id,
+        "plan_hash": _hash(plan.get("plan_hash"), "build.plan_hash"),
+        "verification_profile": WP1B_SMOKE_PROFILE,
+        "journal_path": journal.resolve().as_posix() if journal.is_file() else None,
+        "journal_sha256": _sha256(journal) if journal.is_file() else None,
+        "history": _state_history(record),
+        "terminal_state": str(record.get("state") or "unknown"),
+    }
+
+
+async def _poll_fixed_build(
+    builder: Any,
+    build_id: str,
+    *,
+    timeout_s: float,
+    poll_interval_s: float,
+) -> dict[str, Any]:
+    deadline = time.monotonic() + timeout_s
+    while True:
+        record = builder.get_build_status(build_id)
+        if not isinstance(record, Mapping):
+            raise BackendError(
+                "LCC_FIXED_RESULT_INVALID",
+                "Fixed build status is not an object.",
+                "hvdc",
+                "run_fixed_lcc_acceptance",
+            )
+        result = dict(record)
+        if result.get("state") in {
+            "published",
+            "failed",
+            "timed_out",
+            "interrupted",
+        }:
+            return result
+        if time.monotonic() >= deadline:
+            raise BackendError(
+                "LCC_BUILD_TIMED_OUT",
+                "Fixed acceptance timed out.",
+                "hvdc",
+                "run_fixed_lcc_acceptance",
+            )
+        await asyncio.sleep(poll_interval_s)
+
+
+def _artifact(path_value: Any, field: str) -> dict[str, str]:
+    if not isinstance(path_value, (str, Path)):
+        raise _error(f"{field}.path", f"{field}.path must be a filesystem path.")
+    path = _regular_path(path_value, field)
+    return {"path": path.resolve().as_posix(), "sha256": _sha256(path)}
+
+
+def _output_metadata(selected_output: Path) -> list[Path]:
+    output_base = re.sub(r"_\d{2}$", "", selected_output.stem)
+    return [
+        selected_output.with_name(output_base + suffix)
+        for suffix in (".inf", ".infx")
+        if selected_output.with_name(output_base + suffix).is_file()
+    ]
+
+
+def _pass_report_from_record(
+    request: FixedLccAcceptanceRequest,
+    runtime: Mapping[str, Any],
+    assets: LccAssetSet,
+    component_gate: Mapping[str, Any],
+    plan: Mapping[str, Any],
+    record: Mapping[str, Any],
+    current: Mapping[str, Any],
+) -> dict[str, Any]:
+    history = _state_history(record)
+    if record.get("state") != "published" or tuple(history) != SUCCESS_HISTORY:
+        raise BackendError(
+            "LCC_FIXED_HISTORY_INVALID",
+            "Fixed build did not reach the exact published smoke history.",
+            "hvdc",
+            "run_fixed_lcc_acceptance",
+        )
+    result = record.get("result")
+    if not isinstance(result, Mapping) or not isinstance(result.get("smoke"), Mapping):
+        raise BackendError(
+            "LCC_FIXED_RESULT_INVALID",
+            "Fixed build result contains no smoke evidence.",
+            "hvdc",
+            "run_fixed_lcc_acceptance",
+        )
+    raw_parts = result.get("output_parts")
+    if not isinstance(raw_parts, Sequence) or isinstance(raw_parts, (str, bytes)):
+        raise BackendError(
+            "LCC_FIXED_RESULT_INVALID",
+            "Fixed output part evidence is incomplete.",
+            "hvdc",
+            "run_fixed_lcc_acceptance",
+        )
+    selected_output = _regular_path(
+        _text(result.get("output_file"), "artifacts.selected_output.path"),
+        "artifacts.selected_output",
+    )
+    library = (
+        request.workspace_root
+        / ".pscad-mcp"
+        / "libraries"
+        / Path(assets.companion_library).name
+    )
+    report = copy.deepcopy(dict(current))
+    report.update(_run_metadata(request, str(report["run_id"]), FIXED_CAPABILITY))
+    report.update(
+        {
+            "status": "PASS",
+            "component_gate": copy.deepcopy(dict(component_gate)),
+            "build": _build_evidence(request, plan, record),
+            "artifacts": {
+                "project": _artifact(record.get("target_path"), "artifacts.project"),
+                "library": _artifact(library, "artifacts.library"),
+                "selected_output": _artifact(
+                    selected_output,
+                    "artifacts.selected_output",
+                ),
+                "output_parts": [
+                    _artifact(path, f"artifacts.output_parts[{index}]")
+                    for index, path in enumerate(raw_parts)
+                ],
+                "output_metadata": [
+                    _artifact(path, f"artifacts.output_metadata[{index}]")
+                    for index, path in enumerate(_output_metadata(selected_output))
+                ],
+            },
+            "smoke": copy.deepcopy(dict(result["smoke"])),
+            "runtime": copy.deepcopy(dict(runtime)),
+            "failure": None,
+        }
+    )
+    return report
+
+
+def _cleanup_hash(path: Path) -> tuple[str | None, BaseException | None]:
+    try:
+        return _sha256(_regular_path(path, "cleanup.source")), None
+    except BaseException as error:  # noqa: BLE001 - cleanup evidence controls verdict
+        return None, error
+
+
+async def _cleanup_and_finalize(
+    request: FixedLccAcceptanceRequest,
+    service: Any,
+    builder: Any,
+    report: Mapping[str, Any],
+    process_reader: Callable[[], Sequence[Mapping[str, Any]]],
+) -> dict[str, Any]:
+    result = copy.deepcopy(dict(report))
+    cleanup_error: BaseException | None = None
+    try:
+        await builder.shutdown(timeout_s=5.0)
+    except BaseException as error:  # noqa: BLE001 - cleanup controls verdict
+        cleanup_error = error
+    try:
+        await service.quit_pscad(confirm=True)
+    except BaseException as error:  # noqa: BLE001 - cleanup controls verdict
+        cleanup_error = cleanup_error or error
+    try:
+        remaining = [dict(value) for value in process_reader()]
+    except BaseException as error:  # noqa: BLE001 - process evidence controls verdict
+        remaining = []
+        cleanup_error = cleanup_error or error
+    result["runtime"]["remaining_processes"] = remaining
+    if cleanup_error is not None:
+        result["runtime"]["quit_error"] = str(cleanup_error)[:1024]
+
+    source_error: BaseException | None = None
+    source_changed = False
+    paths = _fixed_source_paths(request)
+    for name, path in paths.items():
+        observed, error = _cleanup_hash(path)
+        source_error = source_error or error
+        source = result["sources"][name]
+        source["after"] = observed
+        source_changed = source_changed or observed != source["before"]
+
+    compiler_error: BaseException | None = None
+    compiler_changed = False
+    snapshot = request.preflight["snapshot"]
+    for path_field, hash_field in (
+        ("compiler_configuration", "compiler_configuration_sha256"),
+        ("compiler_executable", "compiler_executable_sha256"),
+    ):
+        observed, error = _cleanup_hash(Path(snapshot[path_field]))
+        compiler_error = compiler_error or error
+        compiler_changed = compiler_changed or observed != snapshot[hash_field]
+
+    build_id = result["build"].get("build_id")
+    if isinstance(build_id, str):
+        journal = AtomicJournal(request.workspace_root, build_id).path
+        if journal.is_file():
+            result["build"]["journal_path"] = journal.resolve().as_posix()
+            result["build"]["journal_sha256"] = _sha256(journal)
+
+    if cleanup_error or source_error or compiler_error or source_changed or compiler_changed or remaining:
+        return _fail_report(
+            request,
+            result,
+            "cleanup",
+            cleanup_error
+            or source_error
+            or compiler_error
+            or RuntimeError("source, compiler, or process cleanup mismatch"),
+        )
+    return result
+
+
+async def run_fixed_lcc_acceptance(
+    request: FixedLccAcceptanceRequest,
+    *,
+    service: Any,
+    builder: Any,
+    companion_gate_action: Callable[..., Any] = run_companion_component_gate,
+    master_audit_action: Callable[..., Any] = audit_companion_bindings,
+    process_reader: Callable[[], Sequence[Mapping[str, Any]]] = (
+        list_pscad_processes
+    ),
+    poll_interval_s: float = 0.5,
+    timeout_s: float = 900.0,
+) -> dict[str, Any]:
+    source_hashes = _validate_request_sources(request)
+    assets = load_packaged_asset_set()
+    report = _initial_fail_report(request, assets, source_hashes)
+    stage = "attach"
+    try:
+        await service.attach_local()
+        runtime = _runtime_from_status(await service.status())
+        report["runtime"] = copy.deepcopy(runtime)
+        _require_licensed_462_runtime(runtime)
+        audited = master_audit_action(request.master_path, assets.master_bindings)
+        if audited.master_sha256 != source_hashes["master"]:
+            raise BackendError(
+                "MASTER_SOURCE_CHANGED",
+                "The audited Master hash does not match the fixed request.",
+                "hvdc",
+                "run_fixed_lcc_acceptance",
+            )
+
+        stage = "component_gate"
+        component_gate = await _maybe_await(
+            companion_gate_action(
+                service,
+                assets,
+                request.workspace_root / "component-fixtures",
+                master_path=request.master_path,
+                registry_path=request.registry_path,
+                expected_master_sha256=audited.master_sha256,
+                expected_registry_sha256=audited.registry.sha256,
+            )
+        )
+        if not isinstance(component_gate, Mapping):
+            raise BackendError(
+                "LCC_COMPANION_COMPILE_FAILED",
+                "Component gate returned no structured evidence.",
+                "hvdc",
+                "run_fixed_lcc_acceptance",
+            )
+        report["component_gate"] = copy.deepcopy(dict(component_gate))
+        if component_gate.get("status") != "PASS":
+            raise BackendError(
+                "LCC_COMPANION_COMPILE_FAILED",
+                "An isolated companion fixture failed.",
+                "hvdc",
+                "run_fixed_lcc_acceptance",
+                {"component_gate": copy.deepcopy(dict(component_gate))},
+            )
+
+        topology_root = request.workspace_root / "full-topology"
+        stage = "plan"
+        plan = builder.plan_model(
+            request.project_name,
+            folder=str(topology_root),
+            simulation_duration_s=request.simulation_duration_s,
+            verification_profile=WP1B_SMOKE_PROFILE,
+        )
+        if not isinstance(plan, Mapping):
+            raise BackendError(
+                "LCC_FIXED_RESULT_INVALID",
+                "Fixed plan is not an object.",
+                "hvdc",
+                "run_fixed_lcc_acceptance",
+            )
+        report["build"]["plan_hash"] = plan.get("plan_hash")
+        stage = "build"
+        started = await builder.build_model(
+            request.project_name,
+            str(plan["plan_hash"]),
+            folder=str(topology_root),
+            simulation_duration_s=request.simulation_duration_s,
+            verification_profile=WP1B_SMOKE_PROFILE,
+            confirm=True,
+        )
+        if not isinstance(started, Mapping):
+            raise BackendError(
+                "LCC_FIXED_RESULT_INVALID",
+                "Fixed build start returned no build identity.",
+                "hvdc",
+                "run_fixed_lcc_acceptance",
+            )
+        build_id = _text(started.get("build_id"), "build.build_id")
+        record = await _poll_fixed_build(
+            builder,
+            build_id,
+            timeout_s=timeout_s,
+            poll_interval_s=poll_interval_s,
+        )
+        report["build"] = _build_evidence(request, plan, record)
+        if record.get("state") != "published":
+            build_error = record.get("error")
+            raise BackendError(
+                str(build_error.get("code") if isinstance(build_error, Mapping) else "LCC_FIXED_SMOKE_FAILED"),
+                str(build_error.get("message") if isinstance(build_error, Mapping) else "The fixed build did not publish."),
+                "hvdc",
+                "run_fixed_lcc_acceptance",
+            )
+        report = _pass_report_from_record(
+            request,
+            runtime,
+            assets,
+            component_gate,
+            plan,
+            record,
+            report,
+        )
+    except BaseException as error:  # noqa: BLE001 - persist lifecycle failures
+        report = _fail_report(request, report, stage, error)
+    finally:
+        report = await _cleanup_and_finalize(
+            request,
+            service,
+            builder,
+            report,
+            process_reader,
+        )
+
+    try:
+        normalized = validate_fixed_lcc_acceptance_report(report)
+    except BaseException as error:  # noqa: BLE001 - persist report failures
+        report = _fail_report(request, report, "report", error)
+        normalized = validate_fixed_lcc_acceptance_report(report)
+    write_fixed_lcc_acceptance_report(request.report_path, normalized)
+    try:
+        loaded, indexed = load_fixed_lcc_acceptance_report(request.report_path)
+    except BaseException as error:  # noqa: BLE001 - replace invalid PASS evidence
+        normalized = validate_fixed_lcc_acceptance_report(
+            _fail_report(request, normalized, "report", error)
+        )
+        write_fixed_lcc_acceptance_report(request.report_path, normalized)
+        loaded, indexed = load_fixed_lcc_acceptance_report(request.report_path)
+    if indexed["status"] != loaded["status"] or indexed["commit"] != request.commit:
+        raise BackendError(
+            "LCC_FIXED_REPORT_INVALID",
+            "Written fixed report did not re-index.",
+            "hvdc",
+            "run_fixed_lcc_acceptance",
+        )
+    return loaded
+
+
+def write_fixed_lcc_setup_failure_report(
+    request: FixedLccAcceptanceRequest,
+    error: BaseException,
+    *,
+    process_reader: Callable[[], Sequence[Mapping[str, Any]]] = (
+        list_pscad_processes
+    ),
+) -> dict[str, Any]:
+    source_hashes = _validate_request_sources(
+        request,
+        require_preflight_pass=False,
+    )
+    assets = load_packaged_asset_set()
+    report = _fail_report(
+        request,
+        _initial_fail_report(request, assets, source_hashes),
+        "setup",
+        error,
+    )
+    try:
+        report["runtime"]["remaining_processes"] = [
+            dict(value) for value in process_reader()
+        ]
+    except BaseException as process_error:  # noqa: BLE001 - persist setup evidence
+        report["runtime"]["quit_error"] = str(process_error)[:1024]
+    normalized = validate_fixed_lcc_acceptance_report(report)
+    write_fixed_lcc_acceptance_report(request.report_path, normalized)
+    loaded, _indexed = load_fixed_lcc_acceptance_report(request.report_path)
+    return loaded
+
+
 def write_fixed_lcc_acceptance_report(
     path: str | Path,
     value: Any,
@@ -1278,8 +1983,11 @@ __all__ = [
     "REPORT_KEYS",
     "SOURCE_KEYS",
     "SUCCESS_HISTORY",
+    "FixedLccAcceptanceRequest",
     "load_fixed_lcc_acceptance_report",
     "promote_fixed_lcc_report",
+    "run_fixed_lcc_acceptance",
     "validate_fixed_lcc_acceptance_report",
     "write_fixed_lcc_acceptance_report",
+    "write_fixed_lcc_setup_failure_report",
 ]

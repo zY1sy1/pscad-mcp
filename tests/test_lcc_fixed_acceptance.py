@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import asyncio
 import copy
 import hashlib
 import json
 import math
+import shutil
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -13,9 +17,12 @@ from pscad_mcp.hvdc.builders.lcc import fixed_acceptance
 from pscad_mcp.hvdc.builders.lcc.companion_gate import FIXTURES
 from pscad_mcp.hvdc.builders.lcc.fixed_acceptance import (
     FIXED_EXCLUSIONS,
+    FixedLccAcceptanceRequest,
     promote_fixed_lcc_report,
+    run_fixed_lcc_acceptance,
     validate_fixed_lcc_acceptance_report,
 )
+from pscad_mcp.hvdc.builders.lcc.journal import AtomicJournal
 
 COMMIT = "a" * 40
 HASH = "b" * 64
@@ -481,3 +488,333 @@ def test_preflight_file_revalidation_rejects_compiler_drift(tmp_path):
 
     assert failure.value.code == "LCC_FIXED_REPORT_INVALID"
     assert failure.value.details["field"] == "preflight.compiler_configuration"
+
+
+def fixed_request(tmp_path: Path) -> FixedLccAcceptanceRequest:
+    root = Path(__file__).parents[1]
+    asset_root = (
+        root
+        / "pscad_mcp"
+        / "assets"
+        / "lcc"
+        / "cigre_lcc_monopole_v1"
+    )
+    workspace = tmp_path / "fixed-run"
+    workspace.mkdir()
+    master = tmp_path / "master.pslx"
+    compiler_configuration = tmp_path / "fortran_compilers.xml"
+    compiler_executable = tmp_path / "gfortran.exe"
+    master.write_bytes(b"master")
+    compiler_configuration.write_bytes(b"compiler configuration")
+    compiler_executable.write_bytes(b"compiler executable")
+    snapshot = {
+        "status": "PASS",
+        "master_path": str(master),
+        "master_sha256": hashlib.sha256(master.read_bytes()).hexdigest(),
+        "compiler_configuration": str(compiler_configuration),
+        "compiler_configuration_sha256": hashlib.sha256(
+            compiler_configuration.read_bytes()
+        ).hexdigest(),
+        "compiler_executable": str(compiler_executable),
+        "compiler_executable_sha256": hashlib.sha256(
+            compiler_executable.read_bytes()
+        ).hexdigest(),
+    }
+    preflight_hash = hashlib.sha256(
+        json.dumps(
+            snapshot,
+            ensure_ascii=True,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("ascii")
+    ).hexdigest()
+    baseline = tmp_path / "baseline.json"
+    baseline.write_bytes(b"unchanged baseline")
+    return FixedLccAcceptanceRequest(
+        repository_root=root,
+        workspace_root=workspace,
+        master_path=master,
+        registry_path=asset_root / "master-bindings-pscad-4.6.2.json",
+        asset_manifest_path=asset_root / "manifest.json",
+        report_path=workspace / "fixed-lcc-acceptance-report.json",
+        baseline_path=baseline,
+        project_name="WP1B_FIXED_LCC",
+        commit=COMMIT,
+        branch="codex/lcc-wp1b",
+        preflight={
+            "status": "PASS",
+            "sha256": preflight_hash,
+            "snapshot": snapshot,
+        },
+    )
+
+
+def _fake_master_audit(master_path: Path, registry):
+    return SimpleNamespace(
+        master_sha256=hashlib.sha256(master_path.read_bytes()).hexdigest(),
+        registry=registry,
+    )
+
+
+def _component_gate_for_run(request: FixedLccAcceptanceRequest):
+    from pscad_mcp.hvdc.builders.lcc.assets import load_packaged_asset_set
+
+    assets = load_packaged_asset_set()
+    gate = _component_gate()
+    gate_root = request.workspace_root / "component-fixtures"
+    gate_root.mkdir(parents=True, exist_ok=True)
+    source_library = request.asset_manifest_path.parent / assets.companion_library
+    gate_library = gate_root / Path(assets.companion_library).name
+    shutil.copyfile(source_library, gate_library)
+    library_hash = hashlib.sha256(gate_library.read_bytes()).hexdigest()
+    gate.update(
+        workspace=str(gate_root),
+        master_sha256=hashlib.sha256(request.master_path.read_bytes()).hexdigest(),
+        registry_sha256=assets.master_bindings.sha256,
+        library=_path_hash(str(gate_library), library_hash),
+    )
+    for item in gate["fixtures"]:
+        fixture_root = gate_root / item["fixture"]
+        fixture_root.mkdir()
+        project = fixture_root / f"{item['fixture']}.pscx"
+        project.write_bytes(item["fixture"].encode("ascii"))
+        project_hash = hashlib.sha256(project.read_bytes()).hexdigest()
+        item["project"].update(
+            path=str(project),
+            sha256_before_compile=project_hash,
+            sha256=project_hash,
+        )
+    return gate
+
+
+class FakePscadService:
+    def __init__(self, failure_stage: str | None = None) -> None:
+        self.failure_stage = failure_stage
+        self.calls: list[Any] = []
+
+    async def attach_local(self):
+        self.calls.append("attach_local")
+        if self.failure_stage == "attach":
+            raise RuntimeError("attach failed")
+
+    async def status(self):
+        return {
+            "backend": "legacy",
+            "version": "4.6.2",
+            "x64": True,
+            "licensed": True,
+            "session": {"managed_pid": 42},
+        }
+
+    async def quit_pscad(self, *, confirm=False):
+        self.calls.append(("quit_pscad", confirm))
+        if self.failure_stage == "cleanup":
+            raise RuntimeError("quit failed")
+
+    def processes(self):
+        if self.failure_stage == "cleanup":
+            return [{"pid": 42, "name": "Pscad.exe", "exe": "Pscad.exe"}]
+        return []
+
+
+class FakeFixedBuilder:
+    def __init__(
+        self,
+        workspace: Path,
+        failure_stage: str | None = None,
+    ) -> None:
+        self.workspace = workspace
+        self.failure_stage = failure_stage
+        self.plan_calls: list[dict[str, Any]] = []
+        self.build_calls: list[dict[str, Any]] = []
+        self.record: dict[str, Any] | None = None
+
+    def plan_model(
+        self,
+        project_name,
+        folder,
+        simulation_duration_s,
+        verification_profile,
+    ):
+        self.plan_calls.append(
+            {
+                "project_name": project_name,
+                "folder": folder,
+                "simulation_duration_s": simulation_duration_s,
+                "verification_profile": verification_profile,
+            }
+        )
+        if self.failure_stage == "plan":
+            raise RuntimeError("plan failed")
+        return {"plan_hash": HASH}
+
+    async def build_model(
+        self,
+        project_name,
+        expected_plan_hash,
+        folder,
+        simulation_duration_s,
+        verification_profile,
+        confirm,
+    ):
+        self.build_calls.append(
+            {
+                "project_name": project_name,
+                "expected_plan_hash": expected_plan_hash,
+                "folder": folder,
+                "simulation_duration_s": simulation_duration_s,
+                "verification_profile": verification_profile,
+                "confirm": confirm,
+            }
+        )
+        if self.failure_stage == "build":
+            raise RuntimeError("build failed")
+        self.record = self._published_record(project_name, Path(folder))
+        return {"build_id": self.record["build_id"]}
+
+    def _published_record(self, project_name: str, folder: Path):
+        from pscad_mcp.hvdc.builders.lcc.assets import load_packaged_asset_set
+
+        assets = load_packaged_asset_set()
+        folder.mkdir(parents=True, exist_ok=True)
+        project = folder / f"{project_name}.pscx"
+        output = folder / f"{project_name}_01.out"
+        output_metadata = folder / f"{project_name}.inf"
+        library = self.workspace / ".pscad-mcp" / "libraries" / Path(
+            assets.companion_library
+        ).name
+        library.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(
+            Path(__file__).parents[1]
+            / "pscad_mcp"
+            / "assets"
+            / "lcc"
+            / "cigre_lcc_monopole_v1"
+            / assets.companion_library,
+            library,
+        )
+        project.write_bytes(b"project")
+        output.write_bytes(b"output")
+        output_metadata.write_bytes(b"metadata")
+        smoke = copy.deepcopy(valid_fixed_report()["smoke"])
+        if self.failure_stage == "report":
+            smoke["checks"]["time_domain"] = False
+        history = []
+        for state in SUCCESS_HISTORY:
+            history.append({"operation": f"operation:{state}"})
+            history.append({"state": state})
+        record = {
+            "build_id": "build-1",
+            "state": "published",
+            "target_path": str(project),
+            "history": history,
+            "error": None,
+            "result": {
+                "smoke": smoke,
+                "output_file": str(output),
+                "output_parts": [str(output)],
+            },
+        }
+        journal = AtomicJournal(self.workspace, "build-1").path
+        journal.parent.mkdir(parents=True, exist_ok=True)
+        journal.write_text(json.dumps(record), encoding="utf-8")
+        return record
+
+    def get_build_status(self, build_id):
+        assert build_id == "build-1"
+        return copy.deepcopy(self.record)
+
+    async def shutdown(self, timeout_s=5.0):
+        return None
+
+
+def test_orchestrator_runs_component_gate_then_production_smoke(tmp_path):
+    request = fixed_request(tmp_path)
+    service = FakePscadService()
+    builder = FakeFixedBuilder(request.workspace_root)
+    calls = []
+
+    result = asyncio.run(
+        run_fixed_lcc_acceptance(
+            request,
+            service=service,
+            builder=builder,
+            companion_gate_action=lambda *args, **kwargs: calls.append(
+                "component_gate"
+            )
+            or _component_gate_for_run(request),
+            master_audit_action=_fake_master_audit,
+            process_reader=list,
+            poll_interval_s=0,
+        )
+    )
+
+    assert result["status"] == "PASS"
+    assert calls == ["component_gate"]
+    assert builder.plan_calls[0]["verification_profile"] == "wp1b_smoke"
+    assert builder.plan_calls[0]["simulation_duration_s"] == pytest.approx(0.1)
+    assert request.report_path.is_file()
+    assert service.calls == ["attach_local", ("quit_pscad", True)]
+
+
+def failing_orchestrator_inputs(tmp_path: Path, failure_stage: str):
+    request = fixed_request(tmp_path)
+    service = FakePscadService(failure_stage)
+    builder = FakeFixedBuilder(request.workspace_root, failure_stage)
+
+    def gate(*_args, **_kwargs):
+        if failure_stage != "component_gate":
+            return _component_gate_for_run(request)
+        result = _component_gate_for_run(request)
+        result.update(
+            status="FAIL",
+            fixtures=[],
+            failure={
+                "fixture": "bridge_rectifier",
+                "operation": "build_project",
+                "code": "LCC_COMPANION_COMPILE_FAILED",
+                "message": "fixture failed",
+            },
+        )
+        return result
+
+    return request, service, builder, gate
+
+
+@pytest.mark.parametrize(
+    ("failure_stage", "expected_stage"),
+    [
+        ("attach", "attach"),
+        ("component_gate", "component_gate"),
+        ("plan", "plan"),
+        ("build", "build"),
+        ("cleanup", "cleanup"),
+        ("report", "report"),
+    ],
+)
+def test_orchestrator_persists_fail_and_never_promotes(
+    failure_stage,
+    expected_stage,
+    tmp_path,
+):
+    request, service, builder, gate = failing_orchestrator_inputs(
+        tmp_path,
+        failure_stage,
+    )
+
+    result = asyncio.run(
+        run_fixed_lcc_acceptance(
+            request,
+            service=service,
+            builder=builder,
+            companion_gate_action=gate,
+            master_audit_action=_fake_master_audit,
+            process_reader=service.processes,
+            poll_interval_s=0,
+        )
+    )
+
+    assert result["status"] == "FAIL"
+    assert result["failure"]["stage"] == expected_stage
+    assert request.report_path.is_file()
+    assert request.baseline_path.read_bytes() == b"unchanged baseline"
