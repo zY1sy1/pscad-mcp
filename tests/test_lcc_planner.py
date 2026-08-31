@@ -498,6 +498,22 @@ def test_packaged_main_signal_imports_are_pscad_grid_aligned():
     )
 
 
+def test_packaged_raw_signal_route_bends_are_pscad_grid_aligned():
+    blueprint = load_packaged_asset_set().blueprint
+    raw_nets = [
+        net for net in blueprint.nets if net.logical_id in {"vdc_rect_raw", "vdc_inv_raw", "idc_raw"}
+    ]
+
+    assert len(raw_nets) == 3
+    assert all(net.route is not None for net in raw_nets)
+    assert all(
+        coordinate % 18 == 0
+        for net in raw_nets
+        for vertex in net.route.vertices[1:-1]
+        for coordinate in vertex
+    )
+
+
 def test_wp1b_smoke_plan_uses_smoke_gate_and_hashes_profile(tmp_path):
     assets = _asset_set()
     request = LccPlanRequest(
