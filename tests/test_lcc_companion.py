@@ -421,6 +421,8 @@ def test_generated_companion_contains_exact_wp1b_output_channels(tmp_path):
 
     assert not crosses(points("ACY_TO_Y_B"), (180, 180))
     assert not crosses(points("ACD_TO_D_B"), (180, 450))
+    assert not crosses(points("ACY_TO_Y_BUS"), (216, 180))
+    assert not crosses(points("ACD_TO_D_BUS"), (216, 450))
 
 
 @pytest.mark.parametrize(

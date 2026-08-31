@@ -259,8 +259,10 @@
           <vertex x="0" y="0" />
           <vertex x="126" y="0" />
         </Wire>
-        <Wire classid="WireOrthogonal" name="ACY_TO_Y_BUS" x="180" y="180" w="154" h="10" orient="0" id="1233011059">
+        <Wire classid="WireOrthogonal" name="ACY_TO_Y_BUS" x="180" y="180" w="154" h="28" orient="0" id="1233011059">
           <vertex x="0" y="0" />
+          <vertex x="0" y="-18" />
+          <vertex x="144" y="-18" />
           <vertex x="144" y="0" />
         </Wire>
         <Wire classid="WireOrthogonal" name="ACD_TO_D" x="90" y="414" w="136" h="10" orient="0" id="1940377698">
@@ -277,8 +279,10 @@
           <vertex x="0" y="0" />
           <vertex x="126" y="0" />
         </Wire>
-        <Wire classid="WireOrthogonal" name="ACD_TO_D_BUS" x="180" y="450" w="154" h="10" orient="0" id="510313758">
+        <Wire classid="WireOrthogonal" name="ACD_TO_D_BUS" x="180" y="450" w="154" h="28" orient="0" id="510313758">
           <vertex x="0" y="0" />
+          <vertex x="0" y="-18" />
+          <vertex x="144" y="-18" />
           <vertex x="144" y="0" />
         </Wire>
         <Wire classid="WireOrthogonal" name="DC_POS_PATH" x="360" y="54" w="10" h="46" orient="0" id="1713277145">
