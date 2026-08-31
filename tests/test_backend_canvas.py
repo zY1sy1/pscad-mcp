@@ -254,6 +254,26 @@ class SnappingLegacyCanvas(CanvasState):
         )
 
 
+class HalfDownSnappingLegacyCanvas(CanvasState):
+    def __init__(self):
+        super().__init__(modern=False)
+
+    @staticmethod
+    def _snap(value):
+        quotient, remainder = divmod(value, 18)
+        return (quotient + (remainder * 2 > 18)) * 18
+
+    def add_component(self, library, name, x=1, y=1, *args, **parameters):
+        return super().add_component(
+            library,
+            name,
+            self._snap(x),
+            self._snap(y),
+            *args,
+            **parameters,
+        )
+
+
 class CanvasProject:
     def __init__(self, canvas):
         self.main = canvas
@@ -348,6 +368,21 @@ class TestBackendCanvasContracts(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual(component.location, {"x": 684, "y": 540})
+
+    async def test_legacy_accepts_lower_candidate_at_exact_half_grid(self):
+        backend = await self.make_legacy_backend(HalfDownSnappingLegacyCanvas())
+
+        component = await backend.add_component(
+            "case",
+            "Main",
+            "master",
+            "datalabel",
+            (1980, 639),
+            0,
+            {},
+        )
+
+        self.assertEqual(component.location, {"x": 1980, "y": 630})
 
     async def test_bus_connection_and_annotation_creation_match(self):
         for backend, _canvas in await self.make_backends():

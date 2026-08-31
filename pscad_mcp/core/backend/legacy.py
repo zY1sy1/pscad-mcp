@@ -3542,9 +3542,29 @@ class LegacyBackend:
             "x": round(location[0] / self._canvas_grid) * self._canvas_grid,
             "y": round(location[1] / self._canvas_grid) * self._canvas_grid,
         }
-        if info.definition != logical_definition or info.location not in (
-            requested_location,
-            snapped_location,
+        axis_candidates = []
+        for value in location:
+            candidates = {
+                round(value / self._canvas_grid) * self._canvas_grid
+            }
+            quotient, remainder = divmod(value, self._canvas_grid)
+            if remainder * 2 == self._canvas_grid:
+                candidates.update(
+                    {
+                        quotient * self._canvas_grid,
+                        (quotient + 1) * self._canvas_grid,
+                    }
+                )
+            axis_candidates.append(sorted(candidates))
+        snapped_locations = [
+            {"x": x, "y": y}
+            for x in axis_candidates[0]
+            for y in axis_candidates[1]
+        ]
+        if (
+            info.definition != logical_definition
+            or info.location != requested_location
+            and info.location not in snapped_locations
         ):
             raise BackendError(
                 "POSTCONDITION_FAILED",
@@ -3556,6 +3576,7 @@ class LegacyBackend:
                     "actual_definition": info.definition,
                     "requested_location": requested_location,
                     "expected_snapped_location": snapped_location,
+                    "expected_snapped_locations": snapped_locations,
                     "actual_location": info.location,
                 },
             )
