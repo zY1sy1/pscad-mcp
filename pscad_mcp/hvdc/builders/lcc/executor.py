@@ -15,7 +15,6 @@ from pathlib import Path
 from typing import Any
 
 from ....core.backend.base import BackendError
-from ....topology.adapters.lcc import topology_to_lcc_graph
 from ....topology.connectivity import build_connectivity
 from ....topology.models import (
     ProjectTopology,
@@ -1230,6 +1229,8 @@ class LccExecutor:
             if self.asset_set is not None
             else None
         )
+        from ....topology.adapters.lcc import topology_to_lcc_graph
+
         projected = topology_to_lcc_graph(
             build_connectivity(topology).topology,
             catalog,
