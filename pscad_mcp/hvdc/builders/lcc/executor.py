@@ -18,6 +18,7 @@ from .journal import AtomicJournal
 from .models import LccBuildPlan, LccBuildRecord, LccBuildState, LccPlanOperation
 from .project_graph import read_project_graph
 from .routing import absolute_port
+from .smoke import evaluate_fixed_smoke
 from .validator import validate_companion_library, validate_project_graph
 
 _TERMINAL_SUCCESS = {"completed", "complete", "finished", "done", "idle", "stopped"}
@@ -412,6 +413,8 @@ class LccExecutor:
             await self._compile(operation)
         elif operation.kind == "simulate":
             await self._simulate(operation)
+        elif operation.kind == "smoke_validate":
+            await self._smoke_validate(operation)
         elif operation.kind == "accept":
             await self._accept(operation)
         elif operation.kind == "publish":
@@ -1185,6 +1188,53 @@ class LccExecutor:
                 "read_lcc_output",
             )
         return await get_project_output(self.project_name)
+
+    async def _smoke_validate(self, operation: LccPlanOperation) -> None:
+        self._operation_started(operation)
+        if self.plan.verification_profile != "wp1b_smoke":
+            raise _error(
+                "LCC_FIXED_SMOKE_INVALID",
+                "The smoke operation requires the WP1B smoke profile.",
+                "evaluate_fixed_lcc_smoke",
+                verification_profile=self.plan.verification_profile,
+            )
+        if self.asset_set is None:
+            raise _error(
+                "LCC_FIXED_SMOKE_INVALID",
+                "The smoke gate requires a verified asset set.",
+                "evaluate_fixed_lcc_smoke",
+            )
+        expected_hash = operation.arguments.get("contract_sha256")
+        observed_hash = self.asset_set.hashes.get("smoke.json")
+        if expected_hash != observed_hash:
+            raise _error(
+                "LCC_ASSET_MISMATCH",
+                "The smoke contract changed after planning.",
+                "evaluate_fixed_lcc_smoke",
+                expected=expected_hash,
+                observed=observed_hash,
+            )
+        output = await self._acceptance_output()
+        smoke = evaluate_fixed_smoke(output, self.asset_set.smoke)
+        result = dict(self.result or {})
+        result["smoke"] = smoke
+        if self.output_file is not None:
+            result["output_file"] = self.output_file
+            result["output_parts"] = list(
+                self.output_parts or [self.output_file]
+            )
+            try:
+                result["output_sha256"] = sha256_file(Path(self.output_file))
+            except BackendError as error:
+                raise _error(
+                    "LCC_OUTPUT_INCOMPLETE",
+                    "The selected PSCAD output file could not be hashed for smoke evidence.",
+                    "read_lcc_output",
+                    output_file=self.output_file,
+                    upstream_code=error.code,
+                ) from error
+        self.result = result
+        self._record(LccBuildState.SMOKE_PASSED)
 
     async def _accept(self, operation: LccPlanOperation) -> None:
         self._operation_started(operation)

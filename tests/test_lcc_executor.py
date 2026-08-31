@@ -15,10 +15,13 @@ from pscad_mcp.hvdc.builders.lcc.executor import execute_build as _execute_build
 from pscad_mcp.hvdc.builders.lcc.models import (
     LccBlueprint,
     LccBuildPlan,
+    LccBuildState,
     LccComponentSpec,
     LccPlanOperation,
 )
 from tests.lcc_builder_fakes import RecordingPscadService
+from tests.test_lcc_smoke import contract as smoke_contract
+from tests.test_lcc_smoke import mutate_samples, valid_samples
 
 
 def execute_build(*args, **kwargs):
@@ -41,6 +44,33 @@ class OutputFileRecordingService(RecordingPscadService):
     async def read_output_file(self, file_path: str, max_samples: int = 10_000, channel: str | None = None, summary_only: bool = False) -> dict[str, object]:
         self._call("read_output_file", file_path, max_samples, channel, summary_only)
         return {"path": file_path, "verdict": "PASS"}
+
+
+class FixedSmokeRecordingService(OutputFileRecordingService):
+    def __init__(self, *, mutation: str | None = None):
+        super().__init__()
+        self.mutation = mutation
+
+    async def read_output_file(
+        self,
+        file_path: str,
+        max_samples: int = 10_000,
+        channel: str | None = None,
+        summary_only: bool = False,
+    ) -> dict[str, object]:
+        self._call(
+            "read_output_file",
+            file_path,
+            max_samples,
+            channel,
+            summary_only,
+        )
+        payload = valid_samples()
+        return (
+            payload
+            if self.mutation is None
+            else mutate_samples(payload, self.mutation)
+        )
 
 
 def _plan(tmp_path: Path) -> LccBuildPlan:
@@ -102,6 +132,150 @@ def _plan_with_connection(tmp_path: Path) -> LccBuildPlan:
             )
         operations.append(operation)
     return replace(plan, operations=tuple(operations))
+
+
+def _plan_with_profile(tmp_path: Path) -> LccBuildPlan:
+    plan = _plan(tmp_path)
+    operations = tuple(
+        replace(
+            operation,
+            kind="smoke_validate",
+            phase="smoke_validate",
+            operation_id="smoke_validate:executor:000",
+            arguments={
+                "contract_sha256": "s" * 64,
+                "required_channels": list(smoke_contract()["required_channels"]),
+            },
+        )
+        if operation.kind == "accept"
+        else operation
+        for operation in plan.operations
+    )
+    return replace(
+        plan,
+        operations=operations,
+        verification_profile="wp1b_smoke",
+        asset_hashes={
+            "library/cigre.pslx": "l" * 64,
+            "smoke.json": "s" * 64,
+        },
+    )
+
+
+def _fixed_smoke_assets(plan: LccBuildPlan):
+    packaged = load_packaged_asset_set()
+    library_hash = packaged.hashes[packaged.companion_library]
+    catalog = {
+        "schema_version": 1,
+        "name": "executor_test",
+        "pscad_version": "4.6.2",
+        "identity": "executor_test/catalog",
+        "definitions": [
+            {
+                "scoped_name": "master:source",
+                "ports": [],
+                "parameters": {"LogicalId": {"type": "string"}},
+                "bounding_box": [-10, -10, 10, 10],
+            },
+            {
+                "scoped_name": "master:load",
+                "ports": [],
+                "parameters": {"LogicalId": {"type": "string"}},
+                "bounding_box": [-10, -10, 10, 10],
+            },
+        ],
+    }
+    return replace(
+        packaged,
+        name=plan.blueprint.name,
+        companion_library="library/cigre.pslx",
+        blueprint=plan.blueprint,
+        catalog=catalog,
+        smoke=smoke_contract(),
+        hashes={
+            "library/cigre.pslx": library_hash,
+            "smoke.json": "s" * 64,
+        },
+    )
+
+
+def test_executor_uses_smoke_evaluator_and_records_smoke_state(tmp_path):
+    service = FixedSmokeRecordingService()
+    plan = _plan_with_profile(tmp_path)
+
+    record = asyncio.run(
+        execute_build(
+            plan,
+            service,
+            tmp_path,
+            asset_set=_fixed_smoke_assets(plan),
+            build_id="fixed-smoke",
+            poll_interval_s=0,
+        )
+    )
+
+    assert record.state == LccBuildState.PUBLISHED
+    assert [item["state"] for item in record.history if "state" in item][
+        -3:
+    ] == ["simulated", "smoke_passed", "published"]
+    assert record.result["smoke"]["verdict"] == "PASS"
+    assert "golden_checks" not in record.result["smoke"]
+
+
+def test_smoke_failure_never_publishes_or_calls_acceptance(tmp_path, monkeypatch):
+    service = FixedSmokeRecordingService(mutation="disabled")
+    plan = _plan_with_profile(tmp_path)
+    called = []
+    monkeypatch.setattr(
+        "pscad_mcp.hvdc.builders.lcc.executor.evaluate_acceptance",
+        lambda *args, **kwargs: called.append((args, kwargs)),
+    )
+
+    record = asyncio.run(
+        execute_build(
+            plan,
+            service,
+            tmp_path,
+            asset_set=_fixed_smoke_assets(plan),
+            build_id="fixed-smoke-fail",
+            poll_interval_s=0,
+        )
+    )
+
+    assert record.state == LccBuildState.FAILED
+    assert record.error["code"] == "LCC_FIXED_SMOKE_FAILED"
+    assert called == []
+    assert not Path(plan.target_path).exists()
+
+
+def test_smoke_contract_hash_drift_fails_before_output_read(tmp_path):
+    service = FixedSmokeRecordingService()
+    plan = _plan_with_profile(tmp_path)
+    packaged = load_packaged_asset_set()
+    assets = replace(
+        _fixed_smoke_assets(plan),
+        hashes={
+            "library/cigre.pslx": packaged.hashes[
+                packaged.companion_library
+            ],
+            "smoke.json": "x" * 64,
+        },
+    )
+
+    record = asyncio.run(
+        execute_build(
+            plan,
+            service,
+            tmp_path,
+            asset_set=assets,
+            build_id="fixed-smoke-drift",
+            poll_interval_s=0,
+        )
+    )
+
+    assert record.state == LccBuildState.FAILED
+    assert record.error["code"] == "LCC_ASSET_MISMATCH"
+    assert "read_output_file" not in [call[0] for call in service.calls]
 
 
 def test_execute_build_verifies_mutations_and_publishes_after_acceptance(tmp_path):
