@@ -7,6 +7,7 @@ import math
 import re
 import shutil
 import time
+from collections.abc import Mapping, Sequence
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -1136,7 +1137,51 @@ class LccExecutor:
         self._operation_started(operation)
         await self._verify_master_binding_state()
         await self.service.build_project(self.project_name)
+        await self._verify_compile_messages(self.project_name)
         self._operation_completed(LccBuildState.COMPILED)
+
+    async def _verify_compile_messages(self, project_name: str) -> None:
+        reader = getattr(self.service, "get_project_output", None)
+        if not callable(reader):
+            raise _error(
+                "LCC_BUILD_FAILED",
+                "The PSCAD service cannot read structured compile messages.",
+                "verify_lcc_compile_messages",
+                project_name=project_name,
+            )
+        messages = await reader(project_name, structured=True)
+        if not isinstance(messages, Sequence) or isinstance(
+            messages, (str, bytes)
+        ):
+            raise _error(
+                "LCC_BUILD_FAILED",
+                "Structured PSCAD compile messages are not an array.",
+                "verify_lcc_compile_messages",
+                project_name=project_name,
+            )
+        errors = [
+            dict(message)
+            for message in messages
+            if isinstance(message, Mapping)
+            and str(
+                message.get("severity", message.get("status", ""))
+            ).casefold()
+            == "error"
+        ]
+        if errors:
+            summary = " | ".join(
+                str(error.get("text", error.get("message", "compile error")))[
+                    :256
+                ]
+                for error in errors[:3]
+            )
+            raise _error(
+                "LCC_BUILD_FAILED",
+                f"PSCAD reported LCC compile errors: {summary}",
+                "verify_lcc_compile_messages",
+                project_name=project_name,
+                errors=errors[:20],
+            )
 
     async def _verify_master_binding_state(
         self,
@@ -1519,6 +1564,7 @@ class LccExecutor:
         self._validate_graph(self.target_path)
         final_project_name = final_path.stem
         await self.service.build_project(final_project_name)
+        await self._verify_compile_messages(final_project_name)
         await self._verify_master_binding_state(
             project_name=final_project_name,
             refresh_components=False,

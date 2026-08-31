@@ -136,6 +136,22 @@ class FixedSmokeRecordingService(OutputFileRecordingService):
         )
 
 
+class CompileMessageRecordingService(RecordingPscadService):
+    def __init__(self, batches):
+        super().__init__()
+        self.batches = list(batches)
+
+    async def get_project_output(
+        self,
+        project_name: str,
+        structured: bool = False,
+    ):
+        if not structured:
+            return await super().get_project_output(project_name, structured=False)
+        self._call("get_project_output", project_name, structured=True)
+        return self.batches.pop(0) if self.batches else []
+
+
 class PredeclaredLegacyOutputService(RecordingPscadService):
     def __init__(self):
         super().__init__()
@@ -436,6 +452,67 @@ def test_execute_build_verifies_mutations_and_publishes_after_acceptance(tmp_pat
     assert journal_payload["target_path"] == str(Path(_plan(tmp_path).target_path))
 
 
+def test_executor_rejects_structured_staging_compile_errors(tmp_path):
+    service = CompileMessageRecordingService(
+        [
+            [
+                {
+                    "severity": "error",
+                    "text": "Input port is floating.",
+                    "source": {"kind": "build"},
+                }
+            ]
+        ]
+    )
+
+    record = asyncio.run(
+        execute_build(
+            _plan(tmp_path),
+            service,
+            tmp_path,
+            build_id="build-compile-message-error",
+            poll_interval_s=0,
+        )
+    )
+
+    assert record.state == LccBuildState.FAILED
+    assert record.error["code"] == "LCC_BUILD_FAILED"
+    assert "Input port is floating." in record.error["message"]
+    names = [call[0] for call in service.calls]
+    assert names.index("build_project") < names.index("get_project_output")
+    assert "run_project" not in names
+
+
+def test_executor_rejects_structured_final_compile_errors(tmp_path):
+    service = CompileMessageRecordingService(
+        [
+            [],
+            [
+                {
+                    "severity": "error",
+                    "text": "Final project compile failed.",
+                    "source": {"kind": "build"},
+                }
+            ],
+        ]
+    )
+
+    record = asyncio.run(
+        execute_build(
+            _plan(tmp_path),
+            service,
+            tmp_path,
+            build_id="build-final-compile-message-error",
+            poll_interval_s=0,
+        )
+    )
+
+    assert record.state == LccBuildState.FAILED
+    assert record.error["code"] == "LCC_BUILD_FAILED"
+    assert "Final project compile failed." in record.error["message"]
+    assert not Path(_plan(tmp_path).target_path).exists()
+
+
 def test_executor_forwards_master_binding_evidence_to_service(tmp_path):
     plan = _plan(tmp_path)
     binding = {
@@ -630,7 +707,13 @@ def test_execute_build_reads_waveforms_from_a_discovered_output_file(tmp_path):
     assert record.state.value == "published"
     names = [call[0] for call in service.calls]
     assert names.index("discover_output_files") < names.index("read_output_file")
-    assert "get_project_output" not in names
+    compile_message_calls = [
+        call for call in service.calls if call[0] == "get_project_output"
+    ]
+    assert compile_message_calls
+    assert all(
+        call[2].get("structured") is True for call in compile_message_calls
+    )
     assert service.discovered_project_name == str(service.project_file.resolve())
     assert record.result["output_file"] == str((service.project_file.parent / "result.out").resolve())
 
