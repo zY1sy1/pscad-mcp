@@ -657,7 +657,7 @@ class LccExecutor:
                     normalized_kind = str(observed_kind).casefold()
                     if normalized_kind in {
                         "power",
-                        "analog",
+                        "natural",
                         "node",
                         "nonremovable",
                         "removable",
@@ -665,6 +665,14 @@ class LccExecutor:
                         "ground",
                     }:
                         normalized_kind = "electrical"
+                    elif normalized_kind in {
+                        "transfer",
+                        "signal",
+                        "analog",
+                        "real",
+                        "integer",
+                    }:
+                        normalized_kind = "data"
                     if normalized_kind != contract.kind:
                         raise _error(
                             "LCC_PORT_MISMATCH",

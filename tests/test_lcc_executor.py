@@ -844,6 +844,21 @@ class SnappedCompanionPortService(RecordingPscadService):
         ]
 
 
+class RealDataCompanionPortService(SnappedCompanionPortService):
+    async def get_component_ports(self, project_name, component_id):
+        self._call("get_component_ports", project_name, component_id)
+        component = self.components[component_id]
+        return [
+            {
+                "name": "AM_D",
+                "x": component["x"] + 72,
+                "y": component["y"] + 45,
+                "dim": 1,
+                "type": "Real",
+            }
+        ]
+
+
 def test_companion_port_readback_uses_verified_snapped_component_origin(tmp_path):
     service = SnappedCompanionPortService()
     executor = LccExecutor(
@@ -873,6 +888,35 @@ def test_companion_port_readback_uses_verified_snapped_component_origin(tmp_path
     assert executor.component_ids["rectifier_bridge"] == 1
     assert service.components[1]["x"] == 792
     assert service.components[1]["y"] == 216
+
+
+def test_companion_real_port_readback_matches_data_contract(tmp_path):
+    service = RealDataCompanionPortService()
+    executor = LccExecutor(
+        _plan(tmp_path),
+        service,
+        tmp_path,
+        asset_set=load_packaged_asset_set(),
+    )
+    operation = LccPlanOperation(
+        1,
+        "place_component",
+        "rectifier_bridge",
+        {
+            "definition": "cigre_lcc_v1:LCC12PulseBridge",
+            "location": [800, 210],
+            "orientation": 0,
+            "parameters": {"UP": 1},
+            "ports": ["AM_D"],
+            "canvas": "Main",
+        },
+        "place_power:rectifier_bridge:000",
+        "place_power",
+    )
+
+    asyncio.run(executor._place_component(operation))
+
+    assert executor.component_ids["rectifier_bridge"] == 1
 
 
 @pytest.mark.parametrize(
