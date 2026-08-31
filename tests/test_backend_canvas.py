@@ -450,6 +450,18 @@ class TestBackendCanvasContracts(unittest.IsolatedAsyncioTestCase):
                 for wire in wires
             )
         )
+        adapter = next(
+            wire
+            for wire in wires
+            if wire._points[0] == (1980, 639)
+        )
+        anchored_label = next(
+            item for item in labels if item.location == adapter._points[-1]
+        )
+        self.assertLess(
+            canvas.items.index(adapter),
+            canvas.items.index(anchored_label),
+        )
 
     async def test_legacy_assigns_distinct_anchors_to_adjacent_label_networks(self):
         canvas = SnappingLegacyCanvas()

@@ -4246,6 +4246,12 @@ class LegacyBackend:
                         "point": list(point),
                     },
                 )
+            if len(selected_route) >= 2:
+                await self.create_wire(
+                    project_name,
+                    canvas_name,
+                    list(selected_route),
+                )
             created = await self.add_component(
                 project_name,
                 canvas_name,
@@ -4272,11 +4278,6 @@ class LegacyBackend:
             existing_locations.add(location)
             occupied_locations.add(location)
             if len(selected_route) >= 2:
-                await self.create_wire(
-                    project_name,
-                    canvas_name,
-                    list(selected_route),
-                )
                 self._connection_label_routes.append(
                     (
                         project_name,
