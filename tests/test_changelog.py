@@ -75,8 +75,17 @@ def test_readmes_document_the_fixed_lcc_builder_boundary():
         "built",
         "simulated",
         "accepted",
-        "licensed acceptance has not passed",
+        "simulated/pass",
+        "it is not `accepted`",
     ):
         assert phrase in english
-    for phrase in ("PSCAD 4.6.2", "固定电气参数", "单极", "confirm=true", "工作区写入", "授权验收尚未通过"):
+    for phrase in (
+        "PSCAD 4.6.2",
+        "固定电气参数",
+        "单极",
+        "confirm=true",
+        "工作区写入",
+        "simulated/PASS",
+        "不是 `accepted`",
+    ):
         assert phrase in chinese
