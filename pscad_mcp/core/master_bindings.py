@@ -20,7 +20,14 @@ from .definition_metadata import (
     read_definition_metadata_document,
 )
 
-_TOP_LEVEL_FIELDS = {"schema_version", "name", "pscad_version", "bindings"}
+_TOP_LEVEL_FIELDS_V1 = {"schema_version", "name", "pscad_version", "bindings"}
+_TOP_LEVEL_FIELDS_V2 = {
+    "schema_version",
+    "name",
+    "pscad_version",
+    "bindings",
+    "companion_bindings",
+}
 _BINDING_FIELDS = {
     "logical_name",
     "physical_definition",
@@ -300,18 +307,28 @@ class MasterBindingRegistry:
     pscad_version: str
     bindings: tuple[MasterBinding, ...]
     sha256: str
+    companion_bindings: tuple[MasterBinding, ...] = ()
 
     @property
     def by_logical_name(self) -> dict[str, MasterBinding]:
         return {item.logical_name: item for item in self.bindings}
 
+    @property
+    def companion_by_logical_name(self) -> dict[str, MasterBinding]:
+        return {item.logical_name: item for item in self.companion_bindings}
+
     def to_dict(self) -> dict[str, Any]:
-        return {
+        result = {
             "schema_version": self.schema_version,
             "name": self.name,
             "pscad_version": self.pscad_version,
             "bindings": [item.to_dict() for item in self.bindings],
         }
+        if self.schema_version == 2:
+            result["companion_bindings"] = [
+                item.to_dict() for item in self.companion_bindings
+            ]
+        return result
 
 
 @dataclass(frozen=True)
@@ -435,6 +452,14 @@ class AuditedMasterRegistry:
             master_sha256=self.master_sha256,
             _binding=binding,
         )
+
+
+@dataclass(frozen=True)
+class AuditedCompanionRegistry:
+    registry: MasterBindingRegistry
+    master_path: str
+    master_sha256: str
+    definitions: Mapping[str, Mapping[str, Any]]
 
 
 def _parse_contract(value: Any, field: str) -> Mapping[str, Any]:
@@ -775,8 +800,13 @@ def _parse_evidence(value: Any, index: int) -> MasterEvidenceParameter:
     )
 
 
-def _parse_binding(value: Any, index: int) -> MasterBinding:
-    field = f"bindings[{index}]"
+def _parse_binding(
+    value: Any,
+    index: int,
+    *,
+    field_prefix: str = "bindings",
+) -> MasterBinding:
+    field = f"{field_prefix}[{index}]"
     record = _mapping(value, field)
     _exact_fields(record, _BINDING_FIELDS, field)
     shape = _parse_shape(record["shape"])
@@ -865,15 +895,21 @@ def parse_master_binding_registry(value: Any) -> MasterBindingRegistry:
     """Parse an exact registry schema and calculate its canonical hash."""
 
     record = _mapping(value, "registry")
-    _exact_fields(record, _TOP_LEVEL_FIELDS, "registry")
-    schema_version = record["schema_version"]
-    if isinstance(schema_version, bool) or schema_version != 1:
+    schema_version = record.get("schema_version")
+    if isinstance(schema_version, bool) or schema_version not in {1, 2}:
         raise _error(
             "MASTER_BINDING_MISSING",
-            "The Master binding registry schema version must be 1.",
+            "The Master binding registry schema version must be 1 or 2.",
             field="schema_version",
             observed=schema_version,
         )
+    _exact_fields(
+        record,
+        _TOP_LEVEL_FIELDS_V1
+        if schema_version == 1
+        else _TOP_LEVEL_FIELDS_V2,
+        "registry",
+    )
     bindings = tuple(
         _parse_binding(item, index)
         for index, item in enumerate(_sequence(record["bindings"], "bindings"))
@@ -884,8 +920,27 @@ def parse_master_binding_registry(value: Any) -> MasterBindingRegistry:
             "The Master binding registry must not be empty.",
             field="bindings",
         )
+    companion_bindings = tuple(
+        _parse_binding(
+            item,
+            index,
+            field_prefix="companion_bindings",
+        )
+        for index, item in enumerate(
+            _sequence(
+                record.get("companion_bindings", ()),
+                "companion_bindings",
+            )
+        )
+    )
+    if schema_version == 2 and not companion_bindings:
+        raise _error(
+            "MASTER_BINDING_MISSING",
+            "Schema version 2 requires companion bindings.",
+            field="companion_bindings",
+        )
     observed: set[str] = set()
-    for binding in bindings:
+    for binding in (*bindings, *companion_bindings):
         if binding.logical_name in observed:
             raise _error(
                 "MASTER_BINDING_AMBIGUOUS",
@@ -900,6 +955,10 @@ def parse_master_binding_registry(value: Any) -> MasterBindingRegistry:
         "pscad_version": _text(record["pscad_version"], "pscad_version"),
         "bindings": [item.to_dict() for item in bindings],
     }
+    if schema_version == 2:
+        normalized["companion_bindings"] = [
+            item.to_dict() for item in companion_bindings
+        ]
     canonical = json.dumps(
         normalized,
         ensure_ascii=True,
@@ -912,6 +971,7 @@ def parse_master_binding_registry(value: Any) -> MasterBindingRegistry:
         pscad_version=normalized["pscad_version"],
         bindings=bindings,
         sha256=hashlib.sha256(canonical).hexdigest(),
+        companion_bindings=companion_bindings,
     )
 
 
@@ -1194,6 +1254,142 @@ def _definition_evidence(
     return result
 
 
+def audit_companion_bindings(
+    master_path: str | Path,
+    registry: MasterBindingRegistry,
+) -> AuditedCompanionRegistry:
+    """Verify companion-only bindings against an immutable Master source."""
+
+    if not isinstance(registry, MasterBindingRegistry):
+        raise _runtime_error(
+            "MASTER_BINDING_MISSING",
+            "A parsed Master binding registry is required.",
+            "audit_companion_bindings",
+        )
+    if not registry.companion_bindings:
+        raise _runtime_error(
+            "MASTER_BINDING_MISSING",
+            "The registry has no companion bindings.",
+            "audit_companion_bindings",
+        )
+    path = Path(master_path).expanduser().resolve()
+    try:
+        payload = path.read_bytes()
+    except OSError as error:
+        raise _runtime_error(
+            "MASTER_BINDING_MISSING",
+            "The live Master source could not be read.",
+            "audit_companion_bindings",
+            path=str(path),
+        ) from error
+    source_hash = hashlib.sha256(payload).hexdigest()
+    try:
+        metadata_document = read_definition_metadata_document(payload)
+    except (ET.ParseError, OverflowError, TypeError, ValueError) as error:
+        raise _runtime_error(
+            "MASTER_BINDING_MISSING",
+            "The live Master source is not valid definition XML.",
+            "audit_companion_bindings",
+            path=str(path),
+            exception=type(error).__name__,
+        ) from error
+
+    definitions: dict[str, Mapping[str, Any]] = {}
+    for binding in registry.companion_bindings:
+        if binding.shape["kind"] != "direct":
+            raise _runtime_error(
+                "MASTER_BINDING_MISSING",
+                "Companion bindings must use direct shapes.",
+                "audit_companion_bindings",
+                logical_name=binding.logical_name,
+            )
+        matches = metadata_document.get(binding.physical_definition, ())
+        if not matches:
+            raise _runtime_error(
+                "MASTER_BINDING_MISSING",
+                "The companion physical definition is absent from Master.",
+                "audit_companion_bindings",
+                logical_name=binding.logical_name,
+                physical_definition=binding.physical_definition,
+                path=str(path),
+            )
+        if len(matches) != 1:
+            raise _runtime_error(
+                "MASTER_BINDING_AMBIGUOUS",
+                "The companion physical definition is duplicated in Master.",
+                "audit_companion_bindings",
+                logical_name=binding.logical_name,
+                physical_definition=binding.physical_definition,
+                matches=len(matches),
+                path=str(path),
+            )
+        definitions[binding.logical_name] = _freeze(
+            _definition_evidence(binding, matches[0])
+        )
+
+    bridge = definitions.get("master:six_pulse_bridge")
+    if bridge is not None:
+        selected = bridge["selected_ports"]
+        if "FPN" in selected or "FDT" in selected:
+            raise _runtime_error(
+                "MASTER_PORT_MISMATCH",
+                "FP=0 must not select external firing-vector ports.",
+                "audit_companion_bindings",
+            )
+        ao = selected.get("AO")
+        ao_condition = ao.get("condition") if isinstance(ao, Mapping) else None
+        if (
+            not isinstance(ao, Mapping)
+            or ao.get("occurrence") != 1
+            or "FP==0" not in str(ao_condition)
+            or "View==1" not in str(ao_condition)
+        ):
+            raise _runtime_error(
+                "MASTER_PORT_MISMATCH",
+                "The FP=0/View=1 AO port profile is not exact.",
+                "audit_companion_bindings",
+                logical_port="AO",
+                observed=ao,
+            )
+        expected_profiles = {
+            "DP_RECT": (2, "(UP)&&(View==1)"),
+            "DN_RECT": (3, "(UP)&&(View==1)"),
+            "DP_INV": (3, "!(UP)&&(View==1)"),
+            "DN_INV": (2, "!(UP)&&(View==1)"),
+        }
+        for logical_port, (occurrence, condition) in expected_profiles.items():
+            observed = selected.get(logical_port)
+            if (
+                not isinstance(observed, Mapping)
+                or observed.get("occurrence") != occurrence
+                or observed.get("condition") != condition
+            ):
+                raise _runtime_error(
+                    "MASTER_PORT_MISMATCH",
+                    "The g6p200 DC terminal profile is not exact.",
+                    "audit_companion_bindings",
+                    logical_port=logical_port,
+                    expected_occurrence=occurrence,
+                    expected_condition=condition,
+                    observed=observed,
+                )
+        fixed = bridge["fixed_parameters"]
+        if fixed.get("FP") != 0 or fixed.get("View") != 1:
+            raise _runtime_error(
+                "MASTER_PARAMETER_MISMATCH",
+                "The six-pulse bridge must use FP=0 and View=1.",
+                "audit_companion_bindings",
+                observed=fixed,
+            )
+
+    return AuditedCompanionRegistry(
+        registry=registry,
+        master_path=str(path),
+        master_sha256=source_hash,
+        definitions=_freeze(definitions),
+    )
+
+
 def audit_master_bindings(
     master_path: str | Path,
     registry: MasterBindingRegistry,
@@ -1461,6 +1657,7 @@ def _validate_evidence_value(
 
 
 __all__ = [
+    "AuditedCompanionRegistry",
     "AuditedMasterRegistry",
     "MasterBinding",
     "MasterBindingRegistry",
@@ -1469,6 +1666,7 @@ __all__ = [
     "MasterParameterBinding",
     "MasterPortBinding",
     "ResolvedMasterComponent",
+    "audit_companion_bindings",
     "audit_master_bindings",
     "parse_master_binding_registry",
 ]

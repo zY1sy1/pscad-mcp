@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import hashlib
 import importlib
 import json
@@ -58,6 +59,164 @@ def _registry_payload(*bindings: dict[str, object]) -> dict[str, object]:
         "pscad_version": "4.6.2",
         "bindings": list(bindings or (_minimal_binding(),)),
     }
+
+
+def _g6p200_binding() -> dict[str, object]:
+    return {
+        "logical_name": "master:six_pulse_bridge",
+        "physical_definition": "g6p200",
+        "shape": {"kind": "direct"},
+        "ports": [
+            {
+                "logical": "N",
+                "physical": "N",
+                "kind": "electrical",
+                "dimension": 3,
+                "occurrence": 0,
+            },
+            {
+                "logical": "DP_RECT",
+                "physical": "DP",
+                "kind": "electrical",
+                "dimension": 1,
+                "occurrence": 2,
+            },
+            {
+                "logical": "DN_RECT",
+                "physical": "DN",
+                "kind": "electrical",
+                "dimension": 1,
+                "occurrence": 3,
+            },
+            {
+                "logical": "DP_INV",
+                "physical": "DP",
+                "kind": "electrical",
+                "dimension": 1,
+                "occurrence": 3,
+            },
+            {
+                "logical": "DN_INV",
+                "physical": "DN",
+                "kind": "electrical",
+                "dimension": 1,
+                "occurrence": 2,
+            },
+            {
+                "logical": "AO",
+                "physical": "AO",
+                "kind": "data",
+                "dimension": 1,
+                "occurrence": 1,
+            },
+            {
+                "logical": "AM",
+                "physical": "AM",
+                "kind": "data",
+                "dimension": 1,
+                "occurrence": 1,
+            },
+            {
+                "logical": "GM",
+                "physical": "GM",
+                "kind": "data",
+                "dimension": 1,
+                "occurrence": 1,
+            },
+            {
+                "logical": "KB",
+                "physical": "KB",
+                "kind": "data",
+                "dimension": 1,
+                "occurrence": 1,
+            },
+            {
+                "logical": "CB",
+                "physical": "CB",
+                "kind": "data",
+                "dimension": 1,
+                "occurrence": 1,
+            },
+        ],
+        "parameters": [],
+        "fixed_parameters": [
+            {
+                "physical": "FP",
+                "value": 0,
+                "contract": {
+                    "type": "Choice",
+                    "unit": None,
+                    "choices": ["0", "1", "2", "3"],
+                },
+            },
+            {
+                "physical": "View",
+                "value": 1,
+                "contract": {
+                    "type": "Choice",
+                    "unit": None,
+                    "choices": ["0", "1"],
+                },
+            },
+        ],
+        "evidence_parameters": [],
+    }
+
+
+def _registry_payload_v2(
+    *companion_bindings: dict[str, object],
+) -> dict[str, object]:
+    payload = _registry_payload()
+    payload["schema_version"] = 2
+    payload["companion_bindings"] = list(
+        companion_bindings or (_g6p200_binding(),)
+    )
+    return payload
+
+
+def _g6p200_master_xml() -> str:
+    return """<?xml version='1.0'?>
+<pslx>
+  <Definition name='g6p200'>
+    <paramlist><param name='Description' value='6 Pulse Bridge'/></paramlist>
+    <form><category>
+      <parameter name='FP' type='Choice'><value>0</value><choice>0 = Angle in Radians</choice><choice>1 = Array of 6 Pulses</choice><choice>2 = 6 Pulses + 6 Interp. times</choice><choice>3 = Angle in Degrees</choice></parameter>
+      <parameter name='View' type='Choice'><value>1</value><choice>0 = detailed</choice><choice>1 = compact</choice></parameter>
+    </category></form>
+    <svg>
+      <port model='Natural' name='DP' x='0' y='-108' dim='1' type='Switched'><![CDATA[(UP)&&(View==0)]]></port>
+      <port model='Natural' name='DN' x='0' y='108' dim='1' type='Switched'><![CDATA[!(UP)&&(View==0)]]></port>
+      <port model='Natural' name='DN' x='0' y='-108' dim='1' type='Switched'><![CDATA[(UP)&&(View==0)]]></port>
+      <port model='Natural' name='DP' x='0' y='108' dim='1' type='Switched'><![CDATA[!(UP)&&(View==0)]]></port>
+      <port model='Transfer' name='AM' x='144' y='-72' dim='1' mode='Output' type='Real'><![CDATA[(View==0)]]></port>
+      <port model='Transfer' name='GM' x='144' y='-36' dim='1' mode='Output' type='Real'><![CDATA[(View==0)]]></port>
+      <port model='Transfer' name='KB' x='144' y='72' dim='1' mode='Input' type='Integer'><![CDATA[(View==0)]]></port>
+      <port model='Transfer' name='CB' x='-72' y='-108' dim='1' mode='Input' type='Integer'><![CDATA[(View==0)]]></port>
+      <port model='Transfer' name='AO' x='144' y='36' dim='1' mode='Input' type='Real'><![CDATA[((FP==0)||(FP==3))&&(View==0)]]></port>
+      <port model='Transfer' name='FPN' x='144' y='36' dim='6' mode='Input' type='Integer'><![CDATA[((FP==1)||(FP==2))&&(View==0)]]></port>
+      <port model='Transfer' name='FDT' x='144' y='0' dim='6' mode='Input' type='Real'><![CDATA[(FP==2)&&(View==0)]]></port>
+      <port model='Natural' name='N' x='-36' y='0' dim='3' type='Switched'><![CDATA[(View==1)]]></port>
+      <port model='Natural' name='DP' x='0' y='-90' dim='1' type='Switched'><![CDATA[(UP)&&(View==1)]]></port>
+      <port model='Natural' name='DN' x='0' y='-90' dim='1' type='Switched'><![CDATA[!(UP)&&(View==1)]]></port>
+      <port model='Natural' name='DP' x='0' y='90' dim='1' type='Switched'><![CDATA[!(UP)&&(View==1)]]></port>
+      <port model='Natural' name='DN' x='0' y='90' dim='1' type='Switched'><![CDATA[(UP)&&(View==1)]]></port>
+      <port model='Transfer' name='AM' x='54' y='-54' dim='1' mode='Output' type='Real'><![CDATA[(View==1)]]></port>
+      <port model='Transfer' name='GM' x='54' y='-36' dim='1' mode='Output' type='Real'><![CDATA[(View==1)]]></port>
+      <port model='Transfer' name='KB' x='54' y='54' dim='1' mode='Input' type='Integer'><![CDATA[(View==1)]]></port>
+      <port model='Transfer' name='CB' x='-18' y='-90' dim='1' mode='Input' type='Integer'><![CDATA[(View==1)]]></port>
+      <port model='Transfer' name='AO' x='54' y='36' dim='1' mode='Input' type='Real'><![CDATA[((FP==0)||(FP==3))&&(View==1)]]></port>
+      <port model='Transfer' name='FPN' x='54' y='36' dim='6' mode='Input' type='Integer'><![CDATA[((FP==1)||(FP==2))&&(View==1)]]></port>
+      <port model='Transfer' name='FDT' x='54' y='0' dim='6' mode='Input' type='Real'><![CDATA[(FP==2)&&(View==1)]]></port>
+    </svg>
+  </Definition>
+</pslx>
+"""
+
+
+def _write_g6p200_master_fixture(tmp_path: Path) -> Path:
+    path = tmp_path / "master-g6p200.pslx"
+    path.write_text(_g6p200_master_xml(), encoding="utf-8")
+    return path
 
 
 def _packaged_registry(module):
@@ -171,6 +330,91 @@ def _write_master_fixture(tmp_path: Path, **options) -> Path:
     path = tmp_path / "master.pslx"
     path.write_text(_master_fixture_xml(**options), encoding="utf-8")
     return path
+
+
+def test_schema_v2_keeps_project_and_companion_bindings_separate():
+    module = _subject()
+    payload = _registry_payload_v2()
+
+    registry = module.parse_master_binding_registry(payload)
+
+    assert len(registry.bindings) == 1
+    assert registry.companion_by_logical_name[
+        "master:six_pulse_bridge"
+    ].physical_definition == "g6p200"
+    assert registry.to_dict()["companion_bindings"] == payload[
+        "companion_bindings"
+    ]
+
+
+def test_schema_v1_has_no_companion_bindings():
+    module = _subject()
+
+    registry = module.parse_master_binding_registry(_registry_payload())
+
+    assert registry.schema_version == 1
+    assert registry.companion_bindings == ()
+    assert "companion_bindings" not in registry.to_dict()
+
+
+def test_companion_logical_names_must_be_unique_and_disjoint():
+    module = _subject()
+    payload = _registry_payload_v2(copy.deepcopy(_minimal_binding()))
+
+    with pytest.raises(BackendError) as failure:
+        module.parse_master_binding_registry(payload)
+
+    assert failure.value.code == "MASTER_BINDING_AMBIGUOUS"
+
+
+def test_schema_v2_hash_binds_companion_records():
+    module = _subject()
+    first = module.parse_master_binding_registry(_registry_payload_v2())
+    changed = _registry_payload_v2()
+    changed["companion_bindings"][0]["fixed_parameters"][0]["value"] = 1
+
+    second = module.parse_master_binding_registry(changed)
+
+    assert first.sha256 != second.sha256
+
+
+def test_companion_audit_selects_fp0_view1_ao_and_dc_profiles(tmp_path):
+    module = _subject()
+    registry = module.parse_master_binding_registry(_registry_payload_v2())
+
+    audited = module.audit_companion_bindings(
+        _write_g6p200_master_fixture(tmp_path), registry
+    )
+
+    bridge = audited.definitions["master:six_pulse_bridge"]
+    selected = bridge["selected_ports"]
+    assert selected["AO"]["dimension"] == 1
+    assert "FP==0" in selected["AO"]["condition"]
+    assert "View==1" in selected["AO"]["condition"]
+    assert "FPN" not in selected
+    assert "FDT" not in selected
+    assert selected["DP_RECT"]["occurrence"] == 2
+    assert selected["DN_RECT"]["occurrence"] == 3
+    assert selected["DP_INV"]["occurrence"] == 3
+    assert selected["DN_INV"]["occurrence"] == 2
+
+
+def test_companion_audit_rejects_swapped_inverter_dc_profile(tmp_path):
+    module = _subject()
+    payload = _registry_payload_v2()
+    bridge = payload["companion_bindings"][0]
+    next(
+        port for port in bridge["ports"] if port["logical"] == "DP_INV"
+    )["occurrence"] = 2
+    registry = module.parse_master_binding_registry(payload)
+
+    with pytest.raises(BackendError) as failure:
+        module.audit_companion_bindings(
+            _write_g6p200_master_fixture(tmp_path), registry
+        )
+
+    assert failure.value.code == "MASTER_PORT_MISMATCH"
+    assert failure.value.details["logical_port"] == "DP_INV"
 
 
 def test_registry_rejects_unknown_top_level_fields():
