@@ -4246,11 +4246,12 @@ class LegacyBackend:
                         "point": list(point),
                     },
                 )
+            wire_route = tuple(reversed(selected_route))
             if len(selected_route) >= 2:
                 await self.create_wire(
                     project_name,
                     canvas_name,
-                    list(selected_route),
+                    list(wire_route),
                 )
             created = await self.add_component(
                 project_name,
@@ -4283,7 +4284,7 @@ class LegacyBackend:
                         project_name,
                         canvas_name,
                         label,
-                        selected_route,
+                        wire_route,
                     )
                 )
         return {"label": label}

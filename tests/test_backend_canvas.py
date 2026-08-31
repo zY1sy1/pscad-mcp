@@ -445,18 +445,18 @@ class TestBackendCanvasContracts(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([item.name for item in labels], ["SHARED"] * 3)
         self.assertTrue(
             any(
-                wire._points[0] == (1980, 639)
-                and wire._points[-1] == (1980, 648)
+                wire._points[0] == (1980, 648)
+                and wire._points[-1] == (1980, 639)
                 for wire in wires
             )
         )
         adapter = next(
             wire
             for wire in wires
-            if wire._points[0] == (1980, 639)
+            if wire._points[-1] == (1980, 639)
         )
         anchored_label = next(
-            item for item in labels if item.location == adapter._points[-1]
+            item for item in labels if item.location == adapter._points[0]
         )
         self.assertLess(
             canvas.items.index(adapter),
