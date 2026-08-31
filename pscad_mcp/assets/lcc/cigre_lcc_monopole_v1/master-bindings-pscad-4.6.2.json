@@ -285,14 +285,14 @@
             "name": "B",
             "offset": [
               0,
-              108
+              144
             ]
           },
           {
             "name": "C",
             "offset": [
               0,
-              216
+              288
             ]
           }
         ],
@@ -698,14 +698,14 @@
     },
     {
       "logical_name": "master:main_signal_import",
-      "physical_definition": "import",
+      "physical_definition": "datalabel",
       "shape": {
         "kind": "direct"
       },
       "ports": [
         {
           "logical": "OUT",
-          "physical": "N",
+          "physical": "A",
           "kind": "data",
           "dimension": 1,
           "occurrence": 0

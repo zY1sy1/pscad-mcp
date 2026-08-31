@@ -324,9 +324,9 @@ def _master_fixture_xml(
   <Definition name='ground'>
     <svg><port model='Natural' name='A' x='0' y='0' dim='1' type='Ground'/></svg>
   </Definition>
-  <Definition name='import'>
+  <Definition name='datalabel'>
     <form><category><parameter name='Name' type='Text'><value>IMPORT</value></parameter></category></form>
-    <svg><port model='Transfer' name='N' x='36' y='0' dim='0' mode='Output' type='Real'/></svg>
+    <svg><port model='Transfer' name='A' x='0' y='0' dim='0' mode='Input' type='Real'/></svg>
   </Definition>
 </pslx>
 """
@@ -556,6 +556,10 @@ def test_packaged_registry_contains_exact_fixed_catalog_bindings():
         registry.by_logical_name["master:dc_meter"].physical_definition
         == "multimeter"
     )
+    assert (
+        registry.by_logical_name["master:main_signal_import"].physical_definition
+        == "datalabel"
+    )
 
 
 def test_filter_expansion_offsets_are_pscad_grid_aligned():
@@ -572,6 +576,26 @@ def test_filter_expansion_offsets_are_pscad_grid_aligned():
         coordinate % 18 == 0
         for coordinate in shape["neutral"]["ground_offset"]
     )
+
+
+def test_filter_expansion_phase_ports_do_not_coincide():
+    module = _subject()
+    registry = _packaged_registry(module)
+    binding = registry.by_logical_name["master:ac_filter_branch"]
+    instance_offsets = {
+        item["name"]: tuple(item["offset"])
+        for item in binding.shape["instances"]
+    }
+    port_offsets = {"A": (0, -54), "B": (0, 54)}
+    points = [
+        (
+            instance_offsets[port.instance][0] + port_offsets[port.physical][0],
+            instance_offsets[port.instance][1] + port_offsets[port.physical][1],
+        )
+        for port in binding.ports
+    ]
+
+    assert len(points) == len(set(points))
 
 
 def test_registry_hash_is_stable_for_key_order():

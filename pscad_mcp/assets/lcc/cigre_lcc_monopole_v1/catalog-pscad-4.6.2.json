@@ -166,8 +166,8 @@
           "kind": "electrical",
           "dimension": 1,
           "offset": [
-            -30,
-            0
+            0,
+            -54
           ]
         },
         {
@@ -175,8 +175,8 @@
           "kind": "electrical",
           "dimension": 1,
           "offset": [
-            -30,
-            10
+            0,
+            90
           ]
         },
         {
@@ -184,8 +184,8 @@
           "kind": "electrical",
           "dimension": 1,
           "offset": [
-            -30,
-            20
+            0,
+            234
           ]
         },
         {
@@ -193,8 +193,8 @@
           "kind": "electrical",
           "dimension": 1,
           "offset": [
-            30,
-            0
+            0,
+            54
           ]
         },
         {
@@ -202,8 +202,8 @@
           "kind": "electrical",
           "dimension": 1,
           "offset": [
-            30,
-            10
+            0,
+            198
           ]
         },
         {
@@ -211,8 +211,8 @@
           "kind": "electrical",
           "dimension": 1,
           "offset": [
-            30,
-            20
+            0,
+            342
           ]
         }
       ],
@@ -231,10 +231,10 @@
         }
       },
       "bounding_box": [
-        -40,
-        -30,
-        40,
-        30
+        -10,
+        -64,
+        64,
+        352
       ],
       "metadata": {
         "library": "master",
@@ -828,7 +828,7 @@
           "kind": "data",
           "dimension": 1,
           "offset": [
-            36,
+            0,
             0
           ]
         }

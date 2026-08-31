@@ -514,6 +514,12 @@ def test_packaged_raw_signal_route_bends_are_pscad_grid_aligned():
     )
 
 
+def test_packaged_fixed_data_nets_do_not_create_main_canvas_labels():
+    blueprint = load_packaged_asset_set().blueprint
+
+    assert all(net.label is None for net in blueprint.nets if net.kind == "data")
+
+
 def test_wp1b_smoke_plan_uses_smoke_gate_and_hashes_profile(tmp_path):
     assets = _asset_set()
     request = LccPlanRequest(

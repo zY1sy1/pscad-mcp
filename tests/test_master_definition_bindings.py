@@ -140,7 +140,7 @@ async def _runtime_backend(tmp_path, *, snap_wires: bool = False):
         (
             "main_signal_import",
             {"Name": "LCC_TEST_RAW"},
-            "import",
+            "datalabel",
             {"Name": "LCC_TEST_RAW"},
         ),
         ("ground", {}, "ground", {}),
@@ -240,8 +240,8 @@ def test_legacy_expands_filter_and_grounds_each_neutral(tmp_path):
         assert item.values["V"] == pytest.approx(132.79056191361394)
     assert [tuple(wire.vertices) for wire in wires] == [
         ((360, 144), (414, 144)),
-        ((360, 252), (414, 252)),
-        ((360, 360), (414, 360)),
+        ((360, 288), (414, 288)),
+        ((360, 432), (414, 432)),
     ]
     assert parameters == {
         "Branch_MVAR": pytest.approx(50.0),
@@ -383,8 +383,8 @@ def test_filter_binding_pins_vendor_snapped_neutral_wire_endpoints(tmp_path):
     ]
     assert wire_endpoints == [
         [[2304, 162], [2358, 162]],
-        [[2304, 270], [2358, 270]],
-        [[2304, 378], [2358, 378]],
+        [[2304, 306], [2358, 306]],
+        [[2304, 450], [2358, 450]],
     ]
 
 
