@@ -249,8 +249,10 @@
           <vertex x="0" y="0" />
           <vertex x="126" y="0" />
         </Wire>
-        <Wire classid="WireOrthogonal" name="ACY_TO_Y_B" x="90" y="180" w="136" h="10" orient="0" id="1867976790">
+        <Wire classid="WireOrthogonal" name="ACY_TO_Y_B" x="90" y="180" w="136" h="19" orient="0" id="1867976790">
           <vertex x="0" y="0" />
+          <vertex x="0" y="-9" />
+          <vertex x="126" y="-9" />
           <vertex x="126" y="0" />
         </Wire>
         <Wire classid="WireOrthogonal" name="ACY_TO_Y_C" x="90" y="216" w="136" h="10" orient="0" id="645658124">
@@ -265,8 +267,10 @@
           <vertex x="0" y="0" />
           <vertex x="126" y="0" />
         </Wire>
-        <Wire classid="WireOrthogonal" name="ACD_TO_D_B" x="90" y="450" w="136" h="10" orient="0" id="1872377829">
+        <Wire classid="WireOrthogonal" name="ACD_TO_D_B" x="90" y="450" w="136" h="19" orient="0" id="1872377829">
           <vertex x="0" y="0" />
+          <vertex x="0" y="-9" />
+          <vertex x="126" y="-9" />
           <vertex x="126" y="0" />
         </Wire>
         <Wire classid="WireOrthogonal" name="ACD_TO_D_C" x="90" y="486" w="136" h="10" orient="0" id="1410140396">

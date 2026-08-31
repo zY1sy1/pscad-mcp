@@ -377,11 +377,11 @@ def _bridge_definition(definitions: ET.Element) -> None:
     )
     wires = (
         Wire("ACY_TO_Y", ((90, 144), (216, 144))),
-        Wire("ACY_TO_Y_B", ((90, 180), (216, 180))),
+        Wire("ACY_TO_Y_B", ((90, 180), (90, 171), (216, 171), (216, 180))),
         Wire("ACY_TO_Y_C", ((90, 216), (216, 216))),
         Wire("ACY_TO_Y_BUS", ((180, 180), (324, 180))),
         Wire("ACD_TO_D", ((90, 414), (216, 414))),
-        Wire("ACD_TO_D_B", ((90, 450), (216, 450))),
+        Wire("ACD_TO_D_B", ((90, 450), (90, 441), (216, 441), (216, 450))),
         Wire("ACD_TO_D_C", ((90, 486), (216, 486))),
         Wire("ACD_TO_D_BUS", ((180, 450), (324, 450))),
         Wire("DC_POS_PATH", ((360, 54), (360, 90))),

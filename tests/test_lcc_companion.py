@@ -397,6 +397,30 @@ def test_generated_companion_contains_exact_wp1b_output_channels(tmp_path):
         len(details["output_channels"])
         for details in evidence["definitions"].values()
     ) == 10
+    root = ET.fromstring(path.read_bytes())
+    bridge = root.find("./definitions/Definition[@name='LCC12PulseBridge']")
+    assert bridge is not None
+
+    def points(name):
+        wire = bridge.find(f"./schematic/Wire[@name='{name}']")
+        assert wire is not None
+        origin = (int(wire.get("x")), int(wire.get("y")))
+        return [
+            (origin[0] + int(vertex.get("x")), origin[1] + int(vertex.get("y")))
+            for vertex in wire.findall("./vertex")
+        ]
+
+    def crosses(route, point):
+        return any(
+            left[0] == right[0] == point[0]
+            and min(left[1], right[1]) <= point[1] <= max(left[1], right[1])
+            or left[1] == right[1] == point[1]
+            and min(left[0], right[0]) <= point[0] <= max(left[0], right[0])
+            for left, right in zip(route, route[1:])
+        )
+
+    assert not crosses(points("ACY_TO_Y_B"), (180, 180))
+    assert not crosses(points("ACD_TO_D_B"), (180, 450))
 
 
 @pytest.mark.parametrize(

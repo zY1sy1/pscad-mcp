@@ -398,8 +398,11 @@ async def _reload_fixture(
 def _orthogonal_vertices(
     start: tuple[int, int],
     end: tuple[int, int],
+    *,
+    bend_x: int | None = None,
 ) -> list[list[int]]:
-    points = [start, (end[0], start[1]), end]
+    bend = end[0] if bend_x is None else bend_x
+    points = [start, (bend, start[1]), (bend, end[1]), end]
     return [
         [point[0], point[1]]
         for index, point in enumerate(points)
@@ -435,6 +438,7 @@ async def _add_fixture_harness(
         source_y = 720 + source_index * 54
         source_index += 1
         source_x = 540
+        bend_x = 324 + source_index * 54
         await _service_call(
             "create_fixture_harness",
             service.add_canvas_component(
@@ -455,7 +459,11 @@ async def _add_fixture_harness(
             "create_fixture_harness",
             writer(
                 project_name,
-                _orthogonal_vertices((source_x + 36, source_y), target),
+                _orthogonal_vertices(
+                    (source_x + 36, source_y),
+                    target,
+                    bend_x=bend_x,
+                ),
                 canvas_name="Main",
             ),
         )

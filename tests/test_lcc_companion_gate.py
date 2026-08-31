@@ -527,3 +527,11 @@ def test_component_gate_connects_fixture_harness_before_each_build(tmp_path):
     assert "create_wire" in call_names
     assert call_names.index("create_wire") < call_names.index("build_project")
     assert call_names.count("build_project") == 6
+    first_build = call_names.index("build_project")
+    bridge_wires = [
+        call[1][1]
+        for call in service.calls[:first_build]
+        if call[0] == "create_wire"
+    ]
+    assert len(bridge_wires) == 3
+    assert len({wire[1][0] for wire in bridge_wires}) == 3
