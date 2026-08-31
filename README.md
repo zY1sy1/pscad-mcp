@@ -185,11 +185,11 @@ commutation-failure acceptance, and MMC construction are unavailable.
 
 Planning fails closed unless the attached PSCAD service supplies live
 4.6.2 definition inventory; the packaged catalog is not treated as live
-evidence. Build output channels also require an explicit public
-`create_output_channel` capability followed by read-back. The packaged
-`golden.json` is a release-gate placeholder until an independently reviewed
-licensed reference run is generated, so the current branch cannot pass real
-LCC acceptance.
+evidence. For WP1B, Legacy output selectors are bound to the audited
+predeclared `master:export` components after a successful full compile, then
+verified against the generated OUT/INF dataset. The packaged `golden.json`
+remains a release-gate placeholder until an independently reviewed licensed
+reference run is generated.
 
 The fixed catalog's eight `master:*` contracts are resolved through the
 manifest-hashed `master-bindings-pscad-4.6.2.json` registry. Plans record both
@@ -209,9 +209,13 @@ unchanged. Passing this compile-only gate demonstrates that the Master binding
 runtime is usable; it does not replace full CIGRE waveform or commutation-fault
 acceptance.
 
-Licensed acceptance has not passed for the PSCAD 4.6.2 implementation branch,
-so the feature must not be described as an autonomously constructed
-accepted CIGRE LCC model until the opt-in real acceptance test passes.
+The current program baseline records `lcc.fixed_autonomous` as
+`simulated/PASS` from the licensed no-fault WP1B run on commit `6c3919b`.
+That run compiled all six isolated companion fixtures, built and recompiled a
+blank-case full topology, simulated 0.1 s, and verified 2,001 samples with no
+remaining PSCAD process. It is not `accepted`: disturbance, commutation
+failure/recovery, independent golden, and final acceptance remain WP1C/WP6
+work.
 
 ### Blank LCC template path
 

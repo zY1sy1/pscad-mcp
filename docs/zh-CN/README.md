@@ -113,13 +113,16 @@ LCC 领域提供四个工具：`plan_lcc_model`、`build_lcc_model`、
 PSCAD 5.x、故障或换相失败验收、MMC 构建均不可用。
 
 规划阶段如果连接的 PSCAD 服务没有提供实时的 4.6.2 definition inventory，
-会 fail closed；随包 catalog 不会被当作实时证据。输出通道还必须有显式的
-公共 `create_output_channel` 写入能力并完成读回校验。当前随包
-`golden.json` 仍是等待独立授权参考运行生成的 release-gate 占位基线，因此
-本分支不能通过真实 LCC 验收。
+会 fail closed；随包 catalog 不会被当作实时证据。WP1B 在完整编译成功后，
+把 Legacy 输出选择器绑定到已审计的预声明 `master:export`，再用实际生成的
+OUT/INF 数据集验证。随包 `golden.json` 仍是等待独立授权参考运行生成的
+release-gate 占位基线。
 
-当前实现的 PSCAD 4.6.2 授权验收尚未通过；在 opt-in 实机验收
-通过前，不得把该功能描述为已自治构建并验收的 CIGRE LCC 模型。
+当前 program baseline 已把 `lcc.fixed_autonomous` 记录为提交 `6c3919b` 上的
+`simulated/PASS`：六个独立 companion fixture 全部编译，通过空白工程完整拓扑
+构建与 final 重编译，完成 0.1 s、2,001 样本的无故障 smoke，退出后无 PSCAD
+残留进程。该状态不是 `accepted`；扰动、换相失败/恢复、independent golden
+和最终验收仍属于 WP1C/WP6。
 
 ### Blank LCC 与官方工程
 

@@ -324,12 +324,16 @@ def test_checked_in_program_baseline_is_valid_and_scoped():
     )
     native = scopes["lcc.blank_native"]
     assert native["capability_state"] == "simulated"
-    assert native["licensed_status"] == "PASS"
-    assert isinstance(native["evidence_run_id"], str)
+    assert native["licensed_status"] == "NOT_RUN_ON_CURRENT_COMMIT"
+    assert native["evidence_run_id"] is None
+    fixed = scopes["lcc.fixed_autonomous"]
+    assert fixed["capability_state"] == "simulated"
+    assert fixed["licensed_status"] == "PASS"
+    assert isinstance(fixed["evidence_run_id"], str)
     reports = {item["run_id"]: item for item in result["reports"]}
-    evidence = reports[native["evidence_run_id"]]
-    assert evidence["scope"] == "lcc.blank_native"
-    assert evidence["builder_path"] == "lcc.blank_native"
+    evidence = reports[fixed["evidence_run_id"]]
+    assert evidence["scope"] == "lcc.fixed_autonomous"
+    assert evidence["builder_path"] == "lcc.fixed_autonomous"
     assert evidence["kind"] == "licensed_simulation"
     assert evidence["status"] == "PASS"
     assert evidence["commit"] == result["repository"]["base_commit"]
@@ -340,7 +344,32 @@ def test_checked_in_program_baseline_is_valid_and_scoped():
     assert all(
         item["evidence_run_id"] is None
         for name, item in scopes.items()
-        if name != "lcc.blank_native"
+        if name != "lcc.fixed_autonomous"
+    )
+
+
+def test_promoted_wp1b_scope_is_simulated_not_accepted():
+    baseline = json.loads(PROGRAM_BASELINE.read_text(encoding="utf-8"))
+    fixed = next(
+        item
+        for item in baseline["scopes"]
+        if item["scope"] == "lcc.fixed_autonomous"
+    )
+
+    assert fixed["builder_path"] == "lcc.fixed_autonomous"
+    assert fixed["capability_state"] == "simulated"
+    assert fixed["licensed_status"] == "PASS"
+    assert isinstance(fixed["evidence_run_id"], str)
+    assert fixed["explicit_exclusions"] == [
+        "disturbance_acceptance",
+        "commutation_failure_acceptance",
+        "independent_golden",
+        "final_accepted",
+    ]
+    assert not any(
+        item["capability_state"] == "accepted"
+        for item in baseline["scopes"]
+        if item["scope"].startswith("lcc.")
     )
 
 
