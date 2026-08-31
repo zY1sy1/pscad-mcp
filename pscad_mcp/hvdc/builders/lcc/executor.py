@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import math
 import re
 import shutil
 import time
@@ -136,12 +137,21 @@ def _same_parameters(expected: dict[str, Any], observed: Any) -> bool:
 
 
 def _same_setting(expected: Any, observed: Any) -> bool:
+    if isinstance(expected, bool) or isinstance(observed, bool):
+        return (
+            isinstance(expected, bool)
+            and isinstance(observed, bool)
+            and expected is observed
+        )
     if expected == observed:
         return True
-    if isinstance(expected, bool) or isinstance(observed, bool):
-        return False
     try:
-        return float(expected) == float(observed)
+        return math.isclose(
+            float(expected),
+            float(observed),
+            rel_tol=1e-12,
+            abs_tol=1e-12,
+        )
     except (TypeError, ValueError):
         return False
 

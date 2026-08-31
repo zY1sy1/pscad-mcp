@@ -10,7 +10,11 @@ import pytest
 
 from pscad_mcp.core.backend.base import BackendError
 from pscad_mcp.hvdc.builders.lcc.assets import load_packaged_asset_set
-from pscad_mcp.hvdc.builders.lcc.executor import LccExecutor, _legacy_project_settings
+from pscad_mcp.hvdc.builders.lcc.executor import (
+    LccExecutor,
+    _legacy_project_settings,
+    _same_setting,
+)
 from pscad_mcp.hvdc.builders.lcc.executor import execute_build as _execute_build
 from pscad_mcp.hvdc.builders.lcc.models import (
     LccBlueprint,
@@ -27,6 +31,25 @@ from tests.test_lcc_smoke import mutate_samples, valid_samples
 def execute_build(*args, **kwargs):
     kwargs.setdefault("allow_test_double", True)
     return _execute_build(*args, **kwargs)
+
+
+@pytest.mark.parametrize(
+    ("expected", "observed", "matches"),
+    [
+        (50.0, 49.99999999999999, True),
+        (50.0, 49.99, False),
+        (0.0, 1e-8, False),
+        (True, 1, False),
+        ("Y-delta", "Y-delta", True),
+        ("Y-delta", "Y-Y", False),
+    ],
+)
+def test_parameter_readback_allows_only_numeric_serialization_noise(
+    expected,
+    observed,
+    matches,
+):
+    assert _same_setting(expected, observed) is matches
 
 
 class OutputFileRecordingService(RecordingPscadService):
