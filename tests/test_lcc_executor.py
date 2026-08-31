@@ -1331,6 +1331,49 @@ class SnappedRouteEndpointService(RecordingPscadService):
         }
 
 
+class GroundReturnEndpointService(RecordingPscadService):
+    async def get_component_ports(self, project_name, component_id):
+        self._call("get_component_ports", project_name, component_id)
+        point = (1980, 207) if component_id == 1 else (1908, 450)
+        name = "DC_POS" if component_id == 1 else "GND"
+        return {name: {"name": name, "x": point[0], "y": point[1]}}
+
+
+def test_ground_return_wires_terminate_at_both_component_ports(tmp_path):
+    plan = _plan(tmp_path)
+    source, ground = plan.blueprint.components
+    source = replace(source, definition="cigre_lcc_v1:LCC12PulseBridge")
+    ground = replace(ground, definition="master:ground")
+    executor = LccExecutor(
+        replace(
+            plan,
+            blueprint=replace(plan.blueprint, components=(source, ground)),
+        ),
+        GroundReturnEndpointService(),
+        tmp_path,
+    )
+    executor.component_ids = {"source": 1, "load": 2}
+    operation = LccPlanOperation(
+        1,
+        "connect_net",
+        "inverter_return",
+        {
+            "kind": "electrical",
+            "vertices": [[1972, 201], [1900, 201], [1900, 450]],
+            "endpoints": ["source:DC_POS", "load:GND"],
+        },
+        "connect_electrical:inverter_return:000",
+        "connect_electrical",
+    )
+
+    asyncio.run(executor._connect_net(operation))
+
+    wires = [call[1][1] for call in executor.service.calls if call[0] == "create_wire"]
+    assert len(wires) == 2
+    assert {tuple(wire[-1]) for wire in wires} == {(1980, 207), (1908, 450)}
+    assert tuple(wires[0][0]) == tuple(wires[1][0])
+
+
 def test_connect_net_preserves_orthogonality_after_snapping_collapses_a_bend(
     tmp_path,
 ):

@@ -881,6 +881,48 @@ class LccExecutor:
             )
         self._operation_completed()
 
+    def _ground_return_routes(
+        self,
+        endpoints: Any,
+        vertices: list[list[int]],
+        kind: str,
+        label: Any,
+    ) -> tuple[list[list[list[int]]], int] | None:
+        if (
+            kind != "electrical"
+            or label is not None
+            or not isinstance(endpoints, (list, tuple))
+            or len(endpoints) != 2
+            or len(vertices) < 3
+        ):
+            return None
+        definitions = {
+            component.logical_id: component.definition
+            for component in self.plan.blueprint.components
+        }
+        ground_indexes = [
+            index
+            for index, endpoint in enumerate(endpoints)
+            if isinstance(endpoint, str)
+            and definitions.get(endpoint.split(":", 1)[0]) == "master:ground"
+        ]
+        if len(ground_indexes) != 1:
+            return None
+        ground_index = ground_indexes[0]
+        if ground_index == 1:
+            junction = list(vertices[-2])
+            routes = [
+                [list(point) for point in reversed(vertices[:-1])],
+                [junction, list(vertices[-1])],
+            ]
+        else:
+            junction = list(vertices[1])
+            routes = [
+                [junction, list(vertices[0])],
+                [list(point) for point in vertices[1:]],
+            ]
+        return routes, ground_index
+
     async def _connect_net(self, operation: LccPlanOperation) -> None:
         self._operation_started(operation)
         arguments = operation.arguments
@@ -906,6 +948,49 @@ class LccExecutor:
         canvas = "Main"
         kind = str(arguments.get("kind", "electrical"))
         label = arguments.get("label")
+        ground_return = self._ground_return_routes(
+            endpoints,
+            vertices,
+            kind,
+            label,
+        )
+        if ground_return is not None:
+            routes, _ground_index = ground_return
+            responses = []
+            for route in routes:
+                created = await self.service.create_wire(
+                    self.project_name,
+                    route,
+                    canvas_name=canvas,
+                )
+                if not isinstance(created, dict):
+                    self._raise_postcondition(
+                        "Connection creation returned invalid evidence.",
+                        net=operation.target,
+                    )
+                returned_vertices = created.get("vertices")
+                if returned_vertices is not None and [
+                    list(point) for point in returned_vertices
+                ] != route:
+                    self._raise_postcondition(
+                        "Wire vertex read-back did not match the plan.",
+                        net=operation.target,
+                        expected_vertices=route,
+                        observed_vertices=returned_vertices,
+                    )
+                responses.append(created)
+            self._logical_nets[operation.target] = GraphNet(
+                kind,
+                tuple(tuple(int(value) for value in point) for point in vertices),
+                (),
+                tuple(str(endpoint) for endpoint in endpoints),
+            )
+            self._operation_completed(
+                backend_response_type="split_ground_return",
+                wire_count=len(responses),
+                vertices=routes,
+            )
+            return
         if label is not None or len(vertices) == 2:
             created = await self.service.create_connection(
                 self.project_name,
