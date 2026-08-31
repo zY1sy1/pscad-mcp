@@ -149,14 +149,31 @@ class CompanionGateFakeService:
             "DC_POS",
             "DC_NEG",
         }
-        ports = {
-            port: {
+        if definition in FIXTURE_PORTS:
+            port_names = FIXTURE_PORTS[definition]
+        elif definition in {"master:const", "master:consti"}:
+            port_names = {"OUT"}
+        elif definition == "master:ground":
+            port_names = {"GND"}
+        else:
+            raise AssertionError(f"unsupported fake Definition: {definition}")
+        ports = {}
+        for port in port_names:
+            if definition in {"master:const", "master:consti"}:
+                port_x, port_y = x + 36, y
+            else:
+                port_x, port_y = x, y
+            ports[port] = {
                 "name": port,
-                "kind": "electrical" if port in electrical else "data",
+                "kind": (
+                    "electrical"
+                    if port in electrical or definition == "master:ground"
+                    else "data"
+                ),
                 "dimension": 1,
+                "x": port_x,
+                "y": port_y,
             }
-            for port in FIXTURE_PORTS[definition]
-        }
         self.projects[project_name]["components"][component_id] = {
             "definition": definition,
             "parameters": dict(parameters),
@@ -284,6 +301,16 @@ class CompanionGateFakeService:
         if self.mutate_master_on_build is not None:
             self.mutate_master_on_build.write_bytes(b"changed-master")
         return "built"
+
+    async def create_wire(
+        self,
+        project_name: str,
+        vertices: list[list[int]],
+        *,
+        canvas_name: str = "Main",
+    ) -> dict[str, Any]:
+        self._call("create_wire", project_name, vertices, canvas_name)
+        return {"vertices": vertices}
 
     async def get_project_output(
         self,
@@ -477,3 +504,26 @@ def test_component_gate_rejects_pscad_compile_error_messages(tmp_path):
     assert result["failure"]["operation"] == "verify_compile_messages"
     assert result["failure"]["code"] == "LCC_COMPANION_COMPILE_FAILED"
     assert "Input port is floating." in result["failure"]["message"]
+
+
+def test_component_gate_connects_fixture_harness_before_each_build(tmp_path):
+    assets, master, registry, master_hash, registry_hash = _inputs(tmp_path)
+    service = CompanionGateFakeService()
+
+    result = asyncio.run(
+        _subject()(
+            service,
+            assets,
+            tmp_path / "fixtures",
+            master_path=master,
+            registry_path=registry,
+            expected_master_sha256=master_hash,
+            expected_registry_sha256=registry_hash,
+        )
+    )
+
+    assert result["status"] == "PASS"
+    call_names = [call[0] for call in service.calls]
+    assert "create_wire" in call_names
+    assert call_names.index("create_wire") < call_names.index("build_project")
+    assert call_names.count("build_project") == 6

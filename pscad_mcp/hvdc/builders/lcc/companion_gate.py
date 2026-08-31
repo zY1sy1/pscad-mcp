@@ -13,6 +13,7 @@ from ....core.master_bindings import parse_master_binding_registry
 from .assets import LccAssetSet, materialize_library, sha256_file
 from .catalog import parse_catalog, require_definition, require_port
 from .companion import audit_companion_library
+from .routing import absolute_port
 
 
 @dataclass(frozen=True)
@@ -102,6 +103,31 @@ FIXTURES = (
         {},
         ("VDC_RECT", "VDC_INV", "IDC"),
     ),
+)
+
+_FIXTURE_INPUTS = {
+    "cigre_lcc_v1:LCC12PulseBridge": ("AO_Y", "AO_D", "ENABLE"),
+    "cigre_lcc_v1:RectifierControl": ("VDC", "IDC", "IORDER", "ENABLE"),
+    "cigre_lcc_v1:InverterControl": (
+        "VDC",
+        "IDC",
+        "GM_Y",
+        "GM_D",
+        "GAMMA_ORDER",
+        "ENABLE",
+    ),
+    "cigre_lcc_v1:Initialization": (),
+    "cigre_lcc_v1:SignalInterface": (),
+}
+_BRIDGE_ELECTRICAL_PORTS = (
+    "ACY_A",
+    "ACY_B",
+    "ACY_C",
+    "ACD_A",
+    "ACD_B",
+    "ACD_C",
+    "DC_POS",
+    "DC_NEG",
 )
 
 
@@ -379,6 +405,117 @@ async def _reload_fixture(
     return reloaded_name, reloaded_file, int(matches[0]["id"])
 
 
+def _orthogonal_vertices(
+    start: tuple[int, int],
+    end: tuple[int, int],
+) -> list[list[int]]:
+    points = [start, (end[0], start[1]), end]
+    return [
+        [point[0], point[1]]
+        for index, point in enumerate(points)
+        if index == 0 or point != points[index - 1]
+    ]
+
+
+async def _add_fixture_harness(
+    service: Any,
+    project_name: str,
+    fixture: CompanionFixture,
+    catalog: Any,
+) -> None:
+    writer = getattr(service, "create_wire", None)
+    if not callable(writer):
+        raise _error(
+            "LCC_COMPANION_COMPILE_FAILED",
+            "The fixture service cannot create harness wires.",
+            "create_fixture_harness",
+        )
+    definition = require_definition(catalog, fixture.definition)
+    source_index = 0
+    for port_name in _FIXTURE_INPUTS[fixture.definition]:
+        contract = require_port(definition, port_name)
+        target = absolute_port((180, 180), contract.offset, 0)
+        integer = port_name == "ENABLE"
+        if port_name in {"AO_Y", "AO_D"}:
+            value = "0.2617993877991494" if fixture.parameters.get("UP") == 1 else "1.57"
+        elif port_name == "GAMMA_ORDER":
+            value = "0.3141592653589793"
+        else:
+            value = "1" if integer else "1.0"
+        source_y = 720 + source_index * 54
+        source_index += 1
+        source_x = 540
+        await _service_call(
+            "create_fixture_harness",
+            service.add_canvas_component(
+                project_name,
+                "master",
+                "consti" if integer else "const",
+                source_x,
+                source_y,
+                0,
+                {
+                    "Name": f"FIXTURE_{fixture.name}_{port_name}",
+                    "Value": value,
+                },
+                canvas_name="Main",
+            ),
+        )
+        await _service_call(
+            "create_fixture_harness",
+            writer(
+                project_name,
+                _orthogonal_vertices((source_x + 36, source_y), target),
+                canvas_name="Main",
+            ),
+        )
+
+    if fixture.definition.endswith(":LCC12PulseBridge"):
+        for index, port_name in enumerate(_BRIDGE_ELECTRICAL_PORTS):
+            contract = require_port(definition, port_name)
+            target = absolute_port((180, 180), contract.offset, 0)
+            ground = (720 + index * 54, 540)
+            await _service_call(
+                "create_fixture_harness",
+                service.add_canvas_component(
+                    project_name,
+                    "master",
+                    "ground",
+                    ground[0],
+                    ground[1],
+                    0,
+                    {},
+                    canvas_name="Main",
+                ),
+            )
+            await _service_call(
+                "create_fixture_harness",
+                writer(
+                    project_name,
+                    _orthogonal_vertices(ground, target),
+                    canvas_name="Main",
+                ),
+            )
+
+    if fixture.definition.endswith(":SignalInterface"):
+        for index, name in enumerate(
+            ("LCC_VDC_RECT_RAW", "LCC_VDC_INV_RAW", "LCC_IDC_RAW")
+        ):
+            await _service_call(
+                "create_fixture_harness",
+                service.add_canvas_component(
+                    project_name,
+                    "master",
+                    "const",
+                    540,
+                    720 + index * 54,
+                    0,
+                    {"Name": name, "Value": "1.0"},
+                    canvas_name="Main",
+                ),
+            )
+
+
 async def _verify_compile_messages(service: Any, project_name: str) -> None:
     reader = getattr(service, "get_project_output", None)
     if not callable(reader):
@@ -546,6 +683,13 @@ async def run_companion_component_gate(
                     expected=fixture.definition,
                     observed=component.get("definition"),
                 )
+            operation = "create_fixture_harness"
+            await _add_fixture_harness(
+                service,
+                project_name,
+                fixture,
+                catalog,
+            )
             operation = "validate_readback"
             before_reload = await _snapshot(
                 service,
