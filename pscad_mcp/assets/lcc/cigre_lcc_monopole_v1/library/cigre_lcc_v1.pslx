@@ -125,18 +125,20 @@
         </User>
         <User classid="UserCmp" name="" defn="master:g6p200" id="1841912349" x="360" y="180" w="115" h="184" z="110" orient="0" link="-1" q="4">
           <paramlist link="-1" name="" crc="113177439">
+            <param name="UP" value="$(UP)" />
             <param name="FP" value="0" />
             <param name="SNUB" value="1" />
+            <param name="KV" value="-2" />
             <param name="View" value="1" />
             <param name="FR" value="50.0 [Hz]" />
             <param name="GP" value="10.0" />
             <param name="GI" value="50.0" />
             <param name="KP" value="0" />
             <param name="RON" value="0.01 [ohm]" />
-            <param name="ROFF" value="100000000.0 [ohm]" />
+            <param name="ROFF" value="1.0E8 [ohm]" />
             <param name="EFVD" value="0.0 [kV]" />
-            <param name="EBO" value="100000.0 [kV]" />
-            <param name="TEXT" value="0.0 [us]" />
+            <param name="EBO" value="1.0E5 [kV]" />
+            <param name="TEXT" value="0.0 [usec]" />
             <param name="CD" value="0.05 [uF]" />
             <param name="RD" value="5000.0 [ohm]" />
             <param name="FPNM" value="" />
@@ -147,24 +149,24 @@
             <param name="RWSAFB" value="0" />
             <param name="RWV" value="1.0E5" />
             <param name="PFB" value="0" />
-            <param name="UP" value="$(UP)" />
-            <param name="KV" value="-2" />
           </paramlist>
         </User>
         <User classid="UserCmp" name="" defn="master:g6p200" id="1095740208" x="360" y="450" w="115" h="184" z="120" orient="0" link="-1" q="4">
           <paramlist link="-1" name="" crc="113177439">
+            <param name="UP" value="$(UP)" />
             <param name="FP" value="0" />
             <param name="SNUB" value="1" />
+            <param name="KV" value="-1" />
             <param name="View" value="1" />
             <param name="FR" value="50.0 [Hz]" />
             <param name="GP" value="10.0" />
             <param name="GI" value="50.0" />
             <param name="KP" value="0" />
             <param name="RON" value="0.01 [ohm]" />
-            <param name="ROFF" value="100000000.0 [ohm]" />
+            <param name="ROFF" value="1.0E8 [ohm]" />
             <param name="EFVD" value="0.0 [kV]" />
-            <param name="EBO" value="100000.0 [kV]" />
-            <param name="TEXT" value="0.0 [us]" />
+            <param name="EBO" value="1.0E5 [kV]" />
+            <param name="TEXT" value="0.0 [usec]" />
             <param name="CD" value="0.05 [uF]" />
             <param name="RD" value="5000.0 [ohm]" />
             <param name="FPNM" value="" />
@@ -175,8 +177,6 @@
             <param name="RWSAFB" value="0" />
             <param name="RWV" value="1.0E5" />
             <param name="PFB" value="0" />
-            <param name="UP" value="$(UP)" />
-            <param name="KV" value="-1" />
           </paramlist>
         </User>
         <User classid="UserCmp" name="" defn="master:import" id="1832911008" x="504" y="216" w="83" h="22" z="130" orient="0" link="-1" q="4">

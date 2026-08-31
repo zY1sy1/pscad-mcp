@@ -14,18 +14,20 @@ TEMPLATE = ROOT / "pscad_mcp" / "assets" / "templates" / "empty_library.pslx"
 LIBRARY_NAME = "cigre_lcc_v1"
 
 COMMON_G6P200 = {
+    "UP": "$(UP)",
     "FP": "0",
     "SNUB": "1",
+    "KV": "-2",
     "View": "1",
     "FR": "50.0 [Hz]",
     "GP": "10.0",
     "GI": "50.0",
     "KP": "0",
     "RON": "0.01 [ohm]",
-    "ROFF": "100000000.0 [ohm]",
+    "ROFF": "1.0E8 [ohm]",
     "EFVD": "0.0 [kV]",
-    "EBO": "100000.0 [kV]",
-    "TEXT": "0.0 [us]",
+    "EBO": "1.0E5 [kV]",
+    "TEXT": "0.0 [usec]",
     "CD": "0.05 [uF]",
     "RD": "5000.0 [ohm]",
     "FPNM": "",
@@ -323,8 +325,8 @@ def _bridge_definition(definitions: ET.Element) -> None:
             for name in ("AM_Y", "AM_D", "GM_Y", "GM_D")
         )
     )
-    g6_y = {**COMMON_G6P200, "UP": "$(UP)", "KV": "-2"}
-    g6_d = {**COMMON_G6P200, "UP": "$(UP)", "KV": "-1"}
+    g6_y = {**COMMON_G6P200, "KV": "-2"}
+    g6_d = {**COMMON_G6P200, "KV": "-1"}
     components = (
         _pin("pin_acy_a", "ACY_A", 90, 144),
         _pin("pin_acy_b", "ACY_B", 90, 180),
