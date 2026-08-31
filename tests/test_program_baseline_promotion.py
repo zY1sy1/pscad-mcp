@@ -133,6 +133,43 @@ def test_promote_program_report_requires_clean_exact_checkout(tmp_path):
     assert failure.value.details["reason"] == "worktree_not_clean"
 
 
+def test_promote_program_report_updates_existing_asset_hash_atomically(tmp_path):
+    from pscad_mcp.acceptance.promotion import promote_program_report
+
+    baseline = baseline_with_blank_scope()
+    baseline["assets"] = [
+        {
+            "asset_id": "asset.lcc.fixed.manifest",
+            "scope": "lcc.fixed_autonomous",
+            "path": "pscad_mcp/assets/lcc/fixed/manifest.json",
+            "sha256": "1" * 64,
+        }
+    ]
+    baseline_path = tmp_path / "docs" / "acceptance" / "baseline.json"
+    baseline_path.parent.mkdir(parents=True)
+    baseline_path.write_text(json.dumps(baseline), encoding="utf-8")
+    report = write_report(tmp_path / "report.json")
+    identity = {
+        "commit": NEW_COMMIT,
+        "branch": "codex/lcc-wp1a-native-acceptance",
+        "clean": True,
+    }
+
+    updated = promote_program_report(
+        baseline_path,
+        report,
+        expected_scope="lcc.blank_native",
+        owner_work_package="WP1",
+        explicit_exclusions=EXCLUSIONS,
+        asset_hash_updates={"asset.lcc.fixed.manifest": "f" * 64},
+        git_reader=lambda _root: identity,
+    )
+
+    assert updated["assets"][0]["sha256"] == "f" * 64
+    written = json.loads(baseline_path.read_text(encoding="utf-8"))
+    assert written["assets"][0]["sha256"] == "f" * 64
+
+
 def test_promote_program_report_rechecks_checkout_before_write(tmp_path):
     from pscad_mcp.acceptance.promotion import promote_program_report
 

@@ -244,6 +244,7 @@ def promote_program_report(
     git_reader: Callable[[Path], Mapping[str, Any]] = _git_reader,
     expected_report_sha256: str | None = None,
     expected_repository_branch: str | None = None,
+    asset_hash_updates: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
     baseline_file = Path(baseline_path)
     root = (Path(repository_root) if repository_root is not None else baseline_file.parents[2]).resolve()
@@ -277,6 +278,24 @@ def promote_program_report(
         explicit_exclusions=explicit_exclusions,
         expected_report_sha256=pinned_report_sha256,
     )
+    if asset_hash_updates:
+        assets_by_id = {item["asset_id"]: item for item in updated["assets"]}
+        missing = sorted(set(asset_hash_updates) - set(assets_by_id))
+        if missing:
+            raise _error(
+                "asset_update_missing",
+                "Promotion asset hash updates reference unknown asset IDs.",
+                asset_ids=missing,
+            )
+        for asset_id, sha256 in asset_hash_updates.items():
+            assets_by_id[asset_id]["sha256"] = sha256
+        try:
+            updated = validate_program_baseline(updated)
+        except BackendError as error:
+            raise _error(
+                "asset_update_invalid",
+                "Promotion asset hash updates are invalid.",
+            ) from error
     confirmed = dict(git_reader(root))
     if (
         confirmed.get("clean") is not True

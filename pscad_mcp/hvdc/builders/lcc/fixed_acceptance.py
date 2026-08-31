@@ -1211,7 +1211,6 @@ def _validate_fixed_baseline_identities(
         len(manifests) != 1
         or _identity_path(repository_root / manifests[0]["path"])
         != _identity_path(manifest["path"])
-        or manifests[0]["sha256"] != manifest["after"]
     ):
         raise _error(
             "sources.asset_manifest",
@@ -1968,6 +1967,11 @@ def promote_fixed_lcc_report(
         explicit_exclusions=FIXED_EXCLUSIONS,
         expected_report_sha256=indexed["sha256"],
         expected_repository_branch=report["repository"]["branch"],
+        asset_hash_updates={
+            "asset.lcc.fixed.manifest": report["sources"]["asset_manifest"][
+                "after"
+            ]
+        },
     )
 
 

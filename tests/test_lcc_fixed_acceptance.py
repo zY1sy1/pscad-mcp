@@ -386,6 +386,11 @@ def test_promotion_pins_report_hash_and_fixed_scope(monkeypatch, tmp_path):
     assert kwargs["owner_work_package"] == "WP1"
     assert tuple(kwargs["explicit_exclusions"]) == FIXED_EXCLUSIONS
     assert kwargs["expected_repository_branch"] == "codex/lcc-wp1b"
+    assert kwargs["asset_hash_updates"] == {
+        "asset.lcc.fixed.manifest": valid_fixed_report()["sources"][
+            "asset_manifest"
+        ]["after"]
+    }
     assert kwargs["expected_report_sha256"] == hashlib.sha256(
         report.read_bytes()
     ).hexdigest()
