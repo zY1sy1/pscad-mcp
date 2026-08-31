@@ -584,6 +584,50 @@ def test_wp1b_compiled_predeclared_output_falls_back_to_asset_contract(
         assert failure.value.code == "LCC_OUTPUT_INCOMPLETE"
 
 
+def test_legacy_output_paths_are_mapped_from_measurement_components(tmp_path):
+    plan = _plan_with_profile(tmp_path)
+    source, load = plan.blueprint.components
+    source = replace(source, ports=("P",))
+    output = LccOutputSpec(
+        "vdc",
+        "Main/VDC",
+        "kV",
+        "dc_voltage",
+        measurement="vdc_measurement",
+    )
+    plan = replace(
+        plan,
+        blueprint=replace(
+            plan.blueprint,
+            components=(source, load),
+            measurements=(
+                {
+                    "logical_id": "vdc_measurement",
+                    "component": "source",
+                    "port": "P",
+                },
+            ),
+            outputs=(output,),
+        ),
+    )
+    executor = LccExecutor(plan, RecordingPscadService(), tmp_path)
+    payload = {
+        "channels": [
+            {
+                "path": "source/VDC",
+                "domain": [0.0, 0.1],
+                "values": [0.0, 1.0],
+                "units": "kV",
+            }
+        ]
+    }
+
+    normalized = executor._logical_output_payload(payload)
+
+    assert normalized["channels"][0]["path"] == "Main/VDC"
+    assert payload["channels"][0]["path"] == "source/VDC"
+
+
 def _plan(tmp_path: Path) -> LccBuildPlan:
     blueprint = LccBlueprint(
         schema_version=1,

@@ -33,6 +33,7 @@ from .companion import audit_companion_library
 from .companion_gate import FIXTURES, run_companion_component_gate
 from .journal import AtomicJournal
 from .planner import WP1B_SMOKE_PROFILE
+from .smoke import ao_value_within_limits
 
 FIXED_SCOPE = "lcc.fixed_autonomous"
 FIXED_BUILDER_PATH = "lcc.fixed_autonomous"
@@ -776,7 +777,10 @@ def _validate_smoke(value: Any) -> dict[str, Any]:
         units = channel["units"].strip()
         if name in _AO_LIMITS:
             lower, upper = _AO_LIMITS[name]
-            if units.casefold() != "rad" or minimum < lower or maximum > upper:
+            if units.casefold() != "rad" or not (
+                ao_value_within_limits(minimum, lower, upper)
+                and ao_value_within_limits(maximum, lower, upper)
+            ):
                 raise _error(field, "AO smoke evidence is outside its contract.")
         if name in _ENABLE_CHANNELS and (minimum != 1.0 or maximum != 1.0):
             raise _error(field, "Enable smoke evidence is not continuously on.")

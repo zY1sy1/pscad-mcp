@@ -1882,6 +1882,78 @@ class LccExecutor:
         self.history.append(evidence)
         self.journal.write(self._journal_payload())
 
+    def _logical_output_payload(self, value: Any) -> Any:
+        if not isinstance(value, Mapping):
+            return value
+        raw_channels = value.get("channels")
+        if not isinstance(raw_channels, Sequence) or isinstance(
+            raw_channels,
+            (str, bytes, bytearray),
+        ):
+            return value
+        components = {
+            component.logical_id: component
+            for component in self.plan.blueprint.components
+        }
+        measurements = {
+            measurement.get("logical_id"): measurement
+            for measurement in self.plan.blueprint.measurements
+            if isinstance(measurement, Mapping)
+            and isinstance(measurement.get("logical_id"), str)
+        }
+        physical_to_logical = {}
+        for output in self.plan.blueprint.outputs:
+            measurement = measurements.get(output.measurement)
+            component_id = (
+                measurement.get("component")
+                if isinstance(measurement, Mapping)
+                else None
+            )
+            component = components.get(component_id)
+            if component is None:
+                continue
+            physical_path = (
+                component.definition.rsplit(":", 1)[-1]
+                + "/"
+                + output.path.rsplit("/", 1)[-1]
+            )
+            previous = physical_to_logical.setdefault(
+                physical_path,
+                output.path,
+            )
+            if previous != output.path:
+                raise _error(
+                    "LCC_OUTPUT_INCOMPLETE",
+                    "Physical output selectors are ambiguous.",
+                    "read_lcc_output",
+                    physical_path=physical_path,
+                )
+        normalized_channels = []
+        observed_paths = set()
+        for raw_channel in raw_channels:
+            if not isinstance(raw_channel, Mapping):
+                normalized_channels.append(raw_channel)
+                continue
+            channel = dict(raw_channel)
+            raw_path = channel.get("path")
+            if isinstance(raw_path, str) and raw_path in physical_to_logical:
+                channel["path"] = physical_to_logical[raw_path]
+            normalized_path = channel.get("path")
+            if (
+                isinstance(normalized_path, str)
+                and normalized_path in observed_paths
+            ):
+                raise _error(
+                    "LCC_OUTPUT_INCOMPLETE",
+                    "Logical output selectors are duplicated.",
+                    "read_lcc_output",
+                    path=normalized_path,
+                )
+            if isinstance(normalized_path, str):
+                observed_paths.add(normalized_path)
+            normalized_channels.append(channel)
+        return {**value, "channels": normalized_channels}
+
     async def _acceptance_output(self) -> Any:
         discover = getattr(self.service, "discover_output_files", None)
         read_output = getattr(self.service, "read_output_file", None)
@@ -1964,8 +2036,12 @@ class LccExecutor:
                 )
             candidates = sorted(set(candidates), key=str.casefold)
             self.output_file, self.output_parts = _select_output_dataset(candidates)
-            return await read_output(
-                self.output_file, max_samples=1_000_000, summary_only=False
+            return self._logical_output_payload(
+                await read_output(
+                    self.output_file,
+                    max_samples=1_000_000,
+                    summary_only=False,
+                )
             )
 
         get_project_output = getattr(self.service, "get_project_output", None)
@@ -1975,7 +2051,9 @@ class LccExecutor:
                 "The PSCAD service does not expose an output reader.",
                 "read_lcc_output",
             )
-        return await get_project_output(self.project_name)
+        return self._logical_output_payload(
+            await get_project_output(self.project_name)
+        )
 
     async def _smoke_validate(self, operation: LccPlanOperation) -> None:
         self._operation_started(operation)

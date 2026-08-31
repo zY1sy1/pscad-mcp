@@ -153,6 +153,16 @@ def test_valid_no_fault_smoke_passes_without_acceptance_claims():
     assert "accepted" not in result
 
 
+def test_ao_limits_allow_only_text_serialization_noise():
+    payload = valid_samples()
+    lower = contract()["ao_limits_rad"]["Main/AO_RECT_Y"][0]
+    payload["channels"]["Main/AO_RECT_Y"]["values"][0] = lower - 1e-14
+
+    result = _subject()(payload, contract())
+
+    assert result["verdict"] == "PASS"
+
+
 @pytest.mark.parametrize(
     ("mutation", "reason"),
     [
@@ -218,3 +228,50 @@ def test_global_time_payload_is_supported():
     result = _subject()(payload, contract())
 
     assert result["verdict"] == "PASS"
+
+
+def test_legacy_output_channel_list_is_normalized_by_path():
+    payload = valid_samples()
+    legacy = {
+        "channels": [
+            {
+                "path": name,
+                "domain": channel["time"],
+                "values": channel["values"],
+                "units": channel["units"],
+            }
+            for name, channel in payload["channels"].items()
+        ]
+    }
+
+    result = _subject()(legacy, contract())
+
+    assert result["verdict"] == "PASS"
+    assert result["evidence"]["samples"] == 2001
+
+
+def test_legacy_output_channel_paths_must_be_unique():
+    payload = valid_samples()
+    first_name, first = next(iter(payload["channels"].items()))
+    legacy = {
+        "channels": [
+            {
+                "path": first_name,
+                "domain": first["time"],
+                "values": first["values"],
+                "units": first["units"],
+            },
+            {
+                "path": first_name,
+                "domain": first["time"],
+                "values": first["values"],
+                "units": first["units"],
+            },
+        ]
+    }
+
+    with pytest.raises(BackendError) as failure:
+        _subject()(legacy, contract())
+
+    assert failure.value.code == "LCC_FIXED_SMOKE_FAILED"
+    assert failure.value.details["reason"] == "invalid_output"

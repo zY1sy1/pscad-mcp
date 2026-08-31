@@ -272,6 +272,17 @@ def test_valid_fixed_report_is_simulated_pass_with_exact_exclusions():
     assert payload == original
 
 
+def test_pass_report_allows_ao_text_serialization_noise():
+    payload = valid_fixed_report()
+    payload["smoke"]["evidence"]["channels"]["Main/AO_RECT_Y"][
+        "minimum"
+    ] = fixed_acceptance._AO_LIMITS["Main/AO_RECT_Y"][0] - 1e-14
+
+    normalized = validate_fixed_lcc_acceptance_report(payload)
+
+    assert normalized["status"] == "PASS"
+
+
 @pytest.mark.parametrize(
     ("start", "samples"),
     [(0.05, 1001), (0.0, 1001)],

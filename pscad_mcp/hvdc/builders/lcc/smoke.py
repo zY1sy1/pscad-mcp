@@ -26,6 +26,16 @@ CHECK_NAMES = (
 )
 
 
+def ao_value_within_limits(value: float, lower: float, upper: float) -> bool:
+    return (
+        value >= lower
+        or math.isclose(value, lower, rel_tol=1e-12, abs_tol=1e-12)
+    ) and (
+        value <= upper
+        or math.isclose(value, upper, rel_tol=1e-12, abs_tol=1e-12)
+    )
+
+
 def _error(code: str, message: str, **details: Any) -> BackendError:
     return BackendError(
         code,
@@ -278,14 +288,36 @@ def _parse_channels(samples: Any) -> dict[str, dict[str, Any]]:
             "Smoke output must be an object.",
         )
     raw_channels = samples.get("channels")
-    if not isinstance(raw_channels, Mapping):
+    if isinstance(raw_channels, Mapping):
+        channel_items = list(raw_channels.items())
+    elif isinstance(raw_channels, Sequence) and not isinstance(
+        raw_channels,
+        (str, bytes, bytearray),
+    ):
+        channel_items = []
+        for index, raw_channel in enumerate(raw_channels):
+            if not isinstance(raw_channel, Mapping):
+                raise _failed(
+                    "invalid_output",
+                    "Legacy output channels must be objects.",
+                    index=index,
+                )
+            path = raw_channel.get("path")
+            if not isinstance(path, str) or not path.strip():
+                raise _failed(
+                    "invalid_output",
+                    "Legacy output channels require non-empty paths.",
+                    index=index,
+                )
+            channel_items.append((path, raw_channel))
+    else:
         raise _failed(
             "invalid_output",
-            "Smoke output channels must be an object.",
+            "Smoke output channels must be an object or array.",
         )
     global_time = samples.get("time")
     channels: dict[str, dict[str, Any]] = {}
-    for raw_name, raw_channel in raw_channels.items():
+    for raw_name, raw_channel in channel_items:
         if not isinstance(raw_name, str) or not raw_name.strip():
             raise _failed(
                 "invalid_output",
@@ -304,7 +336,14 @@ def _parse_channels(samples: Any) -> dict[str, dict[str, Any]]:
                 "Output channel units must be text.",
                 channel=raw_name,
             )
-        time = raw_channel.get("time", global_time)
+        normalized_name = raw_name.strip()
+        if normalized_name in channels:
+            raise _failed(
+                "invalid_output",
+                "Output channel paths must be unique.",
+                channel=normalized_name,
+            )
+        time = raw_channel.get("time", raw_channel.get("domain", global_time))
         if time is None:
             raise _failed(
                 "invalid_time_domain",
@@ -321,7 +360,7 @@ def _parse_channels(samples: Any) -> dict[str, dict[str, Any]]:
                 time_samples=len(times),
                 value_samples=len(values),
             )
-        channels[raw_name.strip()] = {
+        channels[normalized_name] = {
             "time": times,
             "values": values,
             "units": units.strip(),
@@ -406,7 +445,7 @@ def _require_ao_limits(
                 observed_units=channels[channel]["units"],
             )
         for index, value in enumerate(channels[channel]["values"]):
-            if not lower <= value <= upper:
+            if not ao_value_within_limits(value, lower, upper):
                 raise _failed(
                     "ao_out_of_bounds",
                     "A fixed LCC angle order is outside its hard limits.",
@@ -466,4 +505,4 @@ def evaluate_fixed_smoke(
     }
 
 
-__all__ = ["evaluate_fixed_smoke"]
+__all__ = ["ao_value_within_limits", "evaluate_fixed_smoke"]
