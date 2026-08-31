@@ -821,6 +821,60 @@ class MismatchedConnectionService(RecordingPscadService):
         return created
 
 
+class SnappedCompanionPortService(RecordingPscadService):
+    async def add_canvas_component(self, *args, **kwargs):
+        created = await super().add_canvas_component(*args, **kwargs)
+        component = self.components[created["id"]]
+        component["x"] = round(component["x"] / 18) * 18
+        component["y"] = round(component["y"] / 18) * 18
+        created["location"] = {"x": component["x"], "y": component["y"]}
+        return created
+
+    async def get_component_ports(self, project_name, component_id):
+        self._call("get_component_ports", project_name, component_id)
+        component = self.components[component_id]
+        return [
+            {
+                "name": "ACD_A",
+                "x": component["x"] - 72,
+                "y": component["y"] - 36,
+                "dim": 1,
+                "type": "electrical",
+            }
+        ]
+
+
+def test_companion_port_readback_uses_verified_snapped_component_origin(tmp_path):
+    service = SnappedCompanionPortService()
+    executor = LccExecutor(
+        _plan(tmp_path),
+        service,
+        tmp_path,
+        asset_set=load_packaged_asset_set(),
+    )
+    operation = LccPlanOperation(
+        1,
+        "place_component",
+        "rectifier_bridge",
+        {
+            "definition": "cigre_lcc_v1:LCC12PulseBridge",
+            "location": [800, 210],
+            "orientation": 0,
+            "parameters": {"UP": 1},
+            "ports": ["ACD_A"],
+            "canvas": "Main",
+        },
+        "place_power:rectifier_bridge:000",
+        "place_power",
+    )
+
+    asyncio.run(executor._place_component(operation))
+
+    assert executor.component_ids["rectifier_bridge"] == 1
+    assert service.components[1]["x"] == 792
+    assert service.components[1]["y"] == 216
+
+
 @pytest.mark.parametrize(
     ("service_type", "reason"),
     [

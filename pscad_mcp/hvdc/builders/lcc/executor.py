@@ -678,7 +678,7 @@ class LccExecutor:
                 observed_point = _port_point(observed)
                 if observed_point is not None:
                     expected_point = absolute_port(
-                        (int(location[0]), int(location[1])),
+                        observed_location,
                         contract.offset,
                         expected_orientation,
                     )
