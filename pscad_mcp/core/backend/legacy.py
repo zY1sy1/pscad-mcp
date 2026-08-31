@@ -19,7 +19,12 @@ from importlib.resources import as_file, files
 from pathlib import Path
 from typing import Any
 
-from ...topology.geometry import GeometryError, absolute_port
+from ...topology.geometry import (
+    GeometryError,
+    Segment,
+    absolute_port,
+    classify_intersection,
+)
 from ...topology.hashing import canonical_sha256
 from ...topology.models import (
     DefinitionPortContract,
@@ -208,6 +213,13 @@ class LegacyBackend:
             tuple[str, str, str, str, tuple[int, int]],
             tuple[int, int],
         ] = {}
+        self._connection_label_routes: list[
+            tuple[str, str, str, tuple[tuple[int, int], ...]]
+        ] = []
+        self._connection_port_points: dict[
+            tuple[str, str],
+            set[tuple[int, int]],
+        ] = {}
         self.result_adapter = PscadAdapter(
             executor,
             pscad_module=False,
@@ -361,6 +373,8 @@ class LegacyBackend:
         self._run_last_active_status.clear()
         self._known_managed_layers.clear()
         self._connection_labels.clear()
+        self._connection_label_routes.clear()
+        self._connection_port_points.clear()
 
     async def quit(self) -> None:
         app = self._app
@@ -3968,6 +3982,171 @@ class LegacyBackend:
             await self.executor.run_safe(bus.set_parameters, **dict(parameters))
         return self._canvas_endpoints_payload(object_id, vertices)
 
+    @staticmethod
+    def _label_anchor_candidates(
+        point: tuple[int, int],
+        label: str,
+    ) -> list[tuple[int, int]]:
+        origin = (
+            round(point[0] / 18) * 18,
+            round(point[1] / 18) * 18,
+        )
+        seed = int(
+            hashlib.sha256(
+                f"{label}:{point[0]}:{point[1]}".encode("utf-8")
+            ).hexdigest()[:8],
+            16,
+        )
+        result = []
+        for radius in range(13):
+            ring = {
+                (origin[0] + dx * 18, origin[1] + dy * 18)
+                for dx in range(-radius, radius + 1)
+                for dy in range(-radius, radius + 1)
+                if max(abs(dx), abs(dy)) == radius
+            }
+            result.extend(
+                sorted(
+                    ring,
+                    key=lambda candidate: hashlib.sha256(
+                        f"{seed}:{candidate[0]}:{candidate[1]}".encode(
+                            "ascii"
+                        )
+                    ).hexdigest(),
+                )
+            )
+        return result
+
+    @staticmethod
+    def _label_adapter_candidates(
+        point: tuple[int, int],
+        anchor: tuple[int, int],
+        label: str,
+    ) -> tuple[tuple[tuple[int, int], ...], ...]:
+        if point == anchor:
+            return ((point,),)
+        seed = int(hashlib.sha256(label.encode("utf-8")).hexdigest()[:8], 16)
+        signs = (1, -1) if seed % 2 == 0 else (-1, 1)
+        routes = []
+        for sign in signs:
+            routes.append(
+                (
+                    point,
+                    (point[0] + sign * 18, point[1]),
+                    (point[0] + sign * 18, anchor[1]),
+                    anchor,
+                )
+            )
+            routes.append(
+                (
+                    point,
+                    (point[0], point[1] + sign * 18),
+                    (anchor[0], point[1] + sign * 18),
+                    anchor,
+                )
+            )
+        result = []
+        for route in routes:
+            collapsed = tuple(
+                candidate
+                for index, candidate in enumerate(route)
+                if index == 0 or candidate != route[index - 1]
+            )
+            if len(collapsed) >= 2 and all(
+                left[0] == right[0] or left[1] == right[1]
+                for left, right in zip(collapsed, collapsed[1:])
+            ):
+                result.append(collapsed)
+        return tuple(result)
+
+    @staticmethod
+    def _point_on_route(
+        point: tuple[int, int],
+        route: Sequence[tuple[int, int]],
+    ) -> bool:
+        return any(
+            (
+                left[0] == right[0] == point[0]
+                and min(left[1], right[1]) <= point[1] <= max(left[1], right[1])
+            )
+            or (
+                left[1] == right[1] == point[1]
+                and min(left[0], right[0]) <= point[0] <= max(left[0], right[0])
+            )
+            for left, right in zip(route, route[1:])
+        )
+
+    def _label_route_is_clear(
+        self,
+        project_name: str,
+        canvas_name: str,
+        label: str,
+        point: tuple[int, int],
+        route: tuple[tuple[int, int], ...],
+        blocked_points: set[tuple[int, int]],
+    ) -> bool:
+        if any(
+            candidate != point and self._point_on_route(candidate, route)
+            for candidate in blocked_points
+        ):
+            return False
+        segments = [
+            Segment(left, right) for left, right in zip(route, route[1:])
+        ]
+        for record_project, record_canvas, record_label, record_route in (
+            self._connection_label_routes
+        ):
+            if (
+                record_project != project_name
+                or record_canvas != canvas_name
+                or record_label == label
+            ):
+                continue
+            if any(
+                classify_intersection(segment, other).kind
+                not in {"none", "crossing"}
+                for segment in segments
+                for other in (
+                    Segment(left, right)
+                    for left, right in zip(record_route, record_route[1:])
+                )
+            ):
+                return False
+        return True
+
+    async def _managed_connection_port_points(
+        self,
+        project_name: str,
+        canvas_name: str,
+    ) -> set[tuple[int, int]]:
+        cache_key = (project_name, canvas_name)
+        cached = self._connection_port_points.get(cache_key)
+        if cached is not None:
+            return set(cached)
+        points: set[tuple[int, int]] = set()
+        components = await self.find_components(
+            project_name,
+            canvas_name,
+            None,
+            None,
+        )
+        for component in components:
+            if component.definition.rsplit(":", 1)[-1].casefold() in {
+                "datalabel",
+                "nodelabel",
+            }:
+                continue
+            try:
+                ports = await self.get_component_ports(
+                    project_name,
+                    component.id,
+                )
+            except BackendError:
+                continue
+            points.update((port.x, port.y) for port in ports)
+        self._connection_port_points[cache_key] = points
+        return set(points)
+
     async def create_connection(
         self,
         project_name: str,
@@ -3985,16 +4164,36 @@ class LegacyBackend:
                 "label and electrical must either both be provided or both omitted."
             )
         definition = "nodelabel" if electrical else "datalabel"
-        existing = await self.find_components(
+        label_components = await self.find_components(
             project_name,
             canvas_name,
             definition,
-            label,
+            None,
         )
+        existing = []
+        for component in label_components:
+            try:
+                parameters = await self.get_component_parameters(
+                    project_name,
+                    component.id,
+                )
+            except BackendError:
+                parameters = {}
+            observed_name = parameters.get("Name", component.name)
+            if observed_name == label:
+                existing.append(component)
         existing_locations = {
             (item.location.get("x"), item.location.get("y"))
             for item in existing
         }
+        occupied_locations = {
+            (item.location.get("x"), item.location.get("y"))
+            for item in label_components
+        }
+        port_points = await self._managed_connection_port_points(
+            project_name,
+            canvas_name,
+        )
         for point in (p1, p2):
             key = (
                 project_name,
@@ -4010,23 +4209,82 @@ class LegacyBackend:
             if point in existing_locations:
                 self._connection_labels[key] = point
                 continue
+            selected_anchor = None
+            selected_route = None
+            blocked_points = port_points | occupied_locations
+            for anchor in self._label_anchor_candidates(point, label):
+                if anchor in occupied_locations or (
+                    anchor in port_points and anchor != point
+                ):
+                    continue
+                for route in self._label_adapter_candidates(
+                    point,
+                    anchor,
+                    label,
+                ):
+                    if self._label_route_is_clear(
+                        project_name,
+                        canvas_name,
+                        label,
+                        point,
+                        route,
+                        blocked_points,
+                    ):
+                        selected_anchor = anchor
+                        selected_route = route
+                        break
+                if selected_anchor is not None:
+                    break
+            if selected_anchor is None or selected_route is None:
+                raise BackendError(
+                    "POSTCONDITION_FAILED",
+                    "A collision-free PSCAD label anchor could not be allocated.",
+                    self.name,
+                    "create_connection",
+                    {
+                        "label": label,
+                        "point": list(point),
+                    },
+                )
             created = await self.add_component(
                 project_name,
                 canvas_name,
                 "master",
                 definition,
-                point,
+                selected_anchor,
                 0,
                 {"Name": label},
             )
             location = (created.location["x"], created.location["y"])
+            if location != selected_anchor:
+                raise BackendError(
+                    "POSTCONDITION_FAILED",
+                    "A PSCAD connection label did not keep its grid anchor.",
+                    self.name,
+                    "create_connection",
+                    {
+                        "label": label,
+                        "expected": list(selected_anchor),
+                        "observed": list(location),
+                    },
+                )
             self._connection_labels[key] = location
-            if location != point:
-                vertices = [point]
-                if point[0] != location[0] and point[1] != location[1]:
-                    vertices.append((location[0], point[1]))
-                vertices.append(location)
-                await self.create_wire(project_name, canvas_name, vertices)
+            existing_locations.add(location)
+            occupied_locations.add(location)
+            if len(selected_route) >= 2:
+                await self.create_wire(
+                    project_name,
+                    canvas_name,
+                    list(selected_route),
+                )
+                self._connection_label_routes.append(
+                    (
+                        project_name,
+                        canvas_name,
+                        label,
+                        selected_route,
+                    )
+                )
         return {"label": label}
 
     async def create_annotation(
