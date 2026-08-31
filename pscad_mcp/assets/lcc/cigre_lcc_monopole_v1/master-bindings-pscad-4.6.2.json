@@ -2203,6 +2203,70 @@
         }
       ],
       "evidence_parameters": []
+    },
+    {
+      "logical_name": "master:real_to_integer",
+      "physical_definition": "unity",
+      "shape": {
+        "kind": "direct"
+      },
+      "ports": [
+        {
+          "logical": "IN",
+          "physical": "A:Dim",
+          "kind": "data",
+          "dimension": 1,
+          "occurrence": 0
+        },
+        {
+          "logical": "OUT",
+          "physical": "B:Dim",
+          "kind": "data",
+          "dimension": 1,
+          "occurrence": 2
+        }
+      ],
+      "parameters": [],
+      "fixed_parameters": [
+        {
+          "physical": "IType",
+          "value": 2,
+          "contract": {
+            "type": "Choice",
+            "unit": null,
+            "choices": [
+              "0",
+              "1",
+              "2"
+            ]
+          }
+        },
+        {
+          "physical": "OType",
+          "value": 1,
+          "contract": {
+            "type": "Choice",
+            "unit": null,
+            "choices": [
+              "0",
+              "1",
+              "2",
+              "3",
+              "4",
+              "5"
+            ]
+          }
+        },
+        {
+          "physical": "Dim",
+          "value": 1,
+          "contract": {
+            "type": "Integer",
+            "unit": null
+          }
+        }
+      ],
+      "evidence_parameters": []
     }
   ]
 }

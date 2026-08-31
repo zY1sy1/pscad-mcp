@@ -119,16 +119,6 @@ _FIXTURE_INPUTS = {
     "cigre_lcc_v1:Initialization": (),
     "cigre_lcc_v1:SignalInterface": (),
 }
-_BRIDGE_ELECTRICAL_PORTS = (
-    "ACY_A",
-    "ACY_B",
-    "ACY_C",
-    "ACD_A",
-    "ACD_B",
-    "ACD_C",
-    "DC_POS",
-    "DC_NEG",
-)
 
 
 def _error(code: str, message: str, operation: str, **details: Any) -> BackendError:
@@ -435,7 +425,7 @@ async def _add_fixture_harness(
     for port_name in _FIXTURE_INPUTS[fixture.definition]:
         contract = require_port(definition, port_name)
         target = absolute_port((180, 180), contract.offset, 0)
-        integer = port_name == "ENABLE"
+        integer = False
         if port_name in {"AO_Y", "AO_D"}:
             value = "0.2617993877991494" if fixture.parameters.get("UP") == 1 else "1.57"
         elif port_name == "GAMMA_ORDER":
@@ -469,33 +459,6 @@ async def _add_fixture_harness(
                 canvas_name="Main",
             ),
         )
-
-    if fixture.definition.endswith(":LCC12PulseBridge"):
-        for index, port_name in enumerate(_BRIDGE_ELECTRICAL_PORTS):
-            contract = require_port(definition, port_name)
-            target = absolute_port((180, 180), contract.offset, 0)
-            ground = (720 + index * 54, 540)
-            await _service_call(
-                "create_fixture_harness",
-                service.add_canvas_component(
-                    project_name,
-                    "master",
-                    "ground",
-                    ground[0],
-                    ground[1],
-                    0,
-                    {},
-                    canvas_name="Main",
-                ),
-            )
-            await _service_call(
-                "create_fixture_harness",
-                writer(
-                    project_name,
-                    _orthogonal_vertices(ground, target),
-                    canvas_name="Main",
-                ),
-            )
 
     if fixture.definition.endswith(":SignalInterface"):
         for index, name in enumerate(

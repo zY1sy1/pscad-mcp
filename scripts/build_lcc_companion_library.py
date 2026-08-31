@@ -315,7 +315,7 @@ def _bridge_definition(definitions: ET.Element) -> None:
             )
         )
         + tuple(
-            (name, "data", "input", "Integer" if name == "ENABLE" else "Real")
+            (name, "data", "input", "Real")
             for name in ("AO_Y", "AO_D", "ENABLE")
         )
         + tuple(
@@ -341,15 +341,22 @@ def _bridge_definition(definitions: ET.Element) -> None:
         _import("import_ao_y", "AO_Y", 504, 216),
         _import("import_ao_d", "AO_D", 504, 486),
         _import("import_enable", "ENABLE", 504, 315),
+        Component(
+            "enable_to_integer",
+            "master:unity",
+            600,
+            315,
+            {"IType": "2", "OType": "1", "Dim": "1"},
+        ),
         _export("export_am_y", "AM_Y", 504, 126),
         _export("export_gm_y", "GM_Y", 504, 144),
         _export("export_am_d", "AM_D", 504, 396),
         _export("export_gm_d", "GM_D", 504, 414),
         Component(
-            "const_enable_one", "master:consti", 600, 300, {"Name": "LCC_ENABLE_ONE", "Value": "1"}
+            "const_enable_one", "master:consti", 600, 270, {"Name": "LCC_ENABLE_ONE", "Value": "1"}
         ),
         Component(
-            "const_cb_zero", "master:consti", 600, 360, {"Name": "LCC_CB_ZERO", "Value": "0"}
+            "const_cb_zero", "master:consti", 600, 414, {"Name": "LCC_CB_ZERO", "Value": "0"}
         ),
         Component(
             "enable_inverter",
@@ -382,12 +389,13 @@ def _bridge_definition(definitions: ET.Element) -> None:
         Wire("DC_NEG_PATH", ((360, 540), (360, 576))),
         Wire("AO_Y_TO_BRIDGE_Y", ((540, 216), (414, 216))),
         Wire("AO_D_TO_BRIDGE_D", ((540, 486), (414, 486))),
-        Wire("ENABLE_ONE", ((636, 300), (684, 300), (684, 315))),
-        Wire("ENABLE_ORDER", ((540, 315), (720, 315), (720, 351))),
+        Wire("ENABLE_CONVERSION", ((540, 315), (564, 315))),
+        Wire("ENABLE_ONE", ((636, 270), (684, 270), (684, 315))),
+        Wire("ENABLE_ORDER", ((600, 315), (720, 315), (720, 351))),
         Wire("ENABLE_TO_KB_Y", ((756, 315), (780, 315), (780, 234), (414, 234))),
         Wire("ENABLE_TO_KB_D", ((756, 315), (792, 315), (792, 504), (414, 504))),
-        Wire("CB_ZERO_Y", ((636, 360), (648, 360), (648, 90), (342, 90))),
-        Wire("CB_ZERO_D", ((636, 360), (660, 360), (342, 360))),
+        Wire("CB_ZERO_Y", ((636, 414), (648, 414), (648, 90), (342, 90))),
+        Wire("CB_ZERO_D", ((636, 414), (660, 414), (660, 360), (342, 360))),
         Wire("AM_Y_OUTPUT", ((414, 126), (540, 126))),
         Wire("GM_Y_OUTPUT", ((414, 144), (540, 144))),
         Wire("AM_D_OUTPUT", ((414, 396), (540, 396))),
@@ -405,7 +413,7 @@ def _bridge_definition(definitions: ET.Element) -> None:
 
 def _rectifier_control(definitions: ET.Element) -> None:
     ports = tuple(
-        (name, "data", "input", "Integer" if name == "ENABLE" else "Real")
+        (name, "data", "input", "Real")
         for name in ("VDC", "IDC", "IORDER", "ENABLE")
     ) + tuple((name, "data", "output", "Real") for name in ("AO_Y", "AO_D", "ALPHA"))
     components = (
@@ -413,13 +421,6 @@ def _rectifier_control(definitions: ET.Element) -> None:
         _import("import_idc", "IDC", 90, 180),
         _import("import_iorder", "IORDER", 90, 270),
         _import("import_enable", "ENABLE", 90, 360),
-        Component(
-            "enable_to_real",
-            "master:unity",
-            216,
-            360,
-            {"IType": "1", "OType": "2", "Dim": "1"},
-        ),
         Component(
             "current_error",
             "master:sumjct",
@@ -474,9 +475,8 @@ def _rectifier_control(definitions: ET.Element) -> None:
     wires = (
         Wire("CURRENT_ERROR", ((126, 180), (288, 225))),
         Wire("CURRENT_ORDER", ((126, 270), (324, 261))),
-        Wire("ENABLE_CONVERSION", ((126, 360), (180, 360))),
         Wire("ERROR_TO_PRODUCT", ((360, 225), (414, 225))),
-        Wire("ENABLE_PRODUCT", ((216, 360), (450, 360), (450, 261))),
+        Wire("ENABLE_PRODUCT", ((126, 360), (450, 360), (450, 261))),
         Wire("PRODUCT_TO_PI", ((486, 225), (504, 225))),
         Wire("PI_TO_LIMIT", ((576, 225), (648, 225))),
         Wire("AO_Y_OUTPUT", ((720, 225), (882, 180))),
@@ -497,7 +497,7 @@ def _rectifier_control(definitions: ET.Element) -> None:
 
 def _inverter_control(definitions: ET.Element) -> None:
     ports = tuple(
-        (name, "data", "input", "Integer" if name == "ENABLE" else "Real")
+        (name, "data", "input", "Real")
         for name in ("VDC", "IDC", "GM_Y", "GM_D", "GAMMA_ORDER", "ENABLE")
     ) + tuple((name, "data", "output", "Real") for name in ("AO_Y", "AO_D", "GAMMA"))
     components = (
@@ -507,13 +507,6 @@ def _inverter_control(definitions: ET.Element) -> None:
         _import("import_gm_d", "GM_D", 90, 270),
         _import("import_gamma_order", "GAMMA_ORDER", 90, 342),
         _import("import_enable", "ENABLE", 90, 414),
-        Component(
-            "enable_to_real",
-            "master:unity",
-            216,
-            414,
-            {"IType": "1", "OType": "2", "Dim": "1"},
-        ),
         Component(
             "gamma_minimum",
             "master:maxmin",
@@ -588,9 +581,8 @@ def _inverter_control(definitions: ET.Element) -> None:
         Wire("GAMMA_MIN_D", ((126, 270), (252, 270))),
         Wire("GAMMA_ERROR", ((126, 342), (378, 306))),
         Wire("GAMMA_FEEDBACK", ((324, 234), (414, 342))),
-        Wire("ENABLE_CONVERSION", ((126, 414), (180, 414))),
         Wire("ERROR_TO_PRODUCT", ((450, 306), (504, 306))),
-        Wire("ENABLE_PRODUCT", ((216, 414), (540, 414), (540, 342))),
+        Wire("ENABLE_PRODUCT", ((126, 414), (540, 414), (540, 342))),
         Wire("PRODUCT_TO_PI", ((576, 306), (594, 306))),
         Wire("PI_TO_LIMIT", ((666, 306), (738, 306))),
         Wire("AO_Y_OUTPUT", ((810, 306), (972, 252))),
@@ -612,7 +604,7 @@ def _inverter_control(definitions: ET.Element) -> None:
 
 def _initialization(definitions: ET.Element) -> None:
     ports = tuple(
-        (name, "data", "output", "Integer" if name.startswith("ENABLE") else "Real")
+        (name, "data", "output", "Real")
         for name in ("IORDER", "GAMMA_ORDER", "ENABLE_RECT", "ENABLE_INV")
     )
     components = (
@@ -650,8 +642,8 @@ def _initialization(definitions: ET.Element) -> None:
     wires = (
         Wire("IORDER_OUTPUT", ((216, 126), (396, 126))),
         Wire("GAMMA_ORDER_OUTPUT", ((216, 198), (396, 198))),
-        Wire("ENABLE_RECT_OUTPUT", ((216, 270), (396, 270))),
-        Wire("ENABLE_INV_OUTPUT", ((216, 342), (396, 342))),
+        Wire("ENABLE_RECT_OUTPUT", ((270, 270), (396, 270))),
+        Wire("ENABLE_INV_OUTPUT", ((270, 342), (396, 342))),
         Wire("ENABLE_RECT_CONVERSION", ((216, 270), (234, 270))),
         Wire("ENABLE_INV_CONVERSION", ((216, 342), (234, 342))),
         Wire("ENABLE_RECT_MONITOR", ((270, 270), (432, 270))),

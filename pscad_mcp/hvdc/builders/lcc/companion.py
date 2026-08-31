@@ -39,11 +39,11 @@ EXPECTED_MASTER_COUNTS = {
         "master:export": 4,
         "master:consti": 2,
         "master:sumjct": 1,
+        "master:unity": 1,
     },
     "cigre_lcc_v1:RectifierControl": {
         "master:import": 4,
         "master:export": 3,
-        "master:unity": 1,
         "master:sumjct": 1,
         "master:mult": 1,
         "master:pi_ctlr": 1,
@@ -53,7 +53,6 @@ EXPECTED_MASTER_COUNTS = {
     "cigre_lcc_v1:InverterControl": {
         "master:import": 6,
         "master:export": 3,
-        "master:unity": 1,
         "master:maxmin": 1,
         "master:sumjct": 1,
         "master:mult": 1,
@@ -162,6 +161,7 @@ REQUIRED_CONNECTIONS = {
         "AO_D_TO_BRIDGE_D",
         "ENABLE_TO_KB_Y",
         "ENABLE_TO_KB_D",
+        "ENABLE_CONVERSION",
         "CB_ZERO_Y",
         "CB_ZERO_D",
     },
