@@ -4,6 +4,14 @@ from pathlib import Path
 
 from scripts.audit_lcc_assets import audit_asset_root
 
+PACKAGED_ROOT = (
+    Path(__file__).parents[1]
+    / "pscad_mcp"
+    / "assets"
+    / "lcc"
+    / "cigre_lcc_monopole_v1"
+)
+
 
 def _library(*, extra: str = "", absolute: str = "") -> str:
     valves = "".join(
@@ -55,6 +63,20 @@ def test_audit_rejects_structural_only_library(tmp_path):
     assert report["valid"] is False
     assert "structural_only" in {
         error["reason"] for error in report["errors"]
+    }
+
+
+def test_packaged_asset_root_is_physical():
+    report = audit_asset_root(PACKAGED_ROOT)
+
+    assert report["valid"] is True
+    assert report["effective_valves"] == 12
+    assert report["master_instances"]["master:g6p200"] == 2
+    assert report["firing_mode"] == {
+        "physical_parameter": "FP",
+        "value": 0,
+        "active_port": "AO",
+        "dimension": 1,
     }
 
 

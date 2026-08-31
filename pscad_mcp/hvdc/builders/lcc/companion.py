@@ -31,14 +31,28 @@ FORBIDDEN_STRUCTURAL_TAGS = {
     "dc_series_path",
 }
 EXPECTED_MASTER_COUNTS = {
-    "cigre_lcc_v1:LCC12PulseBridge": {"master:g6p200": 2},
+    "cigre_lcc_v1:LCC12PulseBridge": {
+        "master:g6p200": 2,
+        "master:pin": 8,
+        "master:breakout": 2,
+        "master:import": 3,
+        "master:export": 4,
+        "master:consti": 2,
+        "master:sumjct": 1,
+    },
     "cigre_lcc_v1:RectifierControl": {
+        "master:import": 4,
+        "master:export": 3,
+        "master:unity": 1,
         "master:sumjct": 1,
         "master:mult": 1,
         "master:pi_ctlr": 1,
         "master:hardlimit": 1,
     },
     "cigre_lcc_v1:InverterControl": {
+        "master:import": 6,
+        "master:export": 3,
+        "master:unity": 1,
         "master:maxmin": 1,
         "master:sumjct": 1,
         "master:mult": 1,
@@ -48,8 +62,12 @@ EXPECTED_MASTER_COUNTS = {
     "cigre_lcc_v1:Initialization": {
         "master:const": 2,
         "master:consti": 2,
+        "master:export": 4,
     },
-    "cigre_lcc_v1:SignalInterface": {"master:import": 3},
+    "cigre_lcc_v1:SignalInterface": {
+        "master:import": 3,
+        "master:export": 3,
+    },
 }
 
 

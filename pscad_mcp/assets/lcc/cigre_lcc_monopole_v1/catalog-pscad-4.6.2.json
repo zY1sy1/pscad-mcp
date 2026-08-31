@@ -2,153 +2,866 @@
   "schema_version": 1,
   "name": "cigre_lcc_monopole_v1",
   "pscad_version": "4.6.2",
-  "identity": "cigre_lcc_monopole_v1/catalog-pscad-4.6.2",
+  "identity": "cigre_lcc_monopole_v1/catalog-pscad-4.6.2-physical-v2",
   "master_binding_registry": "master-bindings-pscad-4.6.2.json",
   "definitions": [
     {
       "scoped_name": "master:three_phase_source",
       "ports": [
-        {"name": "A", "kind": "electrical", "dimension": 1, "offset": [0, 0]},
-        {"name": "B", "kind": "electrical", "dimension": 1, "offset": [0, 10]},
-        {"name": "C", "kind": "electrical", "dimension": 1, "offset": [0, 20]}
+        {
+          "name": "A",
+          "kind": "electrical",
+          "dimension": 1,
+          "offset": [
+            0,
+            0
+          ]
+        },
+        {
+          "name": "B",
+          "kind": "electrical",
+          "dimension": 1,
+          "offset": [
+            0,
+            10
+          ]
+        },
+        {
+          "name": "C",
+          "kind": "electrical",
+          "dimension": 1,
+          "offset": [
+            0,
+            20
+          ]
+        }
       ],
       "parameters": {
-        "Amplitude_kV": {"type": "float", "minimum": 0, "maximum": 1000, "unit": "kV"},
-        "Frequency_Hz": {"type": "float", "minimum": 45, "maximum": 65, "unit": "Hz"},
-        "Phase_deg": {"type": "float", "minimum": -360, "maximum": 360, "unit": "deg"}
+        "Amplitude_kV": {
+          "type": "float",
+          "minimum": 0,
+          "maximum": 1000,
+          "unit": "kV"
+        },
+        "Frequency_Hz": {
+          "type": "float",
+          "minimum": 45,
+          "maximum": 65,
+          "unit": "Hz"
+        },
+        "Phase_deg": {
+          "type": "float",
+          "minimum": -360,
+          "maximum": 360,
+          "unit": "deg"
+        }
       },
-      "bounding_box": [-10, -10, 10, 30],
-      "metadata": {"library": "master", "characterized_for": "4.6.2", "binding_registry": "master-bindings-pscad-4.6.2.json"}
+      "bounding_box": [
+        -10,
+        -10,
+        10,
+        30
+      ],
+      "metadata": {
+        "library": "master",
+        "characterized_for": "4.6.2",
+        "binding_registry": "master-bindings-pscad-4.6.2.json"
+      }
     },
     {
       "scoped_name": "master:converter_transformer",
       "ports": [
-        {"name": "HV_A", "kind": "electrical", "dimension": 1, "offset": [-30, 0]},
-        {"name": "HV_B", "kind": "electrical", "dimension": 1, "offset": [-30, 10]},
-        {"name": "HV_C", "kind": "electrical", "dimension": 1, "offset": [-30, 20]},
-        {"name": "LV_A", "kind": "electrical", "dimension": 1, "offset": [30, 0]},
-        {"name": "LV_B", "kind": "electrical", "dimension": 1, "offset": [30, 10]},
-        {"name": "LV_C", "kind": "electrical", "dimension": 1, "offset": [30, 20]}
+        {
+          "name": "HV_A",
+          "kind": "electrical",
+          "dimension": 1,
+          "offset": [
+            -30,
+            0
+          ]
+        },
+        {
+          "name": "HV_B",
+          "kind": "electrical",
+          "dimension": 1,
+          "offset": [
+            -30,
+            10
+          ]
+        },
+        {
+          "name": "HV_C",
+          "kind": "electrical",
+          "dimension": 1,
+          "offset": [
+            -30,
+            20
+          ]
+        },
+        {
+          "name": "LV_A",
+          "kind": "electrical",
+          "dimension": 1,
+          "offset": [
+            30,
+            0
+          ]
+        },
+        {
+          "name": "LV_B",
+          "kind": "electrical",
+          "dimension": 1,
+          "offset": [
+            30,
+            10
+          ]
+        },
+        {
+          "name": "LV_C",
+          "kind": "electrical",
+          "dimension": 1,
+          "offset": [
+            30,
+            20
+          ]
+        }
       ],
       "parameters": {
-        "Ratio": {"type": "float", "minimum": 0.1, "maximum": 20},
-        "PhaseShift_deg": {"type": "float", "minimum": -180, "maximum": 180, "unit": "deg"},
-        "Connection": {"type": "enum", "enum": ["Y-Y", "Y-delta"]}
+        "Ratio": {
+          "type": "float",
+          "minimum": 0.1,
+          "maximum": 20
+        },
+        "PhaseShift_deg": {
+          "type": "float",
+          "minimum": -180,
+          "maximum": 180,
+          "unit": "deg"
+        },
+        "Connection": {
+          "type": "enum",
+          "enum": [
+            "Y-Y",
+            "Y-delta"
+          ]
+        }
       },
-      "bounding_box": [-40, -30, 40, 30],
-      "metadata": {"library": "master", "characterized_for": "4.6.2", "binding_registry": "master-bindings-pscad-4.6.2.json"}
+      "bounding_box": [
+        -40,
+        -30,
+        40,
+        30
+      ],
+      "metadata": {
+        "library": "master",
+        "characterized_for": "4.6.2",
+        "binding_registry": "master-bindings-pscad-4.6.2.json"
+      }
     },
     {
       "scoped_name": "master:ac_filter_branch",
       "ports": [
-        {"name": "IN_A", "kind": "electrical", "dimension": 1, "offset": [-30, 0]},
-        {"name": "IN_B", "kind": "electrical", "dimension": 1, "offset": [-30, 10]},
-        {"name": "IN_C", "kind": "electrical", "dimension": 1, "offset": [-30, 20]},
-        {"name": "OUT_A", "kind": "electrical", "dimension": 1, "offset": [30, 0]},
-        {"name": "OUT_B", "kind": "electrical", "dimension": 1, "offset": [30, 10]},
-        {"name": "OUT_C", "kind": "electrical", "dimension": 1, "offset": [30, 20]}
+        {
+          "name": "IN_A",
+          "kind": "electrical",
+          "dimension": 1,
+          "offset": [
+            -30,
+            0
+          ]
+        },
+        {
+          "name": "IN_B",
+          "kind": "electrical",
+          "dimension": 1,
+          "offset": [
+            -30,
+            10
+          ]
+        },
+        {
+          "name": "IN_C",
+          "kind": "electrical",
+          "dimension": 1,
+          "offset": [
+            -30,
+            20
+          ]
+        },
+        {
+          "name": "OUT_A",
+          "kind": "electrical",
+          "dimension": 1,
+          "offset": [
+            30,
+            0
+          ]
+        },
+        {
+          "name": "OUT_B",
+          "kind": "electrical",
+          "dimension": 1,
+          "offset": [
+            30,
+            10
+          ]
+        },
+        {
+          "name": "OUT_C",
+          "kind": "electrical",
+          "dimension": 1,
+          "offset": [
+            30,
+            20
+          ]
+        }
       ],
       "parameters": {
-        "Branch_MVAR": {"type": "float", "minimum": 0, "maximum": 1000, "unit": "MVAr"},
-        "Tuning_Hz": {"type": "float", "minimum": 40, "maximum": 1000, "unit": "Hz"}
+        "Branch_MVAR": {
+          "type": "float",
+          "minimum": 0,
+          "maximum": 1000,
+          "unit": "MVAr"
+        },
+        "Tuning_Hz": {
+          "type": "float",
+          "minimum": 40,
+          "maximum": 1000,
+          "unit": "Hz"
+        }
       },
-      "bounding_box": [-40, -30, 40, 30],
-      "metadata": {"library": "master", "characterized_for": "4.6.2", "binding_registry": "master-bindings-pscad-4.6.2.json"}
+      "bounding_box": [
+        -40,
+        -30,
+        40,
+        30
+      ],
+      "metadata": {
+        "library": "master",
+        "characterized_for": "4.6.2",
+        "binding_registry": "master-bindings-pscad-4.6.2.json"
+      }
     },
     {
       "scoped_name": "master:smoothing_reactor",
       "ports": [
-        {"name": "IN", "kind": "electrical", "dimension": 1, "offset": [-15, 0]},
-        {"name": "OUT", "kind": "electrical", "dimension": 1, "offset": [15, 0]}
+        {
+          "name": "IN",
+          "kind": "electrical",
+          "dimension": 1,
+          "offset": [
+            -15,
+            0
+          ]
+        },
+        {
+          "name": "OUT",
+          "kind": "electrical",
+          "dimension": 1,
+          "offset": [
+            15,
+            0
+          ]
+        }
       ],
-      "parameters": {"Inductance_mH": {"type": "float", "minimum": 0, "maximum": 1000, "unit": "mH"}},
-      "bounding_box": [-20, -10, 20, 10],
-      "metadata": {"library": "master", "characterized_for": "4.6.2", "binding_registry": "master-bindings-pscad-4.6.2.json"}
+      "parameters": {
+        "Inductance_mH": {
+          "type": "float",
+          "minimum": 0,
+          "maximum": 1000,
+          "unit": "mH"
+        }
+      },
+      "bounding_box": [
+        -20,
+        -10,
+        20,
+        10
+      ],
+      "metadata": {
+        "library": "master",
+        "characterized_for": "4.6.2",
+        "binding_registry": "master-bindings-pscad-4.6.2.json"
+      }
     },
     {
       "scoped_name": "master:dc_line_section",
       "ports": [
-        {"name": "IN", "kind": "electrical", "dimension": 1, "offset": [-40, 0]},
-        {"name": "OUT", "kind": "electrical", "dimension": 1, "offset": [40, 0]}
+        {
+          "name": "IN",
+          "kind": "electrical",
+          "dimension": 1,
+          "offset": [
+            -40,
+            0
+          ]
+        },
+        {
+          "name": "OUT",
+          "kind": "electrical",
+          "dimension": 1,
+          "offset": [
+            40,
+            0
+          ]
+        }
       ],
       "parameters": {
-        "Length_km": {"type": "float", "minimum": 0, "maximum": 10000, "unit": "km"},
-        "Resistance_ohm": {"type": "float", "minimum": 0, "maximum": 1000, "unit": "ohm"}
+        "Length_km": {
+          "type": "float",
+          "minimum": 0,
+          "maximum": 10000,
+          "unit": "km"
+        },
+        "Resistance_ohm": {
+          "type": "float",
+          "minimum": 0,
+          "maximum": 1000,
+          "unit": "ohm"
+        }
       },
-      "bounding_box": [-50, -10, 50, 10],
-      "metadata": {"library": "master", "characterized_for": "4.6.2", "binding_registry": "master-bindings-pscad-4.6.2.json"}
+      "bounding_box": [
+        -50,
+        -10,
+        50,
+        10
+      ],
+      "metadata": {
+        "library": "master",
+        "characterized_for": "4.6.2",
+        "binding_registry": "master-bindings-pscad-4.6.2.json"
+      }
     },
     {
       "scoped_name": "master:ac_meter",
       "ports": [
-        {"name": "A", "kind": "electrical", "dimension": 1, "offset": [-15, 0]},
-        {"name": "B", "kind": "electrical", "dimension": 1, "offset": [15, 0]}
+        {
+          "name": "A",
+          "kind": "electrical",
+          "dimension": 1,
+          "offset": [
+            -15,
+            0
+          ]
+        },
+        {
+          "name": "B",
+          "kind": "electrical",
+          "dimension": 1,
+          "offset": [
+            15,
+            0
+          ]
+        }
       ],
       "parameters": {},
-      "bounding_box": [-20, -10, 20, 30],
-      "metadata": {"library": "master", "characterized_for": "4.6.2", "binding_registry": "master-bindings-pscad-4.6.2.json"}
+      "bounding_box": [
+        -20,
+        -10,
+        20,
+        30
+      ],
+      "metadata": {
+        "library": "master",
+        "characterized_for": "4.6.2",
+        "binding_registry": "master-bindings-pscad-4.6.2.json"
+      }
     },
     {
       "scoped_name": "master:dc_meter",
       "ports": [
-        {"name": "IN", "kind": "electrical", "dimension": 1, "offset": [-15, 0]},
-        {"name": "OUT", "kind": "electrical", "dimension": 1, "offset": [15, 0]}
+        {
+          "name": "IN",
+          "kind": "electrical",
+          "dimension": 1,
+          "offset": [
+            -15,
+            0
+          ]
+        },
+        {
+          "name": "OUT",
+          "kind": "electrical",
+          "dimension": 1,
+          "offset": [
+            15,
+            0
+          ]
+        }
       ],
-      "parameters": {},
-      "bounding_box": [-20, -10, 20, 10],
-      "metadata": {"library": "master", "characterized_for": "4.6.2", "binding_registry": "master-bindings-pscad-4.6.2.json"}
+      "parameters": {
+        "CurrentSignal": {
+          "type": "string"
+        },
+        "VoltageSignal": {
+          "type": "string"
+        }
+      },
+      "bounding_box": [
+        -20,
+        -10,
+        20,
+        10
+      ],
+      "metadata": {
+        "library": "master",
+        "characterized_for": "4.6.2",
+        "binding_registry": "master-bindings-pscad-4.6.2.json"
+      }
     },
     {
       "scoped_name": "master:ground",
-      "ports": [{"name": "GND", "kind": "electrical", "dimension": 1, "offset": [0, 0]}],
+      "ports": [
+        {
+          "name": "GND",
+          "kind": "electrical",
+          "dimension": 1,
+          "offset": [
+            0,
+            0
+          ]
+        }
+      ],
       "parameters": {},
-      "bounding_box": [-10, -10, 10, 10],
-      "metadata": {"library": "master", "characterized_for": "4.6.2", "binding_registry": "master-bindings-pscad-4.6.2.json"}
+      "bounding_box": [
+        -10,
+        -10,
+        10,
+        10
+      ],
+      "metadata": {
+        "library": "master",
+        "characterized_for": "4.6.2",
+        "binding_registry": "master-bindings-pscad-4.6.2.json"
+      }
     },
     {
       "scoped_name": "cigre_lcc_v1:LCC12PulseBridge",
       "ports": [
-        {"name": "ACY_A", "kind": "electrical", "dimension": 1, "offset": [-50, -20]},
-        {"name": "ACY_B", "kind": "electrical", "dimension": 1, "offset": [-50, -10]},
-        {"name": "ACY_C", "kind": "electrical", "dimension": 1, "offset": [-50, 0]},
-        {"name": "ACD_A", "kind": "electrical", "dimension": 1, "offset": [-50, 10]},
-        {"name": "ACD_B", "kind": "electrical", "dimension": 1, "offset": [-50, 20]},
-        {"name": "ACD_C", "kind": "electrical", "dimension": 1, "offset": [-50, 30]},
-        {"name": "DC_POS", "kind": "electrical", "dimension": 1, "offset": [50, -10]},
-        {"name": "DC_NEG", "kind": "electrical", "dimension": 1, "offset": [50, 10]},
-        {"name": "GATES", "kind": "data", "dimension": 12, "offset": [0, 50]}
+        {
+          "name": "ACY_A",
+          "kind": "electrical",
+          "dimension": 1,
+          "offset": [
+            -72,
+            -63
+          ]
+        },
+        {
+          "name": "ACY_B",
+          "kind": "electrical",
+          "dimension": 1,
+          "offset": [
+            -72,
+            -54
+          ]
+        },
+        {
+          "name": "ACY_C",
+          "kind": "electrical",
+          "dimension": 1,
+          "offset": [
+            -72,
+            -45
+          ]
+        },
+        {
+          "name": "ACD_A",
+          "kind": "electrical",
+          "dimension": 1,
+          "offset": [
+            -72,
+            -36
+          ]
+        },
+        {
+          "name": "ACD_B",
+          "kind": "electrical",
+          "dimension": 1,
+          "offset": [
+            -72,
+            -27
+          ]
+        },
+        {
+          "name": "ACD_C",
+          "kind": "electrical",
+          "dimension": 1,
+          "offset": [
+            -72,
+            -18
+          ]
+        },
+        {
+          "name": "DC_POS",
+          "kind": "electrical",
+          "dimension": 1,
+          "offset": [
+            72,
+            -9
+          ]
+        },
+        {
+          "name": "DC_NEG",
+          "kind": "electrical",
+          "dimension": 1,
+          "offset": [
+            72,
+            0
+          ]
+        },
+        {
+          "name": "AO_Y",
+          "kind": "data",
+          "dimension": 1,
+          "offset": [
+            -72,
+            9
+          ]
+        },
+        {
+          "name": "AO_D",
+          "kind": "data",
+          "dimension": 1,
+          "offset": [
+            -72,
+            18
+          ]
+        },
+        {
+          "name": "ENABLE",
+          "kind": "data",
+          "dimension": 1,
+          "offset": [
+            -72,
+            27
+          ]
+        },
+        {
+          "name": "AM_Y",
+          "kind": "data",
+          "dimension": 1,
+          "offset": [
+            72,
+            36
+          ]
+        },
+        {
+          "name": "AM_D",
+          "kind": "data",
+          "dimension": 1,
+          "offset": [
+            72,
+            45
+          ]
+        },
+        {
+          "name": "GM_Y",
+          "kind": "data",
+          "dimension": 1,
+          "offset": [
+            72,
+            54
+          ]
+        },
+        {
+          "name": "GM_D",
+          "kind": "data",
+          "dimension": 1,
+          "offset": [
+            72,
+            63
+          ]
+        }
       ],
-      "parameters": {"ValveDrop_V": {"type": "float", "minimum": 0, "maximum": 1000, "unit": "V"}},
-      "bounding_box": [-55, -55, 55, 55],
-      "metadata": {"library": "cigre_lcc_v1", "internal_contract": "two_six_pulse_groups_twelve_valves"}
+      "parameters": {
+        "UP": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1
+        }
+      },
+      "bounding_box": [
+        -90,
+        -80,
+        90,
+        80
+      ],
+      "metadata": {
+        "library": "cigre_lcc_v1",
+        "internal_contract": "two_live_audited_g6p200_fp0"
+      }
     },
     {
       "scoped_name": "cigre_lcc_v1:RectifierControl",
       "ports": [
-        {"name": "VDC", "kind": "data", "dimension": 1, "offset": [-20, 0]},
-        {"name": "IDC", "kind": "data", "dimension": 1, "offset": [-20, 10]},
-        {"name": "IORDER", "kind": "data", "dimension": 1, "offset": [-20, 20]},
-        {"name": "ENABLE", "kind": "data", "dimension": 1, "offset": [-20, 30]},
-        {"name": "GATES", "kind": "data", "dimension": 12, "offset": [20, 0]},
-        {"name": "ALPHA", "kind": "data", "dimension": 1, "offset": [20, 10]}
+        {
+          "name": "VDC",
+          "kind": "data",
+          "dimension": 1,
+          "offset": [
+            -72,
+            -63
+          ]
+        },
+        {
+          "name": "IDC",
+          "kind": "data",
+          "dimension": 1,
+          "offset": [
+            -72,
+            -54
+          ]
+        },
+        {
+          "name": "IORDER",
+          "kind": "data",
+          "dimension": 1,
+          "offset": [
+            -72,
+            -45
+          ]
+        },
+        {
+          "name": "ENABLE",
+          "kind": "data",
+          "dimension": 1,
+          "offset": [
+            -72,
+            -36
+          ]
+        },
+        {
+          "name": "AO_Y",
+          "kind": "data",
+          "dimension": 1,
+          "offset": [
+            72,
+            -27
+          ]
+        },
+        {
+          "name": "AO_D",
+          "kind": "data",
+          "dimension": 1,
+          "offset": [
+            72,
+            -18
+          ]
+        },
+        {
+          "name": "ALPHA",
+          "kind": "data",
+          "dimension": 1,
+          "offset": [
+            72,
+            -9
+          ]
+        }
       ],
-      "parameters": {"AlphaOrder_deg": {"type": "float", "minimum": 0, "maximum": 180, "unit": "deg"}},
-      "bounding_box": [-25, -25, 25, 40],
-      "metadata": {"library": "cigre_lcc_v1", "control_contract": "constant_current"}
+      "parameters": {},
+      "bounding_box": [
+        -90,
+        -80,
+        90,
+        80
+      ],
+      "metadata": {
+        "library": "cigre_lcc_v1",
+        "control_contract": "constant_current_pi_limited"
+      }
     },
     {
       "scoped_name": "cigre_lcc_v1:InverterControl",
       "ports": [
-        {"name": "VDC", "kind": "data", "dimension": 1, "offset": [-20, 0]},
-        {"name": "IDC", "kind": "data", "dimension": 1, "offset": [-20, 10]},
-        {"name": "GAMMA_ORDER", "kind": "data", "dimension": 1, "offset": [-20, 20]},
-        {"name": "ENABLE", "kind": "data", "dimension": 1, "offset": [-20, 30]},
-        {"name": "GATES", "kind": "data", "dimension": 12, "offset": [20, 0]},
-        {"name": "GAMMA", "kind": "data", "dimension": 1, "offset": [20, 10]}
+        {
+          "name": "VDC",
+          "kind": "data",
+          "dimension": 1,
+          "offset": [
+            -72,
+            -63
+          ]
+        },
+        {
+          "name": "IDC",
+          "kind": "data",
+          "dimension": 1,
+          "offset": [
+            -72,
+            -54
+          ]
+        },
+        {
+          "name": "GM_Y",
+          "kind": "data",
+          "dimension": 1,
+          "offset": [
+            -72,
+            -45
+          ]
+        },
+        {
+          "name": "GM_D",
+          "kind": "data",
+          "dimension": 1,
+          "offset": [
+            -72,
+            -36
+          ]
+        },
+        {
+          "name": "GAMMA_ORDER",
+          "kind": "data",
+          "dimension": 1,
+          "offset": [
+            -72,
+            -27
+          ]
+        },
+        {
+          "name": "ENABLE",
+          "kind": "data",
+          "dimension": 1,
+          "offset": [
+            -72,
+            -18
+          ]
+        },
+        {
+          "name": "AO_Y",
+          "kind": "data",
+          "dimension": 1,
+          "offset": [
+            72,
+            -9
+          ]
+        },
+        {
+          "name": "AO_D",
+          "kind": "data",
+          "dimension": 1,
+          "offset": [
+            72,
+            0
+          ]
+        },
+        {
+          "name": "GAMMA",
+          "kind": "data",
+          "dimension": 1,
+          "offset": [
+            72,
+            9
+          ]
+        }
       ],
-      "parameters": {"GammaOrder_deg": {"type": "float", "minimum": 0, "maximum": 180, "unit": "deg"}},
-      "bounding_box": [-25, -25, 25, 40],
-      "metadata": {"library": "cigre_lcc_v1", "control_contract": "constant_extinction_angle"}
+      "parameters": {},
+      "bounding_box": [
+        -90,
+        -80,
+        90,
+        80
+      ],
+      "metadata": {
+        "library": "cigre_lcc_v1",
+        "control_contract": "constant_extinction_angle_pi_limited"
+      }
+    },
+    {
+      "scoped_name": "cigre_lcc_v1:Initialization",
+      "ports": [
+        {
+          "name": "IORDER",
+          "kind": "data",
+          "dimension": 1,
+          "offset": [
+            72,
+            -63
+          ]
+        },
+        {
+          "name": "GAMMA_ORDER",
+          "kind": "data",
+          "dimension": 1,
+          "offset": [
+            72,
+            -54
+          ]
+        },
+        {
+          "name": "ENABLE_RECT",
+          "kind": "data",
+          "dimension": 1,
+          "offset": [
+            72,
+            -45
+          ]
+        },
+        {
+          "name": "ENABLE_INV",
+          "kind": "data",
+          "dimension": 1,
+          "offset": [
+            72,
+            -36
+          ]
+        }
+      ],
+      "parameters": {},
+      "bounding_box": [
+        -90,
+        -80,
+        90,
+        80
+      ],
+      "metadata": {
+        "library": "cigre_lcc_v1",
+        "initialization_contract": "fixed_enabled_no_fault"
+      }
+    },
+    {
+      "scoped_name": "cigre_lcc_v1:SignalInterface",
+      "ports": [
+        {
+          "name": "VDC_RECT",
+          "kind": "data",
+          "dimension": 1,
+          "offset": [
+            72,
+            -63
+          ]
+        },
+        {
+          "name": "VDC_INV",
+          "kind": "data",
+          "dimension": 1,
+          "offset": [
+            72,
+            -54
+          ]
+        },
+        {
+          "name": "IDC",
+          "kind": "data",
+          "dimension": 1,
+          "offset": [
+            72,
+            -45
+          ]
+        }
+      ],
+      "parameters": {},
+      "bounding_box": [
+        -90,
+        -80,
+        90,
+        80
+      ],
+      "metadata": {
+        "library": "cigre_lcc_v1",
+        "signal_contract": "unique_named_imports"
+      }
     }
   ]
 }

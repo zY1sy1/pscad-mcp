@@ -4,12 +4,13 @@
   "pscad_version": "4.6.2",
   "companion_library": "library/cigre_lcc_v1.pslx",
   "hashes": {
-    "PROVENANCE.md": "e12400f540eafca322e311993b60cf317b569a368402b270c1ee1e1d3e7b56e1",
+    "PROVENANCE.md": "63bba657600812f8b06c488fbe95facd0aebb4b8ca5173f18be265c24a1c768d",
     "acceptance.json": "97adc5b4a5fe7b5d79e1a20c98f808df5a31da1fdf261b3460681cc41a8c3440",
-    "blueprint.json": "c2cbffe6b785b55aae9bb723f7fe69929bd028129110c39bebe6ddcb78fdf211",
-    "catalog-pscad-4.6.2.json": "58adc5648ecc0be48bf205eee9c5544828aea0e55da0472a07ceed8b3fe680fe",
+    "blueprint.json": "38b2c2cb57025ba9625e32298558233b15ac57a590e3e479617acf4f09f3dfb6",
+    "catalog-pscad-4.6.2.json": "e4a705edafcc1d330b09e2beaa33103aa1603b3ae631b66dc7ef17c596c7724b",
     "golden.json": "b84b546c4609cb8369d684f16f49d84593f893466c23b8b2234e0469167ccdcd",
-    "library/cigre_lcc_v1.pslx": "dd51830cb78f83a1a8de9323c8469f328b9838aa467d822eb063121f23c2cfc5",
-    "master-bindings-pscad-4.6.2.json": "edfc0a7952d439e04e345f7203c273bbe0a2e0f4b5aabd57184574baf6e0b967"
+    "library/cigre_lcc_v1.pslx": "63a581226d887d736803e053cd88edbfadbf1986d3128fee8e0833780c36e8e0",
+    "master-bindings-pscad-4.6.2.json": "cd4d4de99698d6ded5fef41d20792c3186795bdb6761ef6d8d33067498523cf8",
+    "smoke.json": "2a80dccfec5a3e465609b54dfdca611e1217f3b5fe36ef5f5820e342e96360cc"
   }
 }

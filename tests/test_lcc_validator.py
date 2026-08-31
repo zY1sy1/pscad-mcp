@@ -419,14 +419,13 @@ def test_validate_project_graph_rejects_duplicate_observed_net():
     ]
 
 
-def test_validate_companion_library_rejects_packaged_structural_contract():
+def test_validate_companion_library_accepts_packaged_physical_contract():
     source = Path(__file__).parents[1] / "pscad_mcp" / "assets" / "lcc" / "cigre_lcc_monopole_v1" / "library" / "cigre_lcc_v1.pslx"
 
     result = validate_companion_library(source)
 
-    assert result["valid"] is False
-    reasons = {error["reason"] for error in result["errors"]}
-    assert "structural_only" in reasons
+    assert result["valid"] is True
+    assert result["evidence"]["effective_valves"] == 12
 
 
 @pytest.mark.parametrize(

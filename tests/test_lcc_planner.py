@@ -5,7 +5,10 @@ import pytest
 
 from pscad_mcp.core.backend.base import BackendError
 from pscad_mcp.core.master_bindings import parse_master_binding_registry
-from pscad_mcp.hvdc.builders.lcc.assets import LccAssetSet
+from pscad_mcp.hvdc.builders.lcc.assets import (
+    LccAssetSet,
+    load_packaged_asset_set,
+)
 from pscad_mcp.hvdc.builders.lcc.planner import LccPlanRequest, create_plan
 from pscad_mcp.hvdc.builders.lcc.schema import parse_blueprint
 
@@ -110,6 +113,7 @@ def _asset_set(blueprint=None, catalog=None):
         catalog=catalog_value,
         acceptance={"checks": [{"name": "golden", "kind": "golden", "required": True, "expected": {}}]},
         golden={"channels": {}},
+        smoke={},
         provenance="source",
         hashes={"library/cigre_lcc_v1.pslx": "a" * 64},
         library_bytes=b"library",
@@ -401,3 +405,29 @@ def test_planner_rejects_unimplemented_route_policy(tmp_path):
     candidate["nets"][0]["route"]["policy"] = "shortest_path"
 
     _assert_code(lambda: create_plan(_request(), _asset_set(candidate), INVENTORY, tmp_path), "LCC_LAYOUT_INVALID")
+
+
+def test_fixed_blueprint_has_two_transformer_groups_and_four_ao_nets():
+    blueprint = load_packaged_asset_set().blueprint
+    component_ids = {component.logical_id for component in blueprint.components}
+    net_ids = {net.logical_id for net in blueprint.nets}
+
+    assert {
+        "rectifier_transformer_y",
+        "rectifier_transformer_d",
+        "inverter_transformer_y",
+        "inverter_transformer_d",
+        "initialization",
+        "signal_interface",
+    } <= component_ids
+    assert {
+        "rectifier_ao_y",
+        "rectifier_ao_d",
+        "inverter_ao_y",
+        "inverter_ao_d",
+    } <= net_ids
+    assert not any(
+        endpoint.port == "GATES"
+        for net in blueprint.nets
+        for endpoint in net.endpoints
+    )

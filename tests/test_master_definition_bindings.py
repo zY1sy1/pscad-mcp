@@ -125,9 +125,9 @@ async def _runtime_backend(tmp_path):
         ),
         (
             "dc_meter",
-            {},
+            {"CurrentSignal": "IDC", "VoltageSignal": "VDC"},
             "multimeter",
-            {"MeasV": 1, "MeasI": 1},
+            {"MeasV": 1, "MeasI": 1, "CurI": "IDC", "VolI": "VDC"},
         ),
         ("ground", {}, "ground", {}),
     ],

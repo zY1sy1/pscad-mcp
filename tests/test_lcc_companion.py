@@ -60,14 +60,31 @@ PORTS = {
 }
 
 USERS = {
-    "LCC12PulseBridge": ("master:g6p200", "master:g6p200"),
+    "LCC12PulseBridge": (
+        "master:g6p200",
+        "master:g6p200",
+        *("master:pin" for _ in range(8)),
+        "master:breakout",
+        "master:breakout",
+        *("master:import" for _ in range(3)),
+        *("master:export" for _ in range(4)),
+        "master:consti",
+        "master:consti",
+        "master:sumjct",
+    ),
     "RectifierControl": (
+        *("master:import" for _ in range(4)),
+        *("master:export" for _ in range(3)),
+        "master:unity",
         "master:sumjct",
         "master:mult",
         "master:pi_ctlr",
         "master:hardlimit",
     ),
     "InverterControl": (
+        *("master:import" for _ in range(6)),
+        *("master:export" for _ in range(3)),
+        "master:unity",
         "master:maxmin",
         "master:sumjct",
         "master:mult",
@@ -79,11 +96,15 @@ USERS = {
         "master:const",
         "master:consti",
         "master:consti",
+        *("master:export" for _ in range(4)),
     ),
     "SignalInterface": (
         "master:import",
         "master:import",
         "master:import",
+        "master:export",
+        "master:export",
+        "master:export",
     ),
 }
 
@@ -282,7 +303,9 @@ def test_physical_bridge_requires_two_g6p200_and_scalar_ao(tmp_path):
     evidence = audit_companion_library(write_physical_library_fixture(tmp_path))
 
     bridge = evidence["definitions"]["cigre_lcc_v1:LCC12PulseBridge"]
-    assert bridge["master_instances"] == {"master:g6p200": 2}
+    assert bridge["master_instances"]["master:g6p200"] == 2
+    assert bridge["master_instances"]["master:pin"] == 8
+    assert bridge["master_instances"]["master:breakout"] == 2
     assert bridge["ports"]["AO_Y"] == {
         "kind": "data",
         "dimension": 1,

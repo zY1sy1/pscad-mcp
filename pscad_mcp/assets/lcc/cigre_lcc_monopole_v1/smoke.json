@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "identity": "cigre_lcc_monopole_v1/wp1b_smoke",
+  "duration_s": 0.1,
+  "output_step_s": 0.00005,
+  "required_channels": [
+    "Main/IDC",
+    "Main/VDC_RECT",
+    "Main/VDC_INV",
+    "Main/AO_RECT_Y",
+    "Main/AO_RECT_D",
+    "Main/AO_INV_Y",
+    "Main/AO_INV_D",
+    "Main/GAMMA_INV",
+    "Main/ENABLE_RECT",
+    "Main/ENABLE_INV"
+  ],
+  "enable_channels": [
+    "Main/ENABLE_RECT",
+    "Main/ENABLE_INV"
+  ],
+  "ao_limits_rad": {
+    "Main/AO_RECT_Y": [0.08726646259971647, 0.5235987755982988],
+    "Main/AO_RECT_D": [0.08726646259971647, 0.5235987755982988],
+    "Main/AO_INV_Y": [0.52, 1.92],
+    "Main/AO_INV_D": [0.52, 1.92]
+  }
+}

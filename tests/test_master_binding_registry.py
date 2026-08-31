@@ -311,6 +311,8 @@ def _master_fixture_xml(
       <parameter name='MeasQ' type='Choice'><value>0</value><choice>0 = No</choice><choice>1 = Yes</choice></parameter>
       <parameter name='Freq' type='Real' unit='Hz' intent='Input'><value>50</value></parameter>
       <parameter name='BaseV' type='Real' unit='kV' intent='Input'><value>230</value></parameter>
+      <parameter name='CurI' type='Text'><value>IDC</value></parameter>
+      <parameter name='VolI' type='Text'><value>VDC</value></parameter>
     </category></form>
     <svg>
       <port model='Natural' name='A' x='-18' y='0' dim='0' type='Removable'>MeasV+MeasP+MeasQ==0</port>
