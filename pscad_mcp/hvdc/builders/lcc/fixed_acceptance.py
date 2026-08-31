@@ -112,6 +112,9 @@ _HASH = re.compile(r"^[0-9a-f]{64}$")
 _MAX_REPORT_BYTES = 16 * 1024 * 1024
 _SMOKE_DURATION_S = 0.1
 _SMOKE_OUTPUT_STEP_S = 0.00005
+_SMOKE_EXPECTED_SAMPLES = round(
+    _SMOKE_DURATION_S / _SMOKE_OUTPUT_STEP_S
+) + 1
 _SMOKE_CHECKS = (
     "time_domain",
     "finite_outputs",
@@ -704,6 +707,8 @@ def _validate_smoke(value: Any) -> dict[str, Any]:
             "output_step_s",
             "domain_start_s",
             "domain_end_s",
+            "minimum_step_s",
+            "maximum_step_s",
             "samples",
             "channels",
         },
@@ -718,13 +723,34 @@ def _validate_smoke(value: Any) -> dict[str, Any]:
         "smoke.evidence.domain_start_s",
     )
     end = _finite(evidence["domain_end_s"], "smoke.evidence.domain_end_s")
+    minimum_step = _finite(
+        evidence["minimum_step_s"],
+        "smoke.evidence.minimum_step_s",
+    )
+    maximum_step = _finite(
+        evidence["maximum_step_s"],
+        "smoke.evidence.maximum_step_s",
+    )
     samples = _positive_integer(evidence["samples"], "smoke.evidence.samples")
+    time_tolerance = max(1e-12, output_step * 1e-9)
     if (
         not math.isclose(duration, _SMOKE_DURATION_S, abs_tol=1e-12)
         or not math.isclose(output_step, _SMOKE_OUTPUT_STEP_S, abs_tol=1e-12)
-        or start < 0
-        or end <= start
-        or abs(end - duration) > output_step
+        or not math.isclose(start, 0.0, abs_tol=time_tolerance)
+        or not math.isclose(end, duration, abs_tol=time_tolerance)
+        or samples != _SMOKE_EXPECTED_SAMPLES
+        or not math.isclose(
+            minimum_step,
+            output_step,
+            rel_tol=1e-9,
+            abs_tol=time_tolerance,
+        )
+        or not math.isclose(
+            maximum_step,
+            output_step,
+            rel_tol=1e-9,
+            abs_tol=time_tolerance,
+        )
     ):
         raise _error("smoke.evidence", "Smoke time-domain evidence is invalid.")
     raw_channels = evidence["channels"]
@@ -768,6 +794,8 @@ def _validate_smoke(value: Any) -> dict[str, Any]:
             "output_step_s": output_step,
             "domain_start_s": start,
             "domain_end_s": end,
+            "minimum_step_s": minimum_step,
+            "maximum_step_s": maximum_step,
             "samples": samples,
             "channels": channels,
         },

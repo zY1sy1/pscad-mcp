@@ -104,6 +104,18 @@ def mutate_samples(
     elif mutation == "shifted_domain":
         channel = channels["Main/VDC_INV"]
         channel["time"] = [value + 0.00005 for value in channel["time"]]
+    elif mutation == "late_start":
+        for channel in channels.values():
+            channel["time"] = channel["time"][1000:]
+            channel["values"] = channel["values"][1000:]
+    elif mutation == "coarse_cadence":
+        coarse_time = [index * 0.0001 for index in range(1001)]
+        for channel in channels.values():
+            channel["time"] = list(coarse_time)
+            channel["values"] = channel["values"][:1001]
+    elif mutation == "irregular_cadence":
+        for channel in channels.values():
+            channel["time"][1000] += 0.00001
     elif mutation == "nan":
         channels["Main/IDC"]["values"][1] = math.nan
     elif mutation == "disabled":
@@ -134,6 +146,8 @@ def test_valid_no_fault_smoke_passes_without_acceptance_claims():
     assert result["evidence"]["domain_start_s"] == pytest.approx(0.0)
     assert result["evidence"]["domain_end_s"] == pytest.approx(0.1)
     assert result["evidence"]["samples"] == 2001
+    assert result["evidence"]["minimum_step_s"] == pytest.approx(0.00005)
+    assert result["evidence"]["maximum_step_s"] == pytest.approx(0.00005)
     assert "golden" not in result
     assert "disturbance" not in result
     assert "accepted" not in result
@@ -146,6 +160,9 @@ def test_valid_no_fault_smoke_passes_without_acceptance_claims():
         ("non_monotonic_time", "invalid_time_domain"),
         ("short_domain", "invalid_time_domain"),
         ("shifted_domain", "inconsistent_time_domain"),
+        ("late_start", "invalid_time_domain"),
+        ("coarse_cadence", "invalid_time_domain"),
+        ("irregular_cadence", "invalid_time_domain"),
         ("nan", "nonfinite_output"),
         ("disabled", "control_not_enabled"),
         ("ao_low", "ao_out_of_bounds"),

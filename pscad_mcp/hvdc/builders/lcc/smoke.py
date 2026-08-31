@@ -124,6 +124,17 @@ def _parse_contract(value: Any) -> dict[str, Any]:
             "invalid_contract",
             "Smoke duration and output step are not positive and ordered.",
         )
+    interval_count = round(duration / output_step)
+    if not math.isclose(
+        interval_count * output_step,
+        duration,
+        rel_tol=1e-12,
+        abs_tol=1e-12,
+    ):
+        raise _invalid(
+            "invalid_contract",
+            "Smoke duration must contain an integral number of output steps.",
+        )
     required = _channel_names(value["required_channels"], "required_channels")
     enabled = _channel_names(value["enable_channels"], "enable_channels")
     if not set(enabled).issubset(required):
@@ -179,6 +190,7 @@ def _parse_contract(value: Any) -> dict[str, Any]:
         "identity": identity.strip(),
         "duration_s": duration,
         "output_step_s": output_step,
+        "expected_samples": interval_count + 1,
         "required_channels": required,
         "enable_channels": enabled,
         "ao_limits_rad": limits,
@@ -320,7 +332,7 @@ def _parse_channels(samples: Any) -> dict[str, dict[str, Any]]:
 def _require_common_time(
     channels: Mapping[str, Mapping[str, Any]],
     contract: Mapping[str, Any],
-) -> list[float]:
+) -> tuple[list[float], float, float]:
     required = contract["required_channels"]
     reference = list(channels[required[0]]["time"])
     for channel in required[1:]:
@@ -334,17 +346,35 @@ def _require_common_time(
                 channel=channel,
             )
     duration = float(contract["duration_s"])
-    tolerance = float(contract["output_step_s"])
-    if reference[0] < 0 or abs(reference[-1] - duration) > tolerance:
+    output_step = float(contract["output_step_s"])
+    expected_samples = int(contract["expected_samples"])
+    tolerance = max(1e-12, output_step * 1e-9)
+    steps = [right - left for left, right in pairwise(reference)]
+    if (
+        not math.isclose(reference[0], 0.0, abs_tol=tolerance)
+        or not math.isclose(reference[-1], duration, abs_tol=tolerance)
+        or len(reference) != expected_samples
+        or any(
+            not math.isclose(
+                step,
+                output_step,
+                rel_tol=1e-9,
+                abs_tol=tolerance,
+            )
+            for step in steps
+        )
+    ):
         raise _failed(
             "invalid_time_domain",
-            "The smoke time domain does not reach the configured duration.",
+            "The smoke time domain does not exactly cover the configured cadence.",
             domain_start_s=reference[0],
             domain_end_s=reference[-1],
             duration_s=duration,
-            tolerance_s=tolerance,
+            output_step_s=output_step,
+            samples=len(reference),
+            expected_samples=expected_samples,
         )
-    return reference
+    return reference, min(steps), max(steps)
 
 
 def _require_enabled(
@@ -406,7 +436,10 @@ def evaluate_fixed_smoke(
     selected = {
         name: channels[name] for name in normalized["required_channels"]
     }
-    common_time = _require_common_time(selected, normalized)
+    common_time, minimum_step, maximum_step = _require_common_time(
+        selected,
+        normalized,
+    )
     _require_enabled(selected, normalized["enable_channels"])
     _require_ao_limits(selected, normalized["ao_limits_rad"])
     return {
@@ -417,6 +450,8 @@ def evaluate_fixed_smoke(
             "output_step_s": normalized["output_step_s"],
             "domain_start_s": common_time[0],
             "domain_end_s": common_time[-1],
+            "minimum_step_s": minimum_step,
+            "maximum_step_s": maximum_step,
             "samples": len(common_time),
             "channels": {
                 name: {

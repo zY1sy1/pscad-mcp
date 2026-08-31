@@ -234,6 +234,8 @@ def valid_fixed_report() -> dict[str, object]:
                 "output_step_s": 0.00005,
                 "domain_start_s": 0.0,
                 "domain_end_s": 0.1,
+                "minimum_step_s": 0.00005,
+                "maximum_step_s": 0.00005,
                 "samples": 2001,
                 "channels": {
                     name: _smoke_channel(name) for name in SMOKE_CHANNELS
@@ -268,6 +270,24 @@ def test_valid_fixed_report_is_simulated_pass_with_exact_exclusions():
     assert normalized["smoke"]["verdict"] == "PASS"
     assert normalized["component_gate"]["status"] == "PASS"
     assert payload == original
+
+
+@pytest.mark.parametrize(
+    ("start", "samples"),
+    [(0.05, 1001), (0.0, 1001)],
+)
+def test_pass_report_rejects_incomplete_smoke_time_domain(start, samples):
+    payload = valid_fixed_report()
+    evidence = payload["smoke"]["evidence"]
+    evidence["domain_start_s"] = start
+    evidence["samples"] = samples
+    for channel in evidence["channels"].values():
+        channel["samples"] = samples
+
+    with pytest.raises(BackendError) as failure:
+        validate_fixed_lcc_acceptance_report(payload)
+
+    assert failure.value.code == "LCC_FIXED_REPORT_INVALID"
 
 
 @pytest.mark.parametrize(
