@@ -740,7 +740,7 @@
             <param name="Name" value="AO_D" />
           </paramlist>
         </User>
-        <User classid="UserCmp" name="" defn="master:export" id="1113361626" x="936" y="360" w="74" h="21" z="140" orient="0" link="-1" q="4">
+        <User classid="UserCmp" name="" defn="master:export" id="1113361626" x="414" y="180" w="74" h="21" z="140" orient="0" link="-1" q="4">
           <paramlist link="-1" name="" crc="39049670">
             <param name="Name" value="GAMMA" />
           </paramlist>
@@ -792,6 +792,8 @@
         </User>
         <Wire classid="WireOrthogonal" name="" lcc_role="GAMMA_MIN" x="126" y="198" w="136" h="46" orient="0" id="1797539155">
           <vertex x="0" y="0" />
+          <vertex x="90" y="0" />
+          <vertex x="90" y="36" />
           <vertex x="126" y="36" />
         </Wire>
         <Wire classid="WireOrthogonal" name="" lcc_role="GAMMA_MIN_D" x="126" y="270" w="136" h="10" orient="0" id="622996719">
@@ -800,10 +802,18 @@
         </Wire>
         <Wire classid="WireOrthogonal" name="" lcc_role="GAMMA_ERROR" x="126" y="342" w="262" h="46" orient="0" id="930145915">
           <vertex x="0" y="0" />
+          <vertex x="216" y="0" />
+          <vertex x="216" y="-36" />
           <vertex x="252" y="-36" />
         </Wire>
-        <Wire classid="WireOrthogonal" name="" lcc_role="GAMMA_FEEDBACK" x="324" y="234" w="100" h="118" orient="0" id="1920965325">
+        <Wire classid="WireOrthogonal" name="" lcc_role="GAMMA_FANOUT" x="324" y="234" w="154" h="172" orient="0" id="1959821033">
           <vertex x="0" y="0" />
+          <vertex x="18" y="0" />
+          <vertex x="18" y="-54" />
+          <vertex x="72" y="-54" />
+          <vertex x="126" y="-54" />
+          <vertex x="144" y="-54" />
+          <vertex x="144" y="108" />
           <vertex x="90" y="108" />
         </Wire>
         <Wire classid="WireOrthogonal" name="" lcc_role="ERROR_TO_PRODUCT" x="450" y="306" w="64" h="10" orient="0" id="252341827">
@@ -831,21 +841,13 @@
           <vertex x="0" y="0" />
           <vertex x="162" y="0" />
         </Wire>
-        <Wire classid="WireOrthogonal" name="" lcc_role="GAMMA_OUTPUT" x="324" y="234" w="658" h="136" orient="0" id="1421254892">
-          <vertex x="0" y="0" />
-          <vertex x="648" y="126" />
-        </Wire>
-        <Wire classid="WireOrthogonal" name="" lcc_role="AO_Y_MONITOR" x="810" y="306" w="64" h="136" orient="0" id="850625839">
+        <Wire classid="WireOrthogonal" name="" lcc_role="AO_Y_MONITOR" x="810" y="306" w="64" h="136" orient="0" id="284256663">
           <vertex x="0" y="0" />
           <vertex x="54" y="-126" />
         </Wire>
-        <Wire classid="WireOrthogonal" name="" lcc_role="AO_D_MONITOR" x="810" y="306" w="64" h="118" orient="0" id="1209645015">
+        <Wire classid="WireOrthogonal" name="" lcc_role="AO_D_MONITOR" x="810" y="306" w="64" h="118" orient="0" id="1863955120">
           <vertex x="0" y="0" />
           <vertex x="54" y="108" />
-        </Wire>
-        <Wire classid="WireOrthogonal" name="" lcc_role="GAMMA_MONITOR" x="324" y="234" w="82" h="64" orient="0" id="525104289">
-          <vertex x="0" y="0" />
-          <vertex x="72" y="-54" />
         </Wire>
       </schematic>
     </Definition>

@@ -673,26 +673,42 @@ def _inverter_control(definitions: ET.Element) -> None:
         ),
         _export("export_ao_y", "AO_Y", 936, 252),
         _export("export_ao_d", "AO_D", 936, 306),
-        _export("export_gamma", "GAMMA", 936, 360),
+        _export("export_gamma", "GAMMA", 414, 180),
         _output_channel("monitor_ao_y", "AO_INV_Y", "rad", 864, 180),
         _output_channel("monitor_ao_d", "AO_INV_D", "rad", 864, 414),
         _output_channel("monitor_gamma", "GAMMA_INV", "rad", 396, 180),
     )
     wires = (
-        Wire("GAMMA_MIN", ((126, 198), (252, 234))),
+        Wire(
+            "GAMMA_MIN",
+            ((126, 198), (216, 198), (216, 234), (252, 234)),
+        ),
         Wire("GAMMA_MIN_D", ((126, 270), (252, 270))),
-        Wire("GAMMA_ERROR", ((126, 342), (378, 306))),
-        Wire("GAMMA_FEEDBACK", ((324, 234), (414, 342))),
+        Wire(
+            "GAMMA_ERROR",
+            ((126, 342), (342, 342), (342, 306), (378, 306)),
+        ),
+        Wire(
+            "GAMMA_FANOUT",
+            (
+                (324, 234),
+                (342, 234),
+                (342, 180),
+                (396, 180),
+                (450, 180),
+                (468, 180),
+                (468, 342),
+                (414, 342),
+            ),
+        ),
         Wire("ERROR_TO_PRODUCT", ((450, 306), (504, 306))),
         Wire("ENABLE_PRODUCT", ((126, 414), (540, 414), (540, 342))),
         Wire("PRODUCT_TO_PI", ((576, 306), (594, 306))),
         Wire("PI_TO_LIMIT", ((666, 306), (738, 306))),
         Wire("AO_Y_OUTPUT", ((810, 306), (972, 252))),
         Wire("AO_D_OUTPUT", ((810, 306), (972, 306))),
-        Wire("GAMMA_OUTPUT", ((324, 234), (972, 360))),
         Wire("AO_Y_MONITOR", ((810, 306), (864, 180))),
         Wire("AO_D_MONITOR", ((810, 306), (864, 414))),
-        Wire("GAMMA_MONITOR", ((324, 234), (396, 180))),
     )
     _definition(
         definitions,

@@ -183,10 +183,9 @@ REQUIRED_CONNECTIONS = {
         "PI_TO_LIMIT",
         "AO_Y_OUTPUT",
         "AO_D_OUTPUT",
-        "GAMMA_OUTPUT",
+        "GAMMA_FANOUT",
         "AO_Y_MONITOR",
         "AO_D_MONITOR",
-        "GAMMA_MONITOR",
     },
     "cigre_lcc_v1:Initialization": {
         "IORDER_OUTPUT",

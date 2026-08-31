@@ -152,10 +152,9 @@ WIRES = {
         "PI_TO_LIMIT",
         "AO_Y_OUTPUT",
         "AO_D_OUTPUT",
-        "GAMMA_OUTPUT",
+        "GAMMA_FANOUT",
         "AO_Y_MONITOR",
         "AO_D_MONITOR",
-        "GAMMA_MONITOR",
     ),
     "Initialization": (
         "IORDER_OUTPUT",
@@ -557,6 +556,54 @@ def test_generated_control_imports_avoid_reserved_internal_names():
         assert {"VDC_MEAS", "IDC_MEAS"} <= port_names
         assert {"VDC_MEAS", "IDC_MEAS"} <= import_names
         assert not {"VDC", "IDC"} & import_names
+
+
+def test_generated_inverter_gamma_signal_uses_one_nonbranching_trunk():
+    root = ET.fromstring(render_library())
+    definition = root.find(
+        "./definitions/Definition[@name='InverterControl']"
+    )
+    assert definition is not None
+
+    def points(role):
+        wire = definition.find(f"./schematic/Wire[@lcc_role='{role}']")
+        assert wire is not None
+        origin = (int(wire.get("x")), int(wire.get("y")))
+        return [
+            (origin[0] + int(vertex.get("x")), origin[1] + int(vertex.get("y")))
+            for vertex in wire.findall("./vertex")
+        ]
+
+    assert points("GAMMA_MIN") == [
+        (126, 198),
+        (216, 198),
+        (216, 234),
+        (252, 234),
+    ]
+    assert points("GAMMA_ERROR") == [
+        (126, 342),
+        (342, 342),
+        (342, 306),
+        (378, 306),
+    ]
+    assert points("GAMMA_FANOUT") == [
+        (324, 234),
+        (342, 234),
+        (342, 180),
+        (396, 180),
+        (450, 180),
+        (468, 180),
+        (468, 342),
+        (414, 342),
+    ]
+    assert definition.find("./schematic/Wire[@lcc_role='GAMMA_OUTPUT']") is None
+    assert definition.find("./schematic/Wire[@lcc_role='GAMMA_MONITOR']") is None
+    gamma_export = next(
+        item
+        for item in definition.findall("./schematic/User[@defn='master:export']")
+        if item.find("./paramlist/param[@name='Name']").get("value") == "GAMMA"
+    )
+    assert (int(gamma_export.get("x")), int(gamma_export.get("y"))) == (414, 180)
 
 
 @pytest.mark.parametrize(
