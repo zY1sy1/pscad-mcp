@@ -57,7 +57,14 @@ FIXTURE_PORTS = {
         "ENABLE_RECT",
         "ENABLE_INV",
     },
-    "cigre_lcc_v1:SignalInterface": {"VDC_RECT", "VDC_INV", "IDC"},
+    "cigre_lcc_v1:SignalInterface": {
+        "VDC_RECT_RAW",
+        "VDC_INV_RAW",
+        "IDC_RAW",
+        "VDC_RECT",
+        "VDC_INV",
+        "IDC",
+    },
 }
 
 

@@ -55,6 +55,9 @@ PORTS = {
         ("ENABLE_INV", "Transfer", "Output", "Real"),
     ),
     "SignalInterface": (
+        ("VDC_RECT_RAW", "Transfer", "Input", "Real"),
+        ("VDC_INV_RAW", "Transfer", "Input", "Real"),
+        ("IDC_RAW", "Transfer", "Input", "Real"),
         ("VDC_RECT", "Transfer", "Output", "Real"),
         ("VDC_INV", "Transfer", "Output", "Real"),
         ("IDC", "Transfer", "Output", "Real"),
@@ -116,6 +119,9 @@ USERS = {
         "master:export",
         "master:export",
         "master:export",
+        "master:unity",
+        "master:unity",
+        "master:unity",
         "master:pgb",
         "master:pgb",
         "master:pgb",
@@ -167,12 +173,12 @@ WIRES = {
         "ENABLE_INV_MONITOR",
     ),
     "SignalInterface": (
-        "VDC_RECT_IMPORT",
-        "VDC_INV_IMPORT",
-        "IDC_IMPORT",
-        "VDC_RECT_MONITOR",
-        "VDC_INV_MONITOR",
-        "IDC_MONITOR",
+        "VDC_RECT_RAW_TO_UNITY",
+        "VDC_RECT_FANOUT",
+        "VDC_INV_RAW_TO_UNITY",
+        "VDC_INV_FANOUT",
+        "IDC_RAW_TO_UNITY",
+        "IDC_FANOUT",
     ),
 }
 
@@ -604,6 +610,44 @@ def test_generated_inverter_gamma_signal_uses_one_nonbranching_trunk():
         if item.find("./paramlist/param[@name='Name']").get("value") == "GAMMA"
     )
     assert (int(gamma_export.get("x")), int(gamma_export.get("y"))) == (414, 180)
+
+
+def test_generated_signal_interface_isolates_raw_inputs_before_fanout():
+    root = ET.fromstring(render_library())
+    definition = root.find(
+        "./definitions/Definition[@name='SignalInterface']"
+    )
+    assert definition is not None
+    assert [item.get("name") for item in definition.findall("./svg/port")] == [
+        "VDC_RECT_RAW",
+        "VDC_INV_RAW",
+        "IDC_RAW",
+        "VDC_RECT",
+        "VDC_INV",
+        "IDC",
+    ]
+    assert [
+        item.get("value")
+        for item in definition.findall(
+            "./schematic/User[@defn='master:import']/paramlist/param[@name='Name']"
+        )
+    ] == ["VDC_RECT_RAW", "VDC_INV_RAW", "IDC_RAW"]
+    unity = definition.findall("./schematic/User[@defn='master:unity']")
+    assert len(unity) == 3
+    assert [
+        item.find("./paramlist/param[@name='OType']").get("value")
+        for item in unity
+    ] == ["2", "2", "2"]
+    assert {
+        item.get("lcc_role") for item in definition.findall("./schematic/Wire")
+    } == {
+        "VDC_RECT_RAW_TO_UNITY",
+        "VDC_RECT_FANOUT",
+        "VDC_INV_RAW_TO_UNITY",
+        "VDC_INV_FANOUT",
+        "IDC_RAW_TO_UNITY",
+        "IDC_FANOUT",
+    }
 
 
 @pytest.mark.parametrize(

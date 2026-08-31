@@ -432,12 +432,18 @@ def test_fixed_blueprint_has_two_transformer_groups_and_four_ao_nets():
         "inverter_transformer_d",
         "initialization",
         "signal_interface",
+        "vdc_rect_main_import",
+        "vdc_inv_main_import",
+        "idc_main_import",
     } <= component_ids
     assert {
         "rectifier_ao_y",
         "rectifier_ao_d",
         "inverter_ao_y",
         "inverter_ao_d",
+        "vdc_rect_raw",
+        "vdc_inv_raw",
+        "idc_raw",
     } <= net_ids
     assert not any(
         endpoint.port == "GATES"

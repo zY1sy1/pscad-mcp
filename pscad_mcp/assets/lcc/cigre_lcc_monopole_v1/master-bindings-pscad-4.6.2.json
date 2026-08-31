@@ -695,6 +695,43 @@
       "parameters": [],
       "fixed_parameters": [],
       "evidence_parameters": []
+    },
+    {
+      "logical_name": "master:main_signal_import",
+      "physical_definition": "import",
+      "shape": {
+        "kind": "direct"
+      },
+      "ports": [
+        {
+          "logical": "OUT",
+          "physical": "N",
+          "kind": "data",
+          "dimension": 1,
+          "occurrence": 0
+        }
+      ],
+      "parameters": [
+        {
+          "logical": [
+            "Name"
+          ],
+          "physical": [
+            "Name"
+          ],
+          "transform": {
+            "kind": "identity"
+          },
+          "physical_contracts": {
+            "Name": {
+              "type": "Text",
+              "unit": null
+            }
+          }
+        }
+      ],
+      "fixed_parameters": [],
+      "evidence_parameters": []
     }
   ],
   "companion_bindings": [

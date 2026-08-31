@@ -71,6 +71,7 @@ EXPECTED_MASTER_COUNTS = {
     "cigre_lcc_v1:SignalInterface": {
         "master:import": 3,
         "master:export": 3,
+        "master:unity": 3,
         "master:pgb": 3,
     },
 }
@@ -148,8 +149,14 @@ EXPECTED_PORTS = {
         for name in ("IORDER", "GAMMA_ORDER", "ENABLE_RECT", "ENABLE_INV")
     },
     "cigre_lcc_v1:SignalInterface": {
-        name: _port("data", "output")
-        for name in ("VDC_RECT", "VDC_INV", "IDC")
+        **{
+            name: _port("data", "input")
+            for name in ("VDC_RECT_RAW", "VDC_INV_RAW", "IDC_RAW")
+        },
+        **{
+            name: _port("data", "output")
+            for name in ("VDC_RECT", "VDC_INV", "IDC")
+        },
     },
 }
 
@@ -198,12 +205,12 @@ REQUIRED_CONNECTIONS = {
         "ENABLE_INV_MONITOR",
     },
     "cigre_lcc_v1:SignalInterface": {
-        "VDC_RECT_IMPORT",
-        "VDC_INV_IMPORT",
-        "IDC_IMPORT",
-        "VDC_RECT_MONITOR",
-        "VDC_INV_MONITOR",
-        "IDC_MONITOR",
+        "VDC_RECT_RAW_TO_UNITY",
+        "VDC_RECT_FANOUT",
+        "VDC_INV_RAW_TO_UNITY",
+        "VDC_INV_FANOUT",
+        "IDC_RAW_TO_UNITY",
+        "IDC_FANOUT",
     },
 }
 

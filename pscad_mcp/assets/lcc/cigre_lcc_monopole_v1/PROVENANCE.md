@@ -40,6 +40,10 @@ The no-fault smoke channels use ten audited `master:pgb` output blocks inside
 the companion definitions. Initialization enable states pass through audited
 integer-to-real `unity` adapters before reaching their output blocks; the
 external integer enable contract is unchanged.
+The three meter tags are imported on the generated Main canvas by the audited
+`master:main_signal_import` binding. `SignalInterface` receives those values
+through explicit raw input ports and passes each through a Real-to-Real
+`unity` adapter before one non-branching wire drives its monitor and output.
 
 Offline structure evidence does not imply physical PASS. Load, instance
 read-back, save/reload, component compile, full-topology compile, and no-fault

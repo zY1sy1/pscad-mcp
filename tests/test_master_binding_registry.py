@@ -324,6 +324,10 @@ def _master_fixture_xml(
   <Definition name='ground'>
     <svg><port model='Natural' name='A' x='0' y='0' dim='1' type='Ground'/></svg>
   </Definition>
+  <Definition name='import'>
+    <form><category><parameter name='Name' type='Text'><value>IMPORT</value></parameter></category></form>
+    <svg><port model='Transfer' name='N' x='36' y='0' dim='0' mode='Output' type='Real'/></svg>
+  </Definition>
 </pslx>
 """
 
@@ -538,6 +542,7 @@ def test_packaged_registry_contains_exact_fixed_catalog_bindings():
         "master:ac_meter",
         "master:dc_meter",
         "master:ground",
+        "master:main_signal_import",
     }
     assert (
         registry.by_logical_name["master:converter_transformer"].physical_definition

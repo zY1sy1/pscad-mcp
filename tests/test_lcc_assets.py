@@ -180,6 +180,7 @@ def test_packaged_asset_exposes_hashed_wp1b_smoke_contract():
     assert "smoke.json" in asset_set.hashes
     assert asset_set.master_bindings is not None
     assert asset_set.master_bindings.schema_version == 2
+    assert "master:main_signal_import" in asset_set.master_bindings.by_logical_name
     assert set(asset_set.master_bindings.companion_by_logical_name) == {
         "master:six_pulse_bridge",
         "master:control_sum",

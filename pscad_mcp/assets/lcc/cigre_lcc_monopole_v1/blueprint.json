@@ -450,6 +450,54 @@
       "role": "power"
     },
     {
+      "logical_id": "vdc_rect_main_import",
+      "definition": "master:main_signal_import",
+      "location": {
+        "x": 1050,
+        "y": 477
+      },
+      "orientation": 0,
+      "parameters": {
+        "Name": "LCC_VDC_RECT_RAW"
+      },
+      "ports": [
+        "OUT"
+      ],
+      "role": "measurement"
+    },
+    {
+      "logical_id": "vdc_inv_main_import",
+      "definition": "master:main_signal_import",
+      "location": {
+        "x": 1050,
+        "y": 540
+      },
+      "orientation": 0,
+      "parameters": {
+        "Name": "LCC_VDC_INV_RAW"
+      },
+      "ports": [
+        "OUT"
+      ],
+      "role": "measurement"
+    },
+    {
+      "logical_id": "idc_main_import",
+      "definition": "master:main_signal_import",
+      "location": {
+        "x": 1050,
+        "y": 603
+      },
+      "orientation": 0,
+      "parameters": {
+        "Name": "LCC_IDC_RAW"
+      },
+      "ports": [
+        "OUT"
+      ],
+      "role": "measurement"
+    },
+    {
       "logical_id": "signal_interface",
       "definition": "cigre_lcc_v1:SignalInterface",
       "location": {
@@ -459,6 +507,9 @@
       "orientation": 0,
       "parameters": {},
       "ports": [
+        "VDC_RECT_RAW",
+        "VDC_INV_RAW",
+        "IDC_RAW",
         "VDC_RECT",
         "VDC_INV",
         "IDC"
@@ -1239,6 +1290,103 @@
           [
             1828,
             237
+          ]
+        ],
+        "policy": "orthogonal"
+      }
+    },
+    {
+      "logical_id": "vdc_rect_raw",
+      "kind": "data",
+      "endpoints": [
+        {
+          "component": "vdc_rect_main_import",
+          "port": "OUT"
+        },
+        {
+          "component": "signal_interface",
+          "port": "VDC_RECT_RAW"
+        }
+      ],
+      "route": {
+        "vertices": [
+          [
+            1086,
+            477
+          ],
+          [
+            1278,
+            477
+          ]
+        ],
+        "policy": "orthogonal"
+      }
+    },
+    {
+      "logical_id": "vdc_inv_raw",
+      "kind": "data",
+      "endpoints": [
+        {
+          "component": "vdc_inv_main_import",
+          "port": "OUT"
+        },
+        {
+          "component": "signal_interface",
+          "port": "VDC_INV_RAW"
+        }
+      ],
+      "route": {
+        "vertices": [
+          [
+            1086,
+            540
+          ],
+          [
+            1210,
+            540
+          ],
+          [
+            1210,
+            486
+          ],
+          [
+            1278,
+            486
+          ]
+        ],
+        "policy": "orthogonal"
+      }
+    },
+    {
+      "logical_id": "idc_raw",
+      "kind": "data",
+      "endpoints": [
+        {
+          "component": "idc_main_import",
+          "port": "OUT"
+        },
+        {
+          "component": "signal_interface",
+          "port": "IDC_RAW"
+        }
+      ],
+      "route": {
+        "vertices": [
+          [
+            1086,
+            603
+          ],
+          [
+            1228,
+            603
+          ],
+          [
+            1228,
+            495
+          ],
+          [
+            1278,
+            495
           ]
         ],
         "policy": "orthogonal"

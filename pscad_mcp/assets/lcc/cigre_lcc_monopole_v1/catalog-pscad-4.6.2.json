@@ -821,15 +821,72 @@
       }
     },
     {
+      "scoped_name": "master:main_signal_import",
+      "ports": [
+        {
+          "name": "OUT",
+          "kind": "data",
+          "dimension": 1,
+          "offset": [
+            36,
+            0
+          ]
+        }
+      ],
+      "parameters": {
+        "Name": {
+          "type": "string"
+        }
+      },
+      "bounding_box": [
+        -45,
+        -20,
+        45,
+        20
+      ],
+      "metadata": {
+        "library": "master",
+        "characterized_for": "4.6.2",
+        "binding_registry": "master-bindings-pscad-4.6.2.json"
+      }
+    },
+    {
       "scoped_name": "cigre_lcc_v1:SignalInterface",
       "ports": [
+        {
+          "name": "VDC_RECT_RAW",
+          "kind": "data",
+          "dimension": 1,
+          "offset": [
+            -72,
+            -63
+          ]
+        },
+        {
+          "name": "VDC_INV_RAW",
+          "kind": "data",
+          "dimension": 1,
+          "offset": [
+            -72,
+            -54
+          ]
+        },
+        {
+          "name": "IDC_RAW",
+          "kind": "data",
+          "dimension": 1,
+          "offset": [
+            -72,
+            -45
+          ]
+        },
         {
           "name": "VDC_RECT",
           "kind": "data",
           "dimension": 1,
           "offset": [
             72,
-            -63
+            -36
           ]
         },
         {
@@ -838,7 +895,7 @@
           "dimension": 1,
           "offset": [
             72,
-            -54
+            -27
           ]
         },
         {
@@ -847,7 +904,7 @@
           "dimension": 1,
           "offset": [
             72,
-            -45
+            -18
           ]
         }
       ],

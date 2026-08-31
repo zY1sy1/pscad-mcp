@@ -109,7 +109,14 @@ FIXTURES = (
         "signal_interface",
         "cigre_lcc_v1:SignalInterface",
         {},
-        ("VDC_RECT", "VDC_INV", "IDC"),
+        (
+            "VDC_RECT_RAW",
+            "VDC_INV_RAW",
+            "IDC_RAW",
+            "VDC_RECT",
+            "VDC_INV",
+            "IDC",
+        ),
     ),
 )
 
@@ -130,7 +137,11 @@ _FIXTURE_INPUTS = {
         "ENABLE",
     ),
     "cigre_lcc_v1:Initialization": (),
-    "cigre_lcc_v1:SignalInterface": (),
+    "cigre_lcc_v1:SignalInterface": (
+        "VDC_RECT_RAW",
+        "VDC_INV_RAW",
+        "IDC_RAW",
+    ),
 }
 _BRIDGE_ELECTRICAL_PORTS = (
     "ACY_A",
@@ -520,25 +531,6 @@ async def _add_fixture_harness(
                     canvas_name="Main",
                 ),
             )
-
-    if fixture.definition.endswith(":SignalInterface"):
-        for index, name in enumerate(
-            ("LCC_VDC_RECT_RAW", "LCC_VDC_INV_RAW", "LCC_IDC_RAW")
-        ):
-            await _service_call(
-                "create_fixture_harness",
-                service.add_canvas_component(
-                    project_name,
-                    "master",
-                    "const",
-                    540,
-                    720 + index * 54,
-                    0,
-                    {"Name": name, "Value": "1.0"},
-                    canvas_name="Main",
-                ),
-            )
-
 
 async def _verify_compile_messages(service: Any, project_name: str) -> None:
     reader = getattr(service, "get_project_output", None)

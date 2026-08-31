@@ -137,6 +137,12 @@ async def _runtime_backend(tmp_path, *, snap_wires: bool = False):
             "multimeter",
             {"MeasV": 1, "MeasI": 1, "CurI": "IDC", "VolI": "VDC"},
         ),
+        (
+            "main_signal_import",
+            {"Name": "LCC_TEST_RAW"},
+            "import",
+            {"Name": "LCC_TEST_RAW"},
+        ),
         ("ground", {}, "ground", {}),
     ],
 )

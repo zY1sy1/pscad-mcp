@@ -779,26 +779,51 @@ def _initialization(definitions: ET.Element) -> None:
 
 def _signal_interface(definitions: ET.Element) -> None:
     ports = tuple(
-        (name, "data", "output", "Real") for name in ("VDC_RECT", "VDC_INV", "IDC")
+        (name, "data", "input", "Real")
+        for name in ("VDC_RECT_RAW", "VDC_INV_RAW", "IDC_RAW")
+    ) + tuple(
+        (name, "data", "output", "Real")
+        for name in ("VDC_RECT", "VDC_INV", "IDC")
     )
     components = (
-        _import("import_vdc_rect", "LCC_VDC_RECT_RAW", 180, 126),
-        _import("import_vdc_inv", "LCC_VDC_INV_RAW", 180, 198),
-        _import("import_idc", "LCC_IDC_RAW", 180, 270),
-        _export("export_vdc_rect", "VDC_RECT", 360, 126),
-        _export("export_vdc_inv", "VDC_INV", 360, 198),
-        _export("export_idc", "IDC", 360, 270),
-        _output_channel("monitor_vdc_rect", "VDC_RECT", "kV", 288, 72),
-        _output_channel("monitor_vdc_inv", "VDC_INV", "kV", 288, 342),
-        _output_channel("monitor_idc", "IDC", "kA", 288, 414),
+        _import("import_vdc_rect", "VDC_RECT_RAW", 180, 126),
+        _import("import_vdc_inv", "VDC_INV_RAW", 180, 198),
+        _import("import_idc", "IDC_RAW", 180, 270),
+        Component(
+            "isolate_vdc_rect",
+            "master:unity",
+            270,
+            126,
+            {"IType": "2", "OType": "2", "Dim": "1"},
+        ),
+        Component(
+            "isolate_vdc_inv",
+            "master:unity",
+            270,
+            198,
+            {"IType": "2", "OType": "2", "Dim": "1"},
+        ),
+        Component(
+            "isolate_idc",
+            "master:unity",
+            270,
+            270,
+            {"IType": "2", "OType": "2", "Dim": "1"},
+        ),
+        _output_channel("monitor_vdc_rect", "VDC_RECT", "kV", 306, 126),
+        _output_channel("monitor_vdc_inv", "VDC_INV", "kV", 306, 198),
+        _output_channel("monitor_idc", "IDC", "kA", 306, 270),
+        _export("export_vdc_rect", "VDC_RECT", 342, 126),
+        _export("export_vdc_inv", "VDC_INV", 342, 198),
+        _export("export_idc", "IDC", 342, 270),
     )
     wires = (
-        Wire("VDC_RECT_IMPORT", ((216, 126), (396, 126))),
-        Wire("VDC_INV_IMPORT", ((216, 198), (396, 198))),
-        Wire("IDC_IMPORT", ((216, 270), (396, 270))),
-        Wire("VDC_RECT_MONITOR", ((216, 126), (288, 72))),
-        Wire("VDC_INV_MONITOR", ((216, 198), (288, 342))),
-        Wire("IDC_MONITOR", ((216, 270), (288, 414))),
+        Wire("VDC_RECT_RAW_TO_UNITY", ((216, 126), (234, 126))),
+        Wire("VDC_RECT_FANOUT", ((270, 126), (306, 126), (378, 126))),
+        Wire("VDC_INV_RAW_TO_UNITY", ((216, 198), (234, 198))),
+        Wire("VDC_INV_FANOUT", ((270, 198), (306, 198), (378, 198))),
+        Wire("IDC_RAW_TO_UNITY", ((216, 270), (234, 270))),
+        Wire("IDC_FANOUT", ((270, 270), (306, 270), (378, 270))),
     )
     _definition(
         definitions,
