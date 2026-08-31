@@ -36,7 +36,13 @@ def test_production_asset_set_has_fixed_identity_and_complete_contract():
     assert len(asset_set.master_bindings.bindings) == 8
     assert asset_set.master_binding_hash == asset_set.hashes["master-bindings-pscad-4.6.2.json"]
     assert "Szechtman" in asset_set.provenance
-    assert validate_companion_library(ASSET_ROOT / asset_set.companion_library)["valid"] is True
+    companion = validate_companion_library(
+        ASSET_ROOT / asset_set.companion_library
+    )
+    assert companion["valid"] is False
+    assert "structural_only" in {
+        error["reason"] for error in companion["errors"]
+    }
 
 
 def test_confirmed_golden_generator_is_the_only_writer(tmp_path):

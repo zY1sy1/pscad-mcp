@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 from scripts.audit_lcc_assets import audit_asset_root
@@ -50,18 +49,13 @@ def _asset_root(tmp_path: Path, library: str, provenance: str | None = None) -> 
     return root
 
 
-def test_audit_accepts_repository_authored_library(tmp_path):
+def test_audit_rejects_structural_only_library(tmp_path):
     report = audit_asset_root(_asset_root(tmp_path, _library()))
 
-    assert report["valid"] is True
-    assert report["definitions"] == [
-        "cigre_lcc_v1:Initialization",
-        "cigre_lcc_v1:InverterControl",
-        "cigre_lcc_v1:LCC12PulseBridge",
-        "cigre_lcc_v1:RectifierControl",
-        "cigre_lcc_v1:SignalInterface",
-    ]
-    assert report["valve_count"] == 12
+    assert report["valid"] is False
+    assert "structural_only" in {
+        error["reason"] for error in report["errors"]
+    }
 
 
 def test_audit_rejects_foreign_scope_absolute_path_and_incomplete_provenance(tmp_path):

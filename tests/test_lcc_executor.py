@@ -301,7 +301,7 @@ def test_execute_build_rejects_unverified_companion_library_before_loading(tmp_p
     )
 
     assert record.state.value == "failed"
-    assert record.error["code"] == "LCC_STRUCTURE_INVALID"
+    assert record.error["code"] == "LCC_COMPANION_INVALID"
     assert "load_projects" not in [call[0] for call in service.calls]
 
 
