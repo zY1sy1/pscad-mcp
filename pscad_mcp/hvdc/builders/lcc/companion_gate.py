@@ -313,6 +313,72 @@ async def _snapshot(
     }
 
 
+async def _reload_fixture(
+    service: Any,
+    project_name: str,
+    project_file: Path,
+    component_id: int,
+    fixture: CompanionFixture,
+) -> tuple[str, Path, int]:
+    try:
+        await service.reload_project(project_name, str(project_file))
+        return project_name, project_file, component_id
+    except BackendError as error:
+        if error.code != "BLUEPRINT_RELOAD_UNAVAILABLE":
+            raise
+
+    save_as = getattr(service, "save_project_as", None)
+    finder = getattr(service, "find_components", None)
+    if not callable(save_as) or not callable(finder):
+        raise _error(
+            "LCC_COMPANION_READBACK_FAILED",
+            "The legacy reload fallback is unavailable.",
+            "reload_project",
+        )
+    reloaded_file = project_file.with_name(f"{fixture.name}_reloaded.pscx")
+    await _service_call(
+        "save_project_as",
+        save_as(
+            project_name,
+            reloaded_file.name,
+            str(reloaded_file.parent),
+            confirm=True,
+        ),
+    )
+    if reloaded_file.is_symlink() or not reloaded_file.is_file():
+        raise _error(
+            "LCC_COMPANION_READBACK_FAILED",
+            "The legacy reload fallback did not save a regular project file.",
+            "save_project_as",
+            path=str(reloaded_file),
+        )
+    reloaded_name = reloaded_file.stem
+    matches = await _service_call(
+        "find_components",
+        finder(
+            reloaded_name,
+            definition=fixture.definition,
+            canvas_name="Main",
+        ),
+    )
+    if (
+        not isinstance(matches, Sequence)
+        or isinstance(matches, (str, bytes))
+        or len(matches) != 1
+        or not isinstance(matches[0], Mapping)
+        or isinstance(matches[0].get("id"), bool)
+        or not isinstance(matches[0].get("id"), int)
+        or matches[0].get("definition") not in {None, fixture.definition}
+    ):
+        raise _error(
+            "LCC_COMPANION_READBACK_FAILED",
+            "The reloaded fixture component is missing or ambiguous.",
+            "find_components",
+            definition=fixture.definition,
+        )
+    return reloaded_name, reloaded_file, int(matches[0]["id"])
+
+
 def _failure(
     fixture: str,
     operation: str,
@@ -459,9 +525,15 @@ async def run_companion_component_gate(
                     "save_project",
                     path=str(project_file),
                 )
-            before_compile_sha256 = sha256_file(project_file)
             operation = "reload_project"
-            await service.reload_project(project_name, str(project_file))
+            project_name, project_file, component_id = await _reload_fixture(
+                service,
+                project_name,
+                project_file,
+                component_id,
+                fixture,
+            )
+            before_compile_sha256 = sha256_file(project_file)
             operation = "validate_readback"
             after_reload = await _snapshot(
                 service,

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import hashlib
 import importlib
 import json
@@ -9,6 +10,7 @@ from typing import Any
 
 import pytest
 
+from pscad_mcp.core.backend.base import BackendError
 from pscad_mcp.hvdc.builders.lcc.assets import load_packaged_asset_set
 
 FIXTURE_PORTS = {
@@ -72,10 +74,12 @@ class CompanionGateFakeService:
         fail_on: str | None = None,
         port_drift: bool = False,
         mutate_master_on_build: Path | None = None,
+        reload_unavailable: bool = False,
     ) -> None:
         self.fail_on = fail_on
         self.port_drift = port_drift
         self.mutate_master_on_build = mutate_master_on_build
+        self.reload_unavailable = reload_unavailable
         self.calls: list[tuple[str, tuple[Any, ...]]] = []
         self.failure_index = -1
         self.projects: dict[str, dict[str, Any]] = {}
@@ -215,7 +219,63 @@ class CompanionGateFakeService:
 
     async def reload_project(self, project_name: str, filename: str) -> str:
         self._call("reload_project", project_name, filename)
+        if self.reload_unavailable:
+            raise BackendError(
+                "BLUEPRINT_RELOAD_UNAVAILABLE",
+                "The legacy backend cannot unload this project.",
+                "legacy",
+                "unload_project",
+            )
         return "reloaded"
+
+    async def save_project_as(
+        self,
+        project_name: str,
+        filename: str,
+        folder: str,
+        *,
+        confirm: bool = False,
+    ) -> str:
+        self._call("save_project_as", project_name, filename, folder, confirm)
+        source = self.projects[project_name]
+        path = Path(folder) / filename
+        path.write_text(
+            json.dumps(source["components"], sort_keys=True),
+            encoding="utf-8",
+        )
+        reloaded_name = path.stem
+        reloaded_components = {}
+        for component in source["components"].values():
+            component_id = self.next_id
+            self.next_id += 1
+            reloaded_components[component_id] = copy.deepcopy(component)
+        self.projects[reloaded_name] = {
+            "path": path,
+            "components": reloaded_components,
+        }
+        return "saved as"
+
+    async def find_components(
+        self,
+        project_name: str,
+        definition: str | None = None,
+        name: str | None = None,
+        canvas_name: str = "Main",
+    ) -> list[dict[str, Any]]:
+        self._call(
+            "find_components",
+            project_name,
+            definition,
+            name,
+            canvas_name,
+        )
+        return [
+            {"id": component_id, "definition": component["definition"]}
+            for component_id, component in self.projects[project_name][
+                "components"
+            ].items()
+            if definition is None or component["definition"] == definition
+        ]
 
     async def build_project(self, project_name: str) -> str:
         self._call("build_project", project_name)
@@ -350,3 +410,30 @@ def test_component_gate_rejects_master_change_before_compile(tmp_path):
     assert result["status"] == "FAIL"
     assert result["failure"]["operation"] == "verify_sources"
     assert result["failure"]["code"] == "MASTER_SOURCE_CHANGED"
+
+
+def test_component_gate_uses_save_as_when_legacy_unload_is_unavailable(tmp_path):
+    assets, master, registry, master_hash, registry_hash = _inputs(tmp_path)
+    service = CompanionGateFakeService(reload_unavailable=True)
+
+    result = asyncio.run(
+        _subject()(
+            service,
+            assets,
+            tmp_path / "fixtures",
+            master_path=master,
+            registry_path=registry,
+            expected_master_sha256=master_hash,
+            expected_registry_sha256=registry_hash,
+        )
+    )
+
+    assert result["status"] == "PASS"
+    call_names = [call[0] for call in service.calls]
+    assert call_names.count("reload_project") == 6
+    assert call_names.count("save_project_as") == 6
+    assert call_names.count("find_components") == 6
+    assert all(
+        item["project"]["name"].endswith("_reloaded")
+        for item in result["fixtures"]
+    )
