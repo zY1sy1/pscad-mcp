@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import xml.etree.ElementTree as ET
+from itertools import pairwise
 from pathlib import Path
 
 import pytest
@@ -28,8 +29,8 @@ PORTS = {
         ("GM_D", "Transfer", "Output", "Real"),
     ),
     "RectifierControl": (
-        ("VDC", "Transfer", "Input", "Real"),
-        ("IDC", "Transfer", "Input", "Real"),
+        ("VDC_MEAS", "Transfer", "Input", "Real"),
+        ("IDC_MEAS", "Transfer", "Input", "Real"),
         ("IORDER", "Transfer", "Input", "Real"),
         ("ENABLE", "Transfer", "Input", "Real"),
         ("AO_Y", "Transfer", "Output", "Real"),
@@ -37,8 +38,8 @@ PORTS = {
         ("ALPHA", "Transfer", "Output", "Real"),
     ),
     "InverterControl": (
-        ("VDC", "Transfer", "Input", "Real"),
-        ("IDC", "Transfer", "Input", "Real"),
+        ("VDC_MEAS", "Transfer", "Input", "Real"),
+        ("IDC_MEAS", "Transfer", "Input", "Real"),
         ("GM_Y", "Transfer", "Input", "Real"),
         ("GM_D", "Transfer", "Input", "Real"),
         ("GAMMA_ORDER", "Transfer", "Input", "Real"),
@@ -67,6 +68,7 @@ USERS = {
         *("master:xnode" for _ in range(8)),
         "master:breakout",
         "master:breakout",
+        *("master:resistor" for _ in range(6)),
         *("master:import" for _ in range(3)),
         *("master:export" for _ in range(4)),
         "master:consti",
@@ -293,7 +295,11 @@ def write_physical_library_fixture(
             ET.SubElement(
                 schematic,
                 "Wire",
-                {"id": str(2000 + wire_index), "name": wire_name},
+                {
+                    "id": str(2000 + wire_index),
+                    "name": "",
+                    "lcc_role": wire_name,
+                },
             )
 
     bridge_svg = definitions.find("./Definition[@name='LCC12PulseBridge']/svg")
@@ -373,6 +379,7 @@ def test_physical_bridge_requires_two_g6p200_and_scalar_ao(tmp_path):
     assert bridge["master_instances"]["master:g6p200"] == 2
     assert bridge["master_instances"]["master:xnode"] == 8
     assert bridge["master_instances"]["master:breakout"] == 2
+    assert bridge["master_instances"]["master:resistor"] == 6
     assert bridge["ports"]["AO_Y"] == {
         "kind": "data",
         "dimension": 1,
@@ -398,11 +405,23 @@ def test_generated_companion_contains_exact_wp1b_output_channels(tmp_path):
         for details in evidence["definitions"].values()
     ) == 10
     root = ET.fromstring(path.read_bytes())
+    assert root.find("./definitions/Definition[@name='Station']") is not None
+    assert root.find("./definitions/Definition[@name='Main']") is not None
+    assert root.find(
+        "./hierarchy/call[@name='cigre_lcc_v1:Station']/call[@name='cigre_lcc_v1:Main']"
+    ) is not None
     bridge = root.find("./definitions/Definition[@name='LCC12PulseBridge']")
     assert bridge is not None
+    generated_wires = bridge.findall("./schematic/Wire")
+    assert all(wire.get("name") == "" for wire in generated_wires)
+    assert all(wire.get("lcc_role") for wire in generated_wires)
+    assert [
+        int(node.get("orient"))
+        for node in bridge.findall("./schematic/User[@defn='master:xnode']")
+    ] == [2, 2, 2, 2, 2, 2, 6, 4]
 
     def points(name):
-        wire = bridge.find(f"./schematic/Wire[@name='{name}']")
+        wire = bridge.find(f"./schematic/Wire[@lcc_role='{name}']")
         assert wire is not None
         origin = (int(wire.get("x")), int(wire.get("y")))
         return [
@@ -416,13 +435,21 @@ def test_generated_companion_contains_exact_wp1b_output_channels(tmp_path):
             and min(left[1], right[1]) <= point[1] <= max(left[1], right[1])
             or left[1] == right[1] == point[1]
             and min(left[0], right[0]) <= point[0] <= max(left[0], right[0])
-            for left, right in zip(route, route[1:])
+            for left, right in pairwise(route)
         )
 
-    assert not crosses(points("ACY_TO_Y_B"), (180, 180))
-    assert not crosses(points("ACD_TO_D_B"), (180, 450))
-    assert not crosses(points("ACY_TO_Y_BUS"), (216, 180))
-    assert not crosses(points("ACD_TO_D_BUS"), (216, 450))
+    assert not crosses(points("ACY_TO_Y_B"), (180, 342))
+    assert not crosses(points("ACD_TO_D_B"), (180, 630))
+    assert not crosses(points("ACY_TO_Y_BUS"), (216, 342))
+    assert not crosses(points("ACD_TO_D_BUS"), (216, 630))
+    assert points("DC_POS_PATH") == [(360, 252), (360, 234), (360, 162)]
+    assert points("DC_SERIES") == [
+        (360, 540),
+        (360, 522),
+        (360, 450),
+        (360, 432),
+    ]
+    assert points("DC_NEG_PATH") == [(360, 720), (360, 738), (360, 828)]
     g6 = bridge.find("./schematic/User[@defn='master:g6p200']/paramlist")
     assert g6 is not None
     assert [param.get("name") for param in g6.findall("./param")] == [
@@ -451,6 +478,85 @@ def test_generated_companion_contains_exact_wp1b_output_channels(tmp_path):
         "RWV",
         "PFB",
     ]
+
+
+@pytest.mark.parametrize(
+    ("wire_name", "forbidden_port"),
+    [
+        ("CB_ZERO_Y", (360, 252)),
+        ("CB_ZERO_D", (360, 540)),
+        ("ENABLE_ORDER", (684, 486)),
+    ],
+)
+def test_generated_bridge_control_wires_do_not_cross_unrelated_ports(
+    wire_name,
+    forbidden_port,
+):
+    root = ET.fromstring(render_library())
+    bridge = root.find("./definitions/Definition[@name='LCC12PulseBridge']")
+    assert bridge is not None
+    wire = bridge.find(f"./schematic/Wire[@lcc_role='{wire_name}']")
+    assert wire is not None
+    origin = (int(wire.get("x")), int(wire.get("y")))
+    route = [
+        (origin[0] + int(vertex.get("x")), origin[1] + int(vertex.get("y")))
+        for vertex in wire.findall("./vertex")
+    ]
+
+    assert not any(
+        left[0] == right[0] == forbidden_port[0]
+        and min(left[1], right[1]) <= forbidden_port[1] <= max(left[1], right[1])
+        or left[1] == right[1] == forbidden_port[1]
+        and min(left[0], right[0]) <= forbidden_port[0] <= max(left[0], right[0])
+        for left, right in pairwise(route)
+    )
+
+
+def test_generated_bridge_isolates_scalar_phase_ports_before_breakout():
+    root = ET.fromstring(render_library())
+    bridge = root.find("./definitions/Definition[@name='LCC12PulseBridge']")
+    assert bridge is not None
+
+    resistors = bridge.findall("./schematic/User[@defn='master:resistor']")
+    assert [(int(item.get("x")), int(item.get("y"))) for item in resistors] == [
+        (108, 306),
+        (108, 342),
+        (108, 378),
+        (108, 594),
+        (108, 630),
+        (108, 666),
+    ]
+    assert [
+        item.find("./paramlist/param[@name='R']").get("value")
+        for item in resistors
+    ] == ["1.0e-6 [ohm]"] * 6
+    assert [
+        int(item.get("orient"))
+        for item in bridge.findall("./schematic/User[@defn='master:breakout']")
+    ] == [4, 4]
+
+
+def test_generated_control_imports_avoid_reserved_internal_names():
+    root = ET.fromstring(render_library())
+
+    for definition_name in ("RectifierControl", "InverterControl"):
+        definition = root.find(
+            f"./definitions/Definition[@name='{definition_name}']"
+        )
+        assert definition is not None
+        port_names = {
+            item.get("name") for item in definition.findall("./svg/port")
+        }
+        import_names = {
+            item.get("value")
+            for item in definition.findall(
+                "./schematic/User[@defn='master:import']/paramlist/param[@name='Name']"
+            )
+        }
+
+        assert {"VDC_MEAS", "IDC_MEAS"} <= port_names
+        assert {"VDC_MEAS", "IDC_MEAS"} <= import_names
+        assert not {"VDC", "IDC"} & import_names
 
 
 @pytest.mark.parametrize(

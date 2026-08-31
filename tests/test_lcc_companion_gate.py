@@ -32,8 +32,8 @@ FIXTURE_PORTS = {
         "GM_D",
     },
     "cigre_lcc_v1:RectifierControl": {
-        "VDC",
-        "IDC",
+        "VDC_MEAS",
+        "IDC_MEAS",
         "IORDER",
         "ENABLE",
         "AO_Y",
@@ -41,8 +41,8 @@ FIXTURE_PORTS = {
         "ALPHA",
     },
     "cigre_lcc_v1:InverterControl": {
-        "VDC",
-        "IDC",
+        "VDC_MEAS",
+        "IDC_MEAS",
         "GM_Y",
         "GM_D",
         "GAMMA_ORDER",
@@ -533,5 +533,37 @@ def test_component_gate_connects_fixture_harness_before_each_build(tmp_path):
         for call in service.calls[:first_build]
         if call[0] == "create_wire"
     ]
-    assert len(bridge_wires) == 3
-    assert len({wire[1][0] for wire in bridge_wires}) == 3
+    assert len(bridge_wires) == 11
+    assert len({wire[1][0] for wire in bridge_wires}) == 11
+
+
+def test_fixture_input_harness_uses_non_crossing_bend_order(tmp_path):
+    assets, master, registry, master_hash, registry_hash = _inputs(tmp_path)
+    service = CompanionGateFakeService()
+
+    result = asyncio.run(
+        _subject()(
+            service,
+            assets,
+            tmp_path / "fixtures",
+            master_path=master,
+            registry_path=registry,
+            expected_master_sha256=master_hash,
+            expected_registry_sha256=registry_hash,
+        )
+    )
+
+    assert result["status"] == "PASS"
+    inverter_input_wires = [
+        call[1][1]
+        for call in service.calls
+        if call[0] == "create_wire" and call[1][0] == "inverter_control"
+    ]
+    assert [vertices[1][0] for vertices in inverter_input_wires] == [
+        648,
+        594,
+        540,
+        486,
+        432,
+        378,
+    ]

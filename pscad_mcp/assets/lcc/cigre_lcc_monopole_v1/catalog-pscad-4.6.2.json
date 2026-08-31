@@ -596,7 +596,7 @@
       "scoped_name": "cigre_lcc_v1:RectifierControl",
       "ports": [
         {
-          "name": "VDC",
+          "name": "VDC_MEAS",
           "kind": "data",
           "dimension": 1,
           "offset": [
@@ -605,7 +605,7 @@
           ]
         },
         {
-          "name": "IDC",
+          "name": "IDC_MEAS",
           "kind": "data",
           "dimension": 1,
           "offset": [
@@ -675,7 +675,7 @@
       "scoped_name": "cigre_lcc_v1:InverterControl",
       "ports": [
         {
-          "name": "VDC",
+          "name": "VDC_MEAS",
           "kind": "data",
           "dimension": 1,
           "offset": [
@@ -684,7 +684,7 @@
           ]
         },
         {
-          "name": "IDC",
+          "name": "IDC_MEAS",
           "kind": "data",
           "dimension": 1,
           "offset": [

@@ -35,6 +35,7 @@ EXPECTED_MASTER_COUNTS = {
         "master:g6p200": 2,
         "master:xnode": 8,
         "master:breakout": 2,
+        "master:resistor": 6,
         "master:import": 3,
         "master:export": 4,
         "master:consti": 2,
@@ -118,7 +119,7 @@ EXPECTED_PORTS = {
     "cigre_lcc_v1:RectifierControl": {
         **{
             name: _port("data", "input")
-            for name in ("VDC", "IDC", "IORDER", "ENABLE")
+            for name in ("VDC_MEAS", "IDC_MEAS", "IORDER", "ENABLE")
         },
         **{
             name: _port("data", "output")
@@ -129,8 +130,8 @@ EXPECTED_PORTS = {
         **{
             name: _port("data", "input")
             for name in (
-                "VDC",
-                "IDC",
+                "VDC_MEAS",
+                "IDC_MEAS",
                 "GM_Y",
                 "GM_D",
                 "GAMMA_ORDER",
@@ -288,6 +289,8 @@ def _definition_records(
                 }
             )
             continue
+        if raw_name == "Main":
+            continue
         name = _scoped_name(raw_name)
         if name in records:
             errors.append({"definition": name, "reason": "duplicate_definition"})
@@ -418,7 +421,11 @@ def _schematic_evidence(
                     else:
                         output_channels.append(name)
         elif tag == "wire":
-            name = (_attribute(element, "name") or "").strip()
+            name = (
+                _attribute(element, "lcc_role")
+                or _attribute(element, "name")
+                or ""
+            ).strip()
             if name:
                 connections.append(name)
     return (

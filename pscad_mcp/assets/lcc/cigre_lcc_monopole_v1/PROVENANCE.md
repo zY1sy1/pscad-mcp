@@ -31,6 +31,11 @@ six-pulse Master bridges; the companion does not fabricate individual valve
 records. `RectifierControl` uses current-error PI and hard limiting;
 `InverterControl` uses minimum gamma feedback, PI, and hard limiting. Page
 interfaces use audited `pin`, `breakout`, `import`, and `export` primitives.
+PSCAD 4.6.2 does not permit individual `breakout` array elements to be
+externalized directly. Each of the six scalar AC phase ports therefore uses
+an audited `master:resistor` fixed at `1e-6 ohm` before the internal
+three-phase breakout; this deterministic phase-isolation branch preserves the
+scalar external contract while giving each array element an internal node.
 The no-fault smoke channels use ten audited `master:pgb` output blocks inside
 the companion definitions. Initialization enable states pass through audited
 integer-to-real `unity` adapters before reaching their output blocks; the

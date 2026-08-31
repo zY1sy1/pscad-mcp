@@ -168,8 +168,8 @@
       "orientation": 0,
       "parameters": {},
       "ports": [
-        "VDC",
-        "IDC",
+        "VDC_MEAS",
+        "IDC_MEAS",
         "IORDER",
         "ENABLE",
         "AO_Y",
@@ -306,8 +306,8 @@
       "orientation": 0,
       "parameters": {},
       "ports": [
-        "VDC",
-        "IDC",
+        "VDC_MEAS",
+        "IDC_MEAS",
         "GM_Y",
         "GM_D",
         "GAMMA_ORDER",
@@ -1254,7 +1254,7 @@
         },
         {
           "component": "rectifier_control",
-          "port": "VDC"
+          "port": "VDC_MEAS"
         }
       ],
       "label": "VDC_RECT"
@@ -1269,7 +1269,7 @@
         },
         {
           "component": "inverter_control",
-          "port": "VDC"
+          "port": "VDC_MEAS"
         }
       ],
       "label": "VDC_INV"
@@ -1284,7 +1284,7 @@
         },
         {
           "component": "rectifier_control",
-          "port": "IDC"
+          "port": "IDC_MEAS"
         }
       ],
       "label": "IDC_RECT"
@@ -1299,7 +1299,7 @@
         },
         {
           "component": "inverter_control",
-          "port": "IDC"
+          "port": "IDC_MEAS"
         }
       ],
       "label": "IDC_INV"

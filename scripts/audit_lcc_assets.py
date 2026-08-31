@@ -10,6 +10,10 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any
 
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
 from pscad_mcp.hvdc.builders.lcc.validator import validate_companion_library
 
 _EXPECTED = {
@@ -69,7 +73,7 @@ def audit_asset_root(asset_root: str | Path) -> dict[str, Any]:
         name = _text(element.attrib.get("name") or element.attrib.get("scoped_name"))
         if _local(element.tag) == "definition" and name:
             classid = _text(element.attrib.get("classid")).casefold()
-            if classid != "stationdefn":
+            if classid != "stationdefn" and name != "Main":
                 definitions.append(
                     name if ":" in name else f"{library_scope}:{name}"
                 )

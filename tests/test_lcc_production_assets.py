@@ -36,7 +36,7 @@ def test_production_asset_set_has_fixed_identity_and_complete_contract():
     assert asset_set.master_bindings is not None
     assert len(asset_set.master_bindings.bindings) == 8
     assert asset_set.master_bindings.schema_version == 2
-    assert len(asset_set.master_bindings.companion_bindings) == 16
+    assert len(asset_set.master_bindings.companion_bindings) == 17
     assert asset_set.master_binding_hash == asset_set.hashes["master-bindings-pscad-4.6.2.json"]
     assert "Szechtman" in asset_set.provenance
     companion = validate_companion_library(
@@ -87,6 +87,7 @@ def test_confirmed_golden_generator_is_the_only_writer(tmp_path):
             "--compiler", str(compiler),
         ],
         cwd=Path(__file__).parents[1],
+        check=False,
         capture_output=True,
         text=True,
     )
@@ -104,6 +105,7 @@ def test_confirmed_golden_generator_is_the_only_writer(tmp_path):
             "--confirm",
         ],
         cwd=Path(__file__).parents[1],
+        check=False,
         capture_output=True,
         text=True,
     )
@@ -210,6 +212,7 @@ def test_golden_generator_rejects_units_and_window_contract_drift(tmp_path):
             "--confirm",
         ],
         cwd=Path(__file__).parents[1],
+        check=False,
         capture_output=True,
         text=True,
     )

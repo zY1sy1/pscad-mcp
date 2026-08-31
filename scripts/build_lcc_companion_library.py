@@ -44,6 +44,7 @@ STYLE = {
     "g6p200": (115, 184, 113177439),
     "xnode": (18, 31, 114262475),
     "breakout": (40, 77, 6599472),
+    "resistor": (74, 30, 10319542),
     "import": (83, 22, 35483323),
     "export": (74, 21, 39049670),
     "const": (69, 19, 8647988),
@@ -65,6 +66,7 @@ class Component:
     x: int
     y: int
     parameters: dict[str, Any]
+    orientation: int = 0
 
 
 @dataclass(frozen=True)
@@ -161,6 +163,8 @@ def _component(
 ) -> None:
     physical = component.definition.split(":", 1)[1]
     width, height, crc = STYLE[physical]
+    if physical == "xnode" and component.orientation in {4, 6}:
+        width = 32
     element = ET.SubElement(
         schematic,
         "User",
@@ -174,7 +178,7 @@ def _component(
             "w": str(width),
             "h": str(height),
             "z": str(sequence * 10),
-            "orient": "0",
+            "orient": str(component.orientation),
             "link": "-1",
             "q": "4",
         },
@@ -206,7 +210,8 @@ def _wire(
         "Wire",
         {
             "classid": "WireOrthogonal",
-            "name": wire.name,
+            "name": "",
+            "lcc_role": wire.name,
             "x": str(first_x),
             "y": str(first_y),
             "w": str(max(xs) - min(xs) + 10),
@@ -261,8 +266,21 @@ def _definition(
         _wire(schematic, name, sequence, wire)
 
 
-def _pin(role: str, name: str, x: int, y: int) -> Component:
-    return Component(role, "master:xnode", x, y, {"Name": name})
+def _pin(
+    role: str,
+    name: str,
+    x: int,
+    y: int,
+    orientation: int,
+) -> Component:
+    return Component(
+        role,
+        "master:xnode",
+        x,
+        y,
+        {"Name": name},
+        orientation,
+    )
 
 
 def _import(role: str, name: str, x: int, y: int) -> Component:
@@ -328,43 +346,99 @@ def _bridge_definition(definitions: ET.Element) -> None:
     g6_y = {**COMMON_G6P200, "KV": "-2"}
     g6_d = {**COMMON_G6P200, "KV": "-1"}
     components = (
-        _pin("pin_acy_a", "ACY_A", 90, 144),
-        _pin("pin_acy_b", "ACY_B", 90, 180),
-        _pin("pin_acy_c", "ACY_C", 90, 216),
-        _pin("pin_acd_a", "ACD_A", 90, 414),
-        _pin("pin_acd_b", "ACD_B", 90, 450),
-        _pin("pin_acd_c", "ACD_C", 90, 486),
-        _pin("pin_dc_pos", "DC_POS", 360, 54),
-        _pin("pin_dc_neg", "DC_NEG", 360, 576),
-        Component("breakout_y", "master:breakout", 180, 180, {"Dis": "0", "Com": "0"}),
-        Component("breakout_d", "master:breakout", 180, 450, {"Dis": "0", "Com": "0"}),
-        Component("bridge_y", "master:g6p200", 360, 180, g6_y),
-        Component("bridge_d", "master:g6p200", 360, 450, g6_d),
-        _import("import_ao_y", "AO_Y", 504, 216),
-        _import("import_ao_d", "AO_D", 504, 486),
-        _import("import_enable", "ENABLE", 504, 315),
+        _pin("pin_acy_a", "ACY_A", 90, 306, 2),
+        _pin("pin_acy_b", "ACY_B", 90, 342, 2),
+        _pin("pin_acy_c", "ACY_C", 90, 378, 2),
+        _pin("pin_acd_a", "ACD_A", 90, 594, 2),
+        _pin("pin_acd_b", "ACD_B", 90, 630, 2),
+        _pin("pin_acd_c", "ACD_C", 90, 666, 2),
+        _pin("pin_dc_pos", "DC_POS", 360, 162, 6),
+        _pin("pin_dc_neg", "DC_NEG", 360, 828, 4),
+        Component(
+            "breakout_y",
+            "master:breakout",
+            180,
+            342,
+            {"Dis": "0", "Com": "0"},
+            4,
+        ),
+        Component(
+            "breakout_d",
+            "master:breakout",
+            180,
+            630,
+            {"Dis": "0", "Com": "0"},
+            4,
+        ),
+        Component(
+            "phase_isolation_acy_a",
+            "master:resistor",
+            108,
+            306,
+            {"R": "1.0e-6 [ohm]"},
+        ),
+        Component(
+            "phase_isolation_acy_b",
+            "master:resistor",
+            108,
+            342,
+            {"R": "1.0e-6 [ohm]"},
+        ),
+        Component(
+            "phase_isolation_acy_c",
+            "master:resistor",
+            108,
+            378,
+            {"R": "1.0e-6 [ohm]"},
+        ),
+        Component(
+            "phase_isolation_acd_a",
+            "master:resistor",
+            108,
+            594,
+            {"R": "1.0e-6 [ohm]"},
+        ),
+        Component(
+            "phase_isolation_acd_b",
+            "master:resistor",
+            108,
+            630,
+            {"R": "1.0e-6 [ohm]"},
+        ),
+        Component(
+            "phase_isolation_acd_c",
+            "master:resistor",
+            108,
+            666,
+            {"R": "1.0e-6 [ohm]"},
+        ),
+        Component("bridge_y", "master:g6p200", 360, 342, g6_y),
+        Component("bridge_d", "master:g6p200", 360, 630, g6_d),
+        _import("import_ao_y", "AO_Y", 504, 378),
+        _import("import_ao_d", "AO_D", 504, 666),
+        _import("import_enable", "ENABLE", 504, 486),
         Component(
             "enable_to_integer",
             "master:unity",
             600,
-            315,
+            486,
             {"IType": "2", "OType": "1", "Dim": "1"},
         ),
-        _export("export_am_y", "AM_Y", 504, 126),
-        _export("export_gm_y", "GM_Y", 504, 144),
-        _export("export_am_d", "AM_D", 504, 396),
-        _export("export_gm_d", "GM_D", 504, 414),
+        _export("export_am_y", "AM_Y", 504, 288),
+        _export("export_gm_y", "GM_Y", 504, 306),
+        _export("export_am_d", "AM_D", 504, 576),
+        _export("export_gm_d", "GM_D", 504, 594),
         Component(
-            "const_enable_one", "master:consti", 600, 270, {"Name": "LCC_ENABLE_ONE", "Value": "1"}
+            "const_enable_one", "master:consti", 600, 450, {"Name": "LCC_ENABLE_ONE", "Value": "1"}
         ),
         Component(
-            "const_cb_zero", "master:consti", 600, 414, {"Name": "LCC_CB_ZERO", "Value": "0"}
+            "const_cb_zero", "master:consti", 600, 540, {"Name": "LCC_CB_ZERO", "Value": "0"}
         ),
         Component(
             "enable_inverter",
             "master:sumjct",
             720,
-            315,
+            486,
             {
                 "DPath": "0",
                 "A": "0",
@@ -378,30 +452,49 @@ def _bridge_definition(definitions: ET.Element) -> None:
         ),
     )
     wires = (
-        Wire("ACY_TO_Y", ((90, 144), (216, 144))),
-        Wire("ACY_TO_Y_B", ((90, 180), (90, 171), (216, 171), (216, 180))),
-        Wire("ACY_TO_Y_C", ((90, 216), (216, 216))),
-        Wire("ACY_TO_Y_BUS", ((180, 180), (180, 162), (324, 162), (324, 180))),
-        Wire("ACD_TO_D", ((90, 414), (216, 414))),
-        Wire("ACD_TO_D_B", ((90, 450), (90, 441), (216, 441), (216, 450))),
-        Wire("ACD_TO_D_C", ((90, 486), (216, 486))),
-        Wire("ACD_TO_D_BUS", ((180, 450), (180, 432), (324, 432), (324, 450))),
-        Wire("DC_POS_PATH", ((360, 54), (360, 90))),
-        Wire("DC_SERIES", ((360, 270), (360, 360))),
-        Wire("DC_NEG_PATH", ((360, 540), (360, 576))),
-        Wire("AO_Y_TO_BRIDGE_Y", ((540, 216), (414, 216))),
-        Wire("AO_D_TO_BRIDGE_D", ((540, 486), (414, 486))),
-        Wire("ENABLE_CONVERSION", ((540, 315), (564, 315))),
-        Wire("ENABLE_ONE", ((636, 270), (684, 270), (684, 315))),
-        Wire("ENABLE_ORDER", ((600, 315), (720, 315), (720, 351))),
-        Wire("ENABLE_TO_KB_Y", ((756, 315), (780, 315), (780, 234), (414, 234))),
-        Wire("ENABLE_TO_KB_D", ((756, 315), (792, 315), (792, 504), (414, 504))),
-        Wire("CB_ZERO_Y", ((636, 414), (648, 414), (648, 90), (342, 90))),
-        Wire("CB_ZERO_D", ((636, 414), (660, 414), (660, 360), (342, 360))),
-        Wire("AM_Y_OUTPUT", ((414, 126), (540, 126))),
-        Wire("GM_Y_OUTPUT", ((414, 144), (540, 144))),
-        Wire("AM_D_OUTPUT", ((414, 396), (540, 396))),
-        Wire("GM_D_OUTPUT", ((414, 414), (540, 414))),
+        Wire("ACY_TO_Y", ((90, 306), (108, 306))),
+        Wire("ACY_TO_Y_B", ((90, 342), (108, 342))),
+        Wire("ACY_TO_Y_C", ((90, 378), (108, 378))),
+        Wire("ACY_TO_Y_BUS", ((180, 342), (180, 324), (324, 324), (324, 342))),
+        Wire("ACD_TO_D", ((90, 594), (108, 594))),
+        Wire("ACD_TO_D_B", ((90, 630), (108, 630))),
+        Wire("ACD_TO_D_C", ((90, 666), (108, 666))),
+        Wire("ACD_TO_D_BUS", ((180, 630), (180, 612), (324, 612), (324, 630))),
+        Wire("DC_POS_PATH", ((360, 252), (360, 234), (360, 162))),
+        Wire(
+            "DC_SERIES",
+            ((360, 540), (360, 522), (360, 450), (360, 432)),
+        ),
+        Wire("DC_NEG_PATH", ((360, 720), (360, 738), (360, 828))),
+        Wire("AO_Y_TO_BRIDGE_Y", ((540, 378), (414, 378))),
+        Wire("AO_D_TO_BRIDGE_D", ((540, 666), (414, 666))),
+        Wire("ENABLE_CONVERSION", ((540, 486), (564, 486))),
+        Wire("ENABLE_ONE", ((636, 450), (684, 450), (684, 486))),
+        Wire(
+            "ENABLE_ORDER",
+            ((600, 486), (648, 486), (648, 522), (720, 522)),
+        ),
+        Wire("ENABLE_TO_KB_Y", ((756, 486), (780, 486), (780, 396), (414, 396))),
+        Wire("ENABLE_TO_KB_D", ((756, 486), (792, 486), (792, 684), (414, 684))),
+        Wire(
+            "CB_ZERO_Y",
+            (
+                (636, 540),
+                (828, 540),
+                (828, 216),
+                (324, 216),
+                (324, 252),
+                (342, 252),
+            ),
+        ),
+        Wire(
+            "CB_ZERO_D",
+            ((636, 540), (636, 558), (324, 558), (324, 540), (342, 540)),
+        ),
+        Wire("AM_Y_OUTPUT", ((414, 288), (540, 288))),
+        Wire("GM_Y_OUTPUT", ((414, 306), (540, 306))),
+        Wire("AM_D_OUTPUT", ((414, 576), (540, 576))),
+        Wire("GM_D_OUTPUT", ((414, 594), (540, 594))),
     )
     _definition(
         definitions,
@@ -416,11 +509,11 @@ def _bridge_definition(definitions: ET.Element) -> None:
 def _rectifier_control(definitions: ET.Element) -> None:
     ports = tuple(
         (name, "data", "input", "Real")
-        for name in ("VDC", "IDC", "IORDER", "ENABLE")
+        for name in ("VDC_MEAS", "IDC_MEAS", "IORDER", "ENABLE")
     ) + tuple((name, "data", "output", "Real") for name in ("AO_Y", "AO_D", "ALPHA"))
     components = (
-        _import("import_vdc", "VDC", 90, 90),
-        _import("import_idc", "IDC", 90, 180),
+        _import("import_vdc", "VDC_MEAS", 90, 90),
+        _import("import_idc", "IDC_MEAS", 90, 180),
         _import("import_iorder", "IORDER", 90, 270),
         _import("import_enable", "ENABLE", 90, 360),
         Component(
@@ -500,11 +593,18 @@ def _rectifier_control(definitions: ET.Element) -> None:
 def _inverter_control(definitions: ET.Element) -> None:
     ports = tuple(
         (name, "data", "input", "Real")
-        for name in ("VDC", "IDC", "GM_Y", "GM_D", "GAMMA_ORDER", "ENABLE")
+        for name in (
+            "VDC_MEAS",
+            "IDC_MEAS",
+            "GM_Y",
+            "GM_D",
+            "GAMMA_ORDER",
+            "ENABLE",
+        )
     ) + tuple((name, "data", "output", "Real") for name in ("AO_Y", "AO_D", "GAMMA"))
     components = (
-        _import("import_vdc", "VDC", 90, 72),
-        _import("import_idc", "IDC", 90, 126),
+        _import("import_vdc", "VDC_MEAS", 90, 72),
+        _import("import_idc", "IDC_MEAS", 90, 126),
         _import("import_gm_y", "GM_Y", 90, 198),
         _import("import_gm_d", "GM_D", 90, 270),
         _import("import_gamma_order", "GAMMA_ORDER", 90, 342),
@@ -702,10 +802,17 @@ def render_library() -> bytes:
     definitions = next(
         child for child in root if child.tag.rsplit("}", 1)[-1] == "definitions"
     )
-    definitions.clear()
-    for child in list(root):
-        if child.tag.rsplit("}", 1)[-1] == "hierarchy":
-            root.remove(child)
+    for definition in list(definitions):
+        if definition.get("name") not in {"Station", "Main"}:
+            definitions.remove(definition)
+    for element in root.iter():
+        for attribute in ("name", "defn"):
+            value = element.get(attribute)
+            if isinstance(value, str) and value.startswith("empty_library:"):
+                element.set(
+                    attribute,
+                    f"{LIBRARY_NAME}:{value.split(':', 1)[1]}",
+                )
     _bridge_definition(definitions)
     _rectifier_control(definitions)
     _inverter_control(definitions)

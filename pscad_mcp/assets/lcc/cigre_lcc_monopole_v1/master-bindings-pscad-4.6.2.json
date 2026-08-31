@@ -2267,6 +2267,41 @@
         }
       ],
       "evidence_parameters": []
+    },
+    {
+      "logical_name": "master:phase_isolation_resistor",
+      "physical_definition": "resistor",
+      "shape": {
+        "kind": "direct"
+      },
+      "ports": [
+        {
+          "logical": "A",
+          "physical": "A",
+          "kind": "electrical",
+          "dimension": 1,
+          "occurrence": 0
+        },
+        {
+          "logical": "B",
+          "physical": "B",
+          "kind": "electrical",
+          "dimension": 1,
+          "occurrence": 0
+        }
+      ],
+      "parameters": [],
+      "fixed_parameters": [
+        {
+          "physical": "R",
+          "value": 0.000001,
+          "contract": {
+            "type": "Real",
+            "unit": "ohm"
+          }
+        }
+      ],
+      "evidence_parameters": []
     }
   ]
 }

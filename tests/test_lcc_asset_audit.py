@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+import subprocess
+import sys
 from pathlib import Path
 
 from scripts.audit_lcc_assets import audit_asset_root
@@ -11,6 +14,7 @@ PACKAGED_ROOT = (
     / "lcc"
     / "cigre_lcc_monopole_v1"
 )
+ROOT = Path(__file__).parents[1]
 
 
 def _library(*, extra: str = "", absolute: str = "") -> str:
@@ -78,6 +82,24 @@ def test_packaged_asset_root_is_physical():
         "active_port": "AO",
         "dimension": 1,
     }
+
+
+def test_asset_audit_cli_uses_the_current_checkout():
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "scripts" / "audit_lcc_assets.py"),
+            "--asset-root",
+            str(PACKAGED_ROOT),
+        ],
+        cwd=ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    assert json.loads(completed.stdout)["valid"] is True
 
 
 def test_audit_rejects_foreign_scope_absolute_path_and_incomplete_provenance(tmp_path):
