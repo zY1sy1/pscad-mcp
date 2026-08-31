@@ -1,5 +1,6 @@
 import copy
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
 
@@ -564,6 +565,9 @@ def test_wp1b_smoke_plan_uses_smoke_gate_and_hashes_profile(tmp_path):
 
     assert smoke.verification_profile == "wp1b_smoke"
     assert smoke.plan_hash != full.plan_hash
+    assert Path(smoke.target_path).stem == "CIGRE_LCC_PUBLISHED"
+    assert Path(smoke.staging_path).name == "CIGRE_LCC.staging"
+    assert Path(full.target_path).stem == "CIGRE_LCC"
     assert [item.kind for item in smoke.operations][-2:] == [
         "smoke_validate",
         "publish",

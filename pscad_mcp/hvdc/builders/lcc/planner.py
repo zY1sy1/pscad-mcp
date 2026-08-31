@@ -362,6 +362,12 @@ def _resolve_paths(request: LccPlanRequest, workspace: str | Path | PathPolicy) 
     if any(separator in project_name for separator in ("/", "\\")) or project_name in {".", ".."}:
         raise _error("LCC_LAYOUT_INVALID", "project_name must be a single project identity.", project_name=project_name)
     filename = project_name if project_name.casefold().endswith(".pscx") else f"{project_name}.pscx"
+    staging_identity = Path(filename).stem
+    final_filename = (
+        f"{staging_identity}_PUBLISHED.pscx"
+        if request.verification_profile == WP1B_SMOKE_PROFILE
+        else filename
+    )
     if isinstance(workspace, PathPolicy):
         policy = workspace
         if policy.workspace_root is None:
@@ -372,18 +378,27 @@ def _resolve_paths(request: LccPlanRequest, workspace: str | Path | PathPolicy) 
         policy = PathPolicy(workspace_root=str(workspace_root))
     try:
         folder = workspace_root if request.folder is None else policy.resolve(request.folder)
-        final_path = policy.resolve_child(str(folder), filename, suffixes={".pscx"})
+        final_path = policy.resolve_child(
+            str(folder),
+            final_filename,
+            suffixes={".pscx"},
+        )
     except (WorkspaceNotConfiguredError, ValueError, OSError) as error:
         raise _error("LCC_LAYOUT_INVALID", str(error), project_name=project_name) from error
     raw_final = folder / project_name
-    raw_target = folder / filename
+    raw_target = folder / final_filename
     if final_path.exists() or raw_final.exists() or raw_target.is_symlink():
         raise _error(
             "LCC_BUILD_CONFLICT",
             "The planned final destination already exists.",
             target_path=str(final_path),
         )
-    staging = folder / ".pscad-mcp" / "lcc-builds" / f"{Path(filename).stem}.staging"
+    staging = (
+        folder
+        / ".pscad-mcp"
+        / "lcc-builds"
+        / f"{staging_identity}.staging"
+    )
     request_duration = None
     return final_path, staging, project_name, request_duration
 
