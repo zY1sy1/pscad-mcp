@@ -124,6 +124,24 @@ release-gate 占位基线。
 残留进程。该状态不是 `accepted`；扰动、换相失败/恢复、independent golden
 和最终验收仍属于 WP1C/WP6。
 
+授权证据生成与基线提升是两个独立动作；run 命令不会修改仓库基线：
+
+```powershell
+$env:PSCAD_MCP_LCC_WP1B_ACCEPTANCE = '1'
+./scripts/run_fixed_lcc_smoke_acceptance.ps1 `
+  -WorkspaceRoot 'D:/PSCAD-Workspace/lcc-wp1b-fixed-acceptance' `
+  -CompilerConfiguration 'C:/Program Files (x86)/PSCAD46/fortran_compilers.xml' `
+  -CompilerExecutable 'C:/Program Files (x86)/GFortran/4.6/bin/gfortran.exe'
+```
+
+只有独立复核后的 PASS 报告才能显式提升：
+
+```powershell
+./.venv/Scripts/python.exe -m pscad_mcp.hvdc.builders.lcc.fixed_acceptance_cli promote `
+  --baseline docs/acceptance/lcc-mmc-program-baseline.json `
+  --report 'D:/PSCAD-Workspace/lcc-wp1b-fixed-acceptance/<run>/fixed-lcc-acceptance-report.json'
+```
+
 ### Blank LCC 与官方工程
 
 `plan_blank_lcc_model`/`build_blank_lcc_model` 需要一个真实的 PSCAD 4.6

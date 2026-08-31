@@ -217,6 +217,25 @@ remaining PSCAD process. It is not `accepted`: disturbance, commutation
 failure/recovery, independent golden, and final acceptance remain WP1C/WP6
 work.
 
+Licensed evidence generation and baseline promotion are separate actions. The
+run command never edits the checked-in baseline:
+
+```powershell
+$env:PSCAD_MCP_LCC_WP1B_ACCEPTANCE = '1'
+./scripts/run_fixed_lcc_smoke_acceptance.ps1 `
+  -WorkspaceRoot 'D:/PSCAD-Workspace/lcc-wp1b-fixed-acceptance' `
+  -CompilerConfiguration 'C:/Program Files (x86)/PSCAD46/fortran_compilers.xml' `
+  -CompilerExecutable 'C:/Program Files (x86)/GFortran/4.6/bin/gfortran.exe'
+```
+
+Only an independently revalidated PASS report may be promoted:
+
+```powershell
+./.venv/Scripts/python.exe -m pscad_mcp.hvdc.builders.lcc.fixed_acceptance_cli promote `
+  --baseline docs/acceptance/lcc-mmc-program-baseline.json `
+  --report 'D:/PSCAD-Workspace/lcc-wp1b-fixed-acceptance/<run>/fixed-lcc-acceptance-report.json'
+```
+
 ### Blank LCC template path
 
 `plan_blank_lcc_model` and `build_blank_lcc_model` use a real PSCAD 4.6
