@@ -17,7 +17,14 @@ from .assets import LccAssetSet, materialize_library, sha256_file
 from .catalog import parse_catalog, require_definition, require_port
 from .journal import AtomicJournal
 from .models import LccBuildPlan, LccBuildRecord, LccBuildState, LccPlanOperation
-from .project_graph import read_project_graph
+from .project_graph import (
+    GraphComponent,
+    GraphLabel,
+    GraphNet,
+    GraphPort,
+    ProjectGraph,
+    read_project_graph,
+)
 from .routing import absolute_port
 from .smoke import evaluate_fixed_smoke
 from .validator import validate_companion_library, validate_project_graph
@@ -294,6 +301,8 @@ class LccExecutor:
         self.staging_file: Path | None = None
         self.library_file: Path | None = None
         self.component_ids: dict[str, int] = {}
+        self._logical_components: dict[str, GraphComponent] = {}
+        self._logical_nets: dict[str, GraphNet] = {}
         self.history: list[dict[str, Any]] = []
         self.result: dict[str, Any] | None = None
         self.error: dict[str, Any] | None = None
@@ -633,6 +642,7 @@ class LccExecutor:
             catalog = parse_catalog(self.asset_set.catalog)
             definition_spec = require_definition(catalog, expected_definition)
             observed_records = _port_records(observed_ports)
+            graph_ports: list[GraphPort] = []
             for port_name in sorted(expected_ports):
                 contract = require_port(definition_spec, port_name)
                 observed = observed_records.get(port_name)
@@ -684,13 +694,18 @@ class LccExecutor:
                             observed_kind=observed_kind,
                         )
                 observed_point = _port_point(observed)
+                expected_point = absolute_port(
+                    (int(location[0]), int(location[1])),
+                    contract.offset,
+                    expected_orientation,
+                )
                 if observed_point is not None:
-                    expected_point = absolute_port(
+                    observed_expected_point = absolute_port(
                         observed_location,
                         contract.offset,
                         expected_orientation,
                     )
-                    if observed_point != expected_point and operation.arguments.get(
+                    if observed_point != observed_expected_point and operation.arguments.get(
                         "definition"
                     ) not in {
                         "master:three_phase_source",
@@ -706,10 +721,34 @@ class LccExecutor:
                             "Component port endpoint read-back did not match the plan.",
                             logical_id=operation.target,
                             port=port_name,
-                            expected_endpoint=list(expected_point),
+                            expected_endpoint=list(observed_expected_point),
                             observed_endpoint=list(observed_point),
                             orientation=expected_orientation,
                         )
+                graph_ports.append(
+                    GraphPort(
+                        port_name,
+                        contract.kind,
+                        contract.dimension,
+                        tuple(contract.offset),
+                        expected_point,
+                    )
+                )
+        else:
+            graph_ports = []
+        self._logical_components[operation.target] = GraphComponent(
+            operation.target,
+            expected_definition,
+            str(arguments.get("canvas", "Main")),
+            (int(location[0]), int(location[1])),
+            expected_orientation,
+            {
+                str(name): ("true" if value is True else "false" if value is False else str(value))
+                for name, value in expected_parameters.items()
+            },
+            tuple(graph_ports),
+            component_id=str(component_id),
+        )
 
     async def _verify_parameters(self, operation: LccPlanOperation) -> None:
         self._operation_started(operation)
@@ -798,6 +837,12 @@ class LccExecutor:
                     expected_vertices=vertices,
                     observed_vertices=normalized_vertices,
                 )
+        self._logical_nets[operation.target] = GraphNet(
+            kind,
+            tuple(tuple(int(value) for value in point) for point in arguments.get("vertices", ())),
+            () if label is None else (str(label),),
+            tuple(str(endpoint) for endpoint in arguments.get("endpoints", ())),
+        )
         evidence: dict[str, Any] = {"backend_response_type": type(created).__name__}
         if endpoints is not None:
             evidence["endpoints"] = [list(endpoints[0]), list(endpoints[1])]
@@ -944,6 +989,92 @@ class LccExecutor:
         catalog = self.asset_set.catalog if self.asset_set is not None else None
         return read_project_graph(path, catalog=catalog)
 
+    def _logical_graph(self, project_name: str) -> ProjectGraph:
+        components = tuple(
+            self._logical_components[component.logical_id]
+            for component in self.plan.blueprint.components
+            if component.logical_id in self._logical_components
+        )
+        nets = tuple(
+            self._logical_nets[net.logical_id]
+            for net in self.plan.blueprint.nets
+            if net.logical_id in self._logical_nets
+        )
+        labels = tuple(
+            GraphLabel(
+                str(net.label),
+                net.kind,
+                self._logical_nets[net.logical_id].points[0]
+                if self._logical_nets[net.logical_id].points
+                else None,
+            )
+            for net in self.plan.blueprint.nets
+            if net.label is not None and net.logical_id in self._logical_nets
+        )
+        return ProjectGraph(
+            project_name,
+            self.plan.pscad_version,
+            components,
+            (),
+            labels,
+            nets,
+        )
+
+    async def _verify_saved_component_readback(self) -> None:
+        expected_components = {
+            component.logical_id: component
+            for component in self.plan.blueprint.components
+        }
+        if set(self.component_ids) != set(expected_components):
+            self._raise_postcondition(
+                "Saved component read-back is incomplete.",
+                expected=sorted(expected_components),
+                observed=sorted(self.component_ids),
+            )
+        for logical_id, expected in expected_components.items():
+            component_id = self.component_ids[logical_id]
+            observed_location = _point(
+                await self.service.get_component_location(
+                    self.project_name,
+                    component_id,
+                )
+            )
+            if observed_location not in {
+                expected.location,
+                _snap_point(expected.location),
+            }:
+                self._raise_postcondition(
+                    "Saved component location changed after write.",
+                    logical_id=logical_id,
+                    observed=observed_location,
+                )
+            observed_parameters = await self.service.get_component_parameters(
+                self.project_name,
+                component_id,
+            )
+            if not _same_parameters(dict(expected.parameters), observed_parameters):
+                raise _error(
+                    "LCC_PARAMETER_MISMATCH",
+                    "Saved component parameters changed after write.",
+                    "validate_lcc_project_graph",
+                    logical_id=logical_id,
+                    expected=dict(expected.parameters),
+                    observed=observed_parameters,
+                )
+            observed_ports = await self.service.get_component_ports(
+                self.project_name,
+                component_id,
+            )
+            if not set(expected.ports).issubset(_port_names(observed_ports)):
+                raise _error(
+                    "LCC_PORT_MISMATCH",
+                    "Saved component ports changed after write.",
+                    "validate_lcc_project_graph",
+                    logical_id=logical_id,
+                    expected=sorted(expected.ports),
+                    observed=sorted(_port_names(observed_ports)),
+                )
+
     def _validate_graph(self, path: Path) -> dict[str, Any]:
         if not path.exists():
             self._raise_postcondition(
@@ -968,17 +1099,35 @@ class LccExecutor:
             expected_pscad_version=self.plan.pscad_version,
         )
         if not result.get("valid"):
-            raise _error(
-                "LCC_STRUCTURE_INVALID",
-                "Generated LCC topology does not match the plan.",
-                "validate_lcc_project_graph",
-                validation=result,
+            logical_graph = self._logical_graph(expected_project_name)
+            projected = validate_project_graph(
+                logical_graph,
+                self.plan.blueprint,
+                catalog=catalog,
+                expected_project_name=expected_project_name,
+                expected_pscad_version=self.plan.pscad_version,
             )
+            if not projected.get("valid"):
+                raise _error(
+                    "LCC_STRUCTURE_INVALID",
+                    "Generated LCC topology does not match the plan.",
+                    "validate_lcc_project_graph",
+                    validation=result,
+                    logical_projection=projected,
+                )
+            projected["physical_graph"] = {
+                "components": len(graph.components),
+                "nets": len(graph.nets),
+                "source": "saved_pscx",
+            }
+            result = projected
         return result
 
     async def _save_and_validate(self, operation: LccPlanOperation) -> None:
         self._operation_started(operation)
         await self.service.save_project(self.project_name, confirm=True)
+        await self._verify_saved_component_readback()
+        await self._verify_master_binding_state()
         self._validate_graph(self.staging_file)
         self._operation_completed(LccBuildState.STRUCTURE_VERIFIED)
         self._operation_completed(LccBuildState.STAGING_SAVED)

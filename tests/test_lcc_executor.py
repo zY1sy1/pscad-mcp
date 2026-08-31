@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import xml.etree.ElementTree as ET
 from dataclasses import replace
 from pathlib import Path
 
@@ -67,6 +68,45 @@ class OutputFileRecordingService(RecordingPscadService):
     async def read_output_file(self, file_path: str, max_samples: int = 10_000, channel: str | None = None, summary_only: bool = False) -> dict[str, object]:
         self._call("read_output_file", file_path, max_samples, channel, summary_only)
         return {"path": file_path, "verdict": "PASS"}
+
+
+class PhysicalizedSavedGraphService(RecordingPscadService):
+    def _write_project(self, path: Path, project_name: str | None = None) -> None:
+        super()._write_project(path, project_name)
+        root = ET.parse(path).getroot()
+        definition = root.find("./definition")
+        assert definition is not None
+        for component in definition.findall("./component"):
+            component.set("logical_id", str(component.get("definition")))
+        ET.SubElement(
+            definition,
+            "component",
+            {
+                "id": "999",
+                "logical_id": "master:pgb",
+                "definition": "master:pgb",
+                "x": "72",
+                "y": "72",
+                "orientation": "0",
+            },
+        )
+        ET.ElementTree(root).write(path, encoding="utf-8", xml_declaration=True)
+
+
+def test_executor_validates_readback_projection_for_physicalized_saved_graph(
+    tmp_path,
+):
+    record = asyncio.run(
+        execute_build(
+            _plan(tmp_path),
+            PhysicalizedSavedGraphService(),
+            tmp_path,
+            build_id="build-physicalized-graph",
+            poll_interval_s=0,
+        )
+    )
+
+    assert record.state.value == "published"
 
 
 class FixedSmokeRecordingService(OutputFileRecordingService):
@@ -449,8 +489,9 @@ def test_executor_forwards_master_binding_evidence_to_service(tmp_path):
     verification_calls = [
         item for item in service.calls if item[0] == "verify_master_binding_state"
     ]
-    assert len(verification_calls) == 3
+    assert len(verification_calls) == 4
     assert [item[2]["refresh_components"] for item in verification_calls] == [
+        True,
         True,
         True,
         False,
