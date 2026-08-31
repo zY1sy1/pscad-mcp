@@ -286,6 +286,47 @@ and publishes evidence-only no-mutation assets. Path boundaries and hashes are
 verified; default tests are not licensed acceptance and packaged corpus status
 remains `live_verified=false`.
 
+#### Offline corpus relationship truth v2
+
+The `pscad-xml-v2` corpus format adds hash-bound, version-specific definition
+sources plus component, conductor, label, instance-port, hierarchy, confirmed
+net, and net-membership records. Schema v1 remains readable with its original
+shape and semantics; a v1 reader is not given synthetic empty v2 records or a
+false relationship-completeness claim.
+
+Relationship evidence stays separated by contract. `confirmed` nets come only
+from the canonical topology engine, `candidate` edges remain reviewable hints,
+and `unresolved` records retain engineering or blocking evidence. Promotion
+requires every referenced definition to be classified and every definition
+source to match its declared namespace, PSCAD version, byte length, and
+SHA-256. The offline workflow does not require PSCAD, does not start PSCAD, and
+checks that PSCX and PSLX inputs remain unchanged. It makes no licensed
+acceptance claim.
+
+Definition bindings use repeatable
+`--definition-source namespace@version=ABSOLUTE_PATH` arguments. A typical
+review flow is:
+
+```powershell
+$bindings = @(
+  '--definition-source', "master@4.6.2=$master462",
+  '--definition-source', "master@4.6.3=$master463",
+  '--definition-source', "vsc-mmc-lib@4.6.2=$vscMmc462"
+)
+python scripts/build_blueprint_corpus.py propose-spec --source-root $sourceRoot --spec $v1Spec --proposal $v2Proposal @bindings
+python scripts/build_blueprint_corpus.py preflight --source-root $sourceRoot --spec $v2Proposal --output $proposedCorpus @bindings
+python scripts/build_blueprint_corpus.py generate --source-root $sourceRoot --spec $v2Proposal --output $proposedCorpus @bindings
+python scripts/build_blueprint_corpus.py verify --source-root $sourceRoot --spec $v2Proposal --output $proposedCorpus @bindings
+python scripts/build_blueprint_corpus.py compare --source-root $sourceRoot --spec $v2Proposal --output $proposedCorpus @bindings
+```
+
+`propose-spec` writes a new portable candidate and never overwrites an existing
+proposal or packaged spec. `preflight` writes no corpus or Blueprint output.
+Formal asset promotion stops without partial changes when either proprietary
+source is unavailable and is reported as `action: needs_evidence`,
+`missing: master@4.6.3 and/or vsc-mmc-lib@4.6.2`, and
+`assets_changed: false`.
+
 Read-only HVDC inspection may scan an existing absolute `.pscx` source such as
 `C:\\PSCADFiles\\Breaker\\TEST1\\difforder_new.pscx`; all scenario mutations
 still require a workspace-scoped, pre-existing `derived_project` and explicit

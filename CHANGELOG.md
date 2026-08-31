@@ -6,6 +6,15 @@ All notable changes to this project are documented here.
 
 ### Changed
 
+- Added the offline `pscad-xml-v2` corpus relationship pipeline with
+  hash-bound versioned definition sources, hierarchy-safe occurrences,
+  canonical confirmed nets, separate candidate/unresolved evidence, and
+  `preflight`/`propose-spec`/`generate`/`verify`/`compare` CLI flows while
+  retaining schema-v1 read compatibility. The formal four-project asset
+  migration remains `needs_evidence` until `master@4.6.3` and
+  `vsc-mmc-lib@4.6.2` are available; no partial assets or licensed acceptance
+  claim are included.
+
 - Blank LCC lifecycle tools now accept an audited official PSCAD 4.6 template,
   extract its real converter definitions into a valid companion PSLX, preserve
   numbered legacy OUT evidence, and run a waveform-backed commutation-fault
