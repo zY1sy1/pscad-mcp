@@ -7,9 +7,9 @@ import hashlib
 import json
 import os
 import re
+import unittest
 from datetime import datetime
 from pathlib import Path
-import unittest
 
 from pscad_mcp.core.backend.legacy import LegacyBackend
 from pscad_mcp.core.executor import robust_executor
@@ -17,7 +17,6 @@ from pscad_mcp.core.path_policy import PathPolicy
 from pscad_mcp.core.service import PscadService
 from pscad_mcp.hvdc.builders.lcc.assets import load_packaged_asset_set
 from pscad_mcp.hvdc.builders.lcc.service import LccBuilderService
-
 
 ACCEPTANCE_ENABLED = os.getenv("PSCAD_MCP_LCC_ACCEPTANCE") == "1"
 
@@ -177,8 +176,18 @@ class TestLccRealAcceptance(unittest.IsolatedAsyncioTestCase):
         }
         try:
             await service.attach_local()
-            plan = builder.plan_model("CIGRE_LCC", folder=str(evidence))
-            started = await builder.build_model("CIGRE_LCC", plan["plan_hash"], folder=str(evidence), confirm=True)
+            plan = builder.plan_model(
+                "CIGRE_LCC",
+                folder=str(evidence),
+                verification_profile="full_acceptance",
+            )
+            started = await builder.build_model(
+                "CIGRE_LCC",
+                plan["plan_hash"],
+                folder=str(evidence),
+                verification_profile="full_acceptance",
+                confirm=True,
+            )
             build_id = str(started["build_id"])
             deadline = asyncio.get_running_loop().time() + 900.0
             while True:
