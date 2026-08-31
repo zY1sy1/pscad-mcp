@@ -83,7 +83,7 @@ def build_connectivity(topology: ProjectTopology) -> ConnectivityResult:
     malformed: set[str] = set()
     segments: list[_SegmentRecord] = []
     conductor_vertices: dict[str, tuple[_Node, ...]] = {}
-    explicit_vertices: set[_Node] = set()
+    confirmed_nodes: set[_Node] = set()
 
     for conductor in sorted(topology.conductors, key=lambda item: item.key):
         if conductor.namespace not in _KNOWN_NAMESPACES:
@@ -99,7 +99,7 @@ def build_connectivity(topology: ProjectTopology) -> ConnectivityResult:
             (conductor.namespace, conductor.canvas_key, point) for point in vertices
         )
         conductor_vertices[conductor.key] = nodes
-        explicit_vertices.update(nodes)
+        confirmed_nodes.update(nodes)
         for node in nodes:
             union_find.add(node)
         for left, right in zip(nodes, nodes[1:]):
@@ -127,8 +127,8 @@ def build_connectivity(topology: ProjectTopology) -> ConnectivityResult:
                 unresolved.add(f"unknown_port_namespace:{port.key}")
                 continue
             node = (port.kind, component.canvas_key, port.absolute)
-            if node in explicit_vertices:
-                port_attachments.append((port.key, node))
+            union_find.add(node)
+            port_attachments.append((port.key, node))
 
     label_by_key = {label.key: label for label in topology.labels}
     label_attachments: list[tuple[str, _Node]] = []
@@ -141,8 +141,8 @@ def build_connectivity(topology: ProjectTopology) -> ConnectivityResult:
             unresolved.add(f"unknown_label_namespace:{label.key}")
             continue
         node = (label.namespace, label.canvas_key, label.location)
-        if node not in explicit_vertices:
-            continue
+        union_find.add(node)
+        confirmed_nodes.add(node)
         label_attachments.append((label.key, node))
         alias = (label.namespace, label.scope.casefold(), label.name.casefold())
         aliases.setdefault(alias, []).append(node)
@@ -163,6 +163,7 @@ def build_connectivity(topology: ProjectTopology) -> ConnectivityResult:
             outer_port,
             inner_port,
             union_find,
+            confirmed_nodes,
         )
         if status != "valid":
             code = (
@@ -281,6 +282,7 @@ def _boundary_status(
     outer_port: TopologyPort | None,
     inner_port: TopologyPort | None,
     union_find: _UnionFind,
+    confirmed_nodes: set[_Node],
 ) -> str:
     if namespace not in _KNOWN_NAMESPACES:
         return "invalid"
@@ -299,7 +301,7 @@ def _boundary_status(
         if port.dimension is not None and dimension is not None:
             if port.dimension != dimension:
                 return "invalid"
-    if not union_find.contains(outer) or not union_find.contains(inner):
+    if outer not in confirmed_nodes or inner not in confirmed_nodes:
         return "unresolved"
     return "valid"
 
@@ -344,6 +346,9 @@ def _materialize_nets(
     confirmed_roots = {
         union_find.find(nodes[0]) for nodes in conductor_vertices.values()
     }
+    confirmed_roots.update(
+        union_find.find(node) for _label_key, node in label_attachments
+    )
     consolidated: dict[_Node, dict[str, set]] = {}
     for root, group in groups.items():
         current_root = union_find.find(root)

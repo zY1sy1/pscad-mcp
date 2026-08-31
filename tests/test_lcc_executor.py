@@ -32,6 +32,7 @@ from pscad_mcp.hvdc.builders.lcc.project_graph import (
     GraphLabel,
     GraphNet,
     GraphPort,
+    GraphWire,
     ProjectGraph,
 )
 from tests.lcc_builder_fakes import RecordingPscadService
@@ -289,7 +290,11 @@ def test_saved_projection_accepts_only_registry_declared_filter_expansion(
             )
             for component_id, definition, location in physical_components
         ),
-        (),
+        (
+            GraphWire("electrical", ((342, 162), (396, 162))),
+            GraphWire("electrical", ((342, 306), (396, 306))),
+            GraphWire("electrical", ((342, 450), (396, 450))),
+        ),
         (),
         (),
     )
@@ -300,6 +305,15 @@ def test_saved_projection_accepts_only_registry_declared_filter_expansion(
     assert [component.logical_id for component in projected.components] == [
         "filter"
     ]
+    assert projected.wires == ()
+    assert projected.nets == ()
+
+    _projected, missing_wire_findings = executor._saved_logical_graph(
+        replace(saved, wires=saved.wires[:-1])
+    )
+    assert {
+        finding["reason"] for finding in missing_wire_findings
+    } == {"bound physical wire missing from saved PSCX"}
 
     _projected, missing_findings = executor._saved_logical_graph(
         replace(saved, components=saved.components[:-1])
@@ -375,6 +389,34 @@ def test_saved_projection_maps_bound_main_signal_import_from_data_label(
     assert [component.logical_id for component in projected.components] == [
         "signal_import"
     ]
+
+
+def test_saved_validation_blueprint_binds_executed_label_network(tmp_path):
+    plan = _plan(tmp_path)
+    net = LccNetSpec(
+        "labeled_net",
+        "data",
+        (LccEndpoint("source", "P"), LccEndpoint("load", "P")),
+        LccRoute(((10, 20), (40, 20))),
+    )
+    executor = LccExecutor(
+        replace(plan, blueprint=replace(plan.blueprint, nets=(net,))),
+        RecordingPscadService(),
+        tmp_path,
+    )
+    executor._logical_nets = {
+        "labeled_net": GraphNet(
+            "data",
+            ((18, 18), (36, 18)),
+            ("WP1B_SHARED",),
+            ("source:P", "load:P"),
+        )
+    }
+
+    projected = executor._saved_validation_blueprint()
+
+    assert projected.nets[0].label == "WP1B_SHARED"
+    assert projected.nets[0].route is None
 
 
 class FixedSmokeRecordingService(OutputFileRecordingService):

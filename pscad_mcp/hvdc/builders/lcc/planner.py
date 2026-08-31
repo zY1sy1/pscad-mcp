@@ -249,6 +249,77 @@ def _net_route(net: LccNetSpec, component_map: Mapping[str, LccComponentSpec], c
     return validate_orthogonal_route((first, (last[0], first[1]), last))
 
 
+def _wp1b_connection_labels(blueprint) -> dict[str, str]:
+    parent: dict[tuple[str, str], tuple[str, str]] = {}
+
+    def find(endpoint: tuple[str, str]) -> tuple[str, str]:
+        parent.setdefault(endpoint, endpoint)
+        if parent[endpoint] != endpoint:
+            parent[endpoint] = find(parent[endpoint])
+        return parent[endpoint]
+
+    def union(left: tuple[str, str], right: tuple[str, str]) -> None:
+        left_root = find(left)
+        right_root = find(right)
+        if left_root != right_root:
+            parent[right_root] = left_root
+
+    for net in blueprint.nets:
+        endpoints = [
+            (net.kind, f"{endpoint.component}:{endpoint.port}")
+            for endpoint in net.endpoints
+        ]
+        for endpoint in endpoints[1:]:
+            union(endpoints[0], endpoint)
+
+    groups: dict[tuple[str, str], list[Any]] = defaultdict(list)
+    for net in blueprint.nets:
+        endpoint = net.endpoints[0]
+        root = find((net.kind, f"{endpoint.component}:{endpoint.port}"))
+        groups[root].append(net)
+
+    components = {
+        component.logical_id: component for component in blueprint.components
+    }
+    result = {}
+    for nets in groups.values():
+        endpoint_names = sorted(
+            {
+                f"{endpoint.component}:{endpoint.port}"
+                for net in nets
+                for endpoint in net.endpoints
+            }
+        )
+        imported_names = {
+            str(components[endpoint.component].parameters.get("Name"))
+            for net in nets
+            for endpoint in net.endpoints
+            if components[endpoint.component].definition
+            == "master:main_signal_import"
+            and isinstance(
+                components[endpoint.component].parameters.get("Name"),
+                str,
+            )
+        }
+        if len(imported_names) > 1:
+            raise _error(
+                "LCC_BLUEPRINT_INVALID",
+                "One WP1B connection group references multiple imported names.",
+                imported_names=sorted(imported_names),
+            )
+        label = (
+            next(iter(imported_names))
+            if len(imported_names) == 1
+            else "WP1B_"
+            + hashlib.sha256("\0".join(endpoint_names).encode("utf-8")).hexdigest()[
+                :16
+            ].upper()
+        )
+        for net in nets:
+            result[net.logical_id] = label
+    return result
+
+
 def _acceptance_checks(asset_set: LccAssetSet) -> tuple[LccAcceptanceCheck, ...]:
     raw = asset_set.acceptance.get("checks", asset_set.acceptance.get("acceptance_checks", ()))
     if not isinstance(raw, Sequence) or isinstance(raw, (str, bytes, bytearray)):
@@ -768,6 +839,11 @@ def create_plan(
             component.logical_id,
             arguments,
         )
+    connection_labels = (
+        _wp1b_connection_labels(blueprint)
+        if request.verification_profile == WP1B_SMOKE_PROFILE
+        else {}
+    )
     for net in blueprint.nets:
         route = _net_route(net, component_map, catalog)
         phase = "connect_electrical" if net.kind == "electrical" else "connect_data"
@@ -779,7 +855,7 @@ def create_plan(
                 "kind": net.kind,
                 "endpoints": [f"{endpoint.component}:{endpoint.port}" for endpoint in net.endpoints],
                 "vertices": [list(point) for point in route],
-                "label": net.label,
+                "label": connection_labels.get(net.logical_id, net.label),
             },
         )
     planned_outputs = blueprint.outputs

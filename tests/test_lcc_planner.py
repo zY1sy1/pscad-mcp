@@ -14,6 +14,7 @@ from pscad_mcp.hvdc.builders.lcc.planner import (
     LccPlanRequest,
     _component_rectangles,
     _net_route,
+    _wp1b_connection_labels,
     create_plan,
 )
 from pscad_mcp.hvdc.builders.lcc.routing import route_intersects_rectangles
@@ -520,6 +521,24 @@ def test_packaged_fixed_data_nets_do_not_create_main_canvas_labels():
     assert all(net.label is None for net in blueprint.nets if net.kind == "data")
 
 
+def test_wp1b_labels_consolidate_shared_ports_and_reuse_raw_signal_names():
+    labels = _wp1b_connection_labels(load_packaged_asset_set().blueprint)
+
+    assert labels["rectifier_control_enable"] == labels[
+        "rectifier_bridge_enable"
+    ]
+    assert labels["inverter_control_enable"] == labels[
+        "inverter_bridge_enable"
+    ]
+    assert labels["rectifier_idc_feedback"] == labels[
+        "inverter_idc_feedback"
+    ]
+    assert labels["vdc_rect_raw"] == "LCC_VDC_RECT_RAW"
+    assert labels["vdc_inv_raw"] == "LCC_VDC_INV_RAW"
+    assert labels["idc_raw"] == "LCC_IDC_RAW"
+    assert len(set(labels.values())) == 50
+
+
 def test_wp1b_smoke_plan_uses_smoke_gate_and_hashes_profile(tmp_path):
     assets = _asset_set()
     request = LccPlanRequest(
@@ -566,6 +585,21 @@ def test_wp1b_smoke_plan_uses_smoke_gate_and_hashes_profile(tmp_path):
     assert smoke_kinds.index("save_and_validate") < smoke_kinds.index("compile")
     assert smoke_kinds.index("compile") < smoke_kinds.index("create_output")
     assert smoke_kinds.index("create_output") < smoke_kinds.index("simulate")
+    smoke_connections = {
+        item.target: item.arguments
+        for item in smoke.operations
+        if item.kind == "connect_net"
+    }
+    full_connections = {
+        item.target: item.arguments
+        for item in full.operations
+        if item.kind == "connect_net"
+    }
+    assert all(
+        isinstance(arguments["label"], str) and arguments["label"]
+        for arguments in smoke_connections.values()
+    )
+    assert full_connections["ac"]["label"] is None
 
 
 def test_wp1b_smoke_plan_excludes_non_smoke_derived_outputs(tmp_path):

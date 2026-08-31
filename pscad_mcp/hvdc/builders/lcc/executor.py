@@ -1191,6 +1191,33 @@ class LccExecutor:
             for label in graph.labels
             if label.location is not None
         }
+        binding_wires = self._expected_saved_binding_wires()
+        observed_binding_wires = Counter(
+            frozenset((wire.vertices[0], wire.vertices[-1]))
+            for wire in graph.wires
+        )
+        if not self.allow_test_double:
+            for expected_wire in binding_wires:
+                observed_count = observed_binding_wires[expected_wire]
+                if observed_count == 0:
+                    findings.append(
+                        {
+                            "reason": "bound physical wire missing from saved PSCX",
+                            "endpoints": [
+                                list(point) for point in sorted(expected_wire)
+                            ],
+                        }
+                    )
+                elif observed_count > 1:
+                    findings.append(
+                        {
+                            "reason": "duplicate bound physical wire",
+                            "endpoints": [
+                                list(point) for point in sorted(expected_wire)
+                            ],
+                            "count": observed_count,
+                        }
+                    )
         conductors = tuple(
             TopologyConductor(
                 key=f"Main:saved-wire:{index}",
@@ -1206,6 +1233,8 @@ class LccExecutor:
                 vertices=wire.vertices,
             )
             for index, wire in enumerate(graph.wires)
+            if frozenset((wire.vertices[0], wire.vertices[-1]))
+            not in binding_wires
         )
         labels = tuple(
             TopologyLabel(
@@ -1279,19 +1308,32 @@ class LccExecutor:
         )
 
     def _saved_validation_blueprint(self):
-        nets = tuple(
-            replace(
-                net,
-                route=replace(
-                    net.route,
-                    vertices=self._logical_nets[net.logical_id].points,
-                ),
-            )
-            if net.route is not None and net.logical_id in self._logical_nets
-            else net
-            for net in self.plan.blueprint.nets
-        )
-        return replace(self.plan.blueprint, nets=nets)
+        nets = []
+        for net in self.plan.blueprint.nets:
+            executed = self._logical_nets.get(net.logical_id)
+            if executed is None:
+                nets.append(net)
+            elif executed.labels:
+                nets.append(
+                    replace(
+                        net,
+                        label=executed.labels[0],
+                        route=None,
+                    )
+                )
+            elif net.route is not None:
+                nets.append(
+                    replace(
+                        net,
+                        route=replace(
+                            net.route,
+                            vertices=executed.points,
+                        ),
+                    )
+                )
+            else:
+                nets.append(net)
+        return replace(self.plan.blueprint, nets=tuple(nets))
 
     def _expected_saved_binding_extras(
         self,
@@ -1359,6 +1401,55 @@ class LccExecutor:
             if expected[signature] > 0:
                 expected[signature] -= 1
         return expected
+
+    def _expected_saved_binding_wires(
+        self,
+    ) -> set[frozenset[tuple[int, int]]]:
+        result: set[frozenset[tuple[int, int]]] = set()
+        registry = (
+            self.asset_set.master_bindings
+            if self.asset_set is not None
+            else None
+        )
+        if registry is None:
+            return result
+        by_logical_name = registry.by_logical_name
+        for operation in self.plan.operations:
+            evidence = operation.arguments.get("binding")
+            if operation.kind != "place_component" or not isinstance(
+                evidence, Mapping
+            ):
+                continue
+            binding = by_logical_name.get(str(evidence.get("logical_name")))
+            if binding is None or binding.shape.get("kind") != "phase_expand":
+                continue
+            location = tuple(operation.arguments.get("location", ()))
+            if len(location) != 2:
+                continue
+            neutral = binding.shape["neutral"]
+            ground_offset = tuple(neutral["ground_offset"])
+            for instance in binding.shape.get("instances", ()):
+                offset = tuple(instance["offset"])
+                neutral_point = _snap_point(
+                    (
+                        int(location[0]) + int(offset[0]),
+                        int(location[1])
+                        + int(offset[1])
+                        + int(ground_offset[1]),
+                    )
+                )
+                ground_point = _snap_point(
+                    (
+                        int(location[0])
+                        + int(offset[0])
+                        + int(ground_offset[0]),
+                        int(location[1])
+                        + int(offset[1])
+                        + int(ground_offset[1]),
+                    )
+                )
+                result.add(frozenset((neutral_point, ground_point)))
+        return result
 
     async def _verify_saved_component_readback(self) -> None:
         expected_components = {

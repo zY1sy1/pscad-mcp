@@ -204,6 +204,10 @@ class LegacyBackend:
         self._run_last_active_at: dict[str, float] = {}
         self._run_last_active_status: dict[str, str] = {}
         self._known_managed_layers: set[tuple[str, str]] = set()
+        self._connection_labels: dict[
+            tuple[str, str, str, str, tuple[int, int]],
+            tuple[int, int],
+        ] = {}
         self.result_adapter = PscadAdapter(
             executor,
             pscad_module=False,
@@ -356,6 +360,7 @@ class LegacyBackend:
         self._run_last_active_at.clear()
         self._run_last_active_status.clear()
         self._known_managed_layers.clear()
+        self._connection_labels.clear()
 
     async def quit(self) -> None:
         app = self._app
@@ -3979,29 +3984,50 @@ class LegacyBackend:
             raise ValueError(
                 "label and electrical must either both be provided or both omitted."
             )
-        used_names = {
-            item.name
-            for item in await self.find_components(
-                project_name, canvas_name, None, None
-            )
-        }
-        unique_label = label
-        suffix = 2
-        while unique_label in used_names:
-            unique_label = f"{label}_{suffix}"
-            suffix += 1
         definition = "nodelabel" if electrical else "datalabel"
+        existing = await self.find_components(
+            project_name,
+            canvas_name,
+            definition,
+            label,
+        )
+        existing_locations = {
+            (item.location.get("x"), item.location.get("y"))
+            for item in existing
+        }
         for point in (p1, p2):
-            await self.add_component(
+            key = (
+                project_name,
+                canvas_name,
+                definition,
+                label,
+                point,
+            )
+            cached_location = self._connection_labels.get(key)
+            if cached_location in existing_locations:
+                continue
+            self._connection_labels.pop(key, None)
+            if point in existing_locations:
+                self._connection_labels[key] = point
+                continue
+            created = await self.add_component(
                 project_name,
                 canvas_name,
                 "master",
                 definition,
                 point,
                 0,
-                {"Name": unique_label},
+                {"Name": label},
             )
-        return {"label": unique_label}
+            location = (created.location["x"], created.location["y"])
+            self._connection_labels[key] = location
+            if location != point:
+                vertices = [point]
+                if point[0] != location[0] and point[1] != location[1]:
+                    vertices.append((location[0], point[1]))
+                vertices.append(location)
+                await self.create_wire(project_name, canvas_name, vertices)
+        return {"label": label}
 
     async def create_annotation(
         self,

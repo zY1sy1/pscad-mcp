@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import xml.etree.ElementTree as ET
-from collections import Counter
+from collections import Counter, defaultdict
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -225,10 +225,6 @@ def _endpoint(component: str, port: str) -> str:
     return f"{component}:{port}"
 
 
-def _expected_net_key(net: LccNetSpec) -> tuple[str, tuple[str, ...]]:
-    return net.kind, tuple(sorted(_endpoint(endpoint.component, endpoint.port) for endpoint in net.endpoints))
-
-
 def _graph_net_key(net: GraphNet) -> tuple[str, tuple[str, ...]]:
     return net.kind, tuple(sorted(net.endpoints))
 
@@ -280,57 +276,171 @@ def _matches_namespace(net_kind: str, port_kind: str | None) -> bool:
     return False
 
 
+def _expected_net_groups(
+    blueprint: LccBlueprint,
+) -> dict[tuple[str, tuple[str, ...]], dict[str, Any]]:
+    parent: dict[tuple[str, str], tuple[str, str]] = {}
+
+    def find(endpoint: tuple[str, str]) -> tuple[str, str]:
+        parent.setdefault(endpoint, endpoint)
+        if parent[endpoint] != endpoint:
+            parent[endpoint] = find(parent[endpoint])
+        return parent[endpoint]
+
+    def union(left: tuple[str, str], right: tuple[str, str]) -> None:
+        left_root = find(left)
+        right_root = find(right)
+        if left_root != right_root:
+            parent[right_root] = left_root
+
+    label_roots: dict[tuple[str, str], tuple[str, str]] = {}
+    for net in blueprint.nets:
+        endpoints = [
+            (net.kind, _endpoint(endpoint.component, endpoint.port))
+            for endpoint in net.endpoints
+        ]
+        for endpoint in endpoints[1:]:
+            union(endpoints[0], endpoint)
+        if net.label is not None:
+            label_key = (net.kind, net.label)
+            previous = label_roots.get(label_key)
+            if previous is None:
+                label_roots[label_key] = endpoints[0]
+            else:
+                union(previous, endpoints[0])
+
+    grouped: dict[tuple[str, str], list[LccNetSpec]] = defaultdict(list)
+    for net in blueprint.nets:
+        first = net.endpoints[0]
+        grouped[
+            find((net.kind, _endpoint(first.component, first.port)))
+        ].append(net)
+
+    result = {}
+    for nets in grouped.values():
+        endpoints = tuple(
+            sorted(
+                {
+                    _endpoint(endpoint.component, endpoint.port)
+                    for net in nets
+                    for endpoint in net.endpoints
+                }
+            )
+        )
+        labels = tuple(sorted({net.label for net in nets if net.label is not None}))
+        result[(nets[0].kind, endpoints)] = {
+            "nets": tuple(nets),
+            "labels": labels,
+        }
+    return result
+
+
+def _group_logical_id(group: Mapping[str, Any]) -> str:
+    names = [net.logical_id for net in group["nets"]]
+    return names[0] if len(names) == 1 else "|".join(sorted(names))
+
+
 def _compare_nets(
     blueprint: LccBlueprint,
     graph: ProjectGraph,
     observed_components: Mapping[str, GraphComponent],
     errors: list[dict[str, Any]],
 ) -> None:
-    expected_by_key = {_expected_net_key(net): net for net in blueprint.nets}
-    expected_by_endpoints = {key[1]: net for key, net in expected_by_key.items()}
+    expected_by_key = _expected_net_groups(blueprint)
+    expected_by_endpoints = {
+        key[1]: group for key, group in expected_by_key.items()
+    }
     observed_counts = Counter(_graph_net_key(net) for net in graph.nets)
     for key, count in observed_counts.items():
         if count > 1:
-            expected_net = expected_by_key.get(key)
-            errors.append(_finding(None if expected_net is None else expected_net.logical_id, "duplicate net", 1, count))
+            expected_group = expected_by_key.get(key)
+            errors.append(
+                _finding(
+                    None
+                    if expected_group is None
+                    else _group_logical_id(expected_group),
+                    "duplicate net",
+                    1,
+                    count,
+                )
+            )
 
     observed_by_key: dict[tuple[str, tuple[str, ...]], GraphNet] = {}
     for net in graph.nets:
         observed_by_key.setdefault(_graph_net_key(net), net)
     observed_endpoint_sets = {key[1]: net for key, net in observed_by_key.items()}
 
-    for key, expected_net in expected_by_key.items():
+    for key, expected_group in expected_by_key.items():
         observed_net = observed_by_key.get(key)
         endpoint_key = key[1]
+        logical_id = _group_logical_id(expected_group)
         if observed_net is None:
             wrong_namespace = observed_endpoint_sets.get(endpoint_key)
             if wrong_namespace is not None:
-                errors.append(_finding(expected_net.logical_id, "net namespace mismatch", expected_net.kind, wrong_namespace.kind))
+                errors.append(
+                    _finding(
+                        logical_id,
+                        "net namespace mismatch",
+                        key[0],
+                        wrong_namespace.kind,
+                    )
+                )
             else:
-                errors.append(_finding(expected_net.logical_id, "missing net", expected_net.to_dict(), None))
+                errors.append(
+                    _finding(
+                        logical_id,
+                        "missing net",
+                        [net.to_dict() for net in expected_group["nets"]],
+                        None,
+                    )
+                )
             continue
 
-        expected_points = _net_route_points(expected_net)
-        observed_points = _observed_route_points(graph, observed_net, expected_points)
-        if expected_points and observed_points != expected_points:
+        if len(expected_group["nets"]) == 1:
+            expected_net = expected_group["nets"][0]
+            expected_points = _net_route_points(expected_net)
+            observed_points = _observed_route_points(
+                graph,
+                observed_net,
+                expected_points,
+            )
+            if expected_points and observed_points != expected_points:
+                errors.append(
+                    _finding(
+                        logical_id,
+                        "net route mismatch",
+                        expected_points,
+                        observed_points,
+                    )
+                )
+        missing_labels = sorted(
+            set(expected_group["labels"]) - set(observed_net.labels)
+        )
+        if missing_labels:
             errors.append(
                 _finding(
-                    expected_net.logical_id,
-                    "net route mismatch",
-                    expected_points,
-                    observed_points,
+                    logical_id,
+                    "net label mismatch",
+                    list(expected_group["labels"]),
+                    observed_net.labels,
                 )
             )
-        if expected_net.label is not None and expected_net.label not in observed_net.labels:
-            errors.append(_finding(expected_net.logical_id, "net label mismatch", expected_net.label, observed_net.labels))
 
     expected_endpoint_keys = set(expected_by_key)
     for observed_key, observed_net in observed_by_key.items():
         if observed_key not in expected_endpoint_keys:
             logical_id = None
             if observed_key[1] in expected_by_endpoints:
-                logical_id = expected_by_endpoints[observed_key[1]].logical_id
-                errors.append(_finding(logical_id, "net namespace mismatch", expected_by_endpoints[observed_key[1]].kind, observed_net.kind))
+                expected_group = expected_by_endpoints[observed_key[1]]
+                logical_id = _group_logical_id(expected_group)
+                errors.append(
+                    _finding(
+                        logical_id,
+                        "net namespace mismatch",
+                        expected_group["nets"][0].kind,
+                        observed_net.kind,
+                    )
+                )
                 continue
             errors.append(_finding(logical_id, "unexpected net", None, observed_net.to_dict()))
 
@@ -348,14 +458,21 @@ def _compare_nets(
 
 
 def _compare_labels(blueprint: LccBlueprint, graph: ProjectGraph, errors: list[dict[str, Any]]) -> None:
-    expected_labels = sorted({net.label for net in blueprint.nets if net.kind == "data" and net.label})
+    expected_limits: dict[str, int] = {}
+    for key, group in _expected_net_groups(blueprint).items():
+        if key[0] != "data":
+            continue
+        for label in group["labels"]:
+            expected_limits[label] = len(key[1])
     data_label_counts = Counter(label.text for label in graph.labels if label.kind == "data")
-    for label in expected_labels:
+    for label, maximum in sorted(expected_limits.items()):
         count = data_label_counts[label]
         if count == 0:
             errors.append(_finding(label, "missing data label", 1, 0))
-        elif count > 1:
-            errors.append(_finding(label, "duplicate data label", 1, count))
+        elif count > maximum:
+            errors.append(
+                _finding(label, "duplicate data label", maximum, count)
+            )
 
 
 def validate_project_graph(
@@ -417,7 +534,10 @@ def validate_project_graph(
         "valid": not sorted_errors,
         "blueprint": parsed_blueprint.name,
         "components": {"expected": len(parsed_blueprint.components), "observed": len(graph.components)},
-        "nets": {"expected": len(parsed_blueprint.nets), "observed": len(graph.nets)},
+        "nets": {
+            "expected": len(_expected_net_groups(parsed_blueprint)),
+            "observed": len(graph.nets),
+        },
         "errors": sorted_errors,
         "warnings": [],
     }

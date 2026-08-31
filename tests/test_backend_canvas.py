@@ -400,6 +400,54 @@ class TestBackendCanvasContracts(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(connection, {"label": "L1"})
                 self.assertEqual(annotation.definition, "master:annotation")
 
+    async def test_legacy_reuses_named_connection_labels_without_duplicates(self):
+        canvas = CanvasState(modern=False)
+        backend = await self.make_legacy_backend(canvas)
+
+        await backend.create_connection(
+            "case", "Main", (2, 3), (12, 3), "SHARED", False
+        )
+        await backend.create_connection(
+            "case", "Main", (12, 3), (22, 3), "SHARED", False
+        )
+
+        labels = [
+            item
+            for item in canvas.items
+            if item.defn_name == "master:datalabel"
+        ]
+        self.assertEqual([item.name for item in labels], ["SHARED"] * 3)
+        self.assertEqual(
+            [item.location for item in labels],
+            [(2, 3), (12, 3), (22, 3)],
+        )
+
+    async def test_legacy_adapts_and_reuses_labels_at_snapped_ports(self):
+        canvas = SnappingLegacyCanvas()
+        backend = await self.make_legacy_backend(canvas)
+
+        await backend.create_connection(
+            "case", "Main", (1980, 639), (1422, 684), "SHARED", False
+        )
+        await backend.create_connection(
+            "case", "Main", (1980, 639), (1836, 621), "SHARED", False
+        )
+
+        labels = [
+            item
+            for item in canvas.items
+            if item.defn_name == "master:datalabel"
+        ]
+        wires = [
+            item for item in canvas.items if item.defn_name == "WireOrthogonal"
+        ]
+        self.assertEqual(len(labels), 3)
+        self.assertEqual([item.name for item in labels], ["SHARED"] * 3)
+        self.assertIn(
+            [(1980, 639), (1980, 648)],
+            [wire._points for wire in wires],
+        )
+
     async def test_frames_list_and_empty_space_match(self):
         for backend, _canvas in await self.make_backends():
             with self.subTest(backend=backend.name):

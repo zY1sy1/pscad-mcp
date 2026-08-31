@@ -1,3 +1,4 @@
+import copy
 from dataclasses import replace
 from pathlib import Path
 
@@ -471,7 +472,13 @@ def test_validate_companion_library_accepts_packaged_physical_contract():
             "unexpected net",
         ),
         (
-            lambda graph: _mutate_graph(labels=graph.labels + (GraphLabel("GATE_CMD", "data", (100, 80)),)),
+            lambda graph: _mutate_graph(
+                labels=graph.labels
+                + (
+                    GraphLabel("GATE_CMD", "data", (100, 80)),
+                    GraphLabel("GATE_CMD", "data", (100, 90)),
+                )
+            ),
             "duplicate data label",
         ),
         (
@@ -522,6 +529,57 @@ def test_validate_companion_library_reports_foreign_scope(tmp_path):
     assert "foreign_scope" in {
         error["reason"] for error in result["errors"]
     }
+
+
+def test_validate_project_graph_accepts_one_label_per_network_endpoint():
+    graph = _graph()
+    labels = graph.labels + (
+        GraphLabel("GATE_CMD", "data", (100, 50)),
+    )
+
+    result = validate_project_graph(
+        replace(graph, labels=labels),
+        _blueprint(),
+    )
+
+    assert result["valid"] is True
+
+
+def test_validate_project_graph_consolidates_blueprint_edges_at_shared_ports():
+    payload = copy.deepcopy(BLUEPRINT_DATA)
+    payload["nets"].append(
+        {
+            "logical_id": "shared_data_bridge",
+            "kind": "data",
+            "label": "GATE_CMD",
+            "endpoints": [
+                {"component": "interface", "port": "ENABLE"},
+                {"component": "bridge", "port": "GATES"},
+            ],
+        }
+    )
+    graph = _graph()
+    observed = tuple(net for net in graph.nets if net.kind == "electrical") + (
+        _net(
+            "data",
+            ((50, 60), (70, 60), (90, 60), (100, 10), (100, 30), (100, 50)),
+            (
+                "bridge:GATES",
+                "control:ENABLE",
+                "control:GATES",
+                "interface:ENABLE",
+            ),
+            ("ENABLE", "GATE_CMD"),
+        ),
+    )
+
+    result = validate_project_graph(
+        replace(graph, nets=observed),
+        parse_blueprint(payload),
+    )
+
+    assert result["valid"] is True
+    assert result["nets"] == {"expected": 3, "observed": 3}
 
 
 def test_validate_companion_library_rejects_duplicate_custom_definition(tmp_path):
