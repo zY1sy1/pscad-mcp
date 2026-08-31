@@ -1435,7 +1435,36 @@
           "port": "IDC_MEAS"
         }
       ],
-      "label": "IDC_RECT"
+      "label": "IDC_RECT",
+      "route": {
+        "vertices": [
+          [
+            1422,
+            522
+          ],
+          [
+            1120,
+            522
+          ],
+          [
+            1120,
+            576
+          ],
+          [
+            928,
+            576
+          ],
+          [
+            928,
+            596
+          ],
+          [
+            728,
+            596
+          ]
+        ],
+        "policy": "orthogonal"
+      }
     },
     {
       "logical_id": "inverter_idc_feedback",

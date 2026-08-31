@@ -9,7 +9,14 @@ from pscad_mcp.hvdc.builders.lcc.assets import (
     LccAssetSet,
     load_packaged_asset_set,
 )
-from pscad_mcp.hvdc.builders.lcc.planner import LccPlanRequest, create_plan
+from pscad_mcp.hvdc.builders.lcc.catalog import parse_catalog
+from pscad_mcp.hvdc.builders.lcc.planner import (
+    LccPlanRequest,
+    _component_rectangles,
+    _net_route,
+    create_plan,
+)
+from pscad_mcp.hvdc.builders.lcc.routing import route_intersects_rectangles
 from pscad_mcp.hvdc.builders.lcc.schema import parse_blueprint
 
 BLUEPRINT = {
@@ -450,6 +457,29 @@ def test_fixed_blueprint_has_two_transformer_groups_and_four_ao_nets():
         for net in blueprint.nets
         for endpoint in net.endpoints
     )
+
+
+def test_packaged_blueprint_routes_avoid_unrelated_component_rectangles():
+    assets = load_packaged_asset_set()
+    catalog = parse_catalog(assets.catalog)
+    components = {
+        component.logical_id: component
+        for component in assets.blueprint.components
+    }
+    rectangles = list(
+        _component_rectangles(assets.blueprint.components, catalog).items()
+    )
+
+    for net in assets.blueprint.nets:
+        excluded = {endpoint.component for endpoint in net.endpoints}
+        route_intersects_rectangles(
+            _net_route(net, components, catalog),
+            [
+                rectangle
+                for logical_id, rectangle in rectangles
+                if logical_id not in excluded
+            ],
+        )
 
 
 def test_wp1b_smoke_plan_uses_smoke_gate_and_hashes_profile(tmp_path):
