@@ -405,9 +405,13 @@ async def _verify_compile_messages(service: Any, project_name: str) -> None:
         == "error"
     ]
     if errors:
+        summary = " | ".join(
+            str(error.get("text", error.get("message", "compile error")))[:256]
+            for error in errors[:3]
+        )
         raise _error(
             "LCC_COMPANION_COMPILE_FAILED",
-            "PSCAD reported component fixture compile errors.",
+            f"PSCAD reported component fixture compile errors: {summary}",
             "verify_compile_messages",
             errors=errors[:20],
         )

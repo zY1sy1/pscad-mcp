@@ -476,3 +476,4 @@ def test_component_gate_rejects_pscad_compile_error_messages(tmp_path):
     assert result["status"] == "FAIL"
     assert result["failure"]["operation"] == "verify_compile_messages"
     assert result["failure"]["code"] == "LCC_COMPANION_COMPILE_FAILED"
+    assert "Input port is floating." in result["failure"]["message"]
