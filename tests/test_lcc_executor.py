@@ -96,6 +96,70 @@ class FixedSmokeRecordingService(OutputFileRecordingService):
         )
 
 
+class PredeclaredLegacyOutputService(RecordingPscadService):
+    def __init__(self):
+        super().__init__()
+        self.saved = False
+
+    async def create_output_channel(
+        self,
+        project_name,
+        path,
+        units,
+        *,
+        call_id=None,
+    ):
+        self._call(
+            "create_output_channel",
+            project_name,
+            path,
+            units,
+            call_id=call_id,
+        )
+        raise BackendError(
+            "CAPABILITY_UNAVAILABLE",
+            "Legacy output channels are predeclared components.",
+            "legacy",
+            "create_output_channel",
+        )
+
+    async def save_project(self, project_name, *, confirm=False):
+        await super().save_project(project_name, confirm=confirm)
+        self.saved = True
+        return "saved"
+
+    async def get_output_channels(self, project_name):
+        self._call("get_output_channels", project_name)
+        if not self.saved:
+            raise BackendError(
+                "CAPABILITY_UNAVAILABLE",
+                "Output metadata is not saved yet.",
+                "legacy",
+                "get_output_channels",
+            )
+        return [
+            {
+                "path": "Main/VDC",
+                "units": "kV",
+                "call_id": None,
+            }
+        ]
+
+
+def test_legacy_predeclared_output_is_saved_before_static_verification(tmp_path):
+    service = PredeclaredLegacyOutputService()
+    executor = LccExecutor(_plan(tmp_path), service, tmp_path)
+    operation = next(
+        item for item in executor.plan.operations if item.kind == "create_output"
+    )
+
+    asyncio.run(executor._create_output(operation))
+
+    calls = [call[0] for call in service.calls]
+    assert calls.index("create_output_channel") < calls.index("save_project")
+    assert calls.index("save_project") < calls.index("get_output_channels")
+
+
 def _plan(tmp_path: Path) -> LccBuildPlan:
     blueprint = LccBlueprint(
         schema_version=1,

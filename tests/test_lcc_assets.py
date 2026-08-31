@@ -195,6 +195,7 @@ def test_packaged_asset_exposes_hashed_wp1b_smoke_contract():
         "master:integer_sum",
         "master:three_phase_breakout",
         "master:integer_to_real",
+        "master:output_channel",
     }
 
 

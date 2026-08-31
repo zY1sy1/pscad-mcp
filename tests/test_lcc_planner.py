@@ -478,6 +478,54 @@ def test_wp1b_smoke_plan_uses_smoke_gate_and_hashes_profile(tmp_path):
         "accept",
         "publish",
     ]
+    assert [
+        item.arguments["path"]
+        for item in smoke.operations
+        if item.kind == "create_output"
+    ] == list(assets.smoke["required_channels"])
+    assert [
+        item.arguments["path"]
+        for item in full.operations
+        if item.kind == "create_output"
+    ] == [output.path for output in assets.blueprint.outputs]
+
+
+def test_wp1b_smoke_plan_excludes_non_smoke_derived_outputs(tmp_path):
+    candidate = copy.deepcopy(BLUEPRINT)
+    candidate["measurements"].append(
+        {
+            "logical_id": "derived_measurement",
+            "kind": "electrical",
+            "component": "source",
+            "port": "ac",
+            "channels": ["Main/DERIVED"],
+            "derived_from": "vdc_measurement",
+        }
+    )
+    candidate["outputs"].append(
+        {
+            "logical_id": "derived",
+            "path": "Main/DERIVED",
+            "units": "kV",
+            "role": "derived_voltage",
+            "measurement": "derived_measurement",
+        }
+    )
+    assets = _asset_set(candidate)
+    request = LccPlanRequest(
+        project_name="CIGRE_LCC",
+        folder=str(tmp_path),
+        simulation_duration_s=0.1,
+        verification_profile="wp1b_smoke",
+    )
+
+    plan = create_plan(request, assets, INVENTORY, tmp_path)
+
+    assert [
+        item.arguments["path"]
+        for item in plan.operations
+        if item.kind == "create_output"
+    ] == ["Main/VDC"]
 
 
 @pytest.mark.parametrize(

@@ -429,6 +429,36 @@
             <param name="Name" value="ALPHA" />
           </paramlist>
         </User>
+        <User classid="UserCmp" name="" defn="master:pgb" id="713473539" x="756" y="126" w="70" h="30" z="130" orient="0" link="-1" q="4">
+          <paramlist link="-1" name="" crc="63669868">
+            <param name="Name" value="AO_RECT_Y" />
+            <param name="Group" value="" />
+            <param name="UseSignalName" value="0" />
+            <param name="enab" value="1" />
+            <param name="Display" value="1" />
+            <param name="Scale" value="1.0" />
+            <param name="Units" value="rad" />
+            <param name="mrun" value="0" />
+            <param name="Pol" value="0" />
+            <param name="Max" value="2.0" />
+            <param name="Min" value="-2.0" />
+          </paramlist>
+        </User>
+        <User classid="UserCmp" name="" defn="master:pgb" id="1085723328" x="756" y="324" w="70" h="30" z="140" orient="0" link="-1" q="4">
+          <paramlist link="-1" name="" crc="63669868">
+            <param name="Name" value="AO_RECT_D" />
+            <param name="Group" value="" />
+            <param name="UseSignalName" value="0" />
+            <param name="enab" value="1" />
+            <param name="Display" value="1" />
+            <param name="Scale" value="1.0" />
+            <param name="Units" value="rad" />
+            <param name="mrun" value="0" />
+            <param name="Pol" value="0" />
+            <param name="Max" value="2.0" />
+            <param name="Min" value="-2.0" />
+          </paramlist>
+        </User>
         <Wire classid="WireOrthogonal" name="CURRENT_ERROR" x="126" y="180" w="172" h="55" orient="0" id="1739989979">
           <vertex x="0" y="0" />
           <vertex x="162" y="45" />
@@ -468,6 +498,14 @@
         <Wire classid="WireOrthogonal" name="ALPHA_OUTPUT" x="720" y="225" w="172" h="55" orient="0" id="480981425">
           <vertex x="0" y="0" />
           <vertex x="162" y="45" />
+        </Wire>
+        <Wire classid="WireOrthogonal" name="AO_Y_MONITOR" x="720" y="225" w="46" h="109" orient="0" id="276362498">
+          <vertex x="0" y="0" />
+          <vertex x="36" y="-99" />
+        </Wire>
+        <Wire classid="WireOrthogonal" name="AO_D_MONITOR" x="720" y="225" w="46" h="109" orient="0" id="585182464">
+          <vertex x="0" y="0" />
+          <vertex x="36" y="99" />
         </Wire>
       </schematic>
     </Definition>
@@ -602,6 +640,51 @@
             <param name="Name" value="GAMMA" />
           </paramlist>
         </User>
+        <User classid="UserCmp" name="" defn="master:pgb" id="491101346" x="864" y="180" w="70" h="30" z="160" orient="0" link="-1" q="4">
+          <paramlist link="-1" name="" crc="63669868">
+            <param name="Name" value="AO_INV_Y" />
+            <param name="Group" value="" />
+            <param name="UseSignalName" value="0" />
+            <param name="enab" value="1" />
+            <param name="Display" value="1" />
+            <param name="Scale" value="1.0" />
+            <param name="Units" value="rad" />
+            <param name="mrun" value="0" />
+            <param name="Pol" value="0" />
+            <param name="Max" value="2.0" />
+            <param name="Min" value="-2.0" />
+          </paramlist>
+        </User>
+        <User classid="UserCmp" name="" defn="master:pgb" id="1459344707" x="864" y="414" w="70" h="30" z="170" orient="0" link="-1" q="4">
+          <paramlist link="-1" name="" crc="63669868">
+            <param name="Name" value="AO_INV_D" />
+            <param name="Group" value="" />
+            <param name="UseSignalName" value="0" />
+            <param name="enab" value="1" />
+            <param name="Display" value="1" />
+            <param name="Scale" value="1.0" />
+            <param name="Units" value="rad" />
+            <param name="mrun" value="0" />
+            <param name="Pol" value="0" />
+            <param name="Max" value="2.0" />
+            <param name="Min" value="-2.0" />
+          </paramlist>
+        </User>
+        <User classid="UserCmp" name="" defn="master:pgb" id="1718888380" x="396" y="180" w="70" h="30" z="180" orient="0" link="-1" q="4">
+          <paramlist link="-1" name="" crc="63669868">
+            <param name="Name" value="GAMMA_INV" />
+            <param name="Group" value="" />
+            <param name="UseSignalName" value="0" />
+            <param name="enab" value="1" />
+            <param name="Display" value="1" />
+            <param name="Scale" value="1.0" />
+            <param name="Units" value="rad" />
+            <param name="mrun" value="0" />
+            <param name="Pol" value="0" />
+            <param name="Max" value="2.0" />
+            <param name="Min" value="-2.0" />
+          </paramlist>
+        </User>
         <Wire classid="WireOrthogonal" name="GAMMA_MIN" x="126" y="198" w="136" h="46" orient="0" id="1797539155">
           <vertex x="0" y="0" />
           <vertex x="126" y="36" />
@@ -649,6 +732,18 @@
         <Wire classid="WireOrthogonal" name="GAMMA_OUTPUT" x="324" y="234" w="658" h="136" orient="0" id="776399689">
           <vertex x="0" y="0" />
           <vertex x="648" y="126" />
+        </Wire>
+        <Wire classid="WireOrthogonal" name="AO_Y_MONITOR" x="810" y="306" w="64" h="136" orient="0" id="760916509">
+          <vertex x="0" y="0" />
+          <vertex x="54" y="-126" />
+        </Wire>
+        <Wire classid="WireOrthogonal" name="AO_D_MONITOR" x="810" y="306" w="64" h="118" orient="0" id="42638927">
+          <vertex x="0" y="0" />
+          <vertex x="54" y="108" />
+        </Wire>
+        <Wire classid="WireOrthogonal" name="GAMMA_MONITOR" x="324" y="234" w="82" h="64" orient="0" id="144051293">
+          <vertex x="0" y="0" />
+          <vertex x="72" y="-54" />
         </Wire>
       </schematic>
     </Definition>
@@ -720,6 +815,50 @@
             <param name="Name" value="ENABLE_INV" />
           </paramlist>
         </User>
+        <User classid="UserCmp" name="" defn="master:unity" id="1955744625" x="270" y="270" w="40" h="19" z="90" orient="0" link="-1" q="4">
+          <paramlist link="-1" name="" crc="39250382">
+            <param name="IType" value="1" />
+            <param name="OType" value="2" />
+            <param name="Dim" value="1" />
+          </paramlist>
+        </User>
+        <User classid="UserCmp" name="" defn="master:unity" id="1563089823" x="270" y="342" w="40" h="19" z="100" orient="0" link="-1" q="4">
+          <paramlist link="-1" name="" crc="39250382">
+            <param name="IType" value="1" />
+            <param name="OType" value="2" />
+            <param name="Dim" value="1" />
+          </paramlist>
+        </User>
+        <User classid="UserCmp" name="" defn="master:pgb" id="1620436898" x="432" y="270" w="70" h="30" z="110" orient="0" link="-1" q="4">
+          <paramlist link="-1" name="" crc="63669868">
+            <param name="Name" value="ENABLE_RECT" />
+            <param name="Group" value="" />
+            <param name="UseSignalName" value="0" />
+            <param name="enab" value="1" />
+            <param name="Display" value="1" />
+            <param name="Scale" value="1.0" />
+            <param name="Units" value="state" />
+            <param name="mrun" value="0" />
+            <param name="Pol" value="0" />
+            <param name="Max" value="2.0" />
+            <param name="Min" value="-2.0" />
+          </paramlist>
+        </User>
+        <User classid="UserCmp" name="" defn="master:pgb" id="1536377453" x="432" y="342" w="70" h="30" z="120" orient="0" link="-1" q="4">
+          <paramlist link="-1" name="" crc="63669868">
+            <param name="Name" value="ENABLE_INV" />
+            <param name="Group" value="" />
+            <param name="UseSignalName" value="0" />
+            <param name="enab" value="1" />
+            <param name="Display" value="1" />
+            <param name="Scale" value="1.0" />
+            <param name="Units" value="state" />
+            <param name="mrun" value="0" />
+            <param name="Pol" value="0" />
+            <param name="Max" value="2.0" />
+            <param name="Min" value="-2.0" />
+          </paramlist>
+        </User>
         <Wire classid="WireOrthogonal" name="IORDER_OUTPUT" x="216" y="126" w="190" h="10" orient="0" id="1626644280">
           <vertex x="0" y="0" />
           <vertex x="180" y="0" />
@@ -735,6 +874,22 @@
         <Wire classid="WireOrthogonal" name="ENABLE_INV_OUTPUT" x="216" y="342" w="190" h="10" orient="0" id="1392657126">
           <vertex x="0" y="0" />
           <vertex x="180" y="0" />
+        </Wire>
+        <Wire classid="WireOrthogonal" name="ENABLE_RECT_CONVERSION" x="216" y="270" w="64" h="10" orient="0" id="635529779">
+          <vertex x="0" y="0" />
+          <vertex x="54" y="0" />
+        </Wire>
+        <Wire classid="WireOrthogonal" name="ENABLE_INV_CONVERSION" x="216" y="342" w="64" h="10" orient="0" id="1945911294">
+          <vertex x="0" y="0" />
+          <vertex x="54" y="0" />
+        </Wire>
+        <Wire classid="WireOrthogonal" name="ENABLE_RECT_MONITOR" x="306" y="270" w="136" h="10" orient="0" id="1096431074">
+          <vertex x="0" y="0" />
+          <vertex x="126" y="0" />
+        </Wire>
+        <Wire classid="WireOrthogonal" name="ENABLE_INV_MONITOR" x="306" y="342" w="136" h="10" orient="0" id="1418426831">
+          <vertex x="0" y="0" />
+          <vertex x="126" y="0" />
         </Wire>
       </schematic>
     </Definition>
@@ -791,6 +946,51 @@
             <param name="Name" value="IDC" />
           </paramlist>
         </User>
+        <User classid="UserCmp" name="" defn="master:pgb" id="16131375" x="288" y="72" w="70" h="30" z="70" orient="0" link="-1" q="4">
+          <paramlist link="-1" name="" crc="63669868">
+            <param name="Name" value="VDC_RECT" />
+            <param name="Group" value="" />
+            <param name="UseSignalName" value="0" />
+            <param name="enab" value="1" />
+            <param name="Display" value="1" />
+            <param name="Scale" value="1.0" />
+            <param name="Units" value="kV" />
+            <param name="mrun" value="0" />
+            <param name="Pol" value="0" />
+            <param name="Max" value="2.0" />
+            <param name="Min" value="-2.0" />
+          </paramlist>
+        </User>
+        <User classid="UserCmp" name="" defn="master:pgb" id="1398644875" x="288" y="342" w="70" h="30" z="80" orient="0" link="-1" q="4">
+          <paramlist link="-1" name="" crc="63669868">
+            <param name="Name" value="VDC_INV" />
+            <param name="Group" value="" />
+            <param name="UseSignalName" value="0" />
+            <param name="enab" value="1" />
+            <param name="Display" value="1" />
+            <param name="Scale" value="1.0" />
+            <param name="Units" value="kV" />
+            <param name="mrun" value="0" />
+            <param name="Pol" value="0" />
+            <param name="Max" value="2.0" />
+            <param name="Min" value="-2.0" />
+          </paramlist>
+        </User>
+        <User classid="UserCmp" name="" defn="master:pgb" id="1615814555" x="288" y="414" w="70" h="30" z="90" orient="0" link="-1" q="4">
+          <paramlist link="-1" name="" crc="63669868">
+            <param name="Name" value="IDC" />
+            <param name="Group" value="" />
+            <param name="UseSignalName" value="0" />
+            <param name="enab" value="1" />
+            <param name="Display" value="1" />
+            <param name="Scale" value="1.0" />
+            <param name="Units" value="kA" />
+            <param name="mrun" value="0" />
+            <param name="Pol" value="0" />
+            <param name="Max" value="2.0" />
+            <param name="Min" value="-2.0" />
+          </paramlist>
+        </User>
         <Wire classid="WireOrthogonal" name="VDC_RECT_IMPORT" x="216" y="126" w="190" h="10" orient="0" id="1865780069">
           <vertex x="0" y="0" />
           <vertex x="180" y="0" />
@@ -802,6 +1002,18 @@
         <Wire classid="WireOrthogonal" name="IDC_IMPORT" x="216" y="270" w="190" h="10" orient="0" id="178248465">
           <vertex x="0" y="0" />
           <vertex x="180" y="0" />
+        </Wire>
+        <Wire classid="WireOrthogonal" name="VDC_RECT_MONITOR" x="216" y="126" w="82" h="64" orient="0" id="1762163440">
+          <vertex x="0" y="0" />
+          <vertex x="72" y="-54" />
+        </Wire>
+        <Wire classid="WireOrthogonal" name="VDC_INV_MONITOR" x="216" y="198" w="82" h="154" orient="0" id="714384429">
+          <vertex x="0" y="0" />
+          <vertex x="72" y="144" />
+        </Wire>
+        <Wire classid="WireOrthogonal" name="IDC_MONITOR" x="216" y="270" w="82" h="154" orient="0" id="320168544">
+          <vertex x="0" y="0" />
+          <vertex x="72" y="144" />
         </Wire>
       </schematic>
     </Definition>

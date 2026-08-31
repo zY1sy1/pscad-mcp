@@ -782,7 +782,20 @@ def create_plan(
                 "label": net.label,
             },
         )
-    for output in blueprint.outputs:
+    planned_outputs = blueprint.outputs
+    if request.verification_profile == WP1B_SMOKE_PROFILE:
+        output_by_path = {output.path: output for output in blueprint.outputs}
+        required_paths = tuple(asset_set.smoke["required_channels"])
+        if len(output_by_path) != len(blueprint.outputs) or any(
+            path not in output_by_path for path in required_paths
+        ):
+            raise _error(
+                "LCC_BLUEPRINT_INVALID",
+                "The WP1B smoke outputs are not an exact blueprint subset.",
+                required_channels=list(required_paths),
+            )
+        planned_outputs = tuple(output_by_path[path] for path in required_paths)
+    for output in planned_outputs:
         add("create_outputs", "create_output", output.logical_id, output.to_dict())
     add("save_and_validate", "save_and_validate", project_name, {})
     add("compile", "compile", project_name, {})

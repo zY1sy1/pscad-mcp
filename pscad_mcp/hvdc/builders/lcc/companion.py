@@ -48,6 +48,7 @@ EXPECTED_MASTER_COUNTS = {
         "master:mult": 1,
         "master:pi_ctlr": 1,
         "master:hardlimit": 1,
+        "master:pgb": 2,
     },
     "cigre_lcc_v1:InverterControl": {
         "master:import": 6,
@@ -58,16 +59,32 @@ EXPECTED_MASTER_COUNTS = {
         "master:mult": 1,
         "master:pi_ctlr": 1,
         "master:hardlimit": 1,
+        "master:pgb": 3,
     },
     "cigre_lcc_v1:Initialization": {
         "master:const": 2,
         "master:consti": 2,
         "master:export": 4,
+        "master:unity": 2,
+        "master:pgb": 2,
     },
     "cigre_lcc_v1:SignalInterface": {
         "master:import": 3,
         "master:export": 3,
+        "master:pgb": 3,
     },
+}
+
+EXPECTED_OUTPUT_CHANNELS = {
+    "cigre_lcc_v1:LCC12PulseBridge": (),
+    "cigre_lcc_v1:RectifierControl": ("AO_RECT_Y", "AO_RECT_D"),
+    "cigre_lcc_v1:InverterControl": (
+        "AO_INV_Y",
+        "AO_INV_D",
+        "GAMMA_INV",
+    ),
+    "cigre_lcc_v1:Initialization": ("ENABLE_RECT", "ENABLE_INV"),
+    "cigre_lcc_v1:SignalInterface": ("VDC_RECT", "VDC_INV", "IDC"),
 }
 
 
@@ -155,6 +172,8 @@ REQUIRED_CONNECTIONS = {
         "AO_Y_OUTPUT",
         "AO_D_OUTPUT",
         "ALPHA_OUTPUT",
+        "AO_Y_MONITOR",
+        "AO_D_MONITOR",
     },
     "cigre_lcc_v1:InverterControl": {
         "GAMMA_MIN",
@@ -164,17 +183,27 @@ REQUIRED_CONNECTIONS = {
         "AO_Y_OUTPUT",
         "AO_D_OUTPUT",
         "GAMMA_OUTPUT",
+        "AO_Y_MONITOR",
+        "AO_D_MONITOR",
+        "GAMMA_MONITOR",
     },
     "cigre_lcc_v1:Initialization": {
         "IORDER_OUTPUT",
         "GAMMA_ORDER_OUTPUT",
         "ENABLE_RECT_OUTPUT",
         "ENABLE_INV_OUTPUT",
+        "ENABLE_RECT_CONVERSION",
+        "ENABLE_INV_CONVERSION",
+        "ENABLE_RECT_MONITOR",
+        "ENABLE_INV_MONITOR",
     },
     "cigre_lcc_v1:SignalInterface": {
         "VDC_RECT_IMPORT",
         "VDC_INV_IMPORT",
         "IDC_IMPORT",
+        "VDC_RECT_MONITOR",
+        "VDC_INV_MONITOR",
+        "IDC_MONITOR",
     },
 }
 
@@ -336,13 +365,14 @@ def _schematic_evidence(
     definition_name: str,
     definition: ET.Element,
     errors: list[dict[str, Any]],
-) -> tuple[Counter[str], tuple[str, ...]]:
+) -> tuple[Counter[str], tuple[str, ...], tuple[str, ...]]:
     schematic = _direct_child(definition, "schematic")
     if schematic is None:
-        return Counter(), ()
+        return Counter(), (), ()
     identifiers: set[str] = set()
     instances: Counter[str] = Counter()
     connections: list[str] = []
+    output_channels: list[str] = []
     for element in schematic:
         tag = _local(element.tag)
         identifier = (_attribute(element, "id") or "").strip()
@@ -364,11 +394,38 @@ def _schematic_evidence(
             ).strip()
             if scoped:
                 instances[scoped] += 1
+                if scoped == "master:pgb":
+                    paramlist = _direct_child(element, "paramlist")
+                    name = ""
+                    if paramlist is not None:
+                        name = next(
+                            (
+                                (_attribute(param, "value") or "").strip()
+                                for param in paramlist
+                                if _local(param.tag) == "param"
+                                and (_attribute(param, "name") or "").casefold()
+                                == "name"
+                            ),
+                            "",
+                        )
+                    if not name:
+                        errors.append(
+                            {
+                                "definition": definition_name,
+                                "reason": "output_channel_name_missing",
+                            }
+                        )
+                    else:
+                        output_channels.append(name)
         elif tag == "wire":
             name = (_attribute(element, "name") or "").strip()
             if name:
                 connections.append(name)
-    return instances, tuple(sorted(connections))
+    return (
+        instances,
+        tuple(sorted(connections)),
+        tuple(output_channels),
+    )
 
 
 def _scan_forbidden_content(
@@ -500,7 +557,7 @@ def audit_companion_library(path: str | Path) -> dict[str, Any]:
                     "observed": ports,
                 }
             )
-        instances, connections = _schematic_evidence(
+        instances, connections, output_channels = _schematic_evidence(
             definition_name, definition, errors
         )
         expected_instances = Counter(EXPECTED_MASTER_COUNTS[definition_name])
@@ -524,10 +581,21 @@ def audit_companion_library(path: str | Path) -> dict[str, Any]:
                     "observed": missing_connections,
                 }
             )
+        expected_outputs = EXPECTED_OUTPUT_CHANNELS[definition_name]
+        if output_channels != expected_outputs:
+            errors.append(
+                {
+                    "definition": definition_name,
+                    "reason": "output_channel_mismatch",
+                    "expected": list(expected_outputs),
+                    "observed": list(output_channels),
+                }
+            )
         evidence[definition_name] = {
             "ports": ports,
             "master_instances": dict(instances),
             "connections": list(connections),
+            "output_channels": list(output_channels),
         }
 
     if errors:

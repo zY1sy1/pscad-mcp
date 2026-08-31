@@ -31,6 +31,10 @@ six-pulse Master bridges; the companion does not fabricate individual valve
 records. `RectifierControl` uses current-error PI and hard limiting;
 `InverterControl` uses minimum gamma feedback, PI, and hard limiting. Page
 interfaces use audited `pin`, `breakout`, `import`, and `export` primitives.
+The no-fault smoke channels use ten audited `master:pgb` output blocks inside
+the companion definitions. Initialization enable states pass through audited
+integer-to-real `unity` adapters before reaching their output blocks; the
+external integer enable contract is unchanged.
 
 Offline structure evidence does not imply physical PASS. Load, instance
 read-back, save/reload, component compile, full-topology compile, and no-fault
@@ -54,6 +58,11 @@ the registry or companion library.
 - `ac_meter` and `dc_meter -> multimeter`, with explicit modes that retain the
   required electrical pair.
 - `ground -> ground`.
+
+The schema-v2 companion section separately binds every Master primitive used
+inside the repository-authored PSLX, including `pgb -> output_channel`. These
+bindings contain metadata and parameter contracts only; no vendor Definition
+body is redistributed.
 
 The official examples informed component identity and semantics only. They are
 not redistributed by this asset package. Licensed Master-binding compile

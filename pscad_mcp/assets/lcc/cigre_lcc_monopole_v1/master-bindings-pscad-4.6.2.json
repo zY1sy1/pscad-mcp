@@ -2046,6 +2046,145 @@
         }
       ],
       "evidence_parameters": []
+    },
+    {
+      "logical_name": "master:output_channel",
+      "physical_definition": "pgb",
+      "shape": {
+        "kind": "direct"
+      },
+      "ports": [
+        {
+          "logical": "INPUT",
+          "physical": "Signl",
+          "kind": "data",
+          "dimension": 1,
+          "occurrence": 0
+        }
+      ],
+      "parameters": [
+        {
+          "logical": [
+            "Name"
+          ],
+          "physical": [
+            "Name"
+          ],
+          "transform": {
+            "kind": "identity"
+          },
+          "physical_contracts": {
+            "Name": {
+              "type": "Text",
+              "unit": null
+            }
+          }
+        },
+        {
+          "logical": [
+            "Units"
+          ],
+          "physical": [
+            "Units"
+          ],
+          "transform": {
+            "kind": "identity"
+          },
+          "physical_contracts": {
+            "Units": {
+              "type": "Text",
+              "unit": null
+            }
+          }
+        }
+      ],
+      "fixed_parameters": [
+        {
+          "physical": "UseSignalName",
+          "value": 0,
+          "contract": {
+            "type": "Choice",
+            "unit": null,
+            "choices": [
+              "0",
+              "1"
+            ]
+          }
+        },
+        {
+          "physical": "enab",
+          "value": 1,
+          "contract": {
+            "type": "Choice",
+            "unit": null,
+            "choices": [
+              "0",
+              "1"
+            ]
+          }
+        },
+        {
+          "physical": "Display",
+          "value": 1,
+          "contract": {
+            "type": "Choice",
+            "unit": null,
+            "choices": [
+              "0",
+              "1"
+            ]
+          }
+        },
+        {
+          "physical": "Scale",
+          "value": 1.0,
+          "contract": {
+            "type": "Real",
+            "unit": ""
+          }
+        },
+        {
+          "physical": "mrun",
+          "value": 0,
+          "contract": {
+            "type": "Choice",
+            "unit": null,
+            "choices": [
+              "0",
+              "1"
+            ]
+          }
+        },
+        {
+          "physical": "Pol",
+          "value": 0,
+          "contract": {
+            "type": "Choice",
+            "unit": null,
+            "choices": [
+              "0",
+              "1"
+            ]
+          }
+        },
+        {
+          "physical": "Max",
+          "value": 2.0,
+          "contract": {
+            "type": "Real",
+            "unit": ""
+          }
+        },
+        {
+          "physical": "Min",
+          "value": -2.0,
+          "contract": {
+            "type": "Real",
+            "unit": ""
+          }
+        }
+      ],
+      "evidence_parameters": []
     }
   ]
 }

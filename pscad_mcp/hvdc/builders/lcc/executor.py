@@ -827,13 +827,34 @@ class LccExecutor:
                 call_id=expected_call_id,
             )
         except BackendError as error:
-            raise _error(
-                "LCC_OUTPUT_INCOMPLETE",
-                "The PSCAD output-channel definition could not be created.",
-                "create_lcc_output_channel",
-                selector=selector,
-                upstream_code=error.code,
-            ) from error
+            if error.code != "CAPABILITY_UNAVAILABLE":
+                raise _error(
+                    "LCC_OUTPUT_INCOMPLETE",
+                    "The PSCAD output-channel definition could not be created.",
+                    "create_lcc_output_channel",
+                    selector=selector,
+                    upstream_code=error.code,
+                ) from error
+            saver = getattr(self.service, "save_project", None)
+            if not callable(saver):
+                raise _error(
+                    "LCC_OUTPUT_INCOMPLETE",
+                    "Predeclared output channels cannot be saved for verification.",
+                    "create_lcc_output_channel",
+                    selector=selector,
+                    upstream_code=error.code,
+                ) from error
+            try:
+                await saver(self.project_name, confirm=True)
+            except BaseException as save_error:
+                raise _error(
+                    "LCC_OUTPUT_INCOMPLETE",
+                    "Predeclared output channels could not be saved.",
+                    "create_lcc_output_channel",
+                    selector=selector,
+                    exception=type(save_error).__name__,
+                ) from save_error
+            created = {"source": "predeclared_component"}
         except BaseException as error:
             raise _error(
                 "LCC_OUTPUT_INCOMPLETE",

@@ -7,6 +7,7 @@ import pytest
 
 from pscad_mcp.core.backend.base import BackendError
 from pscad_mcp.hvdc.builders.lcc.companion import audit_companion_library
+from scripts.build_lcc_companion_library import render_library
 
 PORTS = {
     "LCC12PulseBridge": (
@@ -80,6 +81,8 @@ USERS = {
         "master:mult",
         "master:pi_ctlr",
         "master:hardlimit",
+        "master:pgb",
+        "master:pgb",
     ),
     "InverterControl": (
         *("master:import" for _ in range(6)),
@@ -90,6 +93,9 @@ USERS = {
         "master:mult",
         "master:pi_ctlr",
         "master:hardlimit",
+        "master:pgb",
+        "master:pgb",
+        "master:pgb",
     ),
     "Initialization": (
         "master:const",
@@ -97,6 +103,10 @@ USERS = {
         "master:consti",
         "master:consti",
         *("master:export" for _ in range(4)),
+        "master:unity",
+        "master:unity",
+        "master:pgb",
+        "master:pgb",
     ),
     "SignalInterface": (
         "master:import",
@@ -105,6 +115,9 @@ USERS = {
         "master:export",
         "master:export",
         "master:export",
+        "master:pgb",
+        "master:pgb",
+        "master:pgb",
     ),
 }
 
@@ -127,6 +140,8 @@ WIRES = {
         "AO_Y_OUTPUT",
         "AO_D_OUTPUT",
         "ALPHA_OUTPUT",
+        "AO_Y_MONITOR",
+        "AO_D_MONITOR",
     ),
     "InverterControl": (
         "GAMMA_MIN",
@@ -136,18 +151,36 @@ WIRES = {
         "AO_Y_OUTPUT",
         "AO_D_OUTPUT",
         "GAMMA_OUTPUT",
+        "AO_Y_MONITOR",
+        "AO_D_MONITOR",
+        "GAMMA_MONITOR",
     ),
     "Initialization": (
         "IORDER_OUTPUT",
         "GAMMA_ORDER_OUTPUT",
         "ENABLE_RECT_OUTPUT",
         "ENABLE_INV_OUTPUT",
+        "ENABLE_RECT_CONVERSION",
+        "ENABLE_INV_CONVERSION",
+        "ENABLE_RECT_MONITOR",
+        "ENABLE_INV_MONITOR",
     ),
     "SignalInterface": (
         "VDC_RECT_IMPORT",
         "VDC_INV_IMPORT",
         "IDC_IMPORT",
+        "VDC_RECT_MONITOR",
+        "VDC_INV_MONITOR",
+        "IDC_MONITOR",
     ),
+}
+
+OUTPUT_NAMES = {
+    "LCC12PulseBridge": (),
+    "RectifierControl": ("AO_RECT_Y", "AO_RECT_D"),
+    "InverterControl": ("AO_INV_Y", "AO_INV_D", "GAMMA_INV"),
+    "Initialization": ("ENABLE_RECT", "ENABLE_INV"),
+    "SignalInterface": ("VDC_RECT", "VDC_INV", "IDC"),
 }
 
 
@@ -205,7 +238,7 @@ def write_physical_library_fixture(
         ):
             users.pop()
         for user_index, scoped_name in enumerate(users):
-            ET.SubElement(
+            user = ET.SubElement(
                 schematic,
                 "User",
                 {
@@ -216,6 +249,19 @@ def write_physical_library_fixture(
                     "y": "180",
                 },
             )
+            if scoped_name == "master:pgb":
+                output_index = sum(
+                    value == "master:pgb" for value in users[:user_index]
+                )
+                paramlist = ET.SubElement(user, "paramlist")
+                ET.SubElement(
+                    paramlist,
+                    "param",
+                    {
+                        "name": "Name",
+                        "value": OUTPUT_NAMES[definition_name][output_index],
+                    },
+                )
         wires = list(WIRES[definition_name])
         if (
             mutation == "remove_ao_wire"
@@ -314,6 +360,22 @@ def test_physical_bridge_requires_two_g6p200_and_scalar_ao(tmp_path):
     assert bridge["ports"]["AO_D"]["dimension"] == 1
     assert "GATES" not in bridge["ports"]
     assert evidence["effective_valves"] == 12
+    assert {
+        definition.rsplit(":", 1)[-1]: tuple(details["output_channels"])
+        for definition, details in evidence["definitions"].items()
+    } == OUTPUT_NAMES
+
+
+def test_generated_companion_contains_exact_wp1b_output_channels(tmp_path):
+    path = tmp_path / "generated.pslx"
+    path.write_bytes(render_library())
+
+    evidence = audit_companion_library(path)
+
+    assert sum(
+        len(details["output_channels"])
+        for details in evidence["definitions"].values()
+    ) == 10
 
 
 @pytest.mark.parametrize(

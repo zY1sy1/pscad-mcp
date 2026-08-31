@@ -52,6 +52,7 @@ STYLE = {
     "hardlimit": (76, 58, 85352944),
     "maxmin": (76, 60, 79761838),
     "unity": (40, 19, 39250382),
+    "pgb": (70, 30, 63669868),
 }
 
 
@@ -270,6 +271,34 @@ def _export(role: str, name: str, x: int, y: int) -> Component:
     return Component(role, "master:export", x, y, {"Name": name})
 
 
+def _output_channel(
+    role: str,
+    name: str,
+    units: str,
+    x: int,
+    y: int,
+) -> Component:
+    return Component(
+        role,
+        "master:pgb",
+        x,
+        y,
+        {
+            "Name": name,
+            "Group": "",
+            "UseSignalName": "0",
+            "enab": "1",
+            "Display": "1",
+            "Scale": "1.0",
+            "Units": units,
+            "mrun": "0",
+            "Pol": "0",
+            "Max": "2.0",
+            "Min": "-2.0",
+        },
+    )
+
+
 def _bridge_definition(definitions: ET.Element) -> None:
     ports = (
         tuple(
@@ -439,6 +468,8 @@ def _rectifier_control(definitions: ET.Element) -> None:
         _export("export_ao_y", "AO_Y", 846, 180),
         _export("export_ao_d", "AO_D", 846, 225),
         _export("export_alpha", "ALPHA", 846, 270),
+        _output_channel("monitor_ao_y", "AO_RECT_Y", "rad", 756, 126),
+        _output_channel("monitor_ao_d", "AO_RECT_D", "rad", 756, 324),
     )
     wires = (
         Wire("CURRENT_ERROR", ((126, 180), (288, 225))),
@@ -451,6 +482,8 @@ def _rectifier_control(definitions: ET.Element) -> None:
         Wire("AO_Y_OUTPUT", ((720, 225), (882, 180))),
         Wire("AO_D_OUTPUT", ((720, 225), (882, 225))),
         Wire("ALPHA_OUTPUT", ((720, 225), (882, 270))),
+        Wire("AO_Y_MONITOR", ((720, 225), (756, 126))),
+        Wire("AO_D_MONITOR", ((720, 225), (756, 324))),
     )
     _definition(
         definitions,
@@ -546,6 +579,9 @@ def _inverter_control(definitions: ET.Element) -> None:
         _export("export_ao_y", "AO_Y", 936, 252),
         _export("export_ao_d", "AO_D", 936, 306),
         _export("export_gamma", "GAMMA", 936, 360),
+        _output_channel("monitor_ao_y", "AO_INV_Y", "rad", 864, 180),
+        _output_channel("monitor_ao_d", "AO_INV_D", "rad", 864, 414),
+        _output_channel("monitor_gamma", "GAMMA_INV", "rad", 396, 180),
     )
     wires = (
         Wire("GAMMA_MIN", ((126, 198), (252, 234))),
@@ -560,6 +596,9 @@ def _inverter_control(definitions: ET.Element) -> None:
         Wire("AO_Y_OUTPUT", ((810, 306), (972, 252))),
         Wire("AO_D_OUTPUT", ((810, 306), (972, 306))),
         Wire("GAMMA_OUTPUT", ((324, 234), (972, 360))),
+        Wire("AO_Y_MONITOR", ((810, 306), (864, 180))),
+        Wire("AO_D_MONITOR", ((810, 306), (864, 414))),
+        Wire("GAMMA_MONITOR", ((324, 234), (396, 180))),
     )
     _definition(
         definitions,
@@ -591,12 +630,32 @@ def _initialization(definitions: ET.Element) -> None:
         _export("export_gamma", "GAMMA_ORDER", 360, 198),
         _export("export_enable_rect", "ENABLE_RECT", 360, 270),
         _export("export_enable_inv", "ENABLE_INV", 360, 342),
+        Component(
+            "enable_rect_to_real",
+            "master:unity",
+            270,
+            270,
+            {"IType": "1", "OType": "2", "Dim": "1"},
+        ),
+        Component(
+            "enable_inv_to_real",
+            "master:unity",
+            270,
+            342,
+            {"IType": "1", "OType": "2", "Dim": "1"},
+        ),
+        _output_channel("monitor_enable_rect", "ENABLE_RECT", "state", 432, 270),
+        _output_channel("monitor_enable_inv", "ENABLE_INV", "state", 432, 342),
     )
     wires = (
         Wire("IORDER_OUTPUT", ((216, 126), (396, 126))),
         Wire("GAMMA_ORDER_OUTPUT", ((216, 198), (396, 198))),
         Wire("ENABLE_RECT_OUTPUT", ((216, 270), (396, 270))),
         Wire("ENABLE_INV_OUTPUT", ((216, 342), (396, 342))),
+        Wire("ENABLE_RECT_CONVERSION", ((216, 270), (270, 270))),
+        Wire("ENABLE_INV_CONVERSION", ((216, 342), (270, 342))),
+        Wire("ENABLE_RECT_MONITOR", ((306, 270), (432, 270))),
+        Wire("ENABLE_INV_MONITOR", ((306, 342), (432, 342))),
     )
     _definition(
         definitions,
@@ -619,11 +678,17 @@ def _signal_interface(definitions: ET.Element) -> None:
         _export("export_vdc_rect", "VDC_RECT", 360, 126),
         _export("export_vdc_inv", "VDC_INV", 360, 198),
         _export("export_idc", "IDC", 360, 270),
+        _output_channel("monitor_vdc_rect", "VDC_RECT", "kV", 288, 72),
+        _output_channel("monitor_vdc_inv", "VDC_INV", "kV", 288, 342),
+        _output_channel("monitor_idc", "IDC", "kA", 288, 414),
     )
     wires = (
         Wire("VDC_RECT_IMPORT", ((216, 126), (396, 126))),
         Wire("VDC_INV_IMPORT", ((216, 198), (396, 198))),
         Wire("IDC_IMPORT", ((216, 270), (396, 270))),
+        Wire("VDC_RECT_MONITOR", ((216, 126), (288, 72))),
+        Wire("VDC_INV_MONITOR", ((216, 198), (288, 342))),
+        Wire("IDC_MONITOR", ((216, 270), (288, 414))),
     )
     _definition(
         definitions,
