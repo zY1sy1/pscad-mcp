@@ -38,6 +38,10 @@ from .routing import (
     validate_orthogonal_route,
 )
 
+FULL_ACCEPTANCE_PROFILE = "full_acceptance"
+WP1B_SMOKE_PROFILE = "wp1b_smoke"
+VERIFICATION_PROFILES = {FULL_ACCEPTANCE_PROFILE, WP1B_SMOKE_PROFILE}
+
 PHASES = (
     "materialize_library",
     "create_staging",
@@ -52,6 +56,7 @@ PHASES = (
     "save_and_validate",
     "compile",
     "simulate",
+    "smoke_validate",
     "accept",
     "publish",
 )
@@ -63,6 +68,7 @@ class LccPlanRequest:
     folder: str | None = None
     simulation_duration_s: float | None = None
     blueprint: str = "cigre_lcc_monopole_v1"
+    verification_profile: str = FULL_ACCEPTANCE_PROFILE
 
 
 def _error(code: str, message: str, **details: Any):
@@ -307,6 +313,34 @@ def _resolve_paths(request: LccPlanRequest, workspace: str | Path | PathPolicy) 
 
 
 def _duration(request: LccPlanRequest, asset_set: LccAssetSet) -> float:
+    if request.verification_profile == WP1B_SMOKE_PROFILE:
+        expected = asset_set.smoke.get("duration_s")
+        if (
+            isinstance(expected, bool)
+            or not isinstance(expected, (int, float))
+            or expected <= 0
+        ):
+            raise _error(
+                "LCC_BLUEPRINT_INVALID",
+                "The packaged smoke duration is invalid.",
+            )
+        value = (
+            float(expected)
+            if request.simulation_duration_s is None
+            else request.simulation_duration_s
+        )
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or abs(float(value) - float(expected)) > 1e-12
+        ):
+            raise _error(
+                "LCC_BLUEPRINT_INVALID",
+                "WP1B smoke duration must match the packaged contract.",
+                requested=value,
+                expected=float(expected),
+            )
+        return float(expected)
     default = asset_set.blueprint.settings.get("simulation_duration_s")
     if isinstance(default, bool) or not isinstance(default, (int, float)) or default <= 0:
         raise _error("LCC_BLUEPRINT_INVALID", "The blueprint simulation duration is invalid.")
@@ -486,6 +520,13 @@ def create_plan(
 
     if not isinstance(request, LccPlanRequest):
         raise _error("LCC_BLUEPRINT_INVALID", "request must be an LccPlanRequest.")
+    if request.verification_profile not in VERIFICATION_PROFILES:
+        raise _error(
+            "LCC_BLUEPRINT_INVALID",
+            "The LCC verification profile is unsupported.",
+            verification_profile=request.verification_profile,
+            supported_profiles=sorted(VERIFICATION_PROFILES),
+        )
     if request.blueprint != asset_set.name:
         raise _error(
             "LCC_BLUEPRINT_NOT_FOUND",
@@ -671,7 +712,11 @@ def create_plan(
 
     settings = dict(blueprint.settings)
     settings["simulation_duration_s"] = duration
-    checks = _acceptance_checks(asset_set)
+    checks = (
+        ()
+        if request.verification_profile == WP1B_SMOKE_PROFILE
+        else _acceptance_checks(asset_set)
+    )
     counters: defaultdict[str, int] = defaultdict(int)
     operations: list[LccPlanOperation] = []
 
@@ -742,7 +787,25 @@ def create_plan(
     add("save_and_validate", "save_and_validate", project_name, {})
     add("compile", "compile", project_name, {})
     add("simulate", "simulate", project_name, {"duration_s": duration})
-    add("accept", "accept", project_name, {"required_checks": [check.name for check in checks]})
+    if request.verification_profile == WP1B_SMOKE_PROFILE:
+        add(
+            "smoke_validate",
+            "smoke_validate",
+            project_name,
+            {
+                "contract_sha256": asset_set.hashes["smoke.json"],
+                "required_channels": list(
+                    asset_set.smoke["required_channels"]
+                ),
+            },
+        )
+    else:
+        add(
+            "accept",
+            "accept",
+            project_name,
+            {"required_checks": [check.name for check in checks]},
+        )
     add("publish", "publish", project_name, {"target_path": str(final_path)})
     payload = {
         "request": {
@@ -750,6 +813,7 @@ def create_plan(
             "folder": str(final_path.parent),
             "simulation_duration_s": duration,
             "blueprint": request.blueprint,
+            "verification_profile": request.verification_profile,
         },
         "target_path": str(final_path),
         "staging_path": str(staging_path),
@@ -759,7 +823,10 @@ def create_plan(
         "project_settings": settings,
         "operations": [operation.to_dict() for operation in operations],
         "acceptance_contract": [check.to_dict() for check in checks],
+        "verification_profile": request.verification_profile,
     }
+    if request.verification_profile == WP1B_SMOKE_PROFILE:
+        payload["smoke_contract_sha256"] = asset_set.hashes["smoke.json"]
     if audited_master is not None:
         payload["master_sha256"] = audited_master.master_sha256
         payload["master_binding_registry_sha256"] = (
@@ -770,6 +837,7 @@ def create_plan(
         blueprint=blueprint,
         operations=tuple(operations),
         plan_hash=plan_hash,
+        verification_profile=request.verification_profile,
         acceptance_checks=checks,
         target_path=str(final_path),
         staging_path=str(staging_path),

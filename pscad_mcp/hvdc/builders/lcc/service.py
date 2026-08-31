@@ -22,7 +22,7 @@ from .catalog import parse_catalog
 from .executor import execute_build
 from .journal import AtomicJournal, WorkspaceBuildLease
 from .models import LccBuildPlan, LccBuildRecord, LccBuildState
-from .planner import LccPlanRequest, create_plan
+from .planner import FULL_ACCEPTANCE_PROFILE, LccPlanRequest, create_plan
 from .project_graph import read_project_graph
 from .validator import validate_project_graph
 
@@ -190,8 +190,15 @@ class LccBuilderService:
         folder: str | None = None,
         simulation_duration_s: float | None = None,
         blueprint: str = "cigre_lcc_monopole_v1",
+        verification_profile: str = FULL_ACCEPTANCE_PROFILE,
     ) -> dict[str, Any]:
-        request = LccPlanRequest(project_name, folder, simulation_duration_s, blueprint)
+        request = LccPlanRequest(
+            project_name,
+            folder,
+            simulation_duration_s,
+            blueprint,
+            verification_profile,
+        )
         return self._create_plan(request).to_dict()
 
     def _plan_stale(self, expected: str, observed: str) -> BackendError:
@@ -212,6 +219,7 @@ class LccBuilderService:
         folder: str | None = None,
         simulation_duration_s: float | None = None,
         blueprint: str = "cigre_lcc_monopole_v1",
+        verification_profile: str = FULL_ACCEPTANCE_PROFILE,
         confirm: bool = False,
     ) -> dict[str, Any]:
         if self._closing:
@@ -223,7 +231,13 @@ class LccBuilderService:
             )
         if not confirm:
             raise ConfirmationRequired("build_lcc_model")
-        request = LccPlanRequest(project_name, folder, simulation_duration_s, blueprint)
+        request = LccPlanRequest(
+            project_name,
+            folder,
+            simulation_duration_s,
+            blueprint,
+            verification_profile,
+        )
         plan = self._create_plan(request)
         if not isinstance(expected_plan_hash, str) or not secrets.compare_digest(plan.plan_hash, expected_plan_hash):
             raise self._plan_stale(expected_plan_hash if isinstance(expected_plan_hash, str) else "", plan.plan_hash)

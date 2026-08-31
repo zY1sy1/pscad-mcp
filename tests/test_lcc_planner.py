@@ -100,6 +100,16 @@ INVENTORY = {
     },
 }
 
+SMOKE_CONTRACT = {
+    "schema_version": 1,
+    "identity": "cigre_lcc_monopole_v1/wp1b_smoke",
+    "duration_s": 0.1,
+    "output_step_s": 0.00005,
+    "required_channels": ["Main/VDC"],
+    "enable_channels": ["Main/VDC"],
+    "ao_limits_rad": {"Main/VDC": [0.0, 1.0]},
+}
+
 
 def _asset_set(blueprint=None, catalog=None):
     parsed = parse_blueprint(blueprint or BLUEPRINT)
@@ -113,9 +123,12 @@ def _asset_set(blueprint=None, catalog=None):
         catalog=catalog_value,
         acceptance={"checks": [{"name": "golden", "kind": "golden", "required": True, "expected": {}}]},
         golden={"channels": {}},
-        smoke={},
+        smoke=copy.deepcopy(SMOKE_CONTRACT),
         provenance="source",
-        hashes={"library/cigre_lcc_v1.pslx": "a" * 64},
+        hashes={
+            "library/cigre_lcc_v1.pslx": "a" * 64,
+            "smoke.json": "c" * 64,
+        },
         library_bytes=b"library",
         files={},
     )
@@ -431,3 +444,61 @@ def test_fixed_blueprint_has_two_transformer_groups_and_four_ao_nets():
         for net in blueprint.nets
         for endpoint in net.endpoints
     )
+
+
+def test_wp1b_smoke_plan_uses_smoke_gate_and_hashes_profile(tmp_path):
+    assets = _asset_set()
+    request = LccPlanRequest(
+        project_name="CIGRE_LCC",
+        folder=str(tmp_path),
+        simulation_duration_s=0.1,
+        verification_profile="wp1b_smoke",
+    )
+
+    smoke = create_plan(request, assets, INVENTORY, tmp_path)
+    full = create_plan(
+        replace(
+            request,
+            simulation_duration_s=1.0,
+            verification_profile="full_acceptance",
+        ),
+        assets,
+        INVENTORY,
+        tmp_path,
+    )
+
+    assert smoke.verification_profile == "wp1b_smoke"
+    assert smoke.plan_hash != full.plan_hash
+    assert [item.kind for item in smoke.operations][-2:] == [
+        "smoke_validate",
+        "publish",
+    ]
+    assert "accept" not in [item.kind for item in smoke.operations]
+    assert [item.kind for item in full.operations][-2:] == [
+        "accept",
+        "publish",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("profile", "duration"),
+    [
+        ("wp1b_smoke", 0.2),
+        ("unknown", 0.1),
+    ],
+)
+def test_wp1b_smoke_profile_rejects_wrong_duration_or_name(
+    tmp_path,
+    profile,
+    duration,
+):
+    request = LccPlanRequest(
+        "CIGRE_LCC",
+        simulation_duration_s=duration,
+        verification_profile=profile,
+    )
+
+    with pytest.raises(BackendError) as failure:
+        create_plan(request, _asset_set(), INVENTORY, tmp_path)
+
+    assert failure.value.code == "LCC_BLUEPRINT_INVALID"
