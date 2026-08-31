@@ -482,6 +482,22 @@ def test_packaged_blueprint_routes_avoid_unrelated_component_rectangles():
         )
 
 
+def test_packaged_main_signal_imports_are_pscad_grid_aligned():
+    blueprint = load_packaged_asset_set().blueprint
+    imports = [
+        component
+        for component in blueprint.components
+        if component.definition == "master:main_signal_import"
+    ]
+
+    assert len(imports) == 3
+    assert all(
+        coordinate % 18 == 0
+        for component in imports
+        for coordinate in component.location
+    )
+
+
 def test_wp1b_smoke_plan_uses_smoke_gate_and_hashes_profile(tmp_path):
     assets = _asset_set()
     request = LccPlanRequest(

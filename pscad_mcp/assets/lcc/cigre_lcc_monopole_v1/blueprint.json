@@ -453,8 +453,8 @@
       "logical_id": "vdc_rect_main_import",
       "definition": "master:main_signal_import",
       "location": {
-        "x": 1050,
-        "y": 477
+        "x": 1044,
+        "y": 468
       },
       "orientation": 0,
       "parameters": {
@@ -469,7 +469,7 @@
       "logical_id": "vdc_inv_main_import",
       "definition": "master:main_signal_import",
       "location": {
-        "x": 1050,
+        "x": 1044,
         "y": 540
       },
       "orientation": 0,
@@ -485,8 +485,8 @@
       "logical_id": "idc_main_import",
       "definition": "master:main_signal_import",
       "location": {
-        "x": 1050,
-        "y": 603
+        "x": 1044,
+        "y": 612
       },
       "orientation": 0,
       "parameters": {
@@ -1311,7 +1311,15 @@
       "route": {
         "vertices": [
           [
-            1086,
+            1080,
+            468
+          ],
+          [
+            1170,
+            468
+          ],
+          [
+            1170,
             477
           ],
           [
@@ -1338,7 +1346,7 @@
       "route": {
         "vertices": [
           [
-            1086,
+            1080,
             540
           ],
           [
@@ -1373,12 +1381,12 @@
       "route": {
         "vertices": [
           [
-            1086,
-            603
+            1080,
+            612
           ],
           [
             1228,
-            603
+            612
           ],
           [
             1228,
