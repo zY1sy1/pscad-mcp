@@ -3826,12 +3826,24 @@ class LegacyBackend:
                     "add_component",
                     {"phase": phase},
                 )
+            wire_vertices = await self._absolute_wire_vertices(wire)
+            if len(wire_vertices) < 2:
+                raise BackendError(
+                    "MASTER_READBACK_FAILED",
+                    "Filter neutral grounding returned no wire endpoints.",
+                    self.name,
+                    "add_component",
+                    {"phase": phase},
+                )
             members.append(
                 {
                     "role": "neutral_wire",
                     "instance": phase,
                     "wire_id": self._component_id(wire),
-                    "endpoints": [list(neutral_point), list(ground_point)],
+                    "endpoints": [
+                        list(wire_vertices[0]),
+                        list(wire_vertices[-1]),
+                    ],
                 }
             )
 
