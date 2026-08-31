@@ -9,6 +9,7 @@ import shutil
 import time
 from collections import Counter
 from collections.abc import Mapping, Sequence
+from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -35,7 +36,7 @@ from .project_graph import (
     ProjectGraph,
     read_project_graph,
 )
-from .routing import absolute_port
+from .routing import absolute_port, validate_orthogonal_route
 from .smoke import evaluate_fixed_smoke
 from .validator import validate_companion_library, validate_project_graph
 
@@ -300,6 +301,45 @@ def _topology_component(
             for port in logical.ports
         ),
     )
+
+
+def _route_for_backend(
+    planned_vertices: Sequence[Sequence[int]],
+    actual_start: tuple[int, int] | None,
+    actual_end: tuple[int, int] | None,
+) -> tuple[tuple[int, int], ...]:
+    planned = validate_orthogonal_route(planned_vertices)
+    transformed = [_snap_point(point) for point in planned]
+    if actual_start is not None:
+        transformed[0] = actual_start
+    if actual_end is not None:
+        transformed[-1] = actual_end
+
+    routed = [transformed[0]]
+    last_index = len(transformed) - 1
+    for index, point in enumerate(transformed[1:], start=1):
+        previous = routed[-1]
+        if previous == point:
+            continue
+        if previous[0] != point[0] and previous[1] != point[1]:
+            planned_left = planned[index - 1]
+            planned_right = planned[index]
+            horizontal = planned_left[1] == planned_right[1]
+            if index == last_index:
+                elbow = (
+                    (previous[0], point[1])
+                    if horizontal
+                    else (point[0], previous[1])
+                )
+            else:
+                elbow = (
+                    (point[0], previous[1])
+                    if horizontal
+                    else (previous[0], point[1])
+                )
+            routed.append(elbow)
+        routed.append(point)
+    return validate_orthogonal_route(routed)
 
 
 def _physical_component_signature(
@@ -843,11 +883,10 @@ class LccExecutor:
     async def _connect_net(self, operation: LccPlanOperation) -> None:
         self._operation_started(operation)
         arguments = operation.arguments
-        vertices = [
-            list(_snap_point((int(point[0]), int(point[1]))))
-            for point in arguments.get("vertices", ())
-        ]
+        planned_vertices = arguments.get("vertices", ())
         endpoints = arguments.get("endpoints", ())
+        actual_start = None
+        actual_end = None
         if isinstance(endpoints, (list, tuple)) and len(endpoints) >= 2:
             actual_start = await _actual_endpoint(
                 self.service, self.project_name, self.component_ids, endpoints[0]
@@ -855,14 +894,14 @@ class LccExecutor:
             actual_end = await _actual_endpoint(
                 self.service, self.project_name, self.component_ids, endpoints[-1]
             )
-            if actual_start is not None:
-                vertices[0] = list(actual_start)
-            if actual_end is not None:
-                vertices[-1] = list(actual_end)
-        if len(vertices) < 2:
-            self._raise_postcondition(
-                "A planned net requires at least two vertices.", net=operation.target
+        vertices = [
+            list(point)
+            for point in _route_for_backend(
+                planned_vertices,
+                actual_start,
+                actual_end,
             )
+        ]
         canvas = "Main"
         kind = str(arguments.get("kind", "electrical"))
         label = arguments.get("label")
@@ -906,7 +945,7 @@ class LccExecutor:
                 )
         self._logical_nets[operation.target] = GraphNet(
             kind,
-            tuple(tuple(int(value) for value in point) for point in arguments.get("vertices", ())),
+            tuple(tuple(int(value) for value in point) for point in vertices),
             () if label is None else (str(label),),
             tuple(str(endpoint) for endpoint in arguments.get("endpoints", ())),
         )
@@ -1236,6 +1275,21 @@ class LccExecutor:
             for label in labels
         )
 
+    def _saved_validation_blueprint(self):
+        nets = tuple(
+            replace(
+                net,
+                route=replace(
+                    net.route,
+                    vertices=self._logical_nets[net.logical_id].points,
+                ),
+            )
+            if net.route is not None and net.logical_id in self._logical_nets
+            else net
+            for net in self.plan.blueprint.nets
+        )
+        return replace(self.plan.blueprint, nets=nets)
+
     def _expected_saved_binding_extras(
         self,
         observed_by_id: Mapping[str, GraphComponent],
@@ -1385,7 +1439,7 @@ class LccExecutor:
             logical_graph, projection_findings = self._saved_logical_graph(graph)
             projected = validate_project_graph(
                 logical_graph,
-                self.plan.blueprint,
+                self._saved_validation_blueprint(),
                 catalog=catalog,
                 expected_project_name=expected_project_name,
                 expected_pscad_version=self.plan.pscad_version,

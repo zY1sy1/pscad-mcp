@@ -1277,6 +1277,171 @@ class MismatchedConnectionService(RecordingPscadService):
         return created
 
 
+class SnappedRouteEndpointService(RecordingPscadService):
+    async def get_component_ports(self, project_name, component_id):
+        self._call("get_component_ports", project_name, component_id)
+        return {
+            "P": {
+                "name": "P",
+                "x": 342 if component_id == 1 else 520,
+                "y": 396 if component_id == 1 else 130,
+            }
+        }
+
+
+def test_connect_net_preserves_orthogonality_after_snapping_collapses_a_bend(
+    tmp_path,
+):
+    service = SnappedRouteEndpointService()
+    executor = LccExecutor(_plan(tmp_path), service, tmp_path)
+    executor.component_ids = {"source": 1, "load": 2}
+    source, load = executor.plan.blueprint.components
+    source = replace(
+        source,
+        location=(342, 396),
+        ports=("P",),
+        port_contracts=({"name": "P", "kind": "data", "dimension": 1},),
+    )
+    load = replace(
+        load,
+        location=(520, 130),
+        ports=("P",),
+        port_contracts=({"name": "P", "kind": "data", "dimension": 1},),
+    )
+    route = LccRoute(
+        ((342, 396), (462, 396), (462, 130), (520, 130))
+    )
+    executor.plan = replace(
+        executor.plan,
+        blueprint=replace(
+            executor.plan.blueprint,
+            components=(source, load),
+            nets=(
+                LccNetSpec(
+                    "snapped_route",
+                    "data",
+                    (LccEndpoint("source", "P"), LccEndpoint("load", "P")),
+                    route,
+                ),
+            ),
+        ),
+    )
+    executor._logical_components = {
+        "source": GraphComponent(
+            "source",
+            "master:source",
+            "Main",
+            (342, 396),
+            0,
+            {"LogicalId": "source"},
+            (GraphPort("P", "data", 1, (0, 0), (342, 396)),),
+        ),
+        "load": GraphComponent(
+            "load",
+            "master:load",
+            "Main",
+            (520, 130),
+            0,
+            {"LogicalId": "load"},
+            (GraphPort("P", "data", 1, (0, 0), (520, 130)),),
+        ),
+    }
+    operation = LccPlanOperation(
+        1,
+        "connect_net",
+        "snapped_route",
+        {
+            "kind": "data",
+            "vertices": [
+                [342, 396],
+                [462, 396],
+                [462, 130],
+                [520, 130],
+            ],
+            "endpoints": ["source:P", "load:P"],
+        },
+        "connect_data:snapped_route:000",
+        "connect_data",
+    )
+
+    asyncio.run(executor._connect_net(operation))
+
+    call = next(item for item in service.calls if item[0] == "create_wire")
+    assert call[1][1] == [
+        [342, 396],
+        [468, 396],
+        [468, 126],
+        [468, 130],
+        [520, 130],
+    ]
+
+    saved = tmp_path / "snapped-route.pscx"
+    writer = RecordingPscadService()
+    writer.components = {
+        1: {
+            "id": 1,
+            "logical_id": "source",
+            "definition": "master:source",
+            "x": 342,
+            "y": 396,
+            "orientation": 0,
+            "parameters": {"LogicalId": "source"},
+        },
+        2: {
+            "id": 2,
+            "logical_id": "load",
+            "definition": "master:load",
+            "x": 520,
+            "y": 130,
+            "orientation": 0,
+            "parameters": {"LogicalId": "load"},
+        },
+    }
+    writer._write_project(saved, executor.project_name)
+    root = ET.parse(saved).getroot()
+    definition = root.find("./definition")
+    assert definition is not None
+    wire = ET.SubElement(
+        definition,
+        "wire",
+        {"id": "3", "x": "0", "y": "0", "kind": "data"},
+    )
+    for x, y in call[1][1]:
+        ET.SubElement(wire, "vertex", {"x": str(x), "y": str(y)})
+    ET.ElementTree(root).write(saved, encoding="utf-8", xml_declaration=True)
+
+    assert executor._validate_graph(saved)["valid"] is True
+
+
+@pytest.mark.parametrize(
+    "vertices",
+    [
+        [[0, 0], [9, 9]],
+        [[1, 1], [2, 1]],
+    ],
+)
+def test_connect_net_rejects_invalid_transformed_route_before_backend(
+    tmp_path,
+    vertices,
+):
+    service = RecordingPscadService()
+    executor = LccExecutor(_plan(tmp_path), service, tmp_path)
+    operation = LccPlanOperation(
+        1,
+        "connect_net",
+        "invalid_route",
+        {"kind": "data", "vertices": vertices},
+        "connect_data:invalid_route:000",
+        "connect_data",
+    )
+
+    with pytest.raises(BackendError) as raised:
+        asyncio.run(executor._connect_net(operation))
+
+    assert raised.value.code == "LCC_LAYOUT_INVALID"
+    assert "create_wire" not in [call[0] for call in service.calls]
+
+
 class StrictConnectionArgumentService(RecordingPscadService):
     async def create_connection(
         self,
