@@ -590,6 +590,8 @@ class LegacyBackend:
         destination: Path,
         kind: str,
         operation: str,
+        *,
+        load_destination: bool = True,
     ) -> ProjectInfo:
         temporary: Path | None = self._temporary_path(destination, destination.suffix)
         backup: Path | None = None
@@ -605,6 +607,16 @@ class LegacyBackend:
             os.replace(temporary, destination)
             temporary = None
             replaced = True
+
+            if not load_destination:
+                if backup is not None:
+                    backup.unlink(missing_ok=True)
+                    backup = None
+                return ProjectInfo(
+                    destination.stem,
+                    "Case" if kind == "case" else "Library",
+                    "",
+                )
 
             info = await self._load_and_verify_project(destination, kind, operation)
             if backup is not None:
@@ -661,8 +673,9 @@ class LegacyBackend:
         kind = self._loaded_project_kind(project, source)
         destination = self._project_destination(filename, folder)
         self._require_project_suffix(destination, kind)
+        same_identity = destination.stem.casefold() == project_name.casefold()
         native_info: ProjectInfo | None = None
-        tried_native = not destination.exists()
+        tried_native = not destination.exists() and not same_identity
         if tried_native:
             try:
                 response = await self.executor.run_safe(
@@ -720,6 +733,7 @@ class LegacyBackend:
             destination,
             kind,
             "save_project_as",
+            load_destination=not same_identity,
         )
 
     async def build_project(self, project_name: str) -> None:

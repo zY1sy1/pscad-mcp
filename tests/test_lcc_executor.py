@@ -105,6 +105,12 @@ class PhysicalizedSavedGraphService(RecordingPscadService):
         ET.ElementTree(root).write(path, encoding="utf-8", xml_declaration=True)
 
 
+class ReloadingRecordingService(RecordingPscadService):
+    async def reload_project(self, project_name, filename):
+        self._call("reload_project", project_name, filename)
+        return "reloaded"
+
+
 def test_executor_validates_readback_projection_for_physicalized_saved_graph(
     tmp_path,
 ):
@@ -1109,6 +1115,44 @@ def test_publish_reloads_final_identity_before_compile_smoke(tmp_path):
     publication = next(entry for entry in record.history if entry.get("state") == "published")
     assert isinstance(publication.get("final_project_sha256"), str)
     assert len(publication["final_project_sha256"]) == 64
+
+
+def test_publish_same_identity_uses_unload_reload_boundary(tmp_path):
+    plan = _plan(tmp_path)
+    target = tmp_path / "executor.pscx"
+    operations = []
+    for operation in plan.operations:
+        if operation.kind == "create_staging":
+            arguments = {**operation.arguments, "target_path": str(target)}
+            operation = replace(operation, arguments=arguments)
+        elif operation.kind == "publish":
+            operation = replace(
+                operation,
+                arguments={**operation.arguments, "target_path": str(target)},
+            )
+        operations.append(operation)
+    plan = replace(
+        plan,
+        target_path=str(target),
+        operations=tuple(operations),
+    )
+    service = ReloadingRecordingService()
+
+    record = asyncio.run(
+        execute_build(
+            plan,
+            service,
+            tmp_path,
+            build_id="build-same-final-identity",
+            poll_interval_s=0,
+        )
+    )
+
+    assert record.state.value == "published"
+    reload_call = next(
+        call for call in service.calls if call[0] == "reload_project"
+    )
+    assert reload_call[1] == ("executor", str(target.resolve()))
 
 
 def test_execute_build_reads_waveforms_from_a_discovered_output_file(tmp_path):

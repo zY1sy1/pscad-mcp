@@ -2184,18 +2184,22 @@ class LccExecutor:
                 target_path=str(self.target_path),
                 upstream_code=error.code,
             ) from error
+        final_path = self.target_path.resolve()
+        final_project_name = final_path.stem
+        reloader = getattr(self.service, "reload_project", None)
         loader = getattr(self.service, "load_projects", None)
-        if not callable(loader):
+        if final_project_name == self.project_name and callable(reloader):
+            await reloader(final_project_name, str(final_path))
+        elif callable(loader):
+            await loader([str(final_path)])
+        else:
             raise _error(
                 "LCC_BUILD_FAILED",
                 "The PSCAD service does not expose final-project reloading.",
                 "reload_lcc_published_project",
                 target_path=str(self.target_path.resolve()),
             )
-        final_path = self.target_path.resolve()
-        await loader([str(final_path)])
         self._validate_graph(self.target_path)
-        final_project_name = final_path.stem
         await self.service.build_project(final_project_name)
         await self._verify_compile_messages(final_project_name)
         await self._verify_master_binding_state(
