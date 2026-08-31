@@ -782,6 +782,115 @@ def test_orchestrator_runs_component_gate_then_production_smoke(tmp_path):
     assert service.calls == ["attach_local", ("quit_pscad", True)]
 
 
+def test_orchestrator_persists_setup_fail_when_source_validation_drifts(
+    tmp_path,
+):
+    request = fixed_request(tmp_path)
+    request.master_path.write_bytes(b"master changed after preflight")
+    service = FakePscadService()
+    builder = FakeFixedBuilder(request.workspace_root)
+
+    result = asyncio.run(
+        run_fixed_lcc_acceptance(
+            request,
+            service=service,
+            builder=builder,
+            companion_gate_action=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                AssertionError("component gate must not run")
+            ),
+            master_audit_action=_fake_master_audit,
+            process_reader=service.processes,
+            poll_interval_s=0,
+        )
+    )
+
+    assert result["status"] == "FAIL"
+    assert result["failure"]["stage"] == "setup"
+    assert request.report_path.is_file()
+    assert request.baseline_path.read_bytes() == b"unchanged baseline"
+    assert service.calls == [("quit_pscad", True)]
+
+
+def test_orchestrator_persists_setup_fail_when_asset_loading_fails(
+    monkeypatch,
+    tmp_path,
+):
+    request = fixed_request(tmp_path)
+    service = FakePscadService()
+    builder = FakeFixedBuilder(request.workspace_root)
+
+    def fail_asset_load():
+        raise BackendError(
+            "LCC_ASSET_MISMATCH",
+            "asset loading failed",
+            "hvdc",
+            "load_lcc_asset_set",
+        )
+
+    monkeypatch.setattr(
+        fixed_acceptance,
+        "load_packaged_asset_set",
+        fail_asset_load,
+    )
+
+    result = asyncio.run(
+        run_fixed_lcc_acceptance(
+            request,
+            service=service,
+            builder=builder,
+            process_reader=service.processes,
+            poll_interval_s=0,
+        )
+    )
+
+    assert result["status"] == "FAIL"
+    assert result["failure"]["stage"] == "setup"
+    assert result["failure"]["code"] == "LCC_ASSET_MISMATCH"
+    assert request.report_path.is_file()
+    assert service.calls == [("quit_pscad", True)]
+
+
+def test_orchestrator_persists_cleanup_fail_when_journal_hashing_fails(
+    monkeypatch,
+    tmp_path,
+):
+    request = fixed_request(tmp_path)
+    service = FakePscadService()
+    builder = FakeFixedBuilder(request.workspace_root)
+    original_cleanup_hash = fixed_acceptance._cleanup_hash
+
+    def fail_journal_hash(path):
+        if path.name == "journal.json":
+            return None, OSError("journal became unreadable")
+        return original_cleanup_hash(path)
+
+    monkeypatch.setattr(
+        fixed_acceptance,
+        "_cleanup_hash",
+        fail_journal_hash,
+    )
+
+    result = asyncio.run(
+        run_fixed_lcc_acceptance(
+            request,
+            service=service,
+            builder=builder,
+            companion_gate_action=lambda *_args, **_kwargs: (
+                _component_gate_for_run(request)
+            ),
+            master_audit_action=_fake_master_audit,
+            process_reader=service.processes,
+            poll_interval_s=0,
+        )
+    )
+
+    assert result["status"] == "FAIL"
+    assert result["failure"]["stage"] == "cleanup"
+    assert result["build"]["journal_path"].endswith("journal.json")
+    assert result["build"]["journal_sha256"] is None
+    assert request.report_path.is_file()
+
+
 def failing_orchestrator_inputs(tmp_path: Path, failure_stage: str):
     request = fixed_request(tmp_path)
     service = FakePscadService(failure_stage)

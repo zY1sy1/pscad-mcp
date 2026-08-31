@@ -1382,9 +1382,35 @@ def _validate_request_sources(
     return hashes
 
 
+def _best_effort_source_hashes(
+    request: FixedLccAcceptanceRequest,
+) -> dict[str, str]:
+    snapshot = (
+        request.preflight.get("snapshot")
+        if isinstance(request.preflight, Mapping)
+        else None
+    )
+    fallback_master = (
+        snapshot.get("master_sha256")
+        if isinstance(snapshot, Mapping)
+        and isinstance(snapshot.get("master_sha256"), str)
+        and _HASH.fullmatch(snapshot["master_sha256"])
+        else "0" * 64
+    )
+    result = {}
+    for name, path in _fixed_source_paths(request).items():
+        observed, _error_value = _cleanup_hash(path)
+        result[name] = (
+            observed
+            if observed is not None
+            else fallback_master if name == "master" else "0" * 64
+        )
+    return result
+
+
 def _source_evidence(
     request: FixedLccAcceptanceRequest,
-    assets: LccAssetSet,
+    assets: LccAssetSet | None,
     source_hashes: Mapping[str, str],
 ) -> dict[str, Any]:
     paths = _fixed_source_paths(request)
@@ -1400,14 +1426,18 @@ def _source_evidence(
         "path": paths["registry"].as_posix(),
         "before": source_hashes["registry"],
         "after": source_hashes["registry"],
-        "registry_sha256": assets.master_bindings.sha256,
+        "registry_sha256": (
+            assets.master_bindings.sha256
+            if assets is not None and assets.master_bindings is not None
+            else "0" * 64
+        ),
     }
     return result
 
 
 def _initial_fail_report(
     request: FixedLccAcceptanceRequest,
-    assets: LccAssetSet,
+    assets: LccAssetSet | None,
     source_hashes: Mapping[str, str],
 ) -> dict[str, Any]:
     run_id = request.report_path.parent.name
@@ -1731,13 +1761,23 @@ async def _cleanup_and_finalize(
         compiler_changed = compiler_changed or observed != snapshot[hash_field]
 
     build_id = result["build"].get("build_id")
+    journal_error: BaseException | None = None
     if isinstance(build_id, str):
         journal = AtomicJournal(request.workspace_root, build_id).path
         if journal.is_file():
             result["build"]["journal_path"] = journal.resolve().as_posix()
-            result["build"]["journal_sha256"] = _sha256(journal)
+            journal_sha256, journal_error = _cleanup_hash(journal)
+            result["build"]["journal_sha256"] = journal_sha256
 
-    if cleanup_error or source_error or compiler_error or source_changed or compiler_changed or remaining:
+    if (
+        cleanup_error
+        or source_error
+        or compiler_error
+        or journal_error
+        or source_changed
+        or compiler_changed
+        or remaining
+    ):
         return _fail_report(
             request,
             result,
@@ -1745,6 +1785,7 @@ async def _cleanup_and_finalize(
             cleanup_error
             or source_error
             or compiler_error
+            or journal_error
             or RuntimeError("source, compiler, or process cleanup mismatch"),
         )
     return result
@@ -1763,11 +1804,16 @@ async def run_fixed_lcc_acceptance(
     poll_interval_s: float = 0.5,
     timeout_s: float = 900.0,
 ) -> dict[str, Any]:
-    source_hashes = _validate_request_sources(request)
-    assets = load_packaged_asset_set()
+    source_hashes = _best_effort_source_hashes(request)
+    assets: LccAssetSet | None = None
     report = _initial_fail_report(request, assets, source_hashes)
-    stage = "attach"
+    stage = "setup"
     try:
+        assets = load_packaged_asset_set()
+        report = _initial_fail_report(request, assets, source_hashes)
+        source_hashes = _validate_request_sources(request)
+        report = _initial_fail_report(request, assets, source_hashes)
+        stage = "attach"
         await service.attach_local()
         runtime = _runtime_from_status(await service.status())
         report["runtime"] = copy.deepcopy(runtime)
