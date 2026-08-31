@@ -22,7 +22,17 @@ from pscad_mcp.hvdc.builders.lcc.models import (
     LccBuildPlan,
     LccBuildState,
     LccComponentSpec,
+    LccEndpoint,
+    LccNetSpec,
     LccPlanOperation,
+    LccRoute,
+)
+from pscad_mcp.hvdc.builders.lcc.project_graph import (
+    GraphComponent,
+    GraphLabel,
+    GraphNet,
+    GraphPort,
+    ProjectGraph,
 )
 from tests.lcc_builder_fakes import RecordingPscadService
 from tests.test_lcc_smoke import contract as smoke_contract
@@ -107,6 +117,264 @@ def test_executor_validates_readback_projection_for_physicalized_saved_graph(
     )
 
     assert record.state.value == "published"
+
+
+def test_executor_rejects_planned_net_missing_from_saved_project(tmp_path):
+    plan = _plan(tmp_path)
+    source, load = plan.blueprint.components
+    source = replace(
+        source,
+        ports=("P",),
+        port_contracts=({"name": "P", "kind": "electrical", "dimension": 1},),
+    )
+    load = replace(
+        load,
+        ports=("P",),
+        port_contracts=({"name": "P", "kind": "electrical", "dimension": 1},),
+    )
+    net = LccNetSpec(
+        "source_to_load",
+        "electrical",
+        (LccEndpoint("source", "P"), LccEndpoint("load", "P")),
+        LccRoute(((10, 20), (40, 20))),
+    )
+    plan = replace(
+        plan,
+        blueprint=replace(
+            plan.blueprint,
+            components=(source, load),
+            nets=(net,),
+        ),
+    )
+    executor = LccExecutor(plan, RecordingPscadService(), tmp_path)
+    executor.component_ids = {"source": 1, "load": 2}
+    executor._logical_components = {
+        "source": GraphComponent(
+            "source",
+            "master:source",
+            "Main",
+            (10, 20),
+            0,
+            {"LogicalId": "source"},
+            (GraphPort("P", "electrical", 1, (0, 0), (10, 20)),),
+        ),
+        "load": GraphComponent(
+            "load",
+            "master:load",
+            "Main",
+            (40, 20),
+            0,
+            {"LogicalId": "load"},
+            (GraphPort("P", "electrical", 1, (0, 0), (40, 20)),),
+        ),
+    }
+    executor._logical_nets = {
+        "source_to_load": GraphNet(
+            "electrical",
+            ((10, 20), (40, 20)),
+            (),
+            ("source:P", "load:P"),
+        )
+    }
+    saved = tmp_path / "missing-wire.pscx"
+    writer = RecordingPscadService()
+    writer.components = {
+        1: {
+            "id": 1,
+            "logical_id": "source",
+            "definition": "master:source",
+            "x": 10,
+            "y": 20,
+            "orientation": 0,
+            "parameters": {"LogicalId": "source"},
+        },
+        2: {
+            "id": 2,
+            "logical_id": "load",
+            "definition": "master:load",
+            "x": 40,
+            "y": 20,
+            "orientation": 0,
+            "parameters": {"LogicalId": "load"},
+        },
+    }
+    writer._write_project(saved, executor.project_name)
+
+    with pytest.raises(BackendError) as raised:
+        executor._validate_graph(saved)
+
+    assert raised.value.code == "LCC_STRUCTURE_INVALID"
+
+    root = ET.parse(saved).getroot()
+    definition = root.find("./definition")
+    assert definition is not None
+    wire = ET.SubElement(
+        definition,
+        "wire",
+        {"id": "3", "x": "10", "y": "20", "kind": "electrical"},
+    )
+    ET.SubElement(wire, "vertex", {"x": "0", "y": "0"})
+    endpoint = ET.SubElement(wire, "vertex", {"x": "30", "y": "0"})
+    ET.ElementTree(root).write(saved, encoding="utf-8", xml_declaration=True)
+
+    assert executor._validate_graph(saved)["valid"] is True
+
+    endpoint.set("x", "20")
+    ET.ElementTree(root).write(saved, encoding="utf-8", xml_declaration=True)
+    with pytest.raises(BackendError) as drifted:
+        executor._validate_graph(saved)
+
+    assert drifted.value.code == "LCC_STRUCTURE_INVALID"
+
+
+def test_saved_projection_accepts_only_registry_declared_filter_expansion(
+    tmp_path,
+):
+    assets = load_packaged_asset_set()
+    binding = assets.master_bindings.by_logical_name[
+        "master:ac_filter_branch"
+    ]
+    operation = LccPlanOperation(
+        1,
+        "place_component",
+        "filter",
+        {
+            "definition": "master:ac_filter_branch",
+            "location": [342, 198],
+            "binding": {
+                "logical_name": binding.logical_name,
+                "physical_definition": binding.physical_definition,
+            },
+        },
+        "place_power:filter:000",
+        "place_power",
+    )
+    executor = LccExecutor(
+        replace(_plan(tmp_path), operations=(operation,)),
+        RecordingPscadService(),
+        tmp_path,
+        asset_set=assets,
+    )
+    executor.component_ids = {"filter": 1}
+    executor._logical_components = {
+        "filter": GraphComponent(
+            "filter",
+            "master:ac_filter_branch",
+            "Main",
+            (342, 198),
+            0,
+            {},
+        )
+    }
+    physical_components = (
+        (1, "master:cfilter", (342, 198)),
+        (2, "master:cfilter", (342, 342)),
+        (3, "master:cfilter", (342, 486)),
+        (4, "master:ground", (396, 162)),
+        (5, "master:ground", (396, 306)),
+        (6, "master:ground", (396, 450)),
+    )
+    saved = ProjectGraph(
+        "executor",
+        "4.6.2",
+        tuple(
+            GraphComponent(
+                definition,
+                definition,
+                "Main",
+                location,
+                0,
+                {},
+                component_id=str(component_id),
+            )
+            for component_id, definition, location in physical_components
+        ),
+        (),
+        (),
+        (),
+    )
+
+    projected, findings = executor._saved_logical_graph(saved)
+
+    assert findings == []
+    assert [component.logical_id for component in projected.components] == [
+        "filter"
+    ]
+
+    _projected, missing_findings = executor._saved_logical_graph(
+        replace(saved, components=saved.components[:-1])
+    )
+    assert {
+        finding["reason"] for finding in missing_findings
+    } == {"bound physical component missing from saved PSCX"}
+
+    unexplained = GraphComponent(
+        "master:resistor",
+        "master:resistor",
+        "Main",
+        (900, 900),
+        0,
+        {},
+        component_id="99",
+    )
+    _projected, extra_findings = executor._saved_logical_graph(
+        replace(saved, components=(*saved.components, unexplained))
+    )
+    assert {
+        finding["reason"] for finding in extra_findings
+    } == {"unexpected saved component"}
+
+
+def test_saved_projection_maps_bound_main_signal_import_from_data_label(
+    tmp_path,
+):
+    operation = LccPlanOperation(
+        1,
+        "place_component",
+        "signal_import",
+        {
+            "definition": "master:main_signal_import",
+            "location": [18, 18],
+            "binding": {
+                "logical_name": "master:main_signal_import",
+                "physical_definition": "datalabel",
+            },
+        },
+        "place_measurement:signal_import:000",
+        "place_measurement",
+    )
+    executor = LccExecutor(
+        replace(_plan(tmp_path), operations=(operation,)),
+        RecordingPscadService(),
+        tmp_path,
+    )
+    executor.component_ids = {"signal_import": 7}
+    executor._logical_components = {
+        "signal_import": GraphComponent(
+            "signal_import",
+            "master:main_signal_import",
+            "Main",
+            (18, 18),
+            0,
+            {"Name": "SIGNAL_A"},
+            (GraphPort("OUT", "data", 1, (0, 0), (18, 18)),),
+        )
+    }
+    saved = ProjectGraph(
+        "executor",
+        "4.6.2",
+        (),
+        (),
+        (GraphLabel("SIGNAL_A", "data", (18, 18)),),
+        (),
+    )
+
+    projected, findings = executor._saved_logical_graph(saved)
+
+    assert findings == []
+    assert [component.logical_id for component in projected.components] == [
+        "signal_import"
+    ]
 
 
 class FixedSmokeRecordingService(OutputFileRecordingService):
@@ -1119,6 +1387,9 @@ def test_companion_port_readback_uses_verified_snapped_component_origin(tmp_path
     assert executor.component_ids["rectifier_bridge"] == 1
     assert service.components[1]["x"] == 792
     assert service.components[1]["y"] == 216
+    assert executor._logical_components["rectifier_bridge"].ports[
+        0
+    ].absolute == (720, 180)
 
 
 def test_companion_real_port_readback_matches_data_contract(tmp_path):

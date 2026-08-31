@@ -7,12 +7,22 @@ import math
 import re
 import shutil
 import time
+from collections import Counter
 from collections.abc import Mapping, Sequence
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from ....core.backend.base import BackendError
+from ....topology.adapters.lcc import topology_to_lcc_graph
+from ....topology.connectivity import build_connectivity
+from ....topology.models import (
+    ProjectTopology,
+    TopologyComponent,
+    TopologyConductor,
+    TopologyLabel,
+    TopologyPort,
+)
 from .acceptance import evaluate_acceptance
 from .assets import LccAssetSet, materialize_library, sha256_file
 from .catalog import parse_catalog, require_definition, require_port
@@ -20,7 +30,6 @@ from .journal import AtomicJournal
 from .models import LccBuildPlan, LccBuildRecord, LccBuildState, LccPlanOperation
 from .project_graph import (
     GraphComponent,
-    GraphLabel,
     GraphNet,
     GraphPort,
     ProjectGraph,
@@ -261,6 +270,68 @@ def _select_output_dataset(candidates: list[str]) -> tuple[str, list[str]]:
             candidates=candidates,
         )
     return parts[0][1], [path for _, path in parts]
+
+
+def _topology_component(
+    logical: GraphComponent,
+    canvas: str,
+    object_id: str,
+) -> TopologyComponent:
+    key = f"{canvas}:{object_id}"
+    return TopologyComponent(
+        key=key,
+        canvas_key=canvas,
+        object_id=object_id,
+        definition=logical.definition,
+        name=logical.logical_id,
+        location=logical.location,
+        orientation=logical.orientation,
+        parameters=tuple(sorted(logical.parameters.items())),
+        ports=tuple(
+            TopologyPort(
+                key=f"{key}:{port.name}",
+                component_key=key,
+                name=port.name,
+                absolute=port.absolute,
+                relative=port.offset,
+                kind=port.kind,
+                dimension=port.dimension,
+            )
+            for port in logical.ports
+        ),
+    )
+
+
+def _physical_component_signature(
+    component: GraphComponent,
+) -> tuple[str, tuple[int, int]]:
+    return component.definition.casefold(), component.location
+
+
+def _saved_wire_namespace(
+    vertices: tuple[tuple[int, int], ...],
+    port_kinds: Mapping[tuple[int, int], str],
+    label_kinds: Mapping[tuple[int, int], str],
+    planned_nets: Any,
+) -> str:
+    observed = {
+        kind
+        for point in vertices
+        for kind in (port_kinds.get(point), label_kinds.get(point))
+        if kind in {"electrical", "data"}
+    }
+    if not observed:
+        reversed_vertices = tuple(reversed(vertices))
+        observed = {
+            net.kind
+            for net in planned_nets
+            if net.points in {vertices, reversed_vertices}
+        }
+    if len(observed) == 1:
+        return next(iter(observed))
+    if observed:
+        return "unknown"
+    return "electrical"
 
 
 class LccExecutor:
@@ -695,17 +766,12 @@ class LccExecutor:
                             observed_kind=observed_kind,
                         )
                 observed_point = _port_point(observed)
-                expected_point = absolute_port(
-                    (int(location[0]), int(location[1])),
+                observed_expected_point = absolute_port(
+                    observed_location,
                     contract.offset,
                     expected_orientation,
                 )
                 if observed_point is not None:
-                    observed_expected_point = absolute_port(
-                        observed_location,
-                        contract.offset,
-                        expected_orientation,
-                    )
                     if observed_point != observed_expected_point and operation.arguments.get(
                         "definition"
                     ) not in {
@@ -732,7 +798,7 @@ class LccExecutor:
                         contract.kind,
                         contract.dimension,
                         tuple(contract.offset),
-                        expected_point,
+                        observed_point or observed_expected_point,
                     )
                 )
         else:
@@ -990,36 +1056,252 @@ class LccExecutor:
         catalog = self.asset_set.catalog if self.asset_set is not None else None
         return read_project_graph(path, catalog=catalog)
 
-    def _logical_graph(self, project_name: str) -> ProjectGraph:
-        components = tuple(
-            self._logical_components[component.logical_id]
-            for component in self.plan.blueprint.components
-            if component.logical_id in self._logical_components
-        )
-        nets = tuple(
-            self._logical_nets[net.logical_id]
-            for net in self.plan.blueprint.nets
-            if net.logical_id in self._logical_nets
+    def _saved_logical_graph(
+        self,
+        graph: ProjectGraph,
+    ) -> tuple[ProjectGraph, list[dict[str, Any]]]:
+        managed_ids = {
+            str(component_id): logical_id
+            for logical_id, component_id in self.component_ids.items()
+        }
+        observed_by_id = {
+            str(component.component_id): component
+            for component in graph.components
+            if component.component_id is not None
+        }
+        findings: list[dict[str, Any]] = []
+        components: list[TopologyComponent] = []
+        for logical_id, logical in sorted(self._logical_components.items()):
+            component_id = self.component_ids.get(logical_id)
+            observed = (
+                None
+                if component_id is None
+                else observed_by_id.get(str(component_id))
+            )
+            if observed is None:
+                if self._saved_label_evidences_component(
+                    logical_id,
+                    logical,
+                    graph.labels,
+                ):
+                    components.append(
+                        _topology_component(
+                            logical,
+                            logical.canvas,
+                            str(component_id),
+                        )
+                    )
+                    continue
+                findings.append(
+                    {
+                        "reason": "managed component missing from saved PSCX",
+                        "logical_id": logical_id,
+                        "component_id": component_id,
+                    }
+                )
+                continue
+            components.append(
+                _topology_component(logical, observed.canvas, str(component_id))
+            )
+
+        expected_extras = self._expected_saved_binding_extras(observed_by_id)
+        for observed in graph.components:
+            component_id = (
+                None
+                if observed.component_id is None
+                else str(observed.component_id)
+            )
+            if component_id in managed_ids:
+                continue
+            signature = _physical_component_signature(observed)
+            if expected_extras[signature] > 0:
+                expected_extras[signature] -= 1
+                continue
+            if observed.definition.casefold() == "master:pgb":
+                continue
+            findings.append(
+                {
+                    "reason": "unexpected saved component",
+                    "component_id": component_id,
+                    "definition": observed.definition,
+                    "location": list(observed.location),
+                }
+            )
+        if not self.allow_test_double:
+            for signature, count in sorted(expected_extras.items()):
+                if count > 0:
+                    findings.append(
+                        {
+                            "reason": (
+                                "bound physical component missing from saved PSCX"
+                            ),
+                            "definition": signature[0],
+                            "location": list(signature[1]),
+                            "count": count,
+                        }
+                    )
+
+        port_kinds = {
+            port.absolute: port.kind
+            for component in self._logical_components.values()
+            for port in component.ports
+        }
+        label_kinds = {
+            label.location: label.kind
+            for label in graph.labels
+            if label.location is not None
+        }
+        conductors = tuple(
+            TopologyConductor(
+                key=f"Main:saved-wire:{index}",
+                canvas_key="Main",
+                object_id=f"saved-wire:{index}",
+                kind="wire",
+                namespace=_saved_wire_namespace(
+                    wire.vertices,
+                    port_kinds,
+                    label_kinds,
+                    self._logical_nets.values(),
+                ),
+                vertices=wire.vertices,
+            )
+            for index, wire in enumerate(graph.wires)
         )
         labels = tuple(
-            GraphLabel(
-                str(net.label),
-                net.kind,
-                self._logical_nets[net.logical_id].points[0]
-                if self._logical_nets[net.logical_id].points
-                else None,
+            TopologyLabel(
+                key=f"Main:saved-label:{index}",
+                canvas_key="Main",
+                object_id=f"saved-label:{index}",
+                name=label.text,
+                namespace=label.kind,
+                scope="Main",
+                location=label.location,
             )
-            for net in self.plan.blueprint.nets
-            if net.label is not None and net.logical_id in self._logical_nets
+            for index, label in enumerate(graph.labels)
         )
-        return ProjectGraph(
-            project_name,
-            self.plan.pscad_version,
-            components,
-            (),
-            labels,
-            nets,
+        topology = ProjectTopology(
+            project_name=graph.project_name,
+            pscad_version=graph.pscad_version,
+            components=tuple(components),
+            conductors=conductors,
+            labels=labels,
         )
+        catalog = (
+            parse_catalog(self.asset_set.catalog)
+            if self.asset_set is not None
+            else None
+        )
+        projected = topology_to_lcc_graph(
+            build_connectivity(topology).topology,
+            catalog,
+        )
+        return projected, findings
+
+    def _saved_label_evidences_component(
+        self,
+        logical_id: str,
+        logical: GraphComponent,
+        labels: Sequence[Any],
+    ) -> bool:
+        operation = next(
+            (
+                item
+                for item in self.plan.operations
+                if item.kind == "place_component" and item.target == logical_id
+            ),
+            None,
+        )
+        if operation is None:
+            return False
+        evidence = operation.arguments.get("binding")
+        if not isinstance(evidence, Mapping):
+            return False
+        physical_definition = str(
+            evidence.get("physical_definition", "")
+        ).casefold()
+        expected_kind = {
+            "datalabel": "data",
+            "nodelabel": "electrical",
+        }.get(physical_definition)
+        if expected_kind is None:
+            return False
+        expected_name = logical.parameters.get("Name")
+        if not isinstance(expected_name, str) or not expected_name:
+            return False
+        expected_locations = {logical.location, _snap_point(logical.location)}
+        return any(
+            label.text == expected_name
+            and label.kind == expected_kind
+            and label.location in expected_locations
+            for label in labels
+        )
+
+    def _expected_saved_binding_extras(
+        self,
+        observed_by_id: Mapping[str, GraphComponent],
+    ) -> Counter[tuple[str, tuple[int, int]]]:
+        expected: Counter[tuple[str, tuple[int, int]]] = Counter()
+        registry = (
+            self.asset_set.master_bindings
+            if self.asset_set is not None
+            else None
+        )
+        if registry is None:
+            return expected
+        by_logical_name = registry.by_logical_name
+        for operation in self.plan.operations:
+            evidence = operation.arguments.get("binding")
+            if operation.kind != "place_component" or not isinstance(
+                evidence, Mapping
+            ):
+                continue
+            binding = by_logical_name.get(str(evidence.get("logical_name")))
+            if binding is None or binding.shape.get("kind") != "phase_expand":
+                continue
+            location = tuple(operation.arguments.get("location", ()))
+            if len(location) != 2:
+                continue
+            scope = str(
+                operation.arguments.get("definition", "master:unknown")
+            ).split(":", 1)[0]
+            instances = tuple(binding.shape.get("instances", ()))
+            for instance in instances:
+                offset = tuple(instance["offset"])
+                point = _snap_point(
+                    (
+                        int(location[0]) + int(offset[0]),
+                        int(location[1]) + int(offset[1]),
+                    )
+                )
+                definition = f"{scope}:{binding.physical_definition}".casefold()
+                expected[(definition, point)] += 1
+            neutral = binding.shape["neutral"]
+            ground_offset = tuple(neutral["ground_offset"])
+            for instance in instances:
+                offset = tuple(instance["offset"])
+                point = _snap_point(
+                    (
+                        int(location[0])
+                        + int(offset[0])
+                        + int(ground_offset[0]),
+                        int(location[1])
+                        + int(offset[1])
+                        + int(ground_offset[1]),
+                    )
+                )
+                definition = (
+                    f"{scope}:{neutral['ground_definition']}".casefold()
+                )
+                expected[(definition, point)] += 1
+
+        for component_id in self.component_ids.values():
+            observed = observed_by_id.get(str(component_id))
+            if observed is None:
+                continue
+            signature = _physical_component_signature(observed)
+            if expected[signature] > 0:
+                expected[signature] -= 1
+        return expected
 
     async def _verify_saved_component_readback(self) -> None:
         expected_components = {
@@ -1100,7 +1382,7 @@ class LccExecutor:
             expected_pscad_version=self.plan.pscad_version,
         )
         if not result.get("valid"):
-            logical_graph = self._logical_graph(expected_project_name)
+            logical_graph, projection_findings = self._saved_logical_graph(graph)
             projected = validate_project_graph(
                 logical_graph,
                 self.plan.blueprint,
@@ -1108,13 +1390,14 @@ class LccExecutor:
                 expected_project_name=expected_project_name,
                 expected_pscad_version=self.plan.pscad_version,
             )
-            if not projected.get("valid"):
+            if projection_findings or not projected.get("valid"):
                 raise _error(
                     "LCC_STRUCTURE_INVALID",
                     "Generated LCC topology does not match the plan.",
                     "validate_lcc_project_graph",
                     validation=result,
                     logical_projection=projected,
+                    saved_projection_findings=projection_findings,
                 )
             projected["physical_graph"] = {
                 "components": len(graph.components),
