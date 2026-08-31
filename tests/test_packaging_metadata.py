@@ -50,6 +50,16 @@ def test_canonical_corpus_assets_keep_lf_line_endings_on_checkout():
     assert "pscad_mcp/assets/blueprints/*/*.json text eol=lf" in attributes
 
 
+def test_fixed_lcc_assets_keep_lf_line_endings_on_checkout():
+    root = Path(__file__).parents[1]
+    attributes = (root / ".gitattributes").read_text(encoding="ascii").splitlines()
+
+    assert (
+        "pscad_mcp/assets/lcc/cigre_lcc_monopole_v1/** text eol=lf"
+        in attributes
+    )
+
+
 def test_project_packages_only_the_declared_mmc_asset_shapes():
     path = Path(__file__).parents[1] / "pyproject.toml"
     document = tomllib.loads(path.read_text(encoding="utf-8"))
