@@ -536,7 +536,9 @@ def test_wp1b_labels_consolidate_shared_ports_and_reuse_raw_signal_names():
     assert labels["vdc_rect_raw"] == "LCC_VDC_RECT_RAW"
     assert labels["vdc_inv_raw"] == "LCC_VDC_INV_RAW"
     assert labels["idc_raw"] == "LCC_IDC_RAW"
-    assert len(set(labels.values())) == 50
+    assert labels["rectifier_return"] is None
+    assert labels["inverter_return"] is None
+    assert len({label for label in labels.values() if label is not None}) == 48
 
 
 def test_wp1b_smoke_plan_uses_smoke_gate_and_hashes_profile(tmp_path):

@@ -249,7 +249,7 @@ def _net_route(net: LccNetSpec, component_map: Mapping[str, LccComponentSpec], c
     return validate_orthogonal_route((first, (last[0], first[1]), last))
 
 
-def _wp1b_connection_labels(blueprint) -> dict[str, str]:
+def _wp1b_connection_labels(blueprint) -> dict[str, str | None]:
     parent: dict[tuple[str, str], tuple[str, str]] = {}
 
     def find(endpoint: tuple[str, str]) -> tuple[str, str]:
@@ -301,13 +301,18 @@ def _wp1b_connection_labels(blueprint) -> dict[str, str]:
                 str,
             )
         }
+        has_ground = any(
+            components[endpoint.component].definition == "master:ground"
+            for net in nets
+            for endpoint in net.endpoints
+        )
         if len(imported_names) > 1:
             raise _error(
                 "LCC_BLUEPRINT_INVALID",
                 "One WP1B connection group references multiple imported names.",
                 imported_names=sorted(imported_names),
             )
-        label = (
+        label = None if has_ground else (
             next(iter(imported_names))
             if len(imported_names) == 1
             else "WP1B_"
