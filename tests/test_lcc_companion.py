@@ -64,7 +64,7 @@ USERS = {
     "LCC12PulseBridge": (
         "master:g6p200",
         "master:g6p200",
-        *("master:pin" for _ in range(8)),
+        *("master:xnode" for _ in range(8)),
         "master:breakout",
         "master:breakout",
         *("master:import" for _ in range(3)),
@@ -183,6 +183,17 @@ OUTPUT_NAMES = {
     "SignalInterface": ("VDC_RECT", "VDC_INV", "IDC"),
 }
 
+XNODE_NAMES = (
+    "ACY_A",
+    "ACY_B",
+    "ACY_C",
+    "ACD_A",
+    "ACD_B",
+    "ACD_C",
+    "DC_POS",
+    "DC_NEG",
+)
+
 
 def write_physical_library_fixture(
     tmp_path: Path,
@@ -261,6 +272,16 @@ def write_physical_library_fixture(
                         "name": "Name",
                         "value": OUTPUT_NAMES[definition_name][output_index],
                     },
+                )
+            elif scoped_name == "master:xnode":
+                xnode_index = sum(
+                    value == "master:xnode" for value in users[:user_index]
+                )
+                paramlist = ET.SubElement(user, "paramlist")
+                ET.SubElement(
+                    paramlist,
+                    "param",
+                    {"name": "Name", "value": XNODE_NAMES[xnode_index]},
                 )
         wires = list(WIRES[definition_name])
         if (
@@ -350,7 +371,7 @@ def test_physical_bridge_requires_two_g6p200_and_scalar_ao(tmp_path):
 
     bridge = evidence["definitions"]["cigre_lcc_v1:LCC12PulseBridge"]
     assert bridge["master_instances"]["master:g6p200"] == 2
-    assert bridge["master_instances"]["master:pin"] == 8
+    assert bridge["master_instances"]["master:xnode"] == 8
     assert bridge["master_instances"]["master:breakout"] == 2
     assert bridge["ports"]["AO_Y"] == {
         "kind": "data",

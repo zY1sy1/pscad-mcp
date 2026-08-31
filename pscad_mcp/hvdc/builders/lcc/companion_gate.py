@@ -379,6 +379,40 @@ async def _reload_fixture(
     return reloaded_name, reloaded_file, int(matches[0]["id"])
 
 
+async def _verify_compile_messages(service: Any, project_name: str) -> None:
+    reader = getattr(service, "get_project_output", None)
+    if not callable(reader):
+        raise _error(
+            "LCC_COMPANION_COMPILE_FAILED",
+            "The component gate cannot read structured build messages.",
+            "verify_compile_messages",
+        )
+    messages = await _service_call(
+        "verify_compile_messages",
+        reader(project_name, structured=True),
+    )
+    if not isinstance(messages, Sequence) or isinstance(messages, (str, bytes)):
+        raise _error(
+            "LCC_COMPANION_COMPILE_FAILED",
+            "Structured build messages are not an array.",
+            "verify_compile_messages",
+        )
+    errors = [
+        dict(message)
+        for message in messages
+        if isinstance(message, Mapping)
+        and str(message.get("severity", message.get("status", ""))).casefold()
+        == "error"
+    ]
+    if errors:
+        raise _error(
+            "LCC_COMPANION_COMPILE_FAILED",
+            "PSCAD reported component fixture compile errors.",
+            "verify_compile_messages",
+            errors=errors[:20],
+        )
+
+
 def _failure(
     fixture: str,
     operation: str,
@@ -559,6 +593,8 @@ async def run_companion_component_gate(
             )
             operation = "build_project"
             compile_result = await service.build_project(project_name)
+            operation = "verify_compile_messages"
+            await _verify_compile_messages(service, project_name)
             operation = "verify_sources"
             _verify_sources(
                 master,

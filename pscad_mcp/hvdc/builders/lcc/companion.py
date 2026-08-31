@@ -33,7 +33,7 @@ FORBIDDEN_STRUCTURAL_TAGS = {
 EXPECTED_MASTER_COUNTS = {
     "cigre_lcc_v1:LCC12PulseBridge": {
         "master:g6p200": 2,
-        "master:pin": 8,
+        "master:xnode": 8,
         "master:breakout": 2,
         "master:import": 3,
         "master:export": 4,

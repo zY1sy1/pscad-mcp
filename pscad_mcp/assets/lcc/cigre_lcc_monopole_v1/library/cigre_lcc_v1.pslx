@@ -71,29 +71,45 @@
           <param name="show_sequence" value="0" />
           <param name="auto_sequence" value="1" />
         </paramlist>
-        <User classid="UserCmp" name="" defn="master:pin" id="1220349066" x="90" y="144" w="10" h="10" z="10" orient="0" link="-1" q="4">
-          <paramlist link="-1" name="" crc="1329007" />
+        <User classid="UserCmp" name="" defn="master:xnode" id="1220349066" x="90" y="144" w="18" h="31" z="10" orient="0" link="-1" q="4">
+          <paramlist link="-1" name="" crc="114262475">
+            <param name="Name" value="ACY_A" />
+          </paramlist>
         </User>
-        <User classid="UserCmp" name="" defn="master:pin" id="935112523" x="90" y="180" w="10" h="10" z="20" orient="0" link="-1" q="4">
-          <paramlist link="-1" name="" crc="1329007" />
+        <User classid="UserCmp" name="" defn="master:xnode" id="935112523" x="90" y="180" w="18" h="31" z="20" orient="0" link="-1" q="4">
+          <paramlist link="-1" name="" crc="114262475">
+            <param name="Name" value="ACY_B" />
+          </paramlist>
         </User>
-        <User classid="UserCmp" name="" defn="master:pin" id="1310952919" x="90" y="216" w="10" h="10" z="30" orient="0" link="-1" q="4">
-          <paramlist link="-1" name="" crc="1329007" />
+        <User classid="UserCmp" name="" defn="master:xnode" id="1310952919" x="90" y="216" w="18" h="31" z="30" orient="0" link="-1" q="4">
+          <paramlist link="-1" name="" crc="114262475">
+            <param name="Name" value="ACY_C" />
+          </paramlist>
         </User>
-        <User classid="UserCmp" name="" defn="master:pin" id="148822243" x="90" y="414" w="10" h="10" z="40" orient="0" link="-1" q="4">
-          <paramlist link="-1" name="" crc="1329007" />
+        <User classid="UserCmp" name="" defn="master:xnode" id="148822243" x="90" y="414" w="18" h="31" z="40" orient="0" link="-1" q="4">
+          <paramlist link="-1" name="" crc="114262475">
+            <param name="Name" value="ACD_A" />
+          </paramlist>
         </User>
-        <User classid="UserCmp" name="" defn="master:pin" id="319476899" x="90" y="450" w="10" h="10" z="50" orient="0" link="-1" q="4">
-          <paramlist link="-1" name="" crc="1329007" />
+        <User classid="UserCmp" name="" defn="master:xnode" id="319476899" x="90" y="450" w="18" h="31" z="50" orient="0" link="-1" q="4">
+          <paramlist link="-1" name="" crc="114262475">
+            <param name="Name" value="ACD_B" />
+          </paramlist>
         </User>
-        <User classid="UserCmp" name="" defn="master:pin" id="341569369" x="90" y="486" w="10" h="10" z="60" orient="0" link="-1" q="4">
-          <paramlist link="-1" name="" crc="1329007" />
+        <User classid="UserCmp" name="" defn="master:xnode" id="341569369" x="90" y="486" w="18" h="31" z="60" orient="0" link="-1" q="4">
+          <paramlist link="-1" name="" crc="114262475">
+            <param name="Name" value="ACD_C" />
+          </paramlist>
         </User>
-        <User classid="UserCmp" name="" defn="master:pin" id="1694726840" x="360" y="54" w="10" h="10" z="70" orient="0" link="-1" q="4">
-          <paramlist link="-1" name="" crc="1329007" />
+        <User classid="UserCmp" name="" defn="master:xnode" id="1694726840" x="360" y="54" w="18" h="31" z="70" orient="0" link="-1" q="4">
+          <paramlist link="-1" name="" crc="114262475">
+            <param name="Name" value="DC_POS" />
+          </paramlist>
         </User>
-        <User classid="UserCmp" name="" defn="master:pin" id="1505457878" x="360" y="576" w="10" h="10" z="80" orient="0" link="-1" q="4">
-          <paramlist link="-1" name="" crc="1329007" />
+        <User classid="UserCmp" name="" defn="master:xnode" id="1505457878" x="360" y="576" w="18" h="31" z="80" orient="0" link="-1" q="4">
+          <paramlist link="-1" name="" crc="114262475">
+            <param name="Name" value="DC_NEG" />
+          </paramlist>
         </User>
         <User classid="UserCmp" name="" defn="master:breakout" id="954646376" x="180" y="180" w="40" h="77" z="90" orient="0" link="-1" q="4">
           <paramlist link="-1" name="" crc="6599472">
@@ -200,13 +216,13 @@
         </User>
         <User classid="UserCmp" name="" defn="master:consti" id="867846554" x="600" y="300" w="69" h="19" z="200" orient="0" link="-1" q="4">
           <paramlist link="-1" name="" crc="89924856">
-            <param name="Name" value="" />
+            <param name="Name" value="LCC_ENABLE_ONE" />
             <param name="Value" value="1" />
           </paramlist>
         </User>
         <User classid="UserCmp" name="" defn="master:consti" id="1772817029" x="600" y="360" w="69" h="19" z="210" orient="0" link="-1" q="4">
           <paramlist link="-1" name="" crc="89924856">
-            <param name="Name" value="" />
+            <param name="Name" value="LCC_CB_ZERO" />
             <param name="Value" value="0" />
           </paramlist>
         </User>
@@ -276,10 +292,12 @@
         </Wire>
         <Wire classid="WireOrthogonal" name="ENABLE_ONE" x="636" y="300" w="58" h="25" orient="0" id="124126863">
           <vertex x="0" y="0" />
+          <vertex x="48" y="0" />
           <vertex x="48" y="15" />
         </Wire>
         <Wire classid="WireOrthogonal" name="ENABLE_ORDER" x="540" y="315" w="190" h="46" orient="0" id="1939579750">
           <vertex x="0" y="0" />
+          <vertex x="180" y="0" />
           <vertex x="180" y="36" />
         </Wire>
         <Wire classid="WireOrthogonal" name="ENABLE_TO_KB_Y" x="756" y="315" w="376" h="91" orient="0" id="449659602">
@@ -467,17 +485,18 @@
           <vertex x="0" y="0" />
           <vertex x="198" y="-9" />
         </Wire>
-        <Wire classid="WireOrthogonal" name="ENABLE_CONVERSION" x="126" y="360" w="100" h="10" orient="0" id="960943269">
+        <Wire classid="WireOrthogonal" name="ENABLE_CONVERSION" x="126" y="360" w="64" h="10" orient="0" id="960943269">
           <vertex x="0" y="0" />
-          <vertex x="90" y="0" />
+          <vertex x="54" y="0" />
         </Wire>
         <Wire classid="WireOrthogonal" name="ERROR_TO_PRODUCT" x="360" y="225" w="64" h="10" orient="0" id="1149035048">
           <vertex x="0" y="0" />
           <vertex x="54" y="0" />
         </Wire>
-        <Wire classid="WireOrthogonal" name="ENABLE_PRODUCT" x="252" y="360" w="208" h="109" orient="0" id="181552117">
+        <Wire classid="WireOrthogonal" name="ENABLE_PRODUCT" x="216" y="360" w="244" h="109" orient="0" id="181552117">
           <vertex x="0" y="0" />
-          <vertex x="198" y="-99" />
+          <vertex x="234" y="0" />
+          <vertex x="234" y="-99" />
         </Wire>
         <Wire classid="WireOrthogonal" name="PRODUCT_TO_PI" x="486" y="225" w="28" h="10" orient="0" id="1111095836">
           <vertex x="0" y="0" />
@@ -689,9 +708,9 @@
           <vertex x="0" y="0" />
           <vertex x="126" y="36" />
         </Wire>
-        <Wire classid="WireOrthogonal" name="GAMMA_MIN_D" x="126" y="270" w="172" h="10" orient="0" id="622996719">
+        <Wire classid="WireOrthogonal" name="GAMMA_MIN_D" x="126" y="270" w="136" h="10" orient="0" id="622996719">
           <vertex x="0" y="0" />
-          <vertex x="162" y="0" />
+          <vertex x="126" y="0" />
         </Wire>
         <Wire classid="WireOrthogonal" name="GAMMA_ERROR" x="126" y="342" w="262" h="46" orient="0" id="930145915">
           <vertex x="0" y="0" />
@@ -701,17 +720,18 @@
           <vertex x="0" y="0" />
           <vertex x="90" y="108" />
         </Wire>
-        <Wire classid="WireOrthogonal" name="ENABLE_CONVERSION" x="126" y="414" w="100" h="10" orient="0" id="1948607259">
+        <Wire classid="WireOrthogonal" name="ENABLE_CONVERSION" x="126" y="414" w="64" h="10" orient="0" id="1948607259">
           <vertex x="0" y="0" />
-          <vertex x="90" y="0" />
+          <vertex x="54" y="0" />
         </Wire>
         <Wire classid="WireOrthogonal" name="ERROR_TO_PRODUCT" x="450" y="306" w="64" h="10" orient="0" id="1254974911">
           <vertex x="0" y="0" />
           <vertex x="54" y="0" />
         </Wire>
-        <Wire classid="WireOrthogonal" name="ENABLE_PRODUCT" x="252" y="414" w="298" h="82" orient="0" id="1905517920">
+        <Wire classid="WireOrthogonal" name="ENABLE_PRODUCT" x="216" y="414" w="334" h="82" orient="0" id="1905517920">
           <vertex x="0" y="0" />
-          <vertex x="288" y="-72" />
+          <vertex x="324" y="0" />
+          <vertex x="324" y="-72" />
         </Wire>
         <Wire classid="WireOrthogonal" name="PRODUCT_TO_PI" x="576" y="306" w="28" h="10" orient="0" id="1506288441">
           <vertex x="0" y="0" />
@@ -773,25 +793,25 @@
         </paramlist>
         <User classid="UserCmp" name="" defn="master:const" id="1239532045" x="180" y="126" w="69" h="19" z="10" orient="0" link="-1" q="4">
           <paramlist link="-1" name="" crc="8647988">
-            <param name="Name" value="" />
+            <param name="Name" value="LCC_IORDER_VALUE" />
             <param name="Value" value="1.0" />
           </paramlist>
         </User>
         <User classid="UserCmp" name="" defn="master:const" id="642009499" x="180" y="198" w="69" h="19" z="20" orient="0" link="-1" q="4">
           <paramlist link="-1" name="" crc="8647988">
-            <param name="Name" value="" />
+            <param name="Name" value="LCC_GAMMA_ORDER_VALUE" />
             <param name="Value" value="0.3141592653589793" />
           </paramlist>
         </User>
         <User classid="UserCmp" name="" defn="master:consti" id="1686574534" x="180" y="270" w="69" h="19" z="30" orient="0" link="-1" q="4">
           <paramlist link="-1" name="" crc="89924856">
-            <param name="Name" value="" />
+            <param name="Name" value="LCC_ENABLE_RECT_VALUE" />
             <param name="Value" value="1" />
           </paramlist>
         </User>
         <User classid="UserCmp" name="" defn="master:consti" id="517091691" x="180" y="342" w="69" h="19" z="40" orient="0" link="-1" q="4">
           <paramlist link="-1" name="" crc="89924856">
-            <param name="Name" value="" />
+            <param name="Name" value="LCC_ENABLE_INV_VALUE" />
             <param name="Value" value="1" />
           </paramlist>
         </User>
@@ -875,21 +895,21 @@
           <vertex x="0" y="0" />
           <vertex x="180" y="0" />
         </Wire>
-        <Wire classid="WireOrthogonal" name="ENABLE_RECT_CONVERSION" x="216" y="270" w="64" h="10" orient="0" id="635529779">
+        <Wire classid="WireOrthogonal" name="ENABLE_RECT_CONVERSION" x="216" y="270" w="28" h="10" orient="0" id="635529779">
           <vertex x="0" y="0" />
-          <vertex x="54" y="0" />
+          <vertex x="18" y="0" />
         </Wire>
-        <Wire classid="WireOrthogonal" name="ENABLE_INV_CONVERSION" x="216" y="342" w="64" h="10" orient="0" id="1945911294">
+        <Wire classid="WireOrthogonal" name="ENABLE_INV_CONVERSION" x="216" y="342" w="28" h="10" orient="0" id="1945911294">
           <vertex x="0" y="0" />
-          <vertex x="54" y="0" />
+          <vertex x="18" y="0" />
         </Wire>
-        <Wire classid="WireOrthogonal" name="ENABLE_RECT_MONITOR" x="306" y="270" w="136" h="10" orient="0" id="1096431074">
+        <Wire classid="WireOrthogonal" name="ENABLE_RECT_MONITOR" x="270" y="270" w="172" h="10" orient="0" id="1096431074">
           <vertex x="0" y="0" />
-          <vertex x="126" y="0" />
+          <vertex x="162" y="0" />
         </Wire>
-        <Wire classid="WireOrthogonal" name="ENABLE_INV_MONITOR" x="306" y="342" w="136" h="10" orient="0" id="1418426831">
+        <Wire classid="WireOrthogonal" name="ENABLE_INV_MONITOR" x="270" y="342" w="172" h="10" orient="0" id="1418426831">
           <vertex x="0" y="0" />
-          <vertex x="126" y="0" />
+          <vertex x="162" y="0" />
         </Wire>
       </schematic>
     </Definition>
@@ -918,17 +938,17 @@
         </paramlist>
         <User classid="UserCmp" name="" defn="master:import" id="1782622483" x="180" y="126" w="83" h="22" z="10" orient="0" link="-1" q="4">
           <paramlist link="-1" name="" crc="35483323">
-            <param name="Name" value="VDC_RECT" />
+            <param name="Name" value="LCC_VDC_RECT_RAW" />
           </paramlist>
         </User>
         <User classid="UserCmp" name="" defn="master:import" id="840805525" x="180" y="198" w="83" h="22" z="20" orient="0" link="-1" q="4">
           <paramlist link="-1" name="" crc="35483323">
-            <param name="Name" value="VDC_INV" />
+            <param name="Name" value="LCC_VDC_INV_RAW" />
           </paramlist>
         </User>
         <User classid="UserCmp" name="" defn="master:import" id="1593626453" x="180" y="270" w="83" h="22" z="30" orient="0" link="-1" q="4">
           <paramlist link="-1" name="" crc="35483323">
-            <param name="Name" value="IDC" />
+            <param name="Name" value="LCC_IDC_RAW" />
           </paramlist>
         </User>
         <User classid="UserCmp" name="" defn="master:export" id="39390008" x="360" y="126" w="74" h="21" z="40" orient="0" link="-1" q="4">

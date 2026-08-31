@@ -187,8 +187,8 @@
       },
       "orientation": 0,
       "parameters": {
-        "CurrentSignal": "IDC",
-        "VoltageSignal": "VDC_RECT"
+        "CurrentSignal": "LCC_IDC_RAW",
+        "VoltageSignal": "LCC_VDC_RECT_RAW"
       },
       "ports": [
         "IN",
@@ -257,8 +257,8 @@
       },
       "orientation": 0,
       "parameters": {
-        "CurrentSignal": "IDC_INV",
-        "VoltageSignal": "VDC_INV"
+        "CurrentSignal": "LCC_IDC_INV_RAW",
+        "VoltageSignal": "LCC_VDC_INV_RAW"
       },
       "ports": [
         "IN",

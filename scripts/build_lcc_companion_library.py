@@ -40,7 +40,7 @@ COMMON_G6P200 = {
 
 STYLE = {
     "g6p200": (115, 184, 113177439),
-    "pin": (10, 10, 1329007),
+    "xnode": (18, 31, 114262475),
     "breakout": (40, 77, 6599472),
     "import": (83, 22, 35483323),
     "export": (74, 21, 39049670),
@@ -259,8 +259,8 @@ def _definition(
         _wire(schematic, name, sequence, wire)
 
 
-def _pin(role: str, x: int, y: int) -> Component:
-    return Component(role, "master:pin", x, y, {})
+def _pin(role: str, name: str, x: int, y: int) -> Component:
+    return Component(role, "master:xnode", x, y, {"Name": name})
 
 
 def _import(role: str, name: str, x: int, y: int) -> Component:
@@ -326,14 +326,14 @@ def _bridge_definition(definitions: ET.Element) -> None:
     g6_y = {**COMMON_G6P200, "UP": "$(UP)", "KV": "-2"}
     g6_d = {**COMMON_G6P200, "UP": "$(UP)", "KV": "-1"}
     components = (
-        _pin("pin_acy_a", 90, 144),
-        _pin("pin_acy_b", 90, 180),
-        _pin("pin_acy_c", 90, 216),
-        _pin("pin_acd_a", 90, 414),
-        _pin("pin_acd_b", 90, 450),
-        _pin("pin_acd_c", 90, 486),
-        _pin("pin_dc_pos", 360, 54),
-        _pin("pin_dc_neg", 360, 576),
+        _pin("pin_acy_a", "ACY_A", 90, 144),
+        _pin("pin_acy_b", "ACY_B", 90, 180),
+        _pin("pin_acy_c", "ACY_C", 90, 216),
+        _pin("pin_acd_a", "ACD_A", 90, 414),
+        _pin("pin_acd_b", "ACD_B", 90, 450),
+        _pin("pin_acd_c", "ACD_C", 90, 486),
+        _pin("pin_dc_pos", "DC_POS", 360, 54),
+        _pin("pin_dc_neg", "DC_NEG", 360, 576),
         Component("breakout_y", "master:breakout", 180, 180, {"Dis": "0", "Com": "0"}),
         Component("breakout_d", "master:breakout", 180, 450, {"Dis": "0", "Com": "0"}),
         Component("bridge_y", "master:g6p200", 360, 180, g6_y),
@@ -346,10 +346,10 @@ def _bridge_definition(definitions: ET.Element) -> None:
         _export("export_am_d", "AM_D", 504, 396),
         _export("export_gm_d", "GM_D", 504, 414),
         Component(
-            "const_enable_one", "master:consti", 600, 300, {"Name": "", "Value": "1"}
+            "const_enable_one", "master:consti", 600, 300, {"Name": "LCC_ENABLE_ONE", "Value": "1"}
         ),
         Component(
-            "const_cb_zero", "master:consti", 600, 360, {"Name": "", "Value": "0"}
+            "const_cb_zero", "master:consti", 600, 360, {"Name": "LCC_CB_ZERO", "Value": "0"}
         ),
         Component(
             "enable_inverter",
@@ -382,8 +382,8 @@ def _bridge_definition(definitions: ET.Element) -> None:
         Wire("DC_NEG_PATH", ((360, 540), (360, 576))),
         Wire("AO_Y_TO_BRIDGE_Y", ((540, 216), (414, 216))),
         Wire("AO_D_TO_BRIDGE_D", ((540, 486), (414, 486))),
-        Wire("ENABLE_ONE", ((636, 300), (684, 315))),
-        Wire("ENABLE_ORDER", ((540, 315), (720, 351))),
+        Wire("ENABLE_ONE", ((636, 300), (684, 300), (684, 315))),
+        Wire("ENABLE_ORDER", ((540, 315), (720, 315), (720, 351))),
         Wire("ENABLE_TO_KB_Y", ((756, 315), (780, 315), (780, 234), (414, 234))),
         Wire("ENABLE_TO_KB_D", ((756, 315), (792, 315), (792, 504), (414, 504))),
         Wire("CB_ZERO_Y", ((636, 360), (648, 360), (648, 90), (342, 90))),
@@ -474,9 +474,9 @@ def _rectifier_control(definitions: ET.Element) -> None:
     wires = (
         Wire("CURRENT_ERROR", ((126, 180), (288, 225))),
         Wire("CURRENT_ORDER", ((126, 270), (324, 261))),
-        Wire("ENABLE_CONVERSION", ((126, 360), (216, 360))),
+        Wire("ENABLE_CONVERSION", ((126, 360), (180, 360))),
         Wire("ERROR_TO_PRODUCT", ((360, 225), (414, 225))),
-        Wire("ENABLE_PRODUCT", ((252, 360), (450, 261))),
+        Wire("ENABLE_PRODUCT", ((216, 360), (450, 360), (450, 261))),
         Wire("PRODUCT_TO_PI", ((486, 225), (504, 225))),
         Wire("PI_TO_LIMIT", ((576, 225), (648, 225))),
         Wire("AO_Y_OUTPUT", ((720, 225), (882, 180))),
@@ -585,12 +585,12 @@ def _inverter_control(definitions: ET.Element) -> None:
     )
     wires = (
         Wire("GAMMA_MIN", ((126, 198), (252, 234))),
-        Wire("GAMMA_MIN_D", ((126, 270), (288, 270))),
+        Wire("GAMMA_MIN_D", ((126, 270), (252, 270))),
         Wire("GAMMA_ERROR", ((126, 342), (378, 306))),
         Wire("GAMMA_FEEDBACK", ((324, 234), (414, 342))),
-        Wire("ENABLE_CONVERSION", ((126, 414), (216, 414))),
+        Wire("ENABLE_CONVERSION", ((126, 414), (180, 414))),
         Wire("ERROR_TO_PRODUCT", ((450, 306), (504, 306))),
-        Wire("ENABLE_PRODUCT", ((252, 414), (540, 342))),
+        Wire("ENABLE_PRODUCT", ((216, 414), (540, 414), (540, 342))),
         Wire("PRODUCT_TO_PI", ((576, 306), (594, 306))),
         Wire("PI_TO_LIMIT", ((666, 306), (738, 306))),
         Wire("AO_Y_OUTPUT", ((810, 306), (972, 252))),
@@ -616,16 +616,16 @@ def _initialization(definitions: ET.Element) -> None:
         for name in ("IORDER", "GAMMA_ORDER", "ENABLE_RECT", "ENABLE_INV")
     )
     components = (
-        Component("iorder", "master:const", 180, 126, {"Name": "", "Value": "1.0"}),
+        Component("iorder", "master:const", 180, 126, {"Name": "LCC_IORDER_VALUE", "Value": "1.0"}),
         Component(
             "gamma_order",
             "master:const",
             180,
             198,
-            {"Name": "", "Value": "0.3141592653589793"},
+            {"Name": "LCC_GAMMA_ORDER_VALUE", "Value": "0.3141592653589793"},
         ),
-        Component("enable_rect", "master:consti", 180, 270, {"Name": "", "Value": "1"}),
-        Component("enable_inv", "master:consti", 180, 342, {"Name": "", "Value": "1"}),
+        Component("enable_rect", "master:consti", 180, 270, {"Name": "LCC_ENABLE_RECT_VALUE", "Value": "1"}),
+        Component("enable_inv", "master:consti", 180, 342, {"Name": "LCC_ENABLE_INV_VALUE", "Value": "1"}),
         _export("export_iorder", "IORDER", 360, 126),
         _export("export_gamma", "GAMMA_ORDER", 360, 198),
         _export("export_enable_rect", "ENABLE_RECT", 360, 270),
@@ -652,10 +652,10 @@ def _initialization(definitions: ET.Element) -> None:
         Wire("GAMMA_ORDER_OUTPUT", ((216, 198), (396, 198))),
         Wire("ENABLE_RECT_OUTPUT", ((216, 270), (396, 270))),
         Wire("ENABLE_INV_OUTPUT", ((216, 342), (396, 342))),
-        Wire("ENABLE_RECT_CONVERSION", ((216, 270), (270, 270))),
-        Wire("ENABLE_INV_CONVERSION", ((216, 342), (270, 342))),
-        Wire("ENABLE_RECT_MONITOR", ((306, 270), (432, 270))),
-        Wire("ENABLE_INV_MONITOR", ((306, 342), (432, 342))),
+        Wire("ENABLE_RECT_CONVERSION", ((216, 270), (234, 270))),
+        Wire("ENABLE_INV_CONVERSION", ((216, 342), (234, 342))),
+        Wire("ENABLE_RECT_MONITOR", ((270, 270), (432, 270))),
+        Wire("ENABLE_INV_MONITOR", ((270, 342), (432, 342))),
     )
     _definition(
         definitions,
@@ -672,9 +672,9 @@ def _signal_interface(definitions: ET.Element) -> None:
         (name, "data", "output", "Real") for name in ("VDC_RECT", "VDC_INV", "IDC")
     )
     components = (
-        _import("import_vdc_rect", "VDC_RECT", 180, 126),
-        _import("import_vdc_inv", "VDC_INV", 180, 198),
-        _import("import_idc", "IDC", 180, 270),
+        _import("import_vdc_rect", "LCC_VDC_RECT_RAW", 180, 126),
+        _import("import_vdc_inv", "LCC_VDC_INV_RAW", 180, 198),
+        _import("import_idc", "LCC_IDC_RAW", 180, 270),
         _export("export_vdc_rect", "VDC_RECT", 360, 126),
         _export("export_vdc_inv", "VDC_INV", 360, 198),
         _export("export_idc", "IDC", 360, 270),

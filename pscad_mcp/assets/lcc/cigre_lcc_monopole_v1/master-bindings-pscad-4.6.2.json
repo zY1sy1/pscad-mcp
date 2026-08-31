@@ -1727,7 +1727,7 @@
     },
     {
       "logical_name": "master:electrical_pin",
-      "physical_definition": "pin",
+      "physical_definition": "xnode",
       "shape": {
         "kind": "direct"
       },
@@ -1740,7 +1740,25 @@
           "occurrence": 0
         }
       ],
-      "parameters": [],
+      "parameters": [
+        {
+          "logical": [
+            "Name"
+          ],
+          "physical": [
+            "Name"
+          ],
+          "transform": {
+            "kind": "identity"
+          },
+          "physical_contracts": {
+            "Name": {
+              "type": "Text",
+              "unit": null
+            }
+          }
+        }
+      ],
       "fixed_parameters": [],
       "evidence_parameters": []
     },

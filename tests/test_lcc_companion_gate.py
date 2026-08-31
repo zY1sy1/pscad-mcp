@@ -75,11 +75,13 @@ class CompanionGateFakeService:
         port_drift: bool = False,
         mutate_master_on_build: Path | None = None,
         reload_unavailable: bool = False,
+        compile_messages: list[dict[str, Any]] | None = None,
     ) -> None:
         self.fail_on = fail_on
         self.port_drift = port_drift
         self.mutate_master_on_build = mutate_master_on_build
         self.reload_unavailable = reload_unavailable
+        self.compile_messages = list(compile_messages or [])
         self.calls: list[tuple[str, tuple[Any, ...]]] = []
         self.failure_index = -1
         self.projects: dict[str, dict[str, Any]] = {}
@@ -283,6 +285,14 @@ class CompanionGateFakeService:
             self.mutate_master_on_build.write_bytes(b"changed-master")
         return "built"
 
+    async def get_project_output(
+        self,
+        project_name: str,
+        structured: bool = False,
+    ) -> Any:
+        self._call("get_project_output", project_name, structured)
+        return list(self.compile_messages) if structured else ""
+
 
 def _inputs(tmp_path: Path):
     assets = load_packaged_asset_set()
@@ -437,3 +447,32 @@ def test_component_gate_uses_save_as_when_legacy_unload_is_unavailable(tmp_path)
         item["project"]["name"].endswith("_reloaded")
         for item in result["fixtures"]
     )
+
+
+def test_component_gate_rejects_pscad_compile_error_messages(tmp_path):
+    assets, master, registry, master_hash, registry_hash = _inputs(tmp_path)
+    service = CompanionGateFakeService(
+        compile_messages=[
+            {
+                "severity": "error",
+                "text": "Input port is floating.",
+                "source": None,
+            }
+        ]
+    )
+
+    result = asyncio.run(
+        _subject()(
+            service,
+            assets,
+            tmp_path / "fixtures",
+            master_path=master,
+            registry_path=registry,
+            expected_master_sha256=master_hash,
+            expected_registry_sha256=registry_hash,
+        )
+    )
+
+    assert result["status"] == "FAIL"
+    assert result["failure"]["operation"] == "verify_compile_messages"
+    assert result["failure"]["code"] == "LCC_COMPANION_COMPILE_FAILED"
