@@ -1113,3 +1113,7 @@ Codex 不得在一个 turn 中同时实现两个 licensed 工作包，也不得�
 runner 必须持久化 `INCOMPLETE_ANALYSIS` 或 `FAIL`，不得把 WP1B 无故障 smoke
 提升为动态 PASS。独立 golden 和最终 `accepted` 仍由 WP6 负责；WP1C 完成后再进入
 WP1D 参数化 LCC。
+
+在动态运行前，`wp1c_dynamic` planner profile 会先验证 fault timer、三相 fault
+shunt、`inverter_ac_bus` 和 `Fault/LCC Fault Active` 的唯一绑定；任一项缺失都返回
+`LCC_DYNAMIC_EVENT_UNAVAILABLE`，不创建或修改 PSCAD 工程。

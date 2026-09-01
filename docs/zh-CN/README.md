@@ -139,6 +139,11 @@ runner 会把报告绑定到干净的命名分支，并拒绝缺失或无界的�
 `INCOMPLETE_ANALYSIS`，不会提升为 `accepted`。当前 fixed companion 尚未暴露
 fault/event 输入，因此在完成该绑定并取得真实 PSCAD 运行前，不声明动态 licensed PASS。
 
+可选的 `wp1c_dynamic` 规划 profile 会在创建任何 PSCAD 工程前执行无副作用的
+fault/event 能力门。它要求精确的 EMTDC 计时器、三相 fault shunt、
+`inverter_ac_bus` 绑定和 `Fault/LCC Fault Active` 输出通道；当前 fixed 资产会
+fail-closed 返回 `LCC_DYNAMIC_EVENT_UNAVAILABLE`，直到这些绑定真正存在。
+
 授权证据生成与基线提升是两个独立动作；run 命令不会修改仓库基线：
 
 ```powershell
