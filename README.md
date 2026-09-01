@@ -217,6 +217,23 @@ remaining PSCAD process. It is not `accepted`: disturbance, commutation
 failure/recovery, independent golden, and final acceptance remain WP1C/WP6
 work.
 
+WP1C dynamic evidence is evaluated with real PSCAD-exported channel samples:
+
+```powershell
+./scripts/run_fixed_lcc_dynamic_acceptance.ps1 `
+  -Samples 'D:/PSCAD-Workspace/lcc-wp1c-dynamic/samples.json' `
+  -Golden 'D:/PSCAD-Workspace/lcc-wp1c-dynamic/golden.json' `
+  -Contract 'pscad_mcp/assets/lcc/cigre_lcc_monopole_v1/acceptance.json' `
+  -Report 'D:/PSCAD-Workspace/lcc-wp1c-dynamic/dynamic-report.json'
+```
+
+The runner binds the report to a clean named checkout and rejects missing or
+unbounded disturbance/recovery evidence. Physical evidence without an
+independently reviewed golden is recorded as `INCOMPLETE_ANALYSIS`; it is never
+promoted to `accepted`. The current fixed companion does not yet expose a
+fault/event input, so no dynamic licensed PASS is claimed until that binding
+and a real PSCAD run exist.
+
 Licensed evidence generation and baseline promotion are separate actions. The
 run command never edits the checked-in baseline:
 

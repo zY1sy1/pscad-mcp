@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+from pathlib import Path
 
 import pytest
 
@@ -122,3 +123,16 @@ def test_dynamic_report_fails_when_fault_is_not_bounded_or_recovered():
     result = evaluate_fixed_lcc_dynamic_samples(samples, {}, dynamic_contract())
     assert result["verdict"] == "FAIL"
     assert result["dynamic"]["verdict"] == "FAIL"
+
+
+def test_roadmap_names_wp1c_as_the_next_step():
+    roadmap = Path(__file__).parents[1] / "docs" / "superpowers" / "specs" / "2026-08-30-lcc-mmc-completion-roadmap-design.md"
+    text = roadmap.read_text(encoding="utf-8")
+    assert "执行 WP1C fixed LCC 动态验收" in text
+    assert "先审阅并合并 WP0 分支" not in text
+
+
+def test_readme_documents_dynamic_evidence_status():
+    readme = (Path(__file__).parents[1] / "README.md").read_text(encoding="utf-8")
+    assert "run_fixed_lcc_dynamic_acceptance.ps1" in readme
+    assert "INCOMPLETE_ANALYSIS" in readme
