@@ -18,7 +18,7 @@ Add a pure `fault_event.py` module with:
 - `validate_fixed_lcc_fault_event()` enforcing positive finite timing, a three-phase mask, the canonical `inverter_ac_bus` target, and an explicit event kind.
 - `inspect_fixed_lcc_fault_capability()` that accepts the parsed blueprint, catalog, and live definition inventory and returns a structured `PASS` or `INCOMPLETE_ANALYSIS` result. It requires exactly one `master:tfault`-compatible timer, one `master:tpflt`/equivalent three-phase shunt, a connected inverter AC bus, and a required `Fault/LCC Fault Active` output declaration. Missing or ambiguous bindings are reported by reason and never inferred.
 
-The planner will call this gate only for a future `wp1c_dynamic` verification profile. Existing `wp1b_smoke` and `full_acceptance` behavior remains unchanged. No component or net is added until the gate can be satisfied by live PSCAD inventory and a reviewed topology design.
+The planner calls this gate only for the opt-in `wp1c_dynamic` verification profile. Existing `wp1b_smoke` and `full_acceptance` behavior remains unchanged. No component or net is added until the gate can be satisfied by live PSCAD inventory and a reviewed topology design.
 
 ## Testing
 
