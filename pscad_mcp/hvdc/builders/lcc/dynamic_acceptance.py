@@ -92,6 +92,22 @@ def _channels(value: Any, field: str) -> list[str]:
     return result
 
 
+def _required_channels_from_contract(contract: Mapping[str, Any]) -> list[str]:
+    raw = contract.get("required_channels")
+    if raw is not None:
+        return _channels(raw, "contract.required_channels")
+    golden = contract.get("golden")
+    declarations = golden.get("channels", ()) if isinstance(golden, Mapping) else ()
+    if not isinstance(declarations, Sequence) or isinstance(declarations, (str, bytes, bytearray)):
+        raise _invalid("contract.golden.channels", "golden channels must be an array.")
+    names = [
+        item.get("name")
+        for item in declarations
+        if isinstance(item, Mapping) and item.get("required", True)
+    ]
+    return _channels(names, "contract.golden.channels") if names else []
+
+
 @dataclass(frozen=True)
 class DynamicLccAcceptanceRequest:
     repository_root: Path
@@ -149,7 +165,17 @@ def validate_dynamic_lcc_acceptance_report(value: Any) -> dict[str, Any]:
     physical = _mapping(dynamic["physical"], "dynamic.physical")
     if physical.get("verdict") not in {PASS, FAIL, INCOMPLETE}:
         raise _invalid("dynamic.physical.verdict", "Physical verdict is invalid.")
-    _mapping(report["golden"], "golden")
+    golden = _mapping(report["golden"], "golden")
+    if report["status"] == PASS:
+        source = golden.get("source")
+        if (
+            not isinstance(source, str)
+            or "placeholder" in source.casefold()
+            or golden.get("reviewed") is not True
+        ):
+            raise _invalid("golden", "PASS requires an independently reviewed golden source.")
+        if physical["verdict"] != PASS:
+            raise _invalid("dynamic.physical.verdict", "PASS requires physical evidence to pass.")
     exclusions = _channels(report["explicit_exclusions"], "explicit_exclusions")
     if "final_accepted" not in exclusions:
         raise _invalid("explicit_exclusions", "Final accepted exclusion is required before WP6.")
@@ -177,7 +203,7 @@ def evaluate_fixed_lcc_dynamic_samples(
     channels = samples.get("channels", samples)
     if not isinstance(channels, Mapping):
         raise _invalid("samples.channels", "samples.channels must be an object.")
-    required = _channels(contract.get("required_channels", ()), "contract.required_channels")
+    required = _required_channels_from_contract(contract)
     missing = [name for name in required if name not in channels]
     dynamic_evidence = samples.get("dynamic", {})
     if not isinstance(dynamic_evidence, Mapping):
@@ -209,6 +235,7 @@ def evaluate_fixed_lcc_dynamic_samples(
     elif (
         physical_result["verdict"] == INCOMPLETE
         or waveform_result["verdict"] == INCOMPLETE
+        or not required
     ):
         result["verdict"] = INCOMPLETE
     return result

@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import tempfile
 from collections.abc import Mapping, Sequence
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -67,6 +69,17 @@ def _required_channels(contract: Mapping[str, Any]) -> list[str]:
     return result or ["Main/VDC_RECT"]
 
 
+def _safe_commit(value: Any) -> str:
+    text = value if isinstance(value, str) else ""
+    if len(text) == 40 and all(char in "0123456789abcdef" for char in text):
+        return text
+    return "0" * 40
+
+
+def _safe_float(value: Any) -> float:
+    return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(float(value)) else 0.0
+
+
 def _report(
     arguments: argparse.Namespace,
     *,
@@ -90,23 +103,23 @@ def _report(
         "builder_path": "lcc.fixed_autonomous",
         "kind": "licensed_acceptance",
         "capability_state": "simulated",
-        "commit": arguments.commit,
-        "generated_at_utc": "1970-01-01T00:00:00Z",
+        "commit": _safe_commit(arguments.commit),
+        "generated_at_utc": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "status": status,
         "repository": {
             "branch": arguments.branch,
-            "commit": arguments.commit,
+            "commit": _safe_commit(arguments.commit),
             "clean": True,
         },
         "dynamic": {
             "event": {
                 "kind": arguments.event_kind,
-                "time_s": arguments.event_time,
-                "duration_s": arguments.event_duration,
+                "time_s": _safe_float(arguments.event_time),
+                "duration_s": _safe_float(arguments.event_duration) or 0.1,
             },
             "recovery": {
                 "observed": bool(dynamic_result.get("checks", {}).get("recovered", False)),
-                "window_s": arguments.recovery_window,
+                "window_s": _safe_float(arguments.recovery_window) or 0.5,
             },
             "required_channels": _required_channels(contract),
             "physical": {

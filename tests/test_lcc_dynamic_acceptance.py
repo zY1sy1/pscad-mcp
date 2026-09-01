@@ -126,6 +126,31 @@ def test_dynamic_report_fails_when_fault_is_not_bounded_or_recovered():
     assert result["dynamic"]["verdict"] == "FAIL"
 
 
+def test_dynamic_evaluator_derives_required_channels_from_golden_declarations():
+    contract = dynamic_contract()
+    del contract["required_channels"]
+    result = evaluate_fixed_lcc_dynamic_samples(
+        valid_dynamic_samples(), placeholder_golden(), contract
+    )
+    assert result["missing_channels"] == []
+
+
+def test_dynamic_evaluator_stays_incomplete_without_golden_declarations():
+    contract = dynamic_contract()
+    contract["golden"]["channels"] = []
+    result = evaluate_fixed_lcc_dynamic_samples(
+        valid_dynamic_samples(), {}, contract
+    )
+    assert result["verdict"] == "INCOMPLETE_ANALYSIS"
+
+
+def test_dynamic_report_rejects_forged_pass_with_placeholder_golden():
+    report = valid_dynamic_report()
+    report["status"] = "PASS"
+    with pytest.raises(BackendError):
+        validate_dynamic_lcc_acceptance_report(report)
+
+
 def test_roadmap_names_wp1c_as_the_next_step():
     roadmap = Path(__file__).parents[1] / "docs" / "superpowers" / "specs" / "2026-08-30-lcc-mmc-completion-roadmap-design.md"
     text = roadmap.read_text(encoding="utf-8")

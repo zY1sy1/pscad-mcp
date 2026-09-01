@@ -123,3 +123,35 @@ def test_evaluate_cli_persists_failure_for_invalid_input(tmp_path: Path):
     payload = json.loads(report.read_text(encoding="utf-8"))
     assert payload["status"] == "FAIL"
     assert payload["failure"]["stage"] == "input"
+
+
+def test_evaluate_cli_persists_failure_even_with_invalid_commit_metadata(tmp_path: Path):
+    report = tmp_path / "dynamic-report.json"
+    exit_code = main(
+        [
+            "evaluate",
+            "--samples",
+            str(tmp_path / "missing.json"),
+            "--golden",
+            str(tmp_path / "missing-golden.json"),
+            "--contract",
+            str(tmp_path / "missing-contract.json"),
+            "--report",
+            str(report),
+            "--commit",
+            "bad",
+            "--branch",
+            "codex/wp1c",
+            "--event-time",
+            "nan",
+            "--event-duration",
+            "0.1",
+            "--recovery-window",
+            "0.5",
+        ]
+    )
+
+    assert exit_code == 1
+    payload = json.loads(report.read_text(encoding="utf-8"))
+    assert len(payload["commit"]) == 40
+    assert payload["dynamic"]["event"]["time_s"] == 0.0

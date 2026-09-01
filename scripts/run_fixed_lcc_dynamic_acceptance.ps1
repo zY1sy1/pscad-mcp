@@ -17,21 +17,26 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $RepositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+$ExitCode = 1
 Push-Location $RepositoryRoot
 try {
     $Dirty = git status --porcelain
     if ($LASTEXITCODE -ne 0 -or $Dirty) {
         throw 'WP1C dynamic evidence requires a clean checkout.'
     }
-    if (-not $Branch) {
-        $Branch = git branch --show-current
-    }
-    if (-not $Branch) {
+    $ActualBranch = git branch --show-current
+    if (-not $ActualBranch) {
         throw 'WP1C dynamic evidence requires a named branch.'
     }
-    if (-not $Commit) {
-        $Commit = git rev-parse HEAD
+    if ($Branch -and $Branch -ne $ActualBranch) {
+        throw "Requested branch '$Branch' does not match checkout branch '$ActualBranch'."
     }
+    $Branch = $ActualBranch
+    $ActualCommit = git rev-parse HEAD
+    if ($Commit -and $Commit -ne $ActualCommit) {
+        throw "Requested commit '$Commit' does not match checkout HEAD '$ActualCommit'."
+    }
+    $Commit = $ActualCommit
     if (@(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -like 'PSCAD*' }).Count -ne 0) {
         throw 'Close PSCAD processes before evaluating dynamic evidence.'
     }
