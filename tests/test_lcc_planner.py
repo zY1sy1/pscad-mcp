@@ -17,8 +17,29 @@ from pscad_mcp.hvdc.builders.lcc.planner import (
     _component_rectangles,
     _net_route,
     _wp1b_connection_labels,
+    _dynamic_schedule_events,
     create_plan,
 )
+
+
+def test_dynamic_schedule_events_expand_to_native_on_off_commands():
+    events = _dynamic_schedule_events(
+        [
+            {
+                "kind": "inverter_ac_disturbance",
+                "time_s": 0.8,
+                "duration_s": 0.1,
+                "control_component": "fault_a",
+                "control_parameter": "NAME",
+                "apply_value": 1,
+                "clear_value": 0,
+            }
+        ]
+    )
+    assert events == [
+        {"event_id": "inverter_ac_disturbance:on", "time_s": 0.8, "target": "fault_a.NAME", "value": 1},
+        {"event_id": "inverter_ac_disturbance:off", "time_s": 0.9, "target": "fault_a.NAME", "value": 0},
+    ]
 from pscad_mcp.hvdc.builders.lcc.routing import route_intersects_rectangles
 from pscad_mcp.hvdc.builders.lcc.schema import parse_blueprint
 

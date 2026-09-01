@@ -541,6 +541,8 @@ class LccExecutor:
             await self._save_and_validate(operation)
         elif operation.kind == "compile":
             await self._compile(operation)
+        elif operation.kind == "register_dynamic_events":
+            await self._register_dynamic_events(operation)
         elif operation.kind == "simulate":
             await self._simulate(operation)
         elif operation.kind == "smoke_validate":
@@ -1836,6 +1838,81 @@ class LccExecutor:
                     timeout_s=self.timeout_s,
                 )
             await asyncio.sleep(self.poll_interval_s)
+
+    async def _register_dynamic_events(self, operation: LccPlanOperation) -> None:
+        self._operation_started(operation)
+        events = operation.arguments.get("events")
+        if not isinstance(events, Sequence) or isinstance(events, (str, bytes, bytearray)) or not events:
+            raise _error(
+                "LCC_DYNAMIC_EVENT_UNAVAILABLE",
+                "Dynamic event registration requires a non-empty event list.",
+                "register_lcc_dynamic_events",
+            )
+        normalized: list[dict[str, Any]] = []
+        previous_time = -1.0
+        for index, event in enumerate(events):
+            if not isinstance(event, Mapping):
+                raise _error(
+                    "LCC_DYNAMIC_EVENT_UNAVAILABLE",
+                    "Dynamic event entries must be objects.",
+                    "register_lcc_dynamic_events",
+                    index=index,
+                )
+            event_id = event.get("event_id")
+            target = event.get("target")
+            value = event.get("value")
+            time_s = event.get("time_s")
+            if not isinstance(event_id, str) or not event_id.strip() or not isinstance(target, str) or not target.strip():
+                raise _error(
+                    "LCC_DYNAMIC_EVENT_UNAVAILABLE",
+                    "Dynamic events require exact event_id and target text.",
+                    "register_lcc_dynamic_events",
+                    index=index,
+                )
+            if isinstance(time_s, bool) or not isinstance(time_s, (int, float)) or not math.isfinite(float(time_s)) or float(time_s) <= previous_time:
+                raise _error(
+                    "LCC_DYNAMIC_EVENT_UNAVAILABLE",
+                    "Dynamic event times must be finite and strictly increasing.",
+                    "register_lcc_dynamic_events",
+                    index=index,
+                )
+            previous_time = float(time_s)
+            normalized.append({"event_id": event_id.strip(), "time_s": float(time_s), "target": target.strip(), "value": value})
+        backend = getattr(self.service, "backend_service", self.service)
+        capability_reader = getattr(backend, "get_timed_control_capabilities", None)
+        scheduler = getattr(backend, "schedule_timed_controls", None)
+        if not callable(capability_reader) or not callable(scheduler):
+            raise _error(
+                "LCC_DYNAMIC_EVENT_UNAVAILABLE",
+                "The backend does not expose native EMTDC event scheduling.",
+                "register_lcc_dynamic_events",
+            )
+        capabilities = await capability_reader(self.project_name)
+        if not isinstance(capabilities, Mapping) or capabilities.get("native_schedule") is not True or capabilities.get("simulation_clock") is not True or capabilities.get("time_basis") != "EMTDC":
+            raise _error(
+                "LCC_DYNAMIC_EVENT_UNAVAILABLE",
+                "Dynamic events require native EMTDC scheduling and a simulation clock.",
+                "register_lcc_dynamic_events",
+                capabilities=dict(capabilities) if isinstance(capabilities, Mapping) else {},
+            )
+        acknowledgements = await scheduler(self.project_name, normalized)
+        if not isinstance(acknowledgements, Sequence) or isinstance(acknowledgements, (str, bytes, bytearray)) or len(acknowledgements) != len(normalized):
+            raise _error(
+                "LCC_DYNAMIC_EVENT_UNAVAILABLE",
+                "The native scheduler did not acknowledge every dynamic event.",
+                "register_lcc_dynamic_events",
+                expected=len(normalized),
+                observed=len(acknowledgements) if isinstance(acknowledgements, Sequence) else None,
+            )
+        result = dict(self.result or {})
+        result["dynamic_schedule"] = {
+            "status": "PASS",
+            "mode": "native",
+            "events": normalized,
+            "acknowledgements": [dict(item) if isinstance(item, Mapping) else item for item in acknowledgements],
+        }
+        self.result = result
+        self._operation_completed()
 
     async def _stop_simulation(self, reason: str) -> None:
         if not self._simulation_active:

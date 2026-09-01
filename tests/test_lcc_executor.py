@@ -1078,6 +1078,72 @@ def test_executor_forwards_trusted_threshold_registry_to_acceptance(tmp_path, mo
     assert captured["trusted_threshold_sources"] is registry
 
 
+class TimedScheduleBackend:
+    def __init__(self, *, native: bool = True):
+        self.native = native
+        self.events = None
+
+    async def get_timed_control_capabilities(self, project_name):
+        return {
+            "native_schedule": self.native,
+            "simulation_clock": self.native,
+            "time_basis": "EMTDC" if self.native else "wall_clock",
+        }
+
+    async def schedule_timed_controls(self, project_name, events):
+        self.events = (project_name, list(events))
+        return [{"event_id": event["event_id"], "status": "registered"} for event in events]
+
+
+class TimedScheduleService(RecordingPscadService):
+    def __init__(self, backend):
+        super().__init__()
+        self.backend_service = backend
+
+
+def test_executor_registers_dynamic_events_with_native_emtdc_scheduler(tmp_path):
+    backend = TimedScheduleBackend()
+    executor = LccExecutor(_plan(tmp_path), TimedScheduleService(backend), tmp_path)
+    operation = LccPlanOperation(
+        sequence=1,
+        kind="register_dynamic_events",
+        target="CIGRE_LCC",
+        arguments={
+            "events": [
+                {"event_id": "fault-on", "time_s": 0.8, "target": "fault_a", "value": 1},
+                {"event_id": "fault-off", "time_s": 0.9, "target": "fault_a", "value": 0},
+            ]
+        },
+    )
+
+    asyncio.run(executor._register_dynamic_events(operation))
+
+    assert backend.events == (
+        executor.project_name,
+        list(operation.arguments["events"]),
+    )
+    assert executor.result["dynamic_schedule"]["status"] == "PASS"
+    assert len(executor.result["dynamic_schedule"]["acknowledgements"]) == 2
+
+
+def test_executor_rejects_dynamic_events_without_native_emtdc_scheduler(tmp_path):
+    executor = LccExecutor(
+        _plan(tmp_path),
+        TimedScheduleService(TimedScheduleBackend(native=False)),
+        tmp_path,
+    )
+    operation = LccPlanOperation(
+        sequence=1,
+        kind="register_dynamic_events",
+        target="CIGRE_LCC",
+        arguments={"events": [{"event_id": "fault-on", "time_s": 0.8, "target": "fault_a", "value": 1}]},
+    )
+
+    with pytest.raises(BackendError) as raised:
+        asyncio.run(executor._register_dynamic_events(operation))
+    assert raised.value.code == "LCC_DYNAMIC_EVENT_UNAVAILABLE"
+
+
 def test_execute_build_rejects_unverified_companion_library_before_loading(tmp_path):
     asset_set = load_packaged_asset_set()
     invalid_library = b"<pslx><definition name='unexpected' /></pslx>"
