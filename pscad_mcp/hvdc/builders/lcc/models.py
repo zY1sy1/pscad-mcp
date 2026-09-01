@@ -173,12 +173,14 @@ class LccBlueprint(_JsonRecord):
     measurements: tuple[dict[str, Any], ...] = ()
     structural_assertions: tuple[dict[str, Any], ...] = ()
     profile: str | None = None
+    dynamic_events: tuple[dict[str, Any], ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "settings", _freeze(self.settings))
         object.__setattr__(self, "canvases", _freeze(self.canvases))
         object.__setattr__(self, "measurements", _freeze(self.measurements))
         object.__setattr__(self, "structural_assertions", _freeze(self.structural_assertions))
+        object.__setattr__(self, "dynamic_events", _freeze(self.dynamic_events))
 
 
 @dataclass(frozen=True)
