@@ -77,7 +77,12 @@ def _report(
     failure: BaseException | None,
 ) -> dict[str, Any]:
     dynamic_result = result.get("dynamic", {}) if isinstance(result, Mapping) else {}
-    physical_verdict = dynamic_result.get("verdict", INCOMPLETE)
+    physical_result = result.get("physical", {}) if isinstance(result, Mapping) else {}
+    physical_verdict = (
+        physical_result.get("verdict", INCOMPLETE)
+        if isinstance(physical_result, Mapping)
+        else INCOMPLETE
+    )
     report = {
         "schema_version": 1,
         "run_id": arguments.report.parent.name,
@@ -106,7 +111,10 @@ def _report(
             "required_channels": _required_channels(contract),
             "physical": {
                 "verdict": physical_verdict,
-                "checks": dynamic_result.get("checks", {}),
+                "event_checks": dynamic_result.get("checks", {}),
+                "waveform_checks": physical_result.get("physical_checks", [])
+                if isinstance(physical_result, Mapping)
+                else [],
                 "missing_channels": result.get("missing_channels", []) if isinstance(result, Mapping) else [],
             },
         },

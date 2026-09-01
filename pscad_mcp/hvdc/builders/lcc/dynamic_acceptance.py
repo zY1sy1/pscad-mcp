@@ -183,16 +183,33 @@ def evaluate_fixed_lcc_dynamic_samples(
     if not isinstance(dynamic_evidence, Mapping):
         raise _invalid("samples.dynamic", "samples.dynamic must be an object.")
     dynamic_result = evaluate_commutation_fault(dynamic_evidence)
+    physical_contract = dict(contract)
+    physical_contract["golden"] = {"channels": []}
+    physical_contract["checks"] = [
+        check
+        for check in contract.get("checks", ())
+        if isinstance(check, Mapping) and check.get("kind") == "physical"
+    ]
+    physical_result = evaluate_acceptance(channels, {}, physical_contract)
     waveform_result = evaluate_acceptance(channels, golden, contract)
     result = {
         "verdict": waveform_result["verdict"],
         "dynamic": dynamic_result,
+        "physical": physical_result,
         "waveform": waveform_result,
         "missing_channels": missing,
     }
-    if missing or dynamic_result["verdict"] == FAIL or waveform_result["verdict"] == FAIL:
+    if (
+        missing
+        or dynamic_result["verdict"] == FAIL
+        or physical_result["verdict"] == FAIL
+        or waveform_result["verdict"] == FAIL
+    ):
         result["verdict"] = FAIL
-    elif waveform_result["verdict"] == INCOMPLETE:
+    elif (
+        physical_result["verdict"] == INCOMPLETE
+        or waveform_result["verdict"] == INCOMPLETE
+    ):
         result["verdict"] = INCOMPLETE
     return result
 

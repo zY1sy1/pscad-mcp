@@ -107,6 +107,7 @@ def test_dynamic_report_does_not_promote_placeholder_golden():
     )
     assert result["verdict"] == "INCOMPLETE_ANALYSIS"
     assert result["dynamic"]["verdict"] == "PASS"
+    assert result["physical"]["verdict"] == "PASS"
 
 
 def test_dynamic_report_fails_when_required_channel_is_missing():
