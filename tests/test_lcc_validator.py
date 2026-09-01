@@ -1,3 +1,4 @@
+import copy
 from dataclasses import replace
 from pathlib import Path
 
@@ -18,7 +19,7 @@ from pscad_mcp.hvdc.builders.lcc.validator import (
     validate_companion_library,
     validate_project_graph,
 )
-
+from tests.test_lcc_companion import write_physical_library_fixture
 
 BLUEPRINT_DATA = {
     "schema_version": 1,
@@ -419,29 +420,13 @@ def test_validate_project_graph_rejects_duplicate_observed_net():
     ]
 
 
-def test_validate_companion_library_rejects_valve_identity_and_control_reference_drift(tmp_path):
+def test_validate_companion_library_accepts_packaged_physical_contract():
     source = Path(__file__).parents[1] / "pscad_mcp" / "assets" / "lcc" / "cigre_lcc_monopole_v1" / "library" / "cigre_lcc_v1.pslx"
-    mutated = source.read_text(encoding="utf-8")
-    mutated = mutated.replace(
-        'id="V12" definition="master:thyristor_valve" group="lower"',
-        'id="V12" definition="master:wrong_valve" group="upper"',
-    )
-    mutated = mutated.replace(
-        'definition="master:cc_controller" role="constant_current"',
-        'definition="master:wrong_controller" role="constant_current"',
-    )
-    candidate = tmp_path / "mutated.pslx"
-    candidate.write_text(mutated, encoding="utf-8")
 
-    result = validate_companion_library(candidate)
+    result = validate_companion_library(source)
 
-    assert result["valid"] is False
-    reasons = {error["reason"] for error in result["errors"]}
-    assert {
-        "bridge valve definition mismatch",
-        "bridge valve group mismatch",
-        "control block contract mismatch",
-    } <= reasons
+    assert result["valid"] is True
+    assert result["evidence"]["effective_valves"] == 12
 
 
 @pytest.mark.parametrize(
@@ -487,7 +472,13 @@ def test_validate_companion_library_rejects_valve_identity_and_control_reference
             "unexpected net",
         ),
         (
-            lambda graph: _mutate_graph(labels=graph.labels + (GraphLabel("GATE_CMD", "data", (100, 80)),)),
+            lambda graph: _mutate_graph(
+                labels=graph.labels
+                + (
+                    GraphLabel("GATE_CMD", "data", (100, 80)),
+                    GraphLabel("GATE_CMD", "data", (100, 90)),
+                )
+            ),
             "duplicate data label",
         ),
         (
@@ -516,146 +507,126 @@ def test_validate_project_graph_detects_single_structural_mutations(graph, reaso
     assert result["errors"] == sorted(result["errors"], key=lambda item: (item["code"], item["logical_id"], item["reason"]))
 
 
-def _library_xml(
-    *,
-    missing_valve: bool = False,
-    gate_dimension: int = 12,
-    extra_definition: bool = False,
-    duplicate_interface_definition: bool = False,
-    duplicate_bridge_dc_pos_port: bool = False,
-    duplicate_bridge_gates_wrong_dimension: bool = False,
-) -> str:
-    valves = "\n".join(
-        f'<valve id="V{index:02d}" definition="master:thyristor_valve" group="{"upper" if index <= 6 else "lower"}" />'
-        for index in range(1, 12 if missing_valve else 13)
-    )
-    extra = '<definition name="cigre_lcc_v1:Extra" />' if extra_definition else ""
-    duplicate_interface = '<definition name="cigre_lcc_v1:SignalInterface" />' if duplicate_interface_definition else ""
-    duplicate_dc_pos = '<port name="DC_POS" kind="electrical" dimension="1" />' if duplicate_bridge_dc_pos_port else ""
-    duplicate_gates = '<port name="GATES" kind="data" dimension="6" />' if duplicate_bridge_gates_wrong_dimension else ""
-    return f"""<?xml version="1.0" encoding="utf-8"?>
-<pslx>
-  <definition name="cigre_lcc_v1:LCC12PulseBridge">
-    <external_ports>
-      <port name="ACY_A" kind="electrical" dimension="1" group="acy" />
-      <port name="ACY_B" kind="electrical" dimension="1" group="acy" />
-      <port name="ACY_C" kind="electrical" dimension="1" group="acy" />
-      <port name="ACD_A" kind="electrical" dimension="1" group="acd" />
-      <port name="ACD_B" kind="electrical" dimension="1" group="acd" />
-      <port name="ACD_C" kind="electrical" dimension="1" group="acd" />
-      <port name="DC_POS" kind="electrical" dimension="1" />
-      {duplicate_dc_pos}
-      <port name="DC_NEG" kind="electrical" dimension="1" />
-      <port name="GATES" kind="data" dimension="{gate_dimension}" />
-      {duplicate_gates}
-    </external_ports>
-    <six_pulse_group name="upper" />
-    <six_pulse_group name="lower" />
-    <valves>{valves}</valves>
-    <dc_series_path common="true" />
-    <gate_interface port="GATES" dimension="{gate_dimension}" />
-  </definition>
-  <definition name="cigre_lcc_v1:RectifierControl">
-    <external_ports>
-      <port name="VDC" /><port name="IDC" /><port name="IORDER" />
-      <port name="ENABLE" /><port name="GATES" dimension="12" /><port name="ALPHA" />
-    </external_ports>
-    <control_block definition="master:cc_controller" role="constant_current" />
-  </definition>
-  <definition name="cigre_lcc_v1:InverterControl">
-    <external_ports>
-      <port name="VDC" /><port name="IDC" /><port name="GAMMA_ORDER" />
-      <port name="ENABLE" /><port name="GATES" dimension="12" /><port name="GAMMA" />
-    </external_ports>
-    <control_block definition="master:cc_controller" role="constant_extinction_angle" />
-  </definition>
-  <definition name="cigre_lcc_v1:SignalInterface" />
-  {duplicate_interface}
-  <definition name="cigre_lcc_v1:Initialization" />
-  {extra}
-</pslx>
-"""
-
-
-def test_validate_companion_library_accepts_required_custom_definitions(tmp_path):
-    library = tmp_path / "cigre_lcc_v1.pslx"
-    library.write_text(_library_xml(), encoding="utf-8")
+def test_validate_companion_library_accepts_physical_library(tmp_path):
+    library = write_physical_library_fixture(tmp_path)
 
     result = validate_companion_library(library)
 
-    assert result == {"valid": True, "errors": [], "warnings": []}
+    assert result["valid"] is True
+    assert result["errors"] == []
+    assert result["warnings"] == []
+    assert result["evidence"]["effective_valves"] == 12
 
 
-def test_validate_companion_library_rejects_extra_custom_definition(tmp_path):
-    library = tmp_path / "extra_cigre_lcc_v1.pslx"
-    library.write_text(_library_xml(extra_definition=True), encoding="utf-8")
+def test_validate_companion_library_reports_foreign_scope(tmp_path):
+    library = write_physical_library_fixture(
+        tmp_path, mutation="add_foreign_scope"
+    )
 
     result = validate_companion_library(library)
 
     assert result["valid"] is False
-    assert {
+    assert "foreign_scope" in {
         error["reason"] for error in result["errors"]
-    } == {"unexpected companion definition"}
-    assert result["errors"][0]["logical_id"] == "cigre_lcc_v1:Extra"
+    }
+
+
+def test_validate_project_graph_accepts_one_label_per_network_endpoint():
+    graph = _graph()
+    labels = graph.labels + (
+        GraphLabel("GATE_CMD", "data", (100, 50)),
+    )
+
+    result = validate_project_graph(
+        replace(graph, labels=labels),
+        _blueprint(),
+    )
+
+    assert result["valid"] is True
+
+
+def test_validate_project_graph_consolidates_blueprint_edges_at_shared_ports():
+    payload = copy.deepcopy(BLUEPRINT_DATA)
+    payload["nets"].append(
+        {
+            "logical_id": "shared_data_bridge",
+            "kind": "data",
+            "label": "GATE_CMD",
+            "endpoints": [
+                {"component": "interface", "port": "ENABLE"},
+                {"component": "bridge", "port": "GATES"},
+            ],
+        }
+    )
+    graph = _graph()
+    observed = tuple(net for net in graph.nets if net.kind == "electrical") + (
+        _net(
+            "data",
+            ((50, 60), (70, 60), (90, 60), (100, 10), (100, 30), (100, 50)),
+            (
+                "bridge:GATES",
+                "control:ENABLE",
+                "control:GATES",
+                "interface:ENABLE",
+            ),
+            ("ENABLE", "GATE_CMD"),
+        ),
+    )
+
+    result = validate_project_graph(
+        replace(graph, nets=observed),
+        parse_blueprint(payload),
+    )
+
+    assert result["valid"] is True
+    assert result["nets"] == {"expected": 3, "observed": 3}
 
 
 def test_validate_companion_library_rejects_duplicate_custom_definition(tmp_path):
-    library = tmp_path / "duplicate_definition_cigre_lcc_v1.pslx"
-    library.write_text(_library_xml(duplicate_interface_definition=True), encoding="utf-8")
+    library = write_physical_library_fixture(
+        tmp_path, mutation="duplicate_definition"
+    )
 
     result = validate_companion_library(library)
 
     assert result["valid"] is False
-    assert result["errors"] == [
-        {
-            "code": "LCC_STRUCTURE_INVALID",
-            "logical_id": "cigre_lcc_v1:SignalInterface",
-            "reason": "duplicate companion definition",
-            "expected": 1,
-            "observed": 2,
-        }
-    ]
-
-
-def test_validate_companion_library_rejects_duplicate_bridge_external_port(tmp_path):
-    library = tmp_path / "duplicate_port_cigre_lcc_v1.pslx"
-    library.write_text(_library_xml(duplicate_bridge_dc_pos_port=True), encoding="utf-8")
-
-    result = validate_companion_library(library)
-
-    assert result["valid"] is False
-    assert result["errors"] == [
-        {
-            "code": "LCC_STRUCTURE_INVALID",
-            "logical_id": "cigre_lcc_v1:LCC12PulseBridge:DC_POS",
-            "reason": "duplicate external port",
-            "expected": 1,
-            "observed": 2,
-        }
-    ]
-
-
-def test_validate_companion_library_checks_malformed_duplicate_external_port(tmp_path):
-    library = tmp_path / "malformed_duplicate_port_cigre_lcc_v1.pslx"
-    library.write_text(_library_xml(duplicate_bridge_gates_wrong_dimension=True), encoding="utf-8")
-
-    result = validate_companion_library(library)
-
-    assert result["valid"] is False
-    assert {
+    assert "duplicate_definition" in {
         error["reason"] for error in result["errors"]
-    } == {"duplicate external port", "external gate dimension mismatch"}
+    }
 
 
-def test_validate_companion_library_reports_bridge_internal_contract_failures(tmp_path):
-    library = tmp_path / "bad_cigre_lcc_v1.pslx"
-    library.write_text(_library_xml(missing_valve=True, gate_dimension=6), encoding="utf-8")
+def test_validate_companion_library_rejects_gate_vector_port(tmp_path):
+    library = write_physical_library_fixture(tmp_path, mutation="add_gates_port")
+
+    result = validate_companion_library(library)
+
+    assert result["valid"] is False
+    assert "external_port_mismatch" in {
+        error["reason"] for error in result["errors"]
+    }
+
+
+def test_validate_companion_library_rejects_missing_ao_connection(tmp_path):
+    library = write_physical_library_fixture(tmp_path, mutation="remove_ao_wire")
+
+    result = validate_companion_library(library)
+
+    assert result["valid"] is False
+    assert "internal_connection_missing" in {
+        error["reason"] for error in result["errors"]
+    }
+
+
+def test_validate_companion_library_raises_physical_error_when_requested(tmp_path):
+    library = write_physical_library_fixture(
+        tmp_path, mutation="remove_second_bridge"
+    )
 
     with pytest.raises(BackendError) as raised:
         validate_companion_library(library, raise_on_error=True)
 
-    assert raised.value.code == "LCC_STRUCTURE_INVALID"
-    assert raised.value.operation == "validate_lcc_companion_library"
-    assert {"bridge gate interface dimension mismatch", "bridge valve count mismatch"} <= {
+    assert raised.value.code == "LCC_COMPANION_INVALID"
+    assert raised.value.operation == "audit_lcc_companion_library"
+    assert "master_instance_count" in {
         error["reason"] for error in raised.value.details["errors"]
     }

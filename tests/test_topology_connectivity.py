@@ -180,6 +180,44 @@ def test_same_name_labels_join_only_inside_namespace_and_scope():
     assert sorted(len(net.label_keys) for net in result.topology.nets) == [1, 2]
 
 
+def test_same_name_labels_connect_colocated_ports_without_conductors():
+    result = build_connectivity(
+        ProjectTopology(
+            "case",
+            "4.6.2",
+            components=(
+                _component(1, "OUT", (18, 18), kind="data"),
+                _component(2, "IN", (90, 18), kind="data"),
+            ),
+            labels=(
+                TopologyLabel(
+                    "Main:20",
+                    "Main",
+                    "20",
+                    "SHARED",
+                    "data",
+                    "Main",
+                    (18, 18),
+                ),
+                TopologyLabel(
+                    "Main:21",
+                    "Main",
+                    "21",
+                    "SHARED",
+                    "data",
+                    "Main",
+                    (90, 18),
+                ),
+            ),
+        )
+    )
+
+    assert len(result.topology.nets) == 1
+    assert result.topology.nets[0].port_keys == ("Main:1:OUT", "Main:2:IN")
+    assert result.topology.nets[0].label_keys == ("Main:20", "Main:21")
+    assert result.topology.nets[0].conductor_keys == ()
+
+
 def test_explicit_page_port_link_joins_only_the_named_hierarchy_boundary():
     outer = _component(1, "IN", (20, 0))
     conductors = (

@@ -254,6 +254,26 @@ class SnappingLegacyCanvas(CanvasState):
         )
 
 
+class HalfDownSnappingLegacyCanvas(CanvasState):
+    def __init__(self):
+        super().__init__(modern=False)
+
+    @staticmethod
+    def _snap(value):
+        quotient, remainder = divmod(value, 18)
+        return (quotient + (remainder * 2 > 18)) * 18
+
+    def add_component(self, library, name, x=1, y=1, *args, **parameters):
+        return super().add_component(
+            library,
+            name,
+            self._snap(x),
+            self._snap(y),
+            *args,
+            **parameters,
+        )
+
+
 class CanvasProject:
     def __init__(self, canvas):
         self.main = canvas
@@ -349,6 +369,21 @@ class TestBackendCanvasContracts(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(component.location, {"x": 684, "y": 540})
 
+    async def test_legacy_accepts_lower_candidate_at_exact_half_grid(self):
+        backend = await self.make_legacy_backend(HalfDownSnappingLegacyCanvas())
+
+        component = await backend.add_component(
+            "case",
+            "Main",
+            "master",
+            "datalabel",
+            (1980, 639),
+            0,
+            {},
+        )
+
+        self.assertEqual(component.location, {"x": 1980, "y": 630})
+
     async def test_bus_connection_and_annotation_creation_match(self):
         for backend, _canvas in await self.make_backends():
             with self.subTest(backend=backend.name):
@@ -364,6 +399,128 @@ class TestBackendCanvasContracts(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(bus["endpoints"], [[1, 2], [21, 2]])
                 self.assertEqual(connection, {"label": "L1"})
                 self.assertEqual(annotation.definition, "master:annotation")
+
+    async def test_legacy_reuses_named_connection_labels_without_duplicates(self):
+        canvas = CanvasState(modern=False)
+        backend = await self.make_legacy_backend(canvas)
+
+        await backend.create_connection(
+            "case", "Main", (0, 0), (18, 0), "SHARED", False
+        )
+        await backend.create_connection(
+            "case", "Main", (18, 0), (36, 0), "SHARED", False
+        )
+
+        labels = [
+            item
+            for item in canvas.items
+            if item.defn_name == "master:datalabel"
+        ]
+        self.assertEqual([item.name for item in labels], ["SHARED"] * 3)
+        self.assertEqual(
+            [item.location for item in labels],
+            [(0, 0), (18, 0), (36, 0)],
+        )
+
+    async def test_legacy_adapts_and_reuses_labels_at_snapped_ports(self):
+        canvas = SnappingLegacyCanvas()
+        backend = await self.make_legacy_backend(canvas)
+
+        await backend.create_connection(
+            "case", "Main", (1980, 639), (1422, 684), "SHARED", False
+        )
+        await backend.create_connection(
+            "case", "Main", (1980, 639), (1836, 621), "SHARED", False
+        )
+
+        labels = [
+            item
+            for item in canvas.items
+            if item.defn_name == "master:datalabel"
+        ]
+        wires = [
+            item for item in canvas.items if item.defn_name == "WireOrthogonal"
+        ]
+        self.assertEqual(len(labels), 3)
+        self.assertEqual([item.name for item in labels], ["SHARED"] * 3)
+        self.assertTrue(
+            any(
+                wire._points[0] == (1980, 648)
+                and wire._points[-1] == (1980, 639)
+                for wire in wires
+            )
+        )
+        adapter = next(
+            wire
+            for wire in wires
+            if wire._points[-1] == (1980, 639)
+        )
+        anchored_label = next(
+            item for item in labels if item.location == adapter._points[0]
+        )
+        self.assertLess(
+            canvas.items.index(adapter),
+            canvas.items.index(anchored_label),
+        )
+
+    async def test_legacy_assigns_distinct_anchors_to_adjacent_label_networks(self):
+        canvas = SnappingLegacyCanvas()
+        backend = await self.make_legacy_backend(canvas)
+
+        async def managed_ports(_project_name, _canvas_name):
+            return {(720, 225), (864, 621), (720, 216), (864, 612)}
+
+        backend._managed_connection_port_points = managed_ports
+
+        await backend.create_connection(
+            "case", "Main", (720, 225), (864, 621), "NETWORK_A", False
+        )
+        await backend.create_connection(
+            "case", "Main", (720, 216), (864, 612), "NETWORK_B", False
+        )
+
+        labels = [
+            item
+            for item in canvas.items
+            if item.defn_name == "master:datalabel"
+        ]
+        locations_by_name = {
+            name: {item.location for item in labels if item.name == name}
+            for name in ("NETWORK_A", "NETWORK_B")
+        }
+        self.assertTrue(
+            locations_by_name["NETWORK_A"].isdisjoint(
+                locations_by_name["NETWORK_B"]
+            )
+        )
+
+    async def test_legacy_finds_existing_label_by_name_parameter(self):
+        canvas = CanvasState(modern=False)
+        existing = canvas.add_component(
+            "master", "datalabel", 18, 18, Name="EXTERNAL_SIGNAL"
+        )
+        existing.name = "master:datalabel"
+        backend = await self.make_legacy_backend(canvas)
+
+        await backend.create_connection(
+            "case",
+            "Main",
+            (18, 18),
+            (90, 18),
+            "EXTERNAL_SIGNAL",
+            False,
+        )
+
+        labels = [
+            item
+            for item in canvas.items
+            if item.defn_name == "master:datalabel"
+        ]
+        self.assertEqual(len(labels), 2)
+        self.assertEqual(
+            {item.location for item in labels},
+            {(18, 18), (90, 18)},
+        )
 
     async def test_frames_list_and_empty_space_match(self):
         for backend, _canvas in await self.make_backends():

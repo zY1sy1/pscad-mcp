@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import xml.etree.ElementTree as ET
 from dataclasses import replace
 from pathlib import Path
 
@@ -10,20 +11,58 @@ import pytest
 
 from pscad_mcp.core.backend.base import BackendError
 from pscad_mcp.hvdc.builders.lcc.assets import load_packaged_asset_set
-from pscad_mcp.hvdc.builders.lcc.executor import LccExecutor, _legacy_project_settings
+from pscad_mcp.hvdc.builders.lcc.executor import (
+    LccExecutor,
+    _legacy_project_settings,
+    _same_setting,
+)
 from pscad_mcp.hvdc.builders.lcc.executor import execute_build as _execute_build
 from pscad_mcp.hvdc.builders.lcc.models import (
     LccBlueprint,
     LccBuildPlan,
+    LccBuildState,
     LccComponentSpec,
+    LccEndpoint,
+    LccNetSpec,
+    LccOutputSpec,
     LccPlanOperation,
+    LccRoute,
+)
+from pscad_mcp.hvdc.builders.lcc.project_graph import (
+    GraphComponent,
+    GraphLabel,
+    GraphNet,
+    GraphPort,
+    GraphWire,
+    ProjectGraph,
 )
 from tests.lcc_builder_fakes import RecordingPscadService
+from tests.test_lcc_smoke import contract as smoke_contract
+from tests.test_lcc_smoke import mutate_samples, valid_samples
 
 
 def execute_build(*args, **kwargs):
     kwargs.setdefault("allow_test_double", True)
     return _execute_build(*args, **kwargs)
+
+
+@pytest.mark.parametrize(
+    ("expected", "observed", "matches"),
+    [
+        (50.0, 49.99999999999999, True),
+        (50.0, 49.99, False),
+        (0.0, 1e-8, False),
+        (True, 1, False),
+        ("Y-delta", "Y-delta", True),
+        ("Y-delta", "Y-Y", False),
+    ],
+)
+def test_parameter_readback_allows_only_numeric_serialization_noise(
+    expected,
+    observed,
+    matches,
+):
+    assert _same_setting(expected, observed) is matches
 
 
 class OutputFileRecordingService(RecordingPscadService):
@@ -41,6 +80,558 @@ class OutputFileRecordingService(RecordingPscadService):
     async def read_output_file(self, file_path: str, max_samples: int = 10_000, channel: str | None = None, summary_only: bool = False) -> dict[str, object]:
         self._call("read_output_file", file_path, max_samples, channel, summary_only)
         return {"path": file_path, "verdict": "PASS"}
+
+
+class PhysicalizedSavedGraphService(RecordingPscadService):
+    def _write_project(self, path: Path, project_name: str | None = None) -> None:
+        super()._write_project(path, project_name)
+        root = ET.parse(path).getroot()
+        definition = root.find("./definition")
+        assert definition is not None
+        for component in definition.findall("./component"):
+            component.set("logical_id", str(component.get("definition")))
+        ET.SubElement(
+            definition,
+            "component",
+            {
+                "id": "999",
+                "logical_id": "master:pgb",
+                "definition": "master:pgb",
+                "x": "72",
+                "y": "72",
+                "orientation": "0",
+            },
+        )
+        ET.ElementTree(root).write(path, encoding="utf-8", xml_declaration=True)
+
+
+class ReloadingRecordingService(RecordingPscadService):
+    async def reload_project(self, project_name, filename):
+        self._call("reload_project", project_name, filename)
+        return "reloaded"
+
+
+def test_executor_validates_readback_projection_for_physicalized_saved_graph(
+    tmp_path,
+):
+    record = asyncio.run(
+        execute_build(
+            _plan(tmp_path),
+            PhysicalizedSavedGraphService(),
+            tmp_path,
+            build_id="build-physicalized-graph",
+            poll_interval_s=0,
+        )
+    )
+
+    assert record.state.value == "published"
+
+
+def test_executor_rejects_planned_net_missing_from_saved_project(tmp_path):
+    plan = _plan(tmp_path)
+    source, load = plan.blueprint.components
+    source = replace(
+        source,
+        ports=("P",),
+        port_contracts=({"name": "P", "kind": "electrical", "dimension": 1},),
+    )
+    load = replace(
+        load,
+        ports=("P",),
+        port_contracts=({"name": "P", "kind": "electrical", "dimension": 1},),
+    )
+    net = LccNetSpec(
+        "source_to_load",
+        "electrical",
+        (LccEndpoint("source", "P"), LccEndpoint("load", "P")),
+        LccRoute(((10, 20), (40, 20))),
+    )
+    plan = replace(
+        plan,
+        blueprint=replace(
+            plan.blueprint,
+            components=(source, load),
+            nets=(net,),
+        ),
+    )
+    executor = LccExecutor(plan, RecordingPscadService(), tmp_path)
+    executor.component_ids = {"source": 1, "load": 2}
+    executor._logical_components = {
+        "source": GraphComponent(
+            "source",
+            "master:source",
+            "Main",
+            (10, 20),
+            0,
+            {"LogicalId": "source"},
+            (GraphPort("P", "electrical", 1, (0, 0), (10, 20)),),
+        ),
+        "load": GraphComponent(
+            "load",
+            "master:load",
+            "Main",
+            (40, 20),
+            0,
+            {"LogicalId": "load"},
+            (GraphPort("P", "electrical", 1, (0, 0), (40, 20)),),
+        ),
+    }
+    executor._logical_nets = {
+        "source_to_load": GraphNet(
+            "electrical",
+            ((10, 20), (40, 20)),
+            (),
+            ("source:P", "load:P"),
+        )
+    }
+    saved = tmp_path / "missing-wire.pscx"
+    writer = RecordingPscadService()
+    writer.components = {
+        1: {
+            "id": 1,
+            "logical_id": "source",
+            "definition": "master:source",
+            "x": 10,
+            "y": 20,
+            "orientation": 0,
+            "parameters": {"LogicalId": "source"},
+        },
+        2: {
+            "id": 2,
+            "logical_id": "load",
+            "definition": "master:load",
+            "x": 40,
+            "y": 20,
+            "orientation": 0,
+            "parameters": {"LogicalId": "load"},
+        },
+    }
+    writer._write_project(saved, executor.project_name)
+
+    with pytest.raises(BackendError) as raised:
+        executor._validate_graph(saved)
+
+    assert raised.value.code == "LCC_STRUCTURE_INVALID"
+
+    root = ET.parse(saved).getroot()
+    definition = root.find("./definition")
+    assert definition is not None
+    wire = ET.SubElement(
+        definition,
+        "wire",
+        {"id": "3", "x": "10", "y": "20", "kind": "electrical"},
+    )
+    ET.SubElement(wire, "vertex", {"x": "0", "y": "0"})
+    endpoint = ET.SubElement(wire, "vertex", {"x": "30", "y": "0"})
+    ET.ElementTree(root).write(saved, encoding="utf-8", xml_declaration=True)
+
+    assert executor._validate_graph(saved)["valid"] is True
+
+    endpoint.set("x", "20")
+    ET.ElementTree(root).write(saved, encoding="utf-8", xml_declaration=True)
+    with pytest.raises(BackendError) as drifted:
+        executor._validate_graph(saved)
+
+    assert drifted.value.code == "LCC_STRUCTURE_INVALID"
+
+
+def test_saved_projection_accepts_only_registry_declared_filter_expansion(
+    tmp_path,
+):
+    assets = load_packaged_asset_set()
+    binding = assets.master_bindings.by_logical_name[
+        "master:ac_filter_branch"
+    ]
+    operation = LccPlanOperation(
+        1,
+        "place_component",
+        "filter",
+        {
+            "definition": "master:ac_filter_branch",
+            "location": [342, 198],
+            "binding": {
+                "logical_name": binding.logical_name,
+                "physical_definition": binding.physical_definition,
+            },
+        },
+        "place_power:filter:000",
+        "place_power",
+    )
+    executor = LccExecutor(
+        replace(_plan(tmp_path), operations=(operation,)),
+        RecordingPscadService(),
+        tmp_path,
+        asset_set=assets,
+    )
+    executor.component_ids = {"filter": 1}
+    executor._logical_components = {
+        "filter": GraphComponent(
+            "filter",
+            "master:ac_filter_branch",
+            "Main",
+            (342, 198),
+            0,
+            {},
+        )
+    }
+    physical_components = (
+        (1, "master:cfilter", (342, 198)),
+        (2, "master:cfilter", (342, 342)),
+        (3, "master:cfilter", (342, 486)),
+        (4, "master:ground", (396, 162)),
+        (5, "master:ground", (396, 306)),
+        (6, "master:ground", (396, 450)),
+    )
+    saved = ProjectGraph(
+        "executor",
+        "4.6.2",
+        tuple(
+            GraphComponent(
+                definition,
+                definition,
+                "Main",
+                location,
+                0,
+                {},
+                component_id=str(component_id),
+            )
+            for component_id, definition, location in physical_components
+        ),
+        (
+            GraphWire("electrical", ((342, 162), (396, 162))),
+            GraphWire("electrical", ((342, 306), (396, 306))),
+            GraphWire("electrical", ((342, 450), (396, 450))),
+        ),
+        (),
+        (),
+    )
+
+    projected, findings = executor._saved_logical_graph(saved)
+
+    assert findings == []
+    assert [component.logical_id for component in projected.components] == [
+        "filter"
+    ]
+    assert projected.wires == ()
+    assert projected.nets == ()
+
+    _projected, missing_wire_findings = executor._saved_logical_graph(
+        replace(saved, wires=saved.wires[:-1])
+    )
+    assert {
+        finding["reason"] for finding in missing_wire_findings
+    } == {"bound physical wire missing from saved PSCX"}
+
+    _projected, missing_findings = executor._saved_logical_graph(
+        replace(saved, components=saved.components[:-1])
+    )
+    assert {
+        finding["reason"] for finding in missing_findings
+    } == {"bound physical component missing from saved PSCX"}
+
+    unexplained = GraphComponent(
+        "master:resistor",
+        "master:resistor",
+        "Main",
+        (900, 900),
+        0,
+        {},
+        component_id="99",
+    )
+    _projected, extra_findings = executor._saved_logical_graph(
+        replace(saved, components=(*saved.components, unexplained))
+    )
+    assert {
+        finding["reason"] for finding in extra_findings
+    } == {"unexpected saved component"}
+
+
+def test_saved_projection_maps_bound_main_signal_import_from_data_label(
+    tmp_path,
+):
+    operation = LccPlanOperation(
+        1,
+        "place_component",
+        "signal_import",
+        {
+            "definition": "master:main_signal_import",
+            "location": [18, 18],
+            "binding": {
+                "logical_name": "master:main_signal_import",
+                "physical_definition": "datalabel",
+            },
+        },
+        "place_measurement:signal_import:000",
+        "place_measurement",
+    )
+    executor = LccExecutor(
+        replace(_plan(tmp_path), operations=(operation,)),
+        RecordingPscadService(),
+        tmp_path,
+    )
+    executor.component_ids = {"signal_import": 7}
+    executor._logical_components = {
+        "signal_import": GraphComponent(
+            "signal_import",
+            "master:main_signal_import",
+            "Main",
+            (18, 18),
+            0,
+            {"Name": "SIGNAL_A"},
+            (GraphPort("OUT", "data", 1, (0, 0), (18, 18)),),
+        )
+    }
+    saved = ProjectGraph(
+        "executor",
+        "4.6.2",
+        (),
+        (),
+        (GraphLabel("SIGNAL_A", "data", (18, 18)),),
+        (),
+    )
+
+    projected, findings = executor._saved_logical_graph(saved)
+
+    assert findings == []
+    assert [component.logical_id for component in projected.components] == [
+        "signal_import"
+    ]
+
+
+def test_saved_validation_blueprint_binds_executed_label_network(tmp_path):
+    plan = _plan(tmp_path)
+    net = LccNetSpec(
+        "labeled_net",
+        "data",
+        (LccEndpoint("source", "P"), LccEndpoint("load", "P")),
+        LccRoute(((10, 20), (40, 20))),
+    )
+    executor = LccExecutor(
+        replace(plan, blueprint=replace(plan.blueprint, nets=(net,))),
+        RecordingPscadService(),
+        tmp_path,
+    )
+    executor._logical_nets = {
+        "labeled_net": GraphNet(
+            "data",
+            ((18, 18), (36, 18)),
+            ("WP1B_SHARED",),
+            ("source:P", "load:P"),
+        )
+    }
+
+    projected = executor._saved_validation_blueprint()
+
+    assert projected.nets[0].label == "WP1B_SHARED"
+    assert projected.nets[0].route is None
+
+
+class FixedSmokeRecordingService(OutputFileRecordingService):
+    def __init__(self, *, mutation: str | None = None):
+        super().__init__()
+        self.mutation = mutation
+
+    async def read_output_file(
+        self,
+        file_path: str,
+        max_samples: int = 10_000,
+        channel: str | None = None,
+        summary_only: bool = False,
+    ) -> dict[str, object]:
+        self._call(
+            "read_output_file",
+            file_path,
+            max_samples,
+            channel,
+            summary_only,
+        )
+        payload = valid_samples()
+        return (
+            payload
+            if self.mutation is None
+            else mutate_samples(payload, self.mutation)
+        )
+
+
+class CompileMessageRecordingService(RecordingPscadService):
+    def __init__(self, batches):
+        super().__init__()
+        self.batches = list(batches)
+
+    async def get_project_output(
+        self,
+        project_name: str,
+        structured: bool = False,
+    ):
+        if not structured:
+            return await super().get_project_output(project_name, structured=False)
+        self._call("get_project_output", project_name, structured=True)
+        return self.batches.pop(0) if self.batches else []
+
+
+class PredeclaredLegacyOutputService(RecordingPscadService):
+    def __init__(self):
+        super().__init__()
+        self.saved = False
+
+    async def create_output_channel(
+        self,
+        project_name,
+        path,
+        units,
+        *,
+        call_id=None,
+    ):
+        self._call(
+            "create_output_channel",
+            project_name,
+            path,
+            units,
+            call_id=call_id,
+        )
+        raise BackendError(
+            "CAPABILITY_UNAVAILABLE",
+            "Legacy output channels are predeclared components.",
+            "legacy",
+            "create_output_channel",
+        )
+
+    async def save_project(self, project_name, *, confirm=False):
+        await super().save_project(project_name, confirm=confirm)
+        self.saved = True
+        return "saved"
+
+    async def get_output_channels(self, project_name):
+        self._call("get_output_channels", project_name)
+        if not self.saved:
+            raise BackendError(
+                "CAPABILITY_UNAVAILABLE",
+                "Output metadata is not saved yet.",
+                "legacy",
+                "get_output_channels",
+            )
+        return [
+            {
+                "path": "Main/VDC",
+                "units": "kV",
+                "call_id": None,
+            }
+        ]
+
+
+class UnavailablePredeclaredOutputService(PredeclaredLegacyOutputService):
+    async def get_output_channels(self, project_name):
+        self._call("get_output_channels", project_name)
+        raise BackendError(
+            "CAPABILITY_UNAVAILABLE",
+            "Legacy output metadata is unavailable.",
+            "legacy",
+            "get_output_channels",
+        )
+
+
+def test_legacy_predeclared_output_is_saved_before_static_verification(tmp_path):
+    service = PredeclaredLegacyOutputService()
+    executor = LccExecutor(_plan(tmp_path), service, tmp_path)
+    operation = next(
+        item for item in executor.plan.operations if item.kind == "create_output"
+    )
+
+    asyncio.run(executor._create_output(operation))
+
+    calls = [call[0] for call in service.calls]
+    assert calls.index("create_output_channel") < calls.index("save_project")
+    assert calls.index("save_project") < calls.index("get_output_channels")
+
+
+@pytest.mark.parametrize("selector", ["Main/VDC", "Main/UNKNOWN"])
+def test_wp1b_compiled_predeclared_output_falls_back_to_asset_contract(
+    tmp_path,
+    selector,
+):
+    plan = _plan_with_profile(tmp_path)
+    output = LccOutputSpec(
+        "vdc",
+        "Main/VDC",
+        "kV",
+        "dc_voltage",
+        measurement="vdc_measurement",
+    )
+    plan = replace(
+        plan,
+        blueprint=replace(plan.blueprint, outputs=(output,)),
+    )
+    assets = replace(
+        _fixed_smoke_assets(plan),
+        smoke={
+            **smoke_contract(),
+            "required_channels": ["Main/VDC"],
+            "enable_channels": ["Main/VDC"],
+            "ao_limits_rad": {"Main/VDC": [0.0, 1.0]},
+        },
+    )
+    service = UnavailablePredeclaredOutputService()
+    executor = LccExecutor(plan, service, tmp_path, asset_set=assets)
+    executor.history.append({"state": "compiled"})
+    operation = next(
+        item for item in plan.operations if item.kind == "create_output"
+    )
+    operation = replace(
+        operation,
+        arguments={**operation.arguments, "path": selector},
+    )
+
+    if selector == "Main/VDC":
+        asyncio.run(executor._create_output(operation))
+        assert executor.history[-1]["verification"] == "compiled_asset_contract"
+    else:
+        with pytest.raises(BackendError) as failure:
+            asyncio.run(executor._create_output(operation))
+        assert failure.value.code == "LCC_OUTPUT_INCOMPLETE"
+
+
+def test_legacy_output_paths_are_mapped_from_measurement_components(tmp_path):
+    plan = _plan_with_profile(tmp_path)
+    source, load = plan.blueprint.components
+    source = replace(source, ports=("P",))
+    output = LccOutputSpec(
+        "vdc",
+        "Main/VDC",
+        "kV",
+        "dc_voltage",
+        measurement="vdc_measurement",
+    )
+    plan = replace(
+        plan,
+        blueprint=replace(
+            plan.blueprint,
+            components=(source, load),
+            measurements=(
+                {
+                    "logical_id": "vdc_measurement",
+                    "component": "source",
+                    "port": "P",
+                },
+            ),
+            outputs=(output,),
+        ),
+    )
+    executor = LccExecutor(plan, RecordingPscadService(), tmp_path)
+    payload = {
+        "channels": [
+            {
+                "path": "source/VDC",
+                "domain": [0.0, 0.1],
+                "values": [0.0, 1.0],
+                "units": "kV",
+            }
+        ]
+    }
+
+    normalized = executor._logical_output_payload(payload)
+
+    assert normalized["channels"][0]["path"] == "Main/VDC"
+    assert payload["channels"][0]["path"] == "source/VDC"
 
 
 def _plan(tmp_path: Path) -> LccBuildPlan:
@@ -104,6 +695,150 @@ def _plan_with_connection(tmp_path: Path) -> LccBuildPlan:
     return replace(plan, operations=tuple(operations))
 
 
+def _plan_with_profile(tmp_path: Path) -> LccBuildPlan:
+    plan = _plan(tmp_path)
+    operations = tuple(
+        replace(
+            operation,
+            kind="smoke_validate",
+            phase="smoke_validate",
+            operation_id="smoke_validate:executor:000",
+            arguments={
+                "contract_sha256": "s" * 64,
+                "required_channels": list(smoke_contract()["required_channels"]),
+            },
+        )
+        if operation.kind == "accept"
+        else operation
+        for operation in plan.operations
+    )
+    return replace(
+        plan,
+        operations=operations,
+        verification_profile="wp1b_smoke",
+        asset_hashes={
+            "library/cigre.pslx": "l" * 64,
+            "smoke.json": "s" * 64,
+        },
+    )
+
+
+def _fixed_smoke_assets(plan: LccBuildPlan):
+    packaged = load_packaged_asset_set()
+    library_hash = packaged.hashes[packaged.companion_library]
+    catalog = {
+        "schema_version": 1,
+        "name": "executor_test",
+        "pscad_version": "4.6.2",
+        "identity": "executor_test/catalog",
+        "definitions": [
+            {
+                "scoped_name": "master:source",
+                "ports": [],
+                "parameters": {"LogicalId": {"type": "string"}},
+                "bounding_box": [-10, -10, 10, 10],
+            },
+            {
+                "scoped_name": "master:load",
+                "ports": [],
+                "parameters": {"LogicalId": {"type": "string"}},
+                "bounding_box": [-10, -10, 10, 10],
+            },
+        ],
+    }
+    return replace(
+        packaged,
+        name=plan.blueprint.name,
+        companion_library="library/cigre.pslx",
+        blueprint=plan.blueprint,
+        catalog=catalog,
+        smoke=smoke_contract(),
+        hashes={
+            "library/cigre.pslx": library_hash,
+            "smoke.json": "s" * 64,
+        },
+    )
+
+
+def test_executor_uses_smoke_evaluator_and_records_smoke_state(tmp_path):
+    service = FixedSmokeRecordingService()
+    plan = _plan_with_profile(tmp_path)
+
+    record = asyncio.run(
+        execute_build(
+            plan,
+            service,
+            tmp_path,
+            asset_set=_fixed_smoke_assets(plan),
+            build_id="fixed-smoke",
+            poll_interval_s=0,
+        )
+    )
+
+    assert record.state == LccBuildState.PUBLISHED
+    assert [item["state"] for item in record.history if "state" in item][
+        -3:
+    ] == ["simulated", "smoke_passed", "published"]
+    assert record.result["smoke"]["verdict"] == "PASS"
+    assert "golden_checks" not in record.result["smoke"]
+
+
+def test_smoke_failure_never_publishes_or_calls_acceptance(tmp_path, monkeypatch):
+    service = FixedSmokeRecordingService(mutation="disabled")
+    plan = _plan_with_profile(tmp_path)
+    called = []
+    monkeypatch.setattr(
+        "pscad_mcp.hvdc.builders.lcc.executor.evaluate_acceptance",
+        lambda *args, **kwargs: called.append((args, kwargs)),
+    )
+
+    record = asyncio.run(
+        execute_build(
+            plan,
+            service,
+            tmp_path,
+            asset_set=_fixed_smoke_assets(plan),
+            build_id="fixed-smoke-fail",
+            poll_interval_s=0,
+        )
+    )
+
+    assert record.state == LccBuildState.FAILED
+    assert record.error["code"] == "LCC_FIXED_SMOKE_FAILED"
+    assert called == []
+    assert not Path(plan.target_path).exists()
+
+
+def test_smoke_contract_hash_drift_fails_before_output_read(tmp_path):
+    service = FixedSmokeRecordingService()
+    plan = _plan_with_profile(tmp_path)
+    packaged = load_packaged_asset_set()
+    assets = replace(
+        _fixed_smoke_assets(plan),
+        hashes={
+            "library/cigre.pslx": packaged.hashes[
+                packaged.companion_library
+            ],
+            "smoke.json": "x" * 64,
+        },
+    )
+
+    record = asyncio.run(
+        execute_build(
+            plan,
+            service,
+            tmp_path,
+            asset_set=assets,
+            build_id="fixed-smoke-drift",
+            poll_interval_s=0,
+        )
+    )
+
+    assert record.state == LccBuildState.FAILED
+    assert record.error["code"] == "LCC_ASSET_MISMATCH"
+    assert "read_output_file" not in [call[0] for call in service.calls]
+
+
 def test_execute_build_verifies_mutations_and_publishes_after_acceptance(tmp_path):
     service = RecordingPscadService()
     record = asyncio.run(execute_build(_plan(tmp_path), service, tmp_path, build_id="build-1", poll_interval_s=0))
@@ -133,6 +868,67 @@ def test_execute_build_verifies_mutations_and_publishes_after_acceptance(tmp_pat
     assert journal_payload["state"] == "published"
     assert journal_payload["plan"]["plan_hash"] == "plan-hash"
     assert journal_payload["target_path"] == str(Path(_plan(tmp_path).target_path))
+
+
+def test_executor_rejects_structured_staging_compile_errors(tmp_path):
+    service = CompileMessageRecordingService(
+        [
+            [
+                {
+                    "severity": "error",
+                    "text": "Input port is floating.",
+                    "source": {"kind": "build"},
+                }
+            ]
+        ]
+    )
+
+    record = asyncio.run(
+        execute_build(
+            _plan(tmp_path),
+            service,
+            tmp_path,
+            build_id="build-compile-message-error",
+            poll_interval_s=0,
+        )
+    )
+
+    assert record.state == LccBuildState.FAILED
+    assert record.error["code"] == "LCC_BUILD_FAILED"
+    assert "Input port is floating." in record.error["message"]
+    names = [call[0] for call in service.calls]
+    assert names.index("build_project") < names.index("get_project_output")
+    assert "run_project" not in names
+
+
+def test_executor_rejects_structured_final_compile_errors(tmp_path):
+    service = CompileMessageRecordingService(
+        [
+            [],
+            [
+                {
+                    "severity": "error",
+                    "text": "Final project compile failed.",
+                    "source": {"kind": "build"},
+                }
+            ],
+        ]
+    )
+
+    record = asyncio.run(
+        execute_build(
+            _plan(tmp_path),
+            service,
+            tmp_path,
+            build_id="build-final-compile-message-error",
+            poll_interval_s=0,
+        )
+    )
+
+    assert record.state == LccBuildState.FAILED
+    assert record.error["code"] == "LCC_BUILD_FAILED"
+    assert "Final project compile failed." in record.error["message"]
+    assert not Path(_plan(tmp_path).target_path).exists()
 
 
 def test_executor_forwards_master_binding_evidence_to_service(tmp_path):
@@ -188,8 +984,9 @@ def test_executor_forwards_master_binding_evidence_to_service(tmp_path):
     verification_calls = [
         item for item in service.calls if item[0] == "verify_master_binding_state"
     ]
-    assert len(verification_calls) == 3
+    assert len(verification_calls) == 4
     assert [item[2]["refresh_components"] for item in verification_calls] == [
+        True,
         True,
         True,
         False,
@@ -301,7 +1098,7 @@ def test_execute_build_rejects_unverified_companion_library_before_loading(tmp_p
     )
 
     assert record.state.value == "failed"
-    assert record.error["code"] == "LCC_STRUCTURE_INVALID"
+    assert record.error["code"] == "LCC_COMPANION_INVALID"
     assert "load_projects" not in [call[0] for call in service.calls]
 
 
@@ -320,6 +1117,44 @@ def test_publish_reloads_final_identity_before_compile_smoke(tmp_path):
     assert len(publication["final_project_sha256"]) == 64
 
 
+def test_publish_same_identity_uses_unload_reload_boundary(tmp_path):
+    plan = _plan(tmp_path)
+    target = tmp_path / "executor.pscx"
+    operations = []
+    for operation in plan.operations:
+        if operation.kind == "create_staging":
+            arguments = {**operation.arguments, "target_path": str(target)}
+            operation = replace(operation, arguments=arguments)
+        elif operation.kind == "publish":
+            operation = replace(
+                operation,
+                arguments={**operation.arguments, "target_path": str(target)},
+            )
+        operations.append(operation)
+    plan = replace(
+        plan,
+        target_path=str(target),
+        operations=tuple(operations),
+    )
+    service = ReloadingRecordingService()
+
+    record = asyncio.run(
+        execute_build(
+            plan,
+            service,
+            tmp_path,
+            build_id="build-same-final-identity",
+            poll_interval_s=0,
+        )
+    )
+
+    assert record.state.value == "published"
+    reload_call = next(
+        call for call in service.calls if call[0] == "reload_project"
+    )
+    assert reload_call[1] == ("executor", str(target.resolve()))
+
+
 def test_execute_build_reads_waveforms_from_a_discovered_output_file(tmp_path):
     service = OutputFileRecordingService()
 
@@ -328,7 +1163,13 @@ def test_execute_build_reads_waveforms_from_a_discovered_output_file(tmp_path):
     assert record.state.value == "published"
     names = [call[0] for call in service.calls]
     assert names.index("discover_output_files") < names.index("read_output_file")
-    assert "get_project_output" not in names
+    compile_message_calls = [
+        call for call in service.calls if call[0] == "get_project_output"
+    ]
+    assert compile_message_calls
+    assert all(
+        call[2].get("structured") is True for call in compile_message_calls
+    )
     assert service.discovered_project_name == str(service.project_file.resolve())
     assert record.result["output_file"] == str((service.project_file.parent / "result.out").resolve())
 
@@ -622,6 +1463,358 @@ class MismatchedConnectionService(RecordingPscadService):
         created = await super().create_connection(*args, **kwargs)
         created["p1"] = [999, 999]
         return created
+
+
+class SnappedRouteEndpointService(RecordingPscadService):
+    async def get_component_ports(self, project_name, component_id):
+        self._call("get_component_ports", project_name, component_id)
+        return {
+            "P": {
+                "name": "P",
+                "x": 342 if component_id == 1 else 520,
+                "y": 396 if component_id == 1 else 130,
+            }
+        }
+
+
+class GroundReturnEndpointService(RecordingPscadService):
+    async def get_component_ports(self, project_name, component_id):
+        self._call("get_component_ports", project_name, component_id)
+        point = (1980, 207) if component_id == 1 else (1908, 450)
+        name = "DC_POS" if component_id == 1 else "GND"
+        return {name: {"name": name, "x": point[0], "y": point[1]}}
+
+
+def test_ground_return_wires_terminate_at_both_component_ports(tmp_path):
+    plan = _plan(tmp_path)
+    source, ground = plan.blueprint.components
+    source = replace(source, definition="cigre_lcc_v1:LCC12PulseBridge")
+    ground = replace(ground, definition="master:ground")
+    executor = LccExecutor(
+        replace(
+            plan,
+            blueprint=replace(plan.blueprint, components=(source, ground)),
+        ),
+        GroundReturnEndpointService(),
+        tmp_path,
+    )
+    executor.component_ids = {"source": 1, "load": 2}
+    operation = LccPlanOperation(
+        1,
+        "connect_net",
+        "inverter_return",
+        {
+            "kind": "electrical",
+            "vertices": [[1972, 201], [1900, 201], [1900, 450]],
+            "endpoints": ["source:DC_POS", "load:GND"],
+        },
+        "connect_electrical:inverter_return:000",
+        "connect_electrical",
+    )
+
+    asyncio.run(executor._connect_net(operation))
+
+    wires = [call[1][1] for call in executor.service.calls if call[0] == "create_wire"]
+    assert len(wires) == 2
+    assert {tuple(wire[-1]) for wire in wires} == {(1980, 207), (1908, 450)}
+    assert tuple(wires[0][0]) == tuple(wires[1][0])
+
+
+def test_connect_net_preserves_orthogonality_after_snapping_collapses_a_bend(
+    tmp_path,
+):
+    service = SnappedRouteEndpointService()
+    executor = LccExecutor(_plan(tmp_path), service, tmp_path)
+    executor.component_ids = {"source": 1, "load": 2}
+    source, load = executor.plan.blueprint.components
+    source = replace(
+        source,
+        location=(342, 396),
+        ports=("P",),
+        port_contracts=({"name": "P", "kind": "data", "dimension": 1},),
+    )
+    load = replace(
+        load,
+        location=(520, 130),
+        ports=("P",),
+        port_contracts=({"name": "P", "kind": "data", "dimension": 1},),
+    )
+    route = LccRoute(
+        ((342, 396), (462, 396), (462, 130), (520, 130))
+    )
+    executor.plan = replace(
+        executor.plan,
+        blueprint=replace(
+            executor.plan.blueprint,
+            components=(source, load),
+            nets=(
+                LccNetSpec(
+                    "snapped_route",
+                    "data",
+                    (LccEndpoint("source", "P"), LccEndpoint("load", "P")),
+                    route,
+                ),
+            ),
+        ),
+    )
+    executor._logical_components = {
+        "source": GraphComponent(
+            "source",
+            "master:source",
+            "Main",
+            (342, 396),
+            0,
+            {"LogicalId": "source"},
+            (GraphPort("P", "data", 1, (0, 0), (342, 396)),),
+        ),
+        "load": GraphComponent(
+            "load",
+            "master:load",
+            "Main",
+            (520, 130),
+            0,
+            {"LogicalId": "load"},
+            (GraphPort("P", "data", 1, (0, 0), (520, 130)),),
+        ),
+    }
+    operation = LccPlanOperation(
+        1,
+        "connect_net",
+        "snapped_route",
+        {
+            "kind": "data",
+            "vertices": [
+                [342, 396],
+                [462, 396],
+                [462, 130],
+                [520, 130],
+            ],
+            "endpoints": ["source:P", "load:P"],
+        },
+        "connect_data:snapped_route:000",
+        "connect_data",
+    )
+
+    asyncio.run(executor._connect_net(operation))
+
+    call = next(item for item in service.calls if item[0] == "create_wire")
+    assert call[1][1] == [
+        [342, 396],
+        [468, 396],
+        [468, 126],
+        [468, 130],
+        [520, 130],
+    ]
+
+    saved = tmp_path / "snapped-route.pscx"
+    writer = RecordingPscadService()
+    writer.components = {
+        1: {
+            "id": 1,
+            "logical_id": "source",
+            "definition": "master:source",
+            "x": 342,
+            "y": 396,
+            "orientation": 0,
+            "parameters": {"LogicalId": "source"},
+        },
+        2: {
+            "id": 2,
+            "logical_id": "load",
+            "definition": "master:load",
+            "x": 520,
+            "y": 130,
+            "orientation": 0,
+            "parameters": {"LogicalId": "load"},
+        },
+    }
+    writer._write_project(saved, executor.project_name)
+    root = ET.parse(saved).getroot()
+    definition = root.find("./definition")
+    assert definition is not None
+    wire = ET.SubElement(
+        definition,
+        "wire",
+        {"id": "3", "x": "0", "y": "0", "kind": "data"},
+    )
+    for x, y in call[1][1]:
+        ET.SubElement(wire, "vertex", {"x": str(x), "y": str(y)})
+    ET.ElementTree(root).write(saved, encoding="utf-8", xml_declaration=True)
+
+    assert executor._validate_graph(saved)["valid"] is True
+
+
+@pytest.mark.parametrize(
+    "vertices",
+    [
+        [[0, 0], [9, 9]],
+        [[1, 1], [2, 1]],
+    ],
+)
+def test_connect_net_rejects_invalid_transformed_route_before_backend(
+    tmp_path,
+    vertices,
+):
+    service = RecordingPscadService()
+    executor = LccExecutor(_plan(tmp_path), service, tmp_path)
+    operation = LccPlanOperation(
+        1,
+        "connect_net",
+        "invalid_route",
+        {"kind": "data", "vertices": vertices},
+        "connect_data:invalid_route:000",
+        "connect_data",
+    )
+
+    with pytest.raises(BackendError) as raised:
+        asyncio.run(executor._connect_net(operation))
+
+    assert raised.value.code == "LCC_LAYOUT_INVALID"
+    assert "create_wire" not in [call[0] for call in service.calls]
+
+
+class StrictConnectionArgumentService(RecordingPscadService):
+    async def create_connection(
+        self,
+        project_name,
+        p1,
+        p2,
+        label,
+        electrical,
+        *,
+        canvas_name="Main",
+    ):
+        if (label is None) != (electrical is None):
+            raise ValueError(
+                "label and electrical must either both be provided or both omitted"
+            )
+        return await super().create_connection(
+            project_name,
+            p1,
+            p2,
+            label,
+            electrical,
+            canvas_name=canvas_name,
+        )
+
+
+def test_two_point_unlabeled_net_omits_electrical_flag(tmp_path):
+    service = StrictConnectionArgumentService()
+
+    record = asyncio.run(
+        execute_build(
+            _plan_with_connection(tmp_path),
+            service,
+            tmp_path,
+            build_id="build-unlabeled-connection",
+            poll_interval_s=0,
+        )
+    )
+
+    assert record.state.value == "published"
+    connection = next(call for call in service.calls if call[0] == "create_connection")
+    assert connection[1][3:5] == (None, None)
+
+
+class SnappedCompanionPortService(RecordingPscadService):
+    async def add_canvas_component(self, *args, **kwargs):
+        created = await super().add_canvas_component(*args, **kwargs)
+        component = self.components[created["id"]]
+        component["x"] = round(component["x"] / 18) * 18
+        component["y"] = round(component["y"] / 18) * 18
+        created["location"] = {"x": component["x"], "y": component["y"]}
+        return created
+
+    async def get_component_ports(self, project_name, component_id):
+        self._call("get_component_ports", project_name, component_id)
+        component = self.components[component_id]
+        return [
+            {
+                "name": "ACD_A",
+                "x": component["x"] - 72,
+                "y": component["y"] - 36,
+                "dim": 1,
+                "type": "electrical",
+            }
+        ]
+
+
+class RealDataCompanionPortService(SnappedCompanionPortService):
+    async def get_component_ports(self, project_name, component_id):
+        self._call("get_component_ports", project_name, component_id)
+        component = self.components[component_id]
+        return [
+            {
+                "name": "AM_D",
+                "x": component["x"] + 72,
+                "y": component["y"] + 45,
+                "dim": 1,
+                "type": "Real",
+            }
+        ]
+
+
+def test_companion_port_readback_uses_verified_snapped_component_origin(tmp_path):
+    service = SnappedCompanionPortService()
+    executor = LccExecutor(
+        _plan(tmp_path),
+        service,
+        tmp_path,
+        asset_set=load_packaged_asset_set(),
+    )
+    operation = LccPlanOperation(
+        1,
+        "place_component",
+        "rectifier_bridge",
+        {
+            "definition": "cigre_lcc_v1:LCC12PulseBridge",
+            "location": [800, 210],
+            "orientation": 0,
+            "parameters": {"UP": 1},
+            "ports": ["ACD_A"],
+            "canvas": "Main",
+        },
+        "place_power:rectifier_bridge:000",
+        "place_power",
+    )
+
+    asyncio.run(executor._place_component(operation))
+
+    assert executor.component_ids["rectifier_bridge"] == 1
+    assert service.components[1]["x"] == 792
+    assert service.components[1]["y"] == 216
+    assert executor._logical_components["rectifier_bridge"].ports[
+        0
+    ].absolute == (720, 180)
+
+
+def test_companion_real_port_readback_matches_data_contract(tmp_path):
+    service = RealDataCompanionPortService()
+    executor = LccExecutor(
+        _plan(tmp_path),
+        service,
+        tmp_path,
+        asset_set=load_packaged_asset_set(),
+    )
+    operation = LccPlanOperation(
+        1,
+        "place_component",
+        "rectifier_bridge",
+        {
+            "definition": "cigre_lcc_v1:LCC12PulseBridge",
+            "location": [800, 210],
+            "orientation": 0,
+            "parameters": {"UP": 1},
+            "ports": ["AM_D"],
+            "canvas": "Main",
+        },
+        "place_power:rectifier_bridge:000",
+        "place_power",
+    )
+
+    asyncio.run(executor._place_component(operation))
+
+    assert executor.component_ids["rectifier_bridge"] == 1
 
 
 @pytest.mark.parametrize(

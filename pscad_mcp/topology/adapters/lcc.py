@@ -222,7 +222,11 @@ def _logical_id(item) -> str:
 
 def _validated_vertices(key, vertices):
     try:
-        return validate_orthogonal_route(vertices)
+        collapsed = []
+        for vertex in vertices:
+            if not collapsed or vertex != collapsed[-1]:
+                collapsed.append(vertex)
+        return validate_orthogonal_route(collapsed)
     except BackendError as error:
         raise _invalid("A conductor route is invalid.", key) from error
 

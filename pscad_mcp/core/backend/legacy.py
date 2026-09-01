@@ -19,7 +19,12 @@ from importlib.resources import as_file, files
 from pathlib import Path
 from typing import Any
 
-from ...topology.geometry import GeometryError, absolute_port
+from ...topology.geometry import (
+    GeometryError,
+    Segment,
+    absolute_port,
+    classify_intersection,
+)
 from ...topology.hashing import canonical_sha256
 from ...topology.models import (
     DefinitionPortContract,
@@ -204,6 +209,17 @@ class LegacyBackend:
         self._run_last_active_at: dict[str, float] = {}
         self._run_last_active_status: dict[str, str] = {}
         self._known_managed_layers: set[tuple[str, str]] = set()
+        self._connection_labels: dict[
+            tuple[str, str, str, str, tuple[int, int]],
+            tuple[int, int],
+        ] = {}
+        self._connection_label_routes: list[
+            tuple[str, str, str, tuple[tuple[int, int], ...]]
+        ] = []
+        self._connection_port_points: dict[
+            tuple[str, str],
+            set[tuple[int, int]],
+        ] = {}
         self.result_adapter = PscadAdapter(
             executor,
             pscad_module=False,
@@ -286,23 +302,40 @@ class LegacyBackend:
 
         self._app = await self.executor.run_safe(launch)
         self.owns_process = True
-        process = getattr(self._app, "_proc", None)
-        raw_pid = getattr(process, "pid", None)
         try:
-            self._managed_pid = int(raw_pid) if raw_pid is not None else None
-        except (TypeError, ValueError, OverflowError):
-            self._managed_pid = None
-        after_launch = bounded_process_records(
-            await self.executor.run_safe(self.process_probe)
-        )
-        managed_record = next(
-            (item for item in after_launch if item["pid"] == self._managed_pid),
-            None,
-        )
-        self._managed_executable = (
-            str(managed_record["exe"]) if managed_record else None
-        )
-        return await self.heartbeat()
+            process = getattr(self._app, "_proc", None)
+            raw_pid = getattr(process, "pid", None)
+            try:
+                self._managed_pid = int(raw_pid) if raw_pid is not None else None
+            except (TypeError, ValueError, OverflowError):
+                self._managed_pid = None
+            after_launch = bounded_process_records(
+                await self.executor.run_safe(self.process_probe)
+            )
+            managed_record = next(
+                (item for item in after_launch if item["pid"] == self._managed_pid),
+                None,
+            )
+            self._managed_executable = (
+                str(managed_record["exe"]) if managed_record else None
+            )
+            return await self.heartbeat()
+        except BaseException as attach_error:
+            try:
+                await self.quit()
+            except Exception as cleanup_error:  # noqa: BLE001 - vendor cleanup
+                raise BackendError(
+                    "ATTACH_CLEANUP_FAILED",
+                    "Legacy PSCAD launch failed and the owned process could not "
+                    "be closed.",
+                    self.name,
+                    "attach",
+                    {
+                        "attach_error": str(attach_error)[:1024],
+                        "cleanup_error": str(cleanup_error)[:1024],
+                    },
+                ) from attach_error
+            raise
 
     async def heartbeat(self) -> BackendInfo:
         if self._app is None:
@@ -339,6 +372,9 @@ class LegacyBackend:
         self._run_last_active_at.clear()
         self._run_last_active_status.clear()
         self._known_managed_layers.clear()
+        self._connection_labels.clear()
+        self._connection_label_routes.clear()
+        self._connection_port_points.clear()
 
     async def quit(self) -> None:
         app = self._app
@@ -554,6 +590,8 @@ class LegacyBackend:
         destination: Path,
         kind: str,
         operation: str,
+        *,
+        load_destination: bool = True,
     ) -> ProjectInfo:
         temporary: Path | None = self._temporary_path(destination, destination.suffix)
         backup: Path | None = None
@@ -569,6 +607,16 @@ class LegacyBackend:
             os.replace(temporary, destination)
             temporary = None
             replaced = True
+
+            if not load_destination:
+                if backup is not None:
+                    backup.unlink(missing_ok=True)
+                    backup = None
+                return ProjectInfo(
+                    destination.stem,
+                    "Case" if kind == "case" else "Library",
+                    "",
+                )
 
             info = await self._load_and_verify_project(destination, kind, operation)
             if backup is not None:
@@ -625,8 +673,9 @@ class LegacyBackend:
         kind = self._loaded_project_kind(project, source)
         destination = self._project_destination(filename, folder)
         self._require_project_suffix(destination, kind)
+        same_identity = destination.stem.casefold() == project_name.casefold()
         native_info: ProjectInfo | None = None
-        tried_native = not destination.exists()
+        tried_native = not destination.exists() and not same_identity
         if tried_native:
             try:
                 response = await self.executor.run_safe(
@@ -684,6 +733,7 @@ class LegacyBackend:
             destination,
             kind,
             "save_project_as",
+            load_destination=not same_identity,
         )
 
     async def build_project(self, project_name: str) -> None:
@@ -3525,9 +3575,29 @@ class LegacyBackend:
             "x": round(location[0] / self._canvas_grid) * self._canvas_grid,
             "y": round(location[1] / self._canvas_grid) * self._canvas_grid,
         }
-        if info.definition != logical_definition or info.location not in (
-            requested_location,
-            snapped_location,
+        axis_candidates = []
+        for value in location:
+            candidates = {
+                round(value / self._canvas_grid) * self._canvas_grid
+            }
+            quotient, remainder = divmod(value, self._canvas_grid)
+            if remainder * 2 == self._canvas_grid:
+                candidates.update(
+                    {
+                        quotient * self._canvas_grid,
+                        (quotient + 1) * self._canvas_grid,
+                    }
+                )
+            axis_candidates.append(sorted(candidates))
+        snapped_locations = [
+            {"x": x, "y": y}
+            for x in axis_candidates[0]
+            for y in axis_candidates[1]
+        ]
+        if (
+            info.definition != logical_definition
+            or info.location != requested_location
+            and info.location not in snapped_locations
         ):
             raise BackendError(
                 "POSTCONDITION_FAILED",
@@ -3539,6 +3609,7 @@ class LegacyBackend:
                     "actual_definition": info.definition,
                     "requested_location": requested_location,
                     "expected_snapped_location": snapped_location,
+                    "expected_snapped_locations": snapped_locations,
                     "actual_location": info.location,
                 },
             )
@@ -3788,12 +3859,24 @@ class LegacyBackend:
                     "add_component",
                     {"phase": phase},
                 )
+            wire_vertices = await self._absolute_wire_vertices(wire)
+            if len(wire_vertices) < 2:
+                raise BackendError(
+                    "MASTER_READBACK_FAILED",
+                    "Filter neutral grounding returned no wire endpoints.",
+                    self.name,
+                    "add_component",
+                    {"phase": phase},
+                )
             members.append(
                 {
                     "role": "neutral_wire",
                     "instance": phase,
                     "wire_id": self._component_id(wire),
-                    "endpoints": [list(neutral_point), list(ground_point)],
+                    "endpoints": [
+                        list(wire_vertices[0]),
+                        list(wire_vertices[-1]),
+                    ],
                 }
             )
 
@@ -3913,6 +3996,171 @@ class LegacyBackend:
             await self.executor.run_safe(bus.set_parameters, **dict(parameters))
         return self._canvas_endpoints_payload(object_id, vertices)
 
+    @staticmethod
+    def _label_anchor_candidates(
+        point: tuple[int, int],
+        label: str,
+    ) -> list[tuple[int, int]]:
+        origin = (
+            round(point[0] / 18) * 18,
+            round(point[1] / 18) * 18,
+        )
+        seed = int(
+            hashlib.sha256(
+                f"{label}:{point[0]}:{point[1]}".encode("utf-8")
+            ).hexdigest()[:8],
+            16,
+        )
+        result = []
+        for radius in range(13):
+            ring = {
+                (origin[0] + dx * 18, origin[1] + dy * 18)
+                for dx in range(-radius, radius + 1)
+                for dy in range(-radius, radius + 1)
+                if max(abs(dx), abs(dy)) == radius
+            }
+            result.extend(
+                sorted(
+                    ring,
+                    key=lambda candidate: hashlib.sha256(
+                        f"{seed}:{candidate[0]}:{candidate[1]}".encode(
+                            "ascii"
+                        )
+                    ).hexdigest(),
+                )
+            )
+        return result
+
+    @staticmethod
+    def _label_adapter_candidates(
+        point: tuple[int, int],
+        anchor: tuple[int, int],
+        label: str,
+    ) -> tuple[tuple[tuple[int, int], ...], ...]:
+        if point == anchor:
+            return ((point,),)
+        seed = int(hashlib.sha256(label.encode("utf-8")).hexdigest()[:8], 16)
+        signs = (1, -1) if seed % 2 == 0 else (-1, 1)
+        routes = []
+        for sign in signs:
+            routes.append(
+                (
+                    point,
+                    (point[0] + sign * 18, point[1]),
+                    (point[0] + sign * 18, anchor[1]),
+                    anchor,
+                )
+            )
+            routes.append(
+                (
+                    point,
+                    (point[0], point[1] + sign * 18),
+                    (anchor[0], point[1] + sign * 18),
+                    anchor,
+                )
+            )
+        result = []
+        for route in routes:
+            collapsed = tuple(
+                candidate
+                for index, candidate in enumerate(route)
+                if index == 0 or candidate != route[index - 1]
+            )
+            if len(collapsed) >= 2 and all(
+                left[0] == right[0] or left[1] == right[1]
+                for left, right in zip(collapsed, collapsed[1:])
+            ):
+                result.append(collapsed)
+        return tuple(result)
+
+    @staticmethod
+    def _point_on_route(
+        point: tuple[int, int],
+        route: Sequence[tuple[int, int]],
+    ) -> bool:
+        return any(
+            (
+                left[0] == right[0] == point[0]
+                and min(left[1], right[1]) <= point[1] <= max(left[1], right[1])
+            )
+            or (
+                left[1] == right[1] == point[1]
+                and min(left[0], right[0]) <= point[0] <= max(left[0], right[0])
+            )
+            for left, right in zip(route, route[1:])
+        )
+
+    def _label_route_is_clear(
+        self,
+        project_name: str,
+        canvas_name: str,
+        label: str,
+        point: tuple[int, int],
+        route: tuple[tuple[int, int], ...],
+        blocked_points: set[tuple[int, int]],
+    ) -> bool:
+        if any(
+            candidate != point and self._point_on_route(candidate, route)
+            for candidate in blocked_points
+        ):
+            return False
+        segments = [
+            Segment(left, right) for left, right in zip(route, route[1:])
+        ]
+        for record_project, record_canvas, record_label, record_route in (
+            self._connection_label_routes
+        ):
+            if (
+                record_project != project_name
+                or record_canvas != canvas_name
+                or record_label == label
+            ):
+                continue
+            if any(
+                classify_intersection(segment, other).kind
+                not in {"none", "crossing"}
+                for segment in segments
+                for other in (
+                    Segment(left, right)
+                    for left, right in zip(record_route, record_route[1:])
+                )
+            ):
+                return False
+        return True
+
+    async def _managed_connection_port_points(
+        self,
+        project_name: str,
+        canvas_name: str,
+    ) -> set[tuple[int, int]]:
+        cache_key = (project_name, canvas_name)
+        cached = self._connection_port_points.get(cache_key)
+        if cached is not None:
+            return set(cached)
+        points: set[tuple[int, int]] = set()
+        components = await self.find_components(
+            project_name,
+            canvas_name,
+            None,
+            None,
+        )
+        for component in components:
+            if component.definition.rsplit(":", 1)[-1].casefold() in {
+                "datalabel",
+                "nodelabel",
+            }:
+                continue
+            try:
+                ports = await self.get_component_ports(
+                    project_name,
+                    component.id,
+                )
+            except BackendError:
+                continue
+            points.update((port.x, port.y) for port in ports)
+        self._connection_port_points[cache_key] = points
+        return set(points)
+
     async def create_connection(
         self,
         project_name: str,
@@ -3929,29 +4177,131 @@ class LegacyBackend:
             raise ValueError(
                 "label and electrical must either both be provided or both omitted."
             )
-        used_names = {
-            item.name
-            for item in await self.find_components(
-                project_name, canvas_name, None, None
-            )
-        }
-        unique_label = label
-        suffix = 2
-        while unique_label in used_names:
-            unique_label = f"{label}_{suffix}"
-            suffix += 1
         definition = "nodelabel" if electrical else "datalabel"
+        label_components = await self.find_components(
+            project_name,
+            canvas_name,
+            definition,
+            None,
+        )
+        existing = []
+        for component in label_components:
+            try:
+                parameters = await self.get_component_parameters(
+                    project_name,
+                    component.id,
+                )
+            except BackendError:
+                parameters = {}
+            observed_name = parameters.get("Name", component.name)
+            if observed_name == label:
+                existing.append(component)
+        existing_locations = {
+            (item.location.get("x"), item.location.get("y"))
+            for item in existing
+        }
+        occupied_locations = {
+            (item.location.get("x"), item.location.get("y"))
+            for item in label_components
+        }
+        port_points = await self._managed_connection_port_points(
+            project_name,
+            canvas_name,
+        )
         for point in (p1, p2):
-            await self.add_component(
+            key = (
+                project_name,
+                canvas_name,
+                definition,
+                label,
+                point,
+            )
+            cached_location = self._connection_labels.get(key)
+            if cached_location in existing_locations:
+                continue
+            self._connection_labels.pop(key, None)
+            if point in existing_locations:
+                self._connection_labels[key] = point
+                continue
+            selected_anchor = None
+            selected_route = None
+            blocked_points = port_points | occupied_locations
+            for anchor in self._label_anchor_candidates(point, label):
+                if anchor in occupied_locations or (
+                    anchor in port_points and anchor != point
+                ):
+                    continue
+                for route in self._label_adapter_candidates(
+                    point,
+                    anchor,
+                    label,
+                ):
+                    if self._label_route_is_clear(
+                        project_name,
+                        canvas_name,
+                        label,
+                        point,
+                        route,
+                        blocked_points,
+                    ):
+                        selected_anchor = anchor
+                        selected_route = route
+                        break
+                if selected_anchor is not None:
+                    break
+            if selected_anchor is None or selected_route is None:
+                raise BackendError(
+                    "POSTCONDITION_FAILED",
+                    "A collision-free PSCAD label anchor could not be allocated.",
+                    self.name,
+                    "create_connection",
+                    {
+                        "label": label,
+                        "point": list(point),
+                    },
+                )
+            wire_route = tuple(reversed(selected_route))
+            if len(selected_route) >= 2:
+                await self.create_wire(
+                    project_name,
+                    canvas_name,
+                    list(wire_route),
+                )
+            created = await self.add_component(
                 project_name,
                 canvas_name,
                 "master",
                 definition,
-                point,
+                selected_anchor,
                 0,
-                {"Name": unique_label},
+                {"Name": label},
             )
-        return {"label": unique_label}
+            location = (created.location["x"], created.location["y"])
+            if location != selected_anchor:
+                raise BackendError(
+                    "POSTCONDITION_FAILED",
+                    "A PSCAD connection label did not keep its grid anchor.",
+                    self.name,
+                    "create_connection",
+                    {
+                        "label": label,
+                        "expected": list(selected_anchor),
+                        "observed": list(location),
+                    },
+                )
+            self._connection_labels[key] = location
+            existing_locations.add(location)
+            occupied_locations.add(location)
+            if len(selected_route) >= 2:
+                self._connection_label_routes.append(
+                    (
+                        project_name,
+                        canvas_name,
+                        label,
+                        wire_route,
+                    )
+                )
+        return {"label": label}
 
     async def create_annotation(
         self,

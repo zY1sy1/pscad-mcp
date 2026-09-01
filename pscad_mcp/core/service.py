@@ -245,6 +245,65 @@ def _with_error_guidance(payload: dict[str, Any]) -> dict[str, Any]:
     return payload
 
 
+def discover_output_candidates(
+    project_path: Path,
+    *,
+    started_after: float,
+    max_files: int,
+    resolve_candidate: Callable[[Path], Path] | None = None,
+) -> list[str]:
+    """Scan output files from a project identity without opening the project."""
+    resolver = resolve_candidate or (lambda path: path.resolve(strict=True))
+    candidates: list[Path] = []
+    for suffix in (".out", ".psout"):
+        direct = project_path.with_suffix(suffix)
+        if direct.is_file():
+            candidates.append(direct)
+    normalized_stem = re.sub(r"[^A-Za-z0-9_]", "_", project_path.stem)
+    generated_name = re.compile(
+        rf"(?:{re.escape(project_path.stem)}|{re.escape(normalized_stem)})\.gf\d+",
+        re.IGNORECASE,
+    )
+    generated = sorted(
+        (
+            child
+            for child in project_path.parent.iterdir()
+            if child.is_dir() and generated_name.fullmatch(child.name)
+        ),
+        key=lambda item: item.name.casefold(),
+    )
+    scanned = 0
+    for directory in generated[:32]:
+        for root, directories, filenames in os.walk(directory):
+            directories[:] = sorted(directories, key=str.casefold)[:64]
+            for filename in sorted(filenames, key=str.casefold):
+                scanned += 1
+                if scanned > 10_000:
+                    break
+                path = Path(root) / filename
+                if path.suffix.casefold() in {".out", ".psout"}:
+                    candidates.append(path)
+            if scanned > 10_000:
+                break
+        if scanned > 10_000:
+            break
+    found: list[str] = []
+    for candidate in sorted(
+        set(candidates),
+        key=lambda item: str(item).casefold(),
+    ):
+        try:
+            if candidate.stat().st_mtime < float(started_after):
+                continue
+            resolved = resolver(candidate)
+        except FileNotFoundError:
+            continue
+        found.append(str(resolved))
+        if len(found) >= max_files:
+            break
+    return found
+
+
 class ConfirmationRequired(BackendError):
     def __init__(self, operation: str) -> None:
         super().__init__(
@@ -1077,62 +1136,21 @@ class PscadService:
             operation="discover_output_files",
         )
 
-        def scan() -> list[str]:
-            candidates: list[Path] = []
-            for suffix in (".out", ".psout"):
-                direct = project_path.with_suffix(suffix)
-                if direct.is_file():
-                    candidates.append(direct)
-            # PSCAD 4.x replaces punctuation (notably ``-``) with ``_`` when
-            # naming its compiler directory.  Search both the persisted file
-            # stem and that deterministic normalized identity.
-            normalized_stem = re.sub(r"[^A-Za-z0-9_]", "_", project_path.stem)
-            generated_name = re.compile(
-                rf"(?:{re.escape(project_path.stem)}|{re.escape(normalized_stem)})\.gf\d+",
-                re.IGNORECASE,
+        def resolve_candidate(candidate: Path) -> Path:
+            return self._resolve_path(
+                str(candidate),
+                suffixes={".out", ".psout"},
+                must_exist=True,
+                operation="discover_output_files",
             )
-            generated = sorted(
-                (
-                    child
-                    for child in project_path.parent.iterdir()
-                    if child.is_dir() and generated_name.fullmatch(child.name)
-                ),
-                key=lambda item: item.name.casefold(),
-            )
-            scanned = 0
-            for directory in generated[:32]:
-                for root, directories, filenames in os.walk(directory):
-                    directories[:] = sorted(directories, key=str.casefold)[:64]
-                    for filename in sorted(filenames, key=str.casefold):
-                        scanned += 1
-                        if scanned > 10_000:
-                            break
-                        path = Path(root) / filename
-                        if path.suffix.casefold() in {".out", ".psout"}:
-                            candidates.append(path)
-                    if scanned > 10_000:
-                        break
-                if scanned > 10_000:
-                    break
-            found: list[str] = []
-            for candidate in sorted(set(candidates), key=lambda item: str(item).casefold()):
-                try:
-                    if candidate.stat().st_mtime < float(started_after):
-                        continue
-                    resolved = self._resolve_path(
-                        str(candidate),
-                        suffixes={".out", ".psout"},
-                        must_exist=True,
-                        operation="discover_output_files",
-                    )
-                except FileNotFoundError:
-                    continue
-                found.append(str(resolved))
-                if len(found) >= max_files:
-                    break
-            return found
 
-        return await asyncio.to_thread(scan)
+        return await asyncio.to_thread(
+            discover_output_candidates,
+            project_path,
+            started_after=float(started_after),
+            max_files=max_files,
+            resolve_candidate=resolve_candidate,
+        )
 
     async def find_components(
         self,

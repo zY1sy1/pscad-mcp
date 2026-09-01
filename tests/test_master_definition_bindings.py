@@ -34,7 +34,7 @@ def test_master_binding_marks_three_phase_filter_as_expansion():
     assert binding.port_map == {"IN": "A", "OUT": "B"}
 
 
-async def _runtime_backend(tmp_path):
+async def _runtime_backend(tmp_path, *, snap_wires: bool = False):
     master = tmp_path / "master.pslx"
     master.write_text(_master_fixture_xml(), encoding="utf-8")
     project = LegacyComponentProject()
@@ -46,6 +46,14 @@ async def _runtime_backend(tmp_path):
         return values if names or parameters else values + list(project.main.wires)
 
     def add_wire(*vertices):
+        if snap_wires:
+            vertices = tuple(
+                (
+                    round(point[0] / 18) * 18,
+                    round(point[1] / 18) * 18,
+                )
+                for point in vertices
+            )
         wire = WireOrthogonal(
             10_000 + len(project.main.wires),
             vertices,
@@ -125,9 +133,15 @@ async def _runtime_backend(tmp_path):
         ),
         (
             "dc_meter",
-            {},
+            {"CurrentSignal": "IDC", "VoltageSignal": "VDC"},
             "multimeter",
-            {"MeasV": 1, "MeasI": 1},
+            {"MeasV": 1, "MeasI": 1, "CurI": "IDC", "VolI": "VDC"},
+        ),
+        (
+            "main_signal_import",
+            {"Name": "LCC_TEST_RAW"},
+            "datalabel",
+            {"Name": "LCC_TEST_RAW"},
         ),
         ("ground", {}, "ground", {}),
     ],
@@ -226,8 +240,8 @@ def test_legacy_expands_filter_and_grounds_each_neutral(tmp_path):
         assert item.values["V"] == pytest.approx(132.79056191361394)
     assert [tuple(wire.vertices) for wire in wires] == [
         ((360, 144), (414, 144)),
-        ((360, 252), (414, 252)),
-        ((360, 360), (414, 360)),
+        ((360, 288), (414, 288)),
+        ((360, 432), (414, 432)),
     ]
     assert parameters == {
         "Branch_MVAR": pytest.approx(50.0),
@@ -341,6 +355,37 @@ def test_filter_binding_evidence_lists_grounding_members(tmp_path):
     assert roles.count("component") == 3
     assert roles.count("neutral_ground") == 3
     assert roles.count("neutral_wire") == 3
+
+
+def test_filter_binding_pins_vendor_snapped_neutral_wire_endpoints(tmp_path):
+    async def exercise():
+        backend, _project, _master = await _runtime_backend(
+            tmp_path,
+            snap_wires=True,
+        )
+        created = await backend.add_component(
+            "case",
+            "Main",
+            "master",
+            "ac_filter_branch",
+            (2300, 200),
+            0,
+            {"Branch_MVAR": 50.0, "Tuning_Hz": 300.0},
+        )
+        return await backend.get_master_binding_evidence("case", created.id)
+
+    evidence = asyncio.run(exercise())
+
+    wire_endpoints = [
+        item["endpoints"]
+        for item in evidence["observed_instances"]
+        if item["role"] == "neutral_wire"
+    ]
+    assert wire_endpoints == [
+        [[2304, 162], [2358, 162]],
+        [[2304, 306], [2358, 306]],
+        [[2304, 450], [2358, 450]],
+    ]
 
 
 def test_master_binding_evidence_rejects_physical_parameter_drift(tmp_path):

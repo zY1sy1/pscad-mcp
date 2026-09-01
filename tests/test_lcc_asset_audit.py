@@ -1,9 +1,20 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
 from pathlib import Path
 
 from scripts.audit_lcc_assets import audit_asset_root
+
+PACKAGED_ROOT = (
+    Path(__file__).parents[1]
+    / "pscad_mcp"
+    / "assets"
+    / "lcc"
+    / "cigre_lcc_monopole_v1"
+)
+ROOT = Path(__file__).parents[1]
 
 
 def _library(*, extra: str = "", absolute: str = "") -> str:
@@ -50,18 +61,45 @@ def _asset_root(tmp_path: Path, library: str, provenance: str | None = None) -> 
     return root
 
 
-def test_audit_accepts_repository_authored_library(tmp_path):
+def test_audit_rejects_structural_only_library(tmp_path):
     report = audit_asset_root(_asset_root(tmp_path, _library()))
 
+    assert report["valid"] is False
+    assert "structural_only" in {
+        error["reason"] for error in report["errors"]
+    }
+
+
+def test_packaged_asset_root_is_physical():
+    report = audit_asset_root(PACKAGED_ROOT)
+
     assert report["valid"] is True
-    assert report["definitions"] == [
-        "cigre_lcc_v1:Initialization",
-        "cigre_lcc_v1:InverterControl",
-        "cigre_lcc_v1:LCC12PulseBridge",
-        "cigre_lcc_v1:RectifierControl",
-        "cigre_lcc_v1:SignalInterface",
-    ]
-    assert report["valve_count"] == 12
+    assert report["effective_valves"] == 12
+    assert report["master_instances"]["master:g6p200"] == 2
+    assert report["firing_mode"] == {
+        "physical_parameter": "FP",
+        "value": 0,
+        "active_port": "AO",
+        "dimension": 1,
+    }
+
+
+def test_asset_audit_cli_uses_the_current_checkout():
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "scripts" / "audit_lcc_assets.py"),
+            "--asset-root",
+            str(PACKAGED_ROOT),
+        ],
+        cwd=ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    assert json.loads(completed.stdout)["valid"] is True
 
 
 def test_audit_rejects_foreign_scope_absolute_path_and_incomplete_provenance(tmp_path):

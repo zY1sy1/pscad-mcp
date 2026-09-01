@@ -1,12 +1,24 @@
 import copy
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
 
 from pscad_mcp.core.backend.base import BackendError
 from pscad_mcp.core.master_bindings import parse_master_binding_registry
-from pscad_mcp.hvdc.builders.lcc.assets import LccAssetSet
-from pscad_mcp.hvdc.builders.lcc.planner import LccPlanRequest, create_plan
+from pscad_mcp.hvdc.builders.lcc.assets import (
+    LccAssetSet,
+    load_packaged_asset_set,
+)
+from pscad_mcp.hvdc.builders.lcc.catalog import parse_catalog
+from pscad_mcp.hvdc.builders.lcc.planner import (
+    LccPlanRequest,
+    _component_rectangles,
+    _net_route,
+    _wp1b_connection_labels,
+    create_plan,
+)
+from pscad_mcp.hvdc.builders.lcc.routing import route_intersects_rectangles
 from pscad_mcp.hvdc.builders.lcc.schema import parse_blueprint
 
 BLUEPRINT = {
@@ -97,6 +109,16 @@ INVENTORY = {
     },
 }
 
+SMOKE_CONTRACT = {
+    "schema_version": 1,
+    "identity": "cigre_lcc_monopole_v1/wp1b_smoke",
+    "duration_s": 0.1,
+    "output_step_s": 0.00005,
+    "required_channels": ["Main/VDC"],
+    "enable_channels": ["Main/VDC"],
+    "ao_limits_rad": {"Main/VDC": [0.0, 1.0]},
+}
+
 
 def _asset_set(blueprint=None, catalog=None):
     parsed = parse_blueprint(blueprint or BLUEPRINT)
@@ -110,8 +132,12 @@ def _asset_set(blueprint=None, catalog=None):
         catalog=catalog_value,
         acceptance={"checks": [{"name": "golden", "kind": "golden", "required": True, "expected": {}}]},
         golden={"channels": {}},
+        smoke=copy.deepcopy(SMOKE_CONTRACT),
         provenance="source",
-        hashes={"library/cigre_lcc_v1.pslx": "a" * 64},
+        hashes={
+            "library/cigre_lcc_v1.pslx": "a" * 64,
+            "smoke.json": "c" * 64,
+        },
         library_bytes=b"library",
         files={},
     )
@@ -401,3 +427,244 @@ def test_planner_rejects_unimplemented_route_policy(tmp_path):
     candidate["nets"][0]["route"]["policy"] = "shortest_path"
 
     _assert_code(lambda: create_plan(_request(), _asset_set(candidate), INVENTORY, tmp_path), "LCC_LAYOUT_INVALID")
+
+
+def test_fixed_blueprint_has_two_transformer_groups_and_four_ao_nets():
+    blueprint = load_packaged_asset_set().blueprint
+    component_ids = {component.logical_id for component in blueprint.components}
+    net_ids = {net.logical_id for net in blueprint.nets}
+
+    assert {
+        "rectifier_transformer_y",
+        "rectifier_transformer_d",
+        "inverter_transformer_y",
+        "inverter_transformer_d",
+        "initialization",
+        "signal_interface",
+        "vdc_rect_main_import",
+        "vdc_inv_main_import",
+        "idc_main_import",
+    } <= component_ids
+    assert {
+        "rectifier_ao_y",
+        "rectifier_ao_d",
+        "inverter_ao_y",
+        "inverter_ao_d",
+        "vdc_rect_raw",
+        "vdc_inv_raw",
+        "idc_raw",
+    } <= net_ids
+    assert not any(
+        endpoint.port == "GATES"
+        for net in blueprint.nets
+        for endpoint in net.endpoints
+    )
+
+
+def test_packaged_blueprint_routes_avoid_unrelated_component_rectangles():
+    assets = load_packaged_asset_set()
+    catalog = parse_catalog(assets.catalog)
+    components = {
+        component.logical_id: component
+        for component in assets.blueprint.components
+    }
+    rectangles = list(
+        _component_rectangles(assets.blueprint.components, catalog).items()
+    )
+
+    for net in assets.blueprint.nets:
+        excluded = {endpoint.component for endpoint in net.endpoints}
+        route_intersects_rectangles(
+            _net_route(net, components, catalog),
+            [
+                rectangle
+                for logical_id, rectangle in rectangles
+                if logical_id not in excluded
+            ],
+        )
+
+
+def test_packaged_main_signal_imports_are_pscad_grid_aligned():
+    blueprint = load_packaged_asset_set().blueprint
+    imports = [
+        component
+        for component in blueprint.components
+        if component.definition == "master:main_signal_import"
+    ]
+
+    assert len(imports) == 3
+    assert all(
+        coordinate % 18 == 0
+        for component in imports
+        for coordinate in component.location
+    )
+
+
+def test_packaged_raw_signal_route_bends_are_pscad_grid_aligned():
+    blueprint = load_packaged_asset_set().blueprint
+    raw_nets = [
+        net for net in blueprint.nets if net.logical_id in {"vdc_rect_raw", "vdc_inv_raw", "idc_raw"}
+    ]
+
+    assert len(raw_nets) == 3
+    assert all(net.route is not None for net in raw_nets)
+    assert all(
+        coordinate % 18 == 0
+        for net in raw_nets
+        for vertex in net.route.vertices[1:-1]
+        for coordinate in vertex
+    )
+
+
+def test_packaged_fixed_data_nets_do_not_create_main_canvas_labels():
+    blueprint = load_packaged_asset_set().blueprint
+
+    assert all(net.label is None for net in blueprint.nets if net.kind == "data")
+
+
+def test_wp1b_labels_consolidate_shared_ports_and_reuse_raw_signal_names():
+    labels = _wp1b_connection_labels(load_packaged_asset_set().blueprint)
+
+    assert labels["rectifier_control_enable"] == labels[
+        "rectifier_bridge_enable"
+    ]
+    assert labels["inverter_control_enable"] == labels[
+        "inverter_bridge_enable"
+    ]
+    assert labels["rectifier_idc_feedback"] == labels[
+        "inverter_idc_feedback"
+    ]
+    assert labels["vdc_rect_raw"] == "LCC_VDC_RECT_RAW"
+    assert labels["vdc_inv_raw"] == "LCC_VDC_INV_RAW"
+    assert labels["idc_raw"] == "LCC_IDC_RAW"
+    assert labels["rectifier_return"] is None
+    assert labels["inverter_return"] is None
+    assert len({label for label in labels.values() if label is not None}) == 48
+
+
+def test_wp1b_smoke_plan_uses_smoke_gate_and_hashes_profile(tmp_path):
+    assets = _asset_set()
+    request = LccPlanRequest(
+        project_name="CIGRE_LCC",
+        folder=str(tmp_path),
+        simulation_duration_s=0.1,
+        verification_profile="wp1b_smoke",
+    )
+
+    smoke = create_plan(request, assets, INVENTORY, tmp_path)
+    full = create_plan(
+        replace(
+            request,
+            simulation_duration_s=1.0,
+            verification_profile="full_acceptance",
+        ),
+        assets,
+        INVENTORY,
+        tmp_path,
+    )
+
+    assert smoke.verification_profile == "wp1b_smoke"
+    assert smoke.plan_hash != full.plan_hash
+    assert Path(smoke.target_path).stem == "CIGRE_LCC_PUBLISHED"
+    assert Path(smoke.staging_path).name == "CIGRE_LCC.staging"
+    assert Path(full.target_path).stem == "CIGRE_LCC"
+    assert [item.kind for item in smoke.operations][-2:] == [
+        "smoke_validate",
+        "publish",
+    ]
+    assert "accept" not in [item.kind for item in smoke.operations]
+    assert [item.kind for item in full.operations][-2:] == [
+        "accept",
+        "publish",
+    ]
+    assert [
+        item.arguments["path"]
+        for item in smoke.operations
+        if item.kind == "create_output"
+    ] == list(assets.smoke["required_channels"])
+    assert [
+        item.arguments["path"]
+        for item in full.operations
+        if item.kind == "create_output"
+    ] == [output.path for output in assets.blueprint.outputs]
+    smoke_kinds = [item.kind for item in smoke.operations]
+    assert smoke_kinds.index("save_and_validate") < smoke_kinds.index("compile")
+    assert smoke_kinds.index("compile") < smoke_kinds.index("create_output")
+    assert smoke_kinds.index("create_output") < smoke_kinds.index("simulate")
+    smoke_connections = {
+        item.target: item.arguments
+        for item in smoke.operations
+        if item.kind == "connect_net"
+    }
+    full_connections = {
+        item.target: item.arguments
+        for item in full.operations
+        if item.kind == "connect_net"
+    }
+    assert all(
+        isinstance(arguments["label"], str) and arguments["label"]
+        for arguments in smoke_connections.values()
+    )
+    assert full_connections["ac"]["label"] is None
+
+
+def test_wp1b_smoke_plan_excludes_non_smoke_derived_outputs(tmp_path):
+    candidate = copy.deepcopy(BLUEPRINT)
+    candidate["measurements"].append(
+        {
+            "logical_id": "derived_measurement",
+            "kind": "electrical",
+            "component": "source",
+            "port": "ac",
+            "channels": ["Main/DERIVED"],
+            "derived_from": "vdc_measurement",
+        }
+    )
+    candidate["outputs"].append(
+        {
+            "logical_id": "derived",
+            "path": "Main/DERIVED",
+            "units": "kV",
+            "role": "derived_voltage",
+            "measurement": "derived_measurement",
+        }
+    )
+    assets = _asset_set(candidate)
+    request = LccPlanRequest(
+        project_name="CIGRE_LCC",
+        folder=str(tmp_path),
+        simulation_duration_s=0.1,
+        verification_profile="wp1b_smoke",
+    )
+
+    plan = create_plan(request, assets, INVENTORY, tmp_path)
+
+    assert [
+        item.arguments["path"]
+        for item in plan.operations
+        if item.kind == "create_output"
+    ] == ["Main/VDC"]
+
+
+@pytest.mark.parametrize(
+    ("profile", "duration"),
+    [
+        ("wp1b_smoke", 0.2),
+        ("unknown", 0.1),
+    ],
+)
+def test_wp1b_smoke_profile_rejects_wrong_duration_or_name(
+    tmp_path,
+    profile,
+    duration,
+):
+    request = LccPlanRequest(
+        "CIGRE_LCC",
+        simulation_duration_s=duration,
+        verification_profile=profile,
+    )
+
+    with pytest.raises(BackendError) as failure:
+        create_plan(request, _asset_set(), INVENTORY, tmp_path)
+
+    assert failure.value.code == "LCC_BLUEPRINT_INVALID"

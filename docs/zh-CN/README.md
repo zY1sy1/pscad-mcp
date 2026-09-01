@@ -21,6 +21,12 @@ Legacy PSCAD 4.6.2 后端只支持启动新的受管 Automation 实例，不能�
 领域流程或更新后的提交。README 中“PSCAD 4.6.2 已做真实验收”特指通用 Legacy
 核心工作流，不表示 LCC 或 MMC 已取得最终实机 `PASS`。
 
+LCC/MMC 实现计划使用独立的当前真值基线
+[`docs/acceptance/lcc-mmc-program-baseline.json`](../acceptance/lcc-mmc-program-baseline.json)。
+它登记 exact evidence commit、PSCAD/Master/compiler 身份、官方只读源、随包资产、
+历史运行和九个 builder-owned scope，不替代 topology 状态表。任何 `PASS` 都不能
+跨 scope、跨 commit 或在同一编排族的不同 builder path 之间继承。
+
 ## PSCAD 4.6.2 已验证行为与限制
 
 - 新建空算例和库使用随包分发、由 PSCAD 保存的模板；新建和另存会同时改写工程根身份及精确的工程自命名空间引用，并由 PSCAD 回读验证名称和类型。新目标会先尝试原生另存，未产生有效目标时回退；已有目标始终先保存当前操作副本，再通过原子替换生成目标。
@@ -107,13 +113,34 @@ LCC 领域提供四个工具：`plan_lcc_model`、`build_lcc_model`、
 PSCAD 5.x、故障或换相失败验收、MMC 构建均不可用。
 
 规划阶段如果连接的 PSCAD 服务没有提供实时的 4.6.2 definition inventory，
-会 fail closed；随包 catalog 不会被当作实时证据。输出通道还必须有显式的
-公共 `create_output_channel` 写入能力并完成读回校验。当前随包
-`golden.json` 仍是等待独立授权参考运行生成的 release-gate 占位基线，因此
-本分支不能通过真实 LCC 验收。
+会 fail closed；随包 catalog 不会被当作实时证据。WP1B 在完整编译成功后，
+把 Legacy 输出选择器绑定到已审计的预声明 `master:export`，再用实际生成的
+OUT/INF 数据集验证。随包 `golden.json` 仍是等待独立授权参考运行生成的
+release-gate 占位基线。
 
-当前实现的 PSCAD 4.6.2 授权验收尚未通过；在 opt-in 实机验收
-通过前，不得把该功能描述为已自治构建并验收的 CIGRE LCC 模型。
+当前 program baseline 已把 `lcc.fixed_autonomous` 记录为提交 `3a09c8f` 上的
+`simulated/PASS`：六个独立 companion fixture 全部编译，通过空白工程完整拓扑
+构建与 final 重编译，完成 0.1 s、2,001 样本的无故障 smoke，退出后无 PSCAD
+残留进程。该状态不是 `accepted`；扰动、换相失败/恢复、independent golden
+和最终验收仍属于 WP1C/WP6。
+
+授权证据生成与基线提升是两个独立动作；run 命令不会修改仓库基线：
+
+```powershell
+$env:PSCAD_MCP_LCC_WP1B_ACCEPTANCE = '1'
+./scripts/run_fixed_lcc_smoke_acceptance.ps1 `
+  -WorkspaceRoot 'D:/PSCAD-Workspace/lcc-wp1b-fixed-acceptance' `
+  -CompilerConfiguration 'C:/Program Files (x86)/PSCAD46/fortran_compilers.xml' `
+  -CompilerExecutable 'C:/Program Files (x86)/GFortran/4.6/bin/gfortran.exe'
+```
+
+只有独立复核后的 PASS 报告才能显式提升：
+
+```powershell
+./.venv/Scripts/python.exe -m pscad_mcp.hvdc.builders.lcc.fixed_acceptance_cli promote `
+  --baseline docs/acceptance/lcc-mmc-program-baseline.json `
+  --report 'D:/PSCAD-Workspace/lcc-wp1b-fixed-acceptance/<run>/fixed-lcc-acceptance-report.json'
+```
 
 ### Blank LCC 与官方工程
 
@@ -131,6 +158,12 @@ PSCAD 4.x 会把一个运行结果拆成 `*_01.out`、`*_02.out` 等文件；构
 这些分片及 `.inf` 元数据保存到 `<工程名>.outputs`，因此之后可以用
 `validate_blank_lcc_model` 复读同一份证据。未提供官方模板时工具返回
 `LCC_TEMPLATE_REQUIRED`，不会伪造可编译的 companion。
+
+blank/native LCC 只有在
+`docs/acceptance/lcc-mmc-program-baseline.json` 为 `lcc.blank_native` 指向当前
+提交的 indexed PASS report 时，才具有 licensed simulation evidence。该状态是
+`simulated`，不代表 fixed autonomous 或最终 `accepted`；independent golden
+仍由 WP6 验收。
 
 ### 参数化双引擎 MMC
 

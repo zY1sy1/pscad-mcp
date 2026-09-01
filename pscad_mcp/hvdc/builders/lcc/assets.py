@@ -84,6 +84,7 @@ class LccAssetSet:
     catalog: dict[str, Any]
     acceptance: dict[str, Any]
     golden: dict[str, Any]
+    smoke: dict[str, Any]
     provenance: str
     hashes: dict[str, str]
     library_bytes: bytes
@@ -350,6 +351,7 @@ def load_asset_set(asset_root: str | Path) -> LccAssetSet:
         "catalog-pscad-4.6.2.json",
         "acceptance.json",
         "golden.json",
+        "smoke.json",
         "PROVENANCE.md",
         "master-bindings-pscad-4.6.2.json",
         companion_library,
@@ -409,6 +411,16 @@ def load_asset_set(asset_root: str | Path) -> LccAssetSet:
             asset_version=pscad_version,
             registry_version=master_bindings.pscad_version,
         )
+    smoke = _json_record(files, "smoke.json")
+    expected_smoke_identity = f"{name}/wp1b_smoke"
+    if smoke.get("identity") != expected_smoke_identity:
+        raise _asset_error(
+            "LCC_ASSET_MISMATCH",
+            "The smoke contract identity does not match the asset.",
+            "load_lcc_asset_set",
+            expected=expected_smoke_identity,
+            observed=smoke.get("identity"),
+        )
     return LccAssetSet(
         name=name,
         schema_version=schema_version,
@@ -418,6 +430,7 @@ def load_asset_set(asset_root: str | Path) -> LccAssetSet:
         catalog=catalog,
         acceptance=_json_record(files, "acceptance.json"),
         golden=_json_record(files, "golden.json"),
+        smoke=smoke,
         provenance=provenance,
         hashes=dict(hashes),
         library_bytes=bytes(files[companion_library]),

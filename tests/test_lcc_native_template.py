@@ -170,6 +170,47 @@ def test_native_commutation_acceptance_is_fail_closed() -> None:
     assert "fault_applied" in missing["missing_evidence"]
 
 
+def test_native_commutation_evidence_names_indicator_and_recovery_window():
+    domain = [0.0, 0.7, 0.8, 0.85, 0.9, 1.5]
+    result = evaluate_native_lcc_commutation(
+        {
+            "channels": [
+                {
+                    "path": "Fault/LCC Fault Active",
+                    "units": "state",
+                    "domain": domain,
+                    "values": [0, 0, 1, 1, 0, 0],
+                },
+                {
+                    "path": "Inverter/DC Current",
+                    "units": "pu",
+                    "domain": domain,
+                    "values": [1, 1, 2, 2, 1, 1],
+                },
+                {
+                    "path": "Inverter/Gamma",
+                    "units": "deg",
+                    "domain": domain,
+                    "values": [18, 18, 5, 6, 17, 18],
+                },
+            ]
+        },
+        fault_time_s=0.8,
+        fault_duration_s=0.1,
+        current_limit_pu=3.0,
+        recovery_delay_s=0.5,
+    )
+
+    assert result["verdict"] == "PASS"
+    channels = result["evidence"]["channels"]
+    assert channels["fault_active"]["path"] == "Fault/LCC Fault Active"
+    assert channels["dc_current"]["units"] == "pu"
+    assert channels["failure_indicator"]["path"] == "Inverter/Gamma"
+    assert channels["failure_indicator"]["units"] == "deg"
+    assert channels["failure_indicator"]["samples"] == len(domain)
+    assert result["evidence"]["recovery_window_s"] == 0.5
+
+
 def test_materialize_rejects_existing_destination(tmp_path: Path) -> None:
     source = _template(tmp_path / "official.pscx")
     project = tmp_path / "derived.pscx"

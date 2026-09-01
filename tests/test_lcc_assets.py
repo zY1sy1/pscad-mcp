@@ -7,6 +7,7 @@ import pytest
 from pscad_mcp.core.backend.base import BackendError
 from pscad_mcp.hvdc.builders.lcc.assets import (
     load_asset_set,
+    load_packaged_asset_set,
     materialize_library,
     sha256_file,
 )
@@ -102,6 +103,9 @@ def _write_asset_files(root: Path) -> dict[str, bytes]:
         ).encode("utf-8"),
         "acceptance.json": b'{"checks":[]}',
         "golden.json": b'{"channels":{}}',
+        "smoke.json": (
+            b'{"identity":"cigre_lcc_monopole_v1/wp1b_smoke"}'
+        ),
         "PROVENANCE.md": b"public source\n",
         "library/cigre_lcc_v1.pslx": library,
     }
@@ -164,6 +168,38 @@ def test_load_asset_set_exposes_manifest_hashed_master_registry(tmp_path):
         asset_set.master_binding_hash
         == asset_set.hashes["master-bindings-pscad-4.6.2.json"]
     )
+
+
+def test_packaged_asset_exposes_hashed_wp1b_smoke_contract():
+    asset_set = load_packaged_asset_set()
+
+    assert asset_set.smoke["identity"] == (
+        "cigre_lcc_monopole_v1/wp1b_smoke"
+    )
+    assert asset_set.smoke["duration_s"] == pytest.approx(0.1)
+    assert "smoke.json" in asset_set.hashes
+    assert asset_set.master_bindings is not None
+    assert asset_set.master_bindings.schema_version == 2
+    assert "master:main_signal_import" in asset_set.master_bindings.by_logical_name
+    assert set(asset_set.master_bindings.companion_by_logical_name) == {
+        "master:six_pulse_bridge",
+        "master:control_sum",
+        "master:control_pi",
+        "master:control_limiter",
+        "master:control_minimum",
+        "master:control_product",
+        "master:real_constant",
+        "master:integer_constant",
+        "master:signal_import",
+        "master:electrical_pin",
+        "master:signal_export",
+        "master:integer_sum",
+        "master:three_phase_breakout",
+        "master:integer_to_real",
+        "master:output_channel",
+        "master:real_to_integer",
+        "master:phase_isolation_resistor",
+    }
 
 
 def test_catalog_registry_reference_mismatch_is_rejected(tmp_path):

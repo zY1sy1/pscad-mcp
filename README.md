@@ -134,6 +134,13 @@ mutating HVDC workflows, fixed or parametric LCC builders, MMC, PSCAD 5.x, or
 later-commit acceptance, and no acceptance status is inferred from the
 non-licensed contract suite.
 
+The LCC/MMC implementation program has a separate scoped current-truth
+baseline at `docs/acceptance/lcc-mmc-program-baseline.json`. It records the
+exact evidence commit, PSCAD/Master/compiler identities, official read-only
+sources, packaged assets, historical runs, and nine builder-owned scopes. It
+does not replace the topology status manifest. A `PASS` never transfers across
+scopes, commits, or builder paths within an orchestration family.
+
 The HVDC domain layer adds ten tools without changing the original generic
 inventory: `inspect_hvdc_project`, `get_hvdc_assets`, `get_hvdc_mappings`,
 `validate_hvdc_project`, `run_hvdc_scenario`, `get_hvdc_scenario_status`,
@@ -178,11 +185,11 @@ commutation-failure acceptance, and MMC construction are unavailable.
 
 Planning fails closed unless the attached PSCAD service supplies live
 4.6.2 definition inventory; the packaged catalog is not treated as live
-evidence. Build output channels also require an explicit public
-`create_output_channel` capability followed by read-back. The packaged
-`golden.json` is a release-gate placeholder until an independently reviewed
-licensed reference run is generated, so the current branch cannot pass real
-LCC acceptance.
+evidence. For WP1B, Legacy output selectors are bound to the audited
+predeclared `master:export` components after a successful full compile, then
+verified against the generated OUT/INF dataset. The packaged `golden.json`
+remains a release-gate placeholder until an independently reviewed licensed
+reference run is generated.
 
 The fixed catalog's eight `master:*` contracts are resolved through the
 manifest-hashed `master-bindings-pscad-4.6.2.json` registry. Plans record both
@@ -202,9 +209,32 @@ unchanged. Passing this compile-only gate demonstrates that the Master binding
 runtime is usable; it does not replace full CIGRE waveform or commutation-fault
 acceptance.
 
-Licensed acceptance has not passed for the PSCAD 4.6.2 implementation branch,
-so the feature must not be described as an autonomously constructed
-accepted CIGRE LCC model until the opt-in real acceptance test passes.
+The current program baseline records `lcc.fixed_autonomous` as
+`simulated/PASS` from the licensed no-fault WP1B run on commit `3a09c8f`.
+That run compiled all six isolated companion fixtures, built and recompiled a
+blank-case full topology, simulated 0.1 s, and verified 2,001 samples with no
+remaining PSCAD process. It is not `accepted`: disturbance, commutation
+failure/recovery, independent golden, and final acceptance remain WP1C/WP6
+work.
+
+Licensed evidence generation and baseline promotion are separate actions. The
+run command never edits the checked-in baseline:
+
+```powershell
+$env:PSCAD_MCP_LCC_WP1B_ACCEPTANCE = '1'
+./scripts/run_fixed_lcc_smoke_acceptance.ps1 `
+  -WorkspaceRoot 'D:/PSCAD-Workspace/lcc-wp1b-fixed-acceptance' `
+  -CompilerConfiguration 'C:/Program Files (x86)/PSCAD46/fortran_compilers.xml' `
+  -CompilerExecutable 'C:/Program Files (x86)/GFortran/4.6/bin/gfortran.exe'
+```
+
+Only an independently revalidated PASS report may be promoted:
+
+```powershell
+./.venv/Scripts/python.exe -m pscad_mcp.hvdc.builders.lcc.fixed_acceptance_cli promote `
+  --baseline docs/acceptance/lcc-mmc-program-baseline.json `
+  --report 'D:/PSCAD-Workspace/lcc-wp1b-fixed-acceptance/<run>/fixed-lcc-acceptance-report.json'
+```
 
 ### Blank LCC template path
 
@@ -218,6 +248,11 @@ to a new workspace staging directory. The builder extracts the official
 Library. The source example is never modified. Builds retain numbered legacy
 OUT parts and their `.inf` metadata under `<project>.outputs` so a later
 `validate_blank_lcc_model` call can reread the same evidence.
+
+The blank/native LCC path has current-commit licensed simulation evidence only
+when `docs/acceptance/lcc-mmc-program-baseline.json` names an indexed PASS
+report for `lcc.blank_native`. This is `simulated`, not fixed-autonomous or final
+`accepted` evidence; independent-golden acceptance remains a WP6 gate.
 
 The converter-specific definitions are not present in the Master Library, so a
 blank LCC request without an official template fails with `LCC_TEMPLATE_REQUIRED`

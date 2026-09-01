@@ -26,9 +26,7 @@ from pscad_mcp.hvdc.builders.lcc.assets import canonical_json as lcc_canonical_j
 from pscad_mcp.hvdc.builders.lcc.journal import WorkspaceBuildLease as LccLease
 from pscad_mcp.hvdc.builders.lcc.planner import LccPlanRequest, create_plan
 from pscad_mcp.hvdc.builders.mmc.journal import WorkspaceBuildLease as MmcLease
-
 from tests.test_lcc_planner import INVENTORY, _asset_set
-
 
 _LCC_PLAN_BASELINE = Path(__file__).parent / "fixtures" / "lcc" / "lcc_plan_pre_common_baseline.json"
 
@@ -179,6 +177,7 @@ def _lcc_plan_hash_payload(plan):
         "project_settings": dict(plan.blueprint.settings),
         "operations": [operation.to_dict() for operation in plan.operations],
         "acceptance_contract": [check.to_dict() for check in plan.acceptance_checks],
+        "verification_profile": plan.verification_profile,
     }
 
 
@@ -197,7 +196,7 @@ def test_common_journal_normalizes_serialization_failures_without_replacing_prev
 
 def test_lcc_plan_payload_and_hash_match_pre_common_baseline():
     baseline_payload = _LCC_PLAN_BASELINE.read_bytes().rstrip(b"\r\n")
-    baseline_hash = "96315762b0af90138249387c42836660b41734065c3de158a903d02f333b3296"
+    baseline_hash = "478e987fa3b4fc53d6bafc9d839d91f0adbdfe78b49151b209e7fc5df0d9fb34"
 
     request = LccPlanRequest("CIGRE_LCC")
     asset_set = _asset_set()

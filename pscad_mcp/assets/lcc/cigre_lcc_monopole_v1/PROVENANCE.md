@@ -17,13 +17,37 @@ April 1991, pp. 54-73.
 - Initial conditions and the declared signal interface are documented in
   Table 4 and the initialization discussion on pages 68-70.
 
-The XML is an original repository-authored structural companion contract. It
-contains references only to characterized `master:` definitions; no vendor
-definition body is redistributed. Local Breaker projects were not sources for
-this asset, and no user project XML, parameter set, or schematic was copied.
+The PSLX is generated deterministically by
+`scripts/build_lcc_companion_library.py` from repository-authored component,
+port, parameter, and wire ledgers. It contains references only to live-audited
+`master:` definitions; no vendor form, SVG, schematic, script, or Definition
+body is redistributed. Local Breaker projects were not sources for this asset,
+and no user project XML, parameter set, or schematic was copied.
 
-Compilation in a licensed PSCAD 4.6.2 installation remains a required release
-gate and is recorded separately from this provenance ledger.
+Each 12-pulse bridge contains two `master:g6p200` instances with `FP=0`,
+`View=1`, separate Y/delta AC groups, a common DC series path, and scalar
+radian `AO` inputs. The effective twelve-valve count derives from two audited
+six-pulse Master bridges; the companion does not fabricate individual valve
+records. `RectifierControl` uses current-error PI and hard limiting;
+`InverterControl` uses minimum gamma feedback, PI, and hard limiting. Page
+interfaces use audited `pin`, `breakout`, `import`, and `export` primitives.
+PSCAD 4.6.2 does not permit individual `breakout` array elements to be
+externalized directly. Each of the six scalar AC phase ports therefore uses
+an audited `master:resistor` fixed at `1e-6 ohm` before the internal
+three-phase breakout; this deterministic phase-isolation branch preserves the
+scalar external contract while giving each array element an internal node.
+The no-fault smoke channels use ten audited `master:pgb` output blocks inside
+the companion definitions. Initialization enable states pass through audited
+integer-to-real `unity` adapters before reaching their output blocks; the
+external integer enable contract is unchanged.
+The three meter tags are imported on the generated Main canvas by the audited
+`master:main_signal_import` binding. `SignalInterface` receives those values
+through explicit raw input ports and passes each through a Real-to-Real
+`unity` adapter before one non-branching wire drives its monitor and output.
+
+Offline structure evidence does not imply physical PASS. Load, instance
+read-back, save/reload, component compile, full-topology compile, and no-fault
+simulation in licensed PSCAD 4.6.2 remain separate required gates.
 
 ## Master binding ledger
 
@@ -43,6 +67,11 @@ the registry or companion library.
 - `ac_meter` and `dc_meter -> multimeter`, with explicit modes that retain the
   required electrical pair.
 - `ground -> ground`.
+
+The schema-v2 companion section separately binds every Master primitive used
+inside the repository-authored PSLX, including `pgb -> output_channel`. These
+bindings contain metadata and parameter contracts only; no vendor Definition
+body is redistributed.
 
 The official examples informed component identity and semantics only. They are
 not redistributed by this asset package. Licensed Master-binding compile

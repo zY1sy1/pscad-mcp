@@ -1,0 +1,307 @@
+{
+  "schema_version": 1,
+  "baseline_id": "lcc-mmc-program-wp0-2026-08-30",
+  "generated_at_utc": "2026-09-01T08:06:33.889443Z",
+  "repository": {
+    "base_commit": "3a09c8fe0b6ebf676f2bfd47e7ad89d8cba9117d",
+    "branch": "codex/lcc-wp1b-fixed-physicalization",
+    "worktree_clean": true
+  },
+  "environment": {
+    "backend": "legacy",
+    "pscad_version": "4.6.2",
+    "x64": true,
+    "automation_module": "mhrc.automation",
+    "master_path": "C:/Program Files (x86)/PSCAD46/master.pslx",
+    "master_sha256": "062a614e68d8b18541f42b6bac95e0777d4de6f923fdf3d558ca8ff40255d939",
+    "compiler": {
+      "identity": "gfortran",
+      "configuration_path": "C:/Program Files (x86)/PSCAD46/fortran_compilers.xml",
+      "configuration_sha256": "bd6183220badfa7a32f5419e8563d9b5c598fc370d50970d9e0bfaba092f6ca1",
+      "executable_path": "C:/Program Files (x86)/GFortran/4.6/bin/gfortran.exe",
+      "executable_sha256": "fd179ba3ddb0df54ddc59911042947d97a20f039297279eb6cbf9554b32c8665"
+    }
+  },
+  "sources": [
+    {
+      "source_id": "official.lcc.cigre_bidirectional.project",
+      "kind": "official_template",
+      "path": "D:/pscad-mcp-example-inspection-20260829/cigre_lcc_bidirectional/Cigre_LCC_Bidirectional.pscx",
+      "sha256": "f36738fbec4c9bdb0995ca73726e16d18e85c10166eaa893e6599a591d5c4a43",
+      "availability": "verified_local_read_only"
+    },
+    {
+      "source_id": "official.mmc.half_bridge.project",
+      "kind": "official_template",
+      "path": "C:/Users/Public/Documents/PSCAD/4.6/Examples/ModelsInProgress/H_MMC_Mono_DC.pscx",
+      "sha256": "1900be93877400fba228b1808a5310980d801b0260d7df998df6c5a2f6a035dd",
+      "availability": "verified_local_read_only"
+    },
+    {
+      "source_id": "official.mmc.half_bridge.library",
+      "kind": "official_template_library",
+      "path": "C:/Users/Public/Documents/PSCAD/4.6/Examples/ModelsInProgress/intermediate.pslx",
+      "sha256": "08466778704e547d7d9d80af99a48c09292dd3a51056ac26216c3913d5cc3a1b",
+      "availability": "verified_local_read_only"
+    },
+    {
+      "source_id": "history.master_binding_compile",
+      "kind": "master_binding_compile_run",
+      "path": "D:/PSCAD-Workspace/master-binding-acceptance/master-binding-acceptance-20260829-173320-618412/master-binding-acceptance-report.json",
+      "sha256": "e541947b914ca78b919b7c4796ee2b7e589fbb9868a47261538ca86106f7b38e",
+      "availability": "verified_local_historical_commit_unknown"
+    },
+    {
+      "source_id": "history.blank_lcc_official_template",
+      "kind": "official_lcc_template_run",
+      "path": "D:/PSCAD-Workspace/blank-lcc-native-acceptance2-20260829/.pscad-mcp/lcc-builds/9b2fb1415a6b4f59a306b532c8b6f873/journal.json",
+      "sha256": "edfb882a9f709b703e2b8625b23ef9eb94b4101e2d6466abe0afaadb9a2108f1",
+      "availability": "verified_local_historical_commit_unknown"
+    },
+    {
+      "source_id": "history.blank_mmc_official_template",
+      "kind": "official_mmc_template_run",
+      "path": "D:/PSCAD-Workspace/blank-mmc-native-acceptance-20260829/.pscad-mcp/mmc-builds/b260eaf5c5004b5dab39c9368ed1023c/journal.json",
+      "sha256": "ad6ec80ac2223ba5c68740566bd60d15ae13e31b5bdce8c6f3cbe4dd76e394a9",
+      "availability": "verified_local_historical_commit_unknown"
+    },
+    {
+      "source_id": "history.mmc_parametric_orchestrator",
+      "kind": "mmc_parametric_orchestrator_run",
+      "path": "D:/PSCAD-Workspace/mmc-parametric-acceptance/mmc-parametric-acceptance-20260828T080837223737Z/mmc-parametric-acceptance-report.json",
+      "sha256": "18975323c2b563d308a81d6e1743ef866bfb66d193be2de04cd4284917d5d4e5",
+      "availability": "verified_local_historical_commit"
+    },
+    {
+      "source_id": "environment.wp0_program_preflight",
+      "kind": "environment_preflight",
+      "path": "D:/PSCAD-Workspace/lcc-mmc-program-preflight/preflight-20260830-042048-243/program-preflight-report.json",
+      "sha256": "e42c9835d2268a486ff61975e323fc315ac6b66ddd867e9d12f480d49df116d7",
+      "availability": "verified_local_current_commit"
+    }
+  ],
+  "assets": [
+    {
+      "asset_id": "asset.lcc.fixed.manifest",
+      "scope": "lcc.fixed_autonomous",
+      "path": "pscad_mcp/assets/lcc/cigre_lcc_monopole_v1/manifest.json",
+      "sha256": "115479abfefd89e5e34b0472b503d630c1025ca85560b43b2ee10d4e8b391542"
+    },
+    {
+      "asset_id": "asset.lcc.parametric.catalog",
+      "scope": "lcc.parametric",
+      "path": "pscad_mcp/assets/lcc/lcc_parametric_catalog_v1.json",
+      "sha256": "f9bfd55f0f89a748f298a8e13d1190a98a218976496d45ad45a190a04536e03d"
+    },
+    {
+      "asset_id": "asset.lcc.parametric.monopole",
+      "scope": "lcc.parametric",
+      "path": "pscad_mcp/assets/lcc/lcc_monopole_parametric_v1/blueprint.json",
+      "sha256": "d48b7bdd5472f81e4913e86ebcfccaaaee8bb48859586646f8f0a7e16301fdca"
+    },
+    {
+      "asset_id": "asset.lcc.parametric.bipole",
+      "scope": "lcc.parametric",
+      "path": "pscad_mcp/assets/lcc/lcc_bipole_parametric_v1/blueprint.json",
+      "sha256": "4c40c0c908a5e0ff7f3b2e5630502a3d3221a6e3c7fed0cac33783628d4f8b37"
+    },
+    {
+      "asset_id": "asset.mmc.fixed.manifest",
+      "scope": "mmc.avm_full_bridge",
+      "path": "pscad_mcp/assets/mmc/cigre_b4_p2p_avm_v1/manifest.json",
+      "sha256": "96a0a3f3f61f47ad0b11d7dc5ba14f44fdca7b0edfa5f98ef9fe9ce226fe49fd"
+    }
+  ],
+  "reports": [
+    {
+      "run_id": "native-lcc-20260830-222825-007",
+      "scope": "lcc.blank_native",
+      "builder_path": "lcc.blank_native",
+      "kind": "licensed_simulation",
+      "capability_state": "simulated",
+      "status": "PASS",
+      "commit": "0b931ac47ed336cac303b77324ff375e3daec1fc",
+      "generated_at_utc": "2026-08-30T14:28:59.660655Z",
+      "path": "D:/PSCAD-Workspace/lcc-wp1a-native-acceptance/native-lcc-20260830-222825-007/native-lcc-acceptance-report.json",
+      "sha256": "bc0fa3530e20952e5f760d9b2d4870422416d4ab70e6c1482d4717277ea970bf",
+      "availability": "verified_local"
+    },
+    {
+      "run_id": "native-lcc-20260830-223807-236",
+      "scope": "lcc.blank_native",
+      "builder_path": "lcc.blank_native",
+      "kind": "licensed_simulation",
+      "capability_state": "simulated",
+      "status": "PASS",
+      "commit": "5224f55899a8f94af9c95c69c22d5735f23f7cb0",
+      "generated_at_utc": "2026-08-30T14:38:44.130855Z",
+      "path": "D:/PSCAD-Workspace/lcc-wp1a-native-acceptance/native-lcc-20260830-223807-236/native-lcc-acceptance-report.json",
+      "sha256": "7e731431cf6779814056dc8347a0ea7de439031cfe4120e5fcd0ea6edf95196f",
+      "availability": "verified_local"
+    },
+    {
+      "run_id": "native-lcc-20260830-230408-448",
+      "scope": "lcc.blank_native",
+      "builder_path": "lcc.blank_native",
+      "kind": "licensed_simulation",
+      "capability_state": "simulated",
+      "status": "PASS",
+      "commit": "4f965eb8a35e17a2f11404f3846e1b1c258898b4",
+      "generated_at_utc": "2026-08-30T15:04:46.119585Z",
+      "path": "D:/PSCAD-Workspace/lcc-wp1a-native-acceptance/native-lcc-20260830-230408-448/native-lcc-acceptance-report.json",
+      "sha256": "3b77a36b7078a6dc4ffa4be3ad4e80e98349a1ca5a17f73b1bfc65aab6bffc7a",
+      "availability": "verified_local"
+    },
+    {
+      "run_id": "native-lcc-20260830-232036-018",
+      "scope": "lcc.blank_native",
+      "builder_path": "lcc.blank_native",
+      "kind": "licensed_simulation",
+      "capability_state": "simulated",
+      "status": "PASS",
+      "commit": "c6ad59f3f7638f8b884ea4b95e44c21cd31ff56c",
+      "generated_at_utc": "2026-08-30T15:21:13.496363Z",
+      "path": "D:/PSCAD-Workspace/lcc-wp1a-native-acceptance/native-lcc-20260830-232036-018/native-lcc-acceptance-report.json",
+      "sha256": "1fe448921d339f677fe6f70bfecc057615fd0eb7aee17dd897ab3292acaaf4be",
+      "availability": "verified_local"
+    },
+    {
+      "run_id": "fixed-lcc-20260831-133028-129",
+      "scope": "lcc.fixed_autonomous",
+      "builder_path": "lcc.fixed_autonomous",
+      "kind": "licensed_simulation",
+      "capability_state": "simulated",
+      "status": "PASS",
+      "commit": "6c3919bb6aae893ac43ffdd2f3018284eb1dbec2",
+      "generated_at_utc": "2026-08-31T13:31:59.649100Z",
+      "path": "D:/PSCAD-Workspace/lcc-wp1b-fixed-acceptance/fixed-lcc-20260831-133028-129/fixed-lcc-acceptance-report.json",
+      "sha256": "f276b3ff625049f8b32f6ae11555cc20c8a223c4ae1e132738163c8bb8c8dca5",
+      "availability": "verified_local"
+    },
+    {
+      "run_id": "fixed-lcc-20260901-080458-594",
+      "scope": "lcc.fixed_autonomous",
+      "builder_path": "lcc.fixed_autonomous",
+      "kind": "licensed_simulation",
+      "capability_state": "simulated",
+      "status": "PASS",
+      "commit": "3a09c8fe0b6ebf676f2bfd47e7ad89d8cba9117d",
+      "generated_at_utc": "2026-09-01T08:06:33.889443Z",
+      "path": "D:/PSCAD-Workspace/lcc-wp1b-fixed-acceptance/fixed-lcc-20260901-080458-594/fixed-lcc-acceptance-report.json",
+      "sha256": "030a59d2af8fdbfad76e364eebd7435135135f09bbbbf9df787c8ce5fb68ed14",
+      "availability": "verified_local"
+    }
+  ],
+  "scopes": [
+    {
+      "scope": "lcc.master_bindings",
+      "builder_path": "lcc.master_binding_registry",
+      "owner_work_package": "WP1",
+      "capability_state": "compiled",
+      "licensed_status": "NOT_RUN_ON_CURRENT_COMMIT",
+      "evidence_run_id": null,
+      "explicit_exclusions": [
+        "current_commit_compile",
+        "full_lcc_waveform_acceptance"
+      ]
+    },
+    {
+      "scope": "lcc.blank_native",
+      "builder_path": "lcc.blank_native",
+      "owner_work_package": "WP1",
+      "capability_state": "simulated",
+      "licensed_status": "NOT_RUN_ON_CURRENT_COMMIT",
+      "evidence_run_id": null,
+      "explicit_exclusions": [
+        "fixed_autonomous",
+        "parametric_lcc",
+        "independent_golden",
+        "final_accepted"
+      ]
+    },
+    {
+      "scope": "lcc.fixed_autonomous",
+      "builder_path": "lcc.fixed_autonomous",
+      "owner_work_package": "WP1",
+      "capability_state": "simulated",
+      "licensed_status": "PASS",
+      "evidence_run_id": "fixed-lcc-20260901-080458-594",
+      "explicit_exclusions": [
+        "disturbance_acceptance",
+        "commutation_failure_acceptance",
+        "independent_golden",
+        "final_accepted"
+      ]
+    },
+    {
+      "scope": "lcc.parametric",
+      "builder_path": "lcc.parametric",
+      "owner_work_package": "WP1",
+      "capability_state": "planned",
+      "licensed_status": "NOT_RUN_ON_CURRENT_COMMIT",
+      "evidence_run_id": null,
+      "explicit_exclusions": [
+        "licensed_parameter_matrix"
+      ]
+    },
+    {
+      "scope": "mmc.blank_native_full_bridge",
+      "builder_path": "mmc.blank_native_full_bridge",
+      "owner_work_package": "WP4",
+      "capability_state": "simulated",
+      "licensed_status": "NOT_RUN_ON_CURRENT_COMMIT",
+      "evidence_run_id": null,
+      "explicit_exclusions": [
+        "current_commit_negative_insertion",
+        "current_commit_blocking",
+        "current_commit_recovery"
+      ]
+    },
+    {
+      "scope": "mmc.detailed_pwm_full_bridge",
+      "builder_path": "mmc.detailed_pwm_full_bridge",
+      "owner_work_package": "WP5",
+      "capability_state": "planned",
+      "licensed_status": "INCOMPLETE_ANALYSIS",
+      "evidence_run_id": null,
+      "explicit_exclusions": [
+        "strict_emtdc_timed_control"
+      ]
+    },
+    {
+      "scope": "mmc.avm_full_bridge",
+      "builder_path": "mmc.avm_full_bridge",
+      "owner_work_package": "WP5",
+      "capability_state": "planned",
+      "licensed_status": "INCOMPLETE_ANALYSIS",
+      "evidence_run_id": null,
+      "explicit_exclusions": [
+        "physical_full_bridge_avm"
+      ]
+    },
+    {
+      "scope": "mmc.avm_half_bridge",
+      "builder_path": "mmc.avm_half_bridge",
+      "owner_work_package": "WP5",
+      "capability_state": "planned",
+      "licensed_status": "INCOMPLETE_ANALYSIS",
+      "evidence_run_id": null,
+      "explicit_exclusions": [
+        "physical_half_bridge_avm",
+        "reviewed_independent_golden"
+      ]
+    },
+    {
+      "scope": "mmc.parametric",
+      "builder_path": "mmc.parametric_orchestrator",
+      "owner_work_package": "WP5",
+      "capability_state": "planned",
+      "licensed_status": "INCOMPLETE_ANALYSIS",
+      "evidence_run_id": null,
+      "explicit_exclusions": [
+        "strict_emtdc_timed_control",
+        "master_dc_bus_mapping"
+      ]
+    }
+  ]
+}

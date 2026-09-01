@@ -3,21 +3,40 @@
 from __future__ import annotations
 
 import asyncio
+import math
 import re
 import shutil
 import time
+from collections import Counter
+from collections.abc import Mapping, Sequence
+from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from ....core.backend.base import BackendError
+from ....topology.connectivity import build_connectivity
+from ....topology.models import (
+    ProjectTopology,
+    TopologyComponent,
+    TopologyConductor,
+    TopologyLabel,
+    TopologyPort,
+)
 from .acceptance import evaluate_acceptance
 from .assets import LccAssetSet, materialize_library, sha256_file
 from .catalog import parse_catalog, require_definition, require_port
 from .journal import AtomicJournal
 from .models import LccBuildPlan, LccBuildRecord, LccBuildState, LccPlanOperation
-from .project_graph import read_project_graph
-from .routing import absolute_port
+from .project_graph import (
+    GraphComponent,
+    GraphNet,
+    GraphPort,
+    ProjectGraph,
+    read_project_graph,
+)
+from .routing import absolute_port, validate_orthogonal_route
+from .smoke import evaluate_fixed_smoke
 from .validator import validate_companion_library, validate_project_graph
 
 _TERMINAL_SUCCESS = {"completed", "complete", "finished", "done", "idle", "stopped"}
@@ -135,12 +154,21 @@ def _same_parameters(expected: dict[str, Any], observed: Any) -> bool:
 
 
 def _same_setting(expected: Any, observed: Any) -> bool:
+    if isinstance(expected, bool) or isinstance(observed, bool):
+        return (
+            isinstance(expected, bool)
+            and isinstance(observed, bool)
+            and expected is observed
+        )
     if expected == observed:
         return True
-    if isinstance(expected, bool) or isinstance(observed, bool):
-        return False
     try:
-        return float(expected) == float(observed)
+        return math.isclose(
+            float(expected),
+            float(observed),
+            rel_tol=1e-12,
+            abs_tol=1e-12,
+        )
     except (TypeError, ValueError):
         return False
 
@@ -244,6 +272,107 @@ def _select_output_dataset(candidates: list[str]) -> tuple[str, list[str]]:
     return parts[0][1], [path for _, path in parts]
 
 
+def _topology_component(
+    logical: GraphComponent,
+    canvas: str,
+    object_id: str,
+) -> TopologyComponent:
+    key = f"{canvas}:{object_id}"
+    return TopologyComponent(
+        key=key,
+        canvas_key=canvas,
+        object_id=object_id,
+        definition=logical.definition,
+        name=logical.logical_id,
+        location=logical.location,
+        orientation=logical.orientation,
+        parameters=tuple(sorted(logical.parameters.items())),
+        ports=tuple(
+            TopologyPort(
+                key=f"{key}:{port.name}",
+                component_key=key,
+                name=port.name,
+                absolute=port.absolute,
+                relative=port.offset,
+                kind=port.kind,
+                dimension=port.dimension,
+            )
+            for port in logical.ports
+        ),
+    )
+
+
+def _route_for_backend(
+    planned_vertices: Sequence[Sequence[int]],
+    actual_start: tuple[int, int] | None,
+    actual_end: tuple[int, int] | None,
+) -> tuple[tuple[int, int], ...]:
+    planned = validate_orthogonal_route(planned_vertices)
+    transformed = [_snap_point(point) for point in planned]
+    if actual_start is not None:
+        transformed[0] = actual_start
+    if actual_end is not None:
+        transformed[-1] = actual_end
+
+    routed = [transformed[0]]
+    last_index = len(transformed) - 1
+    for index, point in enumerate(transformed[1:], start=1):
+        previous = routed[-1]
+        if previous == point:
+            continue
+        if previous[0] != point[0] and previous[1] != point[1]:
+            planned_left = planned[index - 1]
+            planned_right = planned[index]
+            horizontal = planned_left[1] == planned_right[1]
+            if index == last_index:
+                elbow = (
+                    (previous[0], point[1])
+                    if horizontal
+                    else (point[0], previous[1])
+                )
+            else:
+                elbow = (
+                    (point[0], previous[1])
+                    if horizontal
+                    else (previous[0], point[1])
+                )
+            routed.append(elbow)
+        routed.append(point)
+    return validate_orthogonal_route(routed)
+
+
+def _physical_component_signature(
+    component: GraphComponent,
+) -> tuple[str, tuple[int, int]]:
+    return component.definition.casefold(), component.location
+
+
+def _saved_wire_namespace(
+    vertices: tuple[tuple[int, int], ...],
+    port_kinds: Mapping[tuple[int, int], str],
+    label_kinds: Mapping[tuple[int, int], str],
+    planned_nets: Any,
+) -> str:
+    observed = {
+        kind
+        for point in vertices
+        for kind in (port_kinds.get(point), label_kinds.get(point))
+        if kind in {"electrical", "data"}
+    }
+    if not observed:
+        reversed_vertices = tuple(reversed(vertices))
+        observed = {
+            net.kind
+            for net in planned_nets
+            if net.points in {vertices, reversed_vertices}
+        }
+    if len(observed) == 1:
+        return next(iter(observed))
+    if observed:
+        return "unknown"
+    return "electrical"
+
+
 class LccExecutor:
     """Apply a plan through the public PscadService boundary."""
 
@@ -283,6 +412,8 @@ class LccExecutor:
         self.staging_file: Path | None = None
         self.library_file: Path | None = None
         self.component_ids: dict[str, int] = {}
+        self._logical_components: dict[str, GraphComponent] = {}
+        self._logical_nets: dict[str, GraphNet] = {}
         self.history: list[dict[str, Any]] = []
         self.result: dict[str, Any] | None = None
         self.error: dict[str, Any] | None = None
@@ -412,6 +543,8 @@ class LccExecutor:
             await self._compile(operation)
         elif operation.kind == "simulate":
             await self._simulate(operation)
+        elif operation.kind == "smoke_validate":
+            await self._smoke_validate(operation)
         elif operation.kind == "accept":
             await self._accept(operation)
         elif operation.kind == "publish":
@@ -620,6 +753,7 @@ class LccExecutor:
             catalog = parse_catalog(self.asset_set.catalog)
             definition_spec = require_definition(catalog, expected_definition)
             observed_records = _port_records(observed_ports)
+            graph_ports: list[GraphPort] = []
             for port_name in sorted(expected_ports):
                 contract = require_port(definition_spec, port_name)
                 observed = observed_records.get(port_name)
@@ -644,7 +778,7 @@ class LccExecutor:
                     normalized_kind = str(observed_kind).casefold()
                     if normalized_kind in {
                         "power",
-                        "analog",
+                        "natural",
                         "node",
                         "nonremovable",
                         "removable",
@@ -652,6 +786,14 @@ class LccExecutor:
                         "ground",
                     }:
                         normalized_kind = "electrical"
+                    elif normalized_kind in {
+                        "transfer",
+                        "signal",
+                        "analog",
+                        "real",
+                        "integer",
+                    }:
+                        normalized_kind = "data"
                     if normalized_kind != contract.kind:
                         raise _error(
                             "LCC_PORT_MISMATCH",
@@ -663,15 +805,16 @@ class LccExecutor:
                             observed_kind=observed_kind,
                         )
                 observed_point = _port_point(observed)
-                if observed_point is not None:
-                    expected_point = absolute_port(
-                        (int(location[0]), int(location[1])),
-                        contract.offset,
-                        expected_orientation,
-                    )
-                    if observed_point != expected_point and operation.arguments.get(
-                        "definition"
-                    ) not in {
+                observed_expected_point = absolute_port(
+                    observed_location,
+                    contract.offset,
+                    expected_orientation,
+                )
+                if (
+                    observed_point is not None
+                    and observed_point != observed_expected_point
+                    and operation.arguments.get("definition")
+                    not in {
                         "master:three_phase_source",
                         "master:converter_transformer",
                         "master:ac_filter_branch",
@@ -680,15 +823,40 @@ class LccExecutor:
                         "master:ac_meter",
                         "master:dc_meter",
                         "master:ground",
-                    }:
-                        self._raise_postcondition(
-                            "Component port endpoint read-back did not match the plan.",
-                            logical_id=operation.target,
-                            port=port_name,
-                            expected_endpoint=list(expected_point),
-                            observed_endpoint=list(observed_point),
-                            orientation=expected_orientation,
-                        )
+                    }
+                ):
+                    self._raise_postcondition(
+                        "Component port endpoint read-back did not match the plan.",
+                        logical_id=operation.target,
+                        port=port_name,
+                        expected_endpoint=list(observed_expected_point),
+                        observed_endpoint=list(observed_point),
+                        orientation=expected_orientation,
+                    )
+                graph_ports.append(
+                    GraphPort(
+                        port_name,
+                        contract.kind,
+                        contract.dimension,
+                        tuple(contract.offset),
+                        observed_point or observed_expected_point,
+                    )
+                )
+        else:
+            graph_ports = []
+        self._logical_components[operation.target] = GraphComponent(
+            operation.target,
+            expected_definition,
+            str(arguments.get("canvas", "Main")),
+            (int(location[0]), int(location[1])),
+            expected_orientation,
+            {
+                str(name): ("true" if value is True else "false" if value is False else str(value))
+                for name, value in expected_parameters.items()
+            },
+            tuple(graph_ports),
+            component_id=str(component_id),
+        )
 
     async def _verify_parameters(self, operation: LccPlanOperation) -> None:
         self._operation_started(operation)
@@ -713,14 +881,55 @@ class LccExecutor:
             )
         self._operation_completed()
 
+    def _ground_return_routes(
+        self,
+        endpoints: Any,
+        vertices: list[list[int]],
+        kind: str,
+        label: Any,
+    ) -> tuple[list[list[list[int]]], int] | None:
+        if (
+            kind != "electrical"
+            or label is not None
+            or not isinstance(endpoints, (list, tuple))
+            or len(endpoints) != 2
+            or len(vertices) < 3
+        ):
+            return None
+        definitions = {
+            component.logical_id: component.definition
+            for component in self.plan.blueprint.components
+        }
+        ground_indexes = [
+            index
+            for index, endpoint in enumerate(endpoints)
+            if isinstance(endpoint, str)
+            and definitions.get(endpoint.split(":", 1)[0]) == "master:ground"
+        ]
+        if len(ground_indexes) != 1:
+            return None
+        ground_index = ground_indexes[0]
+        if ground_index == 1:
+            junction = list(vertices[-2])
+            routes = [
+                [list(point) for point in reversed(vertices[:-1])],
+                [junction, list(vertices[-1])],
+            ]
+        else:
+            junction = list(vertices[1])
+            routes = [
+                [junction, list(vertices[0])],
+                [list(point) for point in vertices[1:]],
+            ]
+        return routes, ground_index
+
     async def _connect_net(self, operation: LccPlanOperation) -> None:
         self._operation_started(operation)
         arguments = operation.arguments
-        vertices = [
-            list(_snap_point((int(point[0]), int(point[1]))))
-            for point in arguments.get("vertices", ())
-        ]
+        planned_vertices = arguments.get("vertices", ())
         endpoints = arguments.get("endpoints", ())
+        actual_start = None
+        actual_end = None
         if isinstance(endpoints, (list, tuple)) and len(endpoints) >= 2:
             actual_start = await _actual_endpoint(
                 self.service, self.project_name, self.component_ids, endpoints[0]
@@ -728,24 +937,67 @@ class LccExecutor:
             actual_end = await _actual_endpoint(
                 self.service, self.project_name, self.component_ids, endpoints[-1]
             )
-            if actual_start is not None:
-                vertices[0] = list(actual_start)
-            if actual_end is not None:
-                vertices[-1] = list(actual_end)
-        if len(vertices) < 2:
-            self._raise_postcondition(
-                "A planned net requires at least two vertices.", net=operation.target
+        vertices = [
+            list(point)
+            for point in _route_for_backend(
+                planned_vertices,
+                actual_start,
+                actual_end,
             )
+        ]
         canvas = "Main"
         kind = str(arguments.get("kind", "electrical"))
         label = arguments.get("label")
+        ground_return = self._ground_return_routes(
+            endpoints,
+            vertices,
+            kind,
+            label,
+        )
+        if ground_return is not None:
+            routes, _ground_index = ground_return
+            responses = []
+            for route in routes:
+                created = await self.service.create_wire(
+                    self.project_name,
+                    route,
+                    canvas_name=canvas,
+                )
+                if not isinstance(created, dict):
+                    self._raise_postcondition(
+                        "Connection creation returned invalid evidence.",
+                        net=operation.target,
+                    )
+                returned_vertices = created.get("vertices")
+                if returned_vertices is not None and [
+                    list(point) for point in returned_vertices
+                ] != route:
+                    self._raise_postcondition(
+                        "Wire vertex read-back did not match the plan.",
+                        net=operation.target,
+                        expected_vertices=route,
+                        observed_vertices=returned_vertices,
+                    )
+                responses.append(created)
+            self._logical_nets[operation.target] = GraphNet(
+                kind,
+                tuple(tuple(int(value) for value in point) for point in vertices),
+                (),
+                tuple(str(endpoint) for endpoint in endpoints),
+            )
+            self._operation_completed(
+                backend_response_type="split_ground_return",
+                wire_count=len(responses),
+                vertices=routes,
+            )
+            return
         if label is not None or len(vertices) == 2:
             created = await self.service.create_connection(
                 self.project_name,
                 vertices[0],
                 vertices[-1],
                 label,
-                kind == "electrical",
+                kind == "electrical" if label is not None else None,
                 canvas_name=canvas,
             )
         else:
@@ -777,12 +1029,45 @@ class LccExecutor:
                     expected_vertices=vertices,
                     observed_vertices=normalized_vertices,
                 )
+        self._logical_nets[operation.target] = GraphNet(
+            kind,
+            tuple(tuple(int(value) for value in point) for point in vertices),
+            () if label is None else (str(label),),
+            tuple(str(endpoint) for endpoint in arguments.get("endpoints", ())),
+        )
         evidence: dict[str, Any] = {"backend_response_type": type(created).__name__}
         if endpoints is not None:
             evidence["endpoints"] = [list(endpoints[0]), list(endpoints[1])]
         if returned_vertices is not None:
             evidence["vertices"] = normalized_vertices
         self._operation_completed(**evidence)
+
+    def _compiled_predeclared_output_matches(
+        self,
+        selector: Any,
+        units: Any,
+        call_id: Any,
+    ) -> bool:
+        if (
+            self.plan.verification_profile != "wp1b_smoke"
+            or self.asset_set is None
+            or not any(
+                entry.get("state") == LccBuildState.COMPILED.value
+                for entry in self.history
+            )
+        ):
+            return False
+        required = self.asset_set.smoke.get("required_channels")
+        if not isinstance(required, (list, tuple)) or selector not in required:
+            return False
+        matches = [
+            output
+            for output in self.plan.blueprint.outputs
+            if output.path == selector
+            and output.units == units
+            and output.call_id == call_id
+        ]
+        return len(matches) == 1
 
     async def _create_output(self, operation: LccPlanOperation) -> None:
         self._operation_started(operation)
@@ -806,13 +1091,34 @@ class LccExecutor:
                 call_id=expected_call_id,
             )
         except BackendError as error:
-            raise _error(
-                "LCC_OUTPUT_INCOMPLETE",
-                "The PSCAD output-channel definition could not be created.",
-                "create_lcc_output_channel",
-                selector=selector,
-                upstream_code=error.code,
-            ) from error
+            if error.code != "CAPABILITY_UNAVAILABLE":
+                raise _error(
+                    "LCC_OUTPUT_INCOMPLETE",
+                    "The PSCAD output-channel definition could not be created.",
+                    "create_lcc_output_channel",
+                    selector=selector,
+                    upstream_code=error.code,
+                ) from error
+            saver = getattr(self.service, "save_project", None)
+            if not callable(saver):
+                raise _error(
+                    "LCC_OUTPUT_INCOMPLETE",
+                    "Predeclared output channels cannot be saved for verification.",
+                    "create_lcc_output_channel",
+                    selector=selector,
+                    upstream_code=error.code,
+                ) from error
+            try:
+                await saver(self.project_name, confirm=True)
+            except BaseException as save_error:
+                raise _error(
+                    "LCC_OUTPUT_INCOMPLETE",
+                    "Predeclared output channels could not be saved.",
+                    "create_lcc_output_channel",
+                    selector=selector,
+                    exception=type(save_error).__name__,
+                ) from save_error
+            created = {"source": "predeclared_component"}
         except BaseException as error:
             raise _error(
                 "LCC_OUTPUT_INCOMPLETE",
@@ -832,6 +1138,18 @@ class LccExecutor:
         try:
             channels = await getter(self.project_name)
         except BackendError as error:
+            if error.code == "CAPABILITY_UNAVAILABLE" and (
+                self._compiled_predeclared_output_matches(
+                    selector,
+                    units,
+                    expected_call_id,
+                )
+            ):
+                self._operation_completed(
+                    creation_response_type=type(created).__name__,
+                    verification="compiled_asset_contract",
+                )
+                return
             raise _error(
                 "LCC_OUTPUT_INCOMPLETE",
                 "The PSCAD output-channel metadata could not be verified.",
@@ -902,6 +1220,416 @@ class LccExecutor:
         catalog = self.asset_set.catalog if self.asset_set is not None else None
         return read_project_graph(path, catalog=catalog)
 
+    def _saved_logical_graph(
+        self,
+        graph: ProjectGraph,
+    ) -> tuple[ProjectGraph, list[dict[str, Any]]]:
+        managed_ids = {
+            str(component_id): logical_id
+            for logical_id, component_id in self.component_ids.items()
+        }
+        observed_by_id = {
+            str(component.component_id): component
+            for component in graph.components
+            if component.component_id is not None
+        }
+        findings: list[dict[str, Any]] = []
+        components: list[TopologyComponent] = []
+        for logical_id, logical in sorted(self._logical_components.items()):
+            component_id = self.component_ids.get(logical_id)
+            observed = (
+                None
+                if component_id is None
+                else observed_by_id.get(str(component_id))
+            )
+            if observed is None:
+                if self._saved_label_evidences_component(
+                    logical_id,
+                    logical,
+                    graph.labels,
+                ):
+                    components.append(
+                        _topology_component(
+                            logical,
+                            logical.canvas,
+                            str(component_id),
+                        )
+                    )
+                    continue
+                findings.append(
+                    {
+                        "reason": "managed component missing from saved PSCX",
+                        "logical_id": logical_id,
+                        "component_id": component_id,
+                    }
+                )
+                continue
+            components.append(
+                _topology_component(logical, observed.canvas, str(component_id))
+            )
+
+        expected_extras = self._expected_saved_binding_extras(observed_by_id)
+        for observed in graph.components:
+            component_id = (
+                None
+                if observed.component_id is None
+                else str(observed.component_id)
+            )
+            if component_id in managed_ids:
+                continue
+            signature = _physical_component_signature(observed)
+            if expected_extras[signature] > 0:
+                expected_extras[signature] -= 1
+                continue
+            if observed.definition.casefold() == "master:pgb":
+                continue
+            findings.append(
+                {
+                    "reason": "unexpected saved component",
+                    "component_id": component_id,
+                    "definition": observed.definition,
+                    "location": list(observed.location),
+                }
+            )
+        if not self.allow_test_double:
+            for signature, count in sorted(expected_extras.items()):
+                if count > 0:
+                    findings.append(
+                        {
+                            "reason": (
+                                "bound physical component missing from saved PSCX"
+                            ),
+                            "definition": signature[0],
+                            "location": list(signature[1]),
+                            "count": count,
+                        }
+                    )
+
+        port_kinds = {
+            port.absolute: port.kind
+            for component in self._logical_components.values()
+            for port in component.ports
+        }
+        label_kinds = {
+            label.location: label.kind
+            for label in graph.labels
+            if label.location is not None
+        }
+        binding_wires = self._expected_saved_binding_wires()
+        observed_binding_wires = Counter(
+            frozenset((wire.vertices[0], wire.vertices[-1]))
+            for wire in graph.wires
+        )
+        if not self.allow_test_double:
+            for expected_wire in binding_wires:
+                observed_count = observed_binding_wires[expected_wire]
+                if observed_count == 0:
+                    findings.append(
+                        {
+                            "reason": "bound physical wire missing from saved PSCX",
+                            "endpoints": [
+                                list(point) for point in sorted(expected_wire)
+                            ],
+                        }
+                    )
+                elif observed_count > 1:
+                    findings.append(
+                        {
+                            "reason": "duplicate bound physical wire",
+                            "endpoints": [
+                                list(point) for point in sorted(expected_wire)
+                            ],
+                            "count": observed_count,
+                        }
+                    )
+        conductors = tuple(
+            TopologyConductor(
+                key=f"Main:saved-wire:{index}",
+                canvas_key="Main",
+                object_id=f"saved-wire:{index}",
+                kind="wire",
+                namespace=_saved_wire_namespace(
+                    wire.vertices,
+                    port_kinds,
+                    label_kinds,
+                    self._logical_nets.values(),
+                ),
+                vertices=wire.vertices,
+            )
+            for index, wire in enumerate(graph.wires)
+            if frozenset((wire.vertices[0], wire.vertices[-1]))
+            not in binding_wires
+        )
+        labels = tuple(
+            TopologyLabel(
+                key=f"Main:saved-label:{index}",
+                canvas_key="Main",
+                object_id=f"saved-label:{index}",
+                name=label.text,
+                namespace=label.kind,
+                scope="Main",
+                location=label.location,
+            )
+            for index, label in enumerate(graph.labels)
+        )
+        topology = ProjectTopology(
+            project_name=graph.project_name,
+            pscad_version=graph.pscad_version,
+            components=tuple(components),
+            conductors=conductors,
+            labels=labels,
+        )
+        catalog = (
+            parse_catalog(self.asset_set.catalog)
+            if self.asset_set is not None
+            else None
+        )
+        from ....topology.adapters.lcc import topology_to_lcc_graph
+
+        projected = topology_to_lcc_graph(
+            build_connectivity(topology).topology,
+            catalog,
+        )
+        return projected, findings
+
+    def _saved_label_evidences_component(
+        self,
+        logical_id: str,
+        logical: GraphComponent,
+        labels: Sequence[Any],
+    ) -> bool:
+        operation = next(
+            (
+                item
+                for item in self.plan.operations
+                if item.kind == "place_component" and item.target == logical_id
+            ),
+            None,
+        )
+        if operation is None:
+            return False
+        evidence = operation.arguments.get("binding")
+        if not isinstance(evidence, Mapping):
+            return False
+        physical_definition = str(
+            evidence.get("physical_definition", "")
+        ).casefold()
+        expected_kind = {
+            "datalabel": "data",
+            "nodelabel": "electrical",
+        }.get(physical_definition)
+        if expected_kind is None:
+            return False
+        expected_name = logical.parameters.get("Name")
+        if not isinstance(expected_name, str) or not expected_name:
+            return False
+        expected_locations = {logical.location, _snap_point(logical.location)}
+        return any(
+            label.text == expected_name
+            and label.kind == expected_kind
+            and label.location in expected_locations
+            for label in labels
+        )
+
+    def _saved_validation_blueprint(self):
+        nets = []
+        for net in self.plan.blueprint.nets:
+            executed = self._logical_nets.get(net.logical_id)
+            if executed is None:
+                nets.append(net)
+            elif executed.labels:
+                nets.append(
+                    replace(
+                        net,
+                        label=executed.labels[0],
+                        route=None,
+                    )
+                )
+            elif net.route is not None:
+                nets.append(
+                    replace(
+                        net,
+                        route=replace(
+                            net.route,
+                            vertices=executed.points,
+                        ),
+                    )
+                )
+            else:
+                nets.append(net)
+        return replace(self.plan.blueprint, nets=tuple(nets))
+
+    def _expected_saved_binding_extras(
+        self,
+        observed_by_id: Mapping[str, GraphComponent],
+    ) -> Counter[tuple[str, tuple[int, int]]]:
+        expected: Counter[tuple[str, tuple[int, int]]] = Counter()
+        registry = (
+            self.asset_set.master_bindings
+            if self.asset_set is not None
+            else None
+        )
+        if registry is None:
+            return expected
+        by_logical_name = registry.by_logical_name
+        for operation in self.plan.operations:
+            evidence = operation.arguments.get("binding")
+            if operation.kind != "place_component" or not isinstance(
+                evidence, Mapping
+            ):
+                continue
+            binding = by_logical_name.get(str(evidence.get("logical_name")))
+            if binding is None or binding.shape.get("kind") != "phase_expand":
+                continue
+            location = tuple(operation.arguments.get("location", ()))
+            if len(location) != 2:
+                continue
+            scope = str(
+                operation.arguments.get("definition", "master:unknown")
+            ).split(":", 1)[0]
+            instances = tuple(binding.shape.get("instances", ()))
+            for instance in instances:
+                offset = tuple(instance["offset"])
+                point = _snap_point(
+                    (
+                        int(location[0]) + int(offset[0]),
+                        int(location[1]) + int(offset[1]),
+                    )
+                )
+                definition = f"{scope}:{binding.physical_definition}".casefold()
+                expected[(definition, point)] += 1
+            neutral = binding.shape["neutral"]
+            ground_offset = tuple(neutral["ground_offset"])
+            for instance in instances:
+                offset = tuple(instance["offset"])
+                point = _snap_point(
+                    (
+                        int(location[0])
+                        + int(offset[0])
+                        + int(ground_offset[0]),
+                        int(location[1])
+                        + int(offset[1])
+                        + int(ground_offset[1]),
+                    )
+                )
+                definition = (
+                    f"{scope}:{neutral['ground_definition']}".casefold()
+                )
+                expected[(definition, point)] += 1
+
+        for component_id in self.component_ids.values():
+            observed = observed_by_id.get(str(component_id))
+            if observed is None:
+                continue
+            signature = _physical_component_signature(observed)
+            if expected[signature] > 0:
+                expected[signature] -= 1
+        return expected
+
+    def _expected_saved_binding_wires(
+        self,
+    ) -> set[frozenset[tuple[int, int]]]:
+        result: set[frozenset[tuple[int, int]]] = set()
+        registry = (
+            self.asset_set.master_bindings
+            if self.asset_set is not None
+            else None
+        )
+        if registry is None:
+            return result
+        by_logical_name = registry.by_logical_name
+        for operation in self.plan.operations:
+            evidence = operation.arguments.get("binding")
+            if operation.kind != "place_component" or not isinstance(
+                evidence, Mapping
+            ):
+                continue
+            binding = by_logical_name.get(str(evidence.get("logical_name")))
+            if binding is None or binding.shape.get("kind") != "phase_expand":
+                continue
+            location = tuple(operation.arguments.get("location", ()))
+            if len(location) != 2:
+                continue
+            neutral = binding.shape["neutral"]
+            ground_offset = tuple(neutral["ground_offset"])
+            for instance in binding.shape.get("instances", ()):
+                offset = tuple(instance["offset"])
+                neutral_point = _snap_point(
+                    (
+                        int(location[0]) + int(offset[0]),
+                        int(location[1])
+                        + int(offset[1])
+                        + int(ground_offset[1]),
+                    )
+                )
+                ground_point = _snap_point(
+                    (
+                        int(location[0])
+                        + int(offset[0])
+                        + int(ground_offset[0]),
+                        int(location[1])
+                        + int(offset[1])
+                        + int(ground_offset[1]),
+                    )
+                )
+                result.add(frozenset((neutral_point, ground_point)))
+        return result
+
+    async def _verify_saved_component_readback(self) -> None:
+        expected_components = {
+            component.logical_id: component
+            for component in self.plan.blueprint.components
+        }
+        if set(self.component_ids) != set(expected_components):
+            self._raise_postcondition(
+                "Saved component read-back is incomplete.",
+                expected=sorted(expected_components),
+                observed=sorted(self.component_ids),
+            )
+        for logical_id, expected in expected_components.items():
+            component_id = self.component_ids[logical_id]
+            observed_location = _point(
+                await self.service.get_component_location(
+                    self.project_name,
+                    component_id,
+                )
+            )
+            if observed_location not in {
+                expected.location,
+                _snap_point(expected.location),
+            }:
+                self._raise_postcondition(
+                    "Saved component location changed after write.",
+                    logical_id=logical_id,
+                    observed=observed_location,
+                )
+            observed_parameters = await self.service.get_component_parameters(
+                self.project_name,
+                component_id,
+            )
+            if not _same_parameters(dict(expected.parameters), observed_parameters):
+                raise _error(
+                    "LCC_PARAMETER_MISMATCH",
+                    "Saved component parameters changed after write.",
+                    "validate_lcc_project_graph",
+                    logical_id=logical_id,
+                    expected=dict(expected.parameters),
+                    observed=observed_parameters,
+                )
+            observed_ports = await self.service.get_component_ports(
+                self.project_name,
+                component_id,
+            )
+            if not set(expected.ports).issubset(_port_names(observed_ports)):
+                raise _error(
+                    "LCC_PORT_MISMATCH",
+                    "Saved component ports changed after write.",
+                    "validate_lcc_project_graph",
+                    logical_id=logical_id,
+                    expected=sorted(expected.ports),
+                    observed=sorted(_port_names(observed_ports)),
+                )
+
     def _validate_graph(self, path: Path) -> dict[str, Any]:
         if not path.exists():
             self._raise_postcondition(
@@ -926,17 +1654,36 @@ class LccExecutor:
             expected_pscad_version=self.plan.pscad_version,
         )
         if not result.get("valid"):
-            raise _error(
-                "LCC_STRUCTURE_INVALID",
-                "Generated LCC topology does not match the plan.",
-                "validate_lcc_project_graph",
-                validation=result,
+            logical_graph, projection_findings = self._saved_logical_graph(graph)
+            projected = validate_project_graph(
+                logical_graph,
+                self._saved_validation_blueprint(),
+                catalog=catalog,
+                expected_project_name=expected_project_name,
+                expected_pscad_version=self.plan.pscad_version,
             )
+            if projection_findings or not projected.get("valid"):
+                raise _error(
+                    "LCC_STRUCTURE_INVALID",
+                    "Generated LCC topology does not match the plan.",
+                    "validate_lcc_project_graph",
+                    validation=result,
+                    logical_projection=projected,
+                    saved_projection_findings=projection_findings,
+                )
+            projected["physical_graph"] = {
+                "components": len(graph.components),
+                "nets": len(graph.nets),
+                "source": "saved_pscx",
+            }
+            result = projected
         return result
 
     async def _save_and_validate(self, operation: LccPlanOperation) -> None:
         self._operation_started(operation)
         await self.service.save_project(self.project_name, confirm=True)
+        await self._verify_saved_component_readback()
+        await self._verify_master_binding_state()
         self._validate_graph(self.staging_file)
         self._operation_completed(LccBuildState.STRUCTURE_VERIFIED)
         self._operation_completed(LccBuildState.STAGING_SAVED)
@@ -945,7 +1692,51 @@ class LccExecutor:
         self._operation_started(operation)
         await self._verify_master_binding_state()
         await self.service.build_project(self.project_name)
+        await self._verify_compile_messages(self.project_name)
         self._operation_completed(LccBuildState.COMPILED)
+
+    async def _verify_compile_messages(self, project_name: str) -> None:
+        reader = getattr(self.service, "get_project_output", None)
+        if not callable(reader):
+            raise _error(
+                "LCC_BUILD_FAILED",
+                "The PSCAD service cannot read structured compile messages.",
+                "verify_lcc_compile_messages",
+                project_name=project_name,
+            )
+        messages = await reader(project_name, structured=True)
+        if not isinstance(messages, Sequence) or isinstance(
+            messages, (str, bytes)
+        ):
+            raise _error(
+                "LCC_BUILD_FAILED",
+                "Structured PSCAD compile messages are not an array.",
+                "verify_lcc_compile_messages",
+                project_name=project_name,
+            )
+        errors = [
+            dict(message)
+            for message in messages
+            if isinstance(message, Mapping)
+            and str(
+                message.get("severity", message.get("status", ""))
+            ).casefold()
+            == "error"
+        ]
+        if errors:
+            summary = " | ".join(
+                str(error.get("text", error.get("message", "compile error")))[
+                    :256
+                ]
+                for error in errors[:3]
+            )
+            raise _error(
+                "LCC_BUILD_FAILED",
+                f"PSCAD reported LCC compile errors: {summary}",
+                "verify_lcc_compile_messages",
+                project_name=project_name,
+                errors=errors[:20],
+            )
 
     async def _verify_master_binding_state(
         self,
@@ -1091,6 +1882,78 @@ class LccExecutor:
         self.history.append(evidence)
         self.journal.write(self._journal_payload())
 
+    def _logical_output_payload(self, value: Any) -> Any:
+        if not isinstance(value, Mapping):
+            return value
+        raw_channels = value.get("channels")
+        if not isinstance(raw_channels, Sequence) or isinstance(
+            raw_channels,
+            (str, bytes, bytearray),
+        ):
+            return value
+        components = {
+            component.logical_id: component
+            for component in self.plan.blueprint.components
+        }
+        measurements = {
+            measurement.get("logical_id"): measurement
+            for measurement in self.plan.blueprint.measurements
+            if isinstance(measurement, Mapping)
+            and isinstance(measurement.get("logical_id"), str)
+        }
+        physical_to_logical = {}
+        for output in self.plan.blueprint.outputs:
+            measurement = measurements.get(output.measurement)
+            component_id = (
+                measurement.get("component")
+                if isinstance(measurement, Mapping)
+                else None
+            )
+            component = components.get(component_id)
+            if component is None:
+                continue
+            physical_path = (
+                component.definition.rsplit(":", 1)[-1]
+                + "/"
+                + output.path.rsplit("/", 1)[-1]
+            )
+            previous = physical_to_logical.setdefault(
+                physical_path,
+                output.path,
+            )
+            if previous != output.path:
+                raise _error(
+                    "LCC_OUTPUT_INCOMPLETE",
+                    "Physical output selectors are ambiguous.",
+                    "read_lcc_output",
+                    physical_path=physical_path,
+                )
+        normalized_channels = []
+        observed_paths = set()
+        for raw_channel in raw_channels:
+            if not isinstance(raw_channel, Mapping):
+                normalized_channels.append(raw_channel)
+                continue
+            channel = dict(raw_channel)
+            raw_path = channel.get("path")
+            if isinstance(raw_path, str) and raw_path in physical_to_logical:
+                channel["path"] = physical_to_logical[raw_path]
+            normalized_path = channel.get("path")
+            if (
+                isinstance(normalized_path, str)
+                and normalized_path in observed_paths
+            ):
+                raise _error(
+                    "LCC_OUTPUT_INCOMPLETE",
+                    "Logical output selectors are duplicated.",
+                    "read_lcc_output",
+                    path=normalized_path,
+                )
+            if isinstance(normalized_path, str):
+                observed_paths.add(normalized_path)
+            normalized_channels.append(channel)
+        return {**value, "channels": normalized_channels}
+
     async def _acceptance_output(self) -> Any:
         discover = getattr(self.service, "discover_output_files", None)
         read_output = getattr(self.service, "read_output_file", None)
@@ -1173,8 +2036,12 @@ class LccExecutor:
                 )
             candidates = sorted(set(candidates), key=str.casefold)
             self.output_file, self.output_parts = _select_output_dataset(candidates)
-            return await read_output(
-                self.output_file, max_samples=1_000_000, summary_only=False
+            return self._logical_output_payload(
+                await read_output(
+                    self.output_file,
+                    max_samples=1_000_000,
+                    summary_only=False,
+                )
             )
 
         get_project_output = getattr(self.service, "get_project_output", None)
@@ -1184,7 +2051,56 @@ class LccExecutor:
                 "The PSCAD service does not expose an output reader.",
                 "read_lcc_output",
             )
-        return await get_project_output(self.project_name)
+        return self._logical_output_payload(
+            await get_project_output(self.project_name)
+        )
+
+    async def _smoke_validate(self, operation: LccPlanOperation) -> None:
+        self._operation_started(operation)
+        if self.plan.verification_profile != "wp1b_smoke":
+            raise _error(
+                "LCC_FIXED_SMOKE_INVALID",
+                "The smoke operation requires the WP1B smoke profile.",
+                "evaluate_fixed_lcc_smoke",
+                verification_profile=self.plan.verification_profile,
+            )
+        if self.asset_set is None:
+            raise _error(
+                "LCC_FIXED_SMOKE_INVALID",
+                "The smoke gate requires a verified asset set.",
+                "evaluate_fixed_lcc_smoke",
+            )
+        expected_hash = operation.arguments.get("contract_sha256")
+        observed_hash = self.asset_set.hashes.get("smoke.json")
+        if expected_hash != observed_hash:
+            raise _error(
+                "LCC_ASSET_MISMATCH",
+                "The smoke contract changed after planning.",
+                "evaluate_fixed_lcc_smoke",
+                expected=expected_hash,
+                observed=observed_hash,
+            )
+        output = await self._acceptance_output()
+        smoke = evaluate_fixed_smoke(output, self.asset_set.smoke)
+        result = dict(self.result or {})
+        result["smoke"] = smoke
+        if self.output_file is not None:
+            result["output_file"] = self.output_file
+            result["output_parts"] = list(
+                self.output_parts or [self.output_file]
+            )
+            try:
+                result["output_sha256"] = sha256_file(Path(self.output_file))
+            except BackendError as error:
+                raise _error(
+                    "LCC_OUTPUT_INCOMPLETE",
+                    "The selected PSCAD output file could not be hashed for smoke evidence.",
+                    "read_lcc_output",
+                    output_file=self.output_file,
+                    upstream_code=error.code,
+                ) from error
+        self.result = result
+        self._record(LccBuildState.SMOKE_PASSED)
 
     async def _accept(self, operation: LccPlanOperation) -> None:
         self._operation_started(operation)
@@ -1268,19 +2184,24 @@ class LccExecutor:
                 target_path=str(self.target_path),
                 upstream_code=error.code,
             ) from error
+        final_path = self.target_path.resolve()
+        final_project_name = final_path.stem
+        reloader = getattr(self.service, "reload_project", None)
         loader = getattr(self.service, "load_projects", None)
-        if not callable(loader):
+        if final_project_name == self.project_name and callable(reloader):
+            await reloader(final_project_name, str(final_path))
+        elif callable(loader):
+            await loader([str(final_path)])
+        else:
             raise _error(
                 "LCC_BUILD_FAILED",
                 "The PSCAD service does not expose final-project reloading.",
                 "reload_lcc_published_project",
                 target_path=str(self.target_path.resolve()),
             )
-        final_path = self.target_path.resolve()
-        await loader([str(final_path)])
         self._validate_graph(self.target_path)
-        final_project_name = final_path.stem
         await self.service.build_project(final_project_name)
+        await self._verify_compile_messages(final_project_name)
         await self._verify_master_binding_state(
             project_name=final_project_name,
             refresh_components=False,

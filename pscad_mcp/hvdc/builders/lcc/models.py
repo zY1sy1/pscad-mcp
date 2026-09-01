@@ -99,6 +99,7 @@ class LccBuildState(str, Enum):
     STAGING_SAVED = "staging_saved"
     COMPILED = "compiled"
     SIMULATED = "simulated"
+    SMOKE_PASSED = "smoke_passed"
     ACCEPTANCE_PASSED = "acceptance_passed"
     PUBLISHED = "published"
     FAILED = "failed"
@@ -213,6 +214,7 @@ class LccBuildPlan(_JsonRecord):
     blueprint: LccBlueprint
     operations: tuple[LccPlanOperation, ...]
     plan_hash: str
+    verification_profile: str = "full_acceptance"
     acceptance_checks: tuple[LccAcceptanceCheck, ...] = ()
     target_path: str | None = None
     staging_path: str | None = None

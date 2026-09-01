@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import replace
-from types import SimpleNamespace
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -14,7 +14,6 @@ from pscad_mcp.hvdc.builders.lcc.models import LccBuildRecord, LccBuildState
 from pscad_mcp.hvdc.builders.lcc.planner import LccPlanRequest
 from pscad_mcp.hvdc.builders.lcc.service import LccBuilderService
 from pscad_mcp.runtime import PendingCleanupError
-
 from tests.lcc_builder_fakes import RecordingPscadService
 from tests.test_lcc_planner import BLUEPRINT, INVENTORY, _asset_set
 
@@ -63,6 +62,30 @@ def test_plan_model_is_side_effect_free_and_json_safe(tmp_path):
     assert plan["plan_hash"]
     assert plan["blueprint"]["name"] == "cigre_lcc_monopole_v1"
     assert list(tmp_path.iterdir()) == []
+
+
+def test_service_threads_wp1b_smoke_profile_through_plan_and_build(tmp_path):
+    service = _service(tmp_path)
+    plan = service.plan_model(
+        "CIGRE_LCC",
+        simulation_duration_s=0.1,
+        verification_profile="wp1b_smoke",
+    )
+
+    assert plan["verification_profile"] == "wp1b_smoke"
+    assert plan["metadata"]["verification_profile"] == "wp1b_smoke"
+
+    started = asyncio.run(
+        service.build_model(
+            "CIGRE_LCC",
+            plan["plan_hash"],
+            simulation_duration_s=0.1,
+            verification_profile="wp1b_smoke",
+            confirm=True,
+        )
+    )
+
+    assert started["plan_hash"] == plan["plan_hash"]
 
 
 def test_plan_model_fails_closed_without_live_inventory(tmp_path):

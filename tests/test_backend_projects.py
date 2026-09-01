@@ -656,6 +656,29 @@ class TestLegacyProjectFiles(unittest.IsolatedAsyncioTestCase):
                 destination, "existing_copy", require_output=True
             )
 
+    async def test_legacy_same_identity_save_as_defers_final_reload(self):
+        with tempfile.TemporaryDirectory() as folder:
+            backend, app = await self.make_backend()
+            source, _project = await self.load_source(backend, app, folder)
+            destination = Path(folder) / "published" / source.name
+            destination.parent.mkdir()
+            loaded_before = list(app.loaded)
+
+            await backend.save_project_as(
+                "source",
+                destination.name,
+                str(destination.parent),
+            )
+
+            self.assertTrue(destination.is_file())
+            self.assert_project_identity(
+                destination,
+                "source",
+                require_output=True,
+            )
+            self.assertEqual(app.loaded, loaded_before)
+            self.assertEqual(backend.definition_paths["source"], source.resolve())
+
     async def test_legacy_save_as_false_response_uses_verified_atomic_fallback(self):
         with tempfile.TemporaryDirectory() as folder:
             backend, app = await self.make_backend()

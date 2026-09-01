@@ -21,22 +21,29 @@ def test_production_asset_set_has_fixed_identity_and_complete_contract():
     assert asset_set.blueprint.poles == 1
     assert asset_set.blueprint.terminals == 2
     assert sum(component.definition == "cigre_lcc_v1:LCC12PulseBridge" for component in asset_set.blueprint.components) == 2
-    assert len(asset_set.blueprint.outputs) == 11
+    assert len(asset_set.blueprint.outputs) == 17
     assert {output.path for output in asset_set.blueprint.outputs} == {
         "Main/VDC_RECT", "Main/VDC_INV", "Main/IDC", "Main/P_RECT", "Main/Q_RECT",
         "Main/P_INV", "Main/Q_INV", "Main/ALPHA_RECT", "Main/GAMMA_INV", "Main/MU_RECT", "Main/VAC_RECT_A",
+        "Main/AO_RECT_Y", "Main/AO_RECT_D", "Main/AO_INV_Y", "Main/AO_INV_D", "Main/ENABLE_RECT", "Main/ENABLE_INV",
     }
     assert len(asset_set.acceptance["physical_checks"]) >= 8
     assert len(asset_set.golden["channels"]) == 11
     assert set(asset_set.hashes) == {
         "PROVENANCE.md", "acceptance.json", "blueprint.json", "catalog-pscad-4.6.2.json", "golden.json", "library/cigre_lcc_v1.pslx",
-        "master-bindings-pscad-4.6.2.json",
+        "master-bindings-pscad-4.6.2.json", "smoke.json",
     }
     assert asset_set.master_bindings is not None
-    assert len(asset_set.master_bindings.bindings) == 8
+    assert len(asset_set.master_bindings.bindings) == 9
+    assert asset_set.master_bindings.schema_version == 2
+    assert len(asset_set.master_bindings.companion_bindings) == 17
     assert asset_set.master_binding_hash == asset_set.hashes["master-bindings-pscad-4.6.2.json"]
     assert "Szechtman" in asset_set.provenance
-    assert validate_companion_library(ASSET_ROOT / asset_set.companion_library)["valid"] is True
+    companion = validate_companion_library(
+        ASSET_ROOT / asset_set.companion_library
+    )
+    assert companion["valid"] is True
+    assert companion["evidence"]["effective_valves"] == 12
 
 
 def test_confirmed_golden_generator_is_the_only_writer(tmp_path):
@@ -80,6 +87,7 @@ def test_confirmed_golden_generator_is_the_only_writer(tmp_path):
             "--compiler", str(compiler),
         ],
         cwd=Path(__file__).parents[1],
+        check=False,
         capture_output=True,
         text=True,
     )
@@ -97,6 +105,7 @@ def test_confirmed_golden_generator_is_the_only_writer(tmp_path):
             "--confirm",
         ],
         cwd=Path(__file__).parents[1],
+        check=False,
         capture_output=True,
         text=True,
     )
@@ -203,6 +212,7 @@ def test_golden_generator_rejects_units_and_window_contract_drift(tmp_path):
             "--confirm",
         ],
         cwd=Path(__file__).parents[1],
+        check=False,
         capture_output=True,
         text=True,
     )

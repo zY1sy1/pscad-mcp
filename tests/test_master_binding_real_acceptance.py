@@ -206,7 +206,10 @@ class TestMasterBindingRealAcceptance(unittest.IsolatedAsyncioTestCase):
                     "Resistance_ohm": 10.0,
                 },
                 "master:ac_meter": {},
-                "master:dc_meter": {},
+                "master:dc_meter": {
+                    "CurrentSignal": "IDC_ACCEPTANCE",
+                    "VoltageSignal": "VDC_ACCEPTANCE",
+                },
                 "master:ground": {},
             }
             locations = {

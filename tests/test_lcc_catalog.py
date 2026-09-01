@@ -3,6 +3,7 @@ import copy
 import pytest
 
 from pscad_mcp.core.backend.base import BackendError
+from pscad_mcp.hvdc.builders.lcc.assets import load_packaged_asset_set
 from pscad_mcp.hvdc.builders.lcc.catalog import (
     parse_catalog,
     require_definition,
@@ -101,4 +102,30 @@ def test_catalog_rejects_invalid_schema_and_boolean_numeric_metadata():
     invalid["definitions"][0]["ports"][0]["dimension"] = True
 
     _assert_code(lambda: parse_catalog(invalid), "LCC_BLUEPRINT_INVALID")
+
+
+def test_fixed_catalog_uses_scalar_ao_contracts():
+    catalog = parse_catalog(load_packaged_asset_set().catalog)
+    bridge = require_definition(catalog, "cigre_lcc_v1:LCC12PulseBridge")
+
+    assert {port.name for port in bridge.ports} == {
+        "ACY_A",
+        "ACY_B",
+        "ACY_C",
+        "ACD_A",
+        "ACD_B",
+        "ACD_C",
+        "DC_POS",
+        "DC_NEG",
+        "AO_Y",
+        "AO_D",
+        "ENABLE",
+        "AM_Y",
+        "AM_D",
+        "GM_Y",
+        "GM_D",
+    }
+    assert require_port(bridge, "AO_Y").dimension == 1
+    assert require_port(bridge, "AO_D").dimension == 1
+    assert "GATES" not in {port.name for port in bridge.ports}
 

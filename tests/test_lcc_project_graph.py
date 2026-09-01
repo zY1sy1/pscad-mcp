@@ -7,7 +7,6 @@ from pscad_mcp.core.backend.base import BackendError
 from pscad_mcp.hvdc.builders.lcc.catalog import parse_catalog
 from pscad_mcp.hvdc.builders.lcc.project_graph import read_project_graph
 
-
 FIXTURE = Path(__file__).parent / "fixtures" / "lcc" / "graph_case.pscx"
 CATALOG = {
     "schema_version": 1,
@@ -100,6 +99,64 @@ def test_real_pscx_shape_uses_catalog_ports_orientation_and_wire_origin(tmp_path
     source = next(component for component in graph.components if component.logical_id == "source")
     with pytest.raises(TypeError):
         source.parameters["new"] = "value"
+
+
+def test_pscad_duplicate_consecutive_wire_vertices_are_collapsed(tmp_path):
+    path = tmp_path / "snapped-wire.pscx"
+    path.write_text(
+        """<?xml version="1.0" encoding="utf-8"?>
+<project name="snapped_wire" version="4.6.2">
+  <definitions>
+    <Definition name="Main" classid="UserCmpDefn">
+      <schematic classid="UserCanvas">
+        <Wire classid="WireOrthogonal" id="301" x="10" y="20" orient="0">
+          <vertex x="0" y="0" />
+          <vertex x="10" y="0" />
+          <vertex x="10" y="0" />
+        </Wire>
+      </schematic>
+    </Definition>
+  </definitions>
+</project>
+""",
+        encoding="utf-8",
+    )
+
+    graph = read_project_graph(path, parse_catalog(CATALOG))
+
+    assert graph.wires[0].vertices == ((10, 20), (20, 20))
+
+
+@pytest.mark.parametrize(
+    "vertices",
+    [((0, 0), (0, 0)), ((0, 0), (1, 1))],
+)
+def test_pscad_invalid_wire_routes_remain_project_errors(tmp_path, vertices):
+    path = tmp_path / "invalid-wire.pscx"
+    vertex_xml = "".join(
+        f'<vertex x="{x}" y="{y}" />' for x, y in vertices
+    )
+    path.write_text(
+        f'''<?xml version="1.0" encoding="utf-8"?>
+<project name="invalid_wire" version="4.6.2">
+  <definitions>
+    <Definition name="Main" classid="UserCmpDefn">
+      <schematic classid="UserCanvas">
+        <Wire classid="WireOrthogonal" id="302" x="10" y="20" orient="0">
+          {vertex_xml}
+        </Wire>
+      </schematic>
+    </Definition>
+  </definitions>
+</project>
+''',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(BackendError) as raised:
+        read_project_graph(path, parse_catalog(CATALOG))
+
+    assert raised.value.code == "LCC_STRUCTURE_INVALID"
 
 
 def test_explicit_port_shape_does_not_infer_catalog_ports_that_are_missing(tmp_path):

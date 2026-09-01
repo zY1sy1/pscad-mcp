@@ -10,8 +10,11 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any
 
-from pscad_mcp.hvdc.builders.lcc.validator import validate_companion_library
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
+from pscad_mcp.hvdc.builders.lcc.validator import validate_companion_library
 
 _EXPECTED = {
     "cigre_lcc_v1:LCC12PulseBridge",
@@ -45,7 +48,9 @@ def audit_asset_root(asset_root: str | Path) -> dict[str, Any]:
         "asset_root": str(root),
         "library": None,
         "definitions": [],
-        "valve_count": 0,
+        "effective_valves": 0,
+        "master_instances": {},
+        "firing_mode": None,
         "foreign_scopes": [],
         "absolute_paths": [],
         "errors": [],
@@ -60,27 +65,44 @@ def audit_asset_root(asset_root: str | Path) -> dict[str, Any]:
         result["errors"].append({"reason": "library_parse_failure", "message": str(error)})
         return result
 
+    library_scope = _text(xml_root.attrib.get("name"))
     definitions = []
     foreign_scopes: set[str] = set()
     absolute_paths: set[str] = set()
     for element in xml_root.iter():
         name = _text(element.attrib.get("name") or element.attrib.get("scoped_name"))
         if _local(element.tag) == "definition" and name:
-            definitions.append(name)
+            classid = _text(element.attrib.get("classid")).casefold()
+            if classid != "stationdefn" and name != "Main":
+                definitions.append(
+                    name if ":" in name else f"{library_scope}:{name}"
+                )
         for value in element.attrib.values():
             if _ABSOLUTE.search(value):
                 absolute_paths.add(value)
             if ":" in value:
-                scope = value.split(":", 1)[0]
-                if scope not in {"master", "cigre_lcc_v1"}:
-                    foreign_scopes.add(scope)
+                value_scope = value.split(":", 1)[0]
+                if value_scope not in {"master", "cigre_lcc_v1"}:
+                    foreign_scopes.add(value_scope)
 
     result["definitions"] = sorted(definitions)
     result["foreign_scopes"] = sorted(foreign_scopes)
     result["absolute_paths"] = sorted(absolute_paths)
     structure = validate_companion_library(library)
     result["errors"].extend(structure.get("errors", []))
-    result["valve_count"] = sum(1 for element in xml_root.iter() if _local(element.tag) == "valve")
+    evidence = structure.get("evidence")
+    if isinstance(evidence, dict):
+        bridge = evidence["definitions"][
+            "cigre_lcc_v1:LCC12PulseBridge"
+        ]
+        result["effective_valves"] = evidence["effective_valves"]
+        result["master_instances"] = dict(bridge["master_instances"])
+        result["firing_mode"] = {
+            "physical_parameter": "FP",
+            "value": 0,
+            "active_port": "AO",
+            "dimension": 1,
+        }
     if set(definitions) != _EXPECTED:
         result["errors"].append({"reason": "custom_definition_set_mismatch", "expected": sorted(_EXPECTED), "observed": sorted(definitions)})
     if foreign_scopes:

@@ -198,6 +198,8 @@ class RecordingPscadService:
 
     async def get_project_output(self, project_name: str, structured: bool = False) -> Any:
         self._call("get_project_output", project_name, structured=structured)
+        if structured:
+            return []
         return self.output
 
     async def save_project_as(self, project_name: str, filename: str, folder: str, *, confirm: bool = False) -> str:
