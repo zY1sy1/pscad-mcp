@@ -2,6 +2,11 @@
 
 from .blank import BlankLccRequest, plan_blank_lcc
 from .blank_service import BlankLccBuilderService
+from .dynamic_acceptance import (
+    DynamicLccAcceptanceRequest,
+    evaluate_fixed_lcc_dynamic_samples,
+    validate_dynamic_lcc_acceptance_report,
+)
 from .models import (
     LccAcceptanceCheck,
     LccBlueprint,
@@ -23,6 +28,7 @@ __all__ = [
     "SUPPORTED_BLUEPRINT",
     "BlankLccBuilderService",
     "BlankLccRequest",
+    "DynamicLccAcceptanceRequest",
     "LccAcceptanceCheck",
     "LccBlueprint",
     "LccBuildPlan",
@@ -35,5 +41,7 @@ __all__ = [
     "LccPlanOperation",
     "LccRoute",
     "parse_blueprint",
+    "evaluate_fixed_lcc_dynamic_samples",
     "plan_blank_lcc",
+    "validate_dynamic_lcc_acceptance_report",
 ]
