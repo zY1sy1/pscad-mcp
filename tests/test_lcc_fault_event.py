@@ -46,6 +46,10 @@ def _complete_blueprint() -> dict[str, object]:
             "timer_component": "inverter_fault_timer",
             "shunt_component": "inverter_fault_shunt",
             "channel": "fault_active",
+            "control_component": "inverter_fault_shunt",
+            "control_parameter": "IS",
+            "apply_value": 1,
+            "clear_value": 0,
         }
     ]
     blueprint["components"].extend(

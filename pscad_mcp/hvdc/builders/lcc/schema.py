@@ -91,6 +91,10 @@ _DYNAMIC_EVENT_KEYS = {
     "timer_component",
     "shunt_component",
     "channel",
+    "control_component",
+    "control_parameter",
+    "apply_value",
+    "clear_value",
 }
 _PARAMETRIC_TOP_LEVEL_KEYS = {
     "topology",

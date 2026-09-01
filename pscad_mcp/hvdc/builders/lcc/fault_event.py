@@ -173,6 +173,15 @@ def inspect_fixed_lcc_fault_capability(
         return {"status": INCOMPLETE, "reasons": ["fault_event_invalid"], "error": error.to_dict(), "bindings": {}}
     timer_id, timer = timers[0]
     shunt_id, shunt = shunts[0]
+    for field in ("control_component", "control_parameter"):
+        if not isinstance(events[0].get(field), str) or not events[0][field].strip():
+            reasons.append(f"fault_{field}_missing")
+    if "apply_value" not in events[0] or "clear_value" not in events[0]:
+        reasons.append("fault_control_values_missing")
+    elif events[0]["apply_value"] == events[0]["clear_value"]:
+        reasons.append("fault_control_values_identical")
+    elif events[0].get("control_component") not in components:
+        reasons.append("fault_control_component_missing")
     timer_definition = definitions.get(str(timer.get("definition")), {})
     shunt_definition = definitions.get(str(shunt.get("definition")), {})
     if not _has_port(timer_definition, "Y", kind="data", direction="output"):
@@ -214,6 +223,10 @@ def inspect_fixed_lcc_fault_capability(
             "timer_component": timer_id,
             "shunt_component": shunt_id,
             "channel": fault_outputs[0].get("path"),
+            "control_component": events[0]["control_component"],
+            "control_parameter": events[0]["control_parameter"],
+            "apply_value": events[0]["apply_value"],
+            "clear_value": events[0]["clear_value"],
         },
     }
 
