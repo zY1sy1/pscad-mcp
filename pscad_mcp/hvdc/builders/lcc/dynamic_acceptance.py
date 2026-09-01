@@ -179,6 +179,8 @@ def validate_dynamic_lcc_acceptance_report(value: Any) -> dict[str, Any]:
     exclusions = _channels(report["explicit_exclusions"], "explicit_exclusions")
     if "final_accepted" not in exclusions:
         raise _invalid("explicit_exclusions", "Final accepted exclusion is required before WP6.")
+    if report["status"] == FAIL and report["failure"] is None:
+        raise _invalid("failure", "FAIL reports must include failure details.")
     if report["failure"] is not None and not isinstance(report["failure"], Mapping):
         raise _invalid("failure", "failure must be null or an object.")
     return report

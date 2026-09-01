@@ -151,6 +151,13 @@ def test_dynamic_report_rejects_forged_pass_with_placeholder_golden():
         validate_dynamic_lcc_acceptance_report(report)
 
 
+def test_dynamic_report_requires_failure_details_for_fail_status():
+    report = valid_dynamic_report()
+    report["status"] = "FAIL"
+    with pytest.raises(BackendError):
+        validate_dynamic_lcc_acceptance_report(report)
+
+
 def test_roadmap_names_wp1c_as_the_next_step():
     roadmap = Path(__file__).parents[1] / "docs" / "superpowers" / "specs" / "2026-08-30-lcc-mmc-completion-roadmap-design.md"
     text = roadmap.read_text(encoding="utf-8")

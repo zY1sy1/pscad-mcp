@@ -155,3 +155,66 @@ def test_evaluate_cli_persists_failure_even_with_invalid_commit_metadata(tmp_pat
     payload = json.loads(report.read_text(encoding="utf-8"))
     assert len(payload["commit"]) == 40
     assert payload["dynamic"]["event"]["time_s"] == 0.0
+
+
+def test_evaluate_cli_records_evaluation_failure_and_waveform_checks(tmp_path: Path):
+    samples = tmp_path / "samples.json"
+    golden = tmp_path / "golden.json"
+    contract = tmp_path / "contract.json"
+    report = Path("dynamic-report.json")
+    samples.write_text(json.dumps(_samples()), encoding="utf-8")
+    golden.write_text(json.dumps({"source": "reference run placeholder"}), encoding="utf-8")
+    contract.write_text(json.dumps(_contract()), encoding="utf-8")
+    try:
+        exit_code = main(
+            [
+                "evaluate",
+                "--samples",
+                str(samples),
+                "--golden",
+                str(golden),
+                "--contract",
+                str(contract),
+                "--report",
+                str(report),
+                "--commit",
+                "a" * 40,
+                "--branch",
+                "codex/wp1c",
+                "--event-time",
+                "0.8",
+                "--event-duration",
+                "0.1",
+                "--recovery-window",
+                "0.5",
+            ]
+        )
+        assert exit_code == 1
+        payload = json.loads(report.read_text(encoding="utf-8"))
+        assert payload["status"] == "INCOMPLETE_ANALYSIS"
+        assert "golden_checks" in payload["dynamic"]["physical"]
+    finally:
+        report.unlink(missing_ok=True)
+
+
+def test_evaluate_cli_records_failure_details_for_missing_required_channel(tmp_path: Path):
+    samples = _samples()
+    del samples["channels"]["Main/VDC_RECT"]
+    samples_path = tmp_path / "samples.json"
+    golden_path = tmp_path / "golden.json"
+    contract_path = tmp_path / "contract.json"
+    report = tmp_path / "report.json"
+    samples_path.write_text(json.dumps(samples), encoding="utf-8")
+    golden_path.write_text(json.dumps({"source": "reference run placeholder"}), encoding="utf-8")
+    contract_path.write_text(json.dumps(_contract()), encoding="utf-8")
+    assert main(
+        [
+            "evaluate", "--samples", str(samples_path), "--golden", str(golden_path),
+            "--contract", str(contract_path), "--report", str(report),
+            "--commit", "a" * 40, "--branch", "codex/wp1c",
+            "--event-time", "0.8", "--event-duration", "0.1", "--recovery-window", "0.5",
+        ]
+    ) == 1
+    payload = json.loads(report.read_text(encoding="utf-8"))
+    assert payload["status"] == "FAIL"
+    assert payload["failure"]["stage"] == "evaluation"

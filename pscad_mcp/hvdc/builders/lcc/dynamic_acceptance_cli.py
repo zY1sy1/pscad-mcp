@@ -98,7 +98,7 @@ def _report(
     )
     report = {
         "schema_version": 1,
-        "run_id": arguments.report.parent.name,
+        "run_id": arguments.report.resolve().parent.name or arguments.report.resolve().stem,
         "scope": "lcc.fixed_autonomous",
         "builder_path": "lcc.fixed_autonomous",
         "kind": "licensed_acceptance",
@@ -128,6 +128,9 @@ def _report(
                 "waveform_checks": physical_result.get("physical_checks", [])
                 if isinstance(physical_result, Mapping)
                 else [],
+                "golden_checks": result.get("waveform", {}).get("golden_checks", [])
+                if isinstance(result, Mapping) and isinstance(result.get("waveform", {}), Mapping)
+                else [],
                 "missing_channels": result.get("missing_channels", []) if isinstance(result, Mapping) else [],
             },
         },
@@ -135,11 +138,21 @@ def _report(
         "explicit_exclusions": ["independent_golden", "final_accepted"],
         "failure": (
             {
-                "stage": "input",
-                "code": failure.code if isinstance(failure, BackendError) else type(failure).__name__,
-                "message": str(failure)[:1024] or type(failure).__name__,
+                "stage": "input" if failure is not None else "evaluation",
+                "code": (
+                    failure.code
+                    if isinstance(failure, BackendError)
+                    else type(failure).__name__
+                    if failure is not None
+                    else "LCC_DYNAMIC_ACCEPTANCE_FAILED"
+                ),
+                "message": (
+                    str(failure)[:1024]
+                    if failure is not None
+                    else "Dynamic evidence did not satisfy the acceptance contract."
+                ),
             }
-            if failure is not None
+            if failure is not None or status == FAIL
             else None
         ),
     }
