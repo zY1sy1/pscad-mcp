@@ -210,7 +210,7 @@ runtime is usable; it does not replace full CIGRE waveform or commutation-fault
 acceptance.
 
 The current program baseline records `lcc.fixed_autonomous` as
-`simulated/PASS` from the licensed no-fault WP1B run on commit `6c3919b`.
+`simulated/PASS` from the licensed no-fault WP1B run on commit `3a09c8f`.
 That run compiled all six isolated companion fixtures, built and recompiled a
 blank-case full topology, simulated 0.1 s, and verified 2,001 samples with no
 remaining PSCAD process. It is not `accepted`: disturbance, commutation

@@ -1,6 +1,6 @@
 # LCC WP1B Fixed Autonomous Physicalization Completion
 
-**Completed:** 2026-08-31
+**Completed:** 2026-09-01
 
 **Scope:** `lcc.fixed_autonomous`
 
@@ -8,13 +8,13 @@
 
 ## Evidence Identity
 
-- Commit: `6c3919bb6aae893ac43ffdd2f3018284eb1dbec2`
+- Commit: `3a09c8fe0b6ebf676f2bfd47e7ad89d8cba9117d`
 - Branch: `codex/lcc-wp1b-fixed-physicalization`
-- Run: `fixed-lcc-20260831-133028-129`
-- Report: `D:/PSCAD-Workspace/lcc-wp1b-fixed-acceptance/fixed-lcc-20260831-133028-129/fixed-lcc-acceptance-report.json`
-- Report SHA-256: `f276b3ff625049f8b32f6ae11555cc20c8a223c4ae1e132738163c8bb8c8dca5`
-- Plan SHA-256: `b244311a3afc5d80cdb4bdd290d3cb422e94e6d9df403e59bbdb2c1226f63400`
-- Journal SHA-256: `37026751419144bcc98e4fd566143cfdaf81db1918586c25bf3d58bd4223d86a`
+- Run: `fixed-lcc-20260901-080458-594`
+- Report: `D:/PSCAD-Workspace/lcc-wp1b-fixed-acceptance/fixed-lcc-20260901-080458-594/fixed-lcc-acceptance-report.json`
+- Report SHA-256: `030a59d2af8fdbfad76e364eebd7435135135f09bbbbf9df787c8ce5fb68ed14`
+- Plan SHA-256: `0d2a6ee947a5cbd329906bfda4cb2e4a77b5b94d94738e537057583462f50744`
+- Journal SHA-256: `cdcd351be307b68e5c48522c9aefc1aac873cb4aac998b54fe276807248bcfc6`
 
 The report was independently reloaded and all referenced files were rehashed
 before promotion. The report commit matched HEAD and no PSCAD process remained.
@@ -57,11 +57,11 @@ The signal-interface before-compile hash in the immutable report is
 
 - State chain: `validated -> staging_created -> components_placed -> parameters_verified -> connections_verified -> structure_verified -> staging_saved -> compiled -> simulated -> smoke_passed -> published`.
 - Published project: `WP1B_FIXED_LCC_PUBLISHED.pscx`.
-- Published project SHA-256: `ff6129dc098bb56d1ffd2b4f78e2b20ae450e3d7a38db1a433a85b64a1993444`.
+- Published project SHA-256: `f15d2f4d350c2c4302e6e6a016b35ac09e0601c4957c1b3bc5da02d54a854305`.
 - Final project reload and compile smoke: PASS.
 - Selected OUT SHA-256: `13564efd93a789353058b4a657a73c0166c9a05057042e0b30be3214f817da6d`.
 - INF SHA-256: `aba32a7966eebcda83c983193d05bb27bd8e1afdb6e36a733a021cdb6b5bc0cc`.
-- INFX SHA-256: `950a92b1fbfbc5661507a9e0ff31c5cb0b327ebf02db71712b4393ff47dd8963`.
+- INFX SHA-256: `13661270dd8a08f32e0b9a4918ebf0e770368b081e11b4f8e3dab269516bfcd7`.
 - Domain: 0.0 s through 0.1 s.
 - Output step: 0.00005 s.
 - Samples: 2,001 per required channel.
@@ -70,7 +70,7 @@ The signal-interface before-compile hash in the immutable report is
 
 ## Verification And Review
 
-- Fresh pre-promotion full suite: `2361 passed, 47 skipped`.
+- Fresh pre-promotion full suite: `2362 passed, 47 skipped`.
 - Generated companion `--check`: PASS.
 - Asset audit: PASS, two `g6p200`, 12 effective valves, scalar FP=0 AO.
 - PowerShell parser: PASS.

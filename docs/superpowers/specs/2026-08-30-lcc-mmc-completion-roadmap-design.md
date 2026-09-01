@@ -422,8 +422,8 @@ fixture 和数据审计可以并行，但最终集成必须按依赖顺序进行
 
 ### 9.3 WP1B：fixed autonomous companion 物理化
 
-**完成状态：** 已在提交 `6c3919b` 上完成。授权报告
-`fixed-lcc-20260831-133028-129` 验证六个独立 Definition fixture、空白工程完整
+**完成状态：** 已在提交 `3a09c8f` 上完成。授权报告
+`fixed-lcc-20260901-080458-594` 验证六个独立 Definition fixture、空白工程完整
 拓扑、final 重编译和 0.1 s 无故障 smoke；基线能力为 `simulated/PASS`。
 该证据不替代 WP1C disturbance/commutation/recovery 或 WP6 independent golden。
 

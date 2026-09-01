@@ -118,7 +118,7 @@ PSCAD 5.x、故障或换相失败验收、MMC 构建均不可用。
 OUT/INF 数据集验证。随包 `golden.json` 仍是等待独立授权参考运行生成的
 release-gate 占位基线。
 
-当前 program baseline 已把 `lcc.fixed_autonomous` 记录为提交 `6c3919b` 上的
+当前 program baseline 已把 `lcc.fixed_autonomous` 记录为提交 `3a09c8f` 上的
 `simulated/PASS`：六个独立 companion fixture 全部编译，通过空白工程完整拓扑
 构建与 final 重编译，完成 0.1 s、2,001 样本的无故障 smoke，退出后无 PSCAD
 残留进程。该状态不是 `accepted`；扰动、换相失败/恢复、independent golden

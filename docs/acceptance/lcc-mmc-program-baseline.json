@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
   "baseline_id": "lcc-mmc-program-wp0-2026-08-30",
-  "generated_at_utc": "2026-08-31T13:31:59.649100Z",
+  "generated_at_utc": "2026-09-01T08:06:33.889443Z",
   "repository": {
-    "base_commit": "6c3919bb6aae893ac43ffdd2f3018284eb1dbec2",
+    "base_commit": "3a09c8fe0b6ebf676f2bfd47e7ad89d8cba9117d",
     "branch": "codex/lcc-wp1b-fixed-physicalization",
     "worktree_clean": true
   },
@@ -177,6 +177,19 @@
       "path": "D:/PSCAD-Workspace/lcc-wp1b-fixed-acceptance/fixed-lcc-20260831-133028-129/fixed-lcc-acceptance-report.json",
       "sha256": "f276b3ff625049f8b32f6ae11555cc20c8a223c4ae1e132738163c8bb8c8dca5",
       "availability": "verified_local"
+    },
+    {
+      "run_id": "fixed-lcc-20260901-080458-594",
+      "scope": "lcc.fixed_autonomous",
+      "builder_path": "lcc.fixed_autonomous",
+      "kind": "licensed_simulation",
+      "capability_state": "simulated",
+      "status": "PASS",
+      "commit": "3a09c8fe0b6ebf676f2bfd47e7ad89d8cba9117d",
+      "generated_at_utc": "2026-09-01T08:06:33.889443Z",
+      "path": "D:/PSCAD-Workspace/lcc-wp1b-fixed-acceptance/fixed-lcc-20260901-080458-594/fixed-lcc-acceptance-report.json",
+      "sha256": "030a59d2af8fdbfad76e364eebd7435135135f09bbbbf9df787c8ce5fb68ed14",
+      "availability": "verified_local"
     }
   ],
   "scopes": [
@@ -212,7 +225,7 @@
       "owner_work_package": "WP1",
       "capability_state": "simulated",
       "licensed_status": "PASS",
-      "evidence_run_id": "fixed-lcc-20260831-133028-129",
+      "evidence_run_id": "fixed-lcc-20260901-080458-594",
       "explicit_exclusions": [
         "disturbance_acceptance",
         "commutation_failure_acceptance",
