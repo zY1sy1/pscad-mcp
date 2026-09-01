@@ -124,6 +124,21 @@ release-gate 占位基线。
 残留进程。该状态不是 `accepted`；扰动、换相失败/恢复、independent golden
 和最终验收仍属于 WP1C/WP6。
 
+WP1C 动态证据使用真实 PSCAD 导出的通道样本评估：
+
+```powershell
+./scripts/run_fixed_lcc_dynamic_acceptance.ps1 `
+  -Samples 'D:/PSCAD-Workspace/lcc-wp1c-dynamic/samples.json' `
+  -Golden 'D:/PSCAD-Workspace/lcc-wp1c-dynamic/golden.json' `
+  -Contract 'pscad_mcp/assets/lcc/cigre_lcc_monopole_v1/acceptance.json' `
+  -Report 'D:/PSCAD-Workspace/lcc-wp1c-dynamic/dynamic-report.json'
+```
+
+runner 会把报告绑定到干净的命名分支，并拒绝缺失或无界的扰动/恢复证据。
+物理证据通过但没有独立复核 golden 时，状态只能是
+`INCOMPLETE_ANALYSIS`，不会提升为 `accepted`。当前 fixed companion 尚未暴露
+fault/event 输入，因此在完成该绑定并取得真实 PSCAD 运行前，不声明动态 licensed PASS。
+
 授权证据生成与基线提升是两个独立动作；run 命令不会修改仓库基线：
 
 ```powershell
