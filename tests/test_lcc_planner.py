@@ -13,6 +13,7 @@ from pscad_mcp.hvdc.builders.lcc.assets import (
 from pscad_mcp.hvdc.builders.lcc.catalog import parse_catalog
 from pscad_mcp.hvdc.builders.lcc.planner import (
     LccPlanRequest,
+    WP1C_DYNAMIC_PROFILE,
     _component_rectangles,
     _net_route,
     _wp1b_connection_labels,
@@ -668,3 +669,16 @@ def test_wp1b_smoke_profile_rejects_wrong_duration_or_name(
         create_plan(request, _asset_set(), INVENTORY, tmp_path)
 
     assert failure.value.code == "LCC_BLUEPRINT_INVALID"
+
+
+def test_dynamic_profile_fails_closed_when_fault_binding_is_missing(tmp_path):
+    request = _request(verification_profile=WP1C_DYNAMIC_PROFILE)
+    with pytest.raises(BackendError) as raised:
+        create_plan(request, _asset_set(), INVENTORY, tmp_path)
+    assert raised.value.code == "LCC_DYNAMIC_EVENT_UNAVAILABLE"
+    assert raised.value.details["reasons"] == [
+        "fault_timer_missing",
+        "fault_shunt_missing",
+        "fault_event_missing",
+        "fault_channel_missing",
+    ]

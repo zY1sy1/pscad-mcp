@@ -7,6 +7,11 @@ from .dynamic_acceptance import (
     evaluate_fixed_lcc_dynamic_samples,
     validate_dynamic_lcc_acceptance_report,
 )
+from .fault_event import (
+    FixedLccFaultEvent,
+    inspect_fixed_lcc_fault_capability,
+    validate_fixed_lcc_fault_event,
+)
 from .models import (
     LccAcceptanceCheck,
     LccBlueprint,
@@ -29,6 +34,7 @@ __all__ = [
     "BlankLccBuilderService",
     "BlankLccRequest",
     "DynamicLccAcceptanceRequest",
+    "FixedLccFaultEvent",
     "LccAcceptanceCheck",
     "LccBlueprint",
     "LccBuildPlan",
@@ -42,6 +48,8 @@ __all__ = [
     "LccRoute",
     "parse_blueprint",
     "evaluate_fixed_lcc_dynamic_samples",
+    "inspect_fixed_lcc_fault_capability",
     "plan_blank_lcc",
     "validate_dynamic_lcc_acceptance_report",
+    "validate_fixed_lcc_fault_event",
 ]

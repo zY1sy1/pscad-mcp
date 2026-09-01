@@ -234,6 +234,12 @@ promoted to `accepted`. The current fixed companion does not yet expose a
 fault/event input, so no dynamic licensed PASS is claimed until that binding
 and a real PSCAD run exist.
 
+The opt-in planner profile `wp1c_dynamic` performs a side-effect-free
+fault/event capability gate before any PSCAD project is created. It requires an
+exact EMTDC timer, a three-phase fault shunt, an `inverter_ac_bus` binding, and
+the `Fault/LCC Fault Active` output channel; the current fixed asset fails
+closed with `LCC_DYNAMIC_EVENT_UNAVAILABLE` until those bindings are present.
+
 Licensed evidence generation and baseline promotion are separate actions. The
 run command never edits the checked-in baseline:
 

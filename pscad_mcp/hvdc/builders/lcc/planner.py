@@ -37,10 +37,16 @@ from .routing import (
     route_intersects_rectangles,
     validate_orthogonal_route,
 )
+from .fault_event import inspect_fixed_lcc_fault_capability
 
 FULL_ACCEPTANCE_PROFILE = "full_acceptance"
 WP1B_SMOKE_PROFILE = "wp1b_smoke"
-VERIFICATION_PROFILES = {FULL_ACCEPTANCE_PROFILE, WP1B_SMOKE_PROFILE}
+WP1C_DYNAMIC_PROFILE = "wp1c_dynamic"
+VERIFICATION_PROFILES = {
+    FULL_ACCEPTANCE_PROFILE,
+    WP1B_SMOKE_PROFILE,
+    WP1C_DYNAMIC_PROFILE,
+}
 
 PHASES = (
     "materialize_library",
@@ -639,6 +645,18 @@ def create_plan(
             observed_version=version,
             required_version="4.6.2",
         )
+    if request.verification_profile == WP1C_DYNAMIC_PROFILE:
+        capability = inspect_fixed_lcc_fault_capability(
+            blueprint.to_dict(),
+            asset_set.catalog,
+            inventory if isinstance(inventory, Mapping) else {},
+        )
+        if capability["status"] != "PASS":
+            raise _error(
+                "LCC_DYNAMIC_EVENT_UNAVAILABLE",
+                "The fixed LCC blueprint has no complete fault/event binding.",
+                reasons=capability.get("reasons", []),
+            )
     duration = _duration(request, asset_set)
     final_path, staging_path, project_name, _ = _resolve_paths(request, workspace)
     catalog = parse_catalog(asset_set.catalog)
