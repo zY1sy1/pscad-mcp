@@ -12,6 +12,7 @@ from pscad_mcp.hvdc.builders.lcc.fault_event import (
     inspect_fixed_lcc_fault_capability,
     validate_fixed_lcc_fault_event,
 )
+from pscad_mcp.hvdc.builders.lcc.schema import parse_blueprint
 
 
 def _asset(name: str) -> dict[str, object]:
@@ -159,3 +160,9 @@ def test_complete_fault_binding_passes_without_side_effects():
     assert result["status"] == "PASS"
     assert result["reasons"] == []
     assert blueprint == before
+
+
+def test_blueprint_parser_preserves_dynamic_event_declarations():
+    blueprint = _complete_blueprint()
+    parsed = parse_blueprint(blueprint)
+    assert parsed.to_dict()["dynamic_events"] == blueprint["dynamic_events"]

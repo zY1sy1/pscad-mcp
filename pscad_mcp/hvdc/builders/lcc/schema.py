@@ -38,6 +38,7 @@ _TOP_LEVEL_KEYS = {
     "nets",
     "measurements",
     "outputs",
+    "dynamic_events",
     "structural_assertions",
 }
 _SETTINGS_KEYS = {
@@ -81,6 +82,16 @@ _OUTPUT_KEYS = {
 _CANVAS_KEYS = {"name", "width", "height", "grid"}
 _MEASUREMENT_KEYS = {"logical_id", "kind", "component", "port", "channels", "derived_from"}
 _ASSERTION_KEYS = {"kind", "logical_id", "expected", "message"}
+_DYNAMIC_EVENT_KEYS = {
+    "kind",
+    "target_bus",
+    "time_s",
+    "duration_s",
+    "phase_mask",
+    "timer_component",
+    "shunt_component",
+    "channel",
+}
 _PARAMETRIC_TOP_LEVEL_KEYS = {
     "topology",
     "ratings",
@@ -414,6 +425,20 @@ def _parse_output(value: Any, index: int) -> LccOutputSpec:
         location=None if output.get("location") is None else _text(output["location"], f"{context}.location"),
         measurement=None if output.get("measurement") is None else _text(output["measurement"], f"{context}.measurement"),
     )
+
+
+def _parse_dynamic_events(value: Any) -> tuple[dict[str, Any], ...]:
+    events = _sequence(value, "dynamic_events")
+    parsed: list[dict[str, Any]] = []
+    for index, value in enumerate(events):
+        context = f"dynamic_events[{index}]"
+        event = _object(value, context)
+        _keys(event, _DYNAMIC_EVENT_KEYS, context)
+        missing = sorted(_DYNAMIC_EVENT_KEYS - set(event))
+        if missing:
+            raise _invalid(f"{context} requires {', '.join(missing)}.", context=context)
+        parsed.append({key: _json_value(item, f"{context}.{key}") for key, item in event.items()})
+    return tuple(parsed)
 
 
 def _parse_canvases(value: Any) -> tuple[dict[str, Any], ...]:
@@ -802,6 +827,7 @@ def parse_blueprint(data: Mapping[str, Any]) -> LccBlueprint:
     canvases = _parse_canvases(blueprint.get("canvases", ()))
     measurements = _parse_measurements(blueprint.get("measurements", ()))
     assertions = _parse_assertions(blueprint.get("structural_assertions", ()))
+    dynamic_events = _parse_dynamic_events(blueprint.get("dynamic_events", ()))
     if "profile" in blueprint and "benchmark_profile" in blueprint:
         raise _invalid(
             "blueprint cannot define both profile and benchmark_profile.",
@@ -824,4 +850,5 @@ def parse_blueprint(data: Mapping[str, Any]) -> LccBlueprint:
         measurements=measurements,
         structural_assertions=assertions,
         profile=profile,
+        dynamic_events=dynamic_events,
     )
