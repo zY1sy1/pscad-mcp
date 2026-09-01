@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import math
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
@@ -47,6 +48,65 @@ VERIFICATION_PROFILES = {
     WP1B_SMOKE_PROFILE,
     WP1C_DYNAMIC_PROFILE,
 }
+
+
+def _dynamic_schedule_events(events: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    if not isinstance(events, Sequence) or isinstance(events, (str, bytes, bytearray)) or not events:
+        raise _error(
+            "LCC_DYNAMIC_EVENT_UNAVAILABLE",
+            "A dynamic profile requires at least one fault event declaration.",
+        )
+    scheduled: list[dict[str, Any]] = []
+    for index, event in enumerate(events):
+        if not isinstance(event, Mapping):
+            raise _error(
+                "LCC_DYNAMIC_EVENT_UNAVAILABLE",
+                "Dynamic event declarations must be objects.",
+                index=index,
+            )
+        component = event.get("control_component")
+        parameter = event.get("control_parameter")
+        if not isinstance(component, str) or not component.strip() or not isinstance(parameter, str) or not parameter.strip():
+            raise _error(
+                "LCC_DYNAMIC_EVENT_UNAVAILABLE",
+                "Dynamic event declarations require an exact control component and parameter.",
+                index=index,
+            )
+        time_s = event.get("time_s")
+        duration_s = event.get("duration_s")
+        if any(isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(float(value)) for value in (time_s, duration_s)) or float(time_s) < 0 or float(duration_s) <= 0:
+            raise _error(
+                "LCC_DYNAMIC_EVENT_UNAVAILABLE",
+                "Dynamic event timing must be finite, non-negative, and positive in duration.",
+                index=index,
+            )
+        target = f"{component.strip()}.{parameter.strip()}"
+        event_prefix = str(event.get("kind", "fault"))
+        if len(events) > 1:
+            event_prefix = f"{event_prefix}:{index}"
+        scheduled.extend(
+            [
+                {
+                    "event_id": f"{event_prefix}:on",
+                    "time_s": float(time_s),
+                    "target": target,
+                    "value": event.get("apply_value"),
+                },
+                {
+                    "event_id": f"{event_prefix}:off",
+                    "time_s": float(time_s) + float(duration_s),
+                    "target": target,
+                    "value": event.get("clear_value"),
+                },
+            ]
+        )
+    scheduled.sort(key=lambda item: (item["time_s"], item["event_id"]))
+    if any(right["time_s"] <= left["time_s"] for left, right in zip(scheduled, scheduled[1:])):
+        raise _error(
+            "LCC_DYNAMIC_EVENT_UNAVAILABLE",
+            "Dynamic event times must be strictly increasing after expansion.",
+        )
+    return scheduled
 
 PHASES = (
     "materialize_library",
@@ -914,6 +974,13 @@ def create_plan(
             add("create_outputs", "create_output", output.logical_id, output.to_dict())
     add("save_and_validate", "save_and_validate", project_name, {})
     add("compile", "compile", project_name, {})
+    if request.verification_profile == WP1C_DYNAMIC_PROFILE:
+        add(
+            "register_dynamic_events",
+            "register_dynamic_events",
+            project_name,
+            {"events": _dynamic_schedule_events(blueprint.dynamic_events)},
+        )
     if request.verification_profile == WP1B_SMOKE_PROFILE:
         for output in planned_outputs:
             add("create_outputs", "create_output", output.logical_id, output.to_dict())
