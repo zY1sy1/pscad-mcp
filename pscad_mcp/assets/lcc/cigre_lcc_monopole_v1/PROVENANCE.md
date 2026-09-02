@@ -94,3 +94,10 @@ The official examples informed component identity and semantics only. They are
 not redistributed by this asset package. Licensed Master-binding compile
 reports are generated under the configured acceptance workspace and remain
 separate from the packaged provenance and from full-model waveform acceptance.
+
+For the installed `master.pslx`, inspection records the `breaker1` control
+parameter as `content_type="Variable"`; the protected Definition body is not
+copied. The official example pattern is `breaker1.NAME=LCC_FAULT_ACTIVE`,
+with the matching data label `LCC_FAULT_ACTIVE` on the event signal. This
+supports the embedded EMTDC timer contract only and is engineering provenance,
+not an independent waveform golden.

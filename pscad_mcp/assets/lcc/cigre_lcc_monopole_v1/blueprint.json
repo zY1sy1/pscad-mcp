@@ -30,6 +30,9 @@
       "timer_component": "inverter_fault_timer",
       "shunt_component": "inverter_fault_shunt_group",
       "channel": "Fault/LCC Fault Active",
+      "control_mode": "embedded_emtdc",
+      "control_signal": "LCC_FAULT_ACTIVE",
+      "recovery_window_s": 0.5,
       "control_components": [
         "inverter_fault_breaker_a",
         "inverter_fault_breaker_b",
@@ -454,7 +457,7 @@
       },
       "orientation": 2,
       "parameters": {
-        "NAME": 0
+        "NAME": "LCC_FAULT_ACTIVE"
       },
       "ports": [
         "A",
@@ -471,7 +474,7 @@
       },
       "orientation": 2,
       "parameters": {
-        "NAME": 0
+        "NAME": "LCC_FAULT_ACTIVE"
       },
       "ports": [
         "A",
@@ -488,7 +491,7 @@
       },
       "orientation": 2,
       "parameters": {
-        "NAME": 0
+        "NAME": "LCC_FAULT_ACTIVE"
       },
       "ports": [
         "A",
@@ -1881,7 +1884,7 @@
           "port": "IN"
         }
       ],
-      "label": null
+      "label": "LCC_FAULT_ACTIVE"
     },
     {
       "logical_id": "inverter_fault_active_signal",

@@ -485,7 +485,7 @@
         {"name": "B", "kind": "electrical", "dimension": 1, "offset": [-36, 0]}
       ],
       "parameters": {
-        "NAME": {"type": "float", "minimum": 0, "maximum": 1, "default": 0}
+        "NAME": {"type": "string", "required": true}
       },
       "bounding_box": [-36, -20, 36, 20],
       "metadata": {

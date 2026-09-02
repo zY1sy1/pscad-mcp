@@ -106,6 +106,9 @@ def _write_asset_files(root: Path) -> dict[str, bytes]:
         "smoke.json": (
             b'{"identity":"cigre_lcc_monopole_v1/wp1b_smoke"}'
         ),
+        "dynamic.json": (
+            b'{"identity":"cigre_lcc_monopole_v1/wp1c_dynamic"}'
+        ),
         "PROVENANCE.md": b"public source\n",
         "library/cigre_lcc_v1.pslx": library,
     }
@@ -200,6 +203,22 @@ def test_packaged_asset_exposes_hashed_wp1b_smoke_contract():
         "master:real_to_integer",
         "master:phase_isolation_resistor",
     }
+
+
+def test_packaged_wp1c_contract_binds_one_timer_symbol_to_three_breakers():
+    assets = load_packaged_asset_set()
+    blueprint = assets.blueprint.to_dict()
+    event = blueprint["dynamic_events"][0]
+    components = {item["logical_id"]: item for item in blueprint["components"]}
+    nets = {item["logical_id"]: item for item in blueprint["nets"]}
+    assert assets.dynamic["identity"] == "cigre_lcc_monopole_v1/wp1c_dynamic"
+    assert event["control_mode"] == "embedded_emtdc"
+    assert event["control_signal"] == "LCC_FAULT_ACTIVE"
+    assert event["recovery_window_s"] == pytest.approx(0.5)
+    assert {components[name]["parameters"]["NAME"] for name in event["control_components"]} == {event["control_signal"]}
+    assert nets["inverter_fault_active_integer"]["label"] == event["control_signal"]
+    assert assets.dynamic["bounded_dc_response"]["maximum_peak_to_prefault_ratio"] == pytest.approx(3.0)
+    assert assets.dynamic["threshold_source"]["scope"] == "engineering_only"
 
 
 def test_catalog_registry_reference_mismatch_is_rejected(tmp_path):
