@@ -1839,6 +1839,71 @@ class LccExecutor:
                 )
             await asyncio.sleep(self.poll_interval_s)
 
+    def _resolve_dynamic_target(
+        self,
+        target: str,
+        *,
+        index: int,
+    ) -> tuple[int, str]:
+        if "." not in target:
+            raise _error(
+                "LCC_DYNAMIC_EVENT_UNAVAILABLE",
+                "Dynamic event targets must identify one logical component and parameter.",
+                "register_lcc_dynamic_events",
+                index=index,
+                target=target,
+            )
+        logical_component, logical_parameter = (
+            item.strip() for item in target.rsplit(".", 1)
+        )
+        component_id = self.component_ids.get(logical_component)
+        components = {
+            component.logical_id: component
+            for component in self.plan.blueprint.components
+        }
+        component = components.get(logical_component)
+        registry = (
+            self.asset_set.master_bindings
+            if self.asset_set is not None
+            else None
+        )
+        binding = (
+            registry.by_logical_name.get(component.definition)
+            if registry is not None and component is not None
+            else None
+        )
+        if (
+            not logical_component
+            or not logical_parameter
+            or component_id is None
+            or component is None
+            or logical_parameter not in component.parameters
+            or binding is None
+        ):
+            raise _error(
+                "LCC_DYNAMIC_EVENT_UNAVAILABLE",
+                "Dynamic event target resolution is incomplete.",
+                "register_lcc_dynamic_events",
+                index=index,
+                target=target,
+            )
+        parameter_bindings = [
+            item
+            for item in binding.parameters
+            if item.logical == (logical_parameter,)
+            and len(item.physical) == 1
+            and item.transform.get("kind") == "identity"
+        ]
+        if len(parameter_bindings) != 1:
+            raise _error(
+                "LCC_DYNAMIC_EVENT_UNAVAILABLE",
+                "Dynamic event parameters require one exact writable Master binding.",
+                "register_lcc_dynamic_events",
+                index=index,
+                target=target,
+            )
+        return component_id, parameter_bindings[0].physical[0]
+
     async def _register_dynamic_events(self, operation: LccPlanOperation) -> None:
         self._operation_started(operation)
         events = operation.arguments.get("events")
@@ -1850,6 +1915,8 @@ class LccExecutor:
             )
         normalized: list[dict[str, Any]] = []
         previous_time = -1.0
+        event_ids: set[str] = set()
+        target_slots: set[tuple[float, int, str]] = set()
         for index, event in enumerate(events):
             if not isinstance(event, Mapping):
                 raise _error(
@@ -1869,15 +1936,42 @@ class LccExecutor:
                     "register_lcc_dynamic_events",
                     index=index,
                 )
-            if isinstance(time_s, bool) or not isinstance(time_s, (int, float)) or not math.isfinite(float(time_s)) or float(time_s) <= previous_time:
+            if isinstance(time_s, bool) or not isinstance(time_s, (int, float)) or not math.isfinite(float(time_s)) or float(time_s) < previous_time:
                 raise _error(
                     "LCC_DYNAMIC_EVENT_UNAVAILABLE",
-                    "Dynamic event times must be finite and strictly increasing.",
+                    "Dynamic event times must be finite and non-decreasing.",
                     "register_lcc_dynamic_events",
                     index=index,
                 )
             previous_time = float(time_s)
-            normalized.append({"event_id": event_id.strip(), "time_s": float(time_s), "target": target.strip(), "value": value})
+            normalized_event_id = event_id.strip()
+            normalized_target = target.strip()
+            component_id, parameter_name = self._resolve_dynamic_target(
+                normalized_target,
+                index=index,
+            )
+            target_slot = (float(time_s), component_id, parameter_name)
+            if normalized_event_id in event_ids or target_slot in target_slots:
+                raise _error(
+                    "LCC_DYNAMIC_EVENT_UNAVAILABLE",
+                    "Dynamic events contain duplicate identifiers or target-time conflicts.",
+                    "register_lcc_dynamic_events",
+                    index=index,
+                    event_id=normalized_event_id,
+                    target=normalized_target,
+                )
+            event_ids.add(normalized_event_id)
+            target_slots.add(target_slot)
+            normalized.append(
+                {
+                    "event_id": normalized_event_id,
+                    "time_s": float(time_s),
+                    "target": normalized_target,
+                    "value": value,
+                    "component_id": component_id,
+                    "parameter_name": parameter_name,
+                }
+            )
         backend = getattr(self.service, "backend_service", self.service)
         capability_reader = getattr(backend, "get_timed_control_capabilities", None)
         scheduler = getattr(backend, "schedule_timed_controls", None)

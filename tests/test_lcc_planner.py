@@ -12,12 +12,12 @@ from pscad_mcp.hvdc.builders.lcc.assets import (
 )
 from pscad_mcp.hvdc.builders.lcc.catalog import parse_catalog
 from pscad_mcp.hvdc.builders.lcc.planner import (
-    LccPlanRequest,
     WP1C_DYNAMIC_PROFILE,
+    LccPlanRequest,
     _component_rectangles,
+    _dynamic_schedule_events,
     _net_route,
     _wp1b_connection_labels,
-    _dynamic_schedule_events,
     create_plan,
 )
 
@@ -29,7 +29,7 @@ def test_dynamic_schedule_events_expand_to_native_on_off_commands():
                 "kind": "inverter_ac_disturbance",
                 "time_s": 0.8,
                 "duration_s": 0.1,
-                "control_component": "fault_a",
+                "control_components": ["fault_a"],
                 "control_parameter": "NAME",
                 "apply_value": 1,
                 "clear_value": 0,
@@ -40,6 +40,53 @@ def test_dynamic_schedule_events_expand_to_native_on_off_commands():
         {"event_id": "inverter_ac_disturbance:on", "time_s": 0.8, "target": "fault_a.NAME", "value": 1},
         {"event_id": "inverter_ac_disturbance:off", "time_s": 0.9, "target": "fault_a.NAME", "value": 0},
     ]
+
+
+def test_dynamic_schedule_events_keep_three_phase_commands_simultaneous():
+    events = _dynamic_schedule_events(
+        [
+            {
+                "kind": "inverter_ac_disturbance",
+                "time_s": 0.8,
+                "duration_s": 0.1,
+                "control_components": ["fault_a", "fault_b", "fault_c"],
+                "control_parameter": "NAME",
+                "apply_value": 1,
+                "clear_value": 0,
+            }
+        ]
+    )
+
+    assert [event["time_s"] for event in events] == [0.8, 0.8, 0.8, 0.9, 0.9, 0.9]
+    assert {event["target"] for event in events[:3]} == {
+        "fault_a.NAME",
+        "fault_b.NAME",
+        "fault_c.NAME",
+    }
+    assert {event["target"] for event in events[3:]} == {
+        "fault_a.NAME",
+        "fault_b.NAME",
+        "fault_c.NAME",
+    }
+
+
+def test_dynamic_schedule_events_reject_duplicate_control_targets():
+    with pytest.raises(BackendError) as raised:
+        _dynamic_schedule_events(
+            [
+                {
+                    "kind": "inverter_ac_disturbance",
+                    "time_s": 0.8,
+                    "duration_s": 0.1,
+                    "control_components": ["fault_a", "fault_a"],
+                    "control_parameter": "NAME",
+                    "apply_value": 1,
+                    "clear_value": 0,
+                }
+            ]
+        )
+
+    assert raised.value.code == "LCC_DYNAMIC_EVENT_UNAVAILABLE"
 from pscad_mcp.hvdc.builders.lcc.routing import route_intersects_rectangles
 from pscad_mcp.hvdc.builders.lcc.schema import parse_blueprint
 

@@ -7,6 +7,7 @@ import math
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
+from itertools import pairwise
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +26,7 @@ from .catalog import (
     require_port,
     validate_parameters,
 )
+from .fault_event import inspect_fixed_lcc_fault_capability
 from .models import (
     LccAcceptanceCheck,
     LccBuildPlan,
@@ -38,7 +40,6 @@ from .routing import (
     route_intersects_rectangles,
     validate_orthogonal_route,
 )
-from .fault_event import inspect_fixed_lcc_fault_capability
 
 FULL_ACCEPTANCE_PROFILE = "full_acceptance"
 WP1B_SMOKE_PROFILE = "wp1b_smoke"
@@ -64,12 +65,19 @@ def _dynamic_schedule_events(events: Sequence[Mapping[str, Any]]) -> list[dict[s
                 "Dynamic event declarations must be objects.",
                 index=index,
             )
-        component = event.get("control_component")
+        components = event.get("control_components")
         parameter = event.get("control_parameter")
-        if not isinstance(component, str) or not component.strip() or not isinstance(parameter, str) or not parameter.strip():
+        if not isinstance(components, Sequence) or isinstance(components, (str, bytes, bytearray)) or not components or any(not isinstance(item, str) or not item.strip() for item in components) or not isinstance(parameter, str) or not parameter.strip():
             raise _error(
                 "LCC_DYNAMIC_EVENT_UNAVAILABLE",
                 "Dynamic event declarations require an exact control component and parameter.",
+                index=index,
+            )
+        normalized_components = [item.strip() for item in components]
+        if len(set(normalized_components)) != len(normalized_components):
+            raise _error(
+                "LCC_DYNAMIC_EVENT_UNAVAILABLE",
+                "Dynamic event control targets must be unique.",
                 index=index,
             )
         time_s = event.get("time_s")
@@ -80,31 +88,43 @@ def _dynamic_schedule_events(events: Sequence[Mapping[str, Any]]) -> list[dict[s
                 "Dynamic event timing must be finite, non-negative, and positive in duration.",
                 index=index,
             )
-        target = f"{component.strip()}.{parameter.strip()}"
         event_prefix = str(event.get("kind", "fault"))
         if len(events) > 1:
             event_prefix = f"{event_prefix}:{index}"
-        scheduled.extend(
-            [
-                {
-                    "event_id": f"{event_prefix}:on",
-                    "time_s": float(time_s),
-                    "target": target,
-                    "value": event.get("apply_value"),
-                },
-                {
-                    "event_id": f"{event_prefix}:off",
-                    "time_s": float(time_s) + float(duration_s),
-                    "target": target,
-                    "value": event.get("clear_value"),
-                },
-            ]
-        )
+        for phase_index, component in enumerate(normalized_components):
+            target = f"{component}.{parameter.strip()}"
+            phase_suffix = "" if len(components) == 1 else f":phase-{phase_index}"
+            scheduled.extend(
+                [
+                    {
+                        "event_id": f"{event_prefix}:on{phase_suffix}",
+                        "time_s": float(time_s),
+                        "target": target,
+                        "value": event.get("apply_value"),
+                    },
+                    {
+                        "event_id": f"{event_prefix}:off{phase_suffix}",
+                        "time_s": float(time_s) + float(duration_s),
+                        "target": target,
+                        "value": event.get("clear_value"),
+                    },
+                ]
+            )
     scheduled.sort(key=lambda item: (item["time_s"], item["event_id"]))
-    if any(right["time_s"] <= left["time_s"] for left, right in zip(scheduled, scheduled[1:])):
+    if any(
+        right["time_s"] < left["time_s"]
+        for left, right in pairwise(scheduled)
+    ):
         raise _error(
             "LCC_DYNAMIC_EVENT_UNAVAILABLE",
-            "Dynamic event times must be strictly increasing after expansion.",
+            "Dynamic event times must be non-decreasing after expansion.",
+        )
+    event_ids = [item["event_id"] for item in scheduled]
+    target_slots = [(item["time_s"], item["target"]) for item in scheduled]
+    if len(event_ids) != len(set(event_ids)) or len(target_slots) != len(set(target_slots)):
+        raise _error(
+            "LCC_DYNAMIC_EVENT_UNAVAILABLE",
+            "Expanded dynamic events contain duplicate identifiers or target-time conflicts.",
         )
     return scheduled
 
@@ -331,6 +351,8 @@ def _wp1b_connection_labels(blueprint) -> dict[str, str | None]:
             parent[right_root] = left_root
 
     for net in blueprint.nets:
+        if net.logical_id.startswith("inverter_fault_"):
+            continue
         endpoints = [
             (net.kind, f"{endpoint.component}:{endpoint.port}")
             for endpoint in net.endpoints
@@ -340,6 +362,8 @@ def _wp1b_connection_labels(blueprint) -> dict[str, str | None]:
 
     groups: dict[tuple[str, str], list[Any]] = defaultdict(list)
     for net in blueprint.nets:
+        if net.logical_id.startswith("inverter_fault_"):
+            continue
         endpoint = net.endpoints[0]
         root = find((net.kind, f"{endpoint.component}:{endpoint.port}"))
         groups[root].append(net)

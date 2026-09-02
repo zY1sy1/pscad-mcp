@@ -230,15 +230,19 @@ WP1C dynamic evidence is evaluated with real PSCAD-exported channel samples:
 The runner binds the report to a clean named checkout and rejects missing or
 unbounded disturbance/recovery evidence. Physical evidence without an
 independently reviewed golden is recorded as `INCOMPLETE_ANALYSIS`; it is never
-promoted to `accepted`. The current fixed companion does not yet expose a
-fault/event input, so no dynamic licensed PASS is claimed until that binding
-and a real PSCAD run exist.
+promoted to `accepted`. The fixed asset now declares three independently
+grounded inverter-side phase shunts, timed breaker controls, and the named
+fault-active `pgb` output channel. All three phase commands retain the same
+EMTDC timestamp. This is packaged/offline capability only: no dynamic
+licensed PASS is claimed until the bindings compile and a real PSCAD run
+produces the required evidence.
 
 The opt-in planner profile `wp1c_dynamic` performs a side-effect-free
 fault/event capability gate before any PSCAD project is created. It requires an
 exact EMTDC timer, a three-phase fault shunt, an `inverter_ac_bus` binding, and
-the `Fault/LCC Fault Active` output channel; the current fixed asset fails
-closed with `LCC_DYNAMIC_EVENT_UNAVAILABLE` until those bindings are present.
+the `Fault/LCC Fault Active` output channel. The packaged asset declares those
+bindings, while planning still fails closed with `LCC_DYNAMIC_EVENT_UNAVAILABLE`
+when live Master inventory or native timed scheduling support is absent.
 
 Licensed evidence generation and baseline promotion are separate actions. The
 run command never edits the checked-in baseline:

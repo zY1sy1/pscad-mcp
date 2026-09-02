@@ -16,6 +16,30 @@
     "frequency_hz": 50,
     "project_type": "case"
   },
+  "dynamic_events": [
+    {
+      "kind": "inverter_ac_disturbance",
+      "target_bus": "inverter_ac_bus",
+      "time_s": 0.8,
+      "duration_s": 0.1,
+      "phase_mask": [
+        1,
+        1,
+        1
+      ],
+      "timer_component": "inverter_fault_timer",
+      "shunt_component": "inverter_fault_shunt_group",
+      "channel": "Fault/LCC Fault Active",
+      "control_components": [
+        "inverter_fault_breaker_a",
+        "inverter_fault_breaker_b",
+        "inverter_fault_breaker_c"
+      ],
+      "control_parameter": "NAME",
+      "apply_value": 1,
+      "clear_value": 0
+    }
+  ],
   "canvases": [
     {
       "name": "Main",
@@ -422,6 +446,200 @@
       "role": "power"
     },
     {
+      "logical_id": "inverter_fault_breaker_a",
+      "definition": "master:breaker1",
+      "location": {
+        "x": 2780,
+        "y": 120
+      },
+      "orientation": 2,
+      "parameters": {
+        "NAME": 0
+      },
+      "ports": [
+        "A",
+        "B"
+      ],
+      "role": "fault_shunt"
+    },
+    {
+      "logical_id": "inverter_fault_breaker_b",
+      "definition": "master:breaker1",
+      "location": {
+        "x": 2780,
+        "y": 200
+      },
+      "orientation": 2,
+      "parameters": {
+        "NAME": 0
+      },
+      "ports": [
+        "A",
+        "B"
+      ],
+      "role": "fault_shunt"
+    },
+    {
+      "logical_id": "inverter_fault_breaker_c",
+      "definition": "master:breaker1",
+      "location": {
+        "x": 2780,
+        "y": 280
+      },
+      "orientation": 2,
+      "parameters": {
+        "NAME": 0
+      },
+      "ports": [
+        "A",
+        "B"
+      ],
+      "role": "fault_shunt"
+    },
+    {
+      "logical_id": "inverter_fault_resistor_a",
+      "definition": "master:fault_resistor",
+      "location": {
+        "x": 2880,
+        "y": 120
+      },
+      "orientation": 0,
+      "parameters": {
+        "Resistance_ohm": 0.01
+      },
+      "ports": [
+        "IN",
+        "OUT"
+      ],
+      "role": "fault_resistor"
+    },
+    {
+      "logical_id": "inverter_fault_resistor_b",
+      "definition": "master:fault_resistor",
+      "location": {
+        "x": 2880,
+        "y": 200
+      },
+      "orientation": 0,
+      "parameters": {
+        "Resistance_ohm": 0.01
+      },
+      "ports": [
+        "IN",
+        "OUT"
+      ],
+      "role": "fault_resistor"
+    },
+    {
+      "logical_id": "inverter_fault_resistor_c",
+      "definition": "master:fault_resistor",
+      "location": {
+        "x": 2880,
+        "y": 280
+      },
+      "orientation": 0,
+      "parameters": {
+        "Resistance_ohm": 0.01
+      },
+      "ports": [
+        "IN",
+        "OUT"
+      ],
+      "role": "fault_resistor"
+    },
+    {
+      "logical_id": "inverter_fault_ground_a",
+      "definition": "master:ground",
+      "location": {
+        "x": 2980,
+        "y": 120
+      },
+      "orientation": 0,
+      "parameters": {},
+      "ports": [
+        "GND"
+      ],
+      "role": "ground"
+    },
+    {
+      "logical_id": "inverter_fault_ground_b",
+      "definition": "master:ground",
+      "location": {
+        "x": 2980,
+        "y": 200
+      },
+      "orientation": 0,
+      "parameters": {},
+      "ports": [
+        "GND"
+      ],
+      "role": "ground"
+    },
+    {
+      "logical_id": "inverter_fault_ground_c",
+      "definition": "master:ground",
+      "location": {
+        "x": 2980,
+        "y": 280
+      },
+      "orientation": 0,
+      "parameters": {},
+      "ports": [
+        "GND"
+      ],
+      "role": "ground"
+    },
+    {
+      "logical_id": "inverter_fault_timer",
+      "definition": "master:tfault",
+      "location": {
+        "x": 2780,
+        "y": 400
+      },
+      "orientation": 0,
+      "parameters": {
+        "FaultTime_s": 0.8,
+        "FaultDuration_s": 0.1
+      },
+      "ports": [
+        "Y"
+      ],
+      "role": "control"
+    },
+    {
+      "logical_id": "fault_active_adapter",
+      "definition": "master:fault_state_integer_to_real",
+      "location": {
+        "x": 2860,
+        "y": 400
+      },
+      "orientation": 0,
+      "parameters": {},
+      "ports": [
+        "IN",
+        "OUT"
+      ],
+      "role": "signal_adapter"
+    },
+    {
+      "logical_id": "fault_active_output",
+      "definition": "master:dynamic_output_channel",
+      "location": {
+        "x": 2920,
+        "y": 400
+      },
+      "orientation": 0,
+      "parameters": {
+        "Group": "Fault",
+        "Name": "LCC Fault Active",
+        "Units": "state"
+      },
+      "ports": [
+        "INPUT"
+      ],
+      "role": "measurement"
+    },
+    {
       "logical_id": "rectifier_ground",
       "definition": "master:ground",
       "location": {
@@ -602,8 +820,22 @@
         {
           "component": "inverter_ac_meter",
           "port": "A"
+        },
+        {
+          "component": "inverter_fault_breaker_a",
+          "port": "A"
         }
-      ]
+      ],
+      "route": {
+        "vertices": [
+          [2650, 200],
+          [2485, 200],
+          [2485, 137],
+          [2744, 137],
+          [2744, 120]
+        ],
+        "policy": "orthogonal"
+      }
     },
     {
       "logical_id": "inverter_meter_filter_a",
@@ -630,8 +862,23 @@
         {
           "component": "inverter_filter",
           "port": "IN_B"
+        },
+        {
+          "component": "inverter_fault_breaker_b",
+          "port": "A"
         }
-      ]
+      ],
+      "route": {
+        "vertices": [
+          [2650, 210],
+          [2358, 210],
+          [2358, 288],
+          [2400, 288],
+          [2400, 200],
+          [2744, 200]
+        ],
+        "policy": "orthogonal"
+      }
     },
     {
       "logical_id": "inverter_source_filter_c",
@@ -644,8 +891,74 @@
         {
           "component": "inverter_filter",
           "port": "IN_C"
+        },
+        {
+          "component": "inverter_fault_breaker_c",
+          "port": "A"
         }
+      ],
+      "route": {
+        "vertices": [
+          [2650, 220],
+          [2358, 220],
+          [2358, 432],
+          [2420, 432],
+          [2420, 280],
+          [2744, 280]
+        ],
+        "policy": "orthogonal"
+      }
+    },
+    {
+      "logical_id": "inverter_fault_branch_a",
+      "kind": "electrical",
+      "endpoints": [
+        {"component": "inverter_fault_breaker_a", "port": "B"},
+        {"component": "inverter_fault_resistor_a", "port": "IN"}
       ]
+    },
+    {
+      "logical_id": "inverter_fault_branch_b",
+      "kind": "electrical",
+      "endpoints": [
+        {"component": "inverter_fault_breaker_b", "port": "B"},
+        {"component": "inverter_fault_resistor_b", "port": "IN"}
+      ]
+    },
+    {
+      "logical_id": "inverter_fault_branch_c",
+      "kind": "electrical",
+      "endpoints": [
+        {"component": "inverter_fault_breaker_c", "port": "B"},
+        {"component": "inverter_fault_resistor_c", "port": "IN"}
+      ]
+    },
+    {
+      "logical_id": "inverter_fault_ground_a",
+      "kind": "electrical",
+      "endpoints": [
+        {"component": "inverter_fault_resistor_a", "port": "OUT"},
+        {"component": "inverter_fault_ground_a", "port": "GND"}
+      ],
+      "route": {"vertices": [[2916, 120], [2980, 120]], "policy": "orthogonal"}
+    },
+    {
+      "logical_id": "inverter_fault_ground_b",
+      "kind": "electrical",
+      "endpoints": [
+        {"component": "inverter_fault_resistor_b", "port": "OUT"},
+        {"component": "inverter_fault_ground_b", "port": "GND"}
+      ],
+      "route": {"vertices": [[2916, 200], [2980, 200]], "policy": "orthogonal"}
+    },
+    {
+      "logical_id": "inverter_fault_ground_c",
+      "kind": "electrical",
+      "endpoints": [
+        {"component": "inverter_fault_resistor_c", "port": "OUT"},
+        {"component": "inverter_fault_ground_c", "port": "GND"}
+      ],
+      "route": {"vertices": [[2916, 280], [2980, 280]], "policy": "orthogonal"}
     },
     {
       "logical_id": "rectifier_filter_a_y",
@@ -1554,6 +1867,36 @@
         }
       ],
       "label": null
+    },
+    {
+      "logical_id": "inverter_fault_active_integer",
+      "kind": "data",
+      "endpoints": [
+        {
+          "component": "inverter_fault_timer",
+          "port": "Y"
+        },
+        {
+          "component": "fault_active_adapter",
+          "port": "IN"
+        }
+      ],
+      "label": null
+    },
+    {
+      "logical_id": "inverter_fault_active_signal",
+      "kind": "data",
+      "endpoints": [
+        {
+          "component": "fault_active_adapter",
+          "port": "OUT"
+        },
+        {
+          "component": "fault_active_output",
+          "port": "INPUT"
+        }
+      ],
+      "label": null
     }
   ],
   "measurements": [
@@ -1711,6 +2054,15 @@
       "channels": [
         "Main/ENABLE_INV"
       ]
+    },
+    {
+      "logical_id": "fault_active_measurement",
+      "kind": "data",
+      "component": "fault_active_output",
+      "port": "INPUT",
+      "channels": [
+        "Fault/LCC Fault Active"
+      ]
     }
   ],
   "outputs": [
@@ -1832,6 +2184,13 @@
       "units": "state",
       "role": "inverter_enable",
       "measurement": "enable_inv_measurement"
+    },
+    {
+      "logical_id": "fault_active",
+      "path": "Fault/LCC Fault Active",
+      "units": "state",
+      "role": "fault_active",
+      "measurement": "fault_active_measurement"
     }
   ],
   "structural_assertions": [

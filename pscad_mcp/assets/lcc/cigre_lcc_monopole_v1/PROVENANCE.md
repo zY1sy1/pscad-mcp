@@ -44,6 +44,13 @@ The three meter tags are imported on the generated Main canvas by the audited
 `master:main_signal_import` binding. `SignalInterface` receives those values
 through explicit raw input ports and passes each through a Real-to-Real
 `unity` adapter before one non-branching wire drives its monitor and output.
+The generated Main canvas also contains three independent inverter-side
+phase-to-ground fault branches. Each branch uses an audited scalar `breaker1`,
+a dedicated `0.01 ohm` `resistor`, and its own audited `ground`. The breakers
+are normally open and their `NAME` controls are scheduled by the fixed-LCC
+dynamic-event plan. An audited `tfault` provides the matching integer event-state
+signal. An audited `unity` converts it to Real, and a dedicated `pgb` predeclares
+the `Fault/LCC Fault Active` output channel.
 
 Offline structure evidence does not imply physical PASS. Load, instance
 read-back, save/reload, component compile, full-topology compile, and no-fault
@@ -52,7 +59,7 @@ simulation in licensed PSCAD 4.6.2 remain separate required gates.
 ## Master binding ledger
 
 `master-bindings-pscad-4.6.2.json` is the authoritative physical binding for
-the eight logical Master entries in this asset set. It was audited against the
+the fourteen logical Master entries in this asset set. It was audited against the
 installed PSCAD 4.6.2 `master.pslx`; no vendor definition body is copied into
 the registry or companion library.
 
@@ -64,9 +71,19 @@ the registry or companion library.
 - `smoothing_reactor -> inductor`, converting mH to H.
 - `dc_line_section -> resistor`, using the catalog's total resistance. The
   rejected `dc_mac_2w` candidate is a DC machine, not a transmission line.
+- `fault_resistor -> resistor`, using only the phase-to-ground shunt
+  resistance and intentionally carrying no line-length evidence parameter.
 - `ac_meter` and `dc_meter -> multimeter`, with explicit modes that retain the
   required electrical pair.
 - `ground -> ground`.
+- `main_signal_import -> import`, for the three Main-canvas meter tags.
+- `breaker1 -> breaker1`, with normally-open fixed settings and the audited
+  scalar `NAME` control parameter.
+- `tfault -> tfault`, with explicit fault-time and duration parameters.
+- `fault_state_integer_to_real -> unity`, fixed to Integer input, Real output,
+  and scalar dimension.
+- `dynamic_output_channel -> pgb`, with explicit group, name, units, and enabled
+  output-channel settings for the fault-active signal.
 
 The schema-v2 companion section separately binds every Master primitive used
 inside the repository-authored PSLX, including `pgb -> output_channel`. These

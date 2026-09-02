@@ -92,9 +92,14 @@ _DYNAMIC_EVENT_KEYS = {
     "shunt_component",
     "channel",
     "control_component",
+    "control_components",
     "control_parameter",
     "apply_value",
     "clear_value",
+}
+_DYNAMIC_EVENT_REQUIRED_KEYS = _DYNAMIC_EVENT_KEYS - {
+    "control_component",
+    "control_components",
 }
 _PARAMETRIC_TOP_LEVEL_KEYS = {
     "topology",
@@ -434,14 +439,29 @@ def _parse_output(value: Any, index: int) -> LccOutputSpec:
 def _parse_dynamic_events(value: Any) -> tuple[dict[str, Any], ...]:
     events = _sequence(value, "dynamic_events")
     parsed: list[dict[str, Any]] = []
-    for index, value in enumerate(events):
+    for index, item in enumerate(events):
         context = f"dynamic_events[{index}]"
-        event = _object(value, context)
+        event = _object(item, context)
         _keys(event, _DYNAMIC_EVENT_KEYS, context)
-        missing = sorted(_DYNAMIC_EVENT_KEYS - set(event))
+        missing = sorted(_DYNAMIC_EVENT_REQUIRED_KEYS - set(event))
         if missing:
             raise _invalid(f"{context} requires {', '.join(missing)}.", context=context)
-        parsed.append({key: _json_value(item, f"{context}.{key}") for key, item in event.items()})
+        has_single = "control_component" in event
+        has_multiple = "control_components" in event
+        if has_single == has_multiple:
+            raise _invalid(
+                f"{context} requires exactly one of control_component or control_components.",
+                context=context,
+            )
+        normalized = dict(event)
+        if has_single:
+            normalized["control_components"] = [normalized.pop("control_component")]
+        parsed.append(
+            {
+                key: _json_value(item, f"{context}.{key}")
+                for key, item in normalized.items()
+            }
+        )
     return tuple(parsed)
 
 

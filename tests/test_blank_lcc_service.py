@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import shutil
+import xml.etree.ElementTree as ET
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -16,20 +19,28 @@ from tests.test_master_binding_registry import _master_fixture_xml
 
 
 def _master_registry(tmp_path: Path, *, include_pgb: bool = True):
-    definitions = "<Definition name='tfault'><svg /></Definition>"
-    if include_pgb:
-        definitions += "<Definition name='pgb'><svg /></Definition>"
     master = tmp_path / "master.pslx"
-    master.write_text(
-        _master_fixture_xml().replace(
-            "</pslx>",
-            definitions + "</pslx>",
-        ),
-        encoding="utf-8",
-    )
+    master.write_text(_master_fixture_xml(), encoding="utf-8")
     assets = load_packaged_asset_set()
     assert assets.master_bindings is not None
-    return audit_master_bindings(master, assets.master_bindings)
+    audited = audit_master_bindings(master, assets.master_bindings)
+    if include_pgb:
+        return audited
+    missing = tmp_path / "master-without-pgb.pslx"
+    tree = ET.parse(master)
+    root = tree.getroot()
+    pgb = next(
+        child
+        for child in root
+        if child.tag == "Definition" and child.get("name") == "pgb"
+    )
+    root.remove(pgb)
+    tree.write(missing, encoding="utf-8", xml_declaration=True)
+    return replace(
+        audited,
+        master_path=str(missing),
+        master_sha256=hashlib.sha256(missing.read_bytes()).hexdigest(),
+    )
 
 
 class _NativeLccServiceFake:

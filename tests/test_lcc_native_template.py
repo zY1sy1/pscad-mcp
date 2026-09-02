@@ -72,15 +72,7 @@ def test_audit_requires_the_official_lcc_roles_and_fault_timer(tmp_path: Path) -
 def test_native_audit_verifies_retained_master_references(tmp_path: Path) -> None:
     source = _template(tmp_path / "official.pscx")
     master = tmp_path / "master.pslx"
-    master.write_text(
-        _master_fixture_xml().replace(
-            "</pslx>",
-            "<Definition name='tfault'><svg /></Definition>"
-            "<Definition name='pgb'><svg /></Definition>"
-            "</pslx>",
-        ),
-        encoding="utf-8",
-    )
+    master.write_text(_master_fixture_xml(), encoding="utf-8")
     assets = load_packaged_asset_set()
     assert assets.master_bindings is not None
     audited = audit_master_bindings(master, assets.master_bindings)

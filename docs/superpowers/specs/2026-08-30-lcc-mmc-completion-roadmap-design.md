@@ -1109,10 +1109,11 @@ Codex 不得在一个 turn 中同时实现两个 licensed 工作包，也不得�
 
 下一步执行 WP1C fixed LCC 动态验收：先用真实 PSCAD 导出样本运行
 `run_fixed_lcc_dynamic_acceptance.ps1`，验证 inverter AC disturbance、换相失败指示、
-有界 DC 响应和恢复窗口。当前 fixed companion 尚未声明 fault/event 输入时，
-runner 必须持久化 `INCOMPLETE_ANALYSIS` 或 `FAIL`，不得把 WP1B 无故障 smoke
-提升为动态 PASS。独立 golden 和最终 `accepted` 仍由 WP6 负责；WP1C 完成后再进入
-WP1D 参数化 LCC。
+有界 DC 响应和恢复窗口。fixed 资产已经声明分相故障支路、计时器和命名输出，
+下一门是这些绑定的真实编译、原生 EMTDC 调度和动态样本证据；证据不完整时 runner
+必须持久化 `INCOMPLETE_ANALYSIS` 或 `FAIL`，不得把 WP1B 无故障 smoke 提升为动态
+PASS。独立 golden 和最终 `accepted` 仍由 WP6 负责；WP1C 完成后再进入 WP1D 参数化
+LCC。
 
 在动态运行前，`wp1c_dynamic` planner profile 会先验证 fault timer、三相 fault
 shunt、`inverter_ac_bus` 和 `Fault/LCC Fault Active` 的唯一绑定；任一项缺失都返回

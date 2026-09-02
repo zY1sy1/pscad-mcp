@@ -328,6 +328,62 @@ def _master_fixture_xml(
     <form><category><parameter name='Name' type='Text'><value>IMPORT</value></parameter></category></form>
     <svg><port model='Transfer' name='A' x='0' y='0' dim='0' mode='Input' type='Real'/></svg>
   </Definition>
+  <Definition name='breaker1'>
+    <form><category>
+      <parameter name='NAME' type='Real'><value>0</value></parameter>
+      <parameter name='OPCUR' type='Choice'><value>0</value><choice>0 = off</choice><choice>1 = on</choice></parameter>
+      <parameter name='ENAB' type='Choice'><value>0</value><choice>0 = off</choice><choice>1 = on</choice></parameter>
+      <parameter name='ViewB' type='Choice'><value>1</value><choice>0 = hidden</choice><choice>1 = shown</choice></parameter>
+      <parameter name='CLVL' type='Real' unit='kA'><value>0</value></parameter>
+      <parameter name='ROFF' type='Real' unit='ohm'><value>1000000</value></parameter>
+      <parameter name='RON' type='Real' unit='ohm'><value>0.01</value></parameter>
+      <parameter name='PostIns' type='Choice'><value>0</value><choice>0 = off</choice><choice>1 = on</choice></parameter>
+      <parameter name='BOpen' type='Choice'><value>0</value><choice>0 = closed</choice><choice>2 = open</choice></parameter>
+    </category></form>
+    <svg>
+      <port model='Natural' name='A' x='36' y='0' dim='1' type='NonRemovable'/>
+      <port model='Natural' name='B' x='-36' y='0' dim='1' type='NonRemovable'/>
+    </svg>
+  </Definition>
+  <Definition name='tfault'>
+    <form><category>
+      <parameter name='TF' type='Real' unit='s'><value>0.8</value></parameter>
+      <parameter name='DF' type='Real' unit='s'><value>0.1</value></parameter>
+      <parameter name='REP' type='Choice'><value>0</value><choice>0 = off</choice><choice>1 = on</choice></parameter>
+    </category></form>
+    <svg><port model='Transfer' name='Y' x='-36' y='0' dim='1' mode='Output' type='Integer'/></svg>
+  </Definition>
+  <Definition name='unity'>
+    <form><category>
+      <parameter name='IType' type='Choice'><value>2</value><choice>0 = Logical</choice><choice>1 = Integer</choice><choice>2 = Real</choice></parameter>
+      <parameter name='OType' type='Choice'><value>1</value><choice>0 = Logical</choice><choice>1 = Integer (NINT)</choice><choice>2 = Real</choice><choice>3 = Integer (INT)</choice><choice>4 = Short Integer Signed</choice><choice>5 = Short Integer Unsigned</choice></parameter>
+      <parameter name='Dim' type='Integer' unit=''><value>1</value></parameter>
+    </category></form>
+    <svg>
+      <port model='Transfer' name='A:Dim' x='-36' y='0' dim='0' mode='Input' type='Real'>IType==2</port>
+      <port model='Transfer' name='B:Dim' x='0' y='0' dim='0' mode='Output' type='Real'>OType==2</port>
+      <port model='Transfer' name='B:Dim' x='0' y='0' dim='0' mode='Output' type='Logical'>OType==0</port>
+      <port model='Transfer' name='B:Dim' x='0' y='0' dim='0' mode='Output' type='Integer'>(OType!=0)&amp;&amp;(OType!=2)</port>
+      <port model='Transfer' name='A:Dim' x='-36' y='0' dim='0' mode='Input' type='Integer'>IType==1</port>
+      <port model='Transfer' name='A:Dim' x='-36' y='0' dim='0' mode='Input' type='Logical'>IType==0</port>
+    </svg>
+  </Definition>
+  <Definition name='pgb'>
+    <form><category>
+      <parameter name='Name' type='Text'><value>Untitled</value></parameter>
+      <parameter name='Group' type='Text'><value></value></parameter>
+      <parameter name='UseSignalName' type='Choice'><value>0</value><choice>0 = No</choice><choice>1 = Yes</choice></parameter>
+      <parameter name='enab' type='Choice'><value>1</value><choice>0 = No</choice><choice>1 = Yes</choice></parameter>
+      <parameter name='Display' type='Choice'><value>1</value><choice>0 = No</choice><choice>1 = Yes</choice></parameter>
+      <parameter name='Scale' type='Real' unit=''><value>1.0</value></parameter>
+      <parameter name='Units' type='Text'><value></value></parameter>
+      <parameter name='mrun' type='Choice'><value>0</value><choice>0 = Last run only</choice><choice>1 = All runs</choice></parameter>
+      <parameter name='Pol' type='Choice'><value>0</value><choice>0 = No</choice><choice>1 = Yes</choice></parameter>
+      <parameter name='Max' type='Real' unit=''><value>2.0</value></parameter>
+      <parameter name='Min' type='Real' unit=''><value>-2.0</value></parameter>
+    </category></form>
+    <svg><port model='Transfer' name='Signl' x='0' y='0' dim='0' mode='Input' type='Real'>true</port></svg>
+  </Definition>
 </pslx>
 """
 
@@ -557,10 +613,15 @@ def test_packaged_registry_contains_exact_fixed_catalog_bindings():
         "master:ac_filter_branch",
         "master:smoothing_reactor",
         "master:dc_line_section",
+        "master:fault_resistor",
         "master:ac_meter",
         "master:dc_meter",
         "master:ground",
         "master:main_signal_import",
+        "master:breaker1",
+        "master:tfault",
+        "master:fault_state_integer_to_real",
+        "master:dynamic_output_channel",
     }
     assert (
         registry.by_logical_name["master:converter_transformer"].physical_definition
@@ -632,7 +693,7 @@ def test_registry_hash_is_stable_for_key_order():
     assert first.sha256 == second.sha256
 
 
-def test_audit_resolves_all_eight_bindings_and_preserves_source_hash(tmp_path):
+def test_audit_resolves_all_packaged_bindings_and_preserves_source_hash(tmp_path):
     module = _subject()
     registry = _packaged_registry(module)
     master = _write_master_fixture(tmp_path)

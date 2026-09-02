@@ -40,13 +40,32 @@ def _complete_event() -> dict[str, object]:
 
 def _complete_blueprint() -> dict[str, object]:
     blueprint = _asset("blueprint.json")
+    blueprint["components"] = [
+        item
+        for item in blueprint["components"]
+        if not str(item.get("logical_id", "")).startswith("inverter_fault_")
+    ]
+    cleaned_nets = []
+    for item in blueprint["nets"]:
+        endpoints = [
+            endpoint
+            for endpoint in item.get("endpoints", [])
+            if not str(endpoint.get("component", "")).startswith("inverter_fault_")
+        ]
+        if len(endpoints) >= 2:
+            cleaned_nets.append({**item, "endpoints": endpoints})
+    blueprint["nets"] = cleaned_nets
+    blueprint["outputs"] = [
+        item for item in blueprint["outputs"] if item.get("role") != "fault_active"
+    ]
+    blueprint["dynamic_events"] = []
     blueprint["dynamic_events"] = [
         {
             **_complete_event(),
             "timer_component": "inverter_fault_timer",
             "shunt_component": "inverter_fault_shunt",
             "channel": "fault_active",
-            "control_component": "inverter_fault_shunt",
+            "control_components": ["inverter_fault_shunt"],
             "control_parameter": "IS",
             "apply_value": 1,
             "clear_value": 0,
@@ -124,6 +143,10 @@ def _complete_inventory() -> dict[str, object]:
     }
 
 
+def _production_inventory() -> dict[str, object]:
+    return {"definitions": _asset("catalog-pscad-4.6.2.json")["definitions"]}
+
+
 def test_valid_fault_event_normalizes_to_immutable_contract():
     result = validate_fixed_lcc_fault_event(_complete_event())
     assert result == FixedLccFaultEvent(
@@ -148,10 +171,9 @@ def test_current_fixed_blueprint_reports_explicit_missing_fault_bindings():
     )
     assert result["status"] == "INCOMPLETE_ANALYSIS"
     assert result["reasons"] == [
-        "fault_timer_missing",
-        "fault_shunt_missing",
-        "fault_event_missing",
-        "fault_channel_missing",
+        "fault_timer_port_missing",
+        "fault_shunt_phase_port_missing",
+        "fault_state_adapter_port_missing",
     ]
 
 
@@ -166,7 +188,89 @@ def test_complete_fault_binding_passes_without_side_effects():
     assert blueprint == before
 
 
+def test_packaged_breaker_group_requires_exact_event_references_and_state_signal():
+    blueprint = _asset("blueprint.json")
+    assert inspect_fixed_lcc_fault_capability(
+        blueprint, _asset("catalog-pscad-4.6.2.json"), _production_inventory()
+    )["status"] == "PASS"
+
+    mutations = [
+        ("timer_component", "missing_timer", "fault_timer_reference_mismatch"),
+        ("shunt_component", "missing_group", "fault_shunt_reference_mismatch"),
+        ("channel", "Fault/Wrong", "fault_channel_reference_mismatch"),
+    ]
+    for field, value, reason in mutations:
+        candidate = copy.deepcopy(blueprint)
+        candidate["dynamic_events"][0][field] = value
+        result = inspect_fixed_lcc_fault_capability(
+            candidate, _asset("catalog-pscad-4.6.2.json"), _production_inventory()
+        )
+        assert reason in result["reasons"]
+
+    disconnected = copy.deepcopy(blueprint)
+    disconnected["nets"] = [
+        net
+        for net in disconnected["nets"]
+        if net["logical_id"] != "inverter_fault_active_signal"
+    ]
+    result = inspect_fixed_lcc_fault_capability(
+        disconnected, _asset("catalog-pscad-4.6.2.json"), _production_inventory()
+    )
+    assert "fault_state_signal_unconnected" in result["reasons"]
+
+
+def test_packaged_breaker_group_requires_one_resistor_branch_per_breaker():
+    blueprint = _asset("blueprint.json")
+    branch = next(
+        net for net in blueprint["nets"] if net["logical_id"] == "inverter_fault_branch_b"
+    )
+    branch["endpoints"][1]["component"] = "inverter_fault_resistor_a"
+    result = inspect_fixed_lcc_fault_capability(
+        blueprint, _asset("catalog-pscad-4.6.2.json"), _production_inventory()
+    )
+    assert "fault_resistor_branch_unconnected" in result["reasons"]
+
+
+def test_live_inventory_port_records_may_omit_direction_metadata():
+    inventory = _complete_inventory()
+    for definition in inventory["definitions"]:
+        for port in definition["ports"]:
+            port.pop("direction", None)
+    result = inspect_fixed_lcc_fault_capability(
+        _complete_blueprint(), _asset("catalog-pscad-4.6.2.json"), inventory
+    )
+    assert result["status"] == "PASS"
+
+
+def test_live_inventory_definitions_may_be_keyed_by_logical_name():
+    inventory = _complete_inventory()
+    inventory["definitions"] = {
+        definition["scoped_name"]: {
+            key: value for key, value in definition.items() if key != "scoped_name"
+        }
+        for definition in inventory["definitions"]
+    }
+    result = inspect_fixed_lcc_fault_capability(
+        _complete_blueprint(), _asset("catalog-pscad-4.6.2.json"), inventory
+    )
+    assert result["status"] == "PASS"
+
+
 def test_blueprint_parser_preserves_dynamic_event_declarations():
     blueprint = _complete_blueprint()
     parsed = parse_blueprint(blueprint)
     assert parsed.to_dict()["dynamic_events"] == blueprint["dynamic_events"]
+
+
+def test_legacy_single_control_component_is_normalized_without_losing_capability():
+    blueprint = _complete_blueprint()
+    event = blueprint["dynamic_events"][0]
+    event["control_component"] = event.pop("control_components")[0]
+    parsed = parse_blueprint(blueprint)
+    normalized = parsed.to_dict()["dynamic_events"][0]
+    assert normalized["control_components"] == ["inverter_fault_shunt"]
+    assert "control_component" not in normalized
+    result = inspect_fixed_lcc_fault_capability(
+        blueprint, _asset("catalog-pscad-4.6.2.json"), _complete_inventory()
+    )
+    assert result["status"] == "PASS"

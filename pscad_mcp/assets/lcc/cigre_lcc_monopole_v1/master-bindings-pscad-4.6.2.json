@@ -525,6 +525,50 @@
       ]
     },
     {
+      "logical_name": "master:fault_resistor",
+      "physical_definition": "resistor",
+      "shape": {
+        "kind": "direct"
+      },
+      "ports": [
+        {
+          "logical": "IN",
+          "physical": "A",
+          "kind": "electrical",
+          "dimension": 1,
+          "occurrence": 0
+        },
+        {
+          "logical": "OUT",
+          "physical": "B",
+          "kind": "electrical",
+          "dimension": 1,
+          "occurrence": 0
+        }
+      ],
+      "parameters": [
+        {
+          "logical": [
+            "Resistance_ohm"
+          ],
+          "physical": [
+            "R"
+          ],
+          "transform": {
+            "kind": "identity"
+          },
+          "physical_contracts": {
+            "R": {
+              "type": "Real",
+              "unit": "ohm"
+            }
+          }
+        }
+      ],
+      "fixed_parameters": [],
+      "evidence_parameters": []
+    },
+    {
       "logical_name": "master:ac_meter",
       "physical_definition": "multimeter",
       "shape": {
@@ -731,6 +775,182 @@
         }
       ],
       "fixed_parameters": [],
+      "evidence_parameters": []
+    },
+    {
+      "logical_name": "master:breaker1",
+      "physical_definition": "breaker1",
+      "shape": {
+        "kind": "direct"
+      },
+      "ports": [
+        {
+          "logical": "A",
+          "physical": "A",
+          "kind": "electrical",
+          "dimension": 1,
+          "occurrence": 0
+        },
+        {
+          "logical": "B",
+          "physical": "B",
+          "kind": "electrical",
+          "dimension": 1,
+          "occurrence": 0
+        }
+      ],
+      "parameters": [
+        {
+          "logical": ["NAME"],
+          "physical": ["NAME"],
+          "transform": {"kind": "identity"},
+          "physical_contracts": {"NAME": {"type": "Real", "unit": null}}
+        }
+      ],
+      "fixed_parameters": [
+        {"physical": "OPCUR", "value": 0, "contract": {"type": "Choice", "unit": null, "choices": ["0", "1"]}},
+        {"physical": "ENAB", "value": 0, "contract": {"type": "Choice", "unit": null, "choices": ["0", "1"]}},
+        {"physical": "ViewB", "value": 1, "contract": {"type": "Choice", "unit": null, "choices": ["0", "1"]}},
+        {"physical": "CLVL", "value": 0, "contract": {"type": "Real", "unit": "kA"}},
+        {"physical": "ROFF", "value": 1000000, "contract": {"type": "Real", "unit": "ohm"}},
+        {"physical": "RON", "value": 0.01, "contract": {"type": "Real", "unit": "ohm"}},
+        {"physical": "PostIns", "value": 0, "contract": {"type": "Choice", "unit": null, "choices": ["0", "1"]}},
+        {"physical": "BOpen", "value": 0, "contract": {"type": "Choice", "unit": null, "choices": ["0", "2"]}}
+      ],
+      "evidence_parameters": []
+    },
+    {
+      "logical_name": "master:tfault",
+      "physical_definition": "tfault",
+      "shape": {
+        "kind": "direct"
+      },
+      "ports": [
+        {
+          "logical": "Y",
+          "physical": "Y",
+          "kind": "data",
+          "dimension": 1,
+          "occurrence": 0
+        }
+      ],
+      "parameters": [
+        {
+          "logical": ["FaultTime_s"],
+          "physical": ["TF"],
+          "transform": {"kind": "identity"},
+          "physical_contracts": {"TF": {"type": "Real", "unit": "s"}}
+        },
+        {
+          "logical": ["FaultDuration_s"],
+          "physical": ["DF"],
+          "transform": {"kind": "identity"},
+          "physical_contracts": {"DF": {"type": "Real", "unit": "s"}}
+        }
+      ],
+      "fixed_parameters": [
+        {"physical": "REP", "value": 0, "contract": {"type": "Choice", "unit": null, "choices": ["0", "1"]}}
+      ],
+      "evidence_parameters": []
+    },
+    {
+      "logical_name": "master:fault_state_integer_to_real",
+      "physical_definition": "unity",
+      "shape": {
+        "kind": "direct"
+      },
+      "ports": [
+        {
+          "logical": "IN",
+          "physical": "A:Dim",
+          "kind": "data",
+          "dimension": 1,
+          "occurrence": 1
+        },
+        {
+          "logical": "OUT",
+          "physical": "B:Dim",
+          "kind": "data",
+          "dimension": 1,
+          "occurrence": 0
+        }
+      ],
+      "parameters": [],
+      "fixed_parameters": [
+        {
+          "physical": "IType",
+          "value": 1,
+          "contract": {
+            "type": "Choice",
+            "unit": null,
+            "choices": ["0", "1", "2"]
+          }
+        },
+        {
+          "physical": "OType",
+          "value": 2,
+          "contract": {
+            "type": "Choice",
+            "unit": null,
+            "choices": ["0", "1", "2", "3", "4", "5"]
+          }
+        },
+        {
+          "physical": "Dim",
+          "value": 1,
+          "contract": {
+            "type": "Integer",
+            "unit": null
+          }
+        }
+      ],
+      "evidence_parameters": []
+    },
+    {
+      "logical_name": "master:dynamic_output_channel",
+      "physical_definition": "pgb",
+      "shape": {
+        "kind": "direct"
+      },
+      "ports": [
+        {
+          "logical": "INPUT",
+          "physical": "Signl",
+          "kind": "data",
+          "dimension": 1,
+          "occurrence": 0
+        }
+      ],
+      "parameters": [
+        {
+          "logical": ["Group"],
+          "physical": ["Group"],
+          "transform": {"kind": "identity"},
+          "physical_contracts": {"Group": {"type": "Text", "unit": null}}
+        },
+        {
+          "logical": ["Name"],
+          "physical": ["Name"],
+          "transform": {"kind": "identity"},
+          "physical_contracts": {"Name": {"type": "Text", "unit": null}}
+        },
+        {
+          "logical": ["Units"],
+          "physical": ["Units"],
+          "transform": {"kind": "identity"},
+          "physical_contracts": {"Units": {"type": "Text", "unit": null}}
+        }
+      ],
+      "fixed_parameters": [
+        {"physical": "UseSignalName", "value": 0, "contract": {"type": "Choice", "unit": null, "choices": ["0", "1"]}},
+        {"physical": "enab", "value": 1, "contract": {"type": "Choice", "unit": null, "choices": ["0", "1"]}},
+        {"physical": "Display", "value": 1, "contract": {"type": "Choice", "unit": null, "choices": ["0", "1"]}},
+        {"physical": "Scale", "value": 1.0, "contract": {"type": "Real", "unit": ""}},
+        {"physical": "mrun", "value": 0, "contract": {"type": "Choice", "unit": null, "choices": ["0", "1"]}},
+        {"physical": "Pol", "value": 0, "contract": {"type": "Choice", "unit": null, "choices": ["0", "1"]}},
+        {"physical": "Max", "value": 2.0, "contract": {"type": "Real", "unit": ""}},
+        {"physical": "Min", "value": -2.0, "contract": {"type": "Real", "unit": ""}}
+      ],
       "evidence_parameters": []
     }
   ],

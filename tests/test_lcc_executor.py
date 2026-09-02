@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from pscad_mcp.core.backend.base import BackendError
+from pscad_mcp.core.master_bindings import parse_master_binding_registry
 from pscad_mcp.hvdc.builders.lcc.assets import load_packaged_asset_set
 from pscad_mcp.hvdc.builders.lcc.executor import (
     LccExecutor,
@@ -1101,17 +1102,67 @@ class TimedScheduleService(RecordingPscadService):
         self.backend_service = backend
 
 
+def _dynamic_asset_set():
+    bindings = []
+    for logical_name in ("master:source", "master:load"):
+        bindings.append(
+            {
+                "logical_name": logical_name,
+                "physical_definition": logical_name.split(":", 1)[1],
+                "shape": {"kind": "direct"},
+                "ports": [
+                    {
+                        "logical": "P",
+                        "physical": "P",
+                        "kind": "electrical",
+                        "dimension": 1,
+                        "occurrence": 0,
+                    }
+                ],
+                "parameters": [
+                    {
+                        "logical": ["LogicalId"],
+                        "physical": ["NAME"],
+                        "transform": {"kind": "identity"},
+                        "physical_contracts": {
+                            "NAME": {"type": "Text", "unit": None}
+                        },
+                    }
+                ],
+                "fixed_parameters": [],
+                "evidence_parameters": [],
+            }
+        )
+    registry = parse_master_binding_registry(
+        {
+            "schema_version": 1,
+            "name": "dynamic_executor_test",
+            "pscad_version": "4.6.2",
+            "bindings": bindings,
+        }
+    )
+    return type("DynamicAssetSet", (), {"master_bindings": registry})()
+
+
 def test_executor_registers_dynamic_events_with_native_emtdc_scheduler(tmp_path):
     backend = TimedScheduleBackend()
-    executor = LccExecutor(_plan(tmp_path), TimedScheduleService(backend), tmp_path)
+    executor = LccExecutor(
+        _plan(tmp_path),
+        TimedScheduleService(backend),
+        tmp_path,
+        asset_set=_dynamic_asset_set(),
+    )
+    executor.component_ids = {"source": 41, "load": 42}
     operation = LccPlanOperation(
         sequence=1,
         kind="register_dynamic_events",
         target="CIGRE_LCC",
         arguments={
             "events": [
-                {"event_id": "fault-on", "time_s": 0.8, "target": "fault_a", "value": 1},
-                {"event_id": "fault-off", "time_s": 0.9, "target": "fault_a", "value": 0},
+                {"event_id": "fault-a-on", "time_s": 0.8, "target": "source.LogicalId", "value": 1},
+                {"event_id": "fault-b-on", "time_s": 0.8, "target": "load.LogicalId", "value": 1},
+                {"event_id": "fault-a-off", "time_s": 0.9, "target": "source.LogicalId", "value": 0},
+                {"event_id": "fault-b-off", "time_s": 0.9, "target": "load.LogicalId", "value": 0},
             ]
         },
     )
@@ -1120,10 +1171,55 @@ def test_executor_registers_dynamic_events_with_native_emtdc_scheduler(tmp_path)
 
     assert backend.events == (
         executor.project_name,
-        list(operation.arguments["events"]),
+        [
+            {
+                **event,
+                "component_id": 41 if event["target"].startswith("source.") else 42,
+                "parameter_name": "NAME",
+            }
+            for event in operation.arguments["events"]
+        ],
     )
     assert executor.result["dynamic_schedule"]["status"] == "PASS"
-    assert len(executor.result["dynamic_schedule"]["acknowledgements"]) == 2
+    assert len(executor.result["dynamic_schedule"]["acknowledgements"]) == 4
+
+
+@pytest.mark.parametrize(
+    ("target", "event_ids"),
+    [
+        ("missing.LogicalId", ("fault-on", "fault-off")),
+        ("source.Unknown", ("fault-on", "fault-off")),
+        ("source.LogicalId", ("fault-on", "fault-on")),
+    ],
+)
+def test_executor_rejects_unresolved_or_ambiguous_dynamic_targets(
+    tmp_path, target, event_ids
+):
+    backend = TimedScheduleBackend()
+    executor = LccExecutor(
+        _plan(tmp_path),
+        TimedScheduleService(backend),
+        tmp_path,
+        asset_set=_dynamic_asset_set(),
+    )
+    executor.component_ids = {"source": 41, "load": 42}
+    operation = LccPlanOperation(
+        sequence=1,
+        kind="register_dynamic_events",
+        target="CIGRE_LCC",
+        arguments={
+            "events": [
+                {"event_id": event_ids[0], "time_s": 0.8, "target": target, "value": 1},
+                {"event_id": event_ids[1], "time_s": 0.9, "target": target, "value": 0},
+            ]
+        },
+    )
+
+    with pytest.raises(BackendError) as raised:
+        asyncio.run(executor._register_dynamic_events(operation))
+
+    assert raised.value.code == "LCC_DYNAMIC_EVENT_UNAVAILABLE"
+    assert backend.events is None
 
 
 def test_executor_rejects_dynamic_events_without_native_emtdc_scheduler(tmp_path):
@@ -1131,12 +1227,14 @@ def test_executor_rejects_dynamic_events_without_native_emtdc_scheduler(tmp_path
         _plan(tmp_path),
         TimedScheduleService(TimedScheduleBackend(native=False)),
         tmp_path,
+        asset_set=_dynamic_asset_set(),
     )
+    executor.component_ids = {"source": 41, "load": 42}
     operation = LccPlanOperation(
         sequence=1,
         kind="register_dynamic_events",
         target="CIGRE_LCC",
-        arguments={"events": [{"event_id": "fault-on", "time_s": 0.8, "target": "fault_a", "value": 1}]},
+        arguments={"events": [{"event_id": "fault-on", "time_s": 0.8, "target": "source.LogicalId", "value": 1}]},
     )
 
     with pytest.raises(BackendError) as raised:

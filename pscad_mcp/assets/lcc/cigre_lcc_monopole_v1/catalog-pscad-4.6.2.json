@@ -333,6 +333,49 @@
       }
     },
     {
+      "scoped_name": "master:fault_resistor",
+      "ports": [
+        {
+          "name": "IN",
+          "kind": "electrical",
+          "dimension": 1,
+          "offset": [
+            0,
+            0
+          ]
+        },
+        {
+          "name": "OUT",
+          "kind": "electrical",
+          "dimension": 1,
+          "offset": [
+            36,
+            0
+          ]
+        }
+      ],
+      "parameters": {
+        "Resistance_ohm": {
+          "type": "float",
+          "minimum": 0,
+          "maximum": 1000,
+          "unit": "ohm"
+        }
+      },
+      "bounding_box": [
+        0,
+        -10,
+        36,
+        10
+      ],
+      "metadata": {
+        "library": "master",
+        "characterized_for": "4.6.2",
+        "binding_registry": "master-bindings-pscad-4.6.2.json",
+        "fault_role": "phase-to-ground shunt impedance"
+      }
+    },
+    {
       "scoped_name": "master:ac_meter",
       "ports": [
         {
@@ -433,6 +476,77 @@
         "library": "master",
         "characterized_for": "4.6.2",
         "binding_registry": "master-bindings-pscad-4.6.2.json"
+      }
+    },
+    {
+      "scoped_name": "master:breaker1",
+      "ports": [
+        {"name": "A", "kind": "electrical", "dimension": 1, "offset": [36, 0]},
+        {"name": "B", "kind": "electrical", "dimension": 1, "offset": [-36, 0]}
+      ],
+      "parameters": {
+        "NAME": {"type": "float", "minimum": 0, "maximum": 1, "default": 0}
+      },
+      "bounding_box": [-36, -20, 36, 20],
+      "metadata": {
+        "library": "master",
+        "characterized_for": "4.6.2",
+        "binding_registry": "master-bindings-pscad-4.6.2.json",
+        "control_semantics": "NAME=1 closed, NAME=0 open"
+      }
+    },
+    {
+      "scoped_name": "master:tfault",
+      "ports": [
+        {"name": "Y", "kind": "data", "dimension": 1, "offset": [-36, 0]}
+      ],
+      "parameters": {
+        "FaultTime_s": {"type": "float", "minimum": 0, "unit": "s", "default": 0.8},
+        "FaultDuration_s": {"type": "float", "minimum": 0, "unit": "s", "default": 0.1}
+      },
+      "bounding_box": [-20, -20, 30, 20],
+      "metadata": {
+        "library": "master",
+        "characterized_for": "4.6.2",
+        "binding_registry": "master-bindings-pscad-4.6.2.json",
+        "control_semantics": "EMTDC timed fault indicator"
+      }
+    },
+    {
+      "scoped_name": "master:fault_state_integer_to_real",
+      "ports": [
+        {"name": "IN", "kind": "data", "dimension": 1, "offset": [-36, 0]},
+        {"name": "OUT", "kind": "data", "dimension": 1, "offset": [0, 0]}
+      ],
+      "parameters": {},
+      "bounding_box": [-36, -20, 0, 20],
+      "metadata": {
+        "library": "master",
+        "master_definition": "unity",
+        "characterized_for": "4.6.2",
+        "binding_registry": "master-bindings-pscad-4.6.2.json",
+        "input_type": "Integer",
+        "output_type": "Real",
+        "dimension": 1
+      }
+    },
+    {
+      "scoped_name": "master:dynamic_output_channel",
+      "ports": [
+        {"name": "INPUT", "kind": "data", "dimension": 1, "offset": [0, 0]}
+      ],
+      "parameters": {
+        "Group": {"type": "string", "default": "Fault"},
+        "Name": {"type": "string", "default": "LCC Fault Active"},
+        "Units": {"type": "string", "default": "state"}
+      },
+      "bounding_box": [-20, -20, 40, 20],
+      "metadata": {
+        "library": "master",
+        "master_definition": "pgb",
+        "characterized_for": "4.6.2",
+        "binding_registry": "master-bindings-pscad-4.6.2.json",
+        "control_semantics": "predeclares the Fault/LCC Fault Active PSCAD output channel"
       }
     },
     {
