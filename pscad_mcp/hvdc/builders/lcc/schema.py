@@ -103,6 +103,9 @@ _DYNAMIC_EVENT_KEYS = {
 _DYNAMIC_EVENT_REQUIRED_KEYS = _DYNAMIC_EVENT_KEYS - {
     "control_component",
     "control_components",
+    "control_mode",
+    "control_signal",
+    "recovery_window_s",
 }
 _PARAMETRIC_TOP_LEVEL_KEYS = {
     "topology",

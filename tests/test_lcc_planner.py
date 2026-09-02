@@ -588,7 +588,9 @@ def test_packaged_raw_signal_route_bends_are_pscad_grid_aligned():
 def test_packaged_fixed_data_nets_do_not_create_main_canvas_labels():
     blueprint = load_packaged_asset_set().blueprint
 
-    assert all(net.label is None for net in blueprint.nets if net.kind == "data")
+    labels = {net.logical_id: net.label for net in blueprint.nets if net.kind == "data"}
+    assert labels["inverter_fault_active_integer"] == "LCC_FAULT_ACTIVE"
+    assert all(label is None for logical_id, label in labels.items() if logical_id != "inverter_fault_active_integer")
 
 
 def test_wp1b_labels_consolidate_shared_ports_and_reuse_raw_signal_names():

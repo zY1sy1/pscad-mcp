@@ -32,7 +32,7 @@ def test_production_asset_set_has_fixed_identity_and_complete_contract():
     assert len(asset_set.golden["channels"]) == 11
     assert set(asset_set.hashes) == {
         "PROVENANCE.md", "acceptance.json", "blueprint.json", "catalog-pscad-4.6.2.json", "golden.json", "library/cigre_lcc_v1.pslx",
-        "master-bindings-pscad-4.6.2.json", "smoke.json",
+        "master-bindings-pscad-4.6.2.json", "smoke.json", "dynamic.json",
     }
     assert asset_set.master_bindings is not None
     assert len(asset_set.master_bindings.bindings) == 14
