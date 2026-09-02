@@ -103,9 +103,6 @@ _DYNAMIC_EVENT_KEYS = {
 _DYNAMIC_EVENT_REQUIRED_KEYS = _DYNAMIC_EVENT_KEYS - {
     "control_component",
     "control_components",
-    "control_mode",
-    "control_signal",
-    "recovery_window_s",
 }
 _PARAMETRIC_TOP_LEVEL_KEYS = {
     "topology",
@@ -452,6 +449,13 @@ def _parse_dynamic_events(value: Any) -> tuple[dict[str, Any], ...]:
         missing = sorted(_DYNAMIC_EVENT_REQUIRED_KEYS - set(event))
         if missing:
             raise _invalid(f"{context} requires {', '.join(missing)}.", context=context)
+        contract_fields = {"control_mode", "control_signal", "recovery_window_s"}
+        present_contract = contract_fields & set(event)
+        if present_contract and present_contract != contract_fields:
+            missing_contract = sorted(contract_fields - present_contract)
+            raise _invalid(
+                f"{context} requires {', '.join(missing_contract)}.", context=context
+            )
         has_single = "control_component" in event
         has_multiple = "control_components" in event
         if has_single == has_multiple:
@@ -462,6 +466,21 @@ def _parse_dynamic_events(value: Any) -> tuple[dict[str, Any], ...]:
         normalized = dict(event)
         if has_single:
             normalized["control_components"] = [normalized.pop("control_component")]
+        # WP1C owns these values in the hashed blueprint asset; do not supply
+        # Python defaults while parsing. Legacy events may omit the whole
+        # contract, but partial declarations are rejected above.
+        if present_contract:
+            normalized["control_mode"] = _text(
+                normalized["control_mode"], f"{context}.control_mode"
+            )
+            normalized["control_signal"] = _text(
+                normalized["control_signal"], f"{context}.control_signal"
+            )
+            normalized["recovery_window_s"] = _number(
+                normalized["recovery_window_s"],
+                f"{context}.recovery_window_s",
+                positive=True,
+            )
         parsed.append(
             {
                 key: _json_value(item, f"{context}.{key}")

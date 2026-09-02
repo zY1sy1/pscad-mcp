@@ -523,6 +523,8 @@ def _duration(request: LccPlanRequest, asset_set: LccAssetSet) -> float:
             )
         return float(expected)
     default = asset_set.blueprint.settings.get("simulation_duration_s")
+    if request.verification_profile == WP1C_DYNAMIC_PROFILE and request.simulation_duration_s is None:
+        default = 1.5
     if isinstance(default, bool) or not isinstance(default, (int, float)) or default <= 0:
         raise _error("LCC_BLUEPRINT_INVALID", "The blueprint simulation duration is invalid.")
     value = default if request.simulation_duration_s is None else request.simulation_duration_s
@@ -742,6 +744,24 @@ def create_plan(
                 reasons=capability.get("reasons", []),
             )
     duration = _duration(request, asset_set)
+    if request.verification_profile == WP1C_DYNAMIC_PROFILE:
+        event = blueprint.dynamic_events[0] if blueprint.dynamic_events else {}
+        bindings = capability.get("bindings", {})
+        try:
+            minimum_duration = (
+                float(event.get("time_s"))
+                + float(event.get("duration_s"))
+                + float(bindings.get("recovery_window_s"))
+            )
+        except (TypeError, ValueError):
+            minimum_duration = float("inf")
+        if duration + 1e-12 < minimum_duration:
+            raise _error(
+                "LCC_DYNAMIC_EVENT_UNAVAILABLE",
+                "Simulation duration does not cover the complete recovery window.",
+                simulation_duration_s=duration,
+                minimum_duration_s=minimum_duration,
+            )
     final_path, staging_path, project_name, _ = _resolve_paths(request, workspace)
     catalog = parse_catalog(asset_set.catalog)
     if catalog.pscad_version != asset_set.pscad_version:

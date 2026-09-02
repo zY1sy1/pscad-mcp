@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
 from typing import Any
@@ -15,6 +16,8 @@ _EVENT_KEYS = {"kind", "target_bus", "time_s", "duration_s", "phase_mask"}
 _EVENT_KINDS = {"inverter_ac_disturbance"}
 _TIMER_DEFINITIONS = {"master:tfault", "master:tfaultn"}
 _SHUNT_DEFINITIONS = {"master:tpflt"}
+_CONTROL_MODES = {"embedded_emtdc", "native_scheduler"}
+_SIGNAL_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 def _invalid(field: str, message: str, **details: Any) -> BackendError:
@@ -127,6 +130,71 @@ def _has_port(record: Mapping[str, Any], name: str, *, kind: str, dimension: int
     return False
 
 
+def _embedded_control_reasons(
+    event: Mapping[str, Any],
+    components: Mapping[str, Mapping[str, Any]],
+    nets: Sequence[Mapping[str, Any]],
+    inventory: Mapping[str, Any],
+) -> list[str]:
+    """Validate the exact WP1C control producer/consumer contract."""
+
+    reasons: list[str] = []
+    mode = event.get("control_mode")
+    signal = event.get("control_signal")
+    recovery = event.get("recovery_window_s")
+    if mode not in _CONTROL_MODES:
+        reasons.append("fault_control_mode_invalid")
+        return reasons
+    if not isinstance(signal, str) or not _SIGNAL_RE.fullmatch(signal):
+        reasons.append("fault_control_signal_invalid")
+    if (
+        isinstance(recovery, bool)
+        or not isinstance(recovery, (int, float))
+        or not math.isfinite(float(recovery))
+        or recovery <= 0
+    ):
+        reasons.append("fault_recovery_window_invalid")
+    if reasons:
+        return reasons
+    if mode == "native_scheduler":
+        capabilities = inventory.get("timed_control_capabilities", inventory)
+        if not isinstance(capabilities, Mapping) or not (
+            capabilities.get("native_schedule") is True
+            and capabilities.get("simulation_clock") is True
+            and capabilities.get("time_basis") == "EMTDC"
+        ):
+            reasons.append("native_scheduler_unavailable")
+        return reasons
+    consumers = event.get("control_components")
+    consumer_names = list(consumers) if isinstance(consumers, Sequence) and not isinstance(consumers, (str, bytes, bytearray)) else []
+    if (
+        len(consumer_names) != 3
+        or len({name for name in consumer_names if isinstance(name, str)}) != 3
+        or any(
+            not isinstance(name, str)
+            or name not in components
+            or not isinstance(components[name].get("parameters"), Mapping)
+            or components[name]["parameters"].get("NAME") != signal
+            for name in consumer_names
+        )
+    ):
+        reasons.append("fault_control_consumer_mismatch")
+    adapter_id = "fault_active_adapter"
+    labeled_nets = [net for net in nets if net.get("label") == signal]
+    expected_producer = {"inverter_fault_timer:Y", f"{adapter_id}:IN"}
+    producer_endpoints = (
+        {
+            f"{endpoint.get('component')}:{endpoint.get('port')}"
+            for endpoint in _records(labeled_nets[0].get("endpoints", ()), "net.endpoints")
+        }
+        if labeled_nets
+        else set()
+    )
+    if len(labeled_nets) != 1 or producer_endpoints != expected_producer:
+        reasons.append("fault_control_producer_mismatch")
+    return reasons
+
+
 def inspect_fixed_lcc_fault_capability(
     blueprint: Mapping[str, Any],
     catalog: Mapping[str, Any],
@@ -184,6 +252,8 @@ def inspect_fixed_lcc_fault_capability(
         reasons.append("fault_event_missing" if not events else "fault_event_ambiguous")
     if len(fault_outputs) != 1:
         reasons.append("fault_channel_missing" if not fault_outputs else "fault_channel_ambiguous")
+    elif fault_outputs[0].get("units") != "state":
+        reasons.append("fault_output_units_invalid")
     if reasons:
         return {"status": INCOMPLETE, "reasons": list(dict.fromkeys(reasons)), "bindings": {}}
 
@@ -195,8 +265,16 @@ def inspect_fixed_lcc_fault_capability(
         return {"status": INCOMPLETE, "reasons": ["fault_event_invalid"], "error": error.to_dict(), "bindings": {}}
     timer_id, timer = timers[0]
     shunt_id, shunt = shunts[0]
+    if breaker_group_candidate:
+        reasons.extend(_embedded_control_reasons(events[0], components, nets, inventory))
     if events[0].get("timer_component") != timer_id:
         reasons.append("fault_timer_reference_mismatch")
+    timer_parameters = timer.get("parameters")
+    if breaker_group_candidate and isinstance(timer_parameters, Mapping):
+        if timer_parameters.get("FaultTime_s") != event["time_s"]:
+            reasons.append("fault_timer_event_mismatch")
+        if timer_parameters.get("FaultDuration_s") != event["duration_s"]:
+            reasons.append("fault_timer_event_mismatch")
     control_components = events[0].get("control_components")
     single_control = events[0].get("control_component")
     if control_components is None and isinstance(single_control, str):
@@ -261,6 +339,15 @@ def inspect_fixed_lcc_fault_capability(
                 for resistor_id in resistor_ids
                 if {f"{breaker_id}:B", f"{resistor_id}:IN"} <= endpoint_keys
             }
+            branch_pair_counts: dict[tuple[str, str], int] = {}
+            for endpoint_keys in net_endpoint_sets:
+                for breaker_id in shunt_ids:
+                    for resistor_id in resistor_ids:
+                        if {f"{breaker_id}:B", f"{resistor_id}:IN"} <= endpoint_keys:
+                            pair = (breaker_id, resistor_id)
+                            branch_pair_counts[pair] = branch_pair_counts.get(pair, 0) + 1
+            if any(count != 1 for count in branch_pair_counts.values()):
+                reasons.append("fault_resistor_branch_duplicate")
             if (
                 len(branch_pairs) != 3
                 or {breaker_id for breaker_id, _resistor_id in branch_pairs}
@@ -275,11 +362,15 @@ def inspect_fixed_lcc_fault_capability(
                 if component.get("definition") == "master:ground"
             }
             for resistor_id, _component in resistors:
-                grounded = any(
-                    f"{resistor_id}:OUT" in endpoint_keys
-                    and any(f"{ground_id}:GND" in endpoint_keys for ground_id in ground_ids)
+                ground_count = sum(
+                    1
                     for endpoint_keys in net_endpoint_sets
+                    if f"{resistor_id}:OUT" in endpoint_keys
+                    and any(f"{ground_id}:GND" in endpoint_keys for ground_id in ground_ids)
                 )
+                grounded = ground_count > 0
+                if ground_count > 1:
+                    reasons.append("fault_resistor_ground_duplicate")
                 if not grounded:
                     reasons.append("fault_resistor_ground_unconnected")
         adapters = [
@@ -344,10 +435,11 @@ def inspect_fixed_lcc_fault_capability(
         reasons.append("fault_trigger_unconnected")
     bus_connected = (
         all(
-            any(
-                any(endpoint.get("component") == logical_id and endpoint.get("port") == "A" for endpoint in _records(net.get("endpoints", ()), "net.endpoints"))
+            sum(
+                1
                 for net in nets
-            )
+                if any(endpoint.get("component") == logical_id and endpoint.get("port") == "A" for endpoint in _records(net.get("endpoints", ()), "net.endpoints"))
+            ) == 1
             for logical_id, _component in shunts
         )
         if breaker_group
@@ -366,15 +458,21 @@ def inspect_fixed_lcc_fault_capability(
         "reasons": [],
         "bindings": {
             "event": event,
+            "control_mode": events[0].get("control_mode"),
+            "control_signal": events[0].get("control_signal"),
+            "recovery_window_s": events[0].get("recovery_window_s"),
             "timer_component": timer_id,
+            "timer": timer_id,
             "shunt_component": (
                 "inverter_fault_shunt_group" if breaker_group else shunt_id
             ),
             "channel": fault_outputs[0].get("path"),
             "control_components": list(control_components),
+            "consumers": list(control_components),
             "control_parameter": events[0]["control_parameter"],
             "apply_value": events[0]["apply_value"],
             "clear_value": events[0]["clear_value"],
+            "output": fault_outputs[0].get("path"),
         },
     }
 

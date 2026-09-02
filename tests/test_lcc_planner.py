@@ -16,6 +16,7 @@ from pscad_mcp.hvdc.builders.lcc.planner import (
     LccPlanRequest,
     _component_rectangles,
     _dynamic_schedule_events,
+    _duration,
     _net_route,
     _wp1b_connection_labels,
     create_plan,
@@ -752,3 +753,27 @@ def test_dynamic_profile_fails_closed_when_fault_binding_is_missing(tmp_path):
         "fault_event_missing",
         "fault_channel_missing",
     ]
+
+
+def test_dynamic_profile_rejects_duration_shorter_than_recovery_before_path_resolution(tmp_path):
+    request = _request(
+        verification_profile=WP1C_DYNAMIC_PROFILE,
+        simulation_duration_s=1.39995,
+    )
+    assets = load_packaged_asset_set()
+    with pytest.raises(BackendError) as raised:
+        create_plan(request, assets, {"pscad_version": "4.6.2", "definitions": assets.catalog["definitions"]}, tmp_path)
+    assert raised.value.code == "LCC_DYNAMIC_EVENT_UNAVAILABLE"
+    assert raised.value.details["simulation_duration_s"] == pytest.approx(1.39995)
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.parametrize("duration, expected", [(1.4, 1.4), (None, 1.5)])
+def test_dynamic_profile_accepts_complete_recovery_duration(tmp_path, duration, expected):
+    request = _request(
+        verification_profile=WP1C_DYNAMIC_PROFILE,
+        simulation_duration_s=duration,
+    )
+    assets = load_packaged_asset_set()
+    assert _duration(request, assets) == pytest.approx(expected)
+    assert list(tmp_path.iterdir()) == []
