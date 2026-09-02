@@ -1,5 +1,7 @@
 # LCC WP1C Fixed Dynamic Acceptance Implementation Plan
 
+> **状态：已被取代。** 2026-09-02 的现场核查发现公开工具 profile、`breaker1.NAME` variable binding、1.5 s 恢复窗口、原始 OUT/INF 派生和多证据 baseline 语义均未在本计划中闭环。不得继续执行本文件；使用 `docs/superpowers/plans/2026-09-02-lcc-wp1c-native-closure.md`。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add a durable licensed dynamic acceptance path for the fixed LCC builder that records disturbance, commutation-failure indication, bounded DC response, and recovery evidence without promoting final `accepted` status before WP6 independent golden review.
