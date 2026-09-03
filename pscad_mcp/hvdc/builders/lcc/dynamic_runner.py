@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from ....core.backend.base import BackendError
+from ....core.process_inventory import list_pscad_processes
 from .dynamic_acceptance import (
     FAIL,
     INCOMPLETE,
@@ -180,7 +181,7 @@ def _fail(report: dict[str, Any], stage: str, error: BaseException) -> dict[str,
     report["failure"] = {"stage": stage, "code": getattr(error, "code", type(error).__name__), "message": str(error)[:1024]}
     report["build"]["terminal_state"] = "failed"
     report["dynamic"] = {"evidence_source": "raw_pscad_output", "engineering_verdict": FAIL, "checks": {}}
-    report["physical"]["verdict"] = FAIL
+    report["physical"] = {"verdict": FAIL, "checks": [{"outcome": FAIL}]}
     return report
 
 
@@ -193,7 +194,7 @@ async def run_fixed_lcc_dynamic_acceptance(
     *,
     service: Any,
     builder: Any,
-    process_reader: Callable[[], Any] = list,
+    process_reader: Callable[[], Any] = list_pscad_processes,
     process_terminator: Callable[[int], Any] | None = None,
     poll_interval_s: float = 0.5,
     timeout_s: float = 900.0,
@@ -241,21 +242,21 @@ async def run_fixed_lcc_dynamic_acceptance(
     try:
         if not request.workspace_root.exists() or not request.workspace_root.is_dir():
             raise _error(stage, "workspace_root must be an existing directory")
-            if not _contained(request.report_path, request.workspace_root):
-                raise _error(stage, "report_path escaped workspace")
-            if not report_write_allowed:
-                raise _error(stage, "report_path already exists")
+        if not _contained(request.report_path, request.workspace_root):
+            raise _error(stage, "report_path escaped workspace")
+        if not report_write_allowed:
+            raise _error(stage, "report_path already exists")
         if not re.fullmatch(r"[0-9a-f]{40}", request.commit):
             raise _error(stage, "commit must be a lowercase SHA")
         if len(before) != len(sources):
             raise _error(stage, "source preflight failed", "LCC_DYNAMIC_SOURCE_INVALID")
         if setup_failed:
             raise _error(stage, "source/preflight snapshot validation failed", "LCC_DYNAMIC_PREFLIGHT_FAILED")
-            if request.preflight.get("status") != PASS:
-                raise _error(stage, "static preflight failed", "LCC_DYNAMIC_PREFLIGHT_FAILED")
-            existing_processes = await _maybe(process_reader())
-            if existing_processes:
-                raise _error(stage, "pre-existing PSCAD processes detected", "LCC_DYNAMIC_PROCESS_PREFLIGHT_FAILED")
+        if request.preflight.get("status") != PASS:
+            raise _error(stage, "static preflight failed", "LCC_DYNAMIC_PREFLIGHT_FAILED")
+        existing_processes = await _maybe(process_reader())
+        if existing_processes:
+            raise _error(stage, "pre-existing PSCAD processes detected", "LCC_DYNAMIC_PROCESS_PREFLIGHT_FAILED")
         stage = "attach"
         await _maybe(service.attach_local())
         status = await _maybe(service.status())

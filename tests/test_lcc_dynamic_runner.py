@@ -299,6 +299,7 @@ def test_runner_terminates_only_managed_pid_and_ignores_spoofed_ownership(tmp_pa
     request, staging = valid_request(tmp_path)
     terminated: list[int] = []
     snapshots = [
+        [],
         [
             {"pid": 123, "runner_owned": False, "run_id": "spoof"},
             {"pid": 456, "runner_owned": True, "run_id": "spoof"},
