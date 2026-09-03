@@ -183,6 +183,7 @@ async def run_fixed_lcc_dynamic_acceptance(
     report = _empty_report(request, sources)
     run_started = time.time()
     before: dict[str, str] = {}
+    setup_failed = False
     try:
         for name, path in sources.items():
             if not _regular(path):
@@ -199,6 +200,16 @@ async def run_fixed_lcc_dynamic_acceptance(
         }
         report["preflight"]["snapshot"] = {name: {"path": str(path.absolute()), "sha256": before[name]} for name, path in sources.items()}
     except BaseException as error:  # noqa: BLE001 - persist setup failure envelope
+        setup_failed = True
+        zeros = "0" * 64
+        report["sources"] = {
+            name: {"path": str(path.absolute()), "before": before.get(name, zeros), "after": before.get(name, zeros)}
+            for name, path in sources.items()
+        }
+        report["preflight"]["snapshot"] = {
+            name: {"path": str(path.absolute()), "sha256": before.get(name, zeros)}
+            for name, path in sources.items()
+        }
         report = _fail(report, "setup", error)
     stage = "setup"
     managed_pid = None
@@ -213,6 +224,8 @@ async def run_fixed_lcc_dynamic_acceptance(
             raise _error(stage, "commit must be a lowercase SHA")
         if len(before) != len(sources):
             raise _error(stage, "source preflight failed", "LCC_DYNAMIC_SOURCE_INVALID")
+        if setup_failed:
+            raise _error(stage, "source/preflight snapshot validation failed", "LCC_DYNAMIC_PREFLIGHT_FAILED")
         if request.preflight.get("status") != PASS:
             raise _error(stage, "static preflight failed", "LCC_DYNAMIC_PREFLIGHT_FAILED")
         stage = "attach"

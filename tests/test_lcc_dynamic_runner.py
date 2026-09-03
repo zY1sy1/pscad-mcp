@@ -73,3 +73,16 @@ def test_runner_static_preflight_failure_writes_fail_without_build(tmp_path: Pat
     assert report["status"] == "FAIL"
     assert report["failure"]["stage"] == "setup"
     assert builder.plan_calls == []
+
+
+def test_runner_preflight_snapshot_mismatch_stops_before_attach(tmp_path: Path):
+    request, staging = valid_request(tmp_path)
+    snapshot = {name: {"path": str(path), "sha256": "a" * 64} for name, path in []}
+    snapshot = {"dynamic": {"path": str(request.repository_root / "pscad_mcp/assets/lcc/cigre_lcc_monopole_v1/dynamic.json"), "sha256": "0" * 64}}
+    request = DynamicLccRunRequest(**{**request.__dict__, "preflight": {"status": "PASS", "sha256": "a" * 64, "snapshot": snapshot}})
+    service = PassingDynamicService(staging)
+    builder = PassingDynamicBuilder(staging)
+    report = asyncio.run(run_fixed_lcc_dynamic_acceptance(request, service=service, builder=builder, process_reader=list, poll_interval_s=0))
+    assert report["status"] == "FAIL"
+    assert service.attached is False
+    assert builder.plan_calls == []
