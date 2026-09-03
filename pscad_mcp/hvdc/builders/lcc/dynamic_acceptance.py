@@ -133,6 +133,8 @@ def _dynamic_verdict(dynamic: Mapping[str, Any]) -> str:
     checks = dynamic.get("checks")
     if not isinstance(checks, Mapping) or not checks:
         return INCOMPLETE
+    if set(checks) != {"disturbance", "failure_indication", "bounded_dc_response", "recovery"}:
+        raise _invalid("dynamic.checks", "Dynamic checks must contain the four canonical checks.")
     outcomes = [item.get("outcome") for item in checks.values() if isinstance(item, Mapping)]
     if len(outcomes) != len(checks) or any(item not in _ALLOWED_VERDICTS for item in outcomes):
         raise _invalid("dynamic.checks", "Dynamic checks must contain verdict outcomes.")
@@ -308,9 +310,16 @@ def validate_dynamic_lcc_acceptance_report(value: Any) -> dict[str, Any]:
         outcome = check.get("outcome", check.get("verdict"))
         if outcome not in _ALLOWED_VERDICTS:
             raise _invalid(f"physical.checks[{index}]", "Physical check outcome is invalid.")
+    physical_outcomes = [check.get("outcome", check.get("verdict")) for check in physical["checks"]]
+    if physical_outcomes:
+        expected_physical = FAIL if FAIL in physical_outcomes else INCOMPLETE if INCOMPLETE in physical_outcomes else PASS
+        if physical["verdict"] != expected_physical:
+            raise _invalid("physical.verdict", "Physical verdict must match check outcomes.")
     golden = _exact(report["golden"], "golden", _GOLDEN_KEYS)
     if not isinstance(golden["reviewed"], bool) or not isinstance(golden["source"], str):
         raise _invalid("golden", "Golden review metadata is required.")
+    if report["golden_verdict"] == PASS and (not golden["reviewed"] or "placeholder" in golden["source"].casefold()):
+        raise _invalid("golden_verdict", "PASS requires a reviewed non-placeholder golden source.")
     expected_engineering = combine_dynamic_verdicts(dynamic_verdict, physical["verdict"])
     if report["engineering_verdict"] != expected_engineering:
         raise _invalid("engineering_verdict", "Engineering verdict must combine dynamic and physical verdicts.")
