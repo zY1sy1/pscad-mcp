@@ -291,6 +291,46 @@ def _print_run_fields(report_path: Path, report: Mapping[str, Any] | None, *, en
     print(f"FIXED_LCC_DYNAMIC_STATUS={status}")
 
 
+def _write_failure_if_absent(
+    report_path: Path,
+    request: DynamicLccRunRequest,
+    *,
+    stage: str,
+    error: BaseException,
+) -> None:
+    """Persist a failure only to a new, non-link report path."""
+    if report_path.exists() or report_path.is_symlink():
+        return
+    parent = report_path.parent
+    for candidate in (parent, *parent.parents):
+        if candidate.is_symlink():
+            return
+        if candidate == request.workspace_root:
+            break
+    fallback = build_dynamic_lcc_failure_report(request, stage=stage, error=error)
+    _atomic_write(report_path, fallback)
+
+
+def _preflight_failure_error(preflight: Mapping[str, Any]) -> BackendError:
+    details = preflight.get("details")
+    original = preflight.get("error")
+    fragments = []
+    if original is not None:
+        fragments.append(f"error={json.dumps(original, ensure_ascii=True, sort_keys=True)}")
+    if details is not None:
+        fragments.append(f"details={json.dumps(details, ensure_ascii=True, sort_keys=True)}")
+    message = "Dynamic LCC static preflight failed."
+    if fragments:
+        message += " " + "; ".join(fragments)
+    return BackendError(
+        "LCC_DYNAMIC_PREFLIGHT_FAILED",
+        message,
+        "hvdc",
+        "dynamic_acceptance_cli",
+        {"preflight": dict(preflight)},
+    )
+
+
 def main(
     argv: Sequence[str] | None = None,
     *,
@@ -328,12 +368,12 @@ def main(
         )
         if preflight.get("status") != PASS:
             try:
-                fallback = build_dynamic_lcc_failure_report(
+                _write_failure_if_absent(
+                    report_path,
                     request,
                     stage="setup",
-                    error=RuntimeError("Dynamic LCC static preflight failed."),
+                    error=_preflight_failure_error(preflight),
                 )
-                _atomic_write(report_path, fallback)
             except Exception as persistence_error:  # noqa: BLE001 - preserve exit 2 even if persistence fails
                 _ = persistence_error
             _print_run_fields(report_path, None, engineering=FAIL, status=FAIL)
@@ -360,8 +400,7 @@ def main(
                     persisted = None
             if persisted is None:
                 try:
-                    fallback = build_dynamic_lcc_failure_report(request, stage="setup", error=error)
-                    _atomic_write(report_path, fallback)
+                    _write_failure_if_absent(report_path, request, stage="setup", error=error)
                 except Exception as persistence_error:  # noqa: BLE001 - report persistence must not mask exit 1
                     _ = persistence_error
             _print_run_fields(report_path, persisted, engineering=FAIL, status=FAIL)

@@ -276,6 +276,32 @@ def test_run_preflight_failure_returns_two_without_creating_service(tmp_path: Pa
     assert validate_dynamic_lcc_acceptance_report(persisted)["failure"]["stage"] == "setup"
 
 
+def test_run_preflight_failure_does_not_overwrite_existing_report(tmp_path: Path):
+    report = tmp_path / "run" / "report.json"
+    report.parent.mkdir(parents=True)
+    sentinel = b"existing-report"
+    report.write_bytes(sentinel)
+    code = main(
+        _run_args(tmp_path, report),
+        preflight_action=lambda _args: {"status": "FAIL", "error": {"code": "PREFLIGHT_X", "message": "bad compiler"}},
+        service_factory=lambda _request: (_ for _ in ()).throw(AssertionError("must not create service")),
+    )
+    assert code == 2
+    assert report.read_bytes() == sentinel
+
+
+def test_run_preflight_failure_new_report_preserves_stable_code_and_reason(tmp_path: Path):
+    report = tmp_path / "run" / "report.json"
+    code = main(
+        _run_args(tmp_path, report),
+        preflight_action=lambda _args: {"status": "FAIL", "error": {"code": "PREFLIGHT_X", "message": "bad compiler"}, "details": {"source": "compiler"}},
+    )
+    assert code == 2
+    persisted = validate_dynamic_lcc_acceptance_report(json.loads(report.read_text(encoding="utf-8")))
+    assert persisted["failure"]["code"] == "LCC_DYNAMIC_PREFLIGHT_FAILED"
+    assert "bad compiler" in persisted["failure"]["message"]
+
+
 def test_run_engineering_pass_with_incomplete_status_returns_zero(tmp_path: Path):
     report = tmp_path / "run" / "report.json"
     payload = _fake_valid_report(report)
@@ -337,6 +363,20 @@ def test_run_service_factory_failure_persists_strict_report(tmp_path: Path):
     assert code == 1
     persisted = json.loads(report.read_text(encoding="utf-8"))
     assert validate_dynamic_lcc_acceptance_report(persisted)["failure"]["stage"] == "setup"
+
+
+def test_run_service_factory_failure_does_not_overwrite_existing_report(tmp_path: Path):
+    report = tmp_path / "run" / "report.json"
+    report.parent.mkdir(parents=True)
+    sentinel = b"existing-report"
+    report.write_bytes(sentinel)
+    code = main(
+        _run_args(tmp_path, report),
+        preflight_action=lambda _args: {"status": "PASS", "sha256": "d" * 64, "snapshot": {}},
+        service_factory=lambda _request: (_ for _ in ()).throw(RuntimeError("factory failed")),
+    )
+    assert code == 1
+    assert report.read_bytes() == sentinel
 
 
 def test_dynamic_wrapper_uses_run_and_no_manual_sample_contract_inputs():
