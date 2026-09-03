@@ -5,6 +5,9 @@ from pathlib import Path
 
 import pytest
 
+from pscad_mcp.hvdc.builders.lcc.dynamic_acceptance import (
+    validate_dynamic_lcc_acceptance_report,
+)
 from pscad_mcp.hvdc.builders.lcc.dynamic_acceptance_cli import main, run_exit_code
 from tests.lcc_dynamic_fakes import valid_wp1c_report
 
@@ -269,6 +272,8 @@ def test_run_preflight_failure_returns_two_without_creating_service(tmp_path: Pa
     )
     assert code == 2
     assert calls == []
+    persisted = json.loads(report.read_text(encoding="utf-8"))
+    assert validate_dynamic_lcc_acceptance_report(persisted)["failure"]["stage"] == "setup"
 
 
 def test_run_engineering_pass_with_incomplete_status_returns_zero(tmp_path: Path):
@@ -322,6 +327,18 @@ def test_run_engineering_failure_returns_one(tmp_path: Path):
     assert code == 1
 
 
+def test_run_service_factory_failure_persists_strict_report(tmp_path: Path):
+    report = tmp_path / "run" / "report.json"
+    code = main(
+        _run_args(tmp_path, report),
+        preflight_action=lambda _args: {"status": "PASS", "sha256": "d" * 64, "snapshot": {}},
+        service_factory=lambda _request: (_ for _ in ()).throw(RuntimeError("factory failed")),
+    )
+    assert code == 1
+    persisted = json.loads(report.read_text(encoding="utf-8"))
+    assert validate_dynamic_lcc_acceptance_report(persisted)["failure"]["stage"] == "setup"
+
+
 def test_dynamic_wrapper_uses_run_and_no_manual_sample_contract_inputs():
     script = (ROOT / "scripts" / "run_fixed_lcc_dynamic_acceptance.ps1").read_text(encoding="utf-8")
     assert "dynamic_acceptance_cli run" in script
@@ -333,3 +350,10 @@ def test_dynamic_wrapper_uses_run_and_no_manual_sample_contract_inputs():
     assert "[string]$Samples" not in script
     assert "[string]$Golden" not in script
     assert "[string]$Contract" not in script
+    for field in (
+        "FIXED_LCC_DYNAMIC_REPORT=",
+        "FIXED_LCC_DYNAMIC_REPORT_SHA256=",
+        "FIXED_LCC_DYNAMIC_ENGINEERING_VERDICT=",
+        "FIXED_LCC_DYNAMIC_STATUS=",
+    ):
+        assert field in script

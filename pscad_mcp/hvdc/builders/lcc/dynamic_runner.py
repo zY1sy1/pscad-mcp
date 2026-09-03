@@ -185,6 +185,34 @@ def _fail(report: dict[str, Any], stage: str, error: BaseException) -> dict[str,
     return report
 
 
+def build_dynamic_lcc_failure_report(
+    request: DynamicLccRunRequest,
+    *,
+    stage: str,
+    error: BaseException,
+) -> dict[str, Any]:
+    """Build a strict, durable FAIL envelope when setup/lifecycle cannot run."""
+    sources = _source_paths(request)
+    report = _empty_report(request, sources)
+    snapshot: dict[str, Any] = {}
+    for name, path in sources.items():
+        try:
+            digest = _sha(path)
+        except BaseException:  # noqa: BLE001 - failure envelope uses a zero digest
+            digest = "0" * 64
+        snapshot[name] = {"path": str(path.absolute()), "sha256": digest}
+    report["preflight"] = {
+        "status": str(request.preflight.get("status", FAIL)) if isinstance(request.preflight, Mapping) else FAIL,
+        "sha256": _canonical_hash(snapshot),
+        "snapshot": snapshot,
+    }
+    report["sources"] = {
+        name: {"path": item["path"], "before": item["sha256"], "after": item["sha256"]}
+        for name, item in snapshot.items()
+    }
+    return validate_dynamic_lcc_acceptance_report(_fail(report, stage, error))
+
+
 def _owned(entry: Mapping[str, Any], run_id: str, managed_pid: Any) -> bool:
     return managed_pid is not None and entry.get("pid") == managed_pid
 
@@ -467,4 +495,8 @@ async def run_fixed_lcc_dynamic_acceptance(
     return normalized
 
 
-__all__ = ["DynamicLccRunRequest", "run_fixed_lcc_dynamic_acceptance"]
+__all__ = [
+    "DynamicLccRunRequest",
+    "build_dynamic_lcc_failure_report",
+    "run_fixed_lcc_dynamic_acceptance",
+]

@@ -70,6 +70,11 @@ try {
         Write-Output ("FIXED_LCC_DYNAMIC_REPORT_SHA256=" + $Hash)
         Write-Output ("FIXED_LCC_DYNAMIC_ENGINEERING_VERDICT=" + $Payload.engineering_verdict)
         Write-Output ("FIXED_LCC_DYNAMIC_STATUS=" + $Payload.status)
+    } else {
+        Write-Output ("FIXED_LCC_DYNAMIC_REPORT=" + $Report)
+        Write-Output 'FIXED_LCC_DYNAMIC_REPORT_SHA256='
+        Write-Output 'FIXED_LCC_DYNAMIC_ENGINEERING_VERDICT=FAIL'
+        Write-Output 'FIXED_LCC_DYNAMIC_STATUS=FAIL'
     }
 }
 finally {

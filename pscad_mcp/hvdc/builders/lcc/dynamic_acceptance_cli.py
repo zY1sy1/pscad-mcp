@@ -28,7 +28,11 @@ from .dynamic_acceptance import (
     evaluate_fixed_lcc_dynamic_samples,
     validate_dynamic_lcc_acceptance_report,
 )
-from .dynamic_runner import DynamicLccRunRequest, run_fixed_lcc_dynamic_acceptance
+from .dynamic_runner import (
+    DynamicLccRunRequest,
+    build_dynamic_lcc_failure_report,
+    run_fixed_lcc_dynamic_acceptance,
+)
 from .service import LccBuilderService
 
 
@@ -282,8 +286,7 @@ def _service_factory(request: DynamicLccRunRequest) -> tuple[Any, Any]:
 
 def _print_run_fields(report_path: Path, report: Mapping[str, Any] | None, *, engineering: str, status: str) -> None:
     print(f"FIXED_LCC_DYNAMIC_REPORT={report_path.resolve()}")
-    if report_path.is_file():
-        print(f"FIXED_LCC_DYNAMIC_REPORT_SHA256={_sha256_file(report_path)}")
+    print(f"FIXED_LCC_DYNAMIC_REPORT_SHA256={_sha256_file(report_path) if report_path.is_file() else ''}")
     print(f"FIXED_LCC_DYNAMIC_ENGINEERING_VERDICT={engineering}")
     print(f"FIXED_LCC_DYNAMIC_STATUS={status}")
 
@@ -309,9 +312,6 @@ def main(
             preflight = preflight_action(arguments)
         except Exception:  # noqa: BLE001 - preflight failures map to exit 2
             preflight = {"status": FAIL, "sha256": "0" * 64, "snapshot": {}}
-        if preflight.get("status") != PASS:
-            _print_run_fields(report_path, None, engineering=FAIL, status=FAIL)
-            return run_exit_code(preflight_status=str(preflight.get("status")), engineering_verdict=FAIL)
         request = DynamicLccRunRequest(
             repository_root=repository_root,
             workspace_root=workspace_root,
@@ -326,6 +326,18 @@ def main(
             output_step_s=arguments.output_step,
             preflight=preflight,
         )
+        if preflight.get("status") != PASS:
+            try:
+                fallback = build_dynamic_lcc_failure_report(
+                    request,
+                    stage="setup",
+                    error=RuntimeError("Dynamic LCC static preflight failed."),
+                )
+                _atomic_write(report_path, fallback)
+            except Exception as persistence_error:  # noqa: BLE001 - preserve exit 2 even if persistence fails
+                _ = persistence_error
+            _print_run_fields(report_path, None, engineering=FAIL, status=FAIL)
+            return run_exit_code(preflight_status=str(preflight.get("status")), engineering_verdict=FAIL)
         try:
             service, builder = service_factory(request)
             result_value = run_action(request, service=service, builder=builder)
@@ -339,8 +351,20 @@ def main(
             status = str(validated.get("status", FAIL))
             _print_run_fields(report_path, validated, engineering=engineering, status=status)
             return run_exit_code(preflight_status=str(preflight.get("status")), engineering_verdict=engineering)
-        except Exception:  # noqa: BLE001 - CLI lifecycle failures are exit 1
-            _print_run_fields(report_path, None, engineering=FAIL, status=FAIL)
+        except Exception as error:  # noqa: BLE001 - CLI lifecycle failures are exit 1
+            persisted = None
+            if report_path.is_file():
+                try:
+                    persisted = validate_dynamic_lcc_acceptance_report(_load_json(report_path))
+                except Exception:  # noqa: BLE001 - replace invalid/partial reports
+                    persisted = None
+            if persisted is None:
+                try:
+                    fallback = build_dynamic_lcc_failure_report(request, stage="setup", error=error)
+                    _atomic_write(report_path, fallback)
+                except Exception as persistence_error:  # noqa: BLE001 - report persistence must not mask exit 1
+                    _ = persistence_error
+            _print_run_fields(report_path, persisted, engineering=FAIL, status=FAIL)
             return 1
     if arguments.action != "evaluate":
         raise SystemExit(f"Unsupported action: {arguments.action}")
