@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import json
 import math
 
 import pytest
@@ -387,3 +388,42 @@ def test_recovery_channel_declarations_must_match_required_channels():
 
     assert result["engineering_verdict"] == "FAIL"
     assert all(check["outcome"] == "FAIL" for check in result["checks"].values())
+
+
+def test_duplicate_recovery_channel_declaration_is_fail():
+    contract = dynamic_contract()
+    contract["recovery"]["channels"].append(
+        dict(contract["recovery"]["channels"][0])
+    )
+
+    result = derive_fixed_lcc_dynamic_evidence(passing_raw_channels(), contract)
+
+    assert result["engineering_verdict"] == "FAIL"
+    assert all(check["outcome"] == "FAIL" for check in result["checks"].values())
+
+
+def test_fault_never_rises_result_is_strictly_json_safe():
+    raw = passing_raw_channels()
+    _set_values(
+        raw,
+        "Fault/LCC Fault Active",
+        [0.0] * len(_channel(raw, "Fault/LCC Fault Active")["values"]),
+    )
+
+    result = derive_fixed_lcc_dynamic_evidence(raw, dynamic_contract())
+
+    assert result["engineering_verdict"] == "FAIL"
+    json.dumps(result, allow_nan=False)
+
+
+@pytest.mark.parametrize("sample_count", [0, 1])
+def test_empty_or_single_sample_failure_result_is_strictly_json_safe(sample_count):
+    raw = passing_raw_channels()
+    for item in raw["channels"]:
+        item["domain"] = list(item["domain"][:sample_count])
+        item["values"] = list(item["values"][:sample_count])
+
+    result = derive_fixed_lcc_dynamic_evidence(raw, dynamic_contract())
+
+    assert result["engineering_verdict"] in {"FAIL", "INCOMPLETE_ANALYSIS"}
+    json.dumps(result, allow_nan=False)

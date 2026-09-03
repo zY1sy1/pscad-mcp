@@ -27,6 +27,18 @@ class _DynamicEvidenceError(Exception):
         super().__init__(reason, selector)
 
 
+def _report_safe(value: Any) -> Any:
+    """Return a JSON-safe copy, replacing non-finite floats with null."""
+
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    if isinstance(value, Mapping):
+        return {key: _report_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_report_safe(item) for item in value]
+    return value
+
+
 def _records(value: Mapping[str, Any]) -> list[Mapping[str, Any]]:
     raw = value.get("channels")
     if isinstance(raw, Mapping):
@@ -213,6 +225,7 @@ def _validate_contract(contract: Any, output_step_s: Any) -> None:
     recovery_channels = recovery.get("channels")
     if not isinstance(recovery_channels, Sequence) or isinstance(recovery_channels, (str, bytes, bytearray)) or not recovery_channels:
         raise _DynamicEvidenceError("invalid_recovery_channels")
+    recovery_identity: set[str] = set()
     for declaration in recovery_channels:
         if (
             not isinstance(declaration, Mapping)
@@ -225,6 +238,10 @@ def _validate_contract(contract: Any, output_step_s: Any) -> None:
             or required_identity.get(declaration["path"]) != declaration["units"]
         ):
             raise _DynamicEvidenceError("invalid_recovery_channel")
+        path = declaration["path"]
+        if path in recovery_identity:
+            raise _DynamicEvidenceError("duplicate_recovery_channel", path)
+        recovery_identity.add(path)
         _finite_number(declaration.get("relative_band"), "relative_band", nonnegative=True)
         _finite_number(declaration.get("absolute_floor"), "absolute_floor", nonnegative=True)
 
@@ -327,7 +344,7 @@ def derive_fixed_lcc_dynamic_evidence(
             for check in checks.values():
                 check["metrics"]["required_start_s"] = prefault_start
                 check["metrics"]["observed_start_s"] = observed_start
-            return {"engineering_verdict": "INCOMPLETE_ANALYSIS", "checks": checks}
+            return _report_safe({"engineering_verdict": "INCOMPLETE_ANALYSIS", "checks": checks})
 
         edge_tolerance = max(float(contract["disturbance"]["maximum_edge_error_s"]), 2.0 * output_step_s)
         disturbance_trace = traces["Fault/LCC Fault Active"]
@@ -431,10 +448,10 @@ def derive_fixed_lcc_dynamic_evidence(
 
         checks = {"disturbance": disturbance, "failure_indication": failure, "bounded_dc_response": bounded, "recovery": recovery}
         verdict = "PASS" if all(check["outcome"] == "PASS" for check in checks.values()) else "FAIL"
-        return {"engineering_verdict": verdict, "checks": checks}
+        return _report_safe({"engineering_verdict": verdict, "checks": checks})
     except _DynamicEvidenceError as error:
-        return {"engineering_verdict": "FAIL", "checks": _failed_checks(contract, error)}
+        return _report_safe({"engineering_verdict": "FAIL", "checks": _failed_checks(contract, error)})
     except (KeyError, TypeError, ValueError, OverflowError, IndexError, AttributeError) as error:
         dynamic_error = _DynamicEvidenceError("invalid_contract")
         dynamic_error.__cause__ = error
-        return {"engineering_verdict": "FAIL", "checks": _failed_checks(contract, dynamic_error)}
+        return _report_safe({"engineering_verdict": "FAIL", "checks": _failed_checks(contract, dynamic_error)})
