@@ -3,7 +3,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from pscad_mcp.hvdc.builders.lcc.dynamic_acceptance_cli import main
+import pytest
+
+from pscad_mcp.hvdc.builders.lcc.dynamic_acceptance_cli import main, run_exit_code
+from tests.lcc_dynamic_fakes import valid_wp1c_report
+
+ROOT = Path(__file__).parents[1]
 
 
 def _wave(values: list[float], units: str) -> dict[str, object]:
@@ -218,3 +223,113 @@ def test_evaluate_cli_records_failure_details_for_missing_required_channel(tmp_p
     payload = json.loads(report.read_text(encoding="utf-8"))
     assert payload["status"] == "FAIL"
     assert payload["failure"]["stage"] == "evaluation"
+
+
+@pytest.mark.parametrize(
+    ("preflight", "engineering", "expected"),
+    [("FAIL", "FAIL", 2), ("PASS", "FAIL", 1), ("PASS", "PASS", 0)],
+)
+def test_run_exit_code_separates_preflight_and_engineering(preflight, engineering, expected):
+    assert run_exit_code(preflight_status=preflight, engineering_verdict=engineering) == expected
+
+
+def _run_args(tmp_path: Path, report: Path) -> list[str]:
+    return [
+        "run",
+        "--repository-root", str(tmp_path),
+        "--workspace-root", str(report.parent),
+        "--master-path", str(tmp_path / "master.pslx"),
+        "--compiler-configuration", str(tmp_path / "fortran_compilers.xml"),
+        "--compiler-executable", str(tmp_path / "gfortran.exe"),
+        "--report", str(report),
+        "--commit", "a" * 40,
+        "--branch", "codex/wp1c",
+    ]
+
+
+def _fake_valid_report(report: Path) -> dict[str, object]:
+    payload = valid_wp1c_report()
+    workspace = report.parent.resolve()
+    payload["build"]["workspace"] = str(workspace)
+    for name, suffix in (("project", ".pscx"), ("library", ".pslx"), ("normalized_samples", ".json")):
+        payload["artifacts"][name]["path"] = str(workspace / f"{name}{suffix}")
+    payload["artifacts"]["selected_output"]["path"] = str(workspace / "run_01.out")
+    payload["artifacts"]["output_parts"][0]["path"] = str(workspace / "run_01.out")
+    payload["artifacts"]["output_metadata"][0]["path"] = str(workspace / "run.inf")
+    return payload
+
+
+def test_run_preflight_failure_returns_two_without_creating_service(tmp_path: Path):
+    report = tmp_path / "run" / "report.json"
+    calls: list[str] = []
+    code = main(
+        _run_args(tmp_path, report),
+        preflight_action=lambda _args: {"status": "FAIL", "sha256": "d" * 64, "snapshot": {}},
+        service_factory=lambda _request: calls.append("service") or (object(), object()),
+    )
+    assert code == 2
+    assert calls == []
+
+
+def test_run_engineering_pass_with_incomplete_status_returns_zero(tmp_path: Path):
+    report = tmp_path / "run" / "report.json"
+    payload = _fake_valid_report(report)
+
+    async def fake_runner(request, **_kwargs):
+        request.report_path.parent.mkdir(parents=True, exist_ok=True)
+        request.report_path.write_text(json.dumps(payload), encoding="utf-8")
+        return payload
+
+    code = main(
+        _run_args(tmp_path, report),
+        preflight_action=lambda _args: {"status": "PASS", "sha256": "d" * 64, "snapshot": {}},
+        service_factory=lambda _request: (object(), object()),
+        run_action=fake_runner,
+    )
+    assert code == 0
+    assert json.loads(report.read_text(encoding="utf-8"))["status"] == "INCOMPLETE_ANALYSIS"
+
+
+def test_run_engineering_failure_returns_one(tmp_path: Path):
+    report = tmp_path / "run" / "report.json"
+    payload = _fake_valid_report(report)
+    payload["engineering_verdict"] = "FAIL"
+    payload["status"] = "FAIL"
+    payload["dynamic"] = {"evidence_source": "raw_pscad_output", "engineering_verdict": "FAIL", "checks": {}}
+    payload["physical"] = {"verdict": "FAIL", "checks": []}
+    payload["build"]["terminal_state"] = "failed"
+    payload["build"]["history"] = []
+    payload["artifacts"] = {
+        "project": None,
+        "library": None,
+        "selected_output": None,
+        "output_parts": [],
+        "output_metadata": [],
+        "normalized_samples": None,
+    }
+
+    async def fake_runner(request, **_kwargs):
+        request.report_path.parent.mkdir(parents=True, exist_ok=True)
+        request.report_path.write_text(json.dumps(payload), encoding="utf-8")
+        return payload
+
+    code = main(
+        _run_args(tmp_path, report),
+        preflight_action=lambda _args: {"status": "PASS", "sha256": "d" * 64, "snapshot": {}},
+        service_factory=lambda _request: (object(), object()),
+        run_action=fake_runner,
+    )
+    assert code == 1
+
+
+def test_dynamic_wrapper_uses_run_and_no_manual_sample_contract_inputs():
+    script = (ROOT / "scripts" / "run_fixed_lcc_dynamic_acceptance.ps1").read_text(encoding="utf-8")
+    assert "dynamic_acceptance_cli run" in script
+    assert "[string]$WorkspaceRoot" in script
+    assert "[string]$MasterPath" in script
+    assert "[string]$CompilerConfiguration" in script
+    assert "[string]$CompilerExecutable" in script
+    assert "[string]$ProjectName" in script
+    assert "[string]$Samples" not in script
+    assert "[string]$Golden" not in script
+    assert "[string]$Contract" not in script
