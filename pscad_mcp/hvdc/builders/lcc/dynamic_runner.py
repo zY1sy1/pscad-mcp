@@ -373,7 +373,10 @@ async def run_fixed_lcc_dynamic_acceptance(
         physical = published_result.get("physical") if isinstance(published_result, Mapping) else None
         if not isinstance(physical, Mapping):
             raise _error(stage, "published physical evidence is missing", "LCC_DYNAMIC_EVIDENCE_MISMATCH")
-        physical = dict(physical)
+        physical_checks = physical.get("physical_checks")
+        if not isinstance(physical_checks, list):
+            raise _error(stage, "published physical evidence shape is invalid", "LCC_DYNAMIC_EVIDENCE_MISMATCH")
+        physical = {"verdict": physical.get("verdict"), "checks": physical_checks}
         report["dynamic"] = {"evidence_source": "raw_pscad_output", "engineering_verdict": dynamic.get("engineering_verdict", FAIL), "checks": dynamic.get("checks", {})}
         report["physical"] = physical
         report["engineering_verdict"] = combine_dynamic_verdicts(dynamic.get("engineering_verdict", FAIL), physical["verdict"])
