@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import math
 
 from pscad_mcp.hvdc.builders.lcc.dynamic_evidence import (
@@ -139,3 +140,174 @@ def test_normalize_accepts_mapping_and_preserves_immutable_traces():
     assert traces["Main/IDC"].path == "Main/IDC"
     assert isinstance(traces["Main/IDC"].time, tuple)
     assert isinstance(traces["Main/IDC"].values, tuple)
+
+
+def test_single_sample_traces_are_classified_without_index_error():
+    raw = passing_raw_channels()
+    for item in raw["channels"]:
+        item["domain"] = [0.0]
+        item["values"] = [item["values"][0]]
+
+    result = derive_fixed_lcc_dynamic_evidence(raw, dynamic_contract())
+
+    assert result["engineering_verdict"] in {"FAIL", "INCOMPLETE_ANALYSIS"}
+    assert set(result["checks"]) == {
+        "disturbance",
+        "failure_indication",
+        "bounded_dc_response",
+        "recovery",
+    }
+    assert all(set(check) == {
+        "outcome",
+        "selectors",
+        "units",
+        "window_s",
+        "sample_count",
+        "metrics",
+    } for check in result["checks"].values())
+
+
+def test_single_disturbance_sample_is_classified_without_index_error():
+    raw = passing_raw_channels()
+    fault = _channel(raw, "Fault/LCC Fault Active")
+    fault["domain"] = [0.8]
+    fault["values"] = [1.0]
+
+    result = derive_fixed_lcc_dynamic_evidence(raw, dynamic_contract())
+
+    assert result["engineering_verdict"] in {"FAIL", "INCOMPLETE_ANALYSIS"}
+    assert set(result["checks"]) == {
+        "disturbance",
+        "failure_indication",
+        "bounded_dc_response",
+        "recovery",
+    }
+
+
+def test_malformed_contract_returns_six_fail_checks_without_crashing():
+    malformed_contracts = []
+
+    contract = dynamic_contract()
+    contract["required_channels"] = None
+    malformed_contracts.append(contract)
+
+    contract = dynamic_contract()
+    contract["event"]["duration_s"] = math.inf
+    malformed_contracts.append(contract)
+
+    contract = dynamic_contract()
+    contract["disturbance"]["active_min"] = -1.0
+    malformed_contracts.append(contract)
+
+    contract = dynamic_contract()
+    contract["failure_indication"]["minimum_drop_rad"] = -1.0
+    malformed_contracts.append(contract)
+
+    contract = dynamic_contract()
+    contract["bounded_dc_response"]["maximum_peak_to_prefault_ratio"] = 0.0
+    malformed_contracts.append(contract)
+
+    contract = dynamic_contract()
+    contract["recovery"]["channels"][0]["relative_band"] = math.nan
+    malformed_contracts.append(contract)
+
+    for malformed in malformed_contracts:
+        result = derive_fixed_lcc_dynamic_evidence(
+            passing_raw_channels(), malformed, output_step_s=math.nan
+        )
+        assert result["engineering_verdict"] == "FAIL"
+        assert set(result["checks"]) == {
+            "disturbance",
+            "failure_indication",
+            "bounded_dc_response",
+            "recovery",
+        }
+        assert all(check["outcome"] == "FAIL" for check in result["checks"].values())
+        assert all(set(check) == {
+            "outcome",
+            "selectors",
+            "units",
+            "window_s",
+            "sample_count",
+            "metrics",
+        } for check in result["checks"].values())
+
+
+def test_non_mapping_contract_returns_six_fail_checks_without_crashing():
+    result = derive_fixed_lcc_dynamic_evidence(passing_raw_channels(), None)  # type: ignore[arg-type]
+
+    assert result["engineering_verdict"] == "FAIL"
+    assert len(result["checks"]) == 4
+    assert all(check["outcome"] == "FAIL" for check in result["checks"].values())
+
+
+def test_start_time_outside_prefault_reference_window_is_incomplete():
+    raw = passing_raw_channels()
+    for item in raw["channels"]:
+        item["domain"] = [time + 1.0 for time in item["domain"]]
+
+    result = derive_fixed_lcc_dynamic_evidence(raw, dynamic_contract())
+
+    assert result["engineering_verdict"] == "INCOMPLETE_ANALYSIS"
+    assert all(
+        check["outcome"] == "INCOMPLETE_ANALYSIS"
+        for check in result["checks"].values()
+    )
+
+
+def test_nonuniform_edge_crossings_are_interpolated_against_event_times():
+    raw = passing_raw_channels()
+    fault = _channel(raw, "Fault/LCC Fault Active")
+    times = list(fault["domain"])
+    times[15998] = 0.79989
+    times[15999] = 0.7999
+    times[16000] = 0.8000111111
+    times[16001] = 0.80006
+    times[17998] = 0.89989
+    times[17999] = 0.8999
+    times[18000] = 0.9000111111
+    times[18001] = 0.90006
+    fault["domain"] = times
+
+    result = derive_fixed_lcc_dynamic_evidence(raw, dynamic_contract())
+
+    assert result["engineering_verdict"] == "PASS"
+    assert result["checks"]["disturbance"]["outcome"] == "PASS"
+
+
+def test_nonuniform_edge_crossing_offset_is_fail():
+    raw = passing_raw_channels()
+    fault = _channel(raw, "Fault/LCC Fault Active")
+    times = list(fault["domain"])
+    times[15998] = 0.79989
+    times[15999] = 0.7999
+    times[16000] = 0.8003
+    times[16001] = 0.80035
+    times[17998] = 0.89989
+    times[17999] = 0.8999
+    times[18000] = 0.9000111111
+    times[18001] = 0.90006
+    fault["domain"] = times
+
+    result = derive_fixed_lcc_dynamic_evidence(raw, dynamic_contract())
+
+    assert result["engineering_verdict"] == "FAIL"
+    assert result["checks"]["disturbance"]["outcome"] == "FAIL"
+
+
+def test_bounded_dc_response_uses_contract_prefault_window():
+    raw = passing_raw_channels()
+    idc = _channel(raw, "Main/IDC")
+    idc["values"] = [
+        0.5 if 0.5 <= time < 0.7 else 1.5 if 0.8 <= time < 0.9 else 1.0
+        for time in idc["domain"]
+    ]
+    contract = copy.deepcopy(dynamic_contract())
+    contract["bounded_dc_response"]["prefault_window_s"] = 0.3
+    contract["bounded_dc_response"]["maximum_peak_to_prefault_ratio"] = 1.8
+
+    result = derive_fixed_lcc_dynamic_evidence(raw, contract)
+
+    assert result["engineering_verdict"] == "FAIL"
+    assert result["checks"]["bounded_dc_response"]["outcome"] == "FAIL"
+    assert result["checks"]["bounded_dc_response"]["metrics"]["prefault_median_ka"] < 1.0

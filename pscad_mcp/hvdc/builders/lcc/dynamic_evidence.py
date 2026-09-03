@@ -101,6 +101,104 @@ def _window_inclusive(trace: Trace, start: float, end: float) -> list[float]:
     return [value for time, value in zip(trace.time, trace.values) if start <= time <= end]
 
 
+def _safe_required(contract: Any) -> list[Mapping[str, Any]]:
+    if not isinstance(contract, Mapping):
+        return []
+    required = contract.get("required_channels", [])
+    if not isinstance(required, Sequence) or isinstance(required, (str, bytes, bytearray)):
+        return []
+    return [item for item in required if isinstance(item, Mapping)]
+
+
+def _finite_number(value: Any, name: str, *, positive: bool = False, nonnegative: bool = False) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise _DynamicEvidenceError(f"invalid_{name}")
+    number = float(value)
+    if not math.isfinite(number):
+        raise _DynamicEvidenceError(f"invalid_{name}")
+    if positive and number <= 0.0:
+        raise _DynamicEvidenceError(f"invalid_{name}")
+    if nonnegative and number < 0.0:
+        raise _DynamicEvidenceError(f"invalid_{name}")
+    return number
+
+
+def _validate_contract(contract: Any, output_step_s: Any) -> None:
+    if not isinstance(contract, Mapping):
+        raise _DynamicEvidenceError("invalid_contract")
+
+    required = contract.get("required_channels")
+    if not isinstance(required, Sequence) or isinstance(required, (str, bytes, bytearray)) or not required:
+        raise _DynamicEvidenceError("invalid_required_channels")
+    for declaration in required:
+        if not isinstance(declaration, Mapping) or not isinstance(declaration.get("path"), str) or not isinstance(declaration.get("units"), str):
+            raise _DynamicEvidenceError("invalid_required_channel")
+
+    event = contract.get("event")
+    if not isinstance(event, Mapping):
+        raise _DynamicEvidenceError("invalid_event")
+    _finite_number(event.get("time_s"), "event_time_s", nonnegative=True)
+    _finite_number(event.get("duration_s"), "event_duration_s", positive=True)
+    _finite_number(event.get("recovery_window_s"), "event_recovery_window_s", positive=True)
+
+    disturbance = contract.get("disturbance")
+    if not isinstance(disturbance, Mapping):
+        raise _DynamicEvidenceError("invalid_disturbance")
+    inactive_max = _finite_number(disturbance.get("inactive_max"), "inactive_max", nonnegative=True)
+    active_min = _finite_number(disturbance.get("active_min"), "active_min", nonnegative=True)
+    if active_min <= inactive_max:
+        raise _DynamicEvidenceError("invalid_disturbance_thresholds")
+    _finite_number(disturbance.get("maximum_edge_error_s"), "maximum_edge_error_s", nonnegative=True)
+
+    failure = contract.get("failure_indication")
+    if not isinstance(failure, Mapping) or not isinstance(failure.get("channel"), str):
+        raise _DynamicEvidenceError("invalid_failure_indication")
+    _finite_number(failure.get("minimum_drop_rad"), "minimum_drop_rad", positive=True)
+
+    bounded = contract.get("bounded_dc_response")
+    if not isinstance(bounded, Mapping) or not isinstance(bounded.get("channel"), str):
+        raise _DynamicEvidenceError("invalid_bounded_dc_response")
+    _finite_number(bounded.get("prefault_window_s"), "prefault_window_s", positive=True)
+    _finite_number(bounded.get("minimum_prefault_magnitude_ka"), "minimum_prefault_magnitude_ka", positive=True)
+    _finite_number(bounded.get("maximum_peak_to_prefault_ratio"), "maximum_peak_to_prefault_ratio", positive=True)
+
+    recovery = contract.get("recovery")
+    if not isinstance(recovery, Mapping):
+        raise _DynamicEvidenceError("invalid_recovery")
+    recovery_window = _finite_number(recovery.get("window_s"), "recovery_window_s", positive=True)
+    minimum_hold = _finite_number(recovery.get("minimum_hold_s"), "minimum_hold_s", positive=True)
+    if minimum_hold > recovery_window:
+        raise _DynamicEvidenceError("invalid_recovery_hold")
+    recovery_channels = recovery.get("channels")
+    if not isinstance(recovery_channels, Sequence) or isinstance(recovery_channels, (str, bytes, bytearray)) or not recovery_channels:
+        raise _DynamicEvidenceError("invalid_recovery_channels")
+    for declaration in recovery_channels:
+        if not isinstance(declaration, Mapping) or not isinstance(declaration.get("path"), str) or not isinstance(declaration.get("units"), str):
+            raise _DynamicEvidenceError("invalid_recovery_channel")
+        _finite_number(declaration.get("relative_band"), "relative_band", nonnegative=True)
+        _finite_number(declaration.get("absolute_floor"), "absolute_floor", nonnegative=True)
+
+    _finite_number(output_step_s, "output_step", positive=True)
+
+
+def _edge_crossing_time(trace: Trace, threshold: float, *, rising: bool) -> float:
+    for left_time, right_time, left_value, right_value in zip(
+        trace.time, trace.time[1:], trace.values, trace.values[1:]
+    ):
+        if rising:
+            crossed = left_value < threshold <= right_value
+        else:
+            crossed = left_value >= threshold > right_value
+        if not crossed:
+            continue
+        delta = right_value - left_value
+        if delta == 0.0:
+            return float(left_time)
+        fraction = (threshold - left_value) / delta
+        return float(left_time + fraction * (right_time - left_time))
+    return math.nan
+
+
 def _check(
     outcome: str,
     selectors: Sequence[str],
@@ -120,10 +218,10 @@ def _check(
 
 
 def _incomplete_checks(
-    contract: Mapping[str, Any], reason: str, end: float, observed_end: float
+    contract: Any, reason: str, end: float, observed_end: float
 ) -> dict[str, dict[str, Any]]:
-    required = contract.get("required_channels", [])
-    units = {str(item.get("path")): str(item.get("units")) for item in required if isinstance(item, Mapping)}
+    required = _safe_required(contract)
+    units = {str(item.get("path")): str(item.get("units")) for item in required}
     selectors = list(units)
     checks = {}
     for name in ("disturbance", "failure_indication", "bounded_dc_response", "recovery"):
@@ -138,9 +236,9 @@ def _incomplete_checks(
     return checks
 
 
-def _failed_checks(contract: Mapping[str, Any], error: _DynamicEvidenceError) -> dict[str, dict[str, Any]]:
-    required = contract.get("required_channels", [])
-    units = {str(item.get("path")): str(item.get("units")) for item in required if isinstance(item, Mapping)}
+def _failed_checks(contract: Any, error: _DynamicEvidenceError) -> dict[str, dict[str, Any]]:
+    required = _safe_required(contract)
+    units = {str(item.get("path")): str(item.get("units")) for item in required}
     selectors = list(units)
     metrics = {"reason": error.reason}
     if error.selector:
@@ -160,6 +258,7 @@ def derive_fixed_lcc_dynamic_evidence(
     """Derive four fixed-contract checks from raw traces only."""
 
     try:
+        _validate_contract(contract, output_step_s)
         required = contract["required_channels"]
         traces = normalize_exact_channels(raw_channels, required)
         event = contract["event"]
@@ -168,27 +267,31 @@ def derive_fixed_lcc_dynamic_evidence(
         recovery_window = float(event["recovery_window_s"])
         clear_time = event_time + duration
         domain_end = clear_time + recovery_window
-        if not math.isfinite(output_step_s) or output_step_s <= 0:
-            raise _DynamicEvidenceError("invalid_output_step")
-        if any(trace.time[-1] < domain_end for trace in traces.values()):
+        bound = contract["bounded_dc_response"]
+        bounded_prefault_window = float(bound["prefault_window_s"])
+        prefault_window = max(0.1, bounded_prefault_window)
+        prefault_start = event_time - prefault_window
+        if any(trace.time[0] > prefault_start or trace.time[-1] < domain_end for trace in traces.values()):
+            observed_start = max(trace.time[0] for trace in traces.values())
             observed_end = min(trace.time[-1] for trace in traces.values())
             checks = _incomplete_checks(contract, "insufficient_time_coverage", domain_end, observed_end)
+            for check in checks.values():
+                check["metrics"]["required_start_s"] = prefault_start
+                check["metrics"]["observed_start_s"] = observed_start
             return {"engineering_verdict": "INCOMPLETE_ANALYSIS", "checks": checks}
 
         edge_tolerance = max(float(contract["disturbance"]["maximum_edge_error_s"]), 2.0 * output_step_s)
         disturbance_trace = traces["Fault/LCC Fault Active"]
-        prefault_start = event_time - 0.1
-        pre_fault = _window(disturbance_trace, prefault_start, event_time)
+        disturbance_prefault_start = event_time - 0.1
+        pre_fault = _window(disturbance_trace, disturbance_prefault_start, event_time)
         event_fault = _window(disturbance_trace, event_time, clear_time)
         post_fault = _window_inclusive(disturbance_trace, clear_time, clear_time + 0.1)
-        disturbance_times = disturbance_trace.time
         active_min = float(contract["disturbance"]["active_min"])
         inactive_max = float(contract["disturbance"]["inactive_max"])
-        active_indices = [index for index, value in enumerate(disturbance_trace.values) if value >= active_min]
-        first_active = disturbance_times[active_indices[0]] if active_indices else math.nan
-        last_active = disturbance_times[active_indices[-1]] if active_indices else math.nan
-        rise_error = abs(first_active - event_time) if active_indices else math.inf
-        fall_error = abs(last_active - (clear_time - (disturbance_times[1] - disturbance_times[0]))) if active_indices else math.inf
+        first_active = _edge_crossing_time(disturbance_trace, active_min, rising=True)
+        last_active = _edge_crossing_time(disturbance_trace, active_min, rising=False)
+        rise_error = abs(first_active - event_time) if math.isfinite(first_active) else math.inf
+        fall_error = abs(last_active - clear_time) if math.isfinite(last_active) else math.inf
         disturbance_pass = bool(pre_fault and event_fault and post_fault) and (
             max(pre_fault) <= inactive_max
             and min(event_fault) >= active_min
@@ -200,7 +303,7 @@ def derive_fixed_lcc_dynamic_evidence(
             "PASS" if disturbance_pass else "FAIL",
             [disturbance_trace.path],
             {disturbance_trace.path: disturbance_trace.units},
-            (prefault_start, clear_time + 0.1),
+            (disturbance_prefault_start, clear_time + 0.1),
             len(pre_fault) + len(event_fault) + len(post_fault),
             {
                 "prefault_max": max(pre_fault) if pre_fault else math.nan,
@@ -215,7 +318,7 @@ def derive_fixed_lcc_dynamic_evidence(
         )
 
         gamma = traces[contract["failure_indication"]["channel"]]
-        gamma_pre = _window(gamma, prefault_start, event_time)
+        gamma_pre = _window(gamma, disturbance_prefault_start, event_time)
         gamma_event = _window(gamma, event_time, clear_time)
         gamma_baseline = median(gamma_pre) if gamma_pre else math.nan
         gamma_min = min(gamma_event) if gamma_event else math.nan
@@ -225,13 +328,14 @@ def derive_fixed_lcc_dynamic_evidence(
             "PASS" if math.isfinite(gamma_drop) and gamma_drop >= minimum_drop else "FAIL",
             [gamma.path],
             {gamma.path: gamma.units},
-            (prefault_start, clear_time),
+            (disturbance_prefault_start, clear_time),
             len(gamma_pre) + len(gamma_event),
             {"prefault_median_rad": gamma_baseline, "event_min_rad": gamma_min, "drop_rad": gamma_drop, "minimum_drop_rad": minimum_drop},
         )
 
         idc = traces[contract["bounded_dc_response"]["channel"]]
-        idc_pre = _window(idc, prefault_start, event_time)
+        idc_prefault_start = event_time - bounded_prefault_window
+        idc_pre = _window(idc, idc_prefault_start, event_time)
         idc_response = _window_inclusive(idc, event_time, domain_end)
         idc_baseline = median(idc_pre) if idc_pre else math.nan
         idc_peak = max((abs(value) for value in idc_response), default=math.nan)
@@ -248,7 +352,7 @@ def derive_fixed_lcc_dynamic_evidence(
             "PASS" if bounded_pass else "FAIL",
             [idc.path],
             {idc.path: idc.units},
-            (prefault_start, domain_end),
+            (idc_prefault_start, domain_end),
             len(idc_pre) + len(idc_response),
             {"prefault_median_ka": idc_baseline, "peak_abs_ka": idc_peak, "peak_to_prefault_ratio": idc_ratio, "maximum_ratio": maximum_ratio, "minimum_prefault_magnitude_ka": minimum_prefault},
         )
@@ -265,7 +369,7 @@ def derive_fixed_lcc_dynamic_evidence(
             trace = traces[path]
             recovery_selectors.append(path)
             recovery_units[path] = trace.units
-            prefault_values = _window(trace, prefault_start, event_time)
+            prefault_values = _window(trace, disturbance_prefault_start, event_time)
             recovery_values = _window_inclusive(trace, recovery_start, domain_end)
             baseline = median(prefault_values) if prefault_values else math.nan
             band = max(abs(baseline) * float(declaration["relative_band"]), float(declaration["absolute_floor"]))
@@ -281,7 +385,7 @@ def derive_fixed_lcc_dynamic_evidence(
         return {"engineering_verdict": verdict, "checks": checks}
     except _DynamicEvidenceError as error:
         return {"engineering_verdict": "FAIL", "checks": _failed_checks(contract, error)}
-    except (KeyError, TypeError, ValueError, OverflowError) as error:
+    except (KeyError, TypeError, ValueError, OverflowError, IndexError, AttributeError) as error:
         dynamic_error = _DynamicEvidenceError("invalid_contract")
         dynamic_error.__cause__ = error
         return {"engineering_verdict": "FAIL", "checks": _failed_checks(contract, dynamic_error)}
