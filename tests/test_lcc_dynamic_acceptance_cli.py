@@ -454,3 +454,29 @@ def test_dynamic_wrapper_uses_run_and_no_manual_sample_contract_inputs():
         "FIXED_LCC_DYNAMIC_STATUS=",
     ):
         assert field in script
+
+
+def test_dynamic_wrapper_maps_preflight_throws_to_exit_two():
+    script = (ROOT / "scripts" / "run_fixed_lcc_dynamic_acceptance.ps1").read_text(
+        encoding="utf-8"
+    )
+    assert "$PreflightComplete = $false" in script
+    assert "catch {" in script
+    assert "$ExitCode = 2" in script
+    assert "$ExitCode = $LASTEXITCODE" in script
+    assert "if (-not $PreflightComplete)" in script
+    assert "if ($LocationPushed)" in script
+
+
+def test_dynamic_completion_sentence_is_explicitly_post_run():
+    for relative in (
+        "README.md",
+        "docs/zh-CN/README.md",
+        "docs/superpowers/specs/2026-08-30-lcc-mmc-completion-roadmap-design.md",
+    ):
+        text = (ROOT / relative).read_text(encoding="utf-8")
+        assert "after a successful pre-wp6 run" in text.lower() or "成功运行后" in text
+        assert (
+            "fixed LCC WP1C current-commit dynamic engineering evidence completed;"
+            in text
+        )

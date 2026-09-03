@@ -150,6 +150,8 @@ checks 成功。成功的 pre-WP6 结果必须写成 `engineering_verdict=PASS` 
 声明三条独立接地的逆变侧分相故障支路、同一 EMTDC 时刻的断路器控制和命名
 fault-active `pgb` 输出通道；这不是最终验收声明。
 
+成功运行后：
+
 fixed LCC WP1C current-commit dynamic engineering evidence completed; final
 status remains `INCOMPLETE_ANALYSIS` pending independent reviewed golden.
 

@@ -247,6 +247,8 @@ independently grounded inverter-side phase shunts, timed breaker controls, and
 the named fault-active `pgb` output channel; this is not a final acceptance
 claim.
 
+After a successful pre-WP6 run:
+
 fixed LCC WP1C current-commit dynamic engineering evidence completed; final
 status remains `INCOMPLETE_ANALYSIS` pending independent reviewed golden.
 

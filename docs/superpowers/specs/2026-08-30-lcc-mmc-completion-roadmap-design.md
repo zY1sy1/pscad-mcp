@@ -498,7 +498,7 @@ wrapper 退出码固定为：`2` 表示 preflight/environment 拒绝且未运行
 pre-WP6 结果必须保留 `engineering_verdict=PASS`、`golden_verdict=INCOMPLETE_ANALYSIS`
 和 `status=INCOMPLETE_ANALYSIS`，并使用以下声明：
 
-> fixed LCC WP1C current-commit dynamic engineering evidence completed; final status remains `INCOMPLETE_ANALYSIS` pending independent reviewed golden.
+> 成功运行后：fixed LCC WP1C current-commit dynamic engineering evidence completed; final status remains `INCOMPLETE_ANALYSIS` pending independent reviewed golden.
 
 WP6 是唯一的 independent-golden/final-accepted owner；只有 WP6 完成后，才可
 更新 baseline、发布或写入最终 accepted 状态。文档中的 implemented、offline-tested、

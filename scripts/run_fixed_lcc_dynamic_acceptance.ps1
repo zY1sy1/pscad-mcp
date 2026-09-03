@@ -15,13 +15,16 @@ param(
 $ErrorActionPreference = 'Stop'
 $RepositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $ExitCode = 1
+$PreflightComplete = $false
+$LocationPushed = $false
 
-if ($env:PSCAD_MCP_ACCEPTANCE -ne '1') {
-    throw 'Set PSCAD_MCP_ACCEPTANCE=1 to run licensed PSCAD acceptance.'
-}
-
-Push-Location $RepositoryRoot
 try {
+    if ($env:PSCAD_MCP_ACCEPTANCE -ne '1') {
+        throw 'Set PSCAD_MCP_ACCEPTANCE=1 to run licensed PSCAD acceptance.'
+    }
+
+    Push-Location $RepositoryRoot
+    $LocationPushed = $true
     $Dirty = git status --porcelain
     if ($LASTEXITCODE -ne 0 -or $Dirty) {
         throw 'WP1C dynamic acceptance requires a clean checkout.'
@@ -46,6 +49,7 @@ try {
     if (-not (Test-Path -LiteralPath $Python -PathType Leaf)) {
         throw 'The repository Python environment is unavailable.'
     }
+    $PreflightComplete = $true
     & $Python -m pscad_mcp.hvdc.builders.lcc.dynamic_acceptance_cli run `
         --repository-root $RepositoryRoot `
         --workspace-root $RunRoot `
@@ -77,7 +81,17 @@ try {
         Write-Output 'FIXED_LCC_DYNAMIC_STATUS=FAIL'
     }
 }
+catch {
+    if (-not $PreflightComplete) {
+        $ExitCode = 2
+    } else {
+        $ExitCode = 1
+    }
+    Write-Error $_ -ErrorAction Continue
+}
 finally {
-    Pop-Location
+    if ($LocationPushed) {
+        Pop-Location
+    }
 }
 exit $ExitCode
