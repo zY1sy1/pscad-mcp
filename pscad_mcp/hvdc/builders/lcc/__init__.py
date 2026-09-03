@@ -7,6 +7,11 @@ from .dynamic_acceptance import (
     evaluate_fixed_lcc_dynamic_samples,
     validate_dynamic_lcc_acceptance_report,
 )
+from .dynamic_evidence import (
+    Trace,
+    derive_fixed_lcc_dynamic_evidence,
+    normalize_exact_channels,
+)
 from .fault_event import (
     FixedLccFaultEvent,
     inspect_fixed_lcc_fault_capability,
@@ -46,9 +51,12 @@ __all__ = [
     "LccOutputSpec",
     "LccPlanOperation",
     "LccRoute",
-    "parse_blueprint",
+    "Trace",
+    "derive_fixed_lcc_dynamic_evidence",
     "evaluate_fixed_lcc_dynamic_samples",
     "inspect_fixed_lcc_fault_capability",
+    "normalize_exact_channels",
+    "parse_blueprint",
     "plan_blank_lcc",
     "validate_dynamic_lcc_acceptance_report",
     "validate_fixed_lcc_fault_event",
