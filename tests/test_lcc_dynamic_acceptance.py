@@ -222,6 +222,46 @@ def test_roadmap_names_wp1c_as_the_next_step():
 
 
 def test_readme_documents_dynamic_evidence_status():
-    readme = (Path(__file__).parents[1] / "README.md").read_text(encoding="utf-8")
-    assert "run_fixed_lcc_dynamic_acceptance.ps1" in readme
-    assert "INCOMPLETE_ANALYSIS" in readme
+    root = Path(__file__).parents[1]
+    required = {
+        "wp1b_smoke",
+        "wp1c_dynamic",
+        "engineering_verdict=PASS",
+        "status=INCOMPLETE_ANALYSIS",
+    }
+    for relative in ("README.md", "docs/zh-CN/README.md"):
+        readme = (root / relative).read_text(encoding="utf-8")
+        assert all(item in readme for item in required)
+        assert "WP1C accepted" not in readme
+        assert "-WorkspaceRoot" in readme
+        assert "-MasterPath" in readme
+        assert "-CompilerConfiguration" in readme
+        assert "-CompilerExecutable" in readme
+        assert "-ProjectName" in readme
+        assert "PSCAD_MCP_ACCEPTANCE=1" in readme
+        assert all(f"`{code}`" in readme for code in ("2", "1", "0"))
+        assert "raw output" in readme.lower()
+        assert "independent" in readme.lower() and "golden" in readme.lower()
+
+
+def test_roadmap_documents_wp1c_boundary_and_wp6_ownership():
+    roadmap = (
+        Path(__file__).parents[1]
+        / "docs"
+        / "superpowers"
+        / "specs"
+        / "2026-08-30-lcc-mmc-completion-roadmap-design.md"
+    ).read_text(encoding="utf-8")
+    required = (
+        "run_fixed_lcc_dynamic_acceptance.ps1",
+        "WP1B-before-WP1C",
+        "companion baseline-gates plan",
+        "WP6",
+        "independent-golden",
+        "final-accepted owner",
+        (
+            "fixed LCC WP1C current-commit dynamic engineering evidence completed; "
+            "final status remains `INCOMPLETE_ANALYSIS` pending independent reviewed golden."
+        ),
+    )
+    assert all(item in roadmap for item in required)
