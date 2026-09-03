@@ -203,6 +203,7 @@ async def run_fixed_lcc_dynamic_acceptance(
     run_started = time.time()
     before: dict[str, str] = {}
     setup_failed = False
+    report_write_allowed = not (request.report_path.exists() or request.report_path.is_symlink())
     try:
         for name, path in sources.items():
             if not _regular(path):
@@ -240,18 +241,21 @@ async def run_fixed_lcc_dynamic_acceptance(
     try:
         if not request.workspace_root.exists() or not request.workspace_root.is_dir():
             raise _error(stage, "workspace_root must be an existing directory")
-        if request.report_path.resolve().parent != request.workspace_root.resolve() and request.workspace_root.resolve() not in request.report_path.resolve().parents:
-            raise _error(stage, "report_path escaped workspace")
-        if request.report_path.exists() or request.report_path.is_symlink():
-            raise _error(stage, "report_path already exists")
+            if not _contained(request.report_path, request.workspace_root):
+                raise _error(stage, "report_path escaped workspace")
+            if not report_write_allowed:
+                raise _error(stage, "report_path already exists")
         if not re.fullmatch(r"[0-9a-f]{40}", request.commit):
             raise _error(stage, "commit must be a lowercase SHA")
         if len(before) != len(sources):
             raise _error(stage, "source preflight failed", "LCC_DYNAMIC_SOURCE_INVALID")
         if setup_failed:
             raise _error(stage, "source/preflight snapshot validation failed", "LCC_DYNAMIC_PREFLIGHT_FAILED")
-        if request.preflight.get("status") != PASS:
-            raise _error(stage, "static preflight failed", "LCC_DYNAMIC_PREFLIGHT_FAILED")
+            if request.preflight.get("status") != PASS:
+                raise _error(stage, "static preflight failed", "LCC_DYNAMIC_PREFLIGHT_FAILED")
+            existing_processes = await _maybe(process_reader())
+            if existing_processes:
+                raise _error(stage, "pre-existing PSCAD processes detected", "LCC_DYNAMIC_PROCESS_PREFLIGHT_FAILED")
         stage = "attach"
         await _maybe(service.attach_local())
         status = await _maybe(service.status())
@@ -452,9 +456,11 @@ async def run_fixed_lcc_dynamic_acceptance(
         normalized = validate_dynamic_lcc_acceptance_report(report)
     except BaseException as error:  # noqa: BLE001 - report validation controls verdict
         normalized = validate_dynamic_lcc_acceptance_report(_fail(report, stage, error))
-    _atomic_write(request.report_path, normalized)
-    loaded = json.loads(request.report_path.read_text(encoding="utf-8"))
-    return validate_dynamic_lcc_acceptance_report(loaded)
+    if report_write_allowed:
+        _atomic_write(request.report_path, normalized)
+        loaded = json.loads(request.report_path.read_text(encoding="utf-8"))
+        return validate_dynamic_lcc_acceptance_report(loaded)
+    return normalized
 
 
 __all__ = ["DynamicLccRunRequest", "run_fixed_lcc_dynamic_acceptance"]
