@@ -280,7 +280,7 @@ def test_packaged_dynamic_event_requires_native_scheduler_capabilities():
         ),
         (
             lambda blueprint: blueprint["nets"].append(copy.deepcopy(next(net for net in blueprint["nets"] if net.get("label") == "LCC_FAULT_ACTIVE"))),
-            "fault_control_producer_mismatch",
+            "fault_control_producer_topology_invalid",
         ),
     ],
 )
@@ -322,7 +322,7 @@ def test_packaged_dynamic_event_rejects_unrelated_second_control_label_net():
     result = inspect_fixed_lcc_fault_capability(
         blueprint, _asset("catalog-pscad-4.6.2.json"), _production_inventory()
     )
-    assert "fault_control_producer_mismatch" in result["reasons"]
+    assert "fault_control_producer_topology_invalid" in result["reasons"]
 
 
 def test_live_inventory_port_records_may_omit_direction_metadata():

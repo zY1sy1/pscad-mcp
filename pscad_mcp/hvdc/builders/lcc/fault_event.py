@@ -191,7 +191,7 @@ def _embedded_control_reasons(
         else set()
     )
     if len(labeled_nets) != 1 or producer_endpoints != expected_producer:
-        reasons.append("fault_control_producer_mismatch")
+        reasons.append("fault_control_producer_topology_invalid")
     return reasons
 
 

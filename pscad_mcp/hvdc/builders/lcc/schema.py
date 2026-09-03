@@ -103,6 +103,12 @@ _DYNAMIC_EVENT_KEYS = {
 _DYNAMIC_EVENT_REQUIRED_KEYS = _DYNAMIC_EVENT_KEYS - {
     "control_component",
     "control_components",
+    # These fields form an all-or-none extension contract.  They remain
+    # optional as a group so legacy dynamic events without embedded control
+    # metadata continue to parse; partial declarations are rejected below.
+    "control_mode",
+    "control_signal",
+    "recovery_window_s",
 }
 _PARAMETRIC_TOP_LEVEL_KEYS = {
     "topology",
