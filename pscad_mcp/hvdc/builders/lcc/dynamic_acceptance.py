@@ -315,6 +315,8 @@ def validate_dynamic_lcc_acceptance_report(value: Any) -> dict[str, Any]:
     dynamic = _exact(report["dynamic"], "dynamic", _DYNAMIC_KEYS)
     if dynamic["evidence_source"] != "raw_pscad_output" or dynamic["engineering_verdict"] not in _ALLOWED_VERDICTS or not isinstance(dynamic["checks"], Mapping):
         raise _invalid("dynamic", "Dynamic evidence must contain raw checks.")
+    if report["status"] != FAIL and not dynamic["checks"]:
+        raise _invalid("dynamic.checks", "Non-FAIL reports require dynamic checks.")
     dynamic_verdict = _dynamic_verdict(dynamic)
     _validate_dynamic_checks(dynamic["checks"])
     if dynamic["engineering_verdict"] != dynamic_verdict and not (report["status"] == FAIL and not dynamic["checks"]):

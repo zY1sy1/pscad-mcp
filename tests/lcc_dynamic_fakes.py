@@ -104,7 +104,7 @@ def valid_wp1c_report() -> dict[str, Any]:
             "engineering_verdict": "PASS",
             "checks": {name: {"outcome": "PASS", "selectors": ["Fault/LCC Fault Active"], "units": {"Fault/LCC Fault Active": "state"}, "window_s": [0.0, 1.0], "sample_count": 1, "metrics": {}} for name in ("disturbance", "failure_indication", "bounded_dc_response", "recovery")},
         },
-        "physical": {"verdict": "PASS", "checks": []},
+        "physical": {"verdict": "PASS", "checks": [{"name": "smoke", "kind": "smoke", "required": True, "status": "passed", "outcome": "PASS"}]},
         "golden": {"source": "placeholder", "reviewed": False},
         "runtime": {
             "remaining_processes": [],
@@ -174,7 +174,7 @@ class PassingDynamicBuilder:
 
     def get_build_status(self, build_id: str):
         raw = passing_raw_channels()
-        return {"state": "published", "history": [{"state": "validated"}, {"state": "dynamic_engineering_passed"}, {"state": "published"}], "result": {"dynamic": derive_fixed_lcc_dynamic_evidence(raw, dynamic_contract()), "physical": {"verdict": "PASS", "physical_checks": []}}}
+        return {"state": "published", "history": [{"state": "validated"}, {"state": "dynamic_engineering_passed"}, {"state": "published"}], "result": {"dynamic": derive_fixed_lcc_dynamic_evidence(raw, dynamic_contract()), "physical": {"verdict": "PASS", "physical_checks": [{"name": "smoke", "kind": "smoke", "required": True, "status": "passed", "outcome": "PASS"}]}}}
 
     async def shutdown(self, *, timeout_s: float = 5.0):
         self.shutdown_called = True

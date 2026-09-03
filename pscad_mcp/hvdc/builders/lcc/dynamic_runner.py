@@ -337,8 +337,10 @@ async def run_fixed_lcc_dynamic_acceptance(
             if not callable(reader):
                 reader = getattr(builder, "get_project_output", None)
             if not callable(reader):
-                raise _error(stage, "output reader unavailable")
+                raise _error(stage, "raw output reader unavailable", "LCC_DYNAMIC_OUTPUT_UNAVAILABLE")
             output = await _maybe(reader(request.project_name))
+            if not isinstance(output, Mapping) or not any(key in output for key in ("raw_channels", "raw", "channels")):
+                raise _error(stage, "fallback output did not provide raw channels", "LCC_DYNAMIC_OUTPUT_UNAVAILABLE")
         if isinstance(output, Mapping) and isinstance(output.get("result"), Mapping):
             output = output["result"]
         if not isinstance(output, Mapping):
