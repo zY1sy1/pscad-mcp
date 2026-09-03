@@ -167,6 +167,14 @@ def test_dynamic_report_rejects_nested_schema_mutations(section, extra):
         validate_dynamic_lcc_acceptance_report(report)
 
 
+@pytest.mark.parametrize("group", ["output_parts", "output_metadata"])
+def test_dynamic_report_rejects_output_artifacts_outside_workspace(group):
+    report = valid_wp1c_report()
+    report["artifacts"][group][0]["path"] = "/outside/forged.out" if group == "output_parts" else "/outside/forged.inf"
+    with pytest.raises(BackendError):
+        validate_dynamic_lcc_acceptance_report(report)
+
+
 def test_fail_report_with_minimal_sections_self_validates():
     report = valid_wp1c_report()
     report["status"] = "FAIL"

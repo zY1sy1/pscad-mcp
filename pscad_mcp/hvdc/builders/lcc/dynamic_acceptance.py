@@ -307,6 +307,10 @@ def validate_dynamic_lcc_acceptance_report(value: Any) -> dict[str, Any]:
         artifact = artifacts[name]
         if artifact is not None and not _path_owned(Path(artifact["path"]), workspace):
             raise _invalid(f"artifacts.{name}.path", "Artifact path escaped the build workspace.")
+    for group_name, group in (("output_parts", parts), ("output_metadata", metadata)):
+        for index, artifact in enumerate(group):
+            if not _path_owned(Path(artifact["path"]), workspace):
+                raise _invalid(f"artifacts.{group_name}[{index}].path", "Artifact path escaped the build workspace.")
 
     dynamic = _exact(report["dynamic"], "dynamic", _DYNAMIC_KEYS)
     if dynamic["evidence_source"] != "raw_pscad_output" or dynamic["engineering_verdict"] not in _ALLOWED_VERDICTS or not isinstance(dynamic["checks"], Mapping):
