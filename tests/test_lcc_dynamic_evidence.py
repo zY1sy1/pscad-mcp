@@ -3,7 +3,10 @@ from __future__ import annotations
 import copy
 import math
 
+import pytest
+
 from pscad_mcp.hvdc.builders.lcc.dynamic_evidence import (
+    _DynamicEvidenceError,
     derive_fixed_lcc_dynamic_evidence,
     normalize_exact_channels,
 )
@@ -311,3 +314,76 @@ def test_bounded_dc_response_uses_contract_prefault_window():
     assert result["engineering_verdict"] == "FAIL"
     assert result["checks"]["bounded_dc_response"]["outcome"] == "FAIL"
     assert result["checks"]["bounded_dc_response"]["metrics"]["prefault_median_ka"] < 1.0
+
+
+def test_event_and_recovery_windows_must_match():
+    contract = dynamic_contract()
+    contract["recovery"]["window_s"] = 0.4
+
+    result = derive_fixed_lcc_dynamic_evidence(passing_raw_channels(), contract)
+
+    assert result["engineering_verdict"] == "FAIL"
+    assert set(result["checks"]) == {
+        "disturbance",
+        "failure_indication",
+        "bounded_dc_response",
+        "recovery",
+    }
+    assert all(check["outcome"] == "FAIL" for check in result["checks"].values())
+    assert all(set(check) == {
+        "outcome",
+        "selectors",
+        "units",
+        "window_s",
+        "sample_count",
+        "metrics",
+    } for check in result["checks"].values())
+
+
+@pytest.mark.parametrize("bad_sample", [True, "1", math.nan, math.inf])
+def test_normalize_rejects_non_numeric_or_non_finite_time_and_values(bad_sample):
+    raw = passing_raw_channels()
+    channel = _channel(raw, "Main/IDC")
+    channel["domain"] = [bad_sample, 0.1]
+    channel["values"] = [1.0, bad_sample]
+
+    with pytest.raises(_DynamicEvidenceError):
+        normalize_exact_channels({"channels": raw["channels"]}, dynamic_contract()["required_channels"])
+
+
+def test_duplicate_required_channel_declaration_is_fail():
+    contract = dynamic_contract()
+    contract["required_channels"].append(dict(contract["required_channels"][0]))
+
+    result = derive_fixed_lcc_dynamic_evidence(passing_raw_channels(), contract)
+
+    assert result["engineering_verdict"] == "FAIL"
+    assert all(check["outcome"] == "FAIL" for check in result["checks"].values())
+
+
+@pytest.mark.parametrize(
+    ("section", "channel", "units"),
+    [
+        ("failure_indication", "Main/VDC_INV", "rad"),
+        ("bounded_dc_response", "Main/VDC_INV", "kA"),
+    ],
+)
+def test_semantic_channel_declarations_must_match_required_channels(section, channel, units):
+    contract = dynamic_contract()
+    contract[section]["channel"] = channel
+    contract[section]["units"] = units
+
+    result = derive_fixed_lcc_dynamic_evidence(passing_raw_channels(), contract)
+
+    assert result["engineering_verdict"] == "FAIL"
+    assert all(check["outcome"] == "FAIL" for check in result["checks"].values())
+
+
+def test_recovery_channel_declarations_must_match_required_channels():
+    contract = dynamic_contract()
+    contract["recovery"]["channels"][0]["units"] = "A"
+
+    result = derive_fixed_lcc_dynamic_evidence(passing_raw_channels(), contract)
+
+    assert result["engineering_verdict"] == "FAIL"
+    assert all(check["outcome"] == "FAIL" for check in result["checks"].values())

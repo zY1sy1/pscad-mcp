@@ -77,15 +77,21 @@ def normalize_exact_channels(
             or isinstance(samples, (str, bytes, bytearray))
         ):
             raise _DynamicEvidenceError("invalid_trace", path)
-        try:
-            times = tuple(float(item) for item in domain)
-            values = tuple(float(item) for item in samples)
-        except (TypeError, ValueError, OverflowError) as error:
-            raise _DynamicEvidenceError("invalid_trace", path) from error
+        normalized: list[tuple[float, ...]] = []
+        for sequence in (domain, samples):
+            if any(isinstance(item, bool) or not isinstance(item, (int, float)) for item in sequence):
+                raise _DynamicEvidenceError("invalid_trace", path)
+            try:
+                converted = tuple(float(item) for item in sequence)
+            except (TypeError, ValueError, OverflowError) as error:
+                raise _DynamicEvidenceError("invalid_trace", path) from error
+            if not all(math.isfinite(item) for item in converted):
+                raise _DynamicEvidenceError("invalid_trace", path)
+            normalized.append(converted)
+        times, values = normalized
         if (
             not times
             or len(times) != len(values)
-            or not all(math.isfinite(item) for item in (*times, *values))
             or any(right <= left for left, right in pairwise(times))
         ):
             raise _DynamicEvidenceError("invalid_trace", path)
@@ -130,16 +136,29 @@ def _validate_contract(contract: Any, output_step_s: Any) -> None:
     required = contract.get("required_channels")
     if not isinstance(required, Sequence) or isinstance(required, (str, bytes, bytearray)) or not required:
         raise _DynamicEvidenceError("invalid_required_channels")
+    required_identity: dict[str, str] = {}
     for declaration in required:
-        if not isinstance(declaration, Mapping) or not isinstance(declaration.get("path"), str) or not isinstance(declaration.get("units"), str):
+        if (
+            not isinstance(declaration, Mapping)
+            or not isinstance(declaration.get("path"), str)
+            or not declaration.get("path")
+            or not declaration["path"].strip()
+            or not isinstance(declaration.get("units"), str)
+            or not declaration.get("units")
+            or not declaration["units"].strip()
+        ):
             raise _DynamicEvidenceError("invalid_required_channel")
+        path = declaration["path"]
+        if path in required_identity:
+            raise _DynamicEvidenceError("duplicate_required_channel", path)
+        required_identity[path] = declaration["units"]
 
     event = contract.get("event")
     if not isinstance(event, Mapping):
         raise _DynamicEvidenceError("invalid_event")
     _finite_number(event.get("time_s"), "event_time_s", nonnegative=True)
     _finite_number(event.get("duration_s"), "event_duration_s", positive=True)
-    _finite_number(event.get("recovery_window_s"), "event_recovery_window_s", positive=True)
+    event_recovery_window = _finite_number(event.get("recovery_window_s"), "event_recovery_window_s", positive=True)
 
     disturbance = contract.get("disturbance")
     if not isinstance(disturbance, Mapping):
@@ -151,12 +170,30 @@ def _validate_contract(contract: Any, output_step_s: Any) -> None:
     _finite_number(disturbance.get("maximum_edge_error_s"), "maximum_edge_error_s", nonnegative=True)
 
     failure = contract.get("failure_indication")
-    if not isinstance(failure, Mapping) or not isinstance(failure.get("channel"), str):
+    if (
+        not isinstance(failure, Mapping)
+        or not isinstance(failure.get("channel"), str)
+        or not isinstance(failure.get("units"), str)
+        or not failure.get("channel")
+        or not failure.get("units")
+        or not failure["channel"].strip()
+        or not failure["units"].strip()
+        or required_identity.get(failure["channel"]) != failure["units"]
+    ):
         raise _DynamicEvidenceError("invalid_failure_indication")
     _finite_number(failure.get("minimum_drop_rad"), "minimum_drop_rad", positive=True)
 
     bounded = contract.get("bounded_dc_response")
-    if not isinstance(bounded, Mapping) or not isinstance(bounded.get("channel"), str):
+    if (
+        not isinstance(bounded, Mapping)
+        or not isinstance(bounded.get("channel"), str)
+        or not isinstance(bounded.get("units"), str)
+        or not bounded.get("channel")
+        or not bounded.get("units")
+        or not bounded["channel"].strip()
+        or not bounded["units"].strip()
+        or required_identity.get(bounded["channel"]) != bounded["units"]
+    ):
         raise _DynamicEvidenceError("invalid_bounded_dc_response")
     _finite_number(bounded.get("prefault_window_s"), "prefault_window_s", positive=True)
     _finite_number(bounded.get("minimum_prefault_magnitude_ka"), "minimum_prefault_magnitude_ka", positive=True)
@@ -166,6 +203,10 @@ def _validate_contract(contract: Any, output_step_s: Any) -> None:
     if not isinstance(recovery, Mapping):
         raise _DynamicEvidenceError("invalid_recovery")
     recovery_window = _finite_number(recovery.get("window_s"), "recovery_window_s", positive=True)
+    output_step = _finite_number(output_step_s, "output_step", positive=True)
+    consistency_tolerance = max(1e-12, output_step * 1e-9)
+    if not math.isclose(event_recovery_window, recovery_window, rel_tol=0.0, abs_tol=consistency_tolerance):
+        raise _DynamicEvidenceError("recovery_window_mismatch")
     minimum_hold = _finite_number(recovery.get("minimum_hold_s"), "minimum_hold_s", positive=True)
     if minimum_hold > recovery_window:
         raise _DynamicEvidenceError("invalid_recovery_hold")
@@ -173,12 +214,20 @@ def _validate_contract(contract: Any, output_step_s: Any) -> None:
     if not isinstance(recovery_channels, Sequence) or isinstance(recovery_channels, (str, bytes, bytearray)) or not recovery_channels:
         raise _DynamicEvidenceError("invalid_recovery_channels")
     for declaration in recovery_channels:
-        if not isinstance(declaration, Mapping) or not isinstance(declaration.get("path"), str) or not isinstance(declaration.get("units"), str):
+        if (
+            not isinstance(declaration, Mapping)
+            or not isinstance(declaration.get("path"), str)
+            or not isinstance(declaration.get("units"), str)
+            or not declaration.get("path")
+            or not declaration.get("units")
+            or not declaration["path"].strip()
+            or not declaration["units"].strip()
+            or required_identity.get(declaration["path"]) != declaration["units"]
+        ):
             raise _DynamicEvidenceError("invalid_recovery_channel")
         _finite_number(declaration.get("relative_band"), "relative_band", nonnegative=True)
         _finite_number(declaration.get("absolute_floor"), "absolute_floor", nonnegative=True)
 
-    _finite_number(output_step_s, "output_step", positive=True)
 
 
 def _edge_crossing_time(trace: Trace, threshold: float, *, rising: bool) -> float:
