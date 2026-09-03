@@ -302,6 +302,63 @@ def test_run_preflight_failure_new_report_preserves_stable_code_and_reason(tmp_p
     assert "bad compiler" in persisted["failure"]["message"]
 
 
+def test_run_preflight_failure_does_not_follow_dangling_report_symlink(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    report = tmp_path / "run" / "report-link.json"
+    target = report.parent / "target.json"
+    original_resolve = Path.resolve
+    original_is_symlink = Path.is_symlink
+
+    def fake_resolve(path: Path, *args, **kwargs):
+        if path == report:
+            return target
+        return original_resolve(path, *args, **kwargs)
+
+    def fake_is_symlink(path: Path) -> bool:
+        return path == report or original_is_symlink(path)
+
+    monkeypatch.setattr(Path, "resolve", fake_resolve)
+    monkeypatch.setattr(Path, "is_symlink", fake_is_symlink)
+
+    code = main(
+        _run_args(tmp_path, report),
+        preflight_action=lambda _args: {
+            "status": "FAIL",
+            "sha256": "d" * 64,
+            "snapshot": {},
+        },
+    )
+
+    assert code == 2
+    assert not target.exists()
+
+
+def test_run_preflight_failure_keeps_static_diagnostics_traceable(tmp_path: Path):
+    report = tmp_path / "run" / "report.json"
+    static = {
+        "status": "FAIL",
+        "checks": {"compiler": "FAIL", "processes": "PASS"},
+        "runtime": {"connected": False},
+        "external_pscad_processes": [{"pid": 123}],
+    }
+    code = main(
+        _run_args(tmp_path, report),
+        preflight_action=lambda _args: {
+            "status": "FAIL",
+            "sha256": "d" * 64,
+            "snapshot": {},
+            "static": static,
+        },
+    )
+
+    assert code == 2
+    persisted = validate_dynamic_lcc_acceptance_report(json.loads(report.read_text(encoding="utf-8")))
+    assert persisted["failure"]["code"] == "LCC_DYNAMIC_PREFLIGHT_FAILED"
+    assert "compiler" in persisted["failure"]["message"]
+    assert "external_pscad_processes" in persisted["failure"]["message"]
+
+
 def test_run_engineering_pass_with_incomplete_status_returns_zero(tmp_path: Path):
     report = tmp_path / "run" / "report.json"
     payload = _fake_valid_report(report)

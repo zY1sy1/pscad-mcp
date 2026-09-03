@@ -134,7 +134,7 @@ def _empty_report(request: DynamicLccRunRequest, sources: Mapping[str, Path]) ->
     commit = request.commit if isinstance(request.commit, str) and re.fullmatch(r"[0-9a-f]{40}", request.commit) else zeros[:40]
     return {
         "schema_version": 1,
-        "run_id": request.report_path.resolve().parent.name or request.report_path.stem,
+        "run_id": request.report_path.absolute().parent.name or request.report_path.stem,
         "scope": "lcc.fixed_autonomous",
         "builder_path": "lcc.fixed_autonomous",
         "kind": "licensed_simulation",

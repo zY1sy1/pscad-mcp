@@ -228,6 +228,7 @@ def _dynamic_source_paths(arguments: argparse.Namespace) -> dict[str, Path]:
 
 def _preflight(arguments: argparse.Namespace) -> dict[str, Any]:
     sources = _dynamic_source_paths(arguments)
+    static: dict[str, Any] = {"status": FAIL}
     try:
         static = run_static_preflight(
             PreflightRequest(
@@ -251,9 +252,15 @@ def _preflight(arguments: argparse.Namespace) -> dict[str, Any]:
             status = FAIL
     except Exception as error:  # noqa: BLE001
         status = FAIL
+        static = {"status": FAIL, "error": {"type": type(error).__name__, "message": str(error)[:1024]}}
         snapshot = {name: {"path": str(path.absolute()), "sha256": "0" * 64} for name, path in sources.items()}
         snapshot["error"] = {"type": type(error).__name__, "message": str(error)[:1024]}
-    return {"status": status, "sha256": _canonical_hash(snapshot), "snapshot": snapshot}
+    return {
+        "status": status,
+        "sha256": _canonical_hash(snapshot),
+        "snapshot": snapshot,
+        "static": static,
+    }
 
 
 def _sha256_file(path: Path) -> str:
@@ -285,7 +292,7 @@ def _service_factory(request: DynamicLccRunRequest) -> tuple[Any, Any]:
 
 
 def _print_run_fields(report_path: Path, report: Mapping[str, Any] | None, *, engineering: str, status: str) -> None:
-    print(f"FIXED_LCC_DYNAMIC_REPORT={report_path.resolve()}")
+    print(f"FIXED_LCC_DYNAMIC_REPORT={report_path.absolute()}")
     print(f"FIXED_LCC_DYNAMIC_REPORT_SHA256={_sha256_file(report_path) if report_path.is_file() else ''}")
     print(f"FIXED_LCC_DYNAMIC_ENGINEERING_VERDICT={engineering}")
     print(f"FIXED_LCC_DYNAMIC_STATUS={status}")
@@ -303,7 +310,7 @@ def _write_failure_if_absent(
         return
     parent = report_path.parent
     for candidate in (parent, *parent.parents):
-        if candidate.is_symlink():
+        if _is_reparse_or_symlink(candidate):
             return
         if candidate == request.workspace_root:
             break
@@ -319,6 +326,9 @@ def _preflight_failure_error(preflight: Mapping[str, Any]) -> BackendError:
         fragments.append(f"error={json.dumps(original, ensure_ascii=True, sort_keys=True)}")
     if details is not None:
         fragments.append(f"details={json.dumps(details, ensure_ascii=True, sort_keys=True)}")
+    static = preflight.get("static")
+    if static is not None:
+        fragments.append(f"static={json.dumps(static, ensure_ascii=True, sort_keys=True)}")
     message = "Dynamic LCC static preflight failed."
     if fragments:
         message += " " + "; ".join(fragments)
@@ -331,6 +341,28 @@ def _preflight_failure_error(preflight: Mapping[str, Any]) -> BackendError:
     )
 
 
+def _is_reparse_or_symlink(path: Path) -> bool:
+    try:
+        if path.is_symlink():
+            return True
+        return bool(getattr(path.stat(), "st_file_attributes", 0) & 0x400)
+    except OSError:
+        return False
+
+
+def _report_parent_is_safe(report_path: Path, workspace_root: Path) -> bool:
+    try:
+        report_path.relative_to(workspace_root)
+    except ValueError:
+        return False
+    for parent in (report_path.parent, *report_path.parent.parents):
+        if _is_reparse_or_symlink(parent):
+            return False
+        if parent == workspace_root:
+            break
+    return True
+
+
 def main(
     argv: Sequence[str] | None = None,
     *,
@@ -340,13 +372,12 @@ def main(
 ) -> int:
     arguments = _parser().parse_args(argv)
     if arguments.action == "run":
-        repository_root = arguments.repository_root.resolve()
-        workspace_root = arguments.workspace_root.resolve()
+        repository_root = arguments.repository_root.absolute()
+        workspace_root = arguments.workspace_root.absolute()
         workspace_root.mkdir(parents=True, exist_ok=True)
-        report_path = arguments.report.resolve()
-        try:
-            report_path.relative_to(workspace_root)
-        except ValueError as error:
+        report_path = arguments.report.absolute()
+        if not _report_parent_is_safe(report_path, workspace_root):
+            error = ValueError("--report must be inside --workspace-root and use regular parent directories")
             raise SystemExit("--report must be inside --workspace-root") from error
         try:
             preflight = preflight_action(arguments)
