@@ -175,6 +175,13 @@ def test_dynamic_report_rejects_output_artifacts_outside_workspace(group):
         validate_dynamic_lcc_acceptance_report(report)
 
 
+def test_dynamic_report_rejects_physical_pass_without_checks():
+    report = valid_wp1c_report()
+    report["physical"] = {"verdict": "PASS", "checks": []}
+    with pytest.raises(BackendError):
+        validate_dynamic_lcc_acceptance_report(report)
+
+
 def test_fail_report_with_minimal_sections_self_validates():
     report = valid_wp1c_report()
     report["status"] = "FAIL"

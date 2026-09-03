@@ -326,6 +326,8 @@ def validate_dynamic_lcc_acceptance_report(value: Any) -> dict[str, Any]:
     physical = _exact(report["physical"], "physical", _PHYSICAL_KEYS)
     if physical["verdict"] not in _ALLOWED_VERDICTS or not isinstance(physical["checks"], Sequence) or isinstance(physical["checks"], (str, bytes, bytearray)):
         raise _invalid("physical", "Physical evidence is invalid.")
+    if report["status"] != FAIL and not physical["checks"]:
+        raise _invalid("physical.checks", "Non-FAIL reports require physical checks.")
     for index, check in enumerate(physical["checks"]):
         if not isinstance(check, Mapping):
             raise _invalid(f"physical.checks[{index}]", "Physical checks must be objects.")
