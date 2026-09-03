@@ -543,6 +543,8 @@ class LccExecutor:
             await self._compile(operation)
         elif operation.kind == "register_dynamic_events":
             await self._register_dynamic_events(operation)
+        elif operation.kind == "verify_dynamic_control":
+            await self._verify_dynamic_control(operation)
         elif operation.kind == "simulate":
             await self._simulate(operation)
         elif operation.kind == "smoke_validate":
@@ -2004,6 +2006,119 @@ class LccExecutor:
             "mode": "native",
             "events": normalized,
             "acknowledgements": [dict(item) if isinstance(item, Mapping) else item for item in acknowledgements],
+        }
+        self.result = result
+        self._operation_completed()
+
+    async def _verify_dynamic_control(
+        self, operation: LccPlanOperation
+    ) -> None:
+        self._operation_started(operation)
+        arguments = dict(operation.arguments)
+        if (
+            self.plan.verification_profile != "wp1c_dynamic"
+            or arguments.get("control_mode") != "embedded_emtdc"
+        ):
+            raise _error(
+                "LCC_DYNAMIC_EVENT_UNAVAILABLE",
+                "Embedded dynamic control verification was not selected.",
+                "verify_lcc_dynamic_control",
+            )
+        if not any(
+            item.get("state") == LccBuildState.COMPILED.value
+            for item in self.history
+        ):
+            raise _error(
+                "LCC_DYNAMIC_EVENT_UNAVAILABLE",
+                "Dynamic control verification requires a compiled project.",
+                "verify_lcc_dynamic_control",
+            )
+        signal = arguments.get("control_signal")
+        timer_name = arguments.get("timer_component")
+        consumers = arguments.get("control_components")
+        channel = arguments.get("channel")
+        if (
+            not isinstance(signal, str)
+            or not isinstance(timer_name, str)
+            or not isinstance(channel, str)
+        ):
+            raise _error(
+                "LCC_DYNAMIC_EVENT_UNAVAILABLE",
+                "Dynamic control identity is incomplete.",
+                "verify_lcc_dynamic_control",
+            )
+        if (
+            not isinstance(consumers, Sequence)
+            or isinstance(consumers, (str, bytes, bytearray))
+            or len(consumers) != 3
+            or not all(isinstance(name, str) and name for name in consumers)
+        ):
+            raise _error(
+                "LCC_DYNAMIC_EVENT_UNAVAILABLE",
+                "Dynamic control requires three breaker consumers.",
+                "verify_lcc_dynamic_control",
+            )
+        try:
+            await self._verify_master_binding_state(refresh_components=True)
+        except BackendError as error:
+            raise _error(
+                "LCC_DYNAMIC_EVENT_UNAVAILABLE",
+                "Compiled Master binding state could not be verified.",
+                "verify_lcc_dynamic_control",
+                upstream_code=error.code,
+            ) from error
+        timer_id = self.component_ids.get(timer_name)
+        consumer_ids = [self.component_ids.get(name) for name in consumers]
+        if timer_id is None or any(value is None for value in consumer_ids):
+            raise _error(
+                "LCC_DYNAMIC_EVENT_UNAVAILABLE",
+                "Dynamic control components are absent after compile.",
+                "verify_lcc_dynamic_control",
+            )
+        timer_parameters = await self.service.get_component_parameters(
+            self.project_name, int(timer_id)
+        )
+        event = arguments.get("event")
+        if (
+            not isinstance(event, Mapping)
+            or not isinstance(timer_parameters, Mapping)
+            or not _same_setting(
+                event.get("time_s"), timer_parameters.get("FaultTime_s")
+            )
+            or not _same_setting(
+                event.get("duration_s"),
+                timer_parameters.get("FaultDuration_s"),
+            )
+        ):
+            raise _error(
+                "LCC_DYNAMIC_EVENT_UNAVAILABLE",
+                "Compiled fault timer parameters differ from the event contract.",
+                "verify_lcc_dynamic_control",
+            )
+        for name, component_id in zip(consumers, consumer_ids):
+            parameters = await self.service.get_component_parameters(
+                self.project_name, int(component_id)
+            )
+            if not isinstance(parameters, Mapping) or parameters.get("NAME") != signal:
+                raise _error(
+                    "LCC_DYNAMIC_EVENT_UNAVAILABLE",
+                    "A compiled fault breaker does not reference the timer signal.",
+                    "verify_lcc_dynamic_control",
+                    logical_id=name,
+                    expected=signal,
+                    observed=parameters.get("NAME")
+                    if isinstance(parameters, Mapping)
+                    else None,
+                )
+        result = dict(self.result or {})
+        result["dynamic_control"] = {
+            "status": "PASS",
+            "mode": "embedded_emtdc",
+            "signal": signal,
+            "timer_component_id": int(timer_id),
+            "consumer_component_ids": [int(value) for value in consumer_ids],
+            "output": channel,
+            "source": "compiled_project_readback",
         }
         self.result = result
         self._operation_completed()

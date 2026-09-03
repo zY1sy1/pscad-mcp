@@ -1242,6 +1242,169 @@ def test_executor_rejects_dynamic_events_without_native_emtdc_scheduler(tmp_path
     assert raised.value.code == "LCC_DYNAMIC_EVENT_UNAVAILABLE"
 
 
+def _dynamic_control_operation(**overrides):
+    arguments = {
+        "control_mode": "embedded_emtdc",
+        "control_signal": "LCC_FAULT_ACTIVE",
+        "timer_component": "inverter_fault_timer",
+        "control_components": [
+            "inverter_fault_breaker_a",
+            "inverter_fault_breaker_b",
+            "inverter_fault_breaker_c",
+        ],
+        "channel": "Fault/LCC Fault Active",
+        "event": {"time_s": 0.8, "duration_s": 0.1},
+    }
+    arguments.update(overrides)
+    return LccPlanOperation(
+        sequence=1,
+        kind="verify_dynamic_control",
+        target="CIGRE_LCC",
+        arguments=arguments,
+    )
+
+
+def _dynamic_control_executor(tmp_path, *, service=None, **plan_overrides):
+    plan = replace(_plan(tmp_path), verification_profile="wp1c_dynamic", **plan_overrides)
+    executor = LccExecutor(plan, service or RecordingPscadService(), tmp_path)
+    executor.history.append({"state": LccBuildState.COMPILED.value})
+    executor.component_ids = {
+        "inverter_fault_timer": 10,
+        "inverter_fault_breaker_a": 11,
+        "inverter_fault_breaker_b": 12,
+        "inverter_fault_breaker_c": 13,
+    }
+    executor.service.components = {
+        10: {"parameters": {"FaultTime_s": 0.8, "FaultDuration_s": 0.1}},
+        11: {"parameters": {"NAME": "LCC_FAULT_ACTIVE"}},
+        12: {"parameters": {"NAME": "LCC_FAULT_ACTIVE"}},
+        13: {"parameters": {"NAME": "LCC_FAULT_ACTIVE"}},
+    }
+    return executor
+
+
+def test_executor_verifies_embedded_dynamic_control_after_compile(tmp_path):
+    service = RecordingPscadService()
+    executor = _dynamic_control_executor(tmp_path, service=service)
+
+    asyncio.run(executor._dispatch(_dynamic_control_operation()))
+
+    assert executor.result["dynamic_control"] == {
+        "status": "PASS",
+        "mode": "embedded_emtdc",
+        "signal": "LCC_FAULT_ACTIVE",
+        "timer_component_id": 10,
+        "consumer_component_ids": [11, 12, 13],
+        "output": "Fault/LCC Fault Active",
+        "source": "compiled_project_readback",
+    }
+
+
+def test_recording_fake_persists_symbolic_parameter_values(tmp_path):
+    service = RecordingPscadService()
+    service.components = {
+        11: {
+            "id": 11,
+            "logical_id": "breaker",
+            "definition": "master:breaker",
+            "x": 0,
+            "y": 0,
+            "orientation": 0,
+            "parameters": {"NAME": "LCC_FAULT_ACTIVE"},
+        }
+    }
+    project = tmp_path / "readback.pscx"
+    service._write_project(project)
+
+    parameter = ET.parse(project).find("./definition/component/parameters/param")
+    assert parameter is not None
+    assert parameter.get("value") == "LCC_FAULT_ACTIVE"
+    assert asyncio.run(service.get_component_parameters("readback", 11))["NAME"] == "LCC_FAULT_ACTIVE"
+
+
+@pytest.mark.parametrize(
+    ("case", "operation_kwargs", "history", "component_ids", "components"),
+    [
+        (
+            "numeric_name",
+            {},
+            [{"state": LccBuildState.COMPILED.value}],
+            None,
+            {11: {"parameters": {"NAME": 1}}},
+        ),
+        (
+            "different_symbol",
+            {},
+            [{"state": LccBuildState.COMPILED.value}],
+            None,
+            {11: {"parameters": {"NAME": "OTHER_SIGNAL"}}},
+        ),
+        (
+            "missing_timer",
+            {},
+            [{"state": LccBuildState.COMPILED.value}],
+            {"inverter_fault_breaker_a": 11, "inverter_fault_breaker_b": 12, "inverter_fault_breaker_c": 13},
+            None,
+        ),
+        (
+            "timing_mismatch",
+            {"event": {"time_s": 0.7, "duration_s": 0.1}},
+            [{"state": LccBuildState.COMPILED.value}],
+            None,
+            None,
+        ),
+        (
+            "pre_compiled",
+            {},
+            [],
+            None,
+            None,
+        ),
+    ],
+)
+def test_executor_rejects_unavailable_embedded_dynamic_control(
+    tmp_path, case, operation_kwargs, history, component_ids, components
+):
+    executor = _dynamic_control_executor(tmp_path)
+    executor.history = list(history)
+    if component_ids is not None:
+        executor.component_ids = component_ids
+    if components is not None:
+        for component_id, component in components.items():
+            executor.service.components[component_id] = component
+    with pytest.raises(BackendError) as raised:
+        asyncio.run(executor._verify_dynamic_control(_dynamic_control_operation(**operation_kwargs)))
+    assert raised.value.code == "LCC_DYNAMIC_EVENT_UNAVAILABLE", case
+    assert "run_project" not in [call[0] for call in executor.service.calls]
+
+
+class DynamicMasterBindingFailureService(RecordingPscadService):
+    async def verify_master_binding_state(self, *args, **kwargs):
+        await super().verify_master_binding_state(*args, **kwargs)
+        raise BackendError(
+            "MASTER_SOURCE_CHANGED",
+            "Master changed after placement.",
+            "hvdc",
+            "verify_master_binding_state",
+        )
+
+
+def test_executor_maps_pinned_master_readback_failure_to_dynamic_unavailable(tmp_path):
+    service = DynamicMasterBindingFailureService()
+    executor = _dynamic_control_executor(
+        tmp_path,
+        service=service,
+        master_sha256="b" * 64,
+        master_binding_registry_sha256="a" * 64,
+    )
+
+    with pytest.raises(BackendError) as raised:
+        asyncio.run(executor._verify_dynamic_control(_dynamic_control_operation()))
+
+    assert raised.value.code == "LCC_DYNAMIC_EVENT_UNAVAILABLE"
+    assert "run_project" not in [call[0] for call in service.calls]
+
+
 def test_execute_build_rejects_unverified_companion_library_before_loading(tmp_path):
     asset_set = load_packaged_asset_set()
     invalid_library = b"<pslx><definition name='unexpected' /></pslx>"
