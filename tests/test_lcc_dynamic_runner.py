@@ -16,9 +16,11 @@ def valid_request(tmp_path: Path) -> tuple[DynamicLccRunRequest, Path]:
     staging = workspace / "staging"
     repo.mkdir()
     staging.mkdir(parents=True)
+    asset_root = repo / "pscad_mcp" / "assets" / "lcc" / "cigre_lcc_monopole_v1"
+    (asset_root / "library").mkdir(parents=True)
     for name in ("blueprint.json", "catalog-pscad-4.6.2.json", "dynamic.json", "master-bindings-pscad-4.6.2.json", "manifest.json", "cigre_lcc_v1.pslx"):
-        path = repo / name
-        path.write_text("{}", encoding="utf-8")
+        path = asset_root / ("library" if name.endswith(".pslx") else "") / name
+        path.write_text((Path(__file__).parents[1] / "pscad_mcp" / "assets" / "lcc" / "cigre_lcc_monopole_v1" / name).read_text(encoding="utf-8") if name == "dynamic.json" else "{}", encoding="utf-8")
     master = repo / "Master.psdx"
     compiler_cfg = repo / "compiler.cfg"
     compiler_exe = repo / "compiler.exe"
@@ -43,10 +45,11 @@ def valid_request(tmp_path: Path) -> tuple[DynamicLccRunRequest, Path]:
 
 def test_runner_rederives_output_and_persists_incomplete_success(tmp_path: Path):
     request, staging = valid_request(tmp_path)
+    service = PassingDynamicService(staging)
     report = asyncio.run(
         run_fixed_lcc_dynamic_acceptance(
             request,
-            service=PassingDynamicService(staging),
+            service=service,
             builder=PassingDynamicBuilder(staging),
             process_reader=list,
             poll_interval_s=0,
@@ -57,6 +60,9 @@ def test_runner_rederives_output_and_persists_incomplete_success(tmp_path: Path)
     assert report["status"] == "INCOMPLETE_ANALYSIS"
     assert report["dynamic"]["evidence_source"] == "raw_pscad_output"
     assert report["runtime"]["remaining_processes"] == []
+    assert report["artifacts"]["project"]["sha256"]
+    assert report["artifacts"]["library"]["sha256"]
+    assert ("output", True) in service.calls
 
 
 def test_runner_static_preflight_failure_writes_fail_without_build(tmp_path: Path):

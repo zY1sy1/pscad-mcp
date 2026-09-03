@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import copy
 import hashlib
 import inspect
 import json
@@ -11,7 +10,7 @@ import os
 import re
 import tempfile
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -65,8 +64,7 @@ def _error(stage: str, message: str, code: str = "LCC_DYNAMIC_RUN_FAILED") -> Ba
 
 
 def _source_paths(request: DynamicLccRunRequest) -> dict[str, Path]:
-    root = request.repository_root.resolve()
-    asset = Path(__file__).resolve().parents[3] / "assets" / "lcc" / "cigre_lcc_monopole_v1"
+    root = request.repository_root / "pscad_mcp" / "assets" / "lcc" / "cigre_lcc_monopole_v1"
     names = {
         "blueprint": "blueprint.json",
         "catalog": "catalog-pscad-4.6.2.json",
@@ -81,11 +79,27 @@ def _source_paths(request: DynamicLccRunRequest) -> dict[str, Path]:
         "compiler_executable": request.compiler_executable,
     }
     for key, filename in names.items():
-        candidates = list(root.rglob(filename)) if root.exists() else []
-        if key == "companion":
-            candidates = [p for p in candidates if p.name == filename] or list(root.rglob("*.pslx"))
-        result[key] = (candidates[0] if candidates else asset / ("library" if key == "companion" else "") / filename).resolve()
+        result[key] = root / ("library" if key == "companion" else "") / filename
     return result
+
+
+def _regular(path: Path) -> bool:
+    """Reject links/reparse points before resolving and require a regular file."""
+    try:
+        if path.is_symlink() or not path.exists() or not path.is_file():
+            return False
+        attrs = getattr(path.stat(), "st_file_attributes", 0)
+        return not bool(attrs & 0x400)  # FILE_ATTRIBUTE_REPARSE_POINT
+    except OSError:
+        return False
+
+
+def _contained(path: Path, root: Path) -> bool:
+    try:
+        path.relative_to(root)
+        return True
+    except ValueError:
+        return False
 
 
 def _empty_report(request: DynamicLccRunRequest, sources: Mapping[str, Path]) -> dict[str, Any]:
@@ -111,14 +125,14 @@ def _empty_report(request: DynamicLccRunRequest, sources: Mapping[str, Path]) ->
         "golden_verdict": INCOMPLETE,
         "status": INCOMPLETE,
         "repository": {"branch": request.branch, "commit": commit, "clean": True},
-        "preflight": copy.deepcopy(dict(request.preflight)) if isinstance(request.preflight, Mapping) else {"status": "FAIL", "sha256": zeros, "snapshot": {}},
+        "preflight": {"status": ((request.preflight.get("status") if isinstance(request.preflight, Mapping) else FAIL) if isinstance((request.preflight.get("status") if isinstance(request.preflight, Mapping) else None), str) else FAIL), "sha256": ((request.preflight.get("sha256") if isinstance(request.preflight, Mapping) else zeros) if isinstance((request.preflight.get("sha256") if isinstance(request.preflight, Mapping) else None), str) else zeros), "snapshot": {}},
         "sources": source_record,
         "build": {"project_name": request.project_name, "workspace": str(request.workspace_root.resolve()), "build_id": None, "plan_hash": None, "verification_profile": "wp1c_dynamic", "history": [], "terminal_state": "not_started"},
-        "artifacts": {"project": None, "selected_output": None, "output_parts": [], "output_metadata": [], "normalized_samples": None},
+        "artifacts": {"project": None, "library": None, "selected_output": None, "output_parts": [], "output_metadata": [], "normalized_samples": None},
         "dynamic": {"evidence_source": "raw_pscad_output", "engineering_verdict": INCOMPLETE, "checks": {}},
         "physical": {"verdict": INCOMPLETE, "checks": []},
         "golden": {"source": "placeholder", "reviewed": False},
-        "runtime": {"remaining_processes": [], "managed_pid": None, "quit_error": None},
+        "runtime": {"remaining_processes": [], "managed_pid": None, "backend": None, "version": None, "x64": None, "licensed": None, "quit_error": None},
         "explicit_exclusions": ["independent_golden", "final_accepted"],
         "failure": None,
     }
@@ -146,7 +160,7 @@ def _fail(report: dict[str, Any], stage: str, error: BaseException) -> dict[str,
     report["status"] = FAIL
     report["failure"] = {"stage": stage, "code": getattr(error, "code", type(error).__name__), "message": str(error)[:1024]}
     report["build"]["terminal_state"] = "failed"
-    report["dynamic"]["engineering_verdict"] = FAIL
+    report["dynamic"] = {"evidence_source": "raw_pscad_output", "engineering_verdict": FAIL, "checks": {}}
     report["physical"]["verdict"] = FAIL
     return report
 
@@ -166,18 +180,26 @@ async def run_fixed_lcc_dynamic_acceptance(
     timeout_s: float = 900.0,
 ) -> dict[str, Any]:
     sources = _source_paths(request)
-    snapshot = request.preflight.get("snapshot") if isinstance(request.preflight, Mapping) else None
-    if isinstance(snapshot, Mapping):
-        for name in tuple(sources):
-            candidate = snapshot.get(f"{name}_path")
-            if isinstance(candidate, (str, Path)):
-                sources[name] = Path(candidate)
     report = _empty_report(request, sources)
-    # Allow files materialized immediately before orchestration (as in test seams),
-    # while still rejecting genuinely stale datasets.
-    run_started = time.time() - 1.0
-    before = {name: _sha(path) for name, path in sources.items() if path.is_file()}
-    report["sources"] = {name: {"path": str(path.resolve()), "before": before.get(name, "0" * 64), "after": before.get(name, "0" * 64)} for name, path in sources.items()}
+    run_started = time.time()
+    before: dict[str, str] = {}
+    try:
+        for name, path in sources.items():
+            if not _regular(path):
+                raise _error("setup", f"source file is missing or not regular: {name}", "LCC_DYNAMIC_SOURCE_INVALID")
+            before[name] = _sha(path)
+        requested_snapshot = request.preflight.get("snapshot") if isinstance(request.preflight, Mapping) else None
+        if isinstance(requested_snapshot, Mapping):
+            for name, item in requested_snapshot.items():
+                if name in sources and isinstance(item, Mapping) and (str(item.get("path")) != str(sources[name].absolute()) or str(item.get("sha256")) != before[name]):
+                    raise _error("setup", f"preflight snapshot drift for {name}", "LCC_DYNAMIC_SOURCE_DRIFT")
+        report["sources"] = {
+            name: {"path": str(path.absolute()), "before": before[name], "after": before[name]}
+            for name, path in sources.items()
+        }
+        report["preflight"]["snapshot"] = {name: {"path": str(path.absolute()), "sha256": before[name]} for name, path in sources.items()}
+    except BaseException as error:  # noqa: BLE001 - persist setup failure envelope
+        report = _fail(report, "setup", error)
     stage = "setup"
     managed_pid = None
     try:
@@ -189,6 +211,8 @@ async def run_fixed_lcc_dynamic_acceptance(
             raise _error(stage, "report_path already exists")
         if not re.fullmatch(r"[0-9a-f]{40}", request.commit):
             raise _error(stage, "commit must be a lowercase SHA")
+        if len(before) != len(sources):
+            raise _error(stage, "source preflight failed", "LCC_DYNAMIC_SOURCE_INVALID")
         if request.preflight.get("status") != PASS:
             raise _error(stage, "static preflight failed", "LCC_DYNAMIC_PREFLIGHT_FAILED")
         stage = "attach"
@@ -224,15 +248,54 @@ async def run_fixed_lcc_dynamic_acceptance(
         report["build"].update({"terminal_state": record.get("state"), "history": [item.get("state") for item in record.get("history", []) if isinstance(item, Mapping)]})
         if record.get("state") != "published" or "dynamic_engineering_passed" not in report["build"]["history"]:
             raise _error(stage, "build did not publish dynamic engineering evidence")
+        artifact_sources = []
+        for candidate in (record, started):
+            if isinstance(candidate, Mapping):
+                nested = candidate.get("result")
+                artifact_sources.append(nested if isinstance(nested, Mapping) else candidate)
+        for artifact_key, path_keys, hash_keys in (
+            ("project", ("project_path", "project_file", "final_project_path"), ("project_sha256", "final_project_sha256")),
+            ("library", ("library_path", "final_library_path"), ("library_sha256", "final_library_sha256")),
+        ):
+            path_value = next((item.get(key) for item in artifact_sources for key in path_keys if item.get(key)), None)
+            hash_value = next((item.get(key) for item in artifact_sources for key in hash_keys if item.get(key)), None)
+            if path_value is None:
+                fallback = request.workspace_root / (f"{request.project_name}.pscx" if artifact_key == "project" else "cigre_lcc_v1.pslx")
+                if _regular(fallback):
+                    path_value = str(fallback)
+            if path_value is None:
+                raise _error(stage, f"build did not report {artifact_key} artifact")
+            artifact_path = Path(str(path_value))
+            if not _regular(artifact_path) or not _contained(artifact_path.absolute(), request.workspace_root.absolute()):
+                raise _error(stage, f"{artifact_key} artifact is not a contained regular file")
+            observed_hash = _sha(artifact_path)
+            if hash_value is not None and str(hash_value) != observed_hash:
+                raise _error(stage, f"{artifact_key} artifact hash mismatch")
+            report["artifacts"][artifact_key] = {"path": str(artifact_path.absolute()), "sha256": observed_hash}
         stage = "output"
-        reader = getattr(service, "get_project_output", None)
-        if not callable(reader):
-            reader = getattr(builder, "get_project_output", None)
-        if not callable(reader):
-            raise _error(stage, "output reader unavailable")
-        try:
-            output = await _maybe(reader(request.project_name, summary_only=False))
-        except TypeError:
+        discover = getattr(service, "discover_output_files", None)
+        file_reader = getattr(service, "read_output_file", None)
+        if callable(discover) and callable(file_reader):
+            discovered = await _maybe(discover(request.project_name, started_after=run_started, max_files=1000))
+            if not isinstance(discovered, Sequence) or isinstance(discovered, (str, bytes, bytearray)):
+                raise _error(stage, "output discovery returned no file list")
+            output_candidates = [Path(str(item)) for item in discovered if Path(str(item)).suffix.casefold() in {".out", ".psout"}]
+            if not output_candidates:
+                raise _error(stage, "output discovery returned no OUT file")
+            selected_hint = max(output_candidates, key=lambda item: item.stat().st_mtime if item.exists() else 0.0)
+            if not _regular(selected_hint) or not _contained(selected_hint.absolute(), request.workspace_root.absolute()):
+                raise _error(stage, "selected output is not a contained regular file")
+            output = await _maybe(file_reader(str(selected_hint), max_samples=1_000_000, summary_only=False))
+            if isinstance(output, Mapping):
+                output = dict(output)
+                output.setdefault("output_file", str(selected_hint))
+                output.setdefault("output_parts", [str(item) for item in discovered])
+        else:
+            reader = getattr(service, "get_project_output", None)
+            if not callable(reader):
+                reader = getattr(builder, "get_project_output", None)
+            if not callable(reader):
+                raise _error(stage, "output reader unavailable")
             output = await _maybe(reader(request.project_name))
         if isinstance(output, Mapping) and isinstance(output.get("result"), Mapping):
             output = output["result"]
@@ -245,13 +308,15 @@ async def run_fixed_lcc_dynamic_acceptance(
         if not output_file:
             raise _error(stage, "selected output is missing")
         selected_raw = Path(output_file)
+        if not _regular(selected_raw):
+            raise _error(stage, "selected output is not a regular file")
         selected = selected_raw.resolve()
         staging = selected.parent
         try:
             selected.relative_to(request.workspace_root.resolve())
         except ValueError as error:
             raise _error(stage, "selected output escaped workspace") from error
-        if not selected.is_file() or selected.is_symlink():
+        if not _regular(selected):
             raise _error(stage, "selected output is not a regular file")
         if selected.stat().st_mtime < run_started:
             raise _error(stage, "selected output is stale")
@@ -283,25 +348,27 @@ async def run_fixed_lcc_dynamic_acceptance(
             raise _error(stage, "raw PSCAD channels are missing")
         contract = {}
         try:
-            packaged_dynamic = Path(__file__).resolve().parents[3] / "assets" / "lcc" / "cigre_lcc_monopole_v1" / "dynamic.json"
+            packaged_dynamic = sources["dynamic"]
             contract = json.loads(packaged_dynamic.read_text(encoding="utf-8"))
-        except BaseException:  # noqa: BLE001 - packaged contract fallback
-            contract = output.get("dynamic_contract") or output.get("contract") or {}
-        dynamic = derive_fixed_lcc_dynamic_evidence(raw_channels, contract, output_step_s=request.output_step_s) if contract else {"engineering_verdict": PASS, "checks": {}}
-        physical = {"verdict": PASS, "checks": []} if dynamic.get("engineering_verdict") == PASS else {"verdict": FAIL, "checks": []}
-        report["dynamic"].update(dynamic)
-        report["dynamic"]["evidence_source"] = "raw_pscad_output"
+        except BaseException as error:
+            raise _error(stage, "packaged dynamic contract unavailable", "LCC_DYNAMIC_CONTRACT_UNAVAILABLE") from error
+        dynamic = derive_fixed_lcc_dynamic_evidence(raw_channels, contract, output_step_s=request.output_step_s)
+        published_result = record.get("result") if isinstance(record.get("result"), Mapping) else {}
+        executor = published_result.get("dynamic") if isinstance(published_result, Mapping) else None
+        if executor is None or json.dumps(executor, sort_keys=True, separators=(",", ":")) != json.dumps(dynamic, sort_keys=True, separators=(",", ":")):
+            raise _error(stage, "executor evidence mismatch", "LCC_DYNAMIC_EVIDENCE_MISMATCH")
+        physical = published_result.get("physical") if isinstance(published_result, Mapping) else None
+        if not isinstance(physical, Mapping):
+            raise _error(stage, "published physical evidence is missing", "LCC_DYNAMIC_EVIDENCE_MISMATCH")
+        physical = dict(physical)
+        report["dynamic"] = {"evidence_source": "raw_pscad_output", "engineering_verdict": dynamic.get("engineering_verdict", FAIL), "checks": dynamic.get("checks", {})}
         report["physical"] = physical
         report["engineering_verdict"] = combine_dynamic_verdicts(dynamic.get("engineering_verdict", FAIL), physical["verdict"])
-        report["dynamic"]["engineering_verdict"] = dynamic.get("engineering_verdict", FAIL)
         report["golden_verdict"] = INCOMPLETE
         report["status"] = combine_dynamic_verdicts(report["engineering_verdict"], report["golden_verdict"])
         normalized_path = request.workspace_root / "normalized-samples.json"
         _atomic_write(normalized_path, raw_channels)
         report["artifacts"]["normalized_samples"] = {"path": str(normalized_path.resolve()), "sha256": _sha(normalized_path)}
-        executor = output.get("executor_evidence")
-        if executor is not None and json.dumps(executor, sort_keys=True, separators=(",", ":")) != json.dumps(dynamic, sort_keys=True, separators=(",", ":")):
-            raise _error(stage, "executor evidence mismatch", "LCC_DYNAMIC_EVIDENCE_MISMATCH")
     except BaseException as error:  # noqa: BLE001 - persist lifecycle failures
         report = _fail(report, stage, error)
     finally:
@@ -315,7 +382,7 @@ async def run_fixed_lcc_dynamic_acceptance(
                 except BaseException as error:  # noqa: BLE001 - cleanup controls verdict
                     cleanup_error = cleanup_error or error
         try:
-            remaining = [dict(item) for item in (await _maybe(process_reader()) or [])]
+            remaining = [dict(item) for item in (await _maybe(process_reader()) or []) if isinstance(item, Mapping)]
         except BaseException as error:  # noqa: BLE001 - process evidence controls verdict
             remaining = []
             cleanup_error = cleanup_error or error
@@ -326,13 +393,13 @@ async def run_fixed_lcc_dynamic_acceptance(
                     await _maybe(process_terminator(int(item["pid"])))
                 except BaseException as error:  # noqa: BLE001 - cleanup controls verdict
                     cleanup_error = cleanup_error or error
-            if owned_remaining and cleanup_error is None:
-                try:
-                    remaining = [dict(item) for item in (await _maybe(process_reader()) or [])]
-                    owned_remaining = [item for item in remaining if _owned(item, report["run_id"], managed_pid)]
-                except BaseException as error:  # noqa: BLE001 - process evidence controls verdict
-                    cleanup_error = cleanup_error or error
+        try:
+            remaining = [dict(item) for item in (await _maybe(process_reader()) or []) if isinstance(item, Mapping)]
+            owned_remaining = [item for item in remaining if _owned(item, report["run_id"], managed_pid)]
+        except BaseException as error:  # noqa: BLE001 - process evidence controls verdict
+            cleanup_error = cleanup_error or error
         report["runtime"]["remaining_processes"] = owned_remaining
+        report["runtime"]["quit_error"] = str(cleanup_error)[:1024] if cleanup_error else None
         for name, path in sources.items():
             try:
                 report["sources"][name]["after"] = _sha(path)

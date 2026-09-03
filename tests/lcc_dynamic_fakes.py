@@ -2,8 +2,14 @@ from __future__ import annotations
 
 import json
 import math
+import os
+import time
 from pathlib import Path
 from typing import Any
+
+from pscad_mcp.hvdc.builders.lcc.dynamic_evidence import (
+    derive_fixed_lcc_dynamic_evidence,
+)
 
 ROOT = Path(__file__).parents[1]
 DYNAMIC_CONTRACT = (
@@ -68,14 +74,14 @@ def valid_wp1c_report() -> dict[str, Any]:
         "golden_verdict": "INCOMPLETE_ANALYSIS",
         "status": "INCOMPLETE_ANALYSIS",
         "repository": {"branch": "codex/wp1c", "commit": commit, "clean": True},
-        "preflight": {"status": "PASS", "sha256": digest, "snapshot": {}},
+        "preflight": {"status": "PASS", "sha256": digest, "snapshot": {name: {"path": f"/tmp/{name}", "sha256": digest} for name in ("blueprint", "catalog", "dynamic", "registry", "manifest", "companion", "master", "compiler_configuration", "compiler_executable")}},
         "sources": {
             name: {"path": f"/tmp/{name}", "before": digest, "after": digest}
             for name in ("blueprint", "catalog", "dynamic", "registry", "manifest", "companion", "master", "compiler_configuration", "compiler_executable")
         },
         "build": {
             "project_name": "WP1C_FIXED_LCC",
-            "workspace": "/tmp/workspace",
+            "workspace": "/tmp",
             "build_id": "build-1",
             "plan_hash": digest,
             "verification_profile": "wp1c_dynamic",
@@ -84,6 +90,7 @@ def valid_wp1c_report() -> dict[str, Any]:
         },
         "artifacts": {
             "project": {"path": "/tmp/project.pscx", "sha256": digest},
+            "library": {"path": "/tmp/library.pslx", "sha256": digest},
             "selected_output": {"path": "/tmp/staging/run_01.out", "sha256": digest},
             "output_parts": [{"path": "/tmp/staging/run_01.out", "sha256": digest}],
             "output_metadata": [{"path": "/tmp/staging/run.inf", "sha256": digest}],
@@ -92,11 +99,19 @@ def valid_wp1c_report() -> dict[str, Any]:
         "dynamic": {
             "evidence_source": "raw_pscad_output",
             "engineering_verdict": "PASS",
-            "checks": {},
+            "checks": {"disturbance": {"outcome": "PASS", "selectors": ["Fault/LCC Fault Active"], "units": {"Fault/LCC Fault Active": "state"}, "window_s": [0.0, 1.0], "sample_count": 1, "metrics": {}}},
         },
         "physical": {"verdict": "PASS", "checks": []},
         "golden": {"source": "placeholder", "reviewed": False},
-        "runtime": {"remaining_processes": []},
+        "runtime": {
+            "remaining_processes": [],
+            "managed_pid": None,
+            "backend": None,
+            "version": None,
+            "x64": None,
+            "licensed": None,
+            "quit_error": None,
+        },
         "explicit_exclusions": ["independent_golden", "final_accepted"],
         "failure": None,
     }
@@ -118,7 +133,12 @@ class PassingDynamicService:
 
     async def get_project_output(self, project_name: str, *, summary_only: bool = True):
         self.calls.append(("output", summary_only))
-        return {"output_file": str(self.staging / "run_01.out"), "channels": passing_raw_channels(), "dynamic_contract": dynamic_contract()}
+        raw = passing_raw_channels()
+        return {
+            "output_file": str(self.staging / "run_01.out"),
+            "channels": raw,
+            "executor_evidence": derive_fixed_lcc_dynamic_evidence(raw, dynamic_contract()),
+        }
 
     async def quit_pscad(self, *, confirm: bool = False):
         self.quit_called = True
@@ -138,10 +158,20 @@ class PassingDynamicBuilder:
 
     async def build_model(self, **kwargs):
         self.build_calls.append(kwargs)
-        return {"build_id": "build-1"}
+        now = time.time()
+        for output in (self.staging / "run_01.out", self.staging / "run.inf"):
+            os.utime(output, (now, now))
+        project = self.staging.parent / "WP1C_FIXED_LCC.pscx"
+        library = self.staging.parent / "cigre_lcc_v1.pslx"
+        project.write_text("project", encoding="utf-8")
+        library.write_text("library", encoding="utf-8")
+        import hashlib
+        digest = lambda path: hashlib.sha256(path.read_bytes()).hexdigest()
+        return {"build_id": "build-1", "project_path": str(project), "project_sha256": digest(project), "library_path": str(library), "library_sha256": digest(library)}
 
     def get_build_status(self, build_id: str):
-        return {"state": "published", "history": [{"state": "validated"}, {"state": "dynamic_engineering_passed"}, {"state": "published"}]}
+        raw = passing_raw_channels()
+        return {"state": "published", "history": [{"state": "validated"}, {"state": "dynamic_engineering_passed"}, {"state": "published"}], "result": {"dynamic": derive_fixed_lcc_dynamic_evidence(raw, dynamic_contract()), "physical": {"verdict": "PASS", "checks": []}}}
 
     async def shutdown(self, *, timeout_s: float = 5.0):
         self.shutdown_called = True

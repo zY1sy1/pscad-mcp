@@ -150,6 +150,52 @@ def test_wp1c_report_rejects_total_pass_without_reviewed_golden():
     assert raised.value.code == "LCC_DYNAMIC_REPORT_INVALID"
 
 
+@pytest.mark.parametrize(
+    ("section", "extra"),
+    [
+        ("dynamic", {"unexpected": True}),
+        ("artifacts", {"project": None}),
+        ("runtime", {"unexpected": True}),
+    ],
+)
+def test_dynamic_report_rejects_nested_schema_mutations(section, extra):
+    report = valid_wp1c_report()
+    report[section].update(extra)
+    with pytest.raises(BackendError):
+        validate_dynamic_lcc_acceptance_report(report)
+
+
+def test_fail_report_with_minimal_sections_self_validates():
+    report = valid_wp1c_report()
+    report["status"] = "FAIL"
+    report["engineering_verdict"] = "FAIL"
+    report["golden_verdict"] = "INCOMPLETE_ANALYSIS"
+    report["failure"] = {"stage": "setup", "code": "X", "message": "broken"}
+    report["preflight"] = {"status": "FAIL", "sha256": "a" * 64, "snapshot": {name: {"path": f"/tmp/{name}", "sha256": "a" * 64} for name in report["sources"]}}
+    report["build"]["terminal_state"] = "failed"
+    report["build"]["history"] = []
+    report["dynamic"] = {"evidence_source": "raw_pscad_output", "engineering_verdict": "FAIL", "checks": {}}
+    report["physical"] = {"verdict": "FAIL", "checks": []}
+    report["artifacts"] = {
+        "project": None,
+        "library": None,
+        "selected_output": None,
+        "output_parts": [],
+        "output_metadata": [],
+        "normalized_samples": None,
+    }
+    report["runtime"] = {
+        "remaining_processes": [],
+        "managed_pid": None,
+        "backend": None,
+        "version": None,
+        "x64": None,
+        "licensed": None,
+        "quit_error": None,
+    }
+    assert validate_dynamic_lcc_acceptance_report(report)["status"] == "FAIL"
+
+
 def test_roadmap_names_wp1c_as_the_next_step():
     roadmap = Path(__file__).parents[1] / "docs" / "superpowers" / "specs" / "2026-08-30-lcc-mmc-completion-roadmap-design.md"
     text = roadmap.read_text(encoding="utf-8")
