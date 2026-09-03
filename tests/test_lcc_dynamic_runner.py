@@ -102,6 +102,29 @@ def test_runner_preflight_snapshot_mismatch_stops_before_attach(tmp_path: Path):
     assert builder.plan_calls == []
 
 
+def test_runner_preserves_existing_report_sentinel(tmp_path: Path):
+    request, staging = valid_request(tmp_path)
+    request.report_path.write_bytes(b"sentinel")
+    service = PassingDynamicService(staging)
+    builder = PassingDynamicBuilder(staging)
+    report = asyncio.run(run_fixed_lcc_dynamic_acceptance(request, service=service, builder=builder, process_reader=list, poll_interval_s=0))
+    assert report["status"] == "FAIL"
+    assert request.report_path.read_bytes() == b"sentinel"
+    assert not service.attached and builder.plan_calls == []
+
+
+def test_runner_process_reader_exception_fails_before_attach(tmp_path: Path):
+    request, staging = valid_request(tmp_path)
+    service = PassingDynamicService(staging)
+    builder = PassingDynamicBuilder(staging)
+    def broken_reader():
+        raise RuntimeError("probe failed")
+    report = asyncio.run(run_fixed_lcc_dynamic_acceptance(request, service=service, builder=builder, process_reader=broken_reader, poll_interval_s=0))
+    assert report["status"] == "FAIL"
+    assert report["failure"]["stage"] == "setup"
+    assert not service.attached and builder.plan_calls == []
+
+
 class _ConfigurableService(PassingDynamicService):
     def __init__(self, staging: Path, *, failure: str | None = None, managed_pid: int | None = None):
         super().__init__(staging)
