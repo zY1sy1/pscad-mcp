@@ -1300,6 +1300,24 @@ def test_executor_verifies_embedded_dynamic_control_after_compile(tmp_path):
     }
 
 
+def test_executor_rejects_duplicate_dynamic_control_consumers(tmp_path):
+    service = RecordingPscadService()
+    executor = _dynamic_control_executor(tmp_path, service=service)
+    operation = _dynamic_control_operation(
+        control_components=[
+            "inverter_fault_breaker_a",
+            "inverter_fault_breaker_a",
+            "inverter_fault_breaker_a",
+        ]
+    )
+
+    with pytest.raises(BackendError) as raised:
+        asyncio.run(executor._verify_dynamic_control(operation))
+
+    assert raised.value.code == "LCC_DYNAMIC_EVENT_UNAVAILABLE"
+    assert "run_project" not in [call[0] for call in service.calls]
+
+
 def test_recording_fake_persists_symbolic_parameter_values(tmp_path):
     service = RecordingPscadService()
     service.components = {

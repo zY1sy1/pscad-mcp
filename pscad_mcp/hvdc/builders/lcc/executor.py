@@ -2058,6 +2058,12 @@ class LccExecutor:
                 "Dynamic control requires three breaker consumers.",
                 "verify_lcc_dynamic_control",
             )
+        if len(set(consumers)) != 3:
+            raise _error(
+                "LCC_DYNAMIC_EVENT_UNAVAILABLE",
+                "Dynamic control requires three distinct breaker consumers.",
+                "verify_lcc_dynamic_control",
+            )
         try:
             await self._verify_master_binding_state(refresh_components=True)
         except BackendError as error:
