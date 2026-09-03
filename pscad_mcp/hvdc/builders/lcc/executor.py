@@ -26,6 +26,7 @@ from ....topology.models import (
 from .acceptance import evaluate_acceptance
 from .assets import LccAssetSet, materialize_library, sha256_file
 from .catalog import parse_catalog, require_definition, require_port
+from .dynamic_evidence import derive_fixed_lcc_dynamic_evidence
 from .journal import AtomicJournal
 from .models import LccBuildPlan, LccBuildRecord, LccBuildState, LccPlanOperation
 from .project_graph import (
@@ -551,6 +552,8 @@ class LccExecutor:
             await self._smoke_validate(operation)
         elif operation.kind == "accept":
             await self._accept(operation)
+        elif operation.kind == "dynamic_accept":
+            await self._dynamic_accept(operation)
         elif operation.kind == "publish":
             await self._publish(operation)
         else:
@@ -2441,6 +2444,82 @@ class LccExecutor:
                 acceptance=result,
             )
         self._record(LccBuildState.ACCEPTANCE_PASSED)
+
+    async def _dynamic_accept(self, operation: LccPlanOperation) -> None:
+        self._operation_started(operation)
+        if self.plan.verification_profile != "wp1c_dynamic" or self.asset_set is None:
+            raise _error(
+                "LCC_DYNAMIC_ACCEPTANCE_FAILED",
+                "Dynamic acceptance requires a verified WP1C asset set.",
+                "evaluate_lcc_dynamic_acceptance",
+            )
+        expected_hash = operation.arguments.get("contract_sha256")
+        if expected_hash != self.asset_set.hashes.get("dynamic.json"):
+            raise _error(
+                "LCC_ASSET_MISMATCH",
+                "The dynamic contract changed after planning.",
+                "evaluate_lcc_dynamic_acceptance",
+            )
+        output = await self._acceptance_output()
+        dynamic = derive_fixed_lcc_dynamic_evidence(
+            output,
+            self.asset_set.dynamic,
+            output_step_s=float(self.plan.blueprint.settings["output_step_s"]),
+        )
+        physical_contract = dict(self.asset_set.acceptance)
+        physical_contract["golden"] = {"channels": []}
+        physical_contract["checks"] = [
+            item
+            for item in self.asset_set.acceptance.get("checks", ())
+            if isinstance(item, Mapping) and item.get("kind") == "physical"
+        ]
+        physical = evaluate_acceptance(output, {}, physical_contract)
+        verdicts = {dynamic["engineering_verdict"], physical["verdict"]}
+        engineering = (
+            "FAIL"
+            if "FAIL" in verdicts
+            else "INCOMPLETE_ANALYSIS"
+            if "INCOMPLETE_ANALYSIS" in verdicts
+            else "PASS"
+        )
+        result = dict(self.result or {})
+        result.update(
+            {
+                "dynamic": dynamic,
+                "physical": physical,
+                "engineering_verdict": engineering,
+                "golden_verdict": "INCOMPLETE_ANALYSIS",
+                "status": "FAIL" if engineering == "FAIL" else "INCOMPLETE_ANALYSIS",
+                "output_file": self.output_file,
+                "output_parts": list(self.output_parts or ()),
+                "output_artifacts": [],
+            }
+        )
+        if self.output_parts:
+            artifacts = []
+            for output_part in self.output_parts:
+                try:
+                    artifacts.append(
+                        {"path": output_part, "sha256": sha256_file(Path(output_part))}
+                    )
+                except BackendError as error:
+                    raise _error(
+                        "LCC_OUTPUT_INCOMPLETE",
+                        "The selected PSCAD output part could not be hashed for dynamic evidence.",
+                        "read_lcc_output",
+                        output_file=output_part,
+                        upstream_code=error.code,
+                    ) from error
+            result["output_artifacts"] = artifacts
+        self.result = result
+        if engineering != "PASS":
+            raise _error(
+                "LCC_DYNAMIC_ACCEPTANCE_FAILED",
+                "The fixed LCC dynamic engineering contract did not pass.",
+                "evaluate_lcc_dynamic_acceptance",
+                acceptance=result,
+            )
+        self._record(LccBuildState.DYNAMIC_ENGINEERING_PASSED)
 
     async def _publish(self, operation: LccPlanOperation) -> None:
         self._operation_started(operation)

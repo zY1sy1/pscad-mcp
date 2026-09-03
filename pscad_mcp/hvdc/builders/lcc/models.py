@@ -101,6 +101,7 @@ class LccBuildState(str, Enum):
     SIMULATED = "simulated"
     SMOKE_PASSED = "smoke_passed"
     ACCEPTANCE_PASSED = "acceptance_passed"
+    DYNAMIC_ENGINEERING_PASSED = "dynamic_engineering_passed"
     PUBLISHED = "published"
     FAILED = "failed"
     TIMED_OUT = "timed_out"

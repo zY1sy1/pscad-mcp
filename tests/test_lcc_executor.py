@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import math
 import xml.etree.ElementTree as ET
 from dataclasses import replace
 from pathlib import Path
@@ -38,6 +39,7 @@ from pscad_mcp.hvdc.builders.lcc.project_graph import (
     ProjectGraph,
 )
 from tests.lcc_builder_fakes import RecordingPscadService
+from tests.lcc_dynamic_fakes import passing_raw_channels
 from tests.test_lcc_smoke import contract as smoke_contract
 from tests.test_lcc_smoke import mutate_samples, valid_samples
 
@@ -1220,6 +1222,74 @@ def test_executor_rejects_unresolved_or_ambiguous_dynamic_targets(
 
     assert raised.value.code == "LCC_DYNAMIC_EVENT_UNAVAILABLE"
     assert backend.events is None
+
+
+def test_wp1c_executor_accepts_engineering_pass_without_forging_total_pass(
+    tmp_path,
+):
+    assets = load_packaged_asset_set()
+    base = _plan(tmp_path)
+    plan = replace(
+        base,
+        blueprint=replace(
+            base.blueprint,
+            settings={"simulation_duration_s": 1.5, "output_step_s": 0.00005},
+        ),
+        verification_profile="wp1c_dynamic",
+        asset_hashes={"dynamic.json": assets.hashes["dynamic.json"]},
+    )
+    service = RecordingPscadService(output=passing_raw_channels())
+    executor = LccExecutor(plan, service, tmp_path, asset_set=assets)
+    operation = LccPlanOperation(
+        sequence=1,
+        kind="dynamic_accept",
+        target="executor",
+        arguments={
+            "contract_sha256": assets.hashes["dynamic.json"],
+            "event": {"time_s": 0.8, "duration_s": 0.1},
+        },
+    )
+
+    asyncio.run(executor._dynamic_accept(operation))
+
+    assert executor.result["engineering_verdict"] == "PASS"
+    assert executor.result["golden_verdict"] == "INCOMPLETE_ANALYSIS"
+    assert executor.result["status"] == "INCOMPLETE_ANALYSIS"
+    assert any(
+        item.get("state") == "dynamic_engineering_passed"
+        for item in executor.history
+    )
+
+
+def test_wp1c_executor_dynamic_failure_never_publishes(tmp_path):
+    assets = load_packaged_asset_set()
+    base = _plan(tmp_path)
+    plan = replace(
+        base,
+        blueprint=replace(
+            base.blueprint,
+            settings={"simulation_duration_s": 1.5, "output_step_s": 0.00005},
+        ),
+        verification_profile="wp1c_dynamic",
+        asset_hashes={"dynamic.json": assets.hashes["dynamic.json"]},
+    )
+    output = passing_raw_channels()
+    gamma = next(item for item in output["channels"] if item["path"] == "Main/GAMMA_INV")
+    gamma["values"] = [math.radians(18.0) for _ in gamma["values"]]
+    service = RecordingPscadService(output=output)
+    executor = LccExecutor(plan, service, tmp_path, asset_set=assets)
+    operation = LccPlanOperation(
+        sequence=1,
+        kind="dynamic_accept",
+        target="executor",
+        arguments={"contract_sha256": assets.hashes["dynamic.json"]},
+    )
+
+    with pytest.raises(BackendError) as raised:
+        asyncio.run(executor._dynamic_accept(operation))
+
+    assert raised.value.code == "LCC_DYNAMIC_ACCEPTANCE_FAILED"
+    assert "save_project_as" not in [call[0] for call in service.calls]
 
 
 def test_executor_rejects_dynamic_events_without_native_emtdc_scheduler(tmp_path):

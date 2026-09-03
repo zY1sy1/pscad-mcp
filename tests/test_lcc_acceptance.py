@@ -12,7 +12,6 @@ from pscad_mcp.hvdc.builders.lcc.acceptance import (
 )
 from pscad_mcp.hvdc.builders.lcc.assets import load_packaged_asset_set
 
-
 FREQUENCY_HZ = 50.0
 DT = 0.001
 
@@ -465,6 +464,31 @@ def test_physical_checks_pass_with_observed_and_derived_details():
     assert checks["terminal_power_balance"]["status"] == "derived"
     assert checks["terminal_power_balance"]["observed"]["imbalance"] == pytest.approx(15.0)
     json.dumps(result)
+
+
+def test_physical_angle_contract_converts_radians_to_degrees():
+    samples = _physical_samples()
+    gamma = samples["channels"]["Main/GAMMA_INV"]
+    gamma["units"] = "rad"
+    gamma["values"] = [math.radians(value) for value in gamma["values"]]
+    contract = {"physical_checks": [{
+        "name": "gamma",
+        "kind": "angle_interval",
+        "required": True,
+        "channel": "Main/GAMMA_INV",
+        "units": "deg",
+        "window": [0.04, 0.07],
+        "min": 10.0,
+        "max": 40.0,
+    }]}
+
+    passing = evaluate_acceptance(samples, {}, contract)
+    assert passing["verdict"] == "PASS"
+    assert passing["physical_checks"][0]["observed"]["units"] == "deg"
+
+    gamma["values"] = [math.radians(5.0) for _ in gamma["values"]]
+    failing = evaluate_acceptance(samples, {}, contract)
+    assert failing["verdict"] == "FAIL"
 
 
 def test_physical_required_bound_violation_fails():
