@@ -450,7 +450,8 @@ async def run_fixed_lcc_dynamic_acceptance(
                 report["sources"][name]["after"] = _sha(path)
             except BaseException:  # noqa: BLE001 - source drift controls verdict
                 report["sources"][name]["after"] = "0" * 64
-        if cleanup_error or owned_remaining or any(report["sources"][n]["before"] != report["sources"][n]["after"] for n in report["sources"]):
+        cleanup_issue = cleanup_error or owned_remaining or any(report["sources"][n]["before"] != report["sources"][n]["after"] for n in report["sources"])
+        if cleanup_issue and (report["status"] != FAIL or report["failure"] is None):
             report = _fail(report, "cleanup", cleanup_error or RuntimeError("cleanup residue or source drift"))
     stage = "report"
     try:
