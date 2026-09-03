@@ -7,6 +7,7 @@ from .dynamic_acceptance import (
     evaluate_fixed_lcc_dynamic_samples,
     validate_dynamic_lcc_acceptance_report,
 )
+from .dynamic_runner import DynamicLccRunRequest, run_fixed_lcc_dynamic_acceptance
 from .dynamic_evidence import (
     Trace,
     derive_fixed_lcc_dynamic_evidence,
@@ -39,6 +40,7 @@ __all__ = [
     "BlankLccBuilderService",
     "BlankLccRequest",
     "DynamicLccAcceptanceRequest",
+    "DynamicLccRunRequest",
     "FixedLccFaultEvent",
     "LccAcceptanceCheck",
     "LccBlueprint",
@@ -54,6 +56,7 @@ __all__ = [
     "Trace",
     "derive_fixed_lcc_dynamic_evidence",
     "evaluate_fixed_lcc_dynamic_samples",
+    "run_fixed_lcc_dynamic_acceptance",
     "inspect_fixed_lcc_fault_capability",
     "normalize_exact_channels",
     "parse_blueprint",

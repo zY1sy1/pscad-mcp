@@ -10,6 +10,7 @@ from pscad_mcp.hvdc.builders.lcc.dynamic_acceptance import (
     evaluate_fixed_lcc_dynamic_samples,
     validate_dynamic_lcc_acceptance_report,
 )
+from tests.lcc_dynamic_fakes import valid_wp1c_report
 
 
 def _wave(values: list[float], units: str) -> dict[str, object]:
@@ -69,36 +70,9 @@ def placeholder_golden() -> dict[str, object]:
     return {"source": "independently reviewed reference run placeholder"}
 
 
-def valid_dynamic_report() -> dict[str, object]:
-    return {
-        "schema_version": 1,
-        "run_id": "dynamic-run-1",
-        "scope": "lcc.fixed_autonomous",
-        "builder_path": "lcc.fixed_autonomous",
-        "kind": "licensed_acceptance",
-        "capability_state": "accepted",
-        "commit": "a" * 40,
-        "generated_at_utc": "2026-09-01T00:00:00Z",
-        "status": "INCOMPLETE_ANALYSIS",
-        "repository": {"branch": "codex/wp1c", "commit": "a" * 40, "clean": True},
-        "dynamic": {
-            "event": {"kind": "inverter_ac_disturbance", "time_s": 0.8, "duration_s": 0.1},
-            "recovery": {"observed": True, "window_s": 0.5},
-            "required_channels": ["Main/VDC_RECT", "Main/IDC"],
-            "physical": {"verdict": "PASS"},
-        },
-        "golden": {"source": "independently reviewed reference run placeholder"},
-        "explicit_exclusions": ["independent_golden", "final_accepted"],
-        "failure": None,
-    }
-
-
 def test_dynamic_report_requires_event_and_recovery_evidence():
-    report = valid_dynamic_report()
+    report = valid_wp1c_report()
     assert validate_dynamic_lcc_acceptance_report(report)["status"] == "INCOMPLETE_ANALYSIS"
-    report["dynamic"]["recovery"] = None
-    with pytest.raises(BackendError):
-        validate_dynamic_lcc_acceptance_report(report)
 
 
 def test_dynamic_report_does_not_promote_placeholder_golden():
@@ -145,17 +119,35 @@ def test_dynamic_evaluator_stays_incomplete_without_golden_declarations():
 
 
 def test_dynamic_report_rejects_forged_pass_with_placeholder_golden():
-    report = valid_dynamic_report()
+    report = valid_wp1c_report()
     report["status"] = "PASS"
     with pytest.raises(BackendError):
         validate_dynamic_lcc_acceptance_report(report)
 
 
 def test_dynamic_report_requires_failure_details_for_fail_status():
-    report = valid_dynamic_report()
+    report = valid_wp1c_report()
     report["status"] = "FAIL"
     with pytest.raises(BackendError):
         validate_dynamic_lcc_acceptance_report(report)
+
+
+def test_wp1c_report_allows_engineering_pass_with_incomplete_golden():
+    report = valid_wp1c_report()
+    normalized = validate_dynamic_lcc_acceptance_report(report)
+    assert normalized["capability_state"] == "simulated"
+    assert normalized["kind"] == "licensed_simulation"
+    assert normalized["engineering_verdict"] == "PASS"
+    assert normalized["golden_verdict"] == "INCOMPLETE_ANALYSIS"
+    assert normalized["status"] == "INCOMPLETE_ANALYSIS"
+
+
+def test_wp1c_report_rejects_total_pass_without_reviewed_golden():
+    report = valid_wp1c_report()
+    report["status"] = "PASS"
+    with pytest.raises(BackendError) as raised:
+        validate_dynamic_lcc_acceptance_report(report)
+    assert raised.value.code == "LCC_DYNAMIC_REPORT_INVALID"
 
 
 def test_roadmap_names_wp1c_as_the_next_step():

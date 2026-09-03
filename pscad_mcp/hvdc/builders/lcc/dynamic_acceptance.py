@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -14,7 +15,7 @@ from .acceptance import evaluate_acceptance, evaluate_commutation_fault
 PASS = "PASS"
 FAIL = "FAIL"
 INCOMPLETE = "INCOMPLETE_ANALYSIS"
-_REPORT_KEYS = {
+REPORT_KEYS = {
     "schema_version",
     "run_id",
     "scope",
@@ -23,19 +24,30 @@ _REPORT_KEYS = {
     "capability_state",
     "commit",
     "generated_at_utc",
+    "engineering_verdict",
+    "golden_verdict",
     "status",
     "repository",
+    "preflight",
+    "sources",
+    "build",
+    "artifacts",
     "dynamic",
+    "physical",
     "golden",
+    "runtime",
     "explicit_exclusions",
     "failure",
 }
-_DYNAMIC_KEYS = {"event", "recovery", "required_channels", "physical"}
-_EVENT_KEYS = {"kind", "time_s", "duration_s"}
-_RECOVERY_KEYS = {"observed", "window_s"}
 _REPOSITORY_KEYS = {"branch", "commit", "clean"}
 _ALLOWED_STATUS = {PASS, FAIL, INCOMPLETE}
-_ALLOWED_CAPABILITIES = {"simulated", "accepted"}
+_ALLOWED_VERDICTS = {PASS, FAIL, INCOMPLETE}
+_SOURCE_KEYS = {
+    "blueprint", "catalog", "dynamic", "registry", "manifest", "companion",
+    "master", "compiler_configuration", "compiler_executable",
+}
+_REPORT_KEYS = REPORT_KEYS
+_HASH = re.compile(r"^[0-9a-f]{64}$")
 
 
 def _invalid(field: str, message: str, **details: Any) -> BackendError:
@@ -126,22 +138,23 @@ class DynamicLccAcceptanceRequest:
 
 
 def validate_dynamic_lcc_acceptance_report(value: Any) -> dict[str, Any]:
-    """Validate the durable WP1C report envelope and dynamic evidence."""
+    """Validate the durable WP1C report envelope and layered verdicts."""
 
-    report = _exact(value, "report", _REPORT_KEYS)
+    report = _exact(value, "report", REPORT_KEYS)
     if report["schema_version"] != 1:
         raise _invalid("schema_version", "Unsupported dynamic report schema.")
     _text(report["run_id"], "run_id")
     if report["scope"] != "lcc.fixed_autonomous" or report["builder_path"] != "lcc.fixed_autonomous":
         raise _invalid("scope", "Dynamic evidence must target fixed autonomous LCC.")
-    if report["kind"] != "licensed_acceptance":
-        raise _invalid("kind", "Dynamic evidence must be licensed acceptance.")
-    if report["capability_state"] not in _ALLOWED_CAPABILITIES:
+    if report["kind"] != "licensed_simulation":
+        raise _invalid("kind", "Dynamic evidence must be licensed simulation.")
+    if report["capability_state"] != "simulated":
         raise _invalid("capability_state", "Capability state is invalid.")
     _sha_commit(report["commit"], "commit")
     _text(report["generated_at_utc"], "generated_at_utc")
-    if report["status"] not in _ALLOWED_STATUS:
-        raise _invalid("status", "Dynamic report status is invalid.")
+    for field in ("engineering_verdict", "golden_verdict", "status"):
+        if report[field] not in _ALLOWED_VERDICTS:
+            raise _invalid(field, f"{field} is invalid.")
 
     repository = _exact(report["repository"], "repository", _REPOSITORY_KEYS)
     _text(repository["branch"], "repository.branch")
@@ -149,41 +162,94 @@ def validate_dynamic_lcc_acceptance_report(value: Any) -> dict[str, Any]:
     if repository["commit"] != report["commit"] or repository["clean"] is not True:
         raise _invalid("repository", "Repository identity is not clean and commit-bound.")
 
-    dynamic = _exact(report["dynamic"], "dynamic", _DYNAMIC_KEYS)
-    event = _exact(dynamic["event"], "dynamic.event", _EVENT_KEYS)
-    _text(event["kind"], "dynamic.event.kind")
-    event_time = _finite(event["time_s"], "dynamic.event.time_s")
-    event_duration = _finite(event["duration_s"], "dynamic.event.duration_s")
-    if event_time < 0 or event_duration <= 0:
-        raise _invalid("dynamic.event", "Event time must be non-negative and duration positive.")
-    recovery = _exact(dynamic["recovery"], "dynamic.recovery", _RECOVERY_KEYS)
-    if not isinstance(recovery["observed"], bool):
-        raise _invalid("dynamic.recovery.observed", "Recovery observed must be boolean.")
-    if _finite(recovery["window_s"], "dynamic.recovery.window_s") <= 0:
-        raise _invalid("dynamic.recovery.window_s", "Recovery window must be positive.")
-    _channels(dynamic["required_channels"], "dynamic.required_channels")
-    physical = _mapping(dynamic["physical"], "dynamic.physical")
-    if physical.get("verdict") not in {PASS, FAIL, INCOMPLETE}:
-        raise _invalid("dynamic.physical.verdict", "Physical verdict is invalid.")
+    preflight = _mapping(report["preflight"], "preflight")
+    if not isinstance(preflight.get("snapshot"), Mapping):
+        raise _invalid("preflight", "Preflight snapshot must be an object.")
+    if report["status"] != FAIL and preflight.get("status") != PASS:
+        raise _invalid("preflight", "Dynamic report requires PASS preflight evidence.")
+    _text(preflight.get("sha256"), "preflight.sha256")
+
+    sources = _mapping(report["sources"], "sources")
+    if set(sources) != _SOURCE_KEYS:
+        raise _invalid("sources", "sources fields are not exact.")
+    for name, item in sources.items():
+        source = _exact(item, f"sources.{name}", {"path", "before", "after"})
+        _text(source["path"], f"sources.{name}.path")
+        _text(source["before"], f"sources.{name}.before")
+        _text(source["after"], f"sources.{name}.after")
+        if not all(_HASH.fullmatch(source[key]) for key in ("before", "after")):
+            raise _invalid(f"sources.{name}", "source hashes must be SHA-256 values.")
+        if report["status"] != FAIL and source["before"] != source["after"]:
+            raise _invalid(f"sources.{name}", "source changed during the run.")
+
+    build = _mapping(report["build"], "build")
+    if report["status"] != FAIL and build.get("terminal_state") != "published":
+        raise _invalid("build.terminal_state", "Dynamic report requires a published build.")
+    history = build.get("history")
+    if report["status"] != FAIL and (not isinstance(history, Sequence) or isinstance(history, (str, bytes)) or "dynamic_engineering_passed" not in history):
+        raise _invalid("build.history", "Build history lacks dynamic engineering pass.")
+
+    artifacts = _mapping(report["artifacts"], "artifacts")
+    normalized = artifacts.get("normalized_samples")
+    if report["status"] != FAIL and (not isinstance(normalized, Mapping) or not isinstance(normalized.get("sha256"), str)):
+        raise _invalid("artifacts.normalized_samples", "Normalized samples must be hashed.")
+    parts = artifacts.get("output_parts")
+    metadata = artifacts.get("output_metadata")
+    if report["status"] != FAIL and (not isinstance(parts, Sequence) or isinstance(parts, (str, bytes)) or not parts):
+        raise _invalid("artifacts.output_parts", "At least one OUT part is required.")
+    if report["status"] != FAIL and (not isinstance(metadata, Sequence) or isinstance(metadata, (str, bytes)) or not metadata):
+        raise _invalid("artifacts.output_metadata", "At least one INF/INFX metadata part is required.")
+    artifact_items = [*parts, *metadata] + ([normalized] if normalized is not None else [])
+    for index, item in enumerate(artifact_items):
+        if not isinstance(item, Mapping) or not isinstance(item.get("path"), str) or not isinstance(item.get("sha256"), str):
+            raise _invalid(f"artifacts[{index}]", "Artifact path and hash are required.")
+        if _HASH.fullmatch(item["sha256"]) is None:
+            raise _invalid(f"artifacts[{index}].sha256", "Artifact hash must be SHA-256.")
+        suffix = Path(item["path"]).suffix.casefold()
+        if item in parts and suffix not in {".out", ".psout"}:
+            raise _invalid("artifacts.output_parts", "OUT parts must have an OUT suffix.")
+        if item in metadata and suffix not in {".inf", ".infx"}:
+            raise _invalid("artifacts.output_metadata", "Metadata must be INF or INFX.")
+
+    dynamic = _mapping(report["dynamic"], "dynamic")
+    if dynamic.get("evidence_source") != "raw_pscad_output":
+        raise _invalid("dynamic.evidence_source", "Runner reports require raw PSCAD output evidence.")
+    physical = _mapping(report["physical"], "physical")
+    if physical.get("verdict") not in _ALLOWED_VERDICTS:
+        raise _invalid("physical.verdict", "Physical verdict is invalid.")
     golden = _mapping(report["golden"], "golden")
-    if report["status"] == PASS:
-        source = golden.get("source")
-        if (
-            not isinstance(source, str)
-            or "placeholder" in source.casefold()
-            or golden.get("reviewed") is not True
-        ):
-            raise _invalid("golden", "PASS requires an independently reviewed golden source.")
-        if physical["verdict"] != PASS:
-            raise _invalid("dynamic.physical.verdict", "PASS requires physical evidence to pass.")
+    if not isinstance(golden.get("reviewed"), bool) or not isinstance(golden.get("source"), str):
+        raise _invalid("golden", "Golden review metadata is required.")
+    expected_engineering = combine_dynamic_verdicts(dynamic.get("engineering_verdict", report["engineering_verdict"]), physical["verdict"])
+    if report["engineering_verdict"] != expected_engineering:
+        raise _invalid("engineering_verdict", "Engineering verdict must combine dynamic and physical verdicts.")
+    if report["status"] != combine_dynamic_verdicts(report["engineering_verdict"], report["golden_verdict"]):
+        raise _invalid("status", "Status must combine engineering and golden verdicts.")
+    runtime = _mapping(report["runtime"], "runtime")
+    remaining = runtime.get("remaining_processes")
+    if not isinstance(remaining, Sequence) or isinstance(remaining, (str, bytes, bytearray)):
+        raise _invalid("runtime.remaining_processes", "Remaining processes must be an array.")
+    if report["status"] != FAIL and remaining:
+        raise _invalid("runtime.remaining_processes", "Runner-owned processes remain.")
     exclusions = _channels(report["explicit_exclusions"], "explicit_exclusions")
-    if "final_accepted" not in exclusions:
-        raise _invalid("explicit_exclusions", "Final accepted exclusion is required before WP6.")
+    if (
+        (not golden["reviewed"] or "placeholder" in golden["source"].casefold())
+        and ("independent_golden" not in exclusions or "final_accepted" not in exclusions)
+    ):
+        raise _invalid("explicit_exclusions", "Independent golden and final accepted exclusions are required.")
     if report["status"] == FAIL and report["failure"] is None:
         raise _invalid("failure", "FAIL reports must include failure details.")
     if report["failure"] is not None and not isinstance(report["failure"], Mapping):
         raise _invalid("failure", "failure must be null or an object.")
     return report
+
+
+def combine_dynamic_verdicts(engineering_verdict: str, golden_verdict: str) -> str:
+    if "FAIL" in {engineering_verdict, golden_verdict}:
+        return FAIL
+    if {engineering_verdict, golden_verdict} == {PASS}:
+        return PASS
+    return INCOMPLETE
 
 
 def _channel_names(samples: Mapping[str, Any]) -> set[str]:
@@ -226,6 +292,8 @@ def evaluate_fixed_lcc_dynamic_samples(
         "physical": physical_result,
         "waveform": waveform_result,
         "missing_channels": missing,
+        "evidence_source": "caller_supplied_diagnostic",
+        "durable": False,
     }
     if (
         missing
@@ -244,7 +312,9 @@ def evaluate_fixed_lcc_dynamic_samples(
 
 
 __all__ = [
+    "REPORT_KEYS",
     "DynamicLccAcceptanceRequest",
+    "combine_dynamic_verdicts",
     "evaluate_fixed_lcc_dynamic_samples",
     "validate_dynamic_lcc_acceptance_report",
 ]
