@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 from pathlib import Path
 
 from pscad_mcp.hvdc.builders.lcc.dynamic_runner import (
@@ -26,6 +28,11 @@ def valid_request(tmp_path: Path) -> tuple[DynamicLccRunRequest, Path]:
     compiler_exe = repo / "compiler.exe"
     for path in (master, compiler_cfg, compiler_exe):
         path.write_text("x", encoding="utf-8")
+    source_paths = {
+        "blueprint": asset_root / "blueprint.json", "catalog": asset_root / "catalog-pscad-4.6.2.json", "dynamic": asset_root / "dynamic.json", "registry": asset_root / "master-bindings-pscad-4.6.2.json", "manifest": asset_root / "manifest.json", "companion": asset_root / "library" / "cigre_lcc_v1.pslx", "master": master, "compiler_configuration": compiler_cfg, "compiler_executable": compiler_exe,
+    }
+    snapshot = {name: {"path": str(path.absolute()), "sha256": hashlib.sha256(path.read_bytes()).hexdigest()} for name, path in source_paths.items()}
+    preflight_hash = hashlib.sha256(json.dumps(snapshot, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")).hexdigest()
     (staging / "run_01.out").write_text("out", encoding="utf-8")
     (staging / "run.inf").write_text("inf", encoding="utf-8")
     report = workspace / "report.json"
@@ -38,7 +45,7 @@ def valid_request(tmp_path: Path) -> tuple[DynamicLccRunRequest, Path]:
         report_path=report,
         commit="a" * 40,
         branch="codex/wp1c",
-        preflight={"status": "PASS", "sha256": "a" * 64, "snapshot": {}},
+        preflight={"status": "PASS", "sha256": preflight_hash, "snapshot": snapshot},
     )
     return request, staging
 

@@ -51,6 +51,11 @@ def _sha(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _canonical_hash(value: Mapping[str, Any]) -> str:
+    payload = json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
 def _await(value: Any) -> Any:
     return value
 
@@ -96,7 +101,21 @@ def _regular(path: Path) -> bool:
 
 def _contained(path: Path, root: Path) -> bool:
     try:
-        path.relative_to(root)
+        current = path.absolute()
+        root_abs = root.absolute()
+        if not current.is_relative_to(root_abs):
+            return False
+        for parent in (root_abs, *current.parents):
+            if parent == current:
+                continue
+            if parent.is_symlink() or bool(getattr(parent.stat(), "st_file_attributes", 0) & 0x400):
+                return False
+            if parent == root_abs:
+                break
+    except OSError:
+        return False
+    try:
+        path.resolve().relative_to(root.resolve())
         return True
     except ValueError:
         return False
@@ -166,7 +185,7 @@ def _fail(report: dict[str, Any], stage: str, error: BaseException) -> dict[str,
 
 
 def _owned(entry: Mapping[str, Any], run_id: str, managed_pid: Any) -> bool:
-    return entry.get("runner_owned") is True or entry.get("run_id") == run_id or (managed_pid is not None and entry.get("pid") == managed_pid)
+    return managed_pid is not None and entry.get("pid") == managed_pid
 
 
 async def run_fixed_lcc_dynamic_acceptance(
@@ -190,10 +209,13 @@ async def run_fixed_lcc_dynamic_acceptance(
                 raise _error("setup", f"source file is missing or not regular: {name}", "LCC_DYNAMIC_SOURCE_INVALID")
             before[name] = _sha(path)
         requested_snapshot = request.preflight.get("snapshot") if isinstance(request.preflight, Mapping) else None
-        if isinstance(requested_snapshot, Mapping):
-            for name, item in requested_snapshot.items():
-                if name in sources and isinstance(item, Mapping) and (str(item.get("path")) != str(sources[name].absolute()) or str(item.get("sha256")) != before[name]):
-                    raise _error("setup", f"preflight snapshot drift for {name}", "LCC_DYNAMIC_SOURCE_DRIFT")
+        if not isinstance(requested_snapshot, Mapping) or set(requested_snapshot) != set(sources):
+            raise _error("setup", "preflight snapshot must cover every source", "LCC_DYNAMIC_PREFLIGHT_FAILED")
+        for name, item in requested_snapshot.items():
+            if not isinstance(item, Mapping) or str(item.get("path")) != str(sources[name].absolute()) or str(item.get("sha256")) != before[name]:
+                raise _error("setup", f"preflight snapshot drift for {name}", "LCC_DYNAMIC_SOURCE_DRIFT")
+        if not isinstance(request.preflight, Mapping) or str(request.preflight.get("sha256")) != _canonical_hash(requested_snapshot):
+            raise _error("setup", "preflight canonical hash mismatch", "LCC_DYNAMIC_PREFLIGHT_FAILED")
         report["sources"] = {
             name: {"path": str(path.absolute()), "before": before[name], "after": before[name]}
             for name, path in sources.items()
@@ -210,6 +232,8 @@ async def run_fixed_lcc_dynamic_acceptance(
             name: {"path": str(path.absolute()), "sha256": before.get(name, zeros)}
             for name, path in sources.items()
         }
+        report["preflight"]["status"] = FAIL
+        report["preflight"]["sha256"] = _canonical_hash(report["preflight"]["snapshot"])
         report = _fail(report, "setup", error)
     stage = "setup"
     managed_pid = None

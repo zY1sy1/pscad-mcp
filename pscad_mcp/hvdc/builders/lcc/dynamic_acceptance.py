@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import math
 import re
 from collections.abc import Mapping, Sequence
@@ -129,6 +131,10 @@ def _path_owned(path: Path, root: Path) -> bool:
         return False
 
 
+def _canonical_hash(value: Mapping[str, Any]) -> str:
+    return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")).hexdigest()
+
+
 def _dynamic_verdict(dynamic: Mapping[str, Any]) -> str:
     checks = dynamic.get("checks")
     if not isinstance(checks, Mapping) or not checks:
@@ -254,6 +260,8 @@ def validate_dynamic_lcc_acceptance_report(value: Any) -> dict[str, Any]:
             raise _invalid(f"preflight.snapshot.{name}", "Snapshot is not bound to source evidence.")
     if set(preflight["snapshot"]) != _SOURCE_KEYS:
         raise _invalid("preflight.snapshot", "Snapshot must cover every source.")
+    if preflight["sha256"] != _canonical_hash(preflight["snapshot"]):
+        raise _invalid("preflight.sha256", "Preflight hash does not match canonical snapshot.")
 
     build = _exact(report["build"], "build", _BUILD_KEYS)
     for key in ("project_name", "workspace", "verification_profile", "terminal_state"):

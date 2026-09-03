@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import copy
+import hashlib
+import json
 from pathlib import Path
 
 import pytest
@@ -171,7 +173,8 @@ def test_fail_report_with_minimal_sections_self_validates():
     report["engineering_verdict"] = "FAIL"
     report["golden_verdict"] = "INCOMPLETE_ANALYSIS"
     report["failure"] = {"stage": "setup", "code": "X", "message": "broken"}
-    report["preflight"] = {"status": "FAIL", "sha256": "a" * 64, "snapshot": {name: {"path": f"/tmp/{name}", "sha256": "a" * 64} for name in report["sources"]}}
+    snapshot = {name: {"path": f"/tmp/{name}", "sha256": "a" * 64} for name in report["sources"]}
+    report["preflight"] = {"status": "FAIL", "sha256": hashlib.sha256(json.dumps(snapshot, sort_keys=True, separators=(",", ":")).encode()).hexdigest(), "snapshot": snapshot}
     report["build"]["terminal_state"] = "failed"
     report["build"]["history"] = []
     report["dynamic"] = {"evidence_source": "raw_pscad_output", "engineering_verdict": "FAIL", "checks": {}}

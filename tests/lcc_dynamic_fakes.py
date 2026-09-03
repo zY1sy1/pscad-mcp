@@ -61,6 +61,9 @@ def valid_wp1c_report() -> dict[str, Any]:
     """Runner-shaped durable report fixture shared by dynamic tests."""
     digest = "a" * 64
     commit = "a" * 40
+    source_names = ("blueprint", "catalog", "dynamic", "registry", "manifest", "companion", "master", "compiler_configuration", "compiler_executable")
+    snapshot = {name: {"path": f"/tmp/{name}", "sha256": digest} for name in source_names}
+    preflight_hash = __import__("hashlib").sha256(json.dumps(snapshot, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")).hexdigest()
     return {
         "schema_version": 1,
         "run_id": "dynamic-run-1",
@@ -74,10 +77,10 @@ def valid_wp1c_report() -> dict[str, Any]:
         "golden_verdict": "INCOMPLETE_ANALYSIS",
         "status": "INCOMPLETE_ANALYSIS",
         "repository": {"branch": "codex/wp1c", "commit": commit, "clean": True},
-        "preflight": {"status": "PASS", "sha256": digest, "snapshot": {name: {"path": f"/tmp/{name}", "sha256": digest} for name in ("blueprint", "catalog", "dynamic", "registry", "manifest", "companion", "master", "compiler_configuration", "compiler_executable")}},
+        "preflight": {"status": "PASS", "sha256": preflight_hash, "snapshot": snapshot},
         "sources": {
             name: {"path": f"/tmp/{name}", "before": digest, "after": digest}
-            for name in ("blueprint", "catalog", "dynamic", "registry", "manifest", "companion", "master", "compiler_configuration", "compiler_executable")
+            for name in source_names
         },
         "build": {
             "project_name": "WP1C_FIXED_LCC",
