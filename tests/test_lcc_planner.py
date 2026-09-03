@@ -1,4 +1,6 @@
 import copy
+import hashlib
+import json
 from dataclasses import replace
 from pathlib import Path
 
@@ -8,6 +10,7 @@ from pscad_mcp.core.backend.base import BackendError
 from pscad_mcp.core.master_bindings import parse_master_binding_registry
 from pscad_mcp.hvdc.builders.lcc.assets import (
     LccAssetSet,
+    canonical_json,
     load_packaged_asset_set,
 )
 from pscad_mcp.hvdc.builders.lcc.catalog import parse_catalog
@@ -15,8 +18,8 @@ from pscad_mcp.hvdc.builders.lcc.planner import (
     WP1C_DYNAMIC_PROFILE,
     LccPlanRequest,
     _component_rectangles,
-    _dynamic_schedule_events,
     _duration,
+    _dynamic_schedule_events,
     _net_route,
     _wp1b_connection_labels,
     create_plan,
@@ -90,6 +93,74 @@ def test_dynamic_schedule_events_reject_duplicate_control_targets():
     assert raised.value.code == "LCC_DYNAMIC_EVENT_UNAVAILABLE"
 from pscad_mcp.hvdc.builders.lcc.routing import route_intersects_rectangles
 from pscad_mcp.hvdc.builders.lcc.schema import parse_blueprint
+
+
+def packaged_dynamic_asset_set(
+    *, control_mode: str = "embedded_emtdc"
+) -> LccAssetSet:
+    assets = load_packaged_asset_set()
+    if control_mode == "embedded_emtdc":
+        return assets
+    blueprint = json.loads(assets.files["blueprint.json"].decode("utf-8"))
+    blueprint["dynamic_events"][0]["control_mode"] = control_mode
+    return replace(assets, blueprint=parse_blueprint(blueprint))
+
+
+def complete_live_inventory(
+    assets: LccAssetSet, *, native_schedule: bool = False
+) -> dict[str, object]:
+    registry = assets.master_bindings
+    assert registry is not None
+    definitions = {
+        item["scoped_name"]: {"ports": copy.deepcopy(item["ports"])}
+        for item in assets.catalog["definitions"]
+    }
+
+    for binding in registry.bindings:
+        definitions[binding.logical_name].update({
+            "physical_definition": binding.physical_definition,
+            "verification_state": "verified",
+            "selected_ports": {
+                port.logical: {
+                    "physical": port.physical,
+                    "occurrence": port.occurrence,
+                    "kind": port.kind,
+                    "dimension": port.dimension,
+                    "raw_dimension": port.dimension,
+                    "model": None,
+                    "type": None,
+                    "mode": None,
+                    "condition": None,
+                    "offset": [0, 0],
+                    "instance": port.instance,
+                }
+                for port in binding.ports
+            },
+        })
+    return {
+        "pscad_version": "4.6.2",
+        "master_path": "C:/PSCAD46/master.pslx",
+        "master_sha256": "a" * 64,
+        "master_binding_registry_sha256": registry.sha256,
+        "definitions": definitions,
+        "timed_control_capabilities": {
+            "native_schedule": native_schedule,
+            "simulation_clock": native_schedule,
+            "time_basis": "EMTDC" if native_schedule else "none",
+        },
+    }
+
+
+LEGACY_PLAN_SNAPSHOTS = {
+    "full_acceptance": {
+        "plan_hash": "b650e383cc69e130df809e3dc5694ee2f2abebc6556305e6e686fde0b41453ae",
+        "operations_hash": "e436ff4ec61119f5df574227fda3a32bacb29cd6c5157e495124d17aa3960539",
+    },
+    "wp1b_smoke": {
+        "plan_hash": "96947f2814c4fdd443681ba61a3fff5ae31651f587ddf48427c9c924aa63f1c6",
+        "operations_hash": "72d983e857275e9a2391c9f2f7ef065fcb2116d4ce3c9cbdd856f7cd150dfa54",
+    },
+}
 
 BLUEPRINT = {
     "schema_version": 1,
@@ -680,6 +751,22 @@ def test_wp1b_smoke_plan_uses_smoke_gate_and_hashes_profile(tmp_path):
     assert full_connections["ac"]["label"] is None
 
 
+@pytest.mark.parametrize("profile", ["full_acceptance", "wp1b_smoke"])
+def test_legacy_profile_plan_snapshots_remain_unchanged(profile):
+    assets = load_packaged_asset_set()
+    inventory = complete_live_inventory(assets)
+    plan = create_plan(
+        _request(verification_profile=profile),
+        assets,
+        inventory,
+        Path("C:/lcc-planner-snapshot"),
+    )
+    snapshot = LEGACY_PLAN_SNAPSHOTS[profile]
+    operation_payload = [operation.to_dict() for operation in plan.operations]
+    assert plan.plan_hash == snapshot["plan_hash"]
+    assert hashlib.sha256(canonical_json(operation_payload)).hexdigest() == snapshot["operations_hash"]
+
+
 def test_wp1b_smoke_plan_excludes_non_smoke_derived_outputs(tmp_path):
     candidate = copy.deepcopy(BLUEPRINT)
     candidate["measurements"].append(
@@ -777,3 +864,32 @@ def test_dynamic_profile_accepts_complete_recovery_duration(tmp_path, duration, 
     assets = load_packaged_asset_set()
     assert _duration(request, assets) == pytest.approx(expected)
     assert list(tmp_path.iterdir()) == []
+
+
+def test_wp1c_embedded_plan_verifies_control_then_dynamically_accepts(tmp_path):
+    assets = packaged_dynamic_asset_set()
+    plan = create_plan(
+        _request(verification_profile=WP1C_DYNAMIC_PROFILE),
+        assets,
+        complete_live_inventory(assets),
+        tmp_path,
+    )
+    kinds = [item.kind for item in plan.operations]
+
+    assert kinds[kinds.index("compile") + 1] == "verify_dynamic_control"
+    assert "register_dynamic_events" not in kinds
+    assert kinds[-3:] == ["simulate", "dynamic_accept", "publish"]
+    assert plan.metadata["dynamic_control"]["mode"] == "embedded_emtdc"
+
+
+def test_native_scheduler_is_only_planned_when_explicitly_selected(tmp_path):
+    assets = packaged_dynamic_asset_set(control_mode="native_scheduler")
+    plan = create_plan(
+        _request(verification_profile=WP1C_DYNAMIC_PROFILE),
+        assets,
+        complete_live_inventory(assets, native_schedule=True),
+        tmp_path,
+    )
+    kinds = [item.kind for item in plan.operations]
+    assert kinds[kinds.index("compile") + 1] == "register_dynamic_events"
+    assert kinds[-3:] == ["simulate", "dynamic_accept", "publish"]

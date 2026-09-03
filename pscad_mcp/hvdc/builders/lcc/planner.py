@@ -141,8 +141,11 @@ PHASES = (
     "create_outputs",
     "save_and_validate",
     "compile",
+    "verify_dynamic_control",
+    "register_dynamic_events",
     "simulate",
     "smoke_validate",
+    "dynamic_accept",
     "accept",
     "publish",
 )
@@ -1019,12 +1022,21 @@ def create_plan(
     add("save_and_validate", "save_and_validate", project_name, {})
     add("compile", "compile", project_name, {})
     if request.verification_profile == WP1C_DYNAMIC_PROFILE:
-        add(
-            "register_dynamic_events",
-            "register_dynamic_events",
-            project_name,
-            {"events": _dynamic_schedule_events(blueprint.dynamic_events)},
-        )
+        dynamic_control = capability["bindings"]
+        if dynamic_control["control_mode"] == "embedded_emtdc":
+            add(
+                "verify_dynamic_control",
+                "verify_dynamic_control",
+                project_name,
+                dynamic_control,
+            )
+        else:
+            add(
+                "register_dynamic_events",
+                "register_dynamic_events",
+                project_name,
+                {"events": _dynamic_schedule_events(blueprint.dynamic_events)},
+            )
     if request.verification_profile == WP1B_SMOKE_PROFILE:
         for output in planned_outputs:
             add("create_outputs", "create_output", output.logical_id, output.to_dict())
@@ -1039,6 +1051,16 @@ def create_plan(
                 "required_channels": list(
                     asset_set.smoke["required_channels"]
                 ),
+            },
+        )
+    elif request.verification_profile == WP1C_DYNAMIC_PROFILE:
+        add(
+            "dynamic_accept",
+            "dynamic_accept",
+            project_name,
+            {
+                "contract_sha256": asset_set.hashes["dynamic.json"],
+                "event": capability["bindings"]["event"],
             },
         )
     else:
@@ -1069,6 +1091,10 @@ def create_plan(
     }
     if request.verification_profile == WP1B_SMOKE_PROFILE:
         payload["smoke_contract_sha256"] = asset_set.hashes["smoke.json"]
+    if request.verification_profile == WP1C_DYNAMIC_PROFILE:
+        dynamic_metadata = dict(capability["bindings"])
+        dynamic_metadata["mode"] = dynamic_metadata.pop("control_mode")
+        payload["dynamic_control"] = dynamic_metadata
     if audited_master is not None:
         payload["master_sha256"] = audited_master.master_sha256
         payload["master_binding_registry_sha256"] = (
@@ -1086,7 +1112,11 @@ def create_plan(
         asset_hashes=dict(asset_set.hashes),
         pscad_version=asset_set.pscad_version,
         catalog_identity=catalog.identity,
-        metadata=payload["request"],
+        metadata=(
+            {**payload["request"], "dynamic_control": payload["dynamic_control"]}
+            if request.verification_profile == WP1C_DYNAMIC_PROFILE
+            else payload["request"]
+        ),
         master_sha256=payload.get("master_sha256"),
         master_binding_registry_sha256=payload.get(
             "master_binding_registry_sha256"
