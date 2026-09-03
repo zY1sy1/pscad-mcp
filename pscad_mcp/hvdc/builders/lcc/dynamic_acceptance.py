@@ -125,9 +125,17 @@ def _artifact(value: Any, field: str, *, required: bool) -> dict[str, Any] | Non
 
 def _path_owned(path: Path, root: Path) -> bool:
     try:
-        path.absolute().relative_to(root.absolute())
+        candidate = path.absolute()
+        root_abs = root.absolute()
+        candidate.relative_to(root_abs)
+        for parent in (candidate, *candidate.parents):
+            if parent == root_abs:
+                break
+            if parent.exists() and (parent.is_symlink() or bool(getattr(parent.stat(), "st_file_attributes", 0) & 0x400)):
+                return False
+        candidate.resolve().relative_to(root_abs.resolve())
         return True
-    except ValueError:
+    except (OSError, ValueError):
         return False
 
 
