@@ -181,7 +181,7 @@ def _fail(report: dict[str, Any], stage: str, error: BaseException) -> dict[str,
     report["failure"] = {"stage": stage, "code": getattr(error, "code", type(error).__name__), "message": str(error)[:1024]}
     report["build"]["terminal_state"] = "failed"
     report["dynamic"] = {"evidence_source": "raw_pscad_output", "engineering_verdict": FAIL, "checks": {}}
-    report["physical"] = {"verdict": FAIL, "checks": [{"outcome": FAIL}]}
+    report["physical"] = {"verdict": FAIL, "checks": [{"name": "runner_failure", "kind": "runner_failure", "required": True, "status": "failed", "outcome": FAIL}]}
     return report
 
 

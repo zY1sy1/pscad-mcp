@@ -327,6 +327,15 @@ def validate_dynamic_lcc_acceptance_report(value: Any) -> dict[str, Any]:
     for index, check in enumerate(physical["checks"]):
         if not isinstance(check, Mapping):
             raise _invalid(f"physical.checks[{index}]", "Physical checks must be objects.")
+        required_keys = {"name", "kind", "required", "status", "outcome"}
+        allowed_keys = required_keys | {"observed", "expected", "comparison_policy"}
+        if not required_keys.issubset(check) or not set(check).issubset(allowed_keys):
+            raise _invalid(f"physical.checks[{index}]", "Physical check fields are not strict.")
+        _text(check["name"], f"physical.checks[{index}].name")
+        _text(check["kind"], f"physical.checks[{index}].kind")
+        _text(check["status"], f"physical.checks[{index}].status")
+        if not isinstance(check["required"], bool):
+            raise _invalid(f"physical.checks[{index}].required", "required must be boolean.")
         outcome = check.get("outcome", check.get("verdict"))
         if outcome not in _ALLOWED_VERDICTS:
             raise _invalid(f"physical.checks[{index}]", "Physical check outcome is invalid.")
@@ -336,8 +345,9 @@ def validate_dynamic_lcc_acceptance_report(value: Any) -> dict[str, Any]:
         if physical["verdict"] != expected_physical:
             raise _invalid("physical.verdict", "Physical verdict must match check outcomes.")
     golden = _exact(report["golden"], "golden", _GOLDEN_KEYS)
-    if not isinstance(golden["reviewed"], bool) or not isinstance(golden["source"], str):
+    if not isinstance(golden["reviewed"], bool):
         raise _invalid("golden", "Golden review metadata is required.")
+    _text(golden["source"], "golden.source")
     if report["golden_verdict"] == PASS and (not golden["reviewed"] or "placeholder" in golden["source"].casefold()):
         raise _invalid("golden_verdict", "PASS requires a reviewed non-placeholder golden source.")
     expected_engineering = combine_dynamic_verdicts(dynamic_verdict, physical["verdict"])
