@@ -47,6 +47,14 @@ try {
     }
     $Python = Join-Path $RepositoryRoot '.venv\Scripts\python.exe'
     if (-not (Test-Path -LiteralPath $Python -PathType Leaf)) {
+        $CommonGitDir = git -C $RepositoryRoot rev-parse --path-format=absolute --git-common-dir
+        if ($LASTEXITCODE -ne 0) {
+            throw 'Unable to locate the repository Python environment.'
+        }
+        $CommonRoot = Split-Path -Parent $CommonGitDir
+        $Python = Join-Path $CommonRoot '.venv\Scripts\python.exe'
+    }
+    if (-not (Test-Path -LiteralPath $Python -PathType Leaf)) {
         throw 'The repository Python environment is unavailable.'
     }
     $PreflightComplete = $true

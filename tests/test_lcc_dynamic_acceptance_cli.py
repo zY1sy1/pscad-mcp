@@ -468,6 +468,15 @@ def test_dynamic_wrapper_maps_preflight_throws_to_exit_two():
     assert "if ($LocationPushed)" in script
 
 
+def test_dynamic_wrapper_falls_back_to_common_repository_python_environment():
+    script = (ROOT / "scripts" / "run_fixed_lcc_dynamic_acceptance.ps1").read_text(
+        encoding="utf-8"
+    )
+    assert "rev-parse --path-format=absolute --git-common-dir" in script
+    assert "$CommonRoot = Split-Path -Parent $CommonGitDir" in script
+    assert "$Python = Join-Path $CommonRoot '.venv\\Scripts\\python.exe'" in script
+
+
 def test_dynamic_completion_sentence_is_explicitly_post_run():
     for relative in (
         "README.md",
