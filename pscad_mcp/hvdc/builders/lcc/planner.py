@@ -986,7 +986,8 @@ def create_plan(
         )
     connection_labels = (
         _wp1b_connection_labels(blueprint)
-        if request.verification_profile == WP1B_SMOKE_PROFILE
+        if request.verification_profile
+        in {WP1B_SMOKE_PROFILE, WP1C_DYNAMIC_PROFILE}
         else {}
     )
     for net in blueprint.nets:

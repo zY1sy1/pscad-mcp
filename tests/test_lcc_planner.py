@@ -886,6 +886,16 @@ def test_wp1c_embedded_plan_verifies_control_then_dynamically_accepts(tmp_path):
     assert "register_dynamic_events" not in kinds
     assert kinds[-3:] == ["simulate", "dynamic_accept", "publish"]
     assert plan.metadata["dynamic_control"]["mode"] == "embedded_emtdc"
+    connections = {
+        item.target: item.arguments
+        for item in plan.operations
+        if item.kind == "connect_net"
+    }
+    expected_labels = _wp1b_connection_labels(assets.blueprint)
+    assert all(
+        connections[logical_id]["label"] == label
+        for logical_id, label in expected_labels.items()
+    )
 
 
 def test_native_scheduler_is_only_planned_when_explicitly_selected(tmp_path):
