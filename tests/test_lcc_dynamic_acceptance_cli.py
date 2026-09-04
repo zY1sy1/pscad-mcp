@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
+from pscad_mcp.hvdc.builders.lcc import dynamic_acceptance_cli
 from pscad_mcp.hvdc.builders.lcc.dynamic_acceptance import (
     validate_dynamic_lcc_acceptance_report,
 )
@@ -475,6 +477,36 @@ def test_dynamic_wrapper_falls_back_to_common_repository_python_environment():
     assert "rev-parse --path-format=absolute --git-common-dir" in script
     assert "$CommonRoot = Split-Path -Parent $CommonGitDir" in script
     assert "$Python = Join-Path $CommonRoot '.venv\\Scripts\\python.exe'" in script
+
+
+def test_dynamic_service_factory_requests_minimized_pscad(monkeypatch, tmp_path):
+    captured = {}
+    backend = object()
+    service = object()
+    builder = object()
+
+    def backend_factory(*args, **kwargs):
+        captured.update(kwargs)
+        return backend
+
+    monkeypatch.setattr(dynamic_acceptance_cli, "LegacyBackend", backend_factory)
+    monkeypatch.setattr(
+        dynamic_acceptance_cli,
+        "PscadService",
+        lambda provider, **kwargs: service,
+    )
+    monkeypatch.setattr(
+        dynamic_acceptance_cli,
+        "LccBuilderService",
+        lambda value, *, workspace_root: builder,
+    )
+
+    result = dynamic_acceptance_cli._service_factory(
+        SimpleNamespace(master_path=tmp_path / "master.pslx", workspace_root=tmp_path)
+    )
+
+    assert result == (service, builder)
+    assert captured["legacy_minimize"] is True
 
 
 def test_dynamic_completion_sentence_is_explicitly_post_run():

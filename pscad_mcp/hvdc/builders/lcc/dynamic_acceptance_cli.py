@@ -281,6 +281,7 @@ def _service_factory(request: DynamicLccRunRequest) -> tuple[Any, Any]:
         version="4.6.2",
         x64=True,
         definition_paths={"master": request.master_path},
+        legacy_minimize=True,
         process_probe=list_pscad_processes,
     )
     service = PscadService(
