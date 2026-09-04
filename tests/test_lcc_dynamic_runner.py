@@ -233,6 +233,44 @@ def test_runner_lifecycle_failures_are_persisted_without_pscad(
         assert builder.build_calls == []
 
 
+def test_runner_filters_operation_history_and_preserves_terminal_build_error(
+    tmp_path: Path,
+):
+    request, staging = valid_request(tmp_path)
+
+    class FailedBuilder(_ConfigurableBuilder):
+        def get_build_status(self, build_id: str):
+            return {
+                "state": "failed",
+                "history": [
+                    {"state": "validated"},
+                    {"kind": "place_component", "target": "source"},
+                    {"state": "failed", "reason": "LCC_OUTPUT_INCOMPLETE"},
+                ],
+                "error": {
+                    "backend": "hvdc",
+                    "code": "LCC_OUTPUT_INCOMPLETE",
+                    "details": {"selector": "Main/VDC_RECT"},
+                    "message": "The PSCAD output-channel metadata could not be verified.",
+                    "operation": "verify_lcc_output_channel",
+                },
+            }
+
+    report = asyncio.run(
+        run_fixed_lcc_dynamic_acceptance(
+            request,
+            service=_ConfigurableService(staging),
+            builder=FailedBuilder(staging),
+            process_reader=list,
+            poll_interval_s=0,
+        )
+    )
+
+    _assert_failure(report, stage="poll", code="LCC_OUTPUT_INCOMPLETE")
+    assert report["build"]["history"] == ["validated", "failed"]
+    assert request.report_path.is_file()
+
+
 @pytest.mark.parametrize(
     ("service_failure", "stage", "code"),
     [

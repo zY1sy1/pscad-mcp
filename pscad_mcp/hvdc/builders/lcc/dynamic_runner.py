@@ -69,6 +69,43 @@ def _error(stage: str, message: str, code: str = "LCC_DYNAMIC_RUN_FAILED") -> Ba
     return BackendError(code, message, "hvdc", "run_fixed_lcc_dynamic_acceptance", {"stage": stage})
 
 
+def _state_history(record: Mapping[str, Any]) -> list[str]:
+    values = record.get("history")
+    if not isinstance(values, Sequence) or isinstance(
+        values, (str, bytes, bytearray)
+    ):
+        raise _error(
+            "poll",
+            "build history is not an array",
+            "LCC_DYNAMIC_BUILD_HISTORY_INVALID",
+        )
+    return [
+        str(item["state"])
+        for item in values
+        if isinstance(item, Mapping) and isinstance(item.get("state"), str)
+    ]
+
+
+def _terminal_build_error(record: Mapping[str, Any]) -> BackendError:
+    failure = record.get("error")
+    if not isinstance(failure, Mapping):
+        return _error("poll", "build did not publish dynamic engineering evidence")
+    code = failure.get("code")
+    message = failure.get("message")
+    backend = failure.get("backend")
+    operation = failure.get("operation")
+    details = failure.get("details")
+    return BackendError(
+        str(code) if isinstance(code, str) and code else "LCC_DYNAMIC_RUN_FAILED",
+        str(message) if isinstance(message, str) and message else "The dynamic LCC build failed.",
+        str(backend) if isinstance(backend, str) and backend else "hvdc",
+        str(operation)
+        if isinstance(operation, str) and operation
+        else "run_fixed_lcc_dynamic_acceptance",
+        dict(details) if isinstance(details, Mapping) else {},
+    )
+
+
 def _source_paths(request: DynamicLccRunRequest) -> dict[str, Path]:
     root = request.repository_root / "pscad_mcp" / "assets" / "lcc" / "cigre_lcc_monopole_v1"
     names = {
@@ -315,8 +352,20 @@ async def run_fixed_lcc_dynamic_acceptance(
             if time.monotonic() >= deadline:
                 raise _error(stage, "build timed out", "LCC_BUILD_TIMED_OUT")
             await asyncio.sleep(poll_interval_s)
-        report["build"].update({"terminal_state": record.get("state"), "history": [item.get("state") for item in record.get("history", []) if isinstance(item, Mapping)]})
-        if record.get("state") != "published" or "dynamic_engineering_passed" not in report["build"]["history"]:
+        terminal_state = record.get("state")
+        report["build"].update(
+            {
+                "terminal_state": (
+                    terminal_state
+                    if isinstance(terminal_state, str) and terminal_state
+                    else "unknown"
+                ),
+                "history": _state_history(record),
+            }
+        )
+        if terminal_state != "published":
+            raise _terminal_build_error(record)
+        if "dynamic_engineering_passed" not in report["build"]["history"]:
             raise _error(stage, "build did not publish dynamic engineering evidence")
         artifact_sources = []
         for candidate in (record, started):
