@@ -1022,23 +1022,6 @@ class LccExecutor:
                     net=operation.target,
                     endpoints=list(endpoints),
                 )
-            created_wire = await self.service.create_wire(
-                self.project_name, vertices, canvas_name=canvas
-            )
-            if not isinstance(created_wire, dict):
-                self._raise_postcondition(
-                    "Wire creation returned invalid evidence.", net=operation.target
-                )
-            returned_vertices = created_wire.get("vertices")
-            if returned_vertices is not None:
-                normalized_vertices = [list(point) for point in returned_vertices]
-                if normalized_vertices != vertices:
-                    self._raise_postcondition(
-                        "Wire vertex read-back did not match the plan.",
-                        net=operation.target,
-                        expected_vertices=vertices,
-                        observed_vertices=normalized_vertices,
-                    )
             label_responses = []
             for point in actual_points:
                 assert point is not None
@@ -1065,6 +1048,7 @@ class LccExecutor:
             self._operation_completed(
                 backend_response_type="multi_endpoint_labeled",
                 wire_vertices=vertices,
+                wire_materialized=False,
                 label_count=len(label_responses),
             )
             return

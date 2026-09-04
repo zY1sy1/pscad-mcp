@@ -1912,7 +1912,7 @@ class ThreeEndpointService(RecordingPscadService):
         return {"A": {"name": "A", "x": x, "y": y}}
 
 
-def test_three_endpoint_labeled_electrical_net_preserves_route_and_all_ports(
+def test_three_endpoint_labeled_electrical_net_uses_labels_without_crossing_wire(
     tmp_path,
 ):
     service = ThreeEndpointService()
@@ -1941,9 +1941,13 @@ def test_three_endpoint_labeled_electrical_net_preserves_route_and_all_ports(
         ([36, 36], [36, 36], "SHARED_AC", True),
     ]
     wires = [call for call in service.calls if call[0] == "create_wire"]
-    assert [call[1][1] for call in wires] == [
-        [[0, 0], [0, 18], [36, 18], [36, 36]]
-    ]
+    assert wires == []
+    assert executor._logical_nets["source_meter_breaker"].points == (
+        (0, 0),
+        (0, 18),
+        (36, 18),
+        (36, 36),
+    )
     assert executor._logical_nets["source_meter_breaker"].endpoints == (
         "source:A",
         "meter:A",
