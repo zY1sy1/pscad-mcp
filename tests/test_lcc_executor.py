@@ -1900,6 +1900,57 @@ class GroundReturnEndpointService(RecordingPscadService):
         return {name: {"name": name, "x": point[0], "y": point[1]}}
 
 
+class ThreeEndpointService(RecordingPscadService):
+    async def get_component_ports(self, project_name, component_id):
+        self._call("get_component_ports", project_name, component_id)
+        points = {
+            1: (0, 0),
+            2: (0, 18),
+            3: (36, 36),
+        }
+        x, y = points[component_id]
+        return {"A": {"name": "A", "x": x, "y": y}}
+
+
+def test_three_endpoint_labeled_electrical_net_preserves_route_and_all_ports(
+    tmp_path,
+):
+    service = ThreeEndpointService()
+    executor = LccExecutor(_plan(tmp_path), service, tmp_path)
+    executor.component_ids = {"source": 1, "meter": 2, "breaker": 3}
+    operation = LccPlanOperation(
+        1,
+        "connect_net",
+        "source_meter_breaker",
+        {
+            "kind": "electrical",
+            "vertices": [[0, 0], [0, 18], [36, 18], [36, 36]],
+            "endpoints": ["source:A", "meter:A", "breaker:A"],
+            "label": "SHARED_AC",
+        },
+        "connect_electrical:source_meter_breaker:000",
+        "connect_electrical",
+    )
+
+    asyncio.run(executor._connect_net(operation))
+
+    connections = [call for call in service.calls if call[0] == "create_connection"]
+    assert [call[1][1:5] for call in connections] == [
+        ([0, 0], [0, 0], "SHARED_AC", True),
+        ([0, 18], [0, 18], "SHARED_AC", True),
+        ([36, 36], [36, 36], "SHARED_AC", True),
+    ]
+    wires = [call for call in service.calls if call[0] == "create_wire"]
+    assert [call[1][1] for call in wires] == [
+        [[0, 0], [0, 18], [36, 18], [36, 36]]
+    ]
+    assert executor._logical_nets["source_meter_breaker"].endpoints == (
+        "source:A",
+        "meter:A",
+        "breaker:A",
+    )
+
+
 def test_ground_return_wires_terminate_at_both_component_ports(tmp_path):
     plan = _plan(tmp_path)
     source, ground = plan.blueprint.components

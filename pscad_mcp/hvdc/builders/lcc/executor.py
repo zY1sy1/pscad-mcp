@@ -935,15 +935,27 @@ class LccExecutor:
         arguments = operation.arguments
         planned_vertices = arguments.get("vertices", ())
         endpoints = arguments.get("endpoints", ())
-        actual_start = None
-        actual_end = None
+        actual_points: list[tuple[int, int] | None] = []
         if isinstance(endpoints, (list, tuple)) and len(endpoints) >= 2:
-            actual_start = await _actual_endpoint(
-                self.service, self.project_name, self.component_ids, endpoints[0]
-            )
-            actual_end = await _actual_endpoint(
-                self.service, self.project_name, self.component_ids, endpoints[-1]
-            )
+            for endpoint in endpoints:
+                point = await _actual_endpoint(
+                    self.service, self.project_name, self.component_ids, endpoint
+                )
+                if point is None and isinstance(endpoint, str) and ":" in endpoint:
+                    component_name, port_name = endpoint.split(":", 1)
+                    component = self._logical_components.get(component_name)
+                    if component is not None:
+                        point = next(
+                            (
+                                port.absolute
+                                for port in component.ports
+                                if port.name == port_name
+                            ),
+                            None,
+                        )
+                actual_points.append(point)
+        actual_start = actual_points[0] if actual_points else None
+        actual_end = actual_points[-1] if actual_points else None
         vertices = [
             list(point)
             for point in _route_for_backend(
@@ -996,6 +1008,64 @@ class LccExecutor:
                 backend_response_type="split_ground_return",
                 wire_count=len(responses),
                 vertices=routes,
+            )
+            return
+        if (
+            label is not None
+            and isinstance(endpoints, (list, tuple))
+            and len(endpoints) > 2
+        ):
+            if any(point is None for point in actual_points):
+                self._raise_postcondition(
+                    "Every endpoint of a multi-terminal labeled net must have "
+                    "a resolved canvas point.",
+                    net=operation.target,
+                    endpoints=list(endpoints),
+                )
+            created_wire = await self.service.create_wire(
+                self.project_name, vertices, canvas_name=canvas
+            )
+            if not isinstance(created_wire, dict):
+                self._raise_postcondition(
+                    "Wire creation returned invalid evidence.", net=operation.target
+                )
+            returned_vertices = created_wire.get("vertices")
+            if returned_vertices is not None:
+                normalized_vertices = [list(point) for point in returned_vertices]
+                if normalized_vertices != vertices:
+                    self._raise_postcondition(
+                        "Wire vertex read-back did not match the plan.",
+                        net=operation.target,
+                        expected_vertices=vertices,
+                        observed_vertices=normalized_vertices,
+                    )
+            label_responses = []
+            for point in actual_points:
+                assert point is not None
+                created = await self.service.create_connection(
+                    self.project_name,
+                    list(point),
+                    list(point),
+                    label,
+                    kind == "electrical",
+                    canvas_name=canvas,
+                )
+                if not isinstance(created, dict):
+                    self._raise_postcondition(
+                        "Connection label creation returned invalid evidence.",
+                        net=operation.target,
+                    )
+                label_responses.append(created)
+            self._logical_nets[operation.target] = GraphNet(
+                kind,
+                tuple(tuple(int(value) for value in point) for point in vertices),
+                (str(label),),
+                tuple(str(endpoint) for endpoint in endpoints),
+            )
+            self._operation_completed(
+                backend_response_type="multi_endpoint_labeled",
+                wire_vertices=vertices,
+                label_count=len(label_responses),
             )
             return
         if label is not None or len(vertices) == 2:
