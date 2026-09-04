@@ -593,6 +593,37 @@ def test_wp1b_compiled_predeclared_output_falls_back_to_asset_contract(
         assert failure.value.code == "LCC_OUTPUT_INCOMPLETE"
 
 
+def test_wp1c_compiled_predeclared_output_falls_back_to_asset_contract(tmp_path):
+    plan = _plan(tmp_path)
+    output = LccOutputSpec(
+        "vdc",
+        "Main/VDC",
+        "kV",
+        "dc_voltage",
+        measurement="vdc_measurement",
+    )
+    plan = replace(
+        plan,
+        verification_profile="wp1c_dynamic",
+        blueprint=replace(plan.blueprint, outputs=(output,)),
+    )
+    service = UnavailablePredeclaredOutputService()
+    executor = LccExecutor(
+        plan,
+        service,
+        tmp_path,
+        asset_set=load_packaged_asset_set(),
+    )
+    executor.history.append({"state": "compiled"})
+    operation = next(
+        item for item in plan.operations if item.kind == "create_output"
+    )
+
+    asyncio.run(executor._create_output(operation))
+
+    assert executor.history[-1]["verification"] == "compiled_asset_contract"
+
+
 def test_legacy_output_paths_are_mapped_from_measurement_components(tmp_path):
     plan = _plan_with_profile(tmp_path)
     source, load = plan.blueprint.components

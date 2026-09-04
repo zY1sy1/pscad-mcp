@@ -1110,7 +1110,7 @@ class LccExecutor:
         call_id: Any,
     ) -> bool:
         if (
-            self.plan.verification_profile != "wp1b_smoke"
+            self.plan.verification_profile not in {"wp1b_smoke", "wp1c_dynamic"}
             or self.asset_set is None
             or not any(
                 entry.get("state") == LccBuildState.COMPILED.value
@@ -1118,9 +1118,10 @@ class LccExecutor:
             )
         ):
             return False
-        required = self.asset_set.smoke.get("required_channels")
-        if not isinstance(required, (list, tuple)) or selector not in required:
-            return False
+        if self.plan.verification_profile == "wp1b_smoke":
+            required = self.asset_set.smoke.get("required_channels")
+            if not isinstance(required, (list, tuple)) or selector not in required:
+                return False
         matches = [
             output
             for output in self.plan.blueprint.outputs

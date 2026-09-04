@@ -1016,7 +1016,10 @@ def create_plan(
                 required_channels=list(required_paths),
             )
         planned_outputs = tuple(output_by_path[path] for path in required_paths)
-    if request.verification_profile != WP1B_SMOKE_PROFILE:
+    if request.verification_profile not in {
+        WP1B_SMOKE_PROFILE,
+        WP1C_DYNAMIC_PROFILE,
+    }:
         for output in planned_outputs:
             add("create_outputs", "create_output", output.logical_id, output.to_dict())
     add("save_and_validate", "save_and_validate", project_name, {})
@@ -1037,7 +1040,10 @@ def create_plan(
                 project_name,
                 {"events": _dynamic_schedule_events(blueprint.dynamic_events)},
             )
-    if request.verification_profile == WP1B_SMOKE_PROFILE:
+    if request.verification_profile in {
+        WP1B_SMOKE_PROFILE,
+        WP1C_DYNAMIC_PROFILE,
+    }:
         for output in planned_outputs:
             add("create_outputs", "create_output", output.logical_id, output.to_dict())
     add("simulate", "simulate", project_name, {"duration_s": duration})

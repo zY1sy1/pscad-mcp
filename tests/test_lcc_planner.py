@@ -877,6 +877,12 @@ def test_wp1c_embedded_plan_verifies_control_then_dynamically_accepts(tmp_path):
     kinds = [item.kind for item in plan.operations]
 
     assert kinds[kinds.index("compile") + 1] == "verify_dynamic_control"
+    output_indexes = [
+        index for index, kind in enumerate(kinds) if kind == "create_output"
+    ]
+    assert output_indexes
+    assert kinds.index("verify_dynamic_control") < min(output_indexes)
+    assert max(output_indexes) < kinds.index("simulate")
     assert "register_dynamic_events" not in kinds
     assert kinds[-3:] == ["simulate", "dynamic_accept", "publish"]
     assert plan.metadata["dynamic_control"]["mode"] == "embedded_emtdc"
