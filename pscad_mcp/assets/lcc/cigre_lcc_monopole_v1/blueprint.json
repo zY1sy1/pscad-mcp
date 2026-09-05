@@ -762,7 +762,7 @@
     },
     {
       "logical_id": "p_rect_import",
-      "definition": "master:signal_import",
+      "definition": "master:main_signal_import",
       "location": {"x": 1044, "y": 702},
       "orientation": 0,
       "parameters": {"Name": "LCC_P_RECT"},
@@ -780,7 +780,7 @@
     },
     {
       "logical_id": "p_inv_import",
-      "definition": "master:signal_import",
+      "definition": "master:main_signal_import",
       "location": {"x": 1044, "y": 756},
       "orientation": 0,
       "parameters": {"Name": "LCC_P_INV"},
@@ -794,15 +794,6 @@
       "orientation": 0,
       "parameters": {"Group": "Main", "Name": "P_INV", "Units": "MW"},
       "ports": ["INPUT"],
-      "role": "measurement"
-    },
-    {
-      "logical_id": "alpha_rect_import",
-      "definition": "master:signal_import",
-      "location": {"x": 1044, "y": 810},
-      "orientation": 0,
-      "parameters": {"Name": "ALPHA"},
-      "ports": ["OUT"],
       "role": "measurement"
     },
     {
@@ -1992,13 +1983,13 @@
       "logical_id": "alpha_rect_telemetry",
       "kind": "data",
       "endpoints": [
-        {"component": "alpha_rect_import", "port": "OUT"},
+        {"component": "rectifier_control", "port": "ALPHA"},
         {"component": "alpha_rect_output", "port": "INPUT"},
         {"component": "mu_rect_output", "port": "INPUT"}
       ],
       "label": null,
       "route": {
-        "vertices": [[1080, 810], [1180, 810], [1180, 864]],
+        "vertices": [[872, 641], [960, 641], [960, 810], [1180, 810], [1180, 864]],
         "policy": "orthogonal"
       }
     }
