@@ -815,15 +815,6 @@
       "role": "measurement"
     },
     {
-      "logical_id": "mu_rect_import",
-      "definition": "master:main_signal_import",
-      "location": {"x": 1044, "y": 864},
-      "orientation": 0,
-      "parameters": {"Name": "ALPHA"},
-      "ports": ["OUT"],
-      "role": "measurement"
-    },
-    {
       "logical_id": "mu_rect_output",
       "definition": "master:dynamic_output_channel",
       "location": {"x": 1180, "y": 864},
@@ -2002,18 +1993,14 @@
       "kind": "data",
       "endpoints": [
         {"component": "alpha_rect_import", "port": "OUT"},
-        {"component": "alpha_rect_output", "port": "INPUT"}
-      ],
-      "label": null
-    },
-    {
-      "logical_id": "mu_rect_telemetry",
-      "kind": "data",
-      "endpoints": [
-        {"component": "mu_rect_import", "port": "OUT"},
+        {"component": "alpha_rect_output", "port": "INPUT"},
         {"component": "mu_rect_output", "port": "INPUT"}
       ],
-      "label": null
+      "label": null,
+      "route": {
+        "vertices": [[1044, 810], [1180, 810], [1180, 864]],
+        "policy": "orthogonal"
+      }
     }
   ],
   "measurements": [
