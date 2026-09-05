@@ -153,12 +153,12 @@ def complete_live_inventory(
 
 LEGACY_PLAN_SNAPSHOTS = {
     "full_acceptance": {
-        "plan_hash": "a8d1cf1c26f0efd6e759bc968c5cead5e00bff1be16fbf28f00f45664c46b6eb",
-        "operations_hash": "e5db95b7847939ee6bfea770d4209472fa73998d7f7b3c1bbfb79864e278c996",
+        "plan_hash": "e650e54e9988b3432181bc8d0de6309662b7a52d13cf2f16a59344b7013225f0",
+        "operations_hash": "6fc88eb1aad9f782b988ff94242d977c5c2f26a456cff92fe85c5bb5da5c7f22",
     },
     "wp1b_smoke": {
-        "plan_hash": "955b9457516b6c53eb069f7ac709229e3273b4db87eef2517599df58f3eee7bf",
-        "operations_hash": "03936aba08658dcfd8bafedd1814858329244eac5826dd56cf8e78ef480eec93",
+        "plan_hash": "00a9f6db962594eec683376909f6524ba02f3283c67689571fdf27273325695c",
+        "operations_hash": "f2f27c190f6de20ce4bafa5ac71ca5cd8991908c49877d52d13fd270cd6fc6f0",
     },
 }
 
@@ -633,7 +633,7 @@ def test_packaged_main_signal_imports_are_pscad_grid_aligned():
         if component.definition == "master:main_signal_import"
     ]
 
-    assert len(imports) == 6
+    assert len(imports) == 3
     assert all(
         coordinate % 18 == 0
         for component in imports
@@ -950,7 +950,7 @@ def test_wp1c_plan_places_physical_acceptance_output_bindings(tmp_path):
             "Units": units,
         }
         import_id = "alpha_rect_import" if logical_id == "mu_rect_output" else logical_id.removesuffix("_output") + "_import"
-        assert placements[import_id]["definition"] == "master:main_signal_import"
+        assert placements[import_id]["definition"] == "master:signal_import"
         assert placements[import_id]["parameters"] == {"Name": signal}
 
 

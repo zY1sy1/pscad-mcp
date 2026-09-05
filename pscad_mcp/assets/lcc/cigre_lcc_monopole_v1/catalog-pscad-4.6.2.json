@@ -968,6 +968,26 @@
       }
     },
     {
+      "scoped_name": "master:signal_import",
+      "ports": [
+        {
+          "name": "OUT",
+          "kind": "data",
+          "dimension": 1,
+          "offset": [36, 0]
+        }
+      ],
+      "parameters": {
+        "Name": {"type": "string"}
+      },
+      "bounding_box": [-36, -20, 36, 20],
+      "metadata": {
+        "library": "master",
+        "characterized_for": "4.6.2",
+        "binding_registry": "master-bindings-pscad-4.6.2.json"
+      }
+    },
+    {
       "scoped_name": "cigre_lcc_v1:SignalInterface",
       "ports": [
         {

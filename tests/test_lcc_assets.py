@@ -193,7 +193,6 @@ def test_packaged_asset_exposes_hashed_wp1b_smoke_contract():
         "master:control_product",
         "master:real_constant",
         "master:integer_constant",
-        "master:signal_import",
         "master:electrical_pin",
         "master:signal_export",
         "master:integer_sum",
