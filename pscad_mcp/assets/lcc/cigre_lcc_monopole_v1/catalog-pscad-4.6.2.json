@@ -397,7 +397,10 @@
           ]
         }
       ],
-      "parameters": {},
+      "parameters": {
+        "ActivePowerSignal": {"type": "string"},
+        "ReactivePowerSignal": {"type": "string"}
+      },
       "bounding_box": [
         -20,
         -10,

@@ -590,7 +590,20 @@
           "occurrence": 1
         }
       ],
-      "parameters": [],
+      "parameters": [
+        {
+          "logical": ["ActivePowerSignal"],
+          "physical": ["P"],
+          "transform": {"kind": "identity"},
+          "physical_contracts": {"P": {"type": "Text", "unit": null}}
+        },
+        {
+          "logical": ["ReactivePowerSignal"],
+          "physical": ["Q"],
+          "transform": {"kind": "identity"},
+          "physical_contracts": {"Q": {"type": "Text", "unit": null}}
+        }
+      ],
       "fixed_parameters": [
         {
           "physical": "MeasP",

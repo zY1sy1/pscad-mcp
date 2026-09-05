@@ -80,7 +80,10 @@
         "y": 137
       },
       "orientation": 0,
-      "parameters": {},
+      "parameters": {
+        "ActivePowerSignal": "LCC_P_RECT",
+        "ReactivePowerSignal": "LCC_Q_RECT"
+      },
       "ports": [
         "A",
         "B"
@@ -421,7 +424,10 @@
         "y": 137
       },
       "orientation": 0,
-      "parameters": {},
+      "parameters": {
+        "ActivePowerSignal": "LCC_P_INV",
+        "ReactivePowerSignal": "LCC_Q_INV"
+      },
       "ports": [
         "A",
         "B"
@@ -753,6 +759,78 @@
         "ENABLE_INV"
       ],
       "role": "control"
+    },
+    {
+      "logical_id": "p_rect_import",
+      "definition": "master:main_signal_import",
+      "location": {"x": 1044, "y": 702},
+      "orientation": 0,
+      "parameters": {"Name": "LCC_P_RECT"},
+      "ports": ["OUT"],
+      "role": "measurement"
+    },
+    {
+      "logical_id": "p_rect_output",
+      "definition": "master:dynamic_output_channel",
+      "location": {"x": 1180, "y": 702},
+      "orientation": 0,
+      "parameters": {"Group": "Main", "Name": "P_RECT", "Units": "MW"},
+      "ports": ["INPUT"],
+      "role": "measurement"
+    },
+    {
+      "logical_id": "p_inv_import",
+      "definition": "master:main_signal_import",
+      "location": {"x": 1044, "y": 756},
+      "orientation": 0,
+      "parameters": {"Name": "LCC_P_INV"},
+      "ports": ["OUT"],
+      "role": "measurement"
+    },
+    {
+      "logical_id": "p_inv_output",
+      "definition": "master:dynamic_output_channel",
+      "location": {"x": 1180, "y": 756},
+      "orientation": 0,
+      "parameters": {"Group": "Main", "Name": "P_INV", "Units": "MW"},
+      "ports": ["INPUT"],
+      "role": "measurement"
+    },
+    {
+      "logical_id": "alpha_rect_import",
+      "definition": "master:main_signal_import",
+      "location": {"x": 1044, "y": 810},
+      "orientation": 0,
+      "parameters": {"Name": "ALPHA"},
+      "ports": ["OUT"],
+      "role": "measurement"
+    },
+    {
+      "logical_id": "alpha_rect_output",
+      "definition": "master:dynamic_output_channel",
+      "location": {"x": 1180, "y": 810},
+      "orientation": 0,
+      "parameters": {"Group": "Main", "Name": "ALPHA_RECT", "Units": "rad"},
+      "ports": ["INPUT"],
+      "role": "measurement"
+    },
+    {
+      "logical_id": "mu_rect_import",
+      "definition": "master:main_signal_import",
+      "location": {"x": 1044, "y": 864},
+      "orientation": 0,
+      "parameters": {"Name": "ALPHA"},
+      "ports": ["OUT"],
+      "role": "measurement"
+    },
+    {
+      "logical_id": "mu_rect_output",
+      "definition": "master:dynamic_output_channel",
+      "location": {"x": 1180, "y": 864},
+      "orientation": 0,
+      "parameters": {"Group": "Main", "Name": "MU_RECT", "Units": "rad"},
+      "ports": ["INPUT"],
+      "role": "measurement"
     }
   ],
   "nets": [
@@ -1898,6 +1976,42 @@
           "component": "fault_active_output",
           "port": "INPUT"
         }
+      ],
+      "label": null
+    },
+    {
+      "logical_id": "p_rect_telemetry",
+      "kind": "data",
+      "endpoints": [
+        {"component": "p_rect_import", "port": "OUT"},
+        {"component": "p_rect_output", "port": "INPUT"}
+      ],
+      "label": null
+    },
+    {
+      "logical_id": "p_inv_telemetry",
+      "kind": "data",
+      "endpoints": [
+        {"component": "p_inv_import", "port": "OUT"},
+        {"component": "p_inv_output", "port": "INPUT"}
+      ],
+      "label": null
+    },
+    {
+      "logical_id": "alpha_rect_telemetry",
+      "kind": "data",
+      "endpoints": [
+        {"component": "alpha_rect_import", "port": "OUT"},
+        {"component": "alpha_rect_output", "port": "INPUT"}
+      ],
+      "label": null
+    },
+    {
+      "logical_id": "mu_rect_telemetry",
+      "kind": "data",
+      "endpoints": [
+        {"component": "mu_rect_import", "port": "OUT"},
+        {"component": "mu_rect_output", "port": "INPUT"}
       ],
       "label": null
     }

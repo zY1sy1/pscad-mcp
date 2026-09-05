@@ -354,7 +354,10 @@ def _wp1b_connection_labels(blueprint) -> dict[str, str | None]:
             parent[right_root] = left_root
 
     for net in blueprint.nets:
-        if net.logical_id.startswith("inverter_fault_"):
+        if (
+            net.logical_id.startswith("inverter_fault_")
+            or net.logical_id.endswith("_telemetry")
+        ):
             continue
         endpoints = [
             (net.kind, f"{endpoint.component}:{endpoint.port}")
@@ -365,7 +368,10 @@ def _wp1b_connection_labels(blueprint) -> dict[str, str | None]:
 
     groups: dict[tuple[str, str], list[Any]] = defaultdict(list)
     for net in blueprint.nets:
-        if net.logical_id.startswith("inverter_fault_"):
+        if (
+            net.logical_id.startswith("inverter_fault_")
+            or net.logical_id.endswith("_telemetry")
+        ):
             continue
         endpoint = net.endpoints[0]
         root = find((net.kind, f"{endpoint.component}:{endpoint.port}"))

@@ -153,12 +153,12 @@ def complete_live_inventory(
 
 LEGACY_PLAN_SNAPSHOTS = {
     "full_acceptance": {
-        "plan_hash": "b650e383cc69e130df809e3dc5694ee2f2abebc6556305e6e686fde0b41453ae",
-        "operations_hash": "e436ff4ec61119f5df574227fda3a32bacb29cd6c5157e495124d17aa3960539",
+        "plan_hash": "b557156425bff947640e530b1fbe50be843cfb3f0fe4c3c3683123a57f673dd3",
+        "operations_hash": "130f4b977e61fc19f8312b7b2cd23d7eabe83aa0a7f76627ccf22983fae333cb",
     },
     "wp1b_smoke": {
-        "plan_hash": "96947f2814c4fdd443681ba61a3fff5ae31651f587ddf48427c9c924aa63f1c6",
-        "operations_hash": "72d983e857275e9a2391c9f2f7ef065fcb2116d4ce3c9cbdd856f7cd150dfa54",
+        "plan_hash": "07f31173665ff16e8542407a33da5f36bcb2830d04a65e3a787ea6bc66003c83",
+        "operations_hash": "2ef538d4dc833bd5ffdc260cfc78dd6ec0046c7108a85473015e648feb9d0aa2",
     },
 }
 
@@ -633,7 +633,7 @@ def test_packaged_main_signal_imports_are_pscad_grid_aligned():
         if component.definition == "master:main_signal_import"
     ]
 
-    assert len(imports) == 3
+    assert len(imports) == 7
     assert all(
         coordinate % 18 == 0
         for component in imports
@@ -752,7 +752,7 @@ def test_wp1b_smoke_plan_uses_smoke_gate_and_hashes_profile(tmp_path):
 
 
 @pytest.mark.parametrize("profile", ["full_acceptance", "wp1b_smoke"])
-def test_legacy_profile_plan_snapshots_remain_unchanged(profile):
+def test_legacy_profile_plan_snapshots_match_current_asset_contract(profile):
     assets = load_packaged_asset_set()
     inventory = complete_live_inventory(assets)
     plan = create_plan(
@@ -896,6 +896,62 @@ def test_wp1c_embedded_plan_verifies_control_then_dynamically_accepts(tmp_path):
         connections[logical_id]["label"] == label
         for logical_id, label in expected_labels.items()
     )
+
+
+def test_wp1c_plan_binds_ac_meter_power_signal_names(tmp_path):
+    assets = load_packaged_asset_set()
+    plan = create_plan(
+        _request(verification_profile=WP1C_DYNAMIC_PROFILE),
+        assets,
+        complete_live_inventory(assets),
+        tmp_path,
+    )
+    placements = {
+        operation.target: operation.arguments
+        for operation in plan.operations
+        if operation.kind == "place_component"
+    }
+
+    assert placements["rectifier_ac_meter"]["parameters"] == {
+        "ActivePowerSignal": "LCC_P_RECT",
+        "ReactivePowerSignal": "LCC_Q_RECT",
+    }
+    assert placements["inverter_ac_meter"]["parameters"] == {
+        "ActivePowerSignal": "LCC_P_INV",
+        "ReactivePowerSignal": "LCC_Q_INV",
+    }
+
+
+def test_wp1c_plan_places_physical_acceptance_output_bindings(tmp_path):
+    assets = load_packaged_asset_set()
+    plan = create_plan(
+        _request(verification_profile=WP1C_DYNAMIC_PROFILE),
+        assets,
+        complete_live_inventory(assets),
+        tmp_path,
+    )
+    placements = {
+        operation.target: operation.arguments
+        for operation in plan.operations
+        if operation.kind == "place_component"
+    }
+
+    expected = {
+        "p_rect_output": ("P_RECT", "MW", "LCC_P_RECT"),
+        "p_inv_output": ("P_INV", "MW", "LCC_P_INV"),
+        "alpha_rect_output": ("ALPHA_RECT", "rad", "ALPHA"),
+        "mu_rect_output": ("MU_RECT", "rad", "ALPHA"),
+    }
+    for logical_id, (name, units, signal) in expected.items():
+        assert placements[logical_id]["definition"] == "master:dynamic_output_channel"
+        assert placements[logical_id]["parameters"] == {
+            "Group": "Main",
+            "Name": name,
+            "Units": units,
+        }
+        import_id = logical_id.removesuffix("_output") + "_import"
+        assert placements[import_id]["definition"] == "master:main_signal_import"
+        assert placements[import_id]["parameters"] == {"Name": signal}
 
 
 def test_native_scheduler_is_only_planned_when_explicitly_selected(tmp_path):
