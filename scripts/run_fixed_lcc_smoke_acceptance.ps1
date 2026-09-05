@@ -46,17 +46,25 @@ if (-not (Test-Path -LiteralPath $Python -PathType Leaf)) {
 if (-not (Test-Path -LiteralPath $Python -PathType Leaf)) {
     throw 'The repository Python environment is unavailable.'
 }
-& $Python -m pscad_mcp.hvdc.builders.lcc.fixed_acceptance_cli 'run' `
-    --repository-root $RepositoryRoot `
-    --workspace-root $RunRoot `
-    --master-path $MasterPath `
-    --compiler-configuration $CompilerConfiguration `
-    --compiler-executable $CompilerExecutable `
-    --report $Report `
-    --commit $Commit `
-    --branch $Branch `
-    --project-name $ProjectName
-if ($LASTEXITCODE -ne 0) {
+$PythonExitCode = 1
+Push-Location $RepositoryRoot
+try {
+    & $Python -m pscad_mcp.hvdc.builders.lcc.fixed_acceptance_cli 'run' `
+        --repository-root $RepositoryRoot `
+        --workspace-root $RunRoot `
+        --master-path $MasterPath `
+        --compiler-configuration $CompilerConfiguration `
+        --compiler-executable $CompilerExecutable `
+        --report $Report `
+        --commit $Commit `
+        --branch $Branch `
+        --project-name $ProjectName
+    $PythonExitCode = $LASTEXITCODE
+}
+finally {
+    Pop-Location
+}
+if ($PythonExitCode -ne 0) {
     throw "WP1B fixed smoke failed; inspect $Report"
 }
 $Remaining = @(Get-Process -ErrorAction SilentlyContinue |

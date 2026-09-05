@@ -167,4 +167,15 @@ def test_powershell_runner_is_run_only_and_checks_cleanup():
     assert "FIXED_LCC_REPORT_SHA256=" in script
     assert "Get-Process" in script
     assert "git status --porcelain" in script
+
+
+def test_powershell_runner_executes_python_from_the_named_checkout():
+    script = (
+        ROOT / "scripts" / "run_fixed_lcc_smoke_acceptance.ps1"
+    ).read_text(encoding="utf-8")
+
+    invocation = script.index("& $Python -m pscad_mcp.hvdc.builders.lcc.fixed_acceptance_cli")
+    assert script.rfind("Push-Location $RepositoryRoot", 0, invocation) > script.index("$Python =")
+    assert script.index("Pop-Location", invocation) > invocation
+    assert "$PythonExitCode = $LASTEXITCODE" in script
     assert "Stop-Process" not in script
