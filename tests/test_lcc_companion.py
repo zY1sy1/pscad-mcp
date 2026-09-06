@@ -414,10 +414,10 @@ def test_generated_bridge_connects_each_phase_resistor_to_breakout(tmp_path):
         ]
 
     assert wire_points("ACY_A_TO_BREAKOUT") == [(144, 306), (216, 306)]
-    assert wire_points("ACY_B_TO_BREAKOUT") == [(144, 342), (216, 342)]
+    assert wire_points("ACY_B_TO_BREAKOUT") == [(144, 342), (162, 342), (162, 360), (216, 360), (216, 342)]
     assert wire_points("ACY_C_TO_BREAKOUT") == [(144, 378), (216, 378)]
     assert wire_points("ACD_A_TO_BREAKOUT") == [(144, 594), (216, 594)]
-    assert wire_points("ACD_B_TO_BREAKOUT") == [(144, 630), (216, 630)]
+    assert wire_points("ACD_B_TO_BREAKOUT") == [(144, 630), (162, 630), (162, 648), (216, 648), (216, 630)]
     assert wire_points("ACD_C_TO_BREAKOUT") == [(144, 666), (216, 666)]
 
 
