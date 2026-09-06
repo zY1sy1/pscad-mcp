@@ -138,8 +138,8 @@ _ENABLE_CHANNELS = ("Main/ENABLE_RECT", "Main/ENABLE_INV")
 _AO_LIMITS = {
     "Main/AO_RECT_Y": (0.08726646259971647, 0.5235987755982988),
     "Main/AO_RECT_D": (0.08726646259971647, 0.5235987755982988),
-    "Main/AO_INV_Y": (0.52, 1.92),
-    "Main/AO_INV_D": (0.52, 1.92),
+    "Main/AO_INV_Y": (math.pi - 1.92, math.pi - 0.52),
+    "Main/AO_INV_D": (math.pi - 1.92, math.pi - 0.52),
 }
 _ELECTRICAL_BRIDGE_PORTS = {
     "ACY_A",
