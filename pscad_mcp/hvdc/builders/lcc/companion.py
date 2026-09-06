@@ -54,7 +54,8 @@ EXPECTED_MASTER_COUNTS = {
         "master:import": 6,
         "master:export": 3,
         "master:maxmin": 1,
-        "master:sumjct": 1,
+        "master:sumjct": 2,
+        "master:const": 1,
         "master:mult": 1,
         "master:pi_ctlr": 1,
         "master:hardlimit": 1,
@@ -185,6 +186,8 @@ REQUIRED_CONNECTIONS = {
     "cigre_lcc_v1:InverterControl": {
         "GAMMA_MIN",
         "GAMMA_ERROR",
+        "BETA_TO_ALPHA",
+        "PI_TO_ALPHA",
         "ENABLE_PRODUCT",
         "PI_TO_LIMIT",
         "AO_Y_OUTPUT",

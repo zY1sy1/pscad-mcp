@@ -640,6 +640,14 @@ def _inverter_control(definitions: ET.Element) -> None:
                 "Limit": "0",
             },
         ),
+        Component(
+            "pi_constant", "master:const", 774, 234,
+            {"Name": "LCC_PI_VALUE", "Value": "3.141592653589793"},
+        ),
+        Component(
+            "beta_to_alpha", "master:sumjct", 882, 306,
+            {"DPath": "1", "A": "0", "B": "1", "C": "0", "D": "-1", "E": "0", "F": "0", "G": "0"},
+        ),
         _export("export_ao_y", "AO_Y", 936, 252),
         _export("export_ao_d", "AO_D", 936, 306),
         _export("export_gamma", "GAMMA", 414, 180),
@@ -674,10 +682,12 @@ def _inverter_control(definitions: ET.Element) -> None:
         Wire("ENABLE_PRODUCT", ((126, 414), (540, 414), (540, 342))),
         Wire("PRODUCT_TO_PI", ((576, 306), (594, 306))),
         Wire("PI_TO_LIMIT", ((666, 306), (738, 306))),
-        Wire("AO_Y_OUTPUT", ((810, 306), (972, 252))),
-        Wire("AO_D_OUTPUT", ((810, 306), (972, 306))),
-        Wire("AO_Y_MONITOR", ((810, 306), (864, 180))),
-        Wire("AO_D_MONITOR", ((810, 306), (864, 414))),
+        Wire("BETA_TO_ALPHA", ((810, 306), (846, 306))),
+        Wire("PI_TO_ALPHA", ((810, 234), (882, 234), (882, 270))),
+        Wire("AO_Y_OUTPUT", ((918, 306), (972, 252))),
+        Wire("AO_D_OUTPUT", ((918, 306), (972, 306))),
+        Wire("AO_Y_MONITOR", ((918, 306), (864, 180))),
+        Wire("AO_D_MONITOR", ((918, 306), (864, 414))),
     )
     _definition(
         definitions,

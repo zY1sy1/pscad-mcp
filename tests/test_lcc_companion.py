@@ -93,6 +93,8 @@ USERS = {
         *("master:export" for _ in range(3)),
         "master:maxmin",
         "master:sumjct",
+        "master:sumjct",
+        "master:const",
         "master:mult",
         "master:pi_ctlr",
         "master:hardlimit",
@@ -153,6 +155,8 @@ WIRES = {
     "InverterControl": (
         "GAMMA_MIN",
         "GAMMA_ERROR",
+        "BETA_TO_ALPHA",
+        "PI_TO_ALPHA",
         "ENABLE_PRODUCT",
         "PI_TO_LIMIT",
         "AO_Y_OUTPUT",
@@ -630,6 +634,34 @@ def test_generated_control_imports_avoid_reserved_internal_names():
         assert {"VDC_MEAS", "IDC_MEAS"} <= port_names
         assert {"VDC_MEAS", "IDC_MEAS"} <= import_names
         assert not {"VDC", "IDC"} & import_names
+
+
+def test_generated_inverter_converts_beta_to_alpha_after_limiting():
+    root = ET.fromstring(render_library())
+    schematic = root.find("./definitions/Definition[@name='InverterControl']/schematic")
+    sums = [
+        user for user in schematic.findall("./User[@defn='master:sumjct']")
+        if user.find("./paramlist/param[@name='D']").get("value") == "-1"
+    ]
+    assert len(sums) == 1
+    parameters = {p.get("name"): p.get("value") for p in sums[0].findall("./paramlist/param")}
+    assert parameters == {"DPath": "1", "A": "0", "B": "1", "C": "0", "D": "-1", "E": "0", "F": "0", "G": "0"}
+    constants = schematic.findall("./User[@defn='master:const']")
+    assert len(constants) == 1
+    assert float(constants[0].find("./paramlist/param[@name='Value']").get("value")) == pytest.approx(3.141592653589793)
+    for name, expected in {
+        "BETA_TO_ALPHA": [(810, 306), (846, 306)],
+        "PI_TO_ALPHA": [(810, 234), (882, 234), (882, 270)],
+    }.items():
+        wire = schematic.find(f"./Wire[@lcc_role='{name}']")
+        origin = (int(wire.get("x")), int(wire.get("y")))
+        assert [
+            (origin[0] + int(v.get("x")), origin[1] + int(v.get("y")))
+            for v in wire.findall("./vertex")
+        ] == expected
+    for name in ("AO_Y_OUTPUT", "AO_D_OUTPUT", "AO_Y_MONITOR", "AO_D_MONITOR"):
+        wire = schematic.find(f"./Wire[@lcc_role='{name}']")
+        assert (int(wire.get("x")), int(wire.get("y"))) == (918, 306)
 
 
 def test_generated_inverter_gamma_signal_uses_one_nonbranching_trunk():

@@ -123,3 +123,11 @@ normal firing. ENABLE is therefore converted to Integer and connected directly
 to both KB inputs. Subtracting one had kept both groups blocked even when
 ENABLE=1. The official CIGRE example similarly changes its KB signals from
 zero to one at 0.04 s.
+
+The inverter gamma PI output is beta, so AO must be alpha=pi-beta after the
+existing beta limiter. This supersedes the direct-AO equation in the earlier
+physicalization design. The installed CIGRE benchmark labels the PI output
+BETAI and uses a native pi-minus-BETAI summing junction to produce AOI.
+The PI gains, state and beta limits are unchanged; the smoke AO interval is
+the complemented alpha interval. This restores the corrective feedback sign
+without retuning the controller or changing dynamic acceptance thresholds.
