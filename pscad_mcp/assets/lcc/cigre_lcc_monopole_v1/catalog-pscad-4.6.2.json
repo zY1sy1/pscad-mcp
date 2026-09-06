@@ -124,6 +124,12 @@
             30,
             20
           ]
+        },
+        {
+          "name": "HV_N",
+          "kind": "electrical",
+          "dimension": 1,
+          "offset": [-36, 72]
         }
       ],
       "parameters": {

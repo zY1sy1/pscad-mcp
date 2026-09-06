@@ -273,6 +273,12 @@ def _master_fixture_xml(
       <port model='Natural' name='A2' x='72' y='-36' dim='1' type='NonRemovable'/>
       <port model='Natural' name='B2' x='72' y='0' dim='1' type='NonRemovable'/>
       <port model='Natural' name='C2' x='72' y='36' dim='1' type='NonRemovable'/>
+      <port model='Natural' name='G1' x='-18' y='36' dim='1' mode='Electrical' type='NonRemovable'>(YD1==0)&amp;&amp;(View!=0)</port>
+      <port model='Natural' name='G2' x='0' y='36' dim='1' mode='Electrical' type='NonRemovable'>(YD2==0)&amp;&amp;(View!=0)</port>
+      <port model='Natural' name='G2' x='0' y='0' dim='1' mode='Electrical' type='Ground'>(YD2==1)</port>
+      <port model='Natural' name='G1' x='-18' y='0' dim='1' mode='Electrical' type='Ground'>(YD1==1)</port>
+      <port model='Natural' name='G1' x='-36' y='72' dim='1' mode='Electrical' type='NonRemovable'>(YD1==0)&amp;&amp;(View==0)</port>
+      <port model='Natural' name='G2' x='36' y='72' dim='1' mode='Electrical' type='NonRemovable'>(YD2==0)&amp;&amp;(View==0)</port>
     </svg>
   </Definition>
   <Definition name='cfilter'>
@@ -723,6 +729,22 @@ def test_audit_resolves_all_packaged_bindings_and_preserves_source_hash(tmp_path
     assert selected["A"]["raw_dimension"] == 0
     assert selected["A"]["dimension"] == 1
     assert selected["A"]["kind"] == "electrical"
+
+
+def test_transformer_binding_selects_primary_y_neutral_in_three_phase_view(tmp_path):
+    module = _subject()
+    registry = _packaged_registry(module)
+    audited = module.audit_master_bindings(_write_master_fixture(tmp_path), registry)
+    selected = audited.definitions["master:converter_transformer"]["selected_ports"]
+
+    assert "HV_N" in selected
+    assert selected["HV_N"]["physical"] == "G1"
+    assert selected["HV_N"]["occurrence"] == 2
+    assert selected["HV_N"]["kind"] == "electrical"
+    assert selected["HV_N"]["dimension"] == 1
+    assert selected["HV_N"]["offset"] == (-36, 72)
+    assert selected["HV_N"]["condition"] == "(YD1==0)&&(View==0)"
+    assert all(port["physical"] != "G2" for port in selected.values())
 
 
 def test_audit_rejects_duplicate_physical_definitions(tmp_path):

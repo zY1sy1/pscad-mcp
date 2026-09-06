@@ -149,6 +149,13 @@
           "kind": "electrical",
           "dimension": 1,
           "occurrence": 0
+        },
+        {
+          "logical": "HV_N",
+          "physical": "G1",
+          "kind": "electrical",
+          "dimension": 1,
+          "occurrence": 2
         }
       ],
       "parameters": [

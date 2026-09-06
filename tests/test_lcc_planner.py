@@ -28,6 +28,65 @@ from pscad_mcp.topology.connectivity import build_connectivity
 from pscad_mcp.topology.models import ProjectTopology, TopologyConductor
 
 
+def test_packaged_transformers_ground_only_their_primary_neutrals():
+    assets = load_packaged_asset_set()
+    catalog = parse_catalog(assets.catalog)
+    components = {
+        component.logical_id: component for component in assets.blueprint.components
+    }
+    transformers = {
+        name: component for name, component in components.items()
+        if component.definition == "master:converter_transformer"
+    }
+    primary_nets = {
+        endpoint.component: net
+        for net in assets.blueprint.nets
+        for endpoint in net.endpoints
+        if endpoint.component in transformers and endpoint.port == "HV_N"
+    }
+    assert len(transformers) == 4
+    assert set(primary_nets) == set(transformers)
+    neutral = next(
+        port for port in catalog.definitions["master:converter_transformer"].ports
+        if port.name == "HV_N"
+    )
+    assert (neutral.kind, neutral.dimension, neutral.offset) == (
+        "electrical", 1, (-36, 72),
+    )
+    for name, net in primary_nets.items():
+        assert "HV_N" in transformers[name].ports
+        assert net.kind == "electrical"
+        assert len(net.endpoints) == 2
+        ground = next(endpoint for endpoint in net.endpoints if endpoint.component != name)
+        assert components[ground.component].definition == "master:ground"
+        assert ground.port == "GND"
+        route = _net_route(net, components, catalog)
+        assert len(route) == 2
+        assert route[0][0] == route[1][0]
+        assert route[1][1] - route[0][1] == 36
+    assert not any(
+        endpoint.component in transformers and endpoint.port.startswith("LV_")
+        for net in assets.blueprint.nets
+        if any(components[end.component].definition == "master:ground" for end in net.endpoints)
+        for endpoint in net.endpoints
+    )
+
+    conductors = tuple(
+        TopologyConductor(
+            key=net.logical_id, canvas_key="Main", object_id=net.logical_id,
+            kind="wire", namespace="electrical",
+            vertices=_net_route(net, components, catalog),
+        )
+        for net in assets.blueprint.nets if net.kind == "electrical"
+    )
+    topology = build_connectivity(
+        ProjectTopology("primary_grounding", "4.6.2", conductors=conductors)
+    ).topology
+    groups = {frozenset(net.conductor_keys) for net in topology.nets}
+    for net in primary_nets.values():
+        assert frozenset({net.logical_id}) in groups
+
+
 def test_packaged_filter_bus_connects_supply_to_both_transformers():
     assets = load_packaged_asset_set()
     labels = _wp1b_connection_labels(assets.blueprint)
@@ -213,12 +272,12 @@ def complete_live_inventory(
 
 LEGACY_PLAN_SNAPSHOTS = {
     "full_acceptance": {
-        "plan_hash": "9d801f4e8c00096b88493ae1a8b6d4a7dbe60ecd6bf3d5a9de16dfb1c25d7be7",
-        "operations_hash": "a99610305bdde321ce63a8baf3437a07521c6d7b166b81064af89b9f98139ae2",
+        "plan_hash": "8dfd42e7c41dc581979aceed9e75cbd50dc8c21febd43979d82aef933ee9a044",
+        "operations_hash": "ba253218299857470f528eedc8b2a382bb640edefc2cb9df2c11e8ad80bd66a4",
     },
     "wp1b_smoke": {
-        "plan_hash": "4a5e0de08d6ccfeb3f85a5269f5256a96dfc5fd577b2967cab276998c9c17e5c",
-        "operations_hash": "a8239672dc98508e1ac0d578e35c6577dae906751d363919bcd67170b319eeca",
+        "plan_hash": "104b7d3bc4f6822532121b88cd9507294fc969e71ee727be2b6c094bebdb805d",
+        "operations_hash": "95df858c385d83eb6655b1c95c4721bf679d96008fd966ffa564c2b44bf7ef41",
     },
 }
 

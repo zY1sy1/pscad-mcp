@@ -141,3 +141,12 @@ valve branches for both instances. Installed help documents global substitution
 in `PSCAD/Features_and_Operations/Setting_Global_Constants.htm`; no Main UP key
 exists in this asset. Fixing the literal orientation avoids both that undefined
 substitution and a second reversal of the inverter connections.
+
+Each converter transformer primary Y neutral is explicitly grounded through
+logical HV_N, mapped to native xfmr-3p2w.G1 occurrence 2 for YD1=0 and View=0
+at offset (-36, 72). All four primary neutrals have dedicated ground symbols
+and vertical connections; valve-side G2 remains ungrounded. The installed
+CIGRE example grounds G1, and the installed 4.6.2 help page
+`Master_Library_Models/HVDC_and_FACTS/6_Pulse_Bridge/Choosing_a_Converter_Transformer.htm`
+requires grounded primary neutrals and ungrounded valve-side neutrals. The
+native component has no parameter that substitutes for this ground connection.

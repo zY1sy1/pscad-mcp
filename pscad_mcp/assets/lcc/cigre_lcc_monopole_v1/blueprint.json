@@ -129,6 +129,7 @@
         "HV_A",
         "HV_B",
         "HV_C",
+        "HV_N",
         "LV_A",
         "LV_B",
         "LV_C"
@@ -152,6 +153,7 @@
         "HV_A",
         "HV_B",
         "HV_C",
+        "HV_N",
         "LV_A",
         "LV_B",
         "LV_C"
@@ -365,6 +367,7 @@
         "HV_A",
         "HV_B",
         "HV_C",
+        "HV_N",
         "LV_A",
         "LV_B",
         "LV_C"
@@ -388,6 +391,7 @@
         "HV_A",
         "HV_B",
         "HV_C",
+        "HV_N",
         "LV_A",
         "LV_B",
         "LV_C"
@@ -647,6 +651,42 @@
         "INPUT"
       ],
       "role": "measurement"
+    },
+    {
+      "logical_id": "rectifier_transformer_y_ground",
+      "definition": "master:ground",
+      "location": {"x": 514, "y": 228},
+      "orientation": 0,
+      "parameters": {},
+      "ports": ["GND"],
+      "role": "ground"
+    },
+    {
+      "logical_id": "rectifier_transformer_d_ground",
+      "definition": "master:ground",
+      "location": {"x": 514, "y": 408},
+      "orientation": 0,
+      "parameters": {},
+      "ports": ["GND"],
+      "role": "ground"
+    },
+    {
+      "logical_id": "inverter_transformer_y_ground",
+      "definition": "master:ground",
+      "location": {"x": 2114, "y": 228},
+      "orientation": 0,
+      "parameters": {},
+      "ports": ["GND"],
+      "role": "ground"
+    },
+    {
+      "logical_id": "inverter_transformer_d_ground",
+      "definition": "master:ground",
+      "location": {"x": 2114, "y": 408},
+      "orientation": 0,
+      "parameters": {},
+      "ports": ["GND"],
+      "role": "ground"
     },
     {
       "logical_id": "rectifier_ground",
@@ -1738,6 +1778,42 @@
           "port": "GND"
         }
       ]
+    },
+    {
+      "logical_id": "rectifier_transformer_y_neutral",
+      "kind": "electrical",
+      "endpoints": [
+        {"component": "rectifier_transformer_y", "port": "HV_N"},
+        {"component": "rectifier_transformer_y_ground", "port": "GND"}
+      ],
+      "route": {"vertices": [[514, 192], [514, 228]], "policy": "orthogonal"}
+    },
+    {
+      "logical_id": "rectifier_transformer_d_neutral",
+      "kind": "electrical",
+      "endpoints": [
+        {"component": "rectifier_transformer_d", "port": "HV_N"},
+        {"component": "rectifier_transformer_d_ground", "port": "GND"}
+      ],
+      "route": {"vertices": [[514, 372], [514, 408]], "policy": "orthogonal"}
+    },
+    {
+      "logical_id": "inverter_transformer_y_neutral",
+      "kind": "electrical",
+      "endpoints": [
+        {"component": "inverter_transformer_y", "port": "HV_N"},
+        {"component": "inverter_transformer_y_ground", "port": "GND"}
+      ],
+      "route": {"vertices": [[2114, 192], [2114, 228]], "policy": "orthogonal"}
+    },
+    {
+      "logical_id": "inverter_transformer_d_neutral",
+      "kind": "electrical",
+      "endpoints": [
+        {"component": "inverter_transformer_d", "port": "HV_N"},
+        {"component": "inverter_transformer_d_ground", "port": "GND"}
+      ],
+      "route": {"vertices": [[2114, 372], [2114, 408]], "policy": "orthogonal"}
     },
     {
       "logical_id": "rectifier_ao_y",
