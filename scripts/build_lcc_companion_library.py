@@ -431,25 +431,6 @@ def _bridge_definition(definitions: ET.Element) -> None:
         _export("export_gm_y", "GM_Y", 504, 306),
         _export("export_am_d", "AM_D", 504, 576),
         _export("export_gm_d", "GM_D", 504, 594),
-        Component(
-            "const_enable_one", "master:consti", 600, 450, {"Name": "LCC_ENABLE_ONE", "Value": "1"}
-        ),
-        Component(
-            "enable_inverter",
-            "master:sumjct",
-            720,
-            486,
-            {
-                "DPath": "0",
-                "A": "0",
-                "B": "0",
-                "C": "0",
-                "D": "1",
-                "E": "0",
-                "F": "-1",
-                "G": "0",
-            },
-        ),
     )
     wires = (
         Wire("ACY_TO_Y", ((90, 306), (108, 306))),
@@ -475,10 +456,8 @@ def _bridge_definition(definitions: ET.Element) -> None:
         Wire("AO_Y_TO_BRIDGE_Y", ((540, 378), (414, 378))),
         Wire("AO_D_TO_BRIDGE_D", ((540, 666), (414, 666))),
         Wire("ENABLE_CONVERSION", ((540, 486), (564, 486))),
-        Wire("ENABLE_ONE", ((636, 450), (648, 450), (648, 522), (720, 522))),
-        Wire("ENABLE_ORDER", ((600, 486), (684, 486))),
-        Wire("ENABLE_TO_KB_Y", ((756, 486), (780, 486), (780, 396), (414, 396))),
-        Wire("ENABLE_TO_KB_D", ((756, 486), (792, 486), (792, 684), (414, 684))),
+        Wire("ENABLE_TO_KB_Y", ((600, 486), (780, 486), (780, 396), (414, 396))),
+        Wire("ENABLE_TO_KB_D", ((600, 486), (792, 486), (792, 684), (414, 684))),
         Wire("CB_REFERENCE_Y", ((288, 288), (288, 252), (342, 252))),
         Wire("CB_REFERENCE_D", ((288, 576), (288, 540), (342, 540))),
         Wire("AM_Y_OUTPUT", ((414, 288), (540, 288))),

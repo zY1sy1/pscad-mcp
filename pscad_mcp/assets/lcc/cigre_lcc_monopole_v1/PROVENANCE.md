@@ -116,3 +116,10 @@ phase configuration `KV=-1`; no transformer phase shift is applied twice.
 Compiled phase-node indices and actual firing angles still require licensed
 verification. The previous constant-zero CB compiled to three identical
 phase-node indices and could not supply a three-phase synchronization signal.
+
+The installed PSCAD 4.6.2 help, `6_Pulse_Bridge/Firing_and_Blocking_Control.htm`
+inside `ol-help.chm`, defines KB=0 as blocking all firing pulses and KB=1 as
+normal firing. ENABLE is therefore converted to Integer and connected directly
+to both KB inputs. Subtracting one had kept both groups blocked even when
+ENABLE=1. The official CIGRE example similarly changes its KB signals from
+zero to one at 0.04 s.

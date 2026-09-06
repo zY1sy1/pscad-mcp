@@ -76,8 +76,6 @@ USERS = {
         *("master:resistor" for _ in range(6)),
         *("master:import" for _ in range(3)),
         *("master:export" for _ in range(4)),
-        "master:consti",
-        "master:sumjct",
         "master:unity",
     ),
     "RectifierControl": (
@@ -450,7 +448,7 @@ def test_generated_bridge_uses_ac_node_references_for_phase_locking():
         assert (x, y) in bus_points
 
 
-def test_generated_bridge_inverts_enable_for_g6p200_block_input(tmp_path):
+def test_generated_bridge_passes_enable_to_g6p200_deblock_input(tmp_path):
     root = ET.fromstring(render_library())
     bridge = root.find("./definitions/Definition[@name='LCC12PulseBridge']")
     assert bridge is not None
@@ -464,8 +462,10 @@ def test_generated_bridge_inverts_enable_for_g6p200_block_input(tmp_path):
             for vertex in wire.findall("./vertex")
         ]
 
-    assert wire_points("ENABLE_ORDER") == [(600, 486), (684, 486)]
-    assert wire_points("ENABLE_ONE") == [(636, 450), (648, 450), (648, 522), (720, 522)]
+    assert wire_points("ENABLE_TO_KB_Y")[0] == (600, 486)
+    assert wire_points("ENABLE_TO_KB_D")[0] == (600, 486)
+    assert bridge.find("./schematic/User[@defn='master:sumjct']") is None
+    assert bridge.find("./schematic/User[@defn='master:consti']") is None
 
 
 def test_generated_companion_contains_exact_wp1b_output_channels(tmp_path):

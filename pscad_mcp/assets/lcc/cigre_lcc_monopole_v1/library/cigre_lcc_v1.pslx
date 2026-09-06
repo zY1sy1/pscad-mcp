@@ -311,24 +311,6 @@
             <param name="Name" value="GM_D" />
           </paramlist>
         </User>
-        <User classid="UserCmp" name="" defn="master:consti" id="867846554" x="600" y="450" w="69" h="19" z="290" orient="0" link="-1" q="4">
-          <paramlist link="-1" name="" crc="89924856">
-            <param name="Name" value="LCC_ENABLE_ONE" />
-            <param name="Value" value="1" />
-          </paramlist>
-        </User>
-        <User classid="UserCmp" name="" defn="master:sumjct" id="214195483" x="720" y="486" w="76" h="60" z="300" orient="0" link="-1" q="4">
-          <paramlist link="-1" name="" crc="6678153">
-            <param name="DPath" value="0" />
-            <param name="A" value="0" />
-            <param name="B" value="0" />
-            <param name="C" value="0" />
-            <param name="D" value="1" />
-            <param name="E" value="0" />
-            <param name="F" value="-1" />
-            <param name="G" value="0" />
-          </paramlist>
-        </User>
         <Wire classid="WireOrthogonal" name="" lcc_role="ACY_TO_Y" x="90" y="306" w="28" h="10" orient="0" id="519349417">
           <vertex x="0" y="0" />
           <vertex x="18" y="0" />
@@ -419,51 +401,41 @@
           <vertex x="0" y="0" />
           <vertex x="24" y="0" />
         </Wire>
-        <Wire classid="WireOrthogonal" name="" lcc_role="ENABLE_ONE" x="636" y="450" w="94" h="82" orient="0" id="1460161890">
+        <Wire classid="WireOrthogonal" name="" lcc_role="ENABLE_TO_KB_Y" x="600" y="486" w="376" h="100" orient="0" id="1557305961">
           <vertex x="0" y="0" />
-          <vertex x="12" y="0" />
-          <vertex x="12" y="72" />
-          <vertex x="84" y="72" />
+          <vertex x="180" y="0" />
+          <vertex x="180" y="-90" />
+          <vertex x="-186" y="-90" />
         </Wire>
-        <Wire classid="WireOrthogonal" name="" lcc_role="ENABLE_ORDER" x="600" y="486" w="94" h="10" orient="0" id="1778831577">
+        <Wire classid="WireOrthogonal" name="" lcc_role="ENABLE_TO_KB_D" x="600" y="486" w="388" h="208" orient="0" id="310388435">
           <vertex x="0" y="0" />
-          <vertex x="84" y="0" />
+          <vertex x="192" y="0" />
+          <vertex x="192" y="198" />
+          <vertex x="-186" y="198" />
         </Wire>
-        <Wire classid="WireOrthogonal" name="" lcc_role="ENABLE_TO_KB_Y" x="756" y="486" w="376" h="100" orient="0" id="1266035346">
-          <vertex x="0" y="0" />
-          <vertex x="24" y="0" />
-          <vertex x="24" y="-90" />
-          <vertex x="-342" y="-90" />
-        </Wire>
-        <Wire classid="WireOrthogonal" name="" lcc_role="ENABLE_TO_KB_D" x="756" y="486" w="388" h="208" orient="0" id="56149471">
-          <vertex x="0" y="0" />
-          <vertex x="36" y="0" />
-          <vertex x="36" y="198" />
-          <vertex x="-342" y="198" />
-        </Wire>
-        <Wire classid="WireOrthogonal" name="" lcc_role="CB_REFERENCE_Y" x="288" y="288" w="64" h="46" orient="0" id="271784529">
+        <Wire classid="WireOrthogonal" name="" lcc_role="CB_REFERENCE_Y" x="288" y="288" w="64" h="46" orient="0" id="1692377696">
           <vertex x="0" y="0" />
           <vertex x="0" y="-36" />
           <vertex x="54" y="-36" />
         </Wire>
-        <Wire classid="WireOrthogonal" name="" lcc_role="CB_REFERENCE_D" x="288" y="576" w="64" h="46" orient="0" id="1030489667">
+        <Wire classid="WireOrthogonal" name="" lcc_role="CB_REFERENCE_D" x="288" y="576" w="64" h="46" orient="0" id="1016892405">
           <vertex x="0" y="0" />
           <vertex x="0" y="-36" />
           <vertex x="54" y="-36" />
         </Wire>
-        <Wire classid="WireOrthogonal" name="" lcc_role="AM_Y_OUTPUT" x="414" y="288" w="136" h="10" orient="0" id="529928091">
+        <Wire classid="WireOrthogonal" name="" lcc_role="AM_Y_OUTPUT" x="414" y="288" w="136" h="10" orient="0" id="1135140749">
           <vertex x="0" y="0" />
           <vertex x="126" y="0" />
         </Wire>
-        <Wire classid="WireOrthogonal" name="" lcc_role="GM_Y_OUTPUT" x="414" y="306" w="136" h="10" orient="0" id="968855846">
+        <Wire classid="WireOrthogonal" name="" lcc_role="GM_Y_OUTPUT" x="414" y="306" w="136" h="10" orient="0" id="789816824">
           <vertex x="0" y="0" />
           <vertex x="126" y="0" />
         </Wire>
-        <Wire classid="WireOrthogonal" name="" lcc_role="AM_D_OUTPUT" x="414" y="576" w="136" h="10" orient="0" id="356433094">
+        <Wire classid="WireOrthogonal" name="" lcc_role="AM_D_OUTPUT" x="414" y="576" w="136" h="10" orient="0" id="863998104">
           <vertex x="0" y="0" />
           <vertex x="126" y="0" />
         </Wire>
-        <Wire classid="WireOrthogonal" name="" lcc_role="GM_D_OUTPUT" x="414" y="594" w="136" h="10" orient="0" id="1472916510">
+        <Wire classid="WireOrthogonal" name="" lcc_role="GM_D_OUTPUT" x="414" y="594" w="136" h="10" orient="0" id="1122794953">
           <vertex x="0" y="0" />
           <vertex x="126" y="0" />
         </Wire>

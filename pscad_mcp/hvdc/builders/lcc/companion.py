@@ -39,8 +39,6 @@ EXPECTED_MASTER_COUNTS = {
         "master:resistor": 6,
         "master:import": 3,
         "master:export": 4,
-        "master:consti": 1,
-        "master:sumjct": 1,
         "master:unity": 1,
     },
     "cigre_lcc_v1:RectifierControl": {
