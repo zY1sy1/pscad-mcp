@@ -329,20 +329,17 @@
           <vertex x="0" y="0" />
           <vertex x="18" y="0" />
         </Wire>
-        <Wire classid="WireOrthogonal" name="" lcc_role="ACY_A_TO_BREAKOUT" x="144" y="306" w="82" h="10" orient="0" id="1653601750">
+        <Wire classid="WireOrthogonal" name="" lcc_role="ACY_A_TO_BREAKOUT" x="182" y="306" w="44" h="10" orient="0" id="1653601750">
           <vertex x="0" y="0" />
-          <vertex x="72" y="0" />
+          <vertex x="34" y="0" />
         </Wire>
-        <Wire classid="WireOrthogonal" name="" lcc_role="ACY_B_TO_BREAKOUT" x="144" y="342" w="82" h="28" orient="0" id="818463169">
+        <Wire classid="WireOrthogonal" name="" lcc_role="ACY_B_TO_BREAKOUT" x="182" y="342" w="44" h="10" orient="0" id="818463169">
           <vertex x="0" y="0" />
-          <vertex x="18" y="0" />
-          <vertex x="18" y="18" />
-          <vertex x="72" y="18" />
-          <vertex x="72" y="0" />
+          <vertex x="34" y="0" />
         </Wire>
-        <Wire classid="WireOrthogonal" name="" lcc_role="ACY_C_TO_BREAKOUT" x="144" y="378" w="82" h="10" orient="0" id="1202648861">
+        <Wire classid="WireOrthogonal" name="" lcc_role="ACY_C_TO_BREAKOUT" x="182" y="378" w="44" h="10" orient="0" id="1202648861">
           <vertex x="0" y="0" />
-          <vertex x="72" y="0" />
+          <vertex x="34" y="0" />
         </Wire>
         <Wire classid="WireOrthogonal" name="" lcc_role="ACY_TO_Y_B" x="90" y="342" w="28" h="10" orient="0" id="957398440">
           <vertex x="0" y="0" />
@@ -362,20 +359,17 @@
           <vertex x="0" y="0" />
           <vertex x="18" y="0" />
         </Wire>
-        <Wire classid="WireOrthogonal" name="" lcc_role="ACD_A_TO_BREAKOUT" x="144" y="594" w="82" h="10" orient="0" id="1761301635">
+        <Wire classid="WireOrthogonal" name="" lcc_role="ACD_A_TO_BREAKOUT" x="182" y="594" w="44" h="10" orient="0" id="1761301635">
           <vertex x="0" y="0" />
-          <vertex x="72" y="0" />
+          <vertex x="34" y="0" />
         </Wire>
-        <Wire classid="WireOrthogonal" name="" lcc_role="ACD_B_TO_BREAKOUT" x="144" y="630" w="82" h="28" orient="0" id="368016582">
+        <Wire classid="WireOrthogonal" name="" lcc_role="ACD_B_TO_BREAKOUT" x="182" y="630" w="44" h="10" orient="0" id="368016582">
           <vertex x="0" y="0" />
-          <vertex x="18" y="0" />
-          <vertex x="18" y="18" />
-          <vertex x="72" y="18" />
-          <vertex x="72" y="0" />
+          <vertex x="34" y="0" />
         </Wire>
-        <Wire classid="WireOrthogonal" name="" lcc_role="ACD_C_TO_BREAKOUT" x="144" y="666" w="82" h="10" orient="0" id="1886300498">
+        <Wire classid="WireOrthogonal" name="" lcc_role="ACD_C_TO_BREAKOUT" x="182" y="666" w="44" h="10" orient="0" id="1886300498">
           <vertex x="0" y="0" />
-          <vertex x="72" y="0" />
+          <vertex x="34" y="0" />
         </Wire>
         <Wire classid="WireOrthogonal" name="" lcc_role="ACD_TO_D_B" x="90" y="630" w="28" h="10" orient="0" id="1168439979">
           <vertex x="0" y="0" />
