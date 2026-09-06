@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import hashlib
 import inspect
 import json
@@ -26,6 +27,7 @@ from .dynamic_acceptance import (
     validate_dynamic_lcc_acceptance_report,
 )
 from .dynamic_evidence import derive_fixed_lcc_dynamic_evidence
+from .output_dataset import legacy_output_stem, output_dataset_parts
 
 
 @dataclass(frozen=True)
@@ -220,6 +222,61 @@ def _fail(report: dict[str, Any], stage: str, error: BaseException) -> dict[str,
     report["dynamic"] = {"evidence_source": "raw_pscad_output", "engineering_verdict": FAIL, "checks": {}}
     report["physical"] = {"verdict": FAIL, "checks": [{"name": "runner_failure", "kind": "runner_failure", "required": True, "status": "failed", "outcome": FAIL}]}
     return report
+
+
+def _retain_engineering_failure_evidence(
+    report: dict[str, Any], error: BaseException, run_started: float,
+) -> dict[str, Any]:
+    """Keep executor diagnostics only when their failed-run output is intact."""
+    if getattr(error, "code", None) != "LCC_DYNAMIC_ACCEPTANCE_FAILED":
+        return report
+    try:
+        acceptance = copy.deepcopy(error.details["acceptance"])
+        workspace = Path(report["build"]["workspace"])
+        selected = Path(acceptance["output_file"]).absolute()
+        parts = []
+        for artifact in acceptance["output_artifacts"]:
+            path = Path(artifact["path"]).absolute()
+            if (
+                not _regular(path) or not _contained(path, workspace)
+                or path.stat().st_mtime < run_started
+                or path.suffix.casefold() not in {".out", ".psout"}
+                or path.parent != selected.parent
+                or _sha(path) != artifact["sha256"]
+            ):
+                return report
+            parts.append({"path": str(path), "sha256": artifact["sha256"]})
+        selected_artifact = next((item for item in parts if Path(item["path"]) == selected), None)
+        if selected_artifact is None or output_dataset_parts(selected) != {Path(item["path"]) for item in parts}:
+            return report
+        stem = legacy_output_stem(selected)
+        metadata = []
+        allowed_metadata = {selected.with_name(stem + suffix) for suffix in (".inf", ".infx")}
+        for artifact in acceptance["output_metadata_artifacts"]:
+            path = Path(artifact["path"]).absolute()
+            if path not in allowed_metadata or not _regular(path) or not _contained(path, workspace) or path.stat().st_mtime < run_started:
+                return report
+            if _sha(path) != artifact["sha256"]:
+                return report
+            metadata.append({"path": str(path), "sha256": artifact["sha256"]})
+        if not metadata or {Path(item["path"]) for item in metadata} != {path for path in allowed_metadata if path.exists()}:
+            return report
+        candidate = copy.deepcopy(report)
+        dynamic = acceptance["dynamic"]
+        physical = acceptance["physical"]
+        candidate["dynamic"] = {
+            "evidence_source": "raw_pscad_output",
+            "engineering_verdict": dynamic["engineering_verdict"],
+            "checks": dynamic["checks"],
+        }
+        candidate["physical"] = {"verdict": physical["verdict"], "checks": physical["physical_checks"]}
+        candidate["artifacts"].update(
+            selected_output=selected_artifact, output_parts=parts, output_metadata=metadata,
+        )
+        json.dumps(candidate, allow_nan=False)
+        return validate_dynamic_lcc_acceptance_report(candidate)
+    except (AttributeError, BackendError, KeyError, OSError, TypeError, ValueError):
+        return report
 
 
 def build_dynamic_lcc_failure_report(
@@ -495,6 +552,8 @@ async def run_fixed_lcc_dynamic_acceptance(
         report["artifacts"]["normalized_samples"] = {"path": str(normalized_path.resolve()), "sha256": _sha(normalized_path)}
     except BaseException as error:  # noqa: BLE001 - persist lifecycle failures
         report = _fail(report, stage, error)
+        if stage == "poll":
+            report = _retain_engineering_failure_evidence(report, error, run_started)
     finally:
         stage = "cleanup"
         cleanup_error: BaseException | None = None

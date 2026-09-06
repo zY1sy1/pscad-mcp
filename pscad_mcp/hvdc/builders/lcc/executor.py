@@ -29,6 +29,7 @@ from .catalog import parse_catalog, require_definition, require_port
 from .dynamic_evidence import derive_fixed_lcc_dynamic_evidence
 from .journal import AtomicJournal
 from .models import LccBuildPlan, LccBuildRecord, LccBuildState, LccPlanOperation
+from .output_dataset import legacy_output_stem, output_dataset_parts
 from .project_graph import (
     GraphComponent,
     GraphNet,
@@ -421,6 +422,7 @@ class LccExecutor:
         self._run_started_after: float | None = None
         self.output_file: str | None = None
         self.output_parts: list[str] = []
+        self._output_read_hashes: dict[str, str] = {}
         self._publication_created = False
         self._publication_hash: str | None = None
         self._simulation_active = False
@@ -2304,6 +2306,26 @@ class LccExecutor:
             normalized_channels.append(channel)
         return {**value, "channels": normalized_channels}
 
+    def _snapshot_dynamic_output(self) -> dict[str, str]:
+        paths = [Path(part) for part in self.output_parts]
+        assert self.output_file is not None
+        selected = Path(self.output_file)
+        if output_dataset_parts(selected) != {path.absolute() for path in paths}:
+            raise _error("LCC_OUTPUT_INCOMPLETE", "The dynamic output dataset has an unlisted or missing part.", "read_lcc_output")
+        if selected.suffix.casefold() == ".out":
+            stem = legacy_output_stem(selected)
+            metadata = [selected.with_name(stem + suffix) for suffix in (".inf", ".infx")]
+            metadata = [path for path in metadata if path.exists()]
+            if not metadata:
+                raise _error("LCC_OUTPUT_INCOMPLETE", "The dynamic output metadata is missing.", "read_lcc_output")
+            paths.extend(metadata)
+        hashes = {}
+        for path in paths:
+            if path.is_symlink() or not path.is_file() or not path.resolve().is_relative_to(self.staging_path.resolve()):
+                raise _error("LCC_OUTPUT_INCOMPLETE", "The dynamic output dataset escaped staging.", "read_lcc_output")
+            hashes[str(path)] = sha256_file(path)
+        return hashes
+
     async def _acceptance_output(self) -> Any:
         discover = getattr(self.service, "discover_output_files", None)
         read_output = getattr(self.service, "read_output_file", None)
@@ -2386,13 +2408,15 @@ class LccExecutor:
                 )
             candidates = sorted(set(candidates), key=str.casefold)
             self.output_file, self.output_parts = _select_output_dataset(candidates)
-            return self._logical_output_payload(
-                await read_output(
-                    self.output_file,
-                    max_samples=1_000_000,
-                    summary_only=False,
-                )
+            before_read = self._snapshot_dynamic_output() if self.plan.verification_profile == "wp1c_dynamic" else {}
+            payload = await read_output(
+                self.output_file, max_samples=1_000_000, summary_only=False,
             )
+            if before_read:
+                if before_read != self._snapshot_dynamic_output():
+                    raise _error("LCC_OUTPUT_INCOMPLETE", "The dynamic output dataset changed while being read.", "read_lcc_output")
+                self._output_read_hashes = before_read
+            return self._logical_output_payload(payload)
 
         get_project_output = getattr(self.service, "get_project_output", None)
         if not callable(get_project_output):
@@ -2529,6 +2553,8 @@ class LccExecutor:
             if isinstance(item, Mapping) and item.get("kind") == "physical"
         ]
         physical = evaluate_acceptance(output, {}, physical_contract)
+        if self._output_read_hashes and self._output_read_hashes != self._snapshot_dynamic_output():
+            raise _error("LCC_OUTPUT_INCOMPLETE", "The dynamic output dataset changed during evaluation.", "read_lcc_output")
         verdicts = {dynamic["engineering_verdict"], physical["verdict"]}
         engineering = (
             "FAIL"
@@ -2548,14 +2574,22 @@ class LccExecutor:
                 "output_file": self.output_file,
                 "output_parts": list(self.output_parts or ()),
                 "output_artifacts": [],
+                "output_metadata_artifacts": [
+                    {"path": path, "sha256": digest}
+                    for path, digest in self._output_read_hashes.items()
+                    if Path(path).suffix.casefold() in {".inf", ".infx"}
+                ],
             }
         )
         if self.output_parts:
             artifacts = []
             for output_part in self.output_parts:
                 try:
+                    digest = sha256_file(Path(output_part))
+                    if self._output_read_hashes and self._output_read_hashes.get(output_part) != digest:
+                        raise _error("LCC_OUTPUT_INCOMPLETE", "The dynamic output changed after evaluation.", "read_lcc_output")
                     artifacts.append(
-                        {"path": output_part, "sha256": sha256_file(Path(output_part))}
+                        {"path": output_part, "sha256": digest}
                     )
                 except BackendError as error:
                     raise _error(

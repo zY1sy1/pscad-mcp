@@ -1292,6 +1292,51 @@ def test_wp1c_executor_accepts_engineering_pass_without_forging_total_pass(
     )
 
 
+@pytest.mark.parametrize("drift", [None, "out", "inf", "new_part"])
+def test_wp1c_executor_binds_failed_checks_to_stable_output_metadata(tmp_path, drift):
+    assets = load_packaged_asset_set()
+    base = _plan(tmp_path)
+    plan = replace(
+        base, verification_profile="wp1c_dynamic",
+        blueprint=replace(base.blueprint, settings={"simulation_duration_s": 1.5, "output_step_s": 0.00005}),
+    )
+    raw = passing_raw_channels()
+    gamma = next(channel for channel in raw["channels"] if channel["path"] == "Main/GAMMA_INV")
+    gamma["values"] = [0.3] * len(gamma["values"])
+
+    class FileService(RecordingPscadService):
+        async def discover_output_files(self, project_name, **kwargs):
+            self.folder = Path(project_name).parent
+            for suffix in ("_01.out", ".inf"):
+                (self.folder / ("result" + suffix)).write_text("original", encoding="utf-8")
+            return [str(self.folder / "result_01.out")]
+
+        async def read_output_file(self, path, **kwargs):
+            if drift == "new_part":
+                (self.folder / "result_02.out").write_text("unbound extra part", encoding="utf-8")
+            elif drift:
+                (self.folder / ("result_01.out" if drift == "out" else "result.inf")).write_text("changed", encoding="utf-8")
+            return raw
+
+    executor = LccExecutor(plan, FileService(), tmp_path, asset_set=assets)
+    executor.staging_path.mkdir(parents=True, exist_ok=True)
+    executor.staging_file = executor.staging_path / "case.pscx"
+    operation = LccPlanOperation(
+        sequence=1, kind="dynamic_accept", target="executor",
+        arguments={"contract_sha256": assets.hashes["dynamic.json"]},
+    )
+    with pytest.raises(BackendError) as raised:
+        asyncio.run(executor._dynamic_accept(operation))
+    if drift:
+        assert raised.value.code == "LCC_OUTPUT_INCOMPLETE"
+    else:
+        assert raised.value.code == "LCC_DYNAMIC_ACCEPTANCE_FAILED"
+        assert raised.value.details["acceptance"]["output_metadata_artifacts"] == [{
+            "path": str(executor.staging_path / "result.inf"),
+            "sha256": hashlib.sha256(b"original").hexdigest(),
+        }]
+
+
 def test_wp1c_executor_dynamic_failure_never_publishes(tmp_path):
     assets = load_packaged_asset_set()
     base = _plan(tmp_path)

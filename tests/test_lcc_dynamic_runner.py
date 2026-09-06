@@ -76,6 +76,83 @@ def test_runner_rederives_output_and_persists_incomplete_success(tmp_path: Path)
     assert ("output", True) in service.calls
 
 
+@pytest.mark.parametrize("artifact_case", ["valid", "valid_two_parts", "hash_drift", "outside_workspace", "stale", "pass_only", "metadata_drift", "new_part"])
+def test_runner_preserves_failed_engineering_checks_with_verified_output(
+    tmp_path: Path, artifact_case: str,
+):
+    from pscad_mcp.hvdc.builders.lcc.dynamic_evidence import derive_fixed_lcc_dynamic_evidence
+    from tests.lcc_dynamic_fakes import dynamic_contract, passing_raw_channels
+
+    request, staging = valid_request(tmp_path)
+    raw = passing_raw_channels()
+    current = next(channel for channel in raw["channels"] if channel["path"] == "Main/IDC")
+    current["values"] = [4.0 if 0.8 <= t < 0.9 else 1.0 for t in current["domain"]]
+    dynamic = derive_fixed_lcc_dynamic_evidence(raw, dynamic_contract())
+    assert dynamic["checks"]["bounded_dc_response"]["outcome"] == "FAIL"
+    if artifact_case == "pass_only":
+        dynamic = derive_fixed_lcc_dynamic_evidence(passing_raw_channels(), dynamic_contract())
+    physical = {"verdict": "PASS", "physical_checks": [
+        {"name": "polarity", "kind": "physical", "required": True, "status": "observed", "outcome": "PASS"},
+    ]}
+
+    class FailedEngineeringBuilder(PassingDynamicBuilder):
+        def get_build_status(self, build_id: str):
+            output = staging / "run_01.out"
+            if artifact_case == "stale":
+                os.utime(output, (1, 1))
+            if artifact_case == "outside_workspace":
+                output = tmp_path / "outside_01.out"
+                output.write_text("outside", encoding="utf-8")
+            digest = hashlib.sha256(output.read_bytes()).hexdigest()
+            metadata = staging / "run.inf"
+            metadata_hash = hashlib.sha256(metadata.read_bytes()).hexdigest()
+            if artifact_case == "metadata_drift":
+                metadata.write_text("different channel selectors", encoding="utf-8")
+            if artifact_case == "new_part":
+                (staging / "run_02.out").write_text("unbound extra part", encoding="utf-8")
+            acceptance = {
+                "dynamic": dynamic, "physical": physical,
+                "output_file": str(output),
+                "output_artifacts": [{
+                    "path": str(output),
+                    "sha256": "0" * 64 if artifact_case == "hash_drift" else digest,
+                }],
+                "output_metadata_artifacts": [{"path": str(metadata), "sha256": metadata_hash}],
+            }
+            if artifact_case == "valid_two_parts":
+                second = staging / "run_02.out"
+                second.write_text("second part", encoding="utf-8")
+                acceptance["output_artifacts"].append({
+                    "path": str(second), "sha256": hashlib.sha256(second.read_bytes()).hexdigest(),
+                })
+            return {
+                "state": "failed",
+                "history": [{"state": state} for state in ("compiled", "simulated", "failed")],
+                "error": {
+                    "code": "LCC_DYNAMIC_ACCEPTANCE_FAILED",
+                    "message": "The dynamic engineering contract did not pass.",
+                    "details": {"acceptance": acceptance},
+                },
+            }
+
+    report = asyncio.run(run_fixed_lcc_dynamic_acceptance(
+        request, service=PassingDynamicService(staging),
+        builder=FailedEngineeringBuilder(staging), process_reader=list, poll_interval_s=0,
+    ))
+    assert report["status"] == "FAIL"
+    assert report["failure"]["code"] == "LCC_DYNAMIC_ACCEPTANCE_FAILED"
+    assert report["build"]["terminal_state"] == "failed"
+    if artifact_case not in {"valid", "valid_two_parts"}:
+        assert report["dynamic"]["checks"] == {}
+        assert report["artifacts"]["output_parts"] == []
+        return
+    assert report["dynamic"]["checks"] == dynamic["checks"]
+    assert report["physical"]["checks"] == physical["physical_checks"]
+    assert report["artifacts"]["selected_output"]["path"] == str((staging / "run_01.out").absolute())
+    assert report["artifacts"]["output_metadata"][0]["sha256"] == hashlib.sha256((staging / "run.inf").read_bytes()).hexdigest()
+    assert json.loads(request.report_path.read_text())["dynamic"] == report["dynamic"]
+
+
 def test_runner_static_preflight_failure_writes_fail_without_build(tmp_path: Path):
     request, staging = valid_request(tmp_path)
     request = DynamicLccRunRequest(**{**request.__dict__, "preflight": {"status": "FAIL", "sha256": "a" * 64, "snapshot": {}}})
