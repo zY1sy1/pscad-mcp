@@ -84,7 +84,7 @@
       </paramlist>
       <form name="12 Pulse LCC Bridge" w="360" h="420" splitter="65">
         <category name="Configuration">
-          <parameter type="Choice" name="UP" desc="Terminal direction">
+          <parameter type="Choice" name="UP" desc="Terminal role">
             <value>1</value>
             <choice>1 = Rectifier</choice>
             <choice>0 = Inverter</choice>
@@ -205,7 +205,7 @@
         </User>
         <User classid="UserCmp" name="" defn="master:g6p200" id="1841912349" x="360" y="342" w="115" h="184" z="170" orient="0" link="-1" q="4">
           <paramlist link="-1" name="" crc="113177439">
-            <param name="UP" value="$(UP)" />
+            <param name="UP" value="1" />
             <param name="FP" value="0" />
             <param name="SNUB" value="1" />
             <param name="KV" value="-1" />
@@ -233,7 +233,7 @@
         </User>
         <User classid="UserCmp" name="" defn="master:g6p200" id="1095740208" x="360" y="630" w="115" h="184" z="180" orient="0" link="-1" q="4">
           <paramlist link="-1" name="" crc="113177439">
-            <param name="UP" value="$(UP)" />
+            <param name="UP" value="1" />
             <param name="FP" value="0" />
             <param name="SNUB" value="1" />
             <param name="KV" value="-1" />

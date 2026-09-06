@@ -424,6 +424,15 @@ def test_generated_bridge_connects_each_phase_resistor_to_breakout(tmp_path):
     assert wire_points("ACD_C_TO_BREAKOUT") == [(182, 666), (216, 666)]
 
 
+def test_generated_bridge_keeps_native_dp_at_logical_dc_pos():
+    root = ET.fromstring(render_library())
+    bridge = root.find("./definitions/Definition[@name='LCC12PulseBridge']")
+    assert [
+        user.find("./paramlist/param[@name='UP']").get("value")
+        for user in bridge.findall("./schematic/User[@defn='master:g6p200']")
+    ] == ["1", "1"]
+
+
 def test_generated_bridge_uses_ac_node_references_for_phase_locking():
     root = ET.fromstring(render_library())
     schematic = root.find("./definitions/Definition[@name='LCC12PulseBridge']/schematic")

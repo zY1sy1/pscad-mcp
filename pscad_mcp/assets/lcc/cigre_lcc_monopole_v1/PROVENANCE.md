@@ -131,3 +131,13 @@ BETAI and uses a native pi-minus-BETAI summing junction to produce AOI.
 The PI gains, state and beta limits are unchanged; the smoke AO interval is
 the complemented alpha interval. This restores the corrective feedback sign
 without retuning the controller or changing dynamic acceptance thresholds.
+
+Internal valve orientation is fixed to literal UP=1 so the wrapper DC_POS/DC_NEG
+ports correspond to native DP/DN. The blueprint already connects the rectifier
+line to DC_POS and the inverter line to DC_NEG; the wrapper UP parameter remains
+terminal-role metadata for compatibility. The earlier `$(UP)` text referred to
+a global Main substitution, not an instance parameter, and generated downward
+valve branches for both instances. Installed help documents global substitution
+in `PSCAD/Features_and_Operations/Setting_Global_Constants.htm`; no Main UP key
+exists in this asset. Fixing the literal orientation avoids both that undefined
+substitution and a second reversal of the inverter connections.

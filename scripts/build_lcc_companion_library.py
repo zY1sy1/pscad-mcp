@@ -14,7 +14,7 @@ TEMPLATE = ROOT / "pscad_mcp" / "assets" / "templates" / "empty_library.pslx"
 LIBRARY_NAME = "cigre_lcc_v1"
 
 COMMON_G6P200 = {
-    "UP": "$(UP)",
+    "UP": "1",
     "FP": "0",
     "SNUB": "1",
     "KV": "-2",
@@ -114,7 +114,7 @@ def _form(definition: ET.Element, name: str) -> None:
         {
             "type": "Choice",
             "name": "UP",
-            "desc": "Terminal direction",
+            "desc": "Terminal role",
         },
     )
     ET.SubElement(parameter, "value").text = "1"
