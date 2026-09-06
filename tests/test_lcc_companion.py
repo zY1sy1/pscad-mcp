@@ -399,6 +399,28 @@ def test_physical_bridge_requires_two_g6p200_and_scalar_ao(tmp_path):
     } == OUTPUT_NAMES
 
 
+def test_generated_bridge_connects_each_phase_resistor_to_breakout(tmp_path):
+    root = ET.fromstring(render_library())
+    bridge = root.find("./definitions/Definition[@name='LCC12PulseBridge']")
+    assert bridge is not None
+
+    def wire_points(name):
+        wire = bridge.find(f"./schematic/Wire[@lcc_role='{name}']")
+        assert wire is not None
+        origin = (int(wire.get("x")), int(wire.get("y")))
+        return [
+            (origin[0] + int(vertex.get("x")), origin[1] + int(vertex.get("y")))
+            for vertex in wire.findall("./vertex")
+        ]
+
+    assert wire_points("ACY_A_TO_BREAKOUT") == [(182, 306), (216, 306)]
+    assert wire_points("ACY_B_TO_BREAKOUT") == [(182, 342), (216, 342)]
+    assert wire_points("ACY_C_TO_BREAKOUT") == [(182, 378), (216, 378)]
+    assert wire_points("ACD_A_TO_BREAKOUT") == [(182, 594), (216, 594)]
+    assert wire_points("ACD_B_TO_BREAKOUT") == [(182, 630), (216, 630)]
+    assert wire_points("ACD_C_TO_BREAKOUT") == [(182, 666), (216, 666)]
+
+
 def test_generated_companion_contains_exact_wp1b_output_channels(tmp_path):
     path = tmp_path / "generated.pslx"
     path.write_bytes(render_library())
