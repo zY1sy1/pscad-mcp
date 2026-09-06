@@ -413,12 +413,12 @@ def test_generated_bridge_connects_each_phase_resistor_to_breakout(tmp_path):
             for vertex in wire.findall("./vertex")
         ]
 
-    assert wire_points("ACY_A_TO_BREAKOUT") == [(182, 306), (216, 306)]
-    assert wire_points("ACY_B_TO_BREAKOUT") == [(182, 342), (216, 342)]
-    assert wire_points("ACY_C_TO_BREAKOUT") == [(182, 378), (216, 378)]
-    assert wire_points("ACD_A_TO_BREAKOUT") == [(182, 594), (216, 594)]
-    assert wire_points("ACD_B_TO_BREAKOUT") == [(182, 630), (216, 630)]
-    assert wire_points("ACD_C_TO_BREAKOUT") == [(182, 666), (216, 666)]
+    assert wire_points("ACY_A_TO_BREAKOUT") == [(144, 306), (216, 306)]
+    assert wire_points("ACY_B_TO_BREAKOUT") == [(144, 342), (216, 342)]
+    assert wire_points("ACY_C_TO_BREAKOUT") == [(144, 378), (216, 378)]
+    assert wire_points("ACD_A_TO_BREAKOUT") == [(144, 594), (216, 594)]
+    assert wire_points("ACD_B_TO_BREAKOUT") == [(144, 630), (216, 630)]
+    assert wire_points("ACD_C_TO_BREAKOUT") == [(144, 666), (216, 666)]
 
 
 def test_generated_companion_contains_exact_wp1b_output_channels(tmp_path):
