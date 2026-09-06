@@ -641,7 +641,7 @@ def _inverter_control(definitions: ET.Element) -> None:
             },
         ),
         Component(
-            "pi_constant", "master:const", 774, 234,
+            "pi_constant", "master:const", 774, 90,
             {"Name": "LCC_PI_VALUE", "Value": "3.141592653589793"},
         ),
         Component(
@@ -683,11 +683,11 @@ def _inverter_control(definitions: ET.Element) -> None:
         Wire("PRODUCT_TO_PI", ((576, 306), (594, 306))),
         Wire("PI_TO_LIMIT", ((666, 306), (738, 306))),
         Wire("BETA_TO_ALPHA", ((810, 306), (846, 306))),
-        Wire("PI_TO_ALPHA", ((810, 234), (882, 234), (882, 270))),
-        Wire("AO_Y_OUTPUT", ((918, 306), (972, 252))),
+        Wire("PI_TO_ALPHA", ((810, 90), (828, 90), (828, 270), (882, 270))),
+        Wire("AO_Y_OUTPUT", ((918, 306), (954, 306), (954, 252), (972, 252))),
         Wire("AO_D_OUTPUT", ((918, 306), (972, 306))),
-        Wire("AO_Y_MONITOR", ((918, 306), (864, 180))),
-        Wire("AO_D_MONITOR", ((918, 306), (864, 414))),
+        Wire("AO_Y_MONITOR", ((918, 306), (936, 306), (936, 126), (864, 126), (864, 180))),
+        Wire("AO_D_MONITOR", ((918, 306), (936, 306), (936, 450), (864, 450), (864, 414))),
     )
     _definition(
         definitions,

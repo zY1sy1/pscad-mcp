@@ -726,7 +726,7 @@
             <param name="Limit" value="0" />
           </paramlist>
         </User>
-        <User classid="UserCmp" name="" defn="master:const" id="876051318" x="774" y="234" w="69" h="19" z="120" orient="0" link="-1" q="4">
+        <User classid="UserCmp" name="" defn="master:const" id="876051318" x="774" y="90" w="69" h="19" z="120" orient="0" link="-1" q="4">
           <paramlist link="-1" name="" crc="8647988">
             <param name="Name" value="LCC_PI_VALUE" />
             <param name="Value" value="3.141592653589793" />
@@ -851,25 +851,34 @@
           <vertex x="0" y="0" />
           <vertex x="36" y="0" />
         </Wire>
-        <Wire classid="WireOrthogonal" name="" lcc_role="PI_TO_ALPHA" x="810" y="234" w="82" h="46" orient="0" id="1305173500">
+        <Wire classid="WireOrthogonal" name="" lcc_role="PI_TO_ALPHA" x="810" y="90" w="82" h="190" orient="0" id="1305173500">
           <vertex x="0" y="0" />
-          <vertex x="72" y="0" />
-          <vertex x="72" y="36" />
+          <vertex x="18" y="0" />
+          <vertex x="18" y="180" />
+          <vertex x="72" y="180" />
         </Wire>
         <Wire classid="WireOrthogonal" name="" lcc_role="AO_Y_OUTPUT" x="918" y="306" w="64" h="64" orient="0" id="1524841893">
           <vertex x="0" y="0" />
+          <vertex x="36" y="0" />
+          <vertex x="36" y="-54" />
           <vertex x="54" y="-54" />
         </Wire>
         <Wire classid="WireOrthogonal" name="" lcc_role="AO_D_OUTPUT" x="918" y="306" w="64" h="10" orient="0" id="1423314963">
           <vertex x="0" y="0" />
           <vertex x="54" y="0" />
         </Wire>
-        <Wire classid="WireOrthogonal" name="" lcc_role="AO_Y_MONITOR" x="918" y="306" w="64" h="136" orient="0" id="760916509">
+        <Wire classid="WireOrthogonal" name="" lcc_role="AO_Y_MONITOR" x="918" y="306" w="82" h="190" orient="0" id="760916509">
           <vertex x="0" y="0" />
+          <vertex x="18" y="0" />
+          <vertex x="18" y="-180" />
+          <vertex x="-54" y="-180" />
           <vertex x="-54" y="-126" />
         </Wire>
-        <Wire classid="WireOrthogonal" name="" lcc_role="AO_D_MONITOR" x="918" y="306" w="64" h="118" orient="0" id="42638927">
+        <Wire classid="WireOrthogonal" name="" lcc_role="AO_D_MONITOR" x="918" y="306" w="82" h="154" orient="0" id="42638927">
           <vertex x="0" y="0" />
+          <vertex x="18" y="0" />
+          <vertex x="18" y="144" />
+          <vertex x="-54" y="144" />
           <vertex x="-54" y="108" />
         </Wire>
       </schematic>

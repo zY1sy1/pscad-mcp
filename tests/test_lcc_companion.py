@@ -660,7 +660,7 @@ def test_generated_inverter_converts_beta_to_alpha_after_limiting():
     assert float(constants[0].find("./paramlist/param[@name='Value']").get("value")) == pytest.approx(3.141592653589793)
     for name, expected in {
         "BETA_TO_ALPHA": [(810, 306), (846, 306)],
-        "PI_TO_ALPHA": [(810, 234), (882, 234), (882, 270)],
+        "PI_TO_ALPHA": [(810, 90), (828, 90), (828, 270), (882, 270)],
     }.items():
         wire = schematic.find(f"./Wire[@lcc_role='{name}']")
         origin = (int(wire.get("x")), int(wire.get("y")))
@@ -671,6 +671,34 @@ def test_generated_inverter_converts_beta_to_alpha_after_limiting():
     for name in ("AO_Y_OUTPUT", "AO_D_OUTPUT", "AO_Y_MONITOR", "AO_D_MONITOR"):
         wire = schematic.find(f"./Wire[@lcc_role='{name}']")
         assert (int(wire.get("x")), int(wire.get("y"))) == (918, 306)
+
+
+def test_generated_inverter_alpha_nets_are_orthogonal_and_separate():
+    from pscad_mcp.topology.connectivity import build_connectivity
+    from pscad_mcp.topology.models import ProjectTopology, TopologyConductor
+
+    root = ET.fromstring(render_library())
+    schematic = root.find("./definitions/Definition[@name='InverterControl']/schematic")
+    ao_names = {"AO_Y_OUTPUT", "AO_D_OUTPUT", "AO_Y_MONITOR", "AO_D_MONITOR"}
+    conductors = []
+    for name in sorted(ao_names | {"PI_TO_ALPHA", "BETA_TO_ALPHA"}):
+        wire = schematic.find(f"./Wire[@lcc_role='{name}']")
+        origin = (int(wire.get("x")), int(wire.get("y")))
+        vertices = tuple(
+            (origin[0] + int(v.get("x")), origin[1] + int(v.get("y")))
+            for v in wire.findall("./vertex")
+        )
+        assert all(a[0] == b[0] or a[1] == b[1] for a, b in pairwise(vertices))
+        conductors.append(TopologyConductor(
+            key=name, object_id=name, canvas_key="InverterControl",
+            kind="wire", namespace="data", vertices=vertices,
+        ))
+    topology = build_connectivity(ProjectTopology(
+        "inverter_alpha", "4.6.2", conductors=tuple(conductors),
+    )).topology
+    assert {frozenset(net.conductor_keys) for net in topology.nets} == {
+        frozenset(ao_names), frozenset({"PI_TO_ALPHA"}), frozenset({"BETA_TO_ALPHA"}),
+    }
 
 
 def test_generated_inverter_gamma_signal_uses_one_nonbranching_trunk():

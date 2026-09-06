@@ -10,7 +10,7 @@
     "catalog-pscad-4.6.2.json": "433f24a15eece899a8ab6299ece9ff48fbb025e8966322ab215823226b816464",
     "dynamic.json": "48bc43bc7f1b6601ddeccdc5c8f6a3d4ce2434d3bb91474e2eb079ee94a3a531",
     "golden.json": "b84b546c4609cb8369d684f16f49d84593f893466c23b8b2234e0469167ccdcd",
-    "library/cigre_lcc_v1.pslx": "34910301a9d47a984a680d614811fe5761e0bb093b7bb3dfb94ca176543a38d5",
+    "library/cigre_lcc_v1.pslx": "d6830fb5a09e7090d9b73c9956ce9d459b6da45875a847784113635fec4c547c",
     "master-bindings-pscad-4.6.2.json": "9a59b3017a52700fc946eee00865d53726d9a1af893380f0057c1284bb0b7a73",
     "smoke.json": "4c03bc0dbb5c1930e16c674fa811b93fe8a0a2fe9c815cc151131134ac953750"
   }
