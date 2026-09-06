@@ -71,10 +71,11 @@ USERS = {
         *("master:xnode" for _ in range(8)),
         "master:breakout",
         "master:breakout",
+        "master:nodeloop",
+        "master:nodeloop",
         *("master:resistor" for _ in range(6)),
         *("master:import" for _ in range(3)),
         *("master:export" for _ in range(4)),
-        "master:consti",
         "master:consti",
         "master:sumjct",
         "master:unity",
@@ -138,8 +139,8 @@ WIRES = {
         "ENABLE_TO_KB_Y",
         "ENABLE_TO_KB_D",
         "ENABLE_CONVERSION",
-        "CB_ZERO_Y",
-        "CB_ZERO_D",
+        "CB_REFERENCE_Y",
+        "CB_REFERENCE_D",
     ),
     "RectifierControl": (
         "CURRENT_ERROR",
@@ -421,6 +422,34 @@ def test_generated_bridge_connects_each_phase_resistor_to_breakout(tmp_path):
     assert wire_points("ACD_C_TO_BREAKOUT") == [(182, 666), (216, 666)]
 
 
+def test_generated_bridge_uses_ac_node_references_for_phase_locking():
+    root = ET.fromstring(render_library())
+    schematic = root.find("./definitions/Definition[@name='LCC12PulseBridge']/schematic")
+    references = schematic.findall("./User[@defn='master:nodeloop']")
+    assert len(references) == 2
+    assert schematic.find("./User/paramlist/param[@value='LCC_CB_ZERO']") is None
+    bridges = schematic.findall("./User[@defn='master:g6p200']")
+    for suffix, reference, bridge in zip(("Y", "D"), references, bridges, strict=True):
+        x, y = int(reference.get("x")), int(reference.get("y"))
+        assert reference.find("./paramlist/param[@name='View']").get("value") == "1"
+        assert bridge.find("./paramlist/param[@name='KV']").get("value") == "-1"
+        wire = schematic.find(f"./Wire[@lcc_role='CB_REFERENCE_{suffix}']")
+        origin = (int(wire.get("x")), int(wire.get("y")))
+        points = [
+            (origin[0] + int(v.get("x")), origin[1] + int(v.get("y")))
+            for v in wire.findall("./vertex")
+        ]
+        assert points[0] == (x, y - 36)
+        assert points[-1] == (int(bridge.get("x")) - 18, int(bridge.get("y")) - 90)
+        bus = schematic.find(f"./Wire[@lcc_role='AC{suffix}_TO_{suffix}_BUS']")
+        origin = (int(bus.get("x")), int(bus.get("y")))
+        bus_points = [
+            (origin[0] + int(v.get("x")), origin[1] + int(v.get("y")))
+            for v in bus.findall("./vertex")
+        ]
+        assert (x, y) in bus_points
+
+
 def test_generated_bridge_inverts_enable_for_g6p200_block_input(tmp_path):
     root = ET.fromstring(render_library())
     bridge = root.find("./definitions/Definition[@name='LCC12PulseBridge']")
@@ -528,8 +557,8 @@ def test_generated_companion_contains_exact_wp1b_output_channels(tmp_path):
 @pytest.mark.parametrize(
     ("wire_name", "forbidden_port"),
         [
-            ("CB_ZERO_Y", (360, 252)),
-            ("CB_ZERO_D", (360, 540)),
+            ("CB_REFERENCE_Y", (360, 252)),
+            ("CB_REFERENCE_D", (360, 540)),
         ],
 )
 def test_generated_bridge_control_wires_do_not_cross_unrelated_ports(

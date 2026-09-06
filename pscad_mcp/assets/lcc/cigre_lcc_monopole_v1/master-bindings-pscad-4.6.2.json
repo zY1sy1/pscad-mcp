@@ -2526,6 +2526,20 @@
       "evidence_parameters": []
     },
     {
+      "logical_name": "master:ac_node_reference",
+      "physical_definition": "nodeloop",
+      "shape": {"kind": "direct"},
+      "ports": [
+        {"logical": "N", "physical": "N", "kind": "electrical", "dimension": 3, "occurrence": 0},
+        {"logical": "REFERENCE", "physical": "X1", "kind": "data", "dimension": 1, "occurrence": 2}
+      ],
+      "parameters": [],
+      "fixed_parameters": [
+        {"physical": "View", "value": 1, "contract": {"type": "Choice", "unit": null, "choices": ["0", "1"]}}
+      ],
+      "evidence_parameters": []
+    },
+    {
       "logical_name": "master:phase_isolation_resistor",
       "physical_definition": "resistor",
       "shape": {

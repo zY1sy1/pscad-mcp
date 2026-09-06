@@ -106,3 +106,13 @@ copied. The official example pattern is `breaker1.NAME=LCC_FAULT_ACTIVE`,
 with the matching data label `LCC_FAULT_ACTIVE` on the event signal. This
 supports the embedded EMTDC timer contract only and is engineering provenance,
 not an independent waveform golden.
+
+The bridge CB input requires an electrical node reference, not an integer
+block command. Each six-pulse group now uses an installed `master:nodeloop`
+with `View=1` on its own valve-side AC vector and routes X1 to CB. The installed
+Motor_Drive_SVM example confirms the direct-bus node-reference topology. With
+the reference taken after the transformer, both groups use the Master Y-Y/D-D
+phase configuration `KV=-1`; no transformer phase shift is applied twice.
+Compiled phase-node indices and actual firing angles still require licensed
+verification. The previous constant-zero CB compiled to three identical
+phase-node indices and could not supply a three-phase synchronization signal.

@@ -185,6 +185,7 @@ def test_packaged_asset_exposes_hashed_wp1b_smoke_contract():
     assert asset_set.master_bindings.schema_version == 2
     assert "master:main_signal_import" in asset_set.master_bindings.by_logical_name
     assert set(asset_set.master_bindings.companion_by_logical_name) == {
+        "master:ac_node_reference",
         "master:six_pulse_bridge",
         "master:control_sum",
         "master:control_pi",

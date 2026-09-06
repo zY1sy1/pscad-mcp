@@ -44,6 +44,7 @@ STYLE = {
     "g6p200": (115, 184, 113177439),
     "xnode": (18, 31, 114262475),
     "breakout": (40, 77, 6599472),
+    "nodeloop": (10, 74, 0),
     "resistor": (74, 30, 10319542),
     "import": (83, 22, 35483323),
     "export": (74, 21, 39049670),
@@ -343,7 +344,7 @@ def _bridge_definition(definitions: ET.Element) -> None:
             for name in ("AM_Y", "AM_D", "GM_Y", "GM_D")
         )
     )
-    g6_y = {**COMMON_G6P200, "KV": "-2"}
+    g6_y = {**COMMON_G6P200, "KV": "-1"}
     g6_d = {**COMMON_G6P200, "KV": "-1"}
     components = (
         _pin("pin_acy_a", "ACY_A", 90, 306, 2),
@@ -414,6 +415,8 @@ def _bridge_definition(definitions: ET.Element) -> None:
         ),
         Component("bridge_y", "master:g6p200", 360, 342, g6_y),
         Component("bridge_d", "master:g6p200", 360, 630, g6_d),
+        Component("reference_y", "master:nodeloop", 288, 324, {"View": "1"}),
+        Component("reference_d", "master:nodeloop", 288, 612, {"View": "1"}),
         _import("import_ao_y", "AO_Y", 504, 378),
         _import("import_ao_d", "AO_D", 504, 666),
         _import("import_enable", "ENABLE", 504, 486),
@@ -430,9 +433,6 @@ def _bridge_definition(definitions: ET.Element) -> None:
         _export("export_gm_d", "GM_D", 504, 594),
         Component(
             "const_enable_one", "master:consti", 600, 450, {"Name": "LCC_ENABLE_ONE", "Value": "1"}
-        ),
-        Component(
-            "const_cb_zero", "master:consti", 600, 540, {"Name": "LCC_CB_ZERO", "Value": "0"}
         ),
         Component(
             "enable_inverter",
@@ -458,14 +458,14 @@ def _bridge_definition(definitions: ET.Element) -> None:
         Wire("ACY_C_TO_BREAKOUT", ((182, 378), (216, 378))),
         Wire("ACY_TO_Y_B", ((90, 342), (108, 342))),
         Wire("ACY_TO_Y_C", ((90, 378), (108, 378))),
-        Wire("ACY_TO_Y_BUS", ((180, 342), (180, 324), (324, 324), (324, 342))),
+        Wire("ACY_TO_Y_BUS", ((180, 342), (180, 324), (288, 324), (324, 324), (324, 342))),
         Wire("ACD_TO_D", ((90, 594), (108, 594))),
         Wire("ACD_A_TO_BREAKOUT", ((182, 594), (216, 594))),
         Wire("ACD_B_TO_BREAKOUT", ((182, 630), (216, 630))),
         Wire("ACD_C_TO_BREAKOUT", ((182, 666), (216, 666))),
         Wire("ACD_TO_D_B", ((90, 630), (108, 630))),
         Wire("ACD_TO_D_C", ((90, 666), (108, 666))),
-        Wire("ACD_TO_D_BUS", ((180, 630), (180, 612), (324, 612), (324, 630))),
+        Wire("ACD_TO_D_BUS", ((180, 630), (180, 612), (288, 612), (324, 612), (324, 630))),
         Wire("DC_POS_PATH", ((360, 252), (360, 234), (360, 162))),
         Wire(
             "DC_SERIES",
@@ -479,21 +479,8 @@ def _bridge_definition(definitions: ET.Element) -> None:
         Wire("ENABLE_ORDER", ((600, 486), (684, 486))),
         Wire("ENABLE_TO_KB_Y", ((756, 486), (780, 486), (780, 396), (414, 396))),
         Wire("ENABLE_TO_KB_D", ((756, 486), (792, 486), (792, 684), (414, 684))),
-        Wire(
-            "CB_ZERO_Y",
-            (
-                (636, 540),
-                (828, 540),
-                (828, 216),
-                (324, 216),
-                (324, 252),
-                (342, 252),
-            ),
-        ),
-        Wire(
-            "CB_ZERO_D",
-            ((636, 540), (636, 558), (324, 558), (324, 540), (342, 540)),
-        ),
+        Wire("CB_REFERENCE_Y", ((288, 288), (288, 252), (342, 252))),
+        Wire("CB_REFERENCE_D", ((288, 576), (288, 540), (342, 540))),
         Wire("AM_Y_OUTPUT", ((414, 288), (540, 288))),
         Wire("GM_Y_OUTPUT", ((414, 306), (540, 306))),
         Wire("AM_D_OUTPUT", ((414, 576), (540, 576))),
