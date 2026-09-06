@@ -313,6 +313,8 @@ def _master_fixture_xml(
       <parameter name='BaseV' type='Real' unit='kV' intent='Input'><value>230</value></parameter>
       <parameter name='CurI' type='Text'><value>IDC</value></parameter>
       <parameter name='VolI' type='Text'><value>VDC</value></parameter>
+      <parameter name='P' type='Text'><value></value></parameter>
+      <parameter name='Q' type='Text'><value></value></parameter>
     </category></form>
     <svg>
       <port model='Natural' name='A' x='-18' y='0' dim='0' type='Removable'>MeasV+MeasP+MeasQ==0</port>
@@ -327,6 +329,10 @@ def _master_fixture_xml(
   <Definition name='datalabel'>
     <form><category><parameter name='Name' type='Text'><value>IMPORT</value></parameter></category></form>
     <svg><port model='Transfer' name='A' x='0' y='0' dim='0' mode='Input' type='Real'/></svg>
+  </Definition>
+  <Definition name='import'>
+    <form><category><parameter name='Name' type='Text'><value>IMPORT</value></parameter></category></form>
+    <svg><port model='Transfer' name='N' x='36' y='0' dim='0' mode='Output' type='Real'>true</port></svg>
   </Definition>
   <Definition name='breaker1'>
     <form><category>
@@ -618,6 +624,7 @@ def test_packaged_registry_contains_exact_fixed_catalog_bindings():
         "master:dc_meter",
         "master:ground",
         "master:main_signal_import",
+        "master:signal_import",
         "master:breaker1",
         "master:tfault",
         "master:fault_state_integer_to_real",
@@ -639,6 +646,10 @@ def test_packaged_registry_contains_exact_fixed_catalog_bindings():
         registry.by_logical_name["master:main_signal_import"].physical_definition
         == "datalabel"
     )
+    assert (
+        registry.by_logical_name["master:signal_import"].physical_definition
+        == "import"
+    )
 
 
 def test_filter_expansion_offsets_are_pscad_grid_aligned():
@@ -657,7 +668,7 @@ def test_filter_expansion_offsets_are_pscad_grid_aligned():
     )
 
 
-def test_filter_expansion_phase_ports_do_not_coincide():
+def test_filter_expansion_is_a_shunt_with_distinct_phase_buses():
     module = _subject()
     registry = _packaged_registry(module)
     binding = registry.by_logical_name["master:ac_filter_branch"]
@@ -666,15 +677,19 @@ def test_filter_expansion_phase_ports_do_not_coincide():
         for item in binding.shape["instances"]
     }
     port_offsets = {"A": (0, -54), "B": (0, 54)}
-    points = [
-        (
+    points = {
+        port.logical: (
             instance_offsets[port.instance][0] + port_offsets[port.physical][0],
             instance_offsets[port.instance][1] + port_offsets[port.physical][1],
         )
         for port in binding.ports
-    ]
+    }
 
-    assert len(points) == len(set(points))
+    assert binding.shape["neutral"]["physical_port"] == "B"
+    assert binding.shape["neutral"]["ground_offset"] == (54, 54)
+    for phase in "ABC":
+        assert points[f"IN_{phase}"] == points[f"OUT_{phase}"]
+    assert len({points[f"IN_{phase}"] for phase in "ABC"}) == 3
 
 
 def test_registry_hash_is_stable_for_key_order():

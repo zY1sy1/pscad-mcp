@@ -281,9 +281,9 @@ def test_saved_projection_accepts_only_registry_declared_filter_expansion(
         (1, "master:cfilter", (342, 198)),
         (2, "master:cfilter", (342, 342)),
         (3, "master:cfilter", (342, 486)),
-        (4, "master:ground", (396, 162)),
-        (5, "master:ground", (396, 306)),
-        (6, "master:ground", (396, 450)),
+        (4, "master:ground", (396, 252)),
+        (5, "master:ground", (396, 396)),
+        (6, "master:ground", (396, 540)),
     )
     saved = ProjectGraph(
         "executor",
@@ -301,9 +301,9 @@ def test_saved_projection_accepts_only_registry_declared_filter_expansion(
             for component_id, definition, location in physical_components
         ),
         (
-            GraphWire("electrical", ((342, 162), (396, 162))),
-            GraphWire("electrical", ((342, 306), (396, 306))),
-            GraphWire("electrical", ((342, 450), (396, 450))),
+            GraphWire("electrical", ((342, 252), (396, 252))),
+            GraphWire("electrical", ((342, 396), (396, 396))),
+            GraphWire("electrical", ((342, 540), (396, 540))),
         ),
         (),
         (),

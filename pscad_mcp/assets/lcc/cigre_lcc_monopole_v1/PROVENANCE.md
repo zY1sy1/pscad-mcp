@@ -66,8 +66,13 @@ the registry or companion library.
 - `three_phase_source -> source3`, with three-phase `View=0`.
 - `converter_transformer -> xfmr-3p2w`, matching the component used by the
   official CIGRE LCC examples inspected on 2026-08-29.
-- `ac_filter_branch -> cfilter`, expanded into three instances with explicit
-  neutral grounds, per-phase MVA, and harmonic-order conversion.
+- `ac_filter_branch -> cfilter`, expanded into three shunt instances with
+  external terminal B grounded, per-phase MVA, and harmonic-order conversion.
+  IN/OUT names for each phase are aliases of the same bus terminal A, joined
+  explicitly in the blueprint. The installed Master marks N as internal; its
+  branch metadata places the main capacitor between A and N, and the parallel
+  LC/resistor section between N and B. Grounding N had isolated the supply
+  from the transformer buses in the 2026-09-06 compiled Main.dta evidence.
 - `smoothing_reactor -> inductor`, converting mH to H.
 - `dc_line_section -> resistor`, using the catalog's total resistance. The
   rejected `dc_mac_2w` candidate is a DC machine, not a transmission line.

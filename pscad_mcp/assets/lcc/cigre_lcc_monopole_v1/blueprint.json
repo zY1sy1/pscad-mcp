@@ -838,11 +838,13 @@
           "component": "rectifier_ac_meter",
           "port": "B"
         },
+        {"component": "rectifier_filter", "port": "OUT_A"},
         {
           "component": "rectifier_filter",
           "port": "IN_A"
         }
-      ]
+      ],
+      "route": {"vertices": [[235, 137], [342, 137], [342, 144]], "policy": "orthogonal"}
     },
     {
       "logical_id": "rectifier_source_filter_b",
@@ -852,11 +854,13 @@
           "component": "rectifier_source",
           "port": "B"
         },
+        {"component": "rectifier_filter", "port": "OUT_B"},
         {
           "component": "rectifier_filter",
           "port": "IN_B"
         }
-      ]
+      ],
+      "route": {"vertices": [[100, 210], [306, 210], [306, 288], [342, 288]], "policy": "orthogonal"}
     },
     {
       "logical_id": "rectifier_source_filter_c",
@@ -866,11 +870,13 @@
           "component": "rectifier_source",
           "port": "C"
         },
+        {"component": "rectifier_filter", "port": "OUT_C"},
         {
           "component": "rectifier_filter",
           "port": "IN_C"
         }
-      ]
+      ],
+      "route": {"vertices": [[100, 220], [288, 220], [288, 432], [342, 432]], "policy": "orthogonal"}
     },
     {
       "logical_id": "inverter_source_a_meter",
@@ -894,7 +900,10 @@
           [2650, 200],
           [2485, 200],
           [2485, 137],
-          [2744, 137],
+          [2466, 137],
+          [2466, 108],
+          [2726, 108],
+          [2726, 120],
           [2744, 120]
         ],
         "policy": "orthogonal"
@@ -908,11 +917,13 @@
           "component": "inverter_ac_meter",
           "port": "B"
         },
+        {"component": "inverter_filter", "port": "OUT_A"},
         {
           "component": "inverter_filter",
           "port": "IN_A"
         }
-      ]
+      ],
+      "route": {"vertices": [[2515, 137], [2538, 137], [2538, 174], [2334, 174], [2334, 144], [2358, 144]], "policy": "orthogonal"}
     },
     {
       "logical_id": "inverter_source_filter_b",
@@ -922,6 +933,7 @@
           "component": "inverter_source",
           "port": "B"
         },
+        {"component": "inverter_filter", "port": "OUT_B"},
         {
           "component": "inverter_filter",
           "port": "IN_B"
@@ -934,10 +946,12 @@
       "route": {
         "vertices": [
           [2650, 210],
-          [2358, 210],
+          [2448, 210],
+          [2448, 288],
           [2358, 288],
-          [2400, 288],
-          [2400, 200],
+          [2430, 288],
+          [2430, 180],
+          [2744, 180],
           [2744, 200]
         ],
         "policy": "orthogonal"
@@ -951,6 +965,7 @@
           "component": "inverter_source",
           "port": "C"
         },
+        {"component": "inverter_filter", "port": "OUT_C"},
         {
           "component": "inverter_filter",
           "port": "IN_C"
@@ -963,10 +978,11 @@
       "route": {
         "vertices": [
           [2650, 220],
-          [2358, 220],
+          [2466, 220],
+          [2466, 432],
           [2358, 432],
-          [2420, 432],
-          [2420, 280],
+          [2484, 432],
+          [2484, 280],
           [2744, 280]
         ],
         "policy": "orthogonal"
@@ -1035,7 +1051,28 @@
           "component": "rectifier_transformer_y",
           "port": "HV_A"
         }
-      ]
+      ],
+      "route": {
+        "vertices": [
+          [
+            342,
+            144
+          ],
+          [
+            444,
+            144
+          ],
+          [
+            444,
+            120
+          ],
+          [
+            520,
+            120
+          ]
+        ],
+        "policy": "orthogonal"
+      }
     },
     {
       "logical_id": "inverter_filter_a_y",
@@ -1049,7 +1086,28 @@
           "component": "inverter_transformer_y",
           "port": "HV_A"
         }
-      ]
+      ],
+      "route": {
+        "vertices": [
+          [
+            2358,
+            144
+          ],
+          [
+            2232,
+            144
+          ],
+          [
+            2232,
+            120
+          ],
+          [
+            2120,
+            120
+          ]
+        ],
+        "policy": "orthogonal"
+      }
     },
     {
       "logical_id": "rectifier_filter_a_d",
@@ -1063,7 +1121,28 @@
           "component": "rectifier_transformer_d",
           "port": "HV_A"
         }
-      ]
+      ],
+      "route": {
+        "vertices": [
+          [
+            342,
+            144
+          ],
+          [
+            444,
+            144
+          ],
+          [
+            444,
+            300
+          ],
+          [
+            520,
+            300
+          ]
+        ],
+        "policy": "orthogonal"
+      }
     },
     {
       "logical_id": "inverter_filter_a_d",
@@ -1077,7 +1156,28 @@
           "component": "inverter_transformer_d",
           "port": "HV_A"
         }
-      ]
+      ],
+      "route": {
+        "vertices": [
+          [
+            2358,
+            144
+          ],
+          [
+            2232,
+            144
+          ],
+          [
+            2232,
+            300
+          ],
+          [
+            2120,
+            300
+          ]
+        ],
+        "policy": "orthogonal"
+      }
     },
     {
       "logical_id": "rectifier_acy_a",
@@ -1150,10 +1250,22 @@
       ],
       "route": {
         "vertices": [
-          [342, 396],
-          [462, 396],
-          [462, 130],
-          [520, 130]
+          [
+            342,
+            288
+          ],
+          [
+            462,
+            288
+          ],
+          [
+            462,
+            130
+          ],
+          [
+            520,
+            130
+          ]
         ],
         "policy": "orthogonal"
       }
@@ -1173,10 +1285,22 @@
       ],
       "route": {
         "vertices": [
-          [2358, 396],
-          [2238, 396],
-          [2238, 130],
-          [2120, 130]
+          [
+            2358,
+            288
+          ],
+          [
+            2250,
+            288
+          ],
+          [
+            2250,
+            130
+          ],
+          [
+            2120,
+            130
+          ]
         ],
         "policy": "orthogonal"
       }
@@ -1193,7 +1317,28 @@
           "component": "rectifier_transformer_d",
           "port": "HV_B"
         }
-      ]
+      ],
+      "route": {
+        "vertices": [
+          [
+            342,
+            288
+          ],
+          [
+            462,
+            288
+          ],
+          [
+            462,
+            310
+          ],
+          [
+            520,
+            310
+          ]
+        ],
+        "policy": "orthogonal"
+      }
     },
     {
       "logical_id": "inverter_filter_b_d",
@@ -1207,7 +1352,28 @@
           "component": "inverter_transformer_d",
           "port": "HV_B"
         }
-      ]
+      ],
+      "route": {
+        "vertices": [
+          [
+            2358,
+            288
+          ],
+          [
+            2250,
+            288
+          ],
+          [
+            2250,
+            310
+          ],
+          [
+            2120,
+            310
+          ]
+        ],
+        "policy": "orthogonal"
+      }
     },
     {
       "logical_id": "rectifier_acy_b",
@@ -1280,10 +1446,22 @@
       ],
       "route": {
         "vertices": [
-          [342, 540],
-          [480, 540],
-          [480, 140],
-          [520, 140]
+          [
+            342,
+            432
+          ],
+          [
+            480,
+            432
+          ],
+          [
+            480,
+            140
+          ],
+          [
+            520,
+            140
+          ]
         ],
         "policy": "orthogonal"
       }
@@ -1303,10 +1481,22 @@
       ],
       "route": {
         "vertices": [
-          [2358, 540],
-          [2220, 540],
-          [2220, 140],
-          [2120, 140]
+          [
+            2358,
+            432
+          ],
+          [
+            2268,
+            432
+          ],
+          [
+            2268,
+            140
+          ],
+          [
+            2120,
+            140
+          ]
         ],
         "policy": "orthogonal"
       }
@@ -1323,7 +1513,28 @@
           "component": "rectifier_transformer_d",
           "port": "HV_C"
         }
-      ]
+      ],
+      "route": {
+        "vertices": [
+          [
+            342,
+            432
+          ],
+          [
+            480,
+            432
+          ],
+          [
+            480,
+            320
+          ],
+          [
+            520,
+            320
+          ]
+        ],
+        "policy": "orthogonal"
+      }
     },
     {
       "logical_id": "inverter_filter_c_d",
@@ -1337,7 +1548,28 @@
           "component": "inverter_transformer_d",
           "port": "HV_C"
         }
-      ]
+      ],
+      "route": {
+        "vertices": [
+          [
+            2358,
+            432
+          ],
+          [
+            2268,
+            432
+          ],
+          [
+            2268,
+            320
+          ],
+          [
+            2120,
+            320
+          ]
+        ],
+        "policy": "orthogonal"
+      }
     },
     {
       "logical_id": "rectifier_acy_c",

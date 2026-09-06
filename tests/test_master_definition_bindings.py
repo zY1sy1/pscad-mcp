@@ -127,9 +127,9 @@ async def _runtime_backend(tmp_path, *, snap_wires: bool = False):
         ),
         (
             "ac_meter",
-            {},
+            {"ActivePowerSignal": "P_RECT", "ReactivePowerSignal": "Q_RECT"},
             "multimeter",
-            {"MeasP": 1, "MeasQ": 1, "Freq": 50.0, "BaseV": 230.0},
+            {"MeasP": 1, "MeasQ": 1, "Freq": 50.0, "BaseV": 230.0, "P": "P_RECT", "Q": "Q_RECT"},
         ),
         (
             "dc_meter",
@@ -239,9 +239,9 @@ def test_legacy_expands_filter_and_grounds_each_neutral(tmp_path):
         assert item.values["dentry"] == 1
         assert item.values["V"] == pytest.approx(132.79056191361394)
     assert [tuple(wire.vertices) for wire in wires] == [
-        ((360, 144), (414, 144)),
-        ((360, 288), (414, 288)),
-        ((360, 432), (414, 432)),
+        ((360, 234), (414, 234)),
+        ((360, 378), (414, 378)),
+        ((360, 522), (414, 522)),
     ]
     assert parameters == {
         "Branch_MVAR": pytest.approx(50.0),
@@ -382,9 +382,9 @@ def test_filter_binding_pins_vendor_snapped_neutral_wire_endpoints(tmp_path):
         if item["role"] == "neutral_wire"
     ]
     assert wire_endpoints == [
-        [[2304, 162], [2358, 162]],
-        [[2304, 306], [2358, 306]],
-        [[2304, 450], [2358, 450]],
+        [[2304, 252], [2358, 252]],
+        [[2304, 396], [2358, 396]],
+        [[2304, 540], [2358, 540]],
     ]
 
 

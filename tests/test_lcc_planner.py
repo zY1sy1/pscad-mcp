@@ -24,6 +24,66 @@ from pscad_mcp.hvdc.builders.lcc.planner import (
     _wp1b_connection_labels,
     create_plan,
 )
+from pscad_mcp.topology.connectivity import build_connectivity
+from pscad_mcp.topology.models import ProjectTopology, TopologyConductor
+
+
+def test_packaged_filter_bus_connects_supply_to_both_transformers():
+    assets = load_packaged_asset_set()
+    labels = _wp1b_connection_labels(assets.blueprint)
+    for station in ("rectifier", "inverter"):
+        bus_labels = []
+        for phase in "abc":
+            supply = (
+                f"{station}_meter_filter_a"
+                if phase == "a"
+                else f"{station}_source_filter_{phase}"
+            )
+            assert labels[supply] == labels[f"{station}_filter_{phase}_y"]
+            assert labels[supply] == labels[f"{station}_filter_{phase}_d"]
+            bus_labels.append(labels[supply])
+        assert len(set(bus_labels)) == 3
+
+
+@pytest.mark.parametrize("station", ["rectifier", "inverter"])
+def test_packaged_physical_supply_routes_keep_phase_buses_separate(station):
+    assets = load_packaged_asset_set()
+    catalog = parse_catalog(assets.catalog)
+    components = {
+        component.logical_id: component for component in assets.blueprint.components
+    }
+    supply_components = {
+        f"{station}_source", f"{station}_ac_meter", f"{station}_filter"
+    }
+    conductors = tuple(
+        TopologyConductor(
+            key=net.logical_id,
+            canvas_key="Main",
+            object_id=net.logical_id,
+            kind="wire",
+            namespace="electrical",
+            vertices=_net_route(net, components, catalog),
+        )
+        for net in assets.blueprint.nets
+        if net.kind == "electrical"
+        and any(endpoint.component in supply_components for endpoint in net.endpoints)
+    )
+    topology = build_connectivity(
+        ProjectTopology("physical_supply", "4.6.2", conductors=conductors)
+    ).topology
+    groups = [set(net.conductor_keys) for net in topology.nets]
+    # The meter separates its source-side conductor from the three phase buses.
+    assert {f"{station}_source_a_meter"} in groups
+    assert len(groups) == 4
+    for phase in "abc":
+        supply = (
+            f"{station}_meter_filter_a"
+            if phase == "a"
+            else f"{station}_source_filter_{phase}"
+        )
+        assert {
+            supply, f"{station}_filter_{phase}_y", f"{station}_filter_{phase}_d"
+        } in groups
 
 
 def test_dynamic_schedule_events_expand_to_native_on_off_commands():
@@ -153,12 +213,12 @@ def complete_live_inventory(
 
 LEGACY_PLAN_SNAPSHOTS = {
     "full_acceptance": {
-        "plan_hash": "98f6d74ad699f858b81f68e2f14ab524c075de559dac0da28d22ee9f9739edaa",
-        "operations_hash": "544f9a0d651450a71389c93db518e92eeb8eb3a5293294eaf28a7bea25e07c9b",
+        "plan_hash": "68fc3fd137421d0ff0cda7a661e1fff1b3157674a45ca034198c17c9095b4093",
+        "operations_hash": "9605b599fefcf41d9782b511122afd9b838c346628d2e18a907476eb8bfbba03",
     },
     "wp1b_smoke": {
-        "plan_hash": "4c21eb8f5f01d8bf5486703863d9e3b6e2175403fb5d840edb81ee81a913fe4f",
-        "operations_hash": "cf1dec8d7c06bffcffafc2c0759ce623aed9da611fffc8dbacd19a8f9b2702ed",
+        "plan_hash": "634fbc4f8a4692a2de166d80b66fdf60071c0535ca952d595a0d09a9ff90f6ee",
+        "operations_hash": "ae2df203928fcb62909cffbf86e760996876c689a329b45dbfb7f15aba0f3401",
     },
 }
 
@@ -687,7 +747,7 @@ def test_wp1b_labels_consolidate_shared_ports_and_reuse_raw_signal_names():
     assert labels["idc_raw"] == "LCC_IDC_RAW"
     assert labels["rectifier_return"] is None
     assert labels["inverter_return"] is None
-    assert len({label for label in labels.values() if label is not None}) == 48
+    assert len({label for label in labels.values() if label is not None}) == 42
 
 
 def test_wp1b_smoke_plan_uses_smoke_gate_and_hashes_profile(tmp_path):

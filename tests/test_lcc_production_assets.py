@@ -35,9 +35,9 @@ def test_production_asset_set_has_fixed_identity_and_complete_contract():
         "master-bindings-pscad-4.6.2.json", "smoke.json", "dynamic.json",
     }
     assert asset_set.master_bindings is not None
-    assert len(asset_set.master_bindings.bindings) == 14
+    assert len(asset_set.master_bindings.bindings) == 15
     assert asset_set.master_bindings.schema_version == 2
-    assert len(asset_set.master_bindings.companion_bindings) == 17
+    assert len(asset_set.master_bindings.companion_bindings) == 16
     assert asset_set.master_binding_hash == asset_set.hashes["master-bindings-pscad-4.6.2.json"]
     assert "Szechtman" in asset_set.provenance
     companion = validate_companion_library(

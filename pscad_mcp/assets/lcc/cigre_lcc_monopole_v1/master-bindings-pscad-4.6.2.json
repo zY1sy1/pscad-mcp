@@ -297,14 +297,14 @@
           }
         ],
         "neutral": {
-          "physical_port": "N",
+        "physical_port": "B",
           "occurrence": 0,
           "ground_definition": "ground",
           "ground_port": "A",
           "ground_occurrence": 0,
-          "ground_offset": [
-            54,
-            -36
+        "ground_offset": [
+          54,
+          54
           ]
         }
       },
@@ -319,7 +319,7 @@
         },
         {
           "logical": "OUT_A",
-          "physical": "B",
+          "physical": "A",
           "kind": "electrical",
           "dimension": 1,
           "occurrence": 0,
@@ -335,7 +335,7 @@
         },
         {
           "logical": "OUT_B",
-          "physical": "B",
+          "physical": "A",
           "kind": "electrical",
           "dimension": 1,
           "occurrence": 0,
@@ -351,7 +351,7 @@
         },
         {
           "logical": "OUT_C",
-          "physical": "B",
+          "physical": "A",
           "kind": "electrical",
           "dimension": 1,
           "occurrence": 0,
