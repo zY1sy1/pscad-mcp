@@ -1987,7 +1987,7 @@
         {"component": "alpha_rect_output", "port": "INPUT"},
         {"component": "mu_rect_output", "port": "INPUT"}
       ],
-      "label": null,
+      "label": "ALPHA",
       "route": {
         "vertices": [[872, 641], [960, 641], [960, 810], [1180, 810], [1180, 864]],
         "policy": "orthogonal"

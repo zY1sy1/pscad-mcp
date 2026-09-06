@@ -153,12 +153,12 @@ def complete_live_inventory(
 
 LEGACY_PLAN_SNAPSHOTS = {
     "full_acceptance": {
-        "plan_hash": "ab3404e9514e57c66eed70ef70189093614cd8987bd92da107578e00e1d78a1c",
-        "operations_hash": "3c8c558a76dc5c905b1e936e4ef0ca5d9d6795ae35eff4bb664f9749bb1118b6",
+        "plan_hash": "e5b18be9cf6a4c42f1846288104da32b280b4e58af11d123f47e2417597fdaa6",
+        "operations_hash": "2ce13178b08a8126f838c2ae34ef2bcb09946e5275a84876eb38afa99ab10739",
     },
     "wp1b_smoke": {
-        "plan_hash": "08934e4b29f83186d8f7fea7b924c5c29cc4ba2c957db5052ee52b21715a4cb4",
-        "operations_hash": "aea53b6985caa01c288680bc8dd6aa9d6386b61ecc3f6d13bc8c8957036cc0d9",
+        "plan_hash": "53ae5edabd9afaf85b2e0dd6ab073697e69f7278ee805b2c11499f756583059a",
+        "operations_hash": "ebfa772c5d2f19249b3d22de118a367064e8704931962c6306383c8fc8c19196",
     },
 }
 
@@ -662,7 +662,12 @@ def test_packaged_fixed_data_nets_do_not_create_main_canvas_labels():
 
     labels = {net.logical_id: net.label for net in blueprint.nets if net.kind == "data"}
     assert labels["inverter_fault_active_integer"] == "LCC_FAULT_ACTIVE"
-    assert all(label is None for logical_id, label in labels.items() if logical_id != "inverter_fault_active_integer")
+    assert all(
+        label is None
+        for logical_id, label in labels.items()
+        if logical_id not in {"inverter_fault_active_integer", "alpha_rect_telemetry"}
+    )
+    assert labels["alpha_rect_telemetry"] == "ALPHA"
 
 
 def test_wp1b_labels_consolidate_shared_ports_and_reuse_raw_signal_names():
