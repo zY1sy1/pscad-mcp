@@ -419,16 +419,15 @@
           <vertex x="0" y="0" />
           <vertex x="24" y="0" />
         </Wire>
-        <Wire classid="WireOrthogonal" name="" lcc_role="ENABLE_ONE" x="636" y="450" w="58" h="46" orient="0" id="1460161890">
+        <Wire classid="WireOrthogonal" name="" lcc_role="ENABLE_ONE" x="636" y="450" w="94" h="82" orient="0" id="1460161890">
           <vertex x="0" y="0" />
-          <vertex x="48" y="0" />
-          <vertex x="48" y="36" />
+          <vertex x="12" y="0" />
+          <vertex x="12" y="72" />
+          <vertex x="84" y="72" />
         </Wire>
-        <Wire classid="WireOrthogonal" name="" lcc_role="ENABLE_ORDER" x="600" y="486" w="130" h="46" orient="0" id="1778831577">
+        <Wire classid="WireOrthogonal" name="" lcc_role="ENABLE_ORDER" x="600" y="486" w="94" h="10" orient="0" id="1778831577">
           <vertex x="0" y="0" />
-          <vertex x="48" y="0" />
-          <vertex x="48" y="36" />
-          <vertex x="120" y="36" />
+          <vertex x="84" y="0" />
         </Wire>
         <Wire classid="WireOrthogonal" name="" lcc_role="ENABLE_TO_KB_Y" x="756" y="486" w="376" h="100" orient="0" id="1266035346">
           <vertex x="0" y="0" />

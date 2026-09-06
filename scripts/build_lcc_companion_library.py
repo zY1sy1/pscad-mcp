@@ -475,11 +475,8 @@ def _bridge_definition(definitions: ET.Element) -> None:
         Wire("AO_Y_TO_BRIDGE_Y", ((540, 378), (414, 378))),
         Wire("AO_D_TO_BRIDGE_D", ((540, 666), (414, 666))),
         Wire("ENABLE_CONVERSION", ((540, 486), (564, 486))),
-        Wire("ENABLE_ONE", ((636, 450), (684, 450), (684, 486))),
-        Wire(
-            "ENABLE_ORDER",
-            ((600, 486), (648, 486), (648, 522), (720, 522)),
-        ),
+        Wire("ENABLE_ONE", ((636, 450), (648, 450), (648, 522), (720, 522))),
+        Wire("ENABLE_ORDER", ((600, 486), (684, 486))),
         Wire("ENABLE_TO_KB_Y", ((756, 486), (780, 486), (780, 396), (414, 396))),
         Wire("ENABLE_TO_KB_D", ((756, 486), (792, 486), (792, 684), (414, 684))),
         Wire(

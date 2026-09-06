@@ -421,6 +421,24 @@ def test_generated_bridge_connects_each_phase_resistor_to_breakout(tmp_path):
     assert wire_points("ACD_C_TO_BREAKOUT") == [(144, 666), (216, 666)]
 
 
+def test_generated_bridge_inverts_enable_for_g6p200_block_input(tmp_path):
+    root = ET.fromstring(render_library())
+    bridge = root.find("./definitions/Definition[@name='LCC12PulseBridge']")
+    assert bridge is not None
+
+    def wire_points(name):
+        wire = bridge.find(f"./schematic/Wire[@lcc_role='{name}']")
+        assert wire is not None
+        origin = (int(wire.get("x")), int(wire.get("y")))
+        return [
+            (origin[0] + int(vertex.get("x")), origin[1] + int(vertex.get("y")))
+            for vertex in wire.findall("./vertex")
+        ]
+
+    assert wire_points("ENABLE_ORDER") == [(600, 486), (684, 486)]
+    assert wire_points("ENABLE_ONE") == [(636, 450), (648, 450), (648, 522), (720, 522)]
+
+
 def test_generated_companion_contains_exact_wp1b_output_channels(tmp_path):
     path = tmp_path / "generated.pslx"
     path.write_bytes(render_library())
@@ -509,11 +527,10 @@ def test_generated_companion_contains_exact_wp1b_output_channels(tmp_path):
 
 @pytest.mark.parametrize(
     ("wire_name", "forbidden_port"),
-    [
-        ("CB_ZERO_Y", (360, 252)),
-        ("CB_ZERO_D", (360, 540)),
-        ("ENABLE_ORDER", (684, 486)),
-    ],
+        [
+            ("CB_ZERO_Y", (360, 252)),
+            ("CB_ZERO_D", (360, 540)),
+        ],
 )
 def test_generated_bridge_control_wires_do_not_cross_unrelated_ports(
     wire_name,
