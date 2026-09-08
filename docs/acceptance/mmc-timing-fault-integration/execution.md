@@ -79,7 +79,7 @@ not silently change it or the physical criteria using observed samples.
 - [x] Implement reload verification in an independent owned worker when the vendor has no
   unload API. Public builder operations must not quit unrelated sessions.
 - [x] Run public-service tests and commit a fault-branch-compatible integration.
-- [ ] Prepare one joint case using the timing adapter on the instrumented model.
+- [x] Prepare one joint case using the timing adapter on the instrumented model.
   Control-command events and physical `fault_active` remain distinct roles.
 - [ ] Bind the original sources, each derived stage, joint schedule/check
   hashes, runtime identities and complete output set in the joint report.
@@ -172,3 +172,41 @@ publication. Reparse rejection uses the repository's compatible `lstat`
 pattern. The focused public/replay/tool/Master gate reports 77 passed,
 1 skipped, with Ruff clean after these fixes. Licensed acceptance remains
 pending and is not inferred from these software results.
+
+## Joint Software Harness
+
+`tests/mmc_timing_fault_case.py` prepares a derived-only offline case using the
+production public plan, compiler dependencies and line generation, actual
+fault binding, explicit T2 charging repair, production fault instrumentation,
+then A's embedded control adapter. It consumes the formal A
+`docs/acceptance/emt-timed-control/schedule-handoff.json`, freezes the file hash
+and canonical parent schedule hash, and requires the original Master, project,
+library and compiler-support identities to agree. The parent's target, values
+and units are preserved. Its old timing tolerance is not inherited.
+
+The joint schedule declares a T2 active-power command at 1.0-1.2 s, separate
+from the physical 2.5-2.7 s fault. It fixes 25 us integration, 250 us output,
+5 s duration and 500 us maximum timing error. The combined fault contract is
+derived from A's deterministic expected rendering and B's original contract;
+it cannot authorize extra physical changes or relabel a fault channel as a
+control command. Both adapters require the identical complete OUT/INF/INFX
+dataset, and static analysis failures retain a unique JSON report.
+
+Run the offline preparation with a new absolute directory:
+
+```powershell
+D:/pscad-mcp/.venv/Scripts/python.exe -m tests.mmc_timing_fault_case --workspace D:/PSCAD-Workspace/mmc-timing-fault-integration/joint-software-<revision>
+```
+
+The output scope is `offline_joint_contract`, with
+`physical_acceptance_verified: false`. The harness has no licensed-run entry
+point. B's accepted `channels-handoff.json`, exact passing model recipe and
+fresh original/replay evidence remain mandatory inputs to the future licensed
+joint gate. Its current raw offline model does not stand in for B's full
+charging/headroom/filter/carrier/virtual-resistance diagnostic chain.
+
+Joint regression coverage reports 16 passed after formal handoff binding.
+The preceding affected A/B/public software gate reported 257 passed, 1 skipped;
+that gate also has no licensed meaning. Ruff is clean for the joint harness
+and tests. Independent review closed all three public replay findings at
+`80e9f8706ad0219dc7199b5a44cd653789f0d0ee` with Spec/Quality PASS.
