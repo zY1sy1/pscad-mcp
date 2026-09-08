@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import time
 from collections.abc import Mapping, Sequence
+from copy import deepcopy
 from typing import Any
 
 from ...topology.hashing import canonical_sha256
@@ -212,7 +213,7 @@ class ModernBackend:
         project = await self._project(project_name)
         provider = getattr(project, "schedule_timed_controls", None)
         if timed_control_provider_capabilities(project)["native_schedule"]:
-            values = await self.executor.run_safe(provider, [dict(event) for event in events])
+            values = await self.executor.run_safe(provider, deepcopy([dict(event) for event in events]))
             if isinstance(values, (list, tuple)):
                 return [dict(item) for item in values if isinstance(item, Mapping)]
         raise BackendError(

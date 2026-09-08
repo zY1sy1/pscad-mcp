@@ -137,7 +137,7 @@ def test_unproven_clock_is_rejected(capabilities):
     {"end_time_s": 0.5}, {"value": float("nan")},
 ])
 def test_invalid_events_are_rejected_before_native_registration(override):
-    class Backend:
+    class Backend(NativeTimingBackend):
         called = False
 
         async def schedule_timed_controls(self, project, events):
@@ -160,7 +160,7 @@ def test_native_ack_identity_must_match_not_only_count(override):
     event = {"event_id": "e1", "time_s": 1.0, "component_id": 17,
              "parameter_name": "Value", "value": 1}
 
-    class Backend:
+    class Backend(NativeTimingBackend):
         async def schedule_timed_controls(self, project, events):
             return [{**event, **override, "status": "registered"}]
 
@@ -189,9 +189,59 @@ def test_native_interval_ack_checks_restoration_value():
              "component_id": 17, "parameter_name": "Value", "value": 1,
              "before_value": 0, "after_value": 0}
 
-    class Backend:
+    class Backend(NativeTimingBackend):
         async def schedule_timed_controls(self, project, events):
             return [{**event, "after_value": 2}]
 
     with pytest.raises(BackendError, match="differs"):
         asyncio.run(dispatch_timed_events(Backend(), "case", [event], mode="native"))
+
+
+def test_native_provider_cannot_rewrite_the_contract_or_callers_request():
+    event = {"event_id": "e1", "time_s": 1.0, "component_id": 17,
+             "parameter_name": "Value", "value": 1,
+             "target": {"instance_path": "Main", "owner": "17", "parameter": "Value"}}
+
+    class Backend(NativeTimingBackend):
+        async def schedule_timed_controls(self, project, events):
+            events[0]["value"] = 999
+            events[0]["target"]["owner"] = "999"
+            return events
+
+    with pytest.raises(BackendError, match="differs"):
+        asyncio.run(dispatch_timed_events(Backend(), "case", [event], mode="native"))
+    assert event["value"] == 1
+    assert event["target"]["owner"] == "17"
+
+
+def test_direct_native_dispatch_requires_verified_capabilities():
+    class Backend(NativeTimingBackend):
+        calls = []
+
+        async def get_timed_control_capabilities(self, project_name):
+            return {"native_schedule": True, "time_basis": "wall_clock"}
+
+        async def schedule_timed_controls(self, project_name, events):
+            self.calls.append(events)
+            return events
+
+    backend = Backend()
+    with pytest.raises(BackendError):
+        asyncio.run(dispatch_timed_events(backend, "case", [{"event_id": "a", "time_s": 1,
+            "component_id": 17, "parameter_name": "Value", "value": 1}], mode="native"))
+    assert backend.calls == []
+
+
+def test_missing_event_value_fails_before_any_native_registration():
+    class Backend(NativeTimingBackend):
+        calls = []
+
+        async def schedule_timed_controls(self, project_name, events):
+            self.calls.append(events)
+            return events
+
+    backend = Backend()
+    with pytest.raises(BackendError):
+        asyncio.run(dispatch_timed_events(backend, "case", [{"event_id": "a", "time_s": 1,
+            "component_id": 17, "parameter_name": "Value"}], mode="native"))
+    assert backend.calls == []

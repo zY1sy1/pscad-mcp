@@ -163,3 +163,25 @@ def test_verified_parameter_mismatch_restores_old_value(tmp_path):
     assert result["status"] == "failed"
     assert result["error"]["code"] == "HVDC_SCENARIO_EXECUTION_FAILED"
     assert result["partial_completion"]["applied_parameter_changes"] == []
+
+
+@pytest.mark.parametrize("override", [{"event_id": "wrong"}, {"component_id": "99"},
+                                     {"time_s": 0.2}, {"value": 0}, {"after_value": 2}])
+def test_public_native_scenario_rejects_wrong_ack_before_run(tmp_path, override):
+    class Native(StrictBackend):
+        async def schedule_timed_controls(self, project_name, events):
+            return [{**event, **override} for event in events]
+
+    backend = Native(mode="native")
+    service, source, derived = _service(tmp_path, backend)
+    scenario = _scenario(derived)
+    scenario["events"][0].update(end_time_s=1.1, before_value=0, after_value=0)
+
+    async def exercise():
+        started = await service.run_scenario(str(source), scenario, confirm=True)
+        return await _terminal(service, started["scenario_id"])
+
+    result = asyncio.run(exercise())
+    assert result["status"] == "failed"
+    assert result["error"]["code"] == "HVDC_TIMED_CONTROL_UNAVAILABLE"
+    assert not any(call[0] == "run" for call in backend.calls)

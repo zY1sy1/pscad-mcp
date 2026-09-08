@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import math
 import time
+from copy import deepcopy
 from collections.abc import Mapping, Sequence
 from typing import Any
 
@@ -44,7 +45,7 @@ def normalize_timed_events(events: Sequence[Mapping[str, Any]]) -> list[dict[str
     """Validate point/interval events before any scheduler or project mutation."""
     result = []
     for index, item in enumerate(events):
-        event = dict(item)
+        event = deepcopy(dict(item))
         event["event_id"] = str(event.get("event_id") or f"event-{index:06d}")
         for field in ("time_s", "end_time_s", "value", "before_value", "after_value"):
             if field not in event:
@@ -52,9 +53,12 @@ def normalize_timed_events(events: Sequence[Mapping[str, Any]]) -> list[dict[str
             raw = event[field]
             if isinstance(raw, bool) or not isinstance(raw, (int, float)) or not math.isfinite(float(raw)):
                 raise _timing_error("Event numeric fields must be finite numbers.", event_id=event["event_id"], field=field)
-            event[field] = float(raw)
+            if field in {"time_s", "end_time_s"}:
+                event[field] = float(raw)
         if "time_s" not in event or event["time_s"] < 0:
             raise _timing_error("Event times must be non-negative.", event_id=event["event_id"])
+        if "value" not in event:
+            raise _timing_error("Each timed event must declare its value.", event_id=event["event_id"])
         if "end_time_s" in event and event["end_time_s"] <= event["time_s"]:
             raise _timing_error("Event intervals must have a positive duration.", event_id=event["event_id"])
         result.append(event)
@@ -114,8 +118,15 @@ async def dispatch_timed_events(
     if max_stalled_polls < 1:
         raise _timing_error("max_stalled_polls must be at least one.", max_stalled_polls=max_stalled_polls)
     normalized = normalize_timed_events(events)
+    for event in normalized:
+        target = event.get("target")
+        binding = target if isinstance(target, Mapping) else {"owner": event.get("component_id"), "parameter": event.get("parameter_name")}
+        if not str(binding.get("owner", "")).isdigit() or not isinstance(binding.get("parameter"), str) or not binding["parameter"].strip():
+            raise _timing_error("Every dispatched event requires an exact numeric owner and parameter.", event_id=event["event_id"])
     if mode == "native":
-        acknowledgements = await backend.schedule_timed_controls(project_name, normalized)
+        if await select_timing_mode(backend, project_name) != "native":
+            raise _timing_error("Native registration requires verified native capability.")
+        acknowledgements = await backend.schedule_timed_controls(project_name, deepcopy(normalized))
         return validate_native_acknowledgements(normalized, acknowledgements)
     if mode != "simulation_clock_polling":
         raise _timing_error("Unknown timed-control mode.", mode=mode)

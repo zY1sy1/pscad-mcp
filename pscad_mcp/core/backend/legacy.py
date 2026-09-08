@@ -14,6 +14,7 @@ import time
 import xml.etree.ElementTree as ET
 from collections.abc import Callable, Mapping, Sequence
 from collections.abc import Mapping as MappingABC
+from copy import deepcopy
 from decimal import Decimal, InvalidOperation
 from importlib.resources import as_file, files
 from pathlib import Path
@@ -758,7 +759,7 @@ class LegacyBackend:
         provider = getattr(project, "schedule_timed_controls", None)
         if timed_control_provider_capabilities(project)["native_schedule"]:
             values = await self.executor.run_safe(
-                provider, [dict(event) for event in events]
+                provider, deepcopy([dict(event) for event in events])
             )
             if isinstance(values, (list, tuple)):
                 return [dict(item) for item in values if isinstance(item, MappingABC)]

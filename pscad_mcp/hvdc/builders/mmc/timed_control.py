@@ -121,6 +121,9 @@ def plan_embedded_control(
     if not normalized:
         raise _error("An embedded schedule must contain at least one event.")
     master = Path(master_identity["path"])
+    replacement_port = _single_port(master, "const", "OUT", "Output")
+    if replacement_port.dim != 1 or (replacement_port.x, replacement_port.y) != (36, 0):
+        raise _error("The replacement const definition has no audited scalar OUT port.")
     pgb_port = _single_port(master, "pgb", "Signl", "Input")
     if (pgb_port.x, pgb_port.y) != (0, 0):
         raise _error("The Master output-channel attachment point changed.")

@@ -123,3 +123,18 @@ def test_saved_readback_detects_script_and_output_binding_drift(tmp_path):
     root.write(destination)
     with pytest.raises(BackendError):
         _module().verify_embedded_control(plan, destination)
+
+
+def test_var_cannot_use_an_unaudited_const_replacement_port(tmp_path):
+    source, master, event = _inputs(tmp_path)
+    source.write_text(PROJECT.replace("master:const", "master:var"))
+    event["target"]["definition"] = "master:var"
+    root = ET.fromstring(MASTER)
+    replacement = copy.deepcopy(root.find("./definitions/Definition[@name='const']"))
+    replacement.set("name", "var")
+    root.find("definitions").append(replacement)
+    root.find("./definitions/Definition[@name='const']/svg/port").set("x", "72")
+    ET.ElementTree(root).write(master)
+    with pytest.raises(BackendError):
+        _module().plan_embedded_control(source, [event], master_path=master,
+            time_step_s=1e-5, output_step_s=1e-5, duration_s=0.05, max_timing_error_s=2e-5)

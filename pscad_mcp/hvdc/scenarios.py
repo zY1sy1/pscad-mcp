@@ -653,7 +653,8 @@ async def _orchestrate_scenario(service: Any, record: dict[str, Any], normalized
                 confirm=normalized.get("_lcc_switching_confirm") is True,
             ))
         else:
-            acknowledgements = await backend.schedule_timed_controls(target_project, events)
+            from .timing import dispatch_timed_events
+            acknowledgements = await dispatch_timed_events(backend, target_project, events, mode="native")
         if len(acknowledgements) != len(events):
             raise BackendError(
                 "HVDC_TIMED_CONTROL_UNAVAILABLE",
