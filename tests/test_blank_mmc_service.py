@@ -145,6 +145,14 @@ def test_public_plan_identifies_legacy_rating_metadata_separately_from_native_mo
     assert plan["request_implementation"]["template_ratings_observed"] is None
 
 
+def test_raw_plan_declares_the_verified_t2_binding_correction_separately_from_tuning(tmp_path):
+    service, request, *_ = _plan_case(tmp_path)
+    plan = service.plan_model(request)
+    assert plan["model_recipe"]["name"] == "raw"
+    assert plan["model_recipe"]["parameters"] == {}
+    assert plan["model_corrections"] == [{"name": "terminal_two_charging", "definition": "Main", "owner": "606940312", "parameter": "T", "before": "Tcharging1", "after": "Tcharging2", "classification": "verified_template_binding_defect"}]
+
+
 def _protocol_case(tmp_path, monkeypatch, *, verdict="FAIL", bad_master=False, read_error=False):
     """Synthetic protocol fixture; no licensed model acceptance is claimed."""
     service, request, source, library = _plan_case(tmp_path)
@@ -166,6 +174,11 @@ def _protocol_case(tmp_path, monkeypatch, *, verdict="FAIL", bad_master=False, r
         root.set("instrumented", "true")
         ET.ElementTree(root).write(destination)
         return {"schema_version": 1, "project_path": str(destination), "channels": [{"channel_id": "fault_active", "role": "fault_active"}], "diagnostic_channels": [], "readback": {"matched": True, "project_sha256": blank_service._sha256(Path(destination))}}
+
+    def charging(origin, destination):
+        calls.append("repair_t2_charging")
+        Path(destination).write_bytes(Path(origin).read_bytes())
+        return {"source": str(origin), "source_sha256": blank_service._sha256(Path(origin)), "destination": str(destination), "destination_sha256": blank_service._sha256(Path(destination)), "owner": "606940312", "before": "Tcharging1", "after": "Tcharging2"}
 
     def finalize(project, contract):
         calls.append("finalize")
@@ -258,6 +271,7 @@ def _protocol_case(tmp_path, monkeypatch, *, verdict="FAIL", bad_master=False, r
                 "artifacts": {"worker/report.json": {"path": str(report_path), "sha256": blank_service._sha256(report_path)}}}
 
     for name, callback in {"materialize_template_native_scenario": materialize, "instrument_fault_channels": instrument,
+        "materialize_terminal_two_charging": charging,
         "finalize_fault_instrumentation": finalize, "verify_fault_instrumentation": verify,
         "read_fault_output_dataset": read, "evaluate_template_native_dc_fault": evaluate}.items():
         monkeypatch.setattr(blank_service, name, callback, raising=False)
@@ -319,6 +333,8 @@ def test_public_publication_uses_tested_instrumented_fault_case(tmp_path, monkey
     assert root.get("fault_time_s") == "2.5"
     assert float(root.get("fault_duration_s")) == pytest.approx(0.2)
     assert calls.index("evaluate") < calls.index("replay")
+    assert calls.index("materialize_fault") < calls.index("repair_t2_charging") < calls.index("instrument")
+    assert record["lineage"][1]["stage"] == "terminal_two_charging"
     assert record["result"]["final_project_sha256"] == record["result"]["tested_project_sha256"]
     result = service.validate_model(str(target))
     assert result["accepted"] is True

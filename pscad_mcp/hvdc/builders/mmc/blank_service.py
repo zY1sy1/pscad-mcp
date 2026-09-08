@@ -37,6 +37,7 @@ from .fault_channels import (
     finalize_fault_instrumentation,
     instrument_fault_channels,
     materialize_dc_feedback_filter,
+    materialize_terminal_two_charging,
     materialize_voltage_control_headroom,
     read_fault_output_dataset,
     snapshot_output_dataset,
@@ -314,13 +315,14 @@ class BlankMmcBuilderService:
             "checks_contract": checks,
             "checks_sha256": hashlib.sha256(json_bytes(checks)).hexdigest(),
             "model_recipe": {"schema_version": 1, "name": recipe, "parameters": copy.deepcopy(_MODEL_RECIPES[recipe]), "physical_acceptance_verified": False},
+            "model_corrections": [{"name": "terminal_two_charging", "definition": "Main", "owner": "606940312", "parameter": "T", "before": "Tcharging1", "after": "Tcharging2", "classification": "verified_template_binding_defect"}],
             "source_identities": identities,
             "runtime_requirements": {"backend": "legacy", "pscad_version": "4.6.2", "master_source_must_match": identities["master"], "new_case_namespace": True},
             "compiler_support": support,
             "line_constants": lines,
             "template_native": {"source_paths": {"project": str(template), "library": str(library)}, "source_hashes": source_hashes, "submodule_topology": dict(observed_topology) if isinstance(observed_topology, Mapping) else {}, "controls": dict(audit.get("template_native_controls", {})) if isinstance(audit.get("template_native_controls", {}), Mapping) else {}},
             "capabilities": {**SubmoduleTopology.capabilities(parsed.submodule_topology), "template_submodule_topology": observed_name, "native_schedule": False, "template_native_timing": bool(isinstance(audit.get("template_native_controls"), Mapping) and audit["template_native_controls"].get("available") is True)},
-            "operations": ["audit_source", "verify_runtime_master", "stage_frozen_dependencies", "materialize_model_recipe", "materialize_template_fault", "instrument_fault_channels", "save_and_finalize_readback", "compile", "simulate_template_native_fault", "freeze_output_dataset", "validate_production_fault_evidence", "publish_tested_case"],
+            "operations": ["audit_source", "verify_runtime_master", "stage_frozen_dependencies", "materialize_template_fault", "repair_terminal_two_charging", "materialize_model_recipe", "instrument_fault_channels", "save_and_finalize_readback", "compile", "simulate_template_native_fault", "freeze_output_dataset", "validate_production_fault_evidence", "publish_tested_case"],
         }
         plan = {**payload, "plan_hash": hashlib.sha256(json_bytes(payload)).hexdigest(), "status": "planned"}
         self._plans[plan["plan_hash"]] = copy.deepcopy(plan)
@@ -911,7 +913,8 @@ async def _execute_native_mmc_plan(
     fault = staging / "native_fault_source.pscx"
     binding = materialize_template_native_scenario(source, fault, dc_fault_time_s=plan["fault"]["time_s"], fault_duration_s=plan["fault"]["removal_time_s"] - plan["fault"]["time_s"])
     lineage.append({"stage": "native_fault", **binding})
-    selected = fault
+    selected = staging / "charging_source.pscx"
+    lineage.append({"stage": "terminal_two_charging", **materialize_terminal_two_charging(fault, selected)})
     recipe = plan["model_recipe"]
     if recipe["name"] != "raw":
         headroom = staging / "headroom_source.pscx"
