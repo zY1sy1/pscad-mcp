@@ -2895,6 +2895,40 @@ class LegacyBackend:
                 {"path": str(path)},
             ) from error
 
+    async def get_master_library_identity(self) -> dict[str, Any]:
+        """Read the connected installation's Master without changing binding caches."""
+        self._require_app()
+        path = await self._discover_master_library()
+        if path is None or not path.is_file():
+            raise BackendError(
+                "MASTER_SOURCE_UNAVAILABLE",
+                "The connected PSCAD installation's Master library was not found.",
+                self.name,
+                "get_master_library_identity",
+            )
+        path = path.resolve()
+        if self._managed_executable:
+            executable = Path(self._managed_executable).resolve()
+            installed = next(
+                (parent / "master.pslx" for parent in executable.parents
+                 if (parent / "master.pslx").is_file()),
+                None,
+            )
+            if installed is None or installed.resolve() != path:
+                raise BackendError(
+                    "MASTER_SOURCE_CHANGED",
+                    "The discovered Master does not belong to the connected managed installation.",
+                    self.name,
+                    "get_master_library_identity",
+                    {"master_path": str(path), "managed_executable": self._managed_executable},
+                )
+        digest = await asyncio.to_thread(lambda: hashlib.sha256(path.read_bytes()).hexdigest())
+        return {
+            "master_path": str(path),
+            "master_sha256": digest,
+            "pscad_version": self.version,
+        }
+
     async def _discover_master_library(self) -> Path | None:
         if self.automation is None:
             return None
