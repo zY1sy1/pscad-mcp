@@ -7,7 +7,7 @@ import json
 import math
 import re
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from importlib import resources
 from pathlib import Path
 from typing import Any
@@ -25,6 +25,8 @@ from ....core.master_bindings import (
     audit_master_bindings,
     parse_master_binding_registry,
 )
+from ..common.serialization import content_hash, json_safe
+from .catalog import MmcCatalog
 
 _FIELDS = {
     "master:dc_bus": {"Name"},
@@ -55,6 +57,20 @@ def load_mmc_master_registry() -> MasterBindingRegistry:
         .read_bytes()
     )
     return parse_master_binding_registry(json.loads(data))
+
+
+def native_inventory_catalog(catalog: Mapping[str, Any] | MmcCatalog) -> dict[str, Any]:
+    """Request the whole audited registry alongside the declared companion types."""
+    payload = json_safe(asdict(catalog) if isinstance(catalog, MmcCatalog) else catalog)
+    definitions = payload.setdefault("definitions", {})
+    for binding in load_mmc_master_registry().bindings:
+        definitions[binding.logical_name] = {
+            "ports": [
+                {"name": port.logical, "kind": port.kind, "dimension": port.dimension}
+                for port in binding.ports
+            ]
+        }
+    return payload
 
 
 def normalize_mmc_master_parameters(
@@ -184,3 +200,53 @@ def audit_mmc_master_bindings(master_path: str | Path) -> MmcMasterContext:
             {},
         )
     return MmcMasterContext(audited, read_definition_metadata_document(payload))
+
+
+def context_from_inventory(inventory: Any) -> MmcMasterContext | None:
+    """Recheck native evidence; bare injected inventories retain their test contract."""
+    identity = {"master_path", "master_sha256", "master_binding_registry_sha256"}
+    if not isinstance(inventory, Mapping) or not identity.intersection(inventory):
+        return None
+    if not identity <= inventory.keys() or not isinstance(
+        inventory["master_path"], str
+    ):
+        raise BackendError(
+            "MASTER_BINDING_MISSING",
+            "MMC inventory has incomplete native Master identity.",
+            "hvdc",
+            "create_mmc_plan",
+            {},
+        )
+    context = audit_mmc_master_bindings(inventory["master_path"])
+    audited = context.audited
+    if (
+        inventory["master_sha256"] != audited.master_sha256
+        or inventory["master_binding_registry_sha256"] != audited.registry.sha256
+    ):
+        raise BackendError(
+            "MASTER_SOURCE_CHANGED",
+            "MMC inventory no longer matches the installed Master and registry.",
+            "hvdc",
+            "create_mmc_plan",
+            {},
+        )
+    observed = inventory.get("definitions", {})
+    for name, expected in audited.definitions.items():
+        record = observed.get(name) if isinstance(observed, Mapping) else None
+        keys = (
+            "logical_name",
+            "physical_definition",
+            "selected_ports",
+            "verification_state",
+        )
+        if not isinstance(record, Mapping) or content_hash(
+            {key: record.get(key) for key in keys}
+        ) != content_hash({key: expected.get(key) for key in keys}):
+            raise BackendError(
+                "MASTER_SOURCE_CHANGED",
+                "MMC inventory contains altered or incomplete physical definition evidence.",
+                "hvdc",
+                "create_mmc_plan",
+                {"logical_name": name},
+            )
+    return context

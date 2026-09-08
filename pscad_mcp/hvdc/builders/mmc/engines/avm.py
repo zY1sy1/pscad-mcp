@@ -8,9 +8,13 @@ from typing import Any
 
 from .....core.backend.base import BackendError
 from ..assets import load_packaged_asset_set
+from ..master_bindings import (
+    context_from_inventory,
+    load_mmc_master_registry,
+    native_inventory_catalog,
+)
 from ..models import MmcBlueprint, MmcBuildState
 from ..parametric_models import MmcCandidate, MmcEnginePlan
-
 
 _LIMITATIONS = {
     "individual_cell_balance": "not_modeled",
@@ -256,7 +260,9 @@ class AvmBlueprintEngine:
                     "MMC_ENGINE_SERVICE_INVALID",
                     "The AVM engine requires a public definition-inventory method.",
                 )
-            inventory = await get_inventory(_inventory_catalog(self.asset_set))
+            inventory = await get_inventory(native_inventory_catalog(_inventory_catalog(self.asset_set)), load_mmc_master_registry().to_dict())
+            if context_from_inventory(inventory) is None:
+                raise _error("MASTER_BINDING_MISSING", "The native AVM inventory must include source-hashed Master binding evidence.")
         selected = _candidate(plan, candidate_id)
         candidate_root = (
             Path(plan.workspace).resolve()
