@@ -27,6 +27,25 @@ REQUIRED_ROLES = (
 OUTPUT_GROUP = "MMC_FAULT_EVIDENCE"
 
 
+def default_fault_checks() -> dict[str, Any]:
+    """Return the frozen 640 kV/900 MW native full-bridge engineering contract."""
+
+    return {
+        "schema_version": 1, "time_basis": "EMTDC", "time_units": "s",
+        "time_step_s": 25e-6, "simulation_duration_s": 5.0,
+        "output_step_s": 250e-6, "max_timing_error_s": 500e-6,
+        "frequency_hz": 60.0, "arm_rms_stability_relative_tolerance": 0.05,
+        "nominal_target_relative_tolerance": 0.05, "arm_peak_limit_ka": 3.0,
+        "maximum_power_loss_fraction": 0.1,
+        "fault_window_s": [2.5, 2.7], "prefault_window_s": [2.0, 2.4], "recovery_window_s": [4.6, 5.0],
+        "negative_voltage_max_kv": -1.0, "fault_current_limit_ka": 20.0,
+        "voltage_recovery_relative_tolerance": 0.05, "power_recovery_relative_tolerance": 0.05,
+        "arm_rms_recovery_relative_tolerance": 0.1, "capacitor_recovery_relative_tolerance": 0.05,
+        "steady_relative_rms_tolerance": 0.05, "minimum_operating_fraction": 0.9, "arm_rms_floor_ka": 0.05,
+        "basis": "Native full-bridge engineering contract: 640 kV, T2 -900 MW, T1 supplies power plus measured losses; complete 60 Hz cycle windows; original 20 kA fault and 3 kA arm limits retained.",
+    }
+
+
 def _error(code: str, message: str, **details: Any) -> BackendError:
     return BackendError(code, message, "hvdc", "mmc_fault_channels", details)
 
@@ -254,6 +273,8 @@ def instrument_fault_channels(source: str | Path, destination: str | Path, *, li
         raise _error("MMC_ACCEPTANCE_INCOMPLETE", "The installed cell has no audited physical blocking state.")
     expose(observed_cell, "MmcInserted", "Dsout", "$VDC:Ntop:Nbtm", "REAL")
     expose(observed_cell, "MmcCapSum", "Dsout", "SUM($Vc)", "REAL")
+    expose(observed_cell, "MmcCapMin", "Dsout", "MINVAL($Vc)", "REAL")
+    expose(observed_cell, "MmcCapMax", "Dsout", "MAXVAL($Vc)", "REAL")
     expose(observed_cell, "MmcBlocked", "Dsdyn", "IVD1_1", "INTEGER")
     observed_fault = clone_definition(masters["fault_sw"], "MmcObservedFaultSwitch")
     expose(observed_fault, "MmcClosed", "Dsout", "1-E_BtoI(OPENBR($NBR,$SS))", "INTEGER")
@@ -318,10 +339,12 @@ def instrument_fault_channels(source: str | Path, destination: str | Path, *, li
                 instance.set("defn", namespace + ":MmcObservedFullCell")
                 arm_suffix = "Top" if arm == "upper" else "Btm"
                 scope = f"{terminal}/{phase}/{arm}"
-                for parameter, signal in (("MmcInserted", f"MmcV{arm_suffix}"), ("MmcCapSum", f"MmcVc{arm_suffix}"), ("MmcBlocked", f"MmcBlock{arm_suffix}")):
+                for parameter, signal in (("MmcInserted", f"MmcV{arm_suffix}"), ("MmcCapSum", f"MmcVc{arm_suffix}"), ("MmcCapMin", f"MmcVcMin{arm_suffix}"), ("MmcCapMax", f"MmcVcMax{arm_suffix}"), ("MmcBlocked", f"MmcBlock{arm_suffix}")):
                     set_param(instance, parameter, signal)
                 add_probe(pole_definition, "v_inserted", scope, f"MmcV{arm_suffix}", instance, source_parameter="MmcInserted", extra={"quantity": "cell_group_terminal_voltage", "positive_port": "Ntop", "negative_port": "Nbtm", "condition": {"DTBP": "0"}})
                 add_probe(pole_definition, "v_cap", scope, f"MmcVc{arm_suffix}", instance, source_parameter="MmcCapSum", nominal=640.0, extra={"quantity": "sum_of_submodule_capacitor_voltages", "expression": "SUM(Vc)", "cell_count_expression": dict(_parameters(instance))["DimC"]})
+                add_probe(pole_definition, "v_cap_minimum", scope, f"MmcVcMin{arm_suffix}", instance, source_parameter="MmcCapMin", units_override="kV", extra={"quantity": "single_submodule_voltage_extremum", "expression": "MINVAL(Vc)", "cell_count_expression": dict(_parameters(instance))["DimC"]})
+                add_probe(pole_definition, "v_cap_maximum", scope, f"MmcVcMax{arm_suffix}", instance, source_parameter="MmcCapMax", units_override="kV", extra={"quantity": "single_submodule_voltage_extremum", "expression": "MAXVAL(Vc)", "cell_count_expression": dict(_parameters(instance))["DimC"]})
                 add_probe(pole_definition, "blocking_state", scope, f"MmcBlock{arm_suffix}", instance, kind="physical_state", source_parameter="MmcBlocked", polarity={"inactive": 0, "active": 1}, extra={"quantity": "firing_based_cell_group_blocked", "expression": "Block_Finder_H result"})
                 current_signal = "IaTop" if arm == "upper" else "IaBtm"
                 current_sources = [item for item in _components(pole_definition) if item.get("defn") == "master:varrlc" and dict(_parameters(item)).get("I") == current_signal]
@@ -442,7 +465,10 @@ def verify_fault_instrumentation(project: str | Path, contract: Mapping[str, Any
         for item in _components(definition):
             by_id.setdefault(item.get("id"), []).append(item)
         scope_components[name] = by_id
-        scope_wires[name] = {item.get("id"): item for item in definition.findall("./schematic/Wire")}
+        by_wire_id: dict[str, list[ET.Element]] = {}
+        for item in definition.findall("./schematic/Wire"):
+            by_wire_id.setdefault(item.get("id"), []).append(item)
+        scope_wires[name] = by_wire_id
     for expected in contract.get("readback_components", []):
         matches = scope_components.get(expected["definition_name"], {}).get(expected["owner_id"], [])
         if len(matches) != 1 or matches[0].get("defn") != expected["definition"] or any(dict(_parameters(matches[0])).get(key) != value for key, value in expected["parameters"].items()) or any(matches[0].get(key) != value for key, value in expected["position"].items()):
@@ -454,8 +480,8 @@ def verify_fault_instrumentation(project: str | Path, contract: Mapping[str, Any
         if name not in definitions or _ports(definitions[name]) != ports:
             raise _error("MMC_POSTCONDITION_FAILED", "A measurement port or its activation condition changed.", definition=name)
     for wire in contract.get("readback_wires", []):
-        match = scope_wires.get(wire["definition_name"], {}).get(wire["owner_id"])
-        if match is None or any(match.get(key) != value for key, value in wire["attributes"].items()) or [dict(item.attrib) for item in match.findall("vertex")] != wire["vertices"]:
+        matches = scope_wires.get(wire["definition_name"], {}).get(wire["owner_id"], [])
+        if len(matches) != 1 or any(matches[0].get(key) != value for key, value in wire["attributes"].items()) or [dict(item.attrib) for item in matches[0].findall("vertex")] != wire["vertices"]:
             raise _error("MMC_POSTCONDITION_FAILED", "A physical measurement connection changed.", wire=wire)
     if reachable_instances(root) != contract.get("reachable_instances"):
         raise _error("MMC_POSTCONDITION_FAILED", "The running instance hierarchy changed after saving.")
@@ -619,4 +645,29 @@ def materialize_dc_feedback_filter(source: str | Path, destination: str | Path, 
     return {"source": str(original), "source_sha256": source_hash, "destination": str(target), "destination_sha256": _sha256(target), "master_sha256": master_hash, "filter_owner": filtered.get("id"), "time_constant_s": time_constant_s, "initialization": "reset_to_raw_feedback_at_timezero", "feedback_label_owner": feedback.get("id"), "raw_feedback_label_owners": ["1379729478", "1453282758"], "scope": "dc_outer_loop_feedback_only", "raw_voltage_acceptance": True}
 
 
-__all__ = ["REQUIRED_ROLES", "instrument_fault_channels", "reachable_instances", "read_fault_output_dataset", "snapshot_output_dataset", "verify_fault_instrumentation", "verify_output_dataset"]
+def materialize_terminal_two_carrier(source: str | Path, destination: str | Path) -> dict[str, Any]:
+    """Compare the installed 3/23 carrier asymmetry using only one ratio change."""
+
+    original = _regular(source)
+    target = _new_target(destination, (original,))
+    digest = _sha256(original)
+    root = ET.parse(original).getroot()
+    main = next((item for item in root.findall("./definitions/Definition") if item.get("name") == "Main"), None)
+    station = next((item for item in root.findall("./definitions/Definition") if item.get("name") == "Station"), None)
+    matches = [item for item in _components(main) if item.get("id") == "1268416470" and item.get("defn", "").endswith(":MMC_Hb_PWM")] if main is not None else []
+    if len(matches) != 1 or dict(_parameters(matches[0])).get("IvlvTop") != "ITopT2" or dict(_parameters(matches[0])).get("Cfreq") not in ("3", "3.0") or station is None or dict(_parameters(station)).get("Freq") not in ("60", "60.0"):
+        raise _error("MMC_ACCEPTANCE_INCOMPLETE", "The installed terminal-2 carrier and 60 Hz source differ from this diagnostic contract.")
+    next(item for item in matches[0].findall("./paramlist/param") if item.get("name") == "Cfreq").set("value", "23")
+    _write_new_xml(root, target)
+    if _sha256(original) != digest:
+        raise _error("MMC_TEMPLATE_SOURCE_CHANGED", "The carrier diagnostic source changed.")
+    return {"source": str(original), "source_sha256": digest, "destination": str(target), "destination_sha256": _sha256(target), "owner_id": "1268416470", "parameter": "Cfreq", "before_ratio": 3.0, "after_ratio": 23.0, "fundamental_frequency_hz": 60.0, "cell_carrier_frequency_hz": 1380.0, "scope": "terminal_2_carrier_ratio_only", "arm_effective_switching_frequency_claimed": False}
+
+
+__all__ = [
+    "REQUIRED_ROLES", "default_fault_checks", "finalize_fault_instrumentation",
+    "instrument_fault_channels", "materialize_dc_feedback_filter",
+    "materialize_terminal_two_carrier", "materialize_voltage_control_headroom",
+    "reachable_instances", "read_fault_output_dataset", "snapshot_output_dataset",
+    "verify_fault_instrumentation", "verify_output_dataset",
+]

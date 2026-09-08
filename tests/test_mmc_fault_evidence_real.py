@@ -25,9 +25,11 @@ from pscad_mcp.acceptance.process_scope import (
 from pscad_mcp.core.backend.base import BackendError
 from pscad_mcp.core.process_inventory import list_pscad_processes
 from pscad_mcp.hvdc.builders.mmc.fault_channels import (
+    default_fault_checks,
     finalize_fault_instrumentation,
     instrument_fault_channels,
     materialize_dc_feedback_filter,
+    materialize_terminal_two_carrier,
     materialize_voltage_control_headroom,
     read_fault_output_dataset,
     snapshot_output_dataset,
@@ -69,7 +71,7 @@ async def _with_owned_connection(service, backend, report, operation, *, process
             ownership = {"owns_process": True, "session": dict(backend.session_details)}
             report.setdefault("launch_ownership", ownership)
             try:
-                if getattr(service, "_backend", backend) is backend:
+                if getattr(service, "_backend", backend) is backend or getattr(service, "_pending_cleanup_backend", None) is backend:
                     await service.quit_pscad(confirm=True)
                 else:
                     await backend.quit()
@@ -83,20 +85,7 @@ async def _with_owned_connection(service, backend, report, operation, *, process
 
 
 def _checks():
-    return {
-        "schema_version": 1, "time_basis": "EMTDC", "time_units": "s",
-        "output_step_s": 250e-6, "max_timing_error_s": 500e-6,
-        "frequency_hz": 60.0, "arm_rms_stability_relative_tolerance": 0.05,
-        "nominal_target_relative_tolerance": 0.05,
-        "arm_peak_limit_ka": 3.0,
-        "maximum_power_loss_fraction": 0.1,
-        "fault_window_s": [2.5, 2.7], "prefault_window_s": [2.0, 2.4], "recovery_window_s": [4.6, 5.0],
-        "negative_voltage_max_kv": -1.0, "fault_current_limit_ka": 20.0,
-        "voltage_recovery_relative_tolerance": 0.05, "power_recovery_relative_tolerance": 0.05,
-        "arm_rms_recovery_relative_tolerance": 0.1, "capacitor_recovery_relative_tolerance": 0.05,
-        "steady_relative_rms_tolerance": 0.05, "minimum_operating_fraction": 0.9, "arm_rms_floor_ka": 0.05,
-        "basis": "New pre-run engineering contract: 640 kV, T1 +900 MW/T2 -900 MW, complete 60 Hz cycle windows; legacy 20 kA fault-current bound retained.",
-    }
+    return default_fault_checks()
 
 
 def _steady(samples, contract, checks=None):
@@ -169,8 +158,10 @@ async def _run_case(service, root, source, library, master, name, fault):
         record["operating_point_repair"] = materialize_voltage_control_headroom(native, repaired, current_limit_pu=1.1)
         filtered = case_root / "dc_feedback.pscx"
         record["feedback_filter"] = materialize_dc_feedback_filter(repaired, filtered, master=master)
+        carrier = case_root / "carrier.pscx"
+        record["carrier_diagnostic"] = materialize_terminal_two_carrier(filtered, carrier)
         project = case_root / f"MMC_{name}.pscx"
-        contract = instrument_fault_channels(filtered, project, library=library, master=master)
+        contract = instrument_fault_channels(carrier, project, library=library, master=master)
         contract["required_checks"] = _checks()
         _write(case_root / "channels.json", contract)
         record.update({"native_binding": binding, "channel_contract_path": str(case_root / "channels.json"), "channel_contract_sha256": _hash(case_root / "channels.json"), "project": str(project), "project_instrumented_sha256": _hash(project)})

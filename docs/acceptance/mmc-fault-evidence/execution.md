@@ -160,3 +160,19 @@ DC-loop scale (roughly 4.6-6.5 Hz from the installed capacitor energy and PI
 gains) and attenuates 303 Hz by about 19.6 dB. This is a controller feedback
 change; acceptance uses only raw physical DC voltage. Only the five-second
 no-fault case runs until the unchanged nominal/stability gate closes.
+
+The sixth attempt (`fault-evidence-20260908T055316670642Z`, d7b5757) completed
+the steady-only run with all input/output/support identities and owned cleanup
+verified. All capacitor-sum, arm-current, and power checks passed, but the two
+raw DC-voltage checks failed. T1/T2 means were 613.70/600.00 kV with raw relative
+RMS ripple 25.50%/27.54%. Their 302.5 Hz components were about 202.5/215.8 kV
+in amplitude and nearly in phase. FrzI duty reduced to 61.59% at T1; all-run arm
+peaks were 2.43201/1.94203 kA. The filtered signal was not used as acceptance
+voltage. This is progress in control behavior, not a physical PASS.
+
+The next diagnostic changes only T2's carrier ratio 3 to 23 at the unchanged
+60 Hz fundamental, matching T1's installed setting. The source uses 76
+phase-shifted carriers; 1380 Hz is the individual carrier frequency and is not
+claimed as the effective arm switching frequency. Added min/max outputs measure
+actual single-submodule voltages in each arm, to distinguish capacitor imbalance
+from a stable capacitor sum. All original physical bands remain fixed.

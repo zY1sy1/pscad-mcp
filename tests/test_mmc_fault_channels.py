@@ -76,6 +76,16 @@ def test_complete_traceable_fault_fixture():
     assert all({"expected", "observed", "window", "source", "status"} <= item.keys() for item in report["check_results"])
 
 
+def test_production_fault_contract_preserves_physical_limits_and_isolated_windows():
+    checks = fault_channels.default_fault_checks()
+    assert checks["fault_current_limit_ka"] == 20.0
+    assert checks["arm_peak_limit_ka"] == 3.0
+    assert checks["fault_window_s"] == [2.5, 2.7]
+    assert checks["recovery_window_s"] == [4.6, 5.0]
+    checks["fault_window_s"][0] = 99
+    assert fault_channels.default_fault_checks()["fault_window_s"] == [2.5, 2.7]
+
+
 def test_a_high_activity_duplicate_cannot_override_the_bound_station():
     samples, contract, checks = fault_fixture()
     other = copy.deepcopy(samples["channels"][0])
@@ -230,6 +240,16 @@ def test_installed_instrumentation_is_derived_unique_and_readable(tmp_path, inst
     assert fault_channels.verify_fault_instrumentation(derived, contract)["matched"] is True
 
 
+def test_cell_voltage_extrema_keep_single_submodule_units(tmp_path, installed_sources):
+    project, library, master = installed_sources
+    contract = fault_channels.instrument_fault_channels(project, tmp_path / "observed.pscx", library=library, master=master)
+    minimum = [item for item in contract["diagnostic_channels"] if item["role"] == "v_cap_minimum"]
+    maximum = [item for item in contract["diagnostic_channels"] if item["role"] == "v_cap_maximum"]
+    assert len(minimum) == len(maximum) == 12
+    assert all(item["units"] == "kV" and item["dimension"] == 1 for item in minimum + maximum)
+    assert all(item["signal_source"]["quantity"] == "single_submodule_voltage_extremum" for item in minimum + maximum)
+
+
 def test_readback_detects_changed_source_parameter(tmp_path, installed_sources):
     from xml.etree import ElementTree as ET
     project, library, master = installed_sources
@@ -309,6 +329,29 @@ def test_measurement_connectivity_and_port_readback_cannot_drift(tmp_path, insta
             port.set("y", "-72")
         else:
             port.text = "DTBP==1"
+    tree.write(derived, encoding="utf-8")
+    with pytest.raises(BackendError) as error:
+        fault_channels.verify_fault_instrumentation(derived, contract)
+    assert error.value.code == "MMC_POSTCONDITION_FAILED"
+
+
+@pytest.mark.parametrize("changed_first", [True, False])
+def test_duplicate_wire_owner_is_rejected_in_either_order(tmp_path, installed_sources, changed_first):
+    from xml.etree import ElementTree as ET
+    project, library, master = installed_sources
+    derived = tmp_path / "observed.pscx"
+    contract = fault_channels.instrument_fault_channels(project, derived, library=library, master=master)
+    tree = ET.parse(derived)
+    record = contract["readback_wires"][0]
+    definition = next(item for item in tree.findall("./definitions/Definition") if item.get("name") == record["definition_name"])
+    canvas = definition.find("schematic")
+    wire = next(item for item in canvas.findall("Wire") if item.get("id") == record["owner_id"])
+    changed = copy.deepcopy(wire)
+    changed.find("vertex").set("x", "900")
+    if changed_first:
+        canvas.insert(list(canvas).index(wire), changed)
+    else:
+        canvas.append(changed)
     tree.write(derived, encoding="utf-8")
     with pytest.raises(BackendError) as error:
         fault_channels.verify_fault_instrumentation(derived, contract)
@@ -574,6 +617,22 @@ def test_dc_feedback_filter_changes_only_the_outer_feedback_branch(tmp_path, ins
     assert result["raw_feedback_label_owners"] == ["1379729478", "1453282758"]
 
 
+def test_carrier_diagnostic_changes_only_terminal_two_ratio(tmp_path, installed_sources):
+    from xml.etree import ElementTree as ET
+
+    from pscad_mcp.hvdc.builders.mmc.template_audit import _components, _parameters
+    project, _, _ = installed_sources
+    destination = tmp_path / "carrier.pscx"
+    before = {item.get("id"): dict(_parameters(item)) for item in _components(ET.parse(project).getroot())}
+    result = fault_channels.materialize_terminal_two_carrier(project, destination)
+    after = {item.get("id"): dict(_parameters(item)) for item in _components(ET.parse(destination).getroot())}
+    assert after["1268416470"]["Cfreq"] == "23"
+    before["1268416470"]["Cfreq"] = "23"
+    assert before == after
+    assert result["cell_carrier_frequency_hz"] == 1380.0
+    assert result["before_ratio"] == 3.0
+
+
 def test_owned_session_is_cleaned_when_status_raises(monkeypatch):
     import asyncio
 
@@ -603,6 +662,26 @@ def test_owned_session_is_cleaned_when_status_raises(monkeypatch):
     assert service.quit_called
     assert report["launch_ownership"]["session"]["managed_pid"] == 42
     assert report["owned_process_cleaned"] is True
+
+
+def test_owned_runner_clears_service_pending_launch_without_heartbeat(monkeypatch):
+    import asyncio
+
+    from pscad_mcp.core.service import PscadService
+    from tests.test_mmc_fault_evidence_real import _with_owned_connection
+    from tests.test_service_attach_cleanup import AttachBackend
+    monkeypatch.setenv("PSCAD_MCP_ACCEPTANCE_CONCURRENT", "1")
+    backend = AttachBackend("owned")
+    service = PscadService(lambda: backend)
+    report = {}
+    async def operation():
+        raise AssertionError("failed connection must not execute a case")
+    with pytest.raises(BackendError, match="could not be closed"):
+        asyncio.run(_with_owned_connection(service, backend, report, operation, process_reader=list))
+    assert service._pending_cleanup_backend is None
+    assert backend.calls == ["attach", "quit", "quit"]
+    assert report["owned_process_cleaned"] is True
+    assert report["launch_ownership"]["session"]["managed_pid"] == 4242
 
 
 def test_reanalysis_rejects_a_changed_frozen_channel_contract(tmp_path):
