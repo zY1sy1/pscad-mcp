@@ -334,7 +334,6 @@ def instrument_fault_channels(source: str | Path, destination: str | Path, *, li
             pole_definition = clone_definition(definitions["MMC_Hb_Pole_PWM"], pole_name)
             pole.set("defn", namespace + ":" + pole_name)
             if any(dict(_parameters(item)).get("Name") == "MmcVzEffective" for item in _components(pole_definition)):
-                probes.extend(component_record(pole_definition, item) for item in _components(pole_definition))
                 for wire in pole_definition.findall("./schematic/Wire"):
                     wires.append({"definition_name": pole_name, "owner_id": wire.get("id"), "attributes": {key: wire.get(key) for key in ("classid", "x", "y", "orient")}, "vertices": [dict(item.attrib) for item in wire.findall("vertex")]})
                 for signal, role, units, quantity in (
@@ -420,6 +419,10 @@ def instrument_fault_channels(source: str | Path, destination: str | Path, *, li
         if len(actual_id) == 1:
             add_probe(control_definition, "controller_id_actual", terminal, "idpu", actual_id[0], units_override="pu", extra={"quantity": "measured_d_axis_current", "normalization": "Ibase2_pk"})
         add_probe(main, "recovery_enable", terminal, f"Dblk{number}P", controls[0], kind="recovery_control", source_parameter="Dblk", polarity={"inactive": 0, "active": 1}, extra={"quantity": "deblocking_enable", "electrical_recovery_required": True})
+
+    for name, definition in definitions.items():
+        if name.startswith("MFE_Pole_") and any(dict(_parameters(item)).get("Name") == "MmcVzEffective" for item in _components(definition)):
+            probes.extend(component_record(definition, item) for item in _components(definition))
 
     # Update hierarchy calls from the actual specialized component graph.
     hierarchy = root.find("hierarchy")

@@ -721,6 +721,15 @@ def test_virtual_resistance_uses_measured_arm_current_and_common_voltage_channel
     assert result["dc_gain"] == 0.0
 
 
+def test_virtual_resistance_instrumentation_freezes_final_cell_definitions(tmp_path, installed_sources):
+    project, library, master = installed_sources
+    modified = tmp_path / "virtual.pscx"
+    fault_channels.materialize_arm_virtual_resistance(project, modified, master=master)
+    instrumented = tmp_path / "observed.pscx"
+    contract = fault_channels.instrument_fault_channels(modified, instrumented, library=library, master=master)
+    assert fault_channels.verify_fault_instrumentation(instrumented, contract)["matched"] is True
+
+
 def test_owned_session_is_cleaned_when_status_raises(monkeypatch):
     import asyncio
 
