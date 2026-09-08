@@ -15,6 +15,36 @@ SHELLS = [value for value in dict.fromkeys((shutil.which("powershell.exe"), shut
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows PowerShell runner coverage")
 @pytest.mark.parametrize("shell", SHELLS)
+@pytest.mark.parametrize("python_exit, expected", [(2, 2), (0, 1)])
+def test_dynamic_post_run_preserves_preflight_failure_without_pid(tmp_path, shell, python_exit, expected):
+    script = Path(__file__).resolve().parents[1] / "scripts" / "run_fixed_lcc_dynamic_acceptance.ps1"
+    report = tmp_path / "report.json"
+    report.write_text(json.dumps({"runtime": {"managed_pid": None}, "status": "FAIL", "engineering_verdict": "FAIL"}))
+    def quote(value):
+        return "'" + str(value).replace("'", "''") + "'"
+
+    command = (
+        "$ErrorActionPreference='Stop'; $tokens=$null; $errors=$null; "
+        f"$ast=[System.Management.Automation.Language.Parser]::ParseFile({quote(script)},[ref]$tokens,[ref]$errors); "
+        "$outer=$ast.Find({param($n) $n -is [System.Management.Automation.Language.TryStatementAst]},$false); "
+        "$statements=$outer.Body.Statements; "
+        "$assignment=$statements | Where-Object {$_.Extent.Text -eq '$ExitCode = $LASTEXITCODE'} | Select-Object -First 1; "
+        "if (-not $assignment) {throw 'Post-run boundary unavailable'}; "
+        "$post=$statements | Where-Object {$_.Extent.StartOffset -gt $assignment.Extent.EndOffset}; "
+        "$block=[scriptblock]::Create(($post | ForEach-Object {$_.Extent.Text}) -join [Environment]::NewLine); "
+        "$env:PSCAD_MCP_ACCEPTANCE_CONCURRENT='1'; "
+        f"$Report={quote(report)}; $ExitCode={python_exit}; "
+        "try { & $block } catch {Write-Output ('POST_ERROR='+$_.Exception.Message); $ExitCode=1}; Write-Output ('POST_EXIT='+$ExitCode)"
+    )
+    # Each PowerShell version must discover its own bundled utility modules.
+    env = {key: value for key, value in os.environ.items() if key.casefold() != "psmodulepath"}
+    result = subprocess.run([shell, "-NoProfile", "-Command", command], capture_output=True, text=True, timeout=30, env=env)
+    assert result.returncode == 0, result.stderr
+    assert f"POST_EXIT={expected}" in result.stdout
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows PowerShell runner coverage")
+@pytest.mark.parametrize("shell", SHELLS)
 @pytest.mark.parametrize("exit_code", [0, 7])
 def test_native_stderr_is_captured_without_losing_exit_code(shell, exit_code):
     helper = Path(__file__).resolve().parents[1] / "scripts" / "acceptance_test_command.ps1"

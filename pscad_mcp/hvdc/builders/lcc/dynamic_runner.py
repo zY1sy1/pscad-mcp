@@ -19,6 +19,12 @@ from typing import Any
 
 from ....core.backend.base import BackendError
 from ....core.process_inventory import list_pscad_processes
+from ....acceptance.process_scope import (
+    concurrent_acceptance_enabled,
+    managed_acceptance_pid,
+    remaining_acceptance_processes,
+    require_acceptance_ownership,
+)
 from .dynamic_acceptance import (
     FAIL,
     INCOMPLETE,
@@ -311,6 +317,15 @@ def _owned(entry: Mapping[str, Any], run_id: str, managed_pid: Any) -> bool:
     return managed_pid is not None and entry.get("pid") == managed_pid
 
 
+async def _remaining_runtime_processes(
+    runtime: Mapping[str, Any], process_reader: Callable[[], Any],
+) -> list[dict[str, Any]]:
+    if concurrent_acceptance_enabled() and process_reader is list_pscad_processes:
+        return remaining_acceptance_processes(runtime, process_reader)
+    observed = [dict(item) for item in (await _maybe(process_reader()) or []) if isinstance(item, Mapping)]
+    return remaining_acceptance_processes(runtime, lambda: observed)
+
+
 async def run_fixed_lcc_dynamic_acceptance(
     request: DynamicLccRunRequest,
     *,
@@ -377,16 +392,20 @@ async def run_fixed_lcc_dynamic_acceptance(
         if request.preflight.get("status") != PASS:
             raise _error(stage, "static preflight failed", "LCC_DYNAMIC_PREFLIGHT_FAILED")
         existing_processes = await _maybe(process_reader())
-        if existing_processes:
+        if existing_processes and not concurrent_acceptance_enabled():
             raise _error(stage, "pre-existing PSCAD processes detected", "LCC_DYNAMIC_PROCESS_PREFLIGHT_FAILED")
         stage = "attach"
         await _maybe(service.attach_local())
         status = await _maybe(service.status())
         if isinstance(status, Mapping):
             session = status.get("session")
-            managed_pid = session.get("managed_pid") if isinstance(session, Mapping) else None
+            raw_pid = session.get("managed_pid") if isinstance(session, Mapping) else None
+            managed_pid = managed_acceptance_pid(status)
             report["runtime"].update({k: status.get(k) for k in ("backend", "version", "x64", "licensed") if k in status})
             report["runtime"]["managed_pid"] = managed_pid
+            if raw_pid is not None and managed_pid is None:
+                raise _error(stage, "The vendor returned an invalid managed PSCAD PID.", "LCC_DYNAMIC_OWNERSHIP_INVALID")
+        require_acceptance_ownership(report["runtime"])
         stage = "plan"
         plan = builder.plan_model(project_name=request.project_name, folder=str(request.workspace_root), simulation_duration_s=request.simulation_duration_s, blueprint="cigre_lcc_monopole_v1", verification_profile="wp1c_dynamic")
         if not isinstance(plan, Mapping) or not isinstance(plan.get("plan_hash"), str):
@@ -565,7 +584,7 @@ async def run_fixed_lcc_dynamic_acceptance(
                 except BaseException as error:  # noqa: BLE001 - cleanup controls verdict
                     cleanup_error = cleanup_error or error
         try:
-            remaining = [dict(item) for item in (await _maybe(process_reader()) or []) if isinstance(item, Mapping)]
+            remaining = await _remaining_runtime_processes(report["runtime"], process_reader)
         except BaseException as error:  # noqa: BLE001 - process evidence controls verdict
             remaining = []
             cleanup_error = cleanup_error or error
@@ -577,7 +596,7 @@ async def run_fixed_lcc_dynamic_acceptance(
                 except BaseException as error:  # noqa: BLE001 - cleanup controls verdict
                     cleanup_error = cleanup_error or error
         try:
-            remaining = [dict(item) for item in (await _maybe(process_reader()) or []) if isinstance(item, Mapping)]
+            remaining = await _remaining_runtime_processes(report["runtime"], process_reader)
             owned_remaining = [item for item in remaining if _owned(item, report["run_id"], managed_pid)]
         except BaseException as error:  # noqa: BLE001 - process evidence controls verdict
             cleanup_error = cleanup_error or error

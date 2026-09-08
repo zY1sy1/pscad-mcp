@@ -78,11 +78,12 @@ try {
     if (Test-Path -LiteralPath $Report -PathType Leaf) {
         $Payload = Get-Content -LiteralPath $Report -Raw | ConvertFrom-Json
         if ($env:PSCAD_MCP_ACCEPTANCE_CONCURRENT -eq '1') {
-            if (-not ($Payload.runtime.managed_pid -gt 0)) {
+            if ($Payload.runtime.managed_pid -gt 0) {
+                if (Get-Process -Id $Payload.runtime.managed_pid -ErrorAction SilentlyContinue) {
+                    throw 'The owned PSCAD process remained after dynamic acceptance.'
+                }
+            } elseif ($ExitCode -eq 0) {
                 throw 'Concurrent acceptance did not record its managed PSCAD PID.'
-            }
-            if (Get-Process -Id $Payload.runtime.managed_pid -ErrorAction SilentlyContinue) {
-                throw 'The owned PSCAD process remained after dynamic acceptance.'
             }
         }
         $Hash = (Get-FileHash -LiteralPath $Report -Algorithm SHA256).Hash.ToLowerInvariant()

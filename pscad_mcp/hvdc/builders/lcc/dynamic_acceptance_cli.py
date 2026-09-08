@@ -20,6 +20,7 @@ from ....core.backend.legacy import LegacyBackend
 from ....core.executor import robust_executor
 from ....core.path_policy import PathPolicy
 from ....core.process_inventory import list_pscad_processes
+from ....acceptance.process_scope import acceptance_launch_policy
 from ....core.service import PscadService
 from .dynamic_acceptance import (
     FAIL,
@@ -283,6 +284,7 @@ def _service_factory(request: DynamicLccRunRequest) -> tuple[Any, Any]:
         definition_paths={"master": request.master_path},
         legacy_minimize=True,
         process_probe=list_pscad_processes,
+        legacy_existing_policy=acceptance_launch_policy(),
     )
     service = PscadService(
         lambda: backend,
