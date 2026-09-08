@@ -9,6 +9,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+. (Join-Path $PSScriptRoot 'acceptance_test_command.ps1')
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $virtualEnvironment = Join-Path $repoRoot ".venv"
 $python = Join-Path $virtualEnvironment "Scripts\python.exe"
@@ -83,7 +84,7 @@ for ($index = 0; $index -lt $manifestCases.Count; $index++) {
 
 $existing = @(Get-Process -ErrorAction SilentlyContinue |
     Where-Object { $_.ProcessName -like "PSCAD*" })
-if ($existing.Count -gt 0) {
+if ($existing.Count -gt 0 -and $env:PSCAD_MCP_ACCEPTANCE_CONCURRENT -ne '1') {
     $summary = ($existing | ForEach-Object {
         "$($_.Id):$($_.ProcessName)"
     }) -join ", "
@@ -129,9 +130,11 @@ try {
 
     Push-Location $repoRoot
     try {
-        & $python -m pytest tests/test_topology_real_acceptance.py -q -s 2>&1 |
-            Tee-Object -Variable capturedOutput
-        $pytestExitCode = $LASTEXITCODE
+        $testResult = Invoke-AcceptanceTestCommand -Executable $python -ArgumentList @(
+            '-m', 'pytest', 'tests/test_topology_real_acceptance.py', '-q', '-s'
+        )
+        $capturedOutput = $testResult.Output
+        $pytestExitCode = $testResult.ExitCode
     } finally {
         Pop-Location
     }

@@ -17,6 +17,11 @@ from pathlib import Path
 from typing import Any
 
 from ..core.process_inventory import list_pscad_processes
+from .process_scope import (
+    concurrent_acceptance_enabled,
+    remaining_acceptance_processes,
+    require_acceptance_ownership,
+)
 from ..core.service import discover_output_candidates
 
 
@@ -76,8 +81,7 @@ def _module_finder(name: str) -> bool:
         return False
 
 
-def _process_reader() -> list[dict[str, object]]:
-    return list_pscad_processes()
+_process_reader = list_pscad_processes
 
 
 def _workspace_write_probe(workspace: Path) -> bool:
@@ -197,7 +201,7 @@ def run_static_preflight(
         )
     )
     automation_ok = module_finder(request.automation_module)
-    processes_ok = not processes
+    processes_ok = concurrent_acceptance_enabled() or not processes
     read_only_sources_ok = all(
         source.is_file() and not source.is_symlink()
         for source in read_only_sources
@@ -238,6 +242,7 @@ def run_static_preflight(
         "compiler_identities": compiler_identities,
         "automation_module": request.automation_module,
         "external_pscad_processes": processes,
+        "process_scope": "owned-instance" if concurrent_acceptance_enabled() else "machine",
         "read_only_source_hashes": {
             source.resolve().as_posix(): _sha256(source)
             for source in read_only_sources
@@ -276,7 +281,7 @@ async def run_licensed_session_preflight(
     workspace = workspace_root.resolve()
     existing = [dict(item) for item in process_reader()]
     projects_before = _project_inventory(workspace)
-    if existing:
+    if existing and not concurrent_acceptance_enabled():
         return {
             "schema_version": 1,
             "status": "FAIL",
@@ -303,6 +308,7 @@ async def run_licensed_session_preflight(
         attached = True
         value = await service.status()
         runtime = value if isinstance(value, Mapping) else {}
+        require_acceptance_ownership(runtime)
     except Exception as error:  # noqa: BLE001 - vendor failure is report evidence
         attach_error = _exception_record(error)
     finally:
@@ -311,7 +317,11 @@ async def run_licensed_session_preflight(
                 await service.quit_pscad(confirm=True)
             except Exception as error:  # noqa: BLE001 - cleanup failure is evidence
                 quit_error = _exception_record(error)
-    remaining = [dict(item) for item in process_reader()]
+    try:
+        remaining = remaining_acceptance_processes(runtime, process_reader)
+    except Exception as error:  # noqa: BLE001 - unknown cleanup cannot pass
+        remaining = []
+        quit_error = quit_error or _exception_record(error)
     projects_after = _project_inventory(workspace)
     runtime_ok = (
         attach_error is None
@@ -341,6 +351,7 @@ async def run_licensed_session_preflight(
         "quit_error": quit_error,
         "processes_before": existing,
         "remaining_processes": remaining,
+        "process_scope": "owned-instance" if concurrent_acceptance_enabled() else "machine",
         "projects_before": projects_before,
         "projects_after": projects_after,
     }

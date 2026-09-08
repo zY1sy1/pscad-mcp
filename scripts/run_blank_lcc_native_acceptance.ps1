@@ -35,7 +35,7 @@ if (-not $branch) { throw 'Native acceptance requires a named branch.' }
 if (@(& git -C $repoRoot status --porcelain).Count -ne 0) {
     throw 'Commit or remove repository changes before native acceptance.'
 }
-if (@(Get-Process -ErrorAction SilentlyContinue | Where-Object ProcessName -Like 'PSCAD*').Count -ne 0) {
+if ($env:PSCAD_MCP_ACCEPTANCE_CONCURRENT -ne '1' -and @(Get-Process -ErrorAction SilentlyContinue | Where-Object ProcessName -Like 'PSCAD*').Count -ne 0) {
     throw 'Close existing PSCAD processes before native acceptance.'
 }
 $null = New-Item -ItemType Directory -Path $Workspace -Force
@@ -86,7 +86,14 @@ if (
 ) {
     throw 'Native LCC source_after evidence differs from source_before.'
 }
-if (@(Get-Process -ErrorAction SilentlyContinue | Where-Object ProcessName -Like 'PSCAD*').Count -ne 0) {
+$remaining = @(Get-Process -ErrorAction SilentlyContinue | Where-Object ProcessName -Like 'PSCAD*')
+if ($env:PSCAD_MCP_ACCEPTANCE_CONCURRENT -eq '1') {
+    if (-not ($payload.runtime.managed_pid -gt 0)) {
+        throw 'Concurrent acceptance did not record its managed PSCAD PID.'
+    }
+    $remaining = @($remaining | Where-Object { $_.Id -eq $payload.runtime.managed_pid })
+}
+if ($remaining.Count -ne 0) {
     throw 'Native LCC acceptance left PSCAD processes running.'
 }
 $reportHash = (Get-FileHash -LiteralPath $report -Algorithm SHA256).Hash.ToLowerInvariant()

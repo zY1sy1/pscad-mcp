@@ -37,7 +37,7 @@ try {
     if ($LASTEXITCODE -ne 0 -or $Commit -notmatch '^[0-9a-f]{40}$') {
         throw 'Unable to resolve an exact checkout HEAD.'
     }
-    if (@(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -like 'PSCAD*' }).Count -ne 0) {
+    if ($env:PSCAD_MCP_ACCEPTANCE_CONCURRENT -ne '1' -and @(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -like 'PSCAD*' }).Count -ne 0) {
         throw 'Close PSCAD processes before running licensed dynamic acceptance.'
     }
     $RunRoot = Join-Path (Resolve-Path $WorkspaceRoot).Path ("run-" + (Get-Date -Format 'yyyyMMdd-HHmmss-fff'))
@@ -72,11 +72,19 @@ try {
         --output-step 0.00005
     $ExitCode = $LASTEXITCODE
 
-    if (@(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -like 'PSCAD*' }).Count -ne 0) {
+    if ($env:PSCAD_MCP_ACCEPTANCE_CONCURRENT -ne '1' -and @(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -like 'PSCAD*' }).Count -ne 0) {
         throw 'PSCAD process remained after licensed dynamic acceptance.'
     }
     if (Test-Path -LiteralPath $Report -PathType Leaf) {
         $Payload = Get-Content -LiteralPath $Report -Raw | ConvertFrom-Json
+        if ($env:PSCAD_MCP_ACCEPTANCE_CONCURRENT -eq '1') {
+            if (-not ($Payload.runtime.managed_pid -gt 0)) {
+                throw 'Concurrent acceptance did not record its managed PSCAD PID.'
+            }
+            if (Get-Process -Id $Payload.runtime.managed_pid -ErrorAction SilentlyContinue) {
+                throw 'The owned PSCAD process remained after dynamic acceptance.'
+            }
+        }
         $Hash = (Get-FileHash -LiteralPath $Report -Algorithm SHA256).Hash.ToLowerInvariant()
         Write-Output ("FIXED_LCC_DYNAMIC_REPORT=" + (Resolve-Path $Report).Path)
         Write-Output ("FIXED_LCC_DYNAMIC_REPORT_SHA256=" + $Hash)

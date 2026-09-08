@@ -1,8 +1,7 @@
 """Opt-in acceptance tests against a licensed PSCAD 4.6.x installation.
 
-These tests are skipped unless PSCAD_MCP_ACCEPTANCE=1. The runner prepares
-independent project copies and refuses to run while another PSCAD process is
-already open, so teardown can safely verify only the processes launched here.
+These tests are skipped unless PSCAD_MCP_ACCEPTANCE=1. Concurrent mode uses
+independent project copies and tracks only vendor-returned instance PIDs.
 """
 
 from __future__ import annotations
@@ -22,6 +21,9 @@ import psutil
 
 from pscad_mcp.core.backend.legacy import LegacyBackend
 from pscad_mcp.core.executor import robust_executor
+from pscad_mcp.acceptance.process_scope import (
+    acceptance_launch_policy, concurrent_acceptance_enabled, managed_acceptance_pid,
+)
 
 
 ACCEPTANCE_ENABLED = os.getenv("PSCAD_MCP_ACCEPTANCE") == "1"
@@ -43,40 +45,40 @@ class LegacyAcceptanceCase(unittest.IsolatedAsyncioTestCase):
             version=os.getenv("PSCAD_MCP_ACCEPTANCE_VERSION", "4.6.2"),
             x64=os.getenv("PSCAD_MCP_ACCEPTANCE_X64", "true").casefold()
             in {"1", "true", "yes", "on"},
+            legacy_existing_policy=acceptance_launch_policy(),
         )
 
     async def asyncSetUp(self) -> None:
         self.before_processes = _pscad_processes()
-        self.assertEqual(
-            self.before_processes,
-            {},
-            "Acceptance refuses to attach while an unrelated PSCAD process is open.",
-        )
+        if not concurrent_acceptance_enabled():
+            self.assertEqual(
+                self.before_processes,
+                {},
+                "Acceptance refuses to attach while an unrelated PSCAD process is open.",
+            )
         self.owned_processes: dict[int, str | None] = {}
         self.backend = self._new_backend()
+        self.addAsyncCleanup(self._cleanup_owned)
         await self._attach_and_record(self.backend)
         self.launched_processes = dict(self.owned_processes)
 
     async def _attach_and_record(self, backend: LegacyBackend) -> None:
-        before = _pscad_processes()
         info = await backend.attach()
         self.assertTrue(info.alive)
         self.assertTrue(info.licensed)
         self.assertTrue(info.owns_process)
-        launched = {
-            pid: executable
-            for pid, executable in _pscad_processes().items()
-            if pid not in before
-        }
+        pid = managed_acceptance_pid(backend.session_details)
+        processes = _pscad_processes()
+        launched = {pid: processes[pid]} if pid in processes else {}
         self.assertTrue(
             launched,
-            "The backend reported ownership but no new PSCAD PID was detected.",
+            "The backend reported ownership but its managed PSCAD PID was not found.",
         )
         self.owned_processes.update(launched)
         for pid, executable in launched.items():
             print(f"ACCEPTANCE_PID={pid};EXE={executable}", flush=True)
 
-    async def asyncTearDown(self) -> None:
+    async def _cleanup_owned(self) -> None:
         teardown_error: BaseException | None = None
         if getattr(self, "backend", None) is not None:
             try:
