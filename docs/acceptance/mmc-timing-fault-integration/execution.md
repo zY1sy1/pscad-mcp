@@ -66,19 +66,19 @@ not silently change it or the physical criteria using observed samples.
 - [x] Bind source XML, Master, all compiler support files, settings, actual fault
   window, check contract and selected model recipe before mutation.
 - [x] Reject requests that cannot cover required windows before building.
-- [ ] Connect production instrumentation and contract evaluation to the actual
+- [x] Connect production instrumentation and contract evaluation to the actual
   `BlankMmcBuilderService` flow, with focused failing regressions first.
-- [ ] Preserve original sources and use exclusive derived files. Keep file
+- [x] Preserve original sources and use exclusive derived files. Keep file
   paths separate from loaded PSCAD names and verify save/readback identity.
-- [ ] Freeze output and channel-contract identities before reading; preserve
+- [x] Freeze output and channel-contract identities before reading; preserve
   failures and all relevant OUT/INF/INFX evidence without publication on FAIL
   or incomplete analysis.
-- [ ] On success publish the actual tested model and fault scenario, companion
+- [x] On success publish the actual tested model and fault scenario, companion
   and required compiler/line dependencies. Do not copy a fault-free base and
   label it the tested fault scenario.
-- [ ] Verify reload in an independent owned worker when the vendor has no
+- [x] Implement reload verification in an independent owned worker when the vendor has no
   unload API. Public builder operations must not quit unrelated sessions.
-- [ ] Run public-service tests and commit a fault-branch-compatible integration.
+- [x] Run public-service tests and commit a fault-branch-compatible integration.
 - [ ] Prepare one joint case using the timing adapter on the instrumented model.
   Control-command events and physical `fault_active` remain distinct roles.
 - [ ] Bind the original sources, each derived stage, joint schedule/check
@@ -118,3 +118,35 @@ An explicit longer run retains its duration without changing the fixed
 physical check windows; an explicit run shorter than 5 s is rejected before
 mutation. Runtime Master verification and the complete execution/publication
 flow are the next batch, so this batch alone is not physical acceptance.
+
+## Public Execution Software Gate
+
+The public flow now materializes the fixed fault, applies only the selected
+recipe, instruments the derived case, verifies runtime namespaces and settings,
+freezes the saved channel contract, and evaluates the complete frozen output
+set against the production checks. It retains failure history and output
+evidence. The runtime Master identity API (`1e79aed`) reads the connected
+installation without changing LCC binding registries.
+
+Publication requires a completed independent worker report, matching project,
+dependency and contract lineage, and verified owned cleanup. The fresh worker
+copies only frozen compiler dependencies, excluding prior compiler caches. Its
+first save permits only the verified virtual document-root rebind; other XML
+changes fail before compilation. A separate publication candidate contains the
+tested project bytes, complete original and replay evidence, compiler inputs,
+relative output index, and a manifest covering every bundle file. The first
+tested project and bundle remain unchanged.
+
+Validation requires frozen publication evidence before reading output and
+reevaluates with the fixed checks. Half-bridge structural compatibility remains
+separate from physical acceptance: intrinsic DC blocking is explicitly
+`NOT_APPLICABLE`. Missing output contracts remain `INCOMPLETE_ANALYSIS`, and
+structural results without output remain physically unevaluated. Unsettled
+owned vendor operations and unconfirmed project containment retain the lease.
+
+Software verification for this batch: 180 passed, 1 skipped across public
+service/tools, replay protocol, Master/service/LCC inventory and production MMC
+fault-channel/template-native tests. Ruff reports no remaining findings. These
+are software and synthetic protocol checks, not licensed electrical acceptance.
+No licensed integration run has occurred. B's current model remains physically
+unaccepted; joint execution must wait for its accepted final inputs.

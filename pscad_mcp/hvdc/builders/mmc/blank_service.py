@@ -15,12 +15,14 @@ import hashlib
 import hmac
 import json
 import math
+import os
 import re
 import shutil
 import threading
 import time
 import uuid
 from collections.abc import Callable, Mapping
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 from xml.etree import ElementTree as ET
@@ -29,11 +31,25 @@ from ....core.backend.base import BackendError
 from ....core.path_policy import PathPolicy
 from ....core.service import ConfirmationRequired
 from ....runtime import PendingCleanupError
-from ..lcc.executor import _select_output_dataset
 from .blank import BlankMmcRequest
-from .fault_channels import default_fault_checks
+from .fault_channels import (
+    default_fault_checks,
+    finalize_fault_instrumentation,
+    instrument_fault_channels,
+    materialize_dc_feedback_filter,
+    materialize_voltage_control_headroom,
+    read_fault_output_dataset,
+    snapshot_output_dataset,
+    verify_fault_instrumentation,
+    verify_output_dataset,
+)
 from .journal import AtomicJournal, WorkspaceBuildLease
-from .line_constants import extract_tline_segments, render_tli
+from .line_constants import (
+    extract_tline_segments,
+    generate_public_line_constants,
+    rebind_template_line_constants,
+    render_tli,
+)
 from .models import SubmoduleTopology
 from .template_audit import (
     audit_mmc_template,
@@ -193,11 +209,16 @@ def _line_contract(source: Path, master: Path, audit: Mapping[str, Any]) -> dict
 class BlankMmcBuilderService:
     """Plan and (when supported) execute an official-template blank MMC case."""
 
-    def __init__(self, pscad_service: Any, *, workspace_root: str | Path, audit_loader: Callable[..., Any] = audit_mmc_template) -> None:
+    def __init__(self, pscad_service: Any, *, workspace_root: str | Path, audit_loader: Callable[..., Any] = audit_mmc_template, replay_verifier: Callable[..., Any] | None = None) -> None:
         self.pscad_service = pscad_service
         self.workspace_root = _workspace(workspace_root)
         self.path_policy = PathPolicy(workspace_root=str(self.workspace_root))
         self.audit_loader = audit_loader
+        self._replay_verifier = replay_verifier
+        self._settlements: dict[str, tuple[Any, ...]] = {}
+        self._cleanup_waiters: dict[str, asyncio.Future[Any]] = {}
+        self._cleanup_tasks: dict[str, asyncio.Task[Any]] = {}
+        self._cleanup_lock = asyncio.Lock()
         self._plans: dict[str, dict[str, Any]] = {}
         self._statuses: dict[str, dict[str, Any]] = {}
         self._tasks: dict[str, asyncio.Task[Any]] = {}
@@ -396,6 +417,7 @@ class BlankMmcBuilderService:
         journal: AtomicJournal,
         lease: WorkspaceBuildLease,
     ) -> dict[str, Any]:
+        record = self._statuses[build_id]
         try:
             record = await _execute_native_mmc_plan(
                 plan,
@@ -403,52 +425,80 @@ class BlankMmcBuilderService:
                 self.workspace_root,
                 build_id=build_id,
                 journal=journal,
+                record=record,
+                audit_loader=self.audit_loader,
+                replay_verifier=self._replay_verifier,
             )
         except asyncio.CancelledError:
-            record = {
-                "build_id": build_id,
-                "state": "interrupted",
-                "plan_hash": plan["plan_hash"],
-                "plan": copy.deepcopy(plan),
-                "error": _error(
+            record.update({
+                "state": "interrupted", "error": _error(
                     "MMC_BUILD_FAILED",
                     "The blank MMC build was interrupted.",
                     "build_blank_mmc_model",
                 ).to_dict(),
-                "result": None,
-                "history": [{"state": "validated"}, {"state": "interrupted"}],
-                "workspace": str(self.workspace_root),
-            }
+            })
+            record["history"].append({"state": "interrupted"})
         except BaseException as error:  # noqa: BLE001 - lifecycle records capture vendor failures
             backend_error = (
                 error
                 if isinstance(error, BackendError)
                 else _error(
                     "MMC_BUILD_FAILED",
-                    "The blank MMC build failed.",
+                    str(error),
                     "build_blank_mmc_model",
                     exception=type(error).__name__,
                 )
             )
-            record = {
-                "build_id": build_id,
-                "state": "failed",
-                "plan_hash": plan["plan_hash"],
-                "plan": copy.deepcopy(plan),
-                "error": backend_error.to_dict(),
-                "result": None,
-                "history": [
-                    {"state": "validated"},
-                    {"state": "failed", "reason": backend_error.code},
-                ],
-                "workspace": str(self.workspace_root),
-            }
+            record.update({"state": "failed", "error": backend_error.to_dict()})
+            record["history"].append({"state": "failed", "reason": backend_error.code})
         finally:
             self._statuses[build_id] = record
-            journal.write(record)
-            lease.release(lease.token)
-            self._leases.pop(build_id, None)
+            self._settlements[build_id] = _owned_native_settlements(self.pscad_service, asyncio.current_task())
+            await self._finish_native_cleanup(build_id)
         return record
+
+    async def _finish_native_cleanup(self, build_id: str, timeout_s: float = 30.0) -> None:
+        async with self._cleanup_lock:
+            lease = self._leases.get(build_id)
+            if lease is None:
+                return
+            record = self._statuses[build_id]
+            pending = await _contain_native_failure(self.pscad_service, record, self._settlements.get(build_id, ()), timeout_s=timeout_s)
+            self._settlements[build_id] = pending
+            record["pending_vendor_calls"] = len(pending)
+            safe = record["containment"]["confirmed"] is True and not pending
+            record["lease_retained"] = not safe
+            AtomicJournal(self.workspace_root, build_id).write(record)
+            if safe:
+                lease.release(lease.token)
+                self._leases.pop(build_id, None)
+                self._settlements.pop(build_id, None)
+                waiter = self._cleanup_waiters.pop(build_id, None)
+                if waiter is not None and not waiter.done():
+                    waiter.set_result(None)
+                return
+            if build_id not in self._cleanup_waiters:
+                self._cleanup_waiters[build_id] = asyncio.get_running_loop().create_future()
+            loop = asyncio.get_running_loop()
+
+            def retry_on_loop() -> None:
+                if build_id in self._leases and build_id not in self._cleanup_tasks:
+                    task = loop.create_task(self._finish_native_cleanup(build_id))
+                    self._cleanup_tasks[build_id] = task
+
+                    def finished(done: asyncio.Task[Any]) -> None:
+                        self._cleanup_tasks.pop(build_id, None)
+                        if not done.cancelled():
+                            done.exception()
+
+                    task.add_done_callback(finished)
+
+            def settled(_: Any) -> None:
+                if not any(not token.settled for token in pending) and not loop.is_closed():
+                    loop.call_soon_threadsafe(retry_on_loop)
+
+            for token in pending:
+                token.add_done_callback(settled)
 
     def _task_done(self, build_id: str, task: asyncio.Task[Any]) -> None:
         try:
@@ -535,6 +585,7 @@ class BlankMmcBuilderService:
             "accepted": False,
             "output_file": None,
             "acceptance": {"status": "not_evaluated", "verdict": "not_evaluated"},
+            "acceptance_scope": {"intrinsic_dc_fault_blocking": "NOT_APPLICABLE" if topology_name == "half_bridge" else "not_evaluated"},
             "native_template": native_audit,
             "capabilities": SubmoduleTopology.capabilities(
                 SubmoduleTopology.FULL_BRIDGE
@@ -544,37 +595,37 @@ class BlankMmcBuilderService:
             if topology_name in {"full_bridge", "half_bridge"}
             else {"intrinsic_dc_fault_blocking": False},
         }
-        if output_file is None:
+        bundle = candidate.with_suffix(".bundle")
+        if not (bundle / "manifest.json").exists():
+            if output_file is not None:
+                result["acceptance"] = {
+                    "status": "not_evaluated", "verdict": "INCOMPLETE_ANALYSIS",
+                    "reason": "No frozen publication, channel and output contracts accompany this project.",
+                }
             return result
-        raw_output = Path(output_file).expanduser()
-        if raw_output.is_symlink():
-            raise _error(
-                "MMC_LAYOUT_INVALID",
-                "The MMC output must not be a symbolic link.",
-                "validate_blank_mmc_model",
-                output_file=str(raw_output),
-            )
-        output = raw_output.resolve()
-        try:
-            output.relative_to(self.workspace_root)
-        except ValueError as error:
-            raise _error("MMC_LAYOUT_INVALID", "The MMC output is outside the workspace.", "validate_blank_mmc_model") from error
+        publication, contract, checks, output_identity = _load_publication_evidence(candidate)
+        output = Path(output_identity["primary"])
+        if output_file is not None:
+            requested_output = Path(output_file).expanduser()
+            if not requested_output.is_absolute():
+                requested_output = self.workspace_root / requested_output
+            if requested_output.is_symlink() or requested_output.resolve() != output:
+                raise _error("MMC_OUTPUT_IDENTITY_CHANGED", "The requested output is not the tested publication dataset.", "validate_blank_mmc_model")
         reader = getattr(self.pscad_service, "read_output_file", None)
         if not callable(reader):
             raise _error("MMC_OUTPUT_INCOMPLETE", "The PSCAD service does not expose an output reader.", "validate_blank_mmc_model")
-        samples = _run_sync(lambda: _read_async(reader, str(output)))
-        if topology_name not in {"full_bridge", "half_bridge"}:
-            acceptance = {
-                "verdict": "INCOMPLETE_ANALYSIS",
-                "reason": "The MMC template topology was not explicitly audited.",
-            }
-        else:
-            topology = SubmoduleTopology(topology_name)
-            acceptance = evaluate_template_native_dc_fault(
-                samples,
-                fault_current_limit_ka=20.0,
-                topology=topology,
-            )
+        samples = _run_sync(lambda: read_fault_output_dataset(reader, str(output), contract, started_after=output_identity["started_after"]))
+        if samples.get("identity") != output_identity:
+            raise _error("MMC_OUTPUT_IDENTITY_CHANGED", "Validation read a different output dataset.", "validate_blank_mmc_model")
+        topology = SubmoduleTopology(publication["plan"]["request"]["submodule_topology"])
+        acceptance = evaluate_template_native_dc_fault(samples, channel_contract=contract, checks_contract=checks,
+            fault_current_limit_ka=checks["fault_current_limit_ka"], topology=topology)
+        _load_publication_evidence(candidate)
+        audit_valid = audit_valid and publication["plan"]["template_native"]["submodule_topology"].get("declared") == topology.value
+        result["valid"] = audit_valid
+        result["native_template"] = native_audit or publication["plan"]["template_native"]
+        result["capabilities"] = SubmoduleTopology.capabilities(topology)
+        result["acceptance_scope"] = {"intrinsic_dc_fault_blocking": "NOT_APPLICABLE" if topology == SubmoduleTopology.HALF_BRIDGE else acceptance.get("verdict")}
         result["output_file"] = str(output)
         result["acceptance"] = {**acceptance, "status": "evaluated"}
         result["accepted"] = bool(
@@ -596,12 +647,13 @@ class BlankMmcBuilderService:
                     task.result()
                 except BaseException:  # noqa: BLE001,S110 - consume terminal cancellation
                     pass
-        for build_id, lease in tuple(self._leases.items()):
-            record = self._statuses.get(build_id)
-            if record is not None:
-                AtomicJournal(self.workspace_root, build_id).write(record)
-            lease.release(lease.token)
-            self._leases.pop(build_id, None)
+        for build_id in tuple(self._leases):
+            await self._finish_native_cleanup(build_id, timeout_s=max(0.01, timeout_s))
+        waiters = tuple(waiter for waiter in self._cleanup_waiters.values() if not waiter.done())
+        if waiters:
+            _, pending = await asyncio.wait(waiters, timeout=max(0.0, timeout_s))
+            if pending:
+                raise PendingCleanupError(tuple(pending))
 
 
 def json_bytes(value: Any) -> bytes:
@@ -610,176 +662,462 @@ def json_bytes(value: Any) -> bytes:
     return json.dumps(value, ensure_ascii=True, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("ascii")
 
 
-async def _read_async(reader: Any, output_file: str) -> Any:
-    try:
-        return await reader(output_file, max_samples=1_000_000, summary_only=False)
-    except TypeError:
-        return await reader(output_file)
+def _native_name(value: str | Path) -> str:
+    return re.sub(r"[^A-Za-z0-9_]", "_", Path(value).stem).casefold()
 
 
-async def _execute_native_mmc_plan(
-    plan: Mapping[str, Any],
-    service: Any,
-    workspace: Path,
-    *,
-    build_id: str,
-    journal: AtomicJournal,
-) -> dict[str, Any]:
-    """Run one audited official MMC template and retain incomplete evidence."""
+def _write_evidence(path: Path, value: Any) -> str:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(json_bytes(value) + b"\n")
+    return _sha256(path)
 
-    source_paths = plan["template_native"]["source_paths"]
-    source_hashes = plan["template_native"]["source_hashes"]
-    source_project = Path(str(source_paths["project"])).expanduser().resolve()
-    source_library = Path(str(source_paths["library"])).expanduser().resolve()
-    for key, path in (("project", source_project), ("library", source_library)):
-        if not path.is_file() or path.is_symlink() or _sha256(path) != str(source_hashes[key]):
-            raise _error("MMC_PLAN_STALE", "An official MMC source changed after planning.", "build_blank_mmc_model", source=key, path=str(path))
-    staging = Path(str(plan["staging_path"])).expanduser().resolve()
-    project_name = str(plan["project_name"])
-    staging.mkdir(parents=True, exist_ok=False)
-    staged_library = staging / source_library.name
-    staged_project = staging / f"{project_name}.pscx"
-    shutil.copy2(source_library, staged_library)
-    support = source_library.parent / "Obj_Files_2016_03_25"
-    if support.is_dir():
-        shutil.copytree(support, staging / support.name)
-    from ....core.backend import legacy_support
 
-    legacy_support.rewrite_template_identity(
-        source_project,
-        staged_project,
-        project_name,
-    )
-    loader = getattr(service, "load_projects", None)
-    writer = getattr(service, "set_project_settings", None)
-    settings_reader = getattr(service, "get_project_settings", None)
-    saver = getattr(service, "save_project", None)
-    builder = getattr(service, "build_project", None)
-    runner = getattr(service, "run_project", None)
-    status_reader = getattr(service, "get_run_status", None)
-    discover = getattr(service, "discover_output_files", None)
-    reader = getattr(service, "read_output_file", None)
-    required = {
-        "load_projects": loader,
-        "set_project_settings": writer,
-        "get_project_settings": settings_reader,
-        "save_project": saver,
-        "build_project": builder,
-        "run_project": runner,
-        "get_run_status": status_reader,
-        "discover_output_files": discover,
-        "read_output_file": reader,
-    }
-    missing = sorted(name for name, method in required.items() if not callable(method))
+def _checkpoint(record: dict[str, Any], journal: AtomicJournal, state: str, **values: Any) -> None:
+    record["state"] = state
+    record.update(values)
+    record.setdefault("history", []).append({"state": state, "at": time.time()})
+    journal.write(record)
+
+
+def _verify_frozen_plan(plan: Mapping[str, Any]) -> None:
+    payload = {key: value for key, value in plan.items() if key not in {"plan_hash", "status"}}
+    if hashlib.sha256(json_bytes(payload)).hexdigest() != plan.get("plan_hash"):
+        raise _error("MMC_PLAN_STALE", "The immutable build plan changed.", "build_blank_mmc_model")
+    if plan.get("checks_contract") != default_fault_checks():
+        raise _error("MMC_PLAN_STALE", "The planned physical checks differ from the production contract.", "build_blank_mmc_model")
+    if plan.get("checks_sha256") != hashlib.sha256(json_bytes(plan["checks_contract"])).hexdigest():
+        raise _error("MMC_PLAN_STALE", "The physical check identity differs from the frozen plan.", "build_blank_mmc_model")
+
+
+def _verify_plan_inputs(plan: Mapping[str, Any], audit_loader: Callable[..., Any]) -> None:
+    _verify_frozen_plan(plan)
+    for identity in plan["source_identities"].values():
+        if _identity(Path(identity["path"])) != identity:
+            raise _error("MMC_PLAN_STALE", "An immutable source changed.", "build_blank_mmc_model", expected=identity)
+    source = Path(plan["source_identities"]["project"]["path"])
+    library = Path(plan["source_identities"]["library"]["path"])
+    master = Path(plan["source_identities"]["master"]["path"])
+    audit = audit_loader(str(source), str(library))
+    if hasattr(audit, "to_dict"):
+        audit = audit.to_dict()
+    if _support_contract(library, audit).get("files") != plan["compiler_support"].get("files"):
+        raise _error("MMC_PLAN_STALE", "The compiler-support source set changed.", "build_blank_mmc_model")
+    if _line_contract(source, master, audit) != plan["line_constants"]:
+        raise _error("MMC_PLAN_STALE", "The line-generation contract changed.", "build_blank_mmc_model")
+
+
+async def _verify_runtime_master(service: Any, expected: Mapping[str, str]) -> dict[str, Any]:
+    inventory_reader = getattr(service, "get_master_library_identity", None)
+    if not callable(inventory_reader):
+        raise _error("MMC_BUILD_UNAVAILABLE", "The connected service cannot prove its installed Master identity.", "build_blank_mmc_model")
+    observed = await inventory_reader()
+    if not isinstance(observed, Mapping) or observed.get("pscad_version") != "4.6.2" or observed.get("master_sha256") != expected["sha256"] or Path(str(observed.get("master_path", ""))).resolve() != Path(expected["path"]).resolve():
+        raise _error("MASTER_SOURCE_CHANGED", "The connected PSCAD Master differs from the planned input.", "build_blank_mmc_model", expected=dict(expected), observed=observed)
+    return dict(observed)
+
+
+def _copy_frozen(origin: Path, destination: Path, digest: str) -> dict[str, str]:
+    if _identity(origin)["sha256"] != digest or destination.exists() or destination.is_symlink():
+        raise _error("MMC_PLAN_STALE", "A dependency changed or its copy destination is occupied.", "build_blank_mmc_model", source=str(origin), destination=str(destination))
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(origin, destination)
+    if _sha256(destination) != digest or _sha256(origin) != digest:
+        raise _error("MMC_PLAN_STALE", "A dependency changed while copying.", "build_blank_mmc_model", source=str(origin))
+    return {"source": str(origin), "path": str(destination), "sha256": digest}
+
+
+def _verify_copies(copies: list[dict[str, str]]) -> None:
+    for item in copies:
+        if _identity(Path(item["path"]))["sha256"] != item["sha256"] or _identity(Path(item["source"]))["sha256"] != item["sha256"]:
+            raise _error("MMC_PLAN_STALE", "A copied dependency or its frozen source changed.", "build_blank_mmc_model", file=item)
+
+
+async def _stage_dependencies(plan: Mapping[str, Any], staging: Path, bundle: Path, record: dict[str, Any]) -> tuple[Path, Path]:
+    source = Path(plan["source_identities"]["project"]["path"])
+    library = Path(plan["source_identities"]["library"]["path"])
+    copies = record.setdefault("dependency_copies", [])
+    staged_library = bundle / library.name
+    copies.append(_copy_frozen(library, staged_library, plan["source_identities"]["library"]["sha256"]))
+    for item in plan["compiler_support"]["files"]:
+        copies.append(_copy_frozen(Path(item["path"]), bundle / item["relative_path"], item["sha256"]))
+    lines = plan["line_constants"]
+    if lines["mode"] == "none":
+        return source, staged_library
+    generation = staging / "line-generation"
+    generation.mkdir()
+    artifacts = await asyncio.to_thread(generate_public_line_constants, source, generation, executable=lines["executable"]["path"])
+    requested = {item["name"]: item["input_sha256"] for item in lines["inputs"]}
+    if {item.segment: item.input_sha256 for item in artifacts} != requested:
+        raise _error("MMC_PLAN_STALE", "Generated line inputs differ from the frozen plan.", "build_blank_mmc_model")
+    record["line_generation"] = [item.to_dict() for item in artifacts]
+    rebound = []
+    for artifact in artifacts:
+        for label in ("input", "constants", "log", "output"):
+            path = Path(getattr(artifact, label + "_path"))
+            digest = getattr(artifact, label + "_sha256")
+            if digest:
+                copies.append(_copy_frozen(path, bundle / "lines" / path.name, digest))
+        rebound.append(replace(artifact, constants_path=(Path(bundle.name) / "lines" / Path(artifact.constants_path).name).as_posix()))
+    target = staging / "line_bound_source.pscx"
+    rebind_template_line_constants(source, tuple(rebound), target)
+    return target, staged_library
+
+
+def _required_service_methods(service: Any) -> None:
+    required = ("list_projects", "load_projects", "set_project_settings", "get_project_settings", "save_project", "build_project", "run_project", "get_run_status", "discover_output_files", "read_output_file")
+    missing = [name for name in required if not callable(getattr(service, name, None))]
     if missing:
-        raise _error("MMC_BUILD_UNAVAILABLE", "The PSCAD service lacks native blank MMC lifecycle capabilities.", "build_blank_mmc_model", missing=missing)
-    await loader([str(staged_library), str(staged_project)])
-    requested = {
-        "time_duration": str(plan["settings"]["simulation_duration_s"]),
-        "time_step": "50",
-        "sample_step": "250",
-        "PlotType": "1",
-        "output_filename": f"{project_name}.out",
-    }
-    await writer(project_name, requested)
-    observed = await settings_reader(project_name)
+        raise _error("MMC_BUILD_UNAVAILABLE", "The service lacks required native fault lifecycle capabilities.", "build_blank_mmc_model", missing=missing)
+
+
+async def _admit_case(service: Any, project: Path, library: Path) -> str:
+    before = await service.list_projects()
+    expected = {project.stem: project, library.stem: library}
+    if len({_native_name(name) for name in expected}) != len(expected):
+        raise _error("MMC_BUILD_CONFLICT", "Project and library runtime names collide.", "build_blank_mmc_model")
+    collisions = [item for item in before if _native_name(str(item.get("name", ""))) in {_native_name(name) for name in expected}]
+    if collisions:
+        raise _error("MMC_BUILD_CONFLICT", "A required runtime namespace is already loaded.", "build_blank_mmc_model", projects=collisions)
+    await service.load_projects([str(library), str(project)])
+    inventory = await service.list_projects()
+    for name, path in expected.items():
+        matches = [item for item in inventory if str(item.get("name", "")).casefold() == name.casefold()]
+        if len(matches) != 1:
+            raise _error("MMC_POSTCONDITION_FAILED", "The loaded namespace is not unique.", "build_blank_mmc_model", name=name, inventory=inventory)
+        actual = matches[0].get("filename", matches[0].get("file_path"))
+        if actual is not None and Path(str(actual)).resolve() != path.resolve():
+            raise _error("MMC_POSTCONDITION_FAILED", "The loaded filename differs from its staged input.", "build_blank_mmc_model", expected=str(path), observed=actual)
+    return next(item["name"] for item in inventory if str(item.get("name", "")).casefold() == project.stem.casefold())
+
+
+async def _run_native_fault_case(service: Any, project: Path, library: Path, contract: dict[str, Any], checks: Mapping[str, Any], settings: Mapping[str, Any], evidence: Path, record: dict[str, Any], checkpoint: Callable[..., None]) -> tuple[dict[str, Any], dict[str, Any]]:
+    _required_service_methods(service)
+    name = await _admit_case(service, project, library)
+    record["runtime_project_name"] = name
+    record["runtime_library_path"] = str(library)
+    requested = {"time_duration": str(settings["simulation_duration_s"]), "time_step": format(settings["time_step_s"] * 1e6, ".12g"), "sample_step": format(settings["output_step_s"] * 1e6, ".12g"), "PlotType": "1", "output_filename": project.stem + ".out", "StartType": "0", "startup_filename": ""}
+    await service.set_project_settings(name, requested)
+    observed = await service.get_project_settings(name)
     if not isinstance(observed, Mapping) or any(str(observed.get(key)) != value for key, value in requested.items()):
-        raise _error("MMC_POSTCONDITION_FAILED", "Native MMC project settings did not read back exactly.", "build_blank_mmc_model", expected=requested, observed=observed)
-    await saver(project_name, confirm=True)
-    await builder(project_name)
-    scenario = staging / f"{project_name}_scenario_source.pscx"
-    materialize_template_native_scenario(
-        staged_project,
-        scenario,
-        dc_fault_time_s=float(plan["fault"]["time_s"]),
-        fault_duration_s=float(plan["fault"]["removal_time_s"] - plan["fault"]["time_s"]),
-    )
-    await loader([str(staged_library), str(scenario)])
-    await writer(scenario.stem, {**requested, "output_filename": f"{scenario.stem}.out"})
-    await saver(scenario.stem, confirm=True)
-    await builder(scenario.stem)
-    started_after = time.time()
-    await runner(scenario.stem)
+        raise _error("MMC_POSTCONDITION_FAILED", "Native project settings did not read back exactly.", "build_blank_mmc_model", expected=requested, observed=observed)
+    await service.save_project(name, confirm=True)
+    contract["required_checks"] = copy.deepcopy(dict(checks))
+    contract = finalize_fault_instrumentation(project, contract)
+    channel_path = evidence / "channels.json"
+    record["result"].update({"channel_contract_path": str(channel_path), "channel_contract_sha256": _write_evidence(channel_path, contract), "tested_project_sha256": _sha256(project)})
+    checkpoint("saved_and_bound")
+    await service.build_project(name)
+    messages_reader = getattr(service, "get_project_output", None)
+    if callable(messages_reader):
+        messages = await messages_reader(name, structured=True)
+        record["messages"] = messages
+        failures = [item for item in messages if str(item.get("severity", "")).casefold() in {"error", "fatal"}]
+        if failures:
+            raise _error("MMC_BUILD_FAILED", "Native fault compilation failed.", "build_blank_mmc_model", messages=failures)
+    verify_fault_instrumentation(project, contract)
+    checkpoint("compiled")
+    started = time.time()
+    record["run_started_after"] = started
+    record["run_started"] = True
+    checkpoint("running")
+    await service.run_project(name)
     deadline = time.monotonic() + 900.0
     while True:
-        state = await status_reader(scenario.stem)
+        state = await service.get_run_status(name)
         value = _status_value(state)
-        if value in _TERMINAL_FAILURE:
-            raise _error("MMC_BUILD_FAILED", "The native MMC simulation failed.", "build_blank_mmc_model", status=state)
+        if value in _TERMINAL_FAILURE or value == "stopped":
+            raise _error("MMC_BUILD_FAILED", "The native fault run failed or was stopped.", "build_blank_mmc_model", project_status=state)
         if value in _TERMINAL_SUCCESS:
             break
         if time.monotonic() >= deadline:
-            raise _error("MMC_BUILD_TIMED_OUT", "The native MMC simulation did not finish in time.", "build_blank_mmc_model")
+            raise _error("MMC_BUILD_TIMED_OUT", "The native fault run exceeded its deadline.", "build_blank_mmc_model")
         await asyncio.sleep(0.25)
-    paths = await discover(str(scenario), started_after=started_after, max_files=32)
-    candidates = sorted({str(Path(path).expanduser().resolve()) for path in paths if isinstance(path, str) and path}, key=str.casefold)
-    for path in candidates:
-        candidate = Path(path)
-        if candidate.is_symlink() or not candidate.is_file():
-            raise _error("MMC_OUTPUT_INCOMPLETE", "A native MMC output is not a regular file.", "build_blank_mmc_model", path=path)
-        try:
-            candidate.relative_to(staging)
-        except ValueError as error:
-            raise _error("MMC_OUTPUT_INCOMPLETE", "A native MMC output escaped staging.", "build_blank_mmc_model", path=path) from error
-    if not candidates:
-        raise _error("MMC_OUTPUT_INCOMPLETE", "The native MMC simulation produced no output.", "build_blank_mmc_model")
-    output_file, output_parts = _select_output_dataset(candidates)
-    samples = await reader(output_file, max_samples=1_000_000, summary_only=False)
-    topology = SubmoduleTopology(plan["request"]["submodule_topology"])
-    acceptance = evaluate_template_native_dc_fault(samples, fault_current_limit_ka=20.0, topology=topology)
-    target = Path(str(plan["target_path"])).expanduser().resolve()
-    archive = target.with_name(f"{target.stem}.outputs")
-    if archive.exists() or archive.is_symlink():
-        raise _error("MMC_BUILD_CONFLICT", "The native MMC output evidence directory already exists.", "build_blank_mmc_model", path=str(archive))
-    archive.mkdir(parents=True, exist_ok=False)
-    archived_parts: list[str] = []
-    for path in output_parts:
-        destination = archive / Path(path).name
-        shutil.copy2(path, destination)
-        archived_parts.append(str(destination.resolve()))
-    base = re.sub(r"_\d{2}$", "", Path(output_file).stem)
-    for suffix in (".inf", ".infx"):
-        metadata = Path(output_file).with_name(base + suffix)
-        if metadata.is_file() and not metadata.is_symlink():
-            shutil.copy2(metadata, archive / metadata.name)
-    persisted_output = str(archive / Path(output_file).name)
+    record["run_completed"] = True
+    record["project_status"] = state
+    checkpoint("simulated")
+    discovered = await service.discover_output_files(str(project), started_after=started, max_files=1000)
+    candidates = sorted({str(Path(path).resolve()) for path in discovered}, key=str.casefold)
+    primary = [path for path in candidates if Path(path).name.casefold() == (project.stem + "_01.out").casefold()]
+    if len(primary) != 1 or any(not Path(path).parent.resolve().is_relative_to(project.parent.resolve()) for path in candidates):
+        raise _error("MMC_OUTPUT_INCOMPLETE", "This native case has no unique project-scoped OUT dataset.", "build_blank_mmc_model", discovered=candidates)
+    manifest = snapshot_output_dataset(primary[0], started_after=started)
+    index_path = evidence / "output-index.json"
+    record["result"].update({"output_file": primary[0], "output_index_path": str(index_path), "output_index_sha256": _write_evidence(index_path, manifest)})
+    checkpoint("outputs_frozen")
+    samples = await read_fault_output_dataset(service.read_output_file, primary[0], contract, started_after=started)
+    if samples.get("identity") != manifest:
+        raise _error("MMC_OUTPUT_IDENTITY_CHANGED", "The reader dataset differs from the pre-read frozen set.", "build_blank_mmc_model")
+    verify_output_dataset(manifest)
+    verify_fault_instrumentation(project, contract)
+    samples_path = evidence / "samples.json"
+    record["result"].update({"samples_path": str(samples_path), "samples_sha256": _write_evidence(samples_path, samples)})
+    return contract, samples
+
+
+def _owned_native_settlements(service: Any, owner: asyncio.Task[Any] | None) -> tuple[Any, ...]:
+    pending = getattr(getattr(service, "executor", None), "pending_settlements_for", None)
+    return tuple(token for token in pending(owner) if not token.settled) if callable(pending) and owner is not None else ()
+
+
+async def _contain_native_failure(service: Any, record: dict[str, Any], pending: tuple[Any, ...] = (), *, timeout_s: float = 30.0) -> tuple[Any, ...]:
+    pending = tuple(token for token in pending if not token.settled)
+    if pending:
+        record["containment"] = {"confirmed": False, "required": True, "reason": "Owned vendor calls have not settled"}
+        return pending
+    if record.get("result", {}).get("reload", {}).get("cleanup_pending"):
+        record["containment"] = {"confirmed": False, "required": True, "reason": "Independent replay ownership remains unresolved"}
+        return ()
+    if not record.get("run_started") or record.get("run_completed"):
+        record["containment"] = {"confirmed": True, "required": False}
+        return ()
+    name = record.get("runtime_project_name")
+    stop_task = None
+    try:
+        stop = getattr(service, "stop_simulation", None)
+        if not callable(stop):
+            raise _error("MMC_BUILD_UNAVAILABLE", "No project-scoped stop capability is available", "build_blank_mmc_model")
+        stop_task = asyncio.create_task(stop(name))
+        await asyncio.wait_for(stop_task, timeout=timeout_s)
+        state = await service.get_run_status(name)
+        record["containment"] = {"confirmed": _status_value(state) in _TERMINAL_SUCCESS | _TERMINAL_FAILURE, "project": name, "project_status": state}
+    except BaseException as error:  # noqa: BLE001 - do not replace the primary build failure
+        record["containment"] = {"confirmed": False, "project": name, "error": str(error)}
+    pending = tuple(dict.fromkeys((*_owned_native_settlements(service, stop_task), *_owned_native_settlements(service, asyncio.current_task()))))
+    if pending:
+        record["containment"]["confirmed"] = False
+    return pending
+
+
+async def _execute_native_mmc_plan(
+    plan: Mapping[str, Any], service: Any, workspace: Path, *,
+    build_id: str, journal: AtomicJournal, record: dict[str, Any],
+    audit_loader: Callable[..., Any], replay_verifier: Callable[..., Any] | None,
+) -> dict[str, Any]:
+    record["result"] = {}
+    checkpoint = lambda state: _checkpoint(record, journal, state)
+    _verify_plan_inputs(plan, audit_loader)
+    record["runtime_master"] = await _verify_runtime_master(service, plan["source_identities"]["master"])
+    staging = Path(plan["staging_path"])
+    target = Path(plan["target_path"])
+    if _native_name(target) in {_native_name(item["path"]) for item in plan["source_identities"].values()}:
+        raise _error("MMC_BUILD_CONFLICT", "The derived case must have a new runtime identity.", "build_blank_mmc_model")
+    staging.mkdir(parents=True, exist_ok=False)
+    bundle = staging / (target.stem + ".bundle")
+    bundle.mkdir()
+    checkpoint("staging_created")
+    source, library = await _stage_dependencies(plan, staging, bundle, record)
+    master = Path(plan["source_identities"]["master"]["path"])
+    lineage = record.setdefault("lineage", [])
+    fault = staging / "native_fault_source.pscx"
+    binding = materialize_template_native_scenario(source, fault, dc_fault_time_s=plan["fault"]["time_s"], fault_duration_s=plan["fault"]["removal_time_s"] - plan["fault"]["time_s"])
+    lineage.append({"stage": "native_fault", **binding})
+    selected = fault
+    recipe = plan["model_recipe"]
+    if recipe["name"] != "raw":
+        headroom = staging / "headroom_source.pscx"
+        lineage.append({"stage": "headroom", **materialize_voltage_control_headroom(selected, headroom, current_limit_pu=recipe["parameters"]["current_limit_pu"])})
+        selected = headroom
+    if recipe["name"] == "headroom_1p1_dc_filter_5ms":
+        filtered = staging / "filtered_source.pscx"
+        lineage.append({"stage": "dc_feedback_filter", **materialize_dc_feedback_filter(selected, filtered, master=master, time_constant_s=recipe["parameters"]["dc_feedback_time_constant_s"])})
+        selected = filtered
+    project = staging / target.name
+    contract = instrument_fault_channels(selected, project, library=library, master=master,
+        expected_source_hashes={"project": _sha256(selected), "library": plan["source_identities"]["library"]["sha256"], "master": plan["source_identities"]["master"]["sha256"]})
+    evidence = bundle / "evidence"
+    _write_evidence(evidence / "plan.json", plan)
+    _write_evidence(evidence / "checks.json", plan["checks_contract"])
+    record["result"].update({"project_file": str(project), "scenario_source": str(project), "model_recipe": copy.deepcopy(recipe)})
+    checkpoint("instrumented")
+    contract, samples = await _run_native_fault_case(service, project, library, contract, plan["checks_contract"], plan["settings"], evidence, record, checkpoint)
+    acceptance = evaluate_template_native_dc_fault(samples, channel_contract=contract, checks_contract=plan["checks_contract"],
+        fault_current_limit_ka=plan["checks_contract"]["fault_current_limit_ka"], topology=SubmoduleTopology(plan["request"]["submodule_topology"]))
+    record["result"]["acceptance"] = acceptance
+    _write_evidence(evidence / "acceptance.json", acceptance)
+    checkpoint("evaluated")
+    _verify_plan_inputs(plan, audit_loader)
+    _verify_copies(record["dependency_copies"])
     if acceptance.get("verdict") != "PASS":
-        code = "MMC_ACCEPTANCE_INCOMPLETE" if acceptance.get("verdict") == "INCOMPLETE_ANALYSIS" else "MMC_ACCEPTANCE_FAILED"
-        return {
-            "build_id": build_id,
-            "state": "failed",
-            "plan_hash": plan["plan_hash"],
-            "target_path": str(target),
-            "staging_path": str(staging),
-            "workspace": str(workspace),
-            "history": [{"state": "validated"}, {"state": "staging_created"}, {"state": "compiled"}, {"state": "simulated", "output_file": persisted_output}, {"state": "acceptance_incomplete", "verdict": acceptance.get("verdict")}],
-            "error": _error(code, "The native MMC fault evidence is not sufficient for the requested topology.", "build_blank_mmc_model", acceptance=acceptance).to_dict(),
-            "result": {"output_file": persisted_output, "output_parts": archived_parts, "acceptance": acceptance, "scenario_source": str(scenario), "template_native": dict(plan["template_native"])},
-        }
-    save_as = getattr(service, "save_project_as", None)
-    if not callable(save_as):
-        raise _error("MMC_BUILD_UNAVAILABLE", "The PSCAD service cannot publish the native MMC project.", "build_blank_mmc_model")
+        code = "MMC_ACCEPTANCE_INCOMPLETE" if acceptance.get("verdict") in {"INCOMPLETE_ANALYSIS", "NOT_APPLICABLE"} else "MMC_ACCEPTANCE_FAILED"
+        raise _error(code, "The actual native fault evidence did not satisfy the fixed production checks.", "build_blank_mmc_model", acceptance=acceptance)
+    if replay_verifier is None:
+        from .native_fault_replay import verify_native_fault_replay
+        replay_verifier = verify_native_fault_replay
+    checkpoint("verifying_reload")
+    replay = await replay_verifier(project=project, bundle=bundle, channel_contract=contract, checks_contract=plan["checks_contract"],
+        settings=plan["settings"], source_identities=plan["source_identities"],
+        dependency_files={Path(item["path"]).relative_to(bundle).as_posix(): item["sha256"] for item in record["dependency_copies"]},
+        workspace=staging / "reload-verification")
+    record["result"]["reload"] = replay
+    if replay.get("status") != "PASS" or replay.get("project_sha256") != _sha256(project) or replay.get("checks_sha256") != plan["checks_sha256"] or replay.get("owned_process_cleaned") is not True or replay.get("worker_exit_code") != 0 or replay.get("parent_channel_contract_sha256") != hashlib.sha256(json_bytes(contract)).hexdigest() or not replay.get("artifacts"):
+        raise _error("MMC_ACCEPTANCE_INCOMPLETE", "The frozen saved model did not pass independent owned replay.", "build_blank_mmc_model", replay=replay)
+    replay_report = _read_hashed_json(_bundle_file(staging / "reload-verification", "worker/report.json"), replay["report_sha256"])
+    if replay_report.get("status") != "PASS" or replay_report.get("parent_channel_contract_sha256") != replay["parent_channel_contract_sha256"]:
+        raise _error("MMC_ACCEPTANCE_INCOMPLETE", "The independent replay summary differs from its frozen worker report.", "build_blank_mmc_model")
+    _verify_plan_inputs(plan, audit_loader)
+    _verify_copies(record["dependency_copies"])
+    verify_fault_instrumentation(project, contract)
+    record["result"].update(_publish_tested_fault_case(plan, project, bundle, contract, record))
+    checkpoint("published")
+    return record
+
+
+def _bundle_file(bundle: Path, relative: str) -> Path:
+    child = Path(relative)
+    if child.is_absolute() or child.drive or ".." in child.parts or not child.parts:
+        raise _error("MMC_LAYOUT_INVALID", "A bundle member must be a relative path inside its bundle.", "validate_blank_mmc_model", path=relative)
+    path = bundle / child
+    for ancestor in (path, *path.parents):
+        if ancestor.is_symlink() or ancestor.is_junction():
+            raise _error("MMC_LAYOUT_INVALID", "Bundle members must not traverse links.", "validate_blank_mmc_model", path=str(path))
+        if ancestor == bundle:
+            break
+    if not path.is_file() or not path.resolve().is_relative_to(bundle.resolve()):
+        raise _error("MMC_OUTPUT_IDENTITY_CHANGED", "A required bundle file is absent.", "validate_blank_mmc_model", path=str(path))
+    return path.resolve()
+
+
+def _bundle_files(bundle: Path, *, omit_manifest: bool = False) -> dict[str, str]:
+    identities = {}
+    for path in sorted(bundle.rglob("*")):
+        if path.is_symlink() or path.is_junction():
+            raise _error("MMC_LAYOUT_INVALID", "Bundle members must not be links.", "validate_blank_mmc_model", path=str(path))
+        if path.is_file():
+            relative = path.relative_to(bundle).as_posix()
+            if not omit_manifest or relative != "manifest.json":
+                identities[relative] = _sha256(_bundle_file(bundle, relative))
+    return identities
+
+
+def _read_hashed_json(path: Path, digest: str) -> dict[str, Any]:
+    if _sha256(path) != digest:
+        raise _error("MMC_OUTPUT_IDENTITY_CHANGED", "Frozen evidence changed before reading.", "validate_blank_mmc_model", path=str(path))
+    value = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(value, dict) or _sha256(path) != digest:
+        raise _error("MMC_OUTPUT_IDENTITY_CHANGED", "Frozen evidence changed while reading.", "validate_blank_mmc_model", path=str(path))
+    return value
+
+
+def _load_publication_evidence(project: Path) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any]]:
+    bundle = project.with_suffix(".bundle")
+    try:
+        manifest_path = _bundle_file(bundle, "manifest.json")
+        publication = _read_hashed_json(manifest_path, _sha256(manifest_path))
+        plan = publication["plan"]
+        _verify_frozen_plan(plan)
+        if publication["project_sha256"] != _sha256(project) or _bundle_files(bundle, omit_manifest=True) != publication["bundle_files"]:
+            raise _error("MMC_OUTPUT_IDENTITY_CHANGED", "The tested project or published bundle changed.", "validate_blank_mmc_model")
+        contract = _read_hashed_json(_bundle_file(bundle, publication["channel_contract_relative_path"]), publication["channel_contract_sha256"])
+        checks = _read_hashed_json(_bundle_file(bundle, publication["checks_relative_path"]), publication["checks_file_sha256"])
+        if checks != plan["checks_contract"] or publication["checks_sha256"] != plan["checks_sha256"] or contract.get("required_checks") != checks or contract.get("vendor_finalized") is not True:
+            raise _error("MMC_OUTPUT_IDENTITY_CHANGED", "Published channel and check contracts disagree.", "validate_blank_mmc_model")
+        replay = publication["reload"]
+        parent = _read_hashed_json(_bundle_file(bundle, "evidence/channels.json"), contract["publication_parent_contract_sha256"])
+        if replay.get("status") != "PASS" or replay.get("project_sha256") != publication["project_sha256"] or replay.get("checks_sha256") != publication["checks_sha256"] or replay.get("owned_process_cleaned") is not True or replay.get("worker_exit_code") != 0 or replay.get("parent_channel_contract_sha256") != hashlib.sha256(json_bytes(parent)).hexdigest():
+            raise _error("MMC_ACCEPTANCE_INCOMPLETE", "The publication has no completed independent replay.", "validate_blank_mmc_model")
+        replay_report = _read_hashed_json(_bundle_file(bundle, "reload/worker/report.json"), replay["report_sha256"])
+        if replay_report.get("status") != "PASS" or replay_report.get("parent_channel_contract_sha256") != replay["parent_channel_contract_sha256"]:
+            raise _error("MMC_ACCEPTANCE_INCOMPLETE", "The copied replay report disagrees with its summary.", "validate_blank_mmc_model")
+        for relative, identity in replay["artifacts"].items():
+            if _sha256(_bundle_file(bundle / "reload", relative)) != identity["sha256"]:
+                raise _error("MMC_OUTPUT_IDENTITY_CHANGED", "An independent replay artifact changed.", "validate_blank_mmc_model")
+        contract["project_path"] = str(project)
+        contract["readback"]["project_path"] = str(project)
+        parent["project_path"] = str(project)
+        parent["readback"]["project_path"] = str(project)
+        if {key: value for key, value in contract.items() if key != "publication_parent_contract_sha256"} != parent:
+            raise _error("MMC_OUTPUT_IDENTITY_CHANGED", "The published channel contract differs from its tested parent.", "validate_blank_mmc_model")
+        verify_fault_instrumentation(project, contract)
+        identity = _read_hashed_json(_bundle_file(bundle, publication["output_index_relative_path"]), publication["output_index_sha256"])
+        identity["primary"] = str(_bundle_file(bundle, identity["primary"]))
+        for name, item in identity["files"].items():
+            item["path"] = str(_bundle_file(bundle, item["path"]))
+            if Path(item["path"]).name != name:
+                raise _error("MMC_OUTPUT_IDENTITY_CHANGED", "Output filename and index key disagree.", "validate_blank_mmc_model")
+        verify_output_dataset(identity)
+        if identity["primary"] != str(_bundle_file(bundle, publication["output_file_relative_path"])):
+            raise _error("MMC_OUTPUT_IDENTITY_CHANGED", "The published primary output differs from its index.", "validate_blank_mmc_model")
+        return publication, contract, checks, identity
+    except (OSError, KeyError, TypeError, ValueError) as error:
+        raise _error("MMC_OUTPUT_IDENTITY_CHANGED", "The publication evidence is missing or malformed.", "validate_blank_mmc_model", reason=str(error)) from error
+
+
+def _publish_tested_fault_case(plan: Mapping[str, Any], project: Path, bundle: Path, contract: Mapping[str, Any], record: Mapping[str, Any]) -> dict[str, Any]:
+    target = Path(plan["target_path"])
+    final_bundle = target.parent / bundle.name
+    if target.exists() or target.is_symlink() or final_bundle.exists() or final_bundle.is_symlink():
+        raise _error("MMC_BUILD_CONFLICT", "A publication destination already exists.", "build_blank_mmc_model")
+    tested_bundle = bundle
+    tested_bundle_files = _bundle_files(tested_bundle)
+    candidate = project.parent / "publication-candidate"
+    candidate.mkdir()
+    candidate_bundle = candidate / bundle.name
+    candidate_project = candidate / project.name
+    shutil.copytree(tested_bundle, candidate_bundle)
+    if _bundle_files(candidate_bundle) != tested_bundle_files:
+        raise _error("MMC_POSTCONDITION_FAILED", "The copied publication dependencies differ from the tested bundle.", "build_blank_mmc_model")
+    bundle = candidate_bundle
+    tested_hash = _sha256(project)
+    result = record["result"]
+    manifest = _read_hashed_json(Path(result["output_index_path"]), result["output_index_sha256"])
+    frozen_contract = _read_hashed_json(Path(result["channel_contract_path"]), result["channel_contract_sha256"])
+    if frozen_contract != contract:
+        raise _error("MMC_OUTPUT_IDENTITY_CHANGED", "The evaluated channel contract differs from its frozen file.", "build_blank_mmc_model")
+    verify_output_dataset(manifest)
+    replay_root = project.parent / "reload-verification"
+    for relative, item in result["reload"]["artifacts"].items():
+        origin = _bundle_file(replay_root, relative)
+        if origin != Path(item["path"]).resolve():
+            raise _error("MMC_OUTPUT_IDENTITY_CHANGED", "Replay artifact path differs from its owned directory.", "build_blank_mmc_model")
+        _copy_frozen(origin, bundle / "reload" / relative, item["sha256"])
+    output_copy = bundle / "outputs"
+    output_copy.mkdir()
+    for item in manifest["files"].values():
+        _copy_frozen(Path(item["path"]), output_copy / Path(item["path"]).name, item["sha256"])
+    published_identity = copy.deepcopy(manifest)
+    published_identity["primary"] = "outputs/" + Path(manifest["primary"]).name
+    for item in published_identity["files"].values():
+        item["path"] = "outputs/" + Path(item["path"]).name
+    output_index_sha256 = _write_evidence(bundle / "evidence" / "published-output-index.json", published_identity)
+    published_contract = copy.deepcopy(dict(contract))
+    published_contract["project_path"] = str(target)
+    published_contract["readback"]["project_path"] = str(target)
+    published_contract["publication_parent_contract_sha256"] = record["result"]["channel_contract_sha256"]
+    _write_evidence(bundle / "evidence" / "published-channels.json", published_contract)
+    publication = {"schema_version": 1, "plan": copy.deepcopy(dict(plan)), "project_sha256": tested_hash,
+        "channel_contract_relative_path": "evidence/published-channels.json",
+        "channel_contract_sha256": _sha256(bundle / "evidence" / "published-channels.json"),
+        "checks_relative_path": "evidence/checks.json", "checks_sha256": plan["checks_sha256"],
+        "checks_file_sha256": _sha256(bundle / "evidence" / "checks.json"),
+        "output_index_relative_path": "evidence/published-output-index.json", "output_index_sha256": output_index_sha256,
+        "output_file_relative_path": published_identity["primary"],
+        "output_started_after": record["run_started_after"], "acceptance": record["result"]["acceptance"],
+        "runtime_master": record["runtime_master"], "lineage": record["lineage"],
+        "reload": record["result"]["reload"], "bundle_files": _bundle_files(bundle)}
+    _write_evidence(bundle / "manifest.json", publication)
+    bundle_files = _bundle_files(bundle)
+    verify_output_dataset(manifest)
+    _copy_frozen(project, candidate_project, tested_hash)
+    if _bundle_files(candidate_bundle) != bundle_files or _bundle_files(tested_bundle) != tested_bundle_files:
+        raise _error("MMC_POSTCONDITION_FAILED", "The publication candidate differs from its tested inputs.", "build_blank_mmc_model")
+    _load_publication_evidence(candidate_project)
     target.parent.mkdir(parents=True, exist_ok=True)
-    await save_as(staged_project.stem, target.name, str(target.parent), confirm=False)
-    final_library = target.parent / source_library.name
-    if final_library.exists() or final_library.is_symlink():
-        raise _error("MMC_BUILD_CONFLICT", "The native MMC companion publication target already exists.", "build_blank_mmc_model", path=str(final_library))
-    shutil.copy2(staged_library, final_library)
-    scenario_target = target.with_name(f"{target.stem}_scenario_source.pscx")
-    shutil.copy2(target, scenario_target)
-    await loader([str(final_library), str(target)])
-    await builder(target.stem)
-    return {
-        "build_id": build_id,
-        "state": "published",
-        "plan_hash": plan["plan_hash"],
-        "target_path": str(target),
-        "staging_path": str(staging),
-        "workspace": str(workspace),
-        "history": [{"state": "validated"}, {"state": "published"}],
-        "error": None,
-        "result": {"output_file": persisted_output, "output_parts": archived_parts, "acceptance": acceptance, "final_library_path": str(final_library), "scenario_source": str(scenario_target), "final_project_sha256": _sha256(target)},
-    }
+    candidate_bundle.rename(final_bundle)
+    exposed = False
+    try:
+        # An exclusive hard link exposes only the already verified complete bytes.
+        os.link(candidate_project, target)
+        exposed = True
+        candidate_project.unlink()
+    except BaseException:
+        if exposed:
+            target.unlink()
+        final_bundle.rename(candidate_bundle)
+        raise
+    return {"final_project_sha256": tested_hash, "tested_project_sha256": tested_hash, "scenario_source": str(target),
+        "final_library_path": str(final_bundle / Path(plan["source_identities"]["library"]["path"]).name),
+        "bundle_path": str(final_bundle), "publication_manifest": str(final_bundle / "manifest.json"),
+        "published_output_file": str(final_bundle / publication["output_file_relative_path"])}
 
 
 __all__ = ["BlankMmcBuilderService"]
