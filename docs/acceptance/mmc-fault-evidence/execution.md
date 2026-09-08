@@ -176,3 +176,67 @@ phase-shifted carriers; 1380 Hz is the individual carrier frequency and is not
 claimed as the effective arm switching frequency. Added min/max outputs measure
 actual single-submodule voltages in each arm, to distinguish capacitor imbalance
 from a stable capacitor sum. All original physical bands remain fixed.
+
+The seventh attempt (`fault-evidence-20260908T063325715595Z`, 9451bfa) found
+almost no change after T2's carrier ratio changed: raw DC voltages averaged
+613.589/600.019 kV versus 613.703/599.997 kV in the preceding case. It retained
+physical FAIL with all identities, support copies and cleanup verified. New
+single-cell extrema in the final window were 7.160-11.460 kV at T1 and
+7.606-8.617 kV at T2. These diagnostics do not certify individual cell balance.
+
+The original line comprises two 200 km segments in series, hence 400 km total.
+Independent source-backed modal approximation placed its lowest parallel
+mode near 310 Hz, close to the observed 303 Hz; this is supporting evidence,
+not a proof of the closed-loop cause. The line geometry/constants remain fixed.
+
+The next experiment uses the seventh run as its fixed baseline and adds only
+power-mode DC-port damping: `Idref1 - 1.5*(Edc_Pu-MmcFilteredVdcPu)` feeds InA
+of the existing mode selector before the total Imag/Imax limiter. At T2, negative
+d-axis reference exports power to the AC system, so a positive raw-minus-filtered
+voltage increment makes the current request more negative and increases DC
+power absorption. The local high-pass has zero DC gain and retains the prior
+TIMEZERO initialization. T1 remains in DC-voltage mode, so its selected branch
+is unchanged. All current limiting and FrzI paths see the combined request.
+
+The 1.5 pu gain corresponds to approximately 0.00366 S static incremental
+conductance at 1000 MVA/640 kV, compared with the 900 MW constant-power magnitude
+of 0.00220 S. This estimate does not include current-loop delay, transformer
+leakage or saturation and is not claimed as a stability proof. Actual damping,
+selected d-axis reference before/after limiting, actual dq current and physical
+station DC current are saved for phase/amplitude diagnosis. The average power
+target, raw-voltage acceptance and all physical limits remain unchanged.
+
+The eighth attempt (`fault-evidence-20260908T070331092930Z`, 09ecea7) failed
+physically despite valid complete identities and cleanup. T2 active power fell
+to -777.71 MW; its pre-limit d-axis request ranged -1.678 to -0.274 pu, while the
+actual total limiter clipped it at -1 pu. The 302.5 Hz oscillation increased.
+Coherent actual-id/limited-reference ratios had phases about +104.5 degrees at
+T2 and -144.2 degrees at T1. These jointly disturbed response ratios are not
+identified transfer functions, but rule out reliance on the static gain alone.
+This failed current-reference damping branch is not increased or retained in
+the next voltage-path experiment.
+
+The next candidate returns to the seventh fixed baseline and adds only common
+arm-voltage virtual resistance. In measured convention, ic=(IaTop+IaBtm)/2;
+the three phase means sum to -Idc_station. The eighth run independently gave
+-1.31801 versus -1.31792 kA at T1 and +1.30808 versus +1.30815 kA at T2, with
+about 0.0635 kA instantaneous residual RMS. The sign/coefficient are verified;
+instantaneous perfect KCL is not inferred from those differently sequenced
+measurements.
+
+The source equations are VrefT=DBlk_ramp-Vref-Vz and
+VrefB=DBlk_ramp+Vref-Vz. Setting
+Vz_effective=Vz-(2*30/640)*HP_5ms(ic) raises both requested inserted arm voltages
+in the direction opposing the measured circulating current. Each incremental
+requested arm voltage is 30*HP(ic)*(actual sum(Vc)/640) kV; at nominal summed
+capacitor voltage this corresponds to 30 ohm per arm or 20 ohm at the DC port.
+The commanded AC differential term is unchanged, the high-pass DC gain is
+zero, and this is not a claim of physical resistor losses. The filter resets to
+the actual raw circulating-current signal at TIMEZERO.
+
+Raw/effective Vz, raw/high-pass ic, signed arm-voltage requests, actual inserted
+voltage, capacitor extrema and original protection measurements are retained.
+The existing comparator still limits the number of selected cells to the
+physical count. Additionally, any steady request with absolute modulation
+above 2 pu fails the diagnostic gate; implicit clipping cannot manufacture a
+passing working point. All original nominal, recovery and current bounds remain.

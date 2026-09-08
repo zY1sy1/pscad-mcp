@@ -37,6 +37,8 @@ def default_fault_checks() -> dict[str, Any]:
         "frequency_hz": 60.0, "arm_rms_stability_relative_tolerance": 0.05,
         "nominal_target_relative_tolerance": 0.05, "arm_peak_limit_ka": 3.0,
         "maximum_power_loss_fraction": 0.1,
+        "modulation_abs_limit": 2.0,
+        "require_modulation_evidence": True,
         "fault_window_s": [2.5, 2.7], "prefault_window_s": [2.0, 2.4], "recovery_window_s": [4.6, 5.0],
         "negative_voltage_max_kv": -1.0, "fault_current_limit_ka": 20.0,
         "voltage_recovery_relative_tolerance": 0.05, "power_recovery_relative_tolerance": 0.05,
@@ -275,6 +277,11 @@ def instrument_fault_channels(source: str | Path, destination: str | Path, *, li
     expose(observed_cell, "MmcCapSum", "Dsout", "SUM($Vc)", "REAL")
     expose(observed_cell, "MmcCapMin", "Dsout", "MINVAL($Vc)", "REAL")
     expose(observed_cell, "MmcCapMax", "Dsout", "MAXVAL($Vc)", "REAL")
+    capacitance = [item for item in observed_cell.findall("./form/category/parameter") if item.get("name") == "C"]
+    if len(capacitance) != 1 or capacitance[0].get("unit") != "uF":
+        raise _error("MMC_ACCEPTANCE_INCOMPLETE", "The actual cell capacitance unit must be audited before computing energy.")
+    expose(observed_cell, "MmcCapEnergy", "Dsout", "0.5e-6*$C*SUM($Vc**2)", "REAL")
+    expose(observed_cell, "MmcEquivalentSource", "Dsdyn", "RVD1_5", "REAL")
     expose(observed_cell, "MmcBlocked", "Dsdyn", "IVD1_1", "INTEGER")
     observed_fault = clone_definition(masters["fault_sw"], "MmcObservedFaultSwitch")
     expose(observed_fault, "MmcClosed", "Dsout", "1-E_BtoI(OPENBR($NBR,$SS))", "INTEGER")
@@ -307,6 +314,21 @@ def instrument_fault_channels(source: str | Path, destination: str | Path, *, li
         channels.append({"channel_id": channel_id, "role": role, "model_scope": scope, "definition_name": definition.get("name"), "owner_id": pgb.get("id"), "definition": "master:pgb", "signal_source": source_record, "selector": {"description": channel_id, "group": OUTPUT_GROUP, "port": "Signl"}, "units": units, "dimension": 1, "polarity": polarity, "nominal": nominal, "output_part": None, "metadata_file": None, "sample_count": None, "time_bounds_s": None, "hash": None})
         probes.extend(component_record(definition, component) for component in (label, pgb, source_component))
 
+    def add_node_probe(definition: ET.Element, role: str, scope: str, signal: str, owner: str, x: int, y: int, units: str, quantity: str) -> None:
+        sources = [item for item in _components(definition) if item.get("id") == owner]
+        if len(sources) != 1:
+            raise _error("MMC_ACCEPTANCE_INCOMPLETE", "A voltage-base diagnostic owner is not unique.", owner=owner)
+        canvas = definition.find("schematic")
+        matching_wires = [item for item in canvas.findall("Wire") if any(int(item.get("x", "0")) + int(vertex.get("x", "0")) == x and int(item.get("y", "0")) + int(vertex.get("y", "0")) == y for vertex in item.findall("vertex"))]
+        if not matching_wires:
+            raise _error("MMC_ACCEPTANCE_INCOMPLETE", "A voltage-base diagnostic node has no audited wire.", owner=owner, x=x, y=y)
+        alias = ET.SubElement(canvas, "User", {"classid": "UserCmp", "defn": "master:datalabel", "id": allocate(scope + ":" + signal + ":node"), "x": str(x), "y": str(y), "orient": "0", "w": "72", "h": "22", "z": "1", "link": "-1", "q": "4"})
+        set_param(alias, "Name", signal)
+        probes.append(component_record(definition, alias))
+        for wire in matching_wires:
+            wires.append({"definition_name": definition.get("name"), "owner_id": wire.get("id"), "attributes": {key: wire.get(key) for key in ("classid", "x", "y", "orient")}, "vertices": [dict(item.attrib) for item in wire.findall("vertex")]})
+        add_probe(definition, role, scope, signal, sources[0], kind="control_quantity", units_override=units, extra={"quantity": quantity, "node": {"x": x, "y": y}})
+
     main = definitions["Main"]
     switches = [item for item in _components(main) if item.get("defn") == "master:fault_sw" and dict(_parameters(item)).get("Name") == "DC_flt_2_PN"]
     if len(switches) != 1:
@@ -325,6 +347,10 @@ def instrument_fault_channels(source: str | Path, destination: str | Path, *, li
         pwm_name = f"MFE_PWM_{terminal}"
         pwm = clone_definition(definitions["MMC_Hb_PWM"], pwm_name)
         converter.set("defn", namespace + ":" + pwm_name)
+        local_dc = [item for item in _components(pwm) if item.get("id") == "2025177284" and item.get("defn") == "master:voltmeter" and dict(_parameters(item)).get("Name") == "Edc"]
+        if len(local_dc) != 1:
+            raise _error("MMC_ACCEPTANCE_INCOMPLETE", "The converter-side pole-to-pole voltmeter is missing.")
+        add_probe(pwm, "v_dc_converter", terminal, "Edc", local_dc[0], source_parameter="Name", units_override="kV", extra={"quantity": "converter_side_dc_pole_to_pole_voltage", "not_an_acceptance_voltage": True})
         poles = [item for item in _components(pwm) if item.get("defn", "").endswith(":MMC_Hb_Pole_PWM")]
         if len(poles) != 3:
             raise _error("MMC_ACCEPTANCE_INCOMPLETE", "The converter must expose three phase poles.", terminal=terminal)
@@ -332,6 +358,31 @@ def instrument_fault_channels(source: str | Path, destination: str | Path, *, li
             pole_name = f"MFE_Pole_{terminal}_{phase}"
             pole_definition = clone_definition(definitions["MMC_Hb_Pole_PWM"], pole_name)
             pole.set("defn", namespace + ":" + pole_name)
+            for signal, owner, role, quantity in (("Vref", "1233804117", "phase_ac_reference", "phase_ac_voltage_reference_after_dc_normalization_and_clamp"), ("Vz", "1642798056", "phase_common_reference", "original_ccsc_common_voltage_reference")):
+                sources = [item for item in _components(pole_definition) if item.get("id") == owner and dict(_parameters(item)).get("Name") == signal]
+                if len(sources) != 1:
+                    raise _error("MMC_ACCEPTANCE_INCOMPLETE", "A phase-voltage diagnostic source is missing.", signal=signal)
+                add_probe(pole_definition, role, f"{terminal}/{phase}", signal, sources[0], kind="control_quantity", units_override="pu", extra={"quantity": quantity})
+            add_node_probe(pole_definition, "arm_deblocking_ramp", f"{terminal}/{phase}", "MmcDeblockingRamp", "263038724", 2304, 468, "pu", "deblocking_ramp_before_arm_voltage_sum")
+            if any(dict(_parameters(item)).get("Name") == "MmcVzEffective" for item in _components(pole_definition)):
+                for wire in pole_definition.findall("./schematic/Wire"):
+                    wires.append({"definition_name": pole_name, "owner_id": wire.get("id"), "attributes": {key: wire.get(key) for key in ("classid", "x", "y", "orient")}, "vertices": [dict(item.attrib) for item in wire.findall("vertex")]})
+                for signal, role, units, quantity in (
+                    ("MmcIcircRaw", "circulating_current_raw", "kA", "half_sum_of_measured_arm_currents"),
+                    ("MmcIcircHighpass", "circulating_current_highpass", "kA", "local_highpass_circulating_current"),
+                    ("Vz", "circulating_voltage_raw", "pu", "original_ccsc_common_voltage_reference"),
+                    ("MmcVzEffective", "circulating_voltage_effective", "pu", "common_voltage_reference_with_virtual_resistance"),
+                ):
+                    sources = [item for item in _components(pole_definition) if item.get("defn") in ("master:datalabel", "master:import") and dict(_parameters(item)).get("Name") == signal]
+                    if not sources:
+                        raise _error("MMC_ACCEPTANCE_INCOMPLETE", "A virtual-resistance diagnostic source is missing.", signal=signal)
+                    add_probe(pole_definition, role, f"{terminal}/{phase}", signal, sources[0], units_override=units, extra={"quantity": quantity})
+            for arm, signal in (("upper", "VrefT"), ("lower", "VrefB")):
+                labels = [item for item in _components(pole_definition) if item.get("defn") == "master:datalabel" and dict(_parameters(item)).get("Name") == signal]
+                if labels:
+                    add_probe(pole_definition, "modulation_request", f"{terminal}/{phase}/{arm}", signal, labels[0], units_override="pu", extra={"quantity": "signed_arm_voltage_request", "requested_voltage_equation": "0.5*Vref*sum(Vc)", "carrier_range": [0.0, 2.0], "physical_cell_count_bounded": True})
+                else:
+                    raise _error("MMC_ACCEPTANCE_INCOMPLETE", "Every arm requires its actual signed modulation request.", scope=f"{terminal}/{phase}/{arm}", signal=signal)
             cells = [item for item in _components(pole_definition) if item.get("defn") == "intermediate:FullCellR_n"]
             if len(cells) != 2 or any(dict(_parameters(item)).get("DTBP") != "0" for item in cells):
                 raise _error("MMC_ACCEPTANCE_INCOMPLETE", "Every pole must contain two unconditional full-bridge cell groups.")
@@ -339,12 +390,14 @@ def instrument_fault_channels(source: str | Path, destination: str | Path, *, li
                 instance.set("defn", namespace + ":MmcObservedFullCell")
                 arm_suffix = "Top" if arm == "upper" else "Btm"
                 scope = f"{terminal}/{phase}/{arm}"
-                for parameter, signal in (("MmcInserted", f"MmcV{arm_suffix}"), ("MmcCapSum", f"MmcVc{arm_suffix}"), ("MmcCapMin", f"MmcVcMin{arm_suffix}"), ("MmcCapMax", f"MmcVcMax{arm_suffix}"), ("MmcBlocked", f"MmcBlock{arm_suffix}")):
+                for parameter, signal in (("MmcInserted", f"MmcV{arm_suffix}"), ("MmcCapSum", f"MmcVc{arm_suffix}"), ("MmcCapMin", f"MmcVcMin{arm_suffix}"), ("MmcCapMax", f"MmcVcMax{arm_suffix}"), ("MmcCapEnergy", f"MmcEnergy{arm_suffix}"), ("MmcEquivalentSource", f"MmcEquivalent{arm_suffix}"), ("MmcBlocked", f"MmcBlock{arm_suffix}")):
                     set_param(instance, parameter, signal)
                 add_probe(pole_definition, "v_inserted", scope, f"MmcV{arm_suffix}", instance, source_parameter="MmcInserted", extra={"quantity": "cell_group_terminal_voltage", "positive_port": "Ntop", "negative_port": "Nbtm", "condition": {"DTBP": "0"}})
                 add_probe(pole_definition, "v_cap", scope, f"MmcVc{arm_suffix}", instance, source_parameter="MmcCapSum", nominal=640.0, extra={"quantity": "sum_of_submodule_capacitor_voltages", "expression": "SUM(Vc)", "cell_count_expression": dict(_parameters(instance))["DimC"]})
                 add_probe(pole_definition, "v_cap_minimum", scope, f"MmcVcMin{arm_suffix}", instance, source_parameter="MmcCapMin", units_override="kV", extra={"quantity": "single_submodule_voltage_extremum", "expression": "MINVAL(Vc)", "cell_count_expression": dict(_parameters(instance))["DimC"]})
                 add_probe(pole_definition, "v_cap_maximum", scope, f"MmcVcMax{arm_suffix}", instance, source_parameter="MmcCapMax", units_override="kV", extra={"quantity": "single_submodule_voltage_extremum", "expression": "MAXVAL(Vc)", "cell_count_expression": dict(_parameters(instance))["DimC"]})
+                add_probe(pole_definition, "arm_capacitor_energy", scope, f"MmcEnergy{arm_suffix}", instance, source_parameter="MmcCapEnergy", units_override="MJ", extra={"quantity": "sum_of_actual_submodule_capacitor_energies", "expression": "0.5*C_uF*1e-6*SUM(Vc_kV**2)", "capacitance_expression": dict(_parameters(instance))["C"], "capacitance_unit": "uF", "unit_derivation": "F*kV**2=MJ"})
+                add_probe(pole_definition, "cell_equivalent_source_voltage", scope, f"MmcEquivalent{arm_suffix}", instance, source_parameter="MmcEquivalentSource", units_override="kV", extra={"quantity": "vendor_cell_group_equivalent_source_voltage", "expression": "FULLCELL1_EXE RVD1_5", "branch_equation": "EBRD(BRx)=-RVD1_5", "not_a_direct_selected_cell_sum": True})
                 add_probe(pole_definition, "blocking_state", scope, f"MmcBlock{arm_suffix}", instance, kind="physical_state", source_parameter="MmcBlocked", polarity={"inactive": 0, "active": 1}, extra={"quantity": "firing_based_cell_group_blocked", "expression": "Block_Finder_H result"})
                 current_signal = "IaTop" if arm == "upper" else "IaBtm"
                 current_sources = [item for item in _components(pole_definition) if item.get("defn") == "master:varrlc" and dict(_parameters(item)).get("I") == current_signal]
@@ -356,6 +409,10 @@ def instrument_fault_channels(source: str | Path, destination: str | Path, *, li
             raise _error("MMC_ACCEPTANCE_INCOMPLETE", "The terminal power meter is missing.", terminal=terminal)
         add_probe(main, "p_active", terminal, "P" + number, meters[0], source_parameter="P", nominal=900.0 if terminal == "T1" else -900.0, extra={"quantity": "three_phase_active_power", "direction": "meter_arrow", "base_mva": dict(_parameters(meters[0]))["S"]})
         channels[-1]["nominal_role"] = "power_balance_input" if terminal == "T1" else "controlled_active_power"
+        dc_meters = [item for item in _components(main) if item.get("defn") == "master:ammeter" and dict(_parameters(item)).get("Name") == "Idc" + number]
+        if len(dc_meters) != 1:
+            raise _error("MMC_ACCEPTANCE_INCOMPLETE", "The physical station DC current meter is missing.")
+        add_probe(main, "i_dc_station", terminal, "Idc" + number, dc_meters[0], source_parameter="Name", units_override="kA", extra={"quantity": "station_dc_current", "direction": "original_meter_arrow"})
         voltage_sources = [item for item in _components(main) if item.get("defn") == "master:voltmeter" and dict(_parameters(item)).get("Name") == "Edc" + number]
         if len(voltage_sources) != 1:
             raise _error("MMC_ACCEPTANCE_INCOMPLETE", "The pole-to-pole terminal voltage meter is missing.", terminal=terminal)
@@ -372,6 +429,8 @@ def instrument_fault_channels(source: str | Path, destination: str | Path, *, li
         if len(control_calls) != 1:
             raise _error("MMC_ACCEPTANCE_INCOMPLETE", "The actual station controller is not unique.")
         control_calls[0].set("defn", namespace + ":" + control_name)
+        add_node_probe(control_definition, "controller_ac_magnitude_kv", terminal, "MmcAcMagnitudeKv", "736319288", 3204, 2034, "kV", "phase_voltage_command_magnitude_before_dc_normalization")
+        add_node_probe(control_definition, "controller_ac_magnitude_preclamp", terminal, "MmcAcMagnitudePreclamp", "235800143", 3204, 1944, "pu", "phase_voltage_command_magnitude_before_1p5_clamp")
         probes.extend(component_record(control_definition, item) for item in _components(control_definition))
         for wire in control_definition.findall("./schematic/Wire"):
             wires.append({"definition_name": control_name, "owner_id": wire.get("id"), "attributes": {key: wire.get(key) for key in ("classid", "x", "y", "orient")}, "vertices": [dict(item.attrib) for item in wire.findall("vertex")]})
@@ -384,7 +443,23 @@ def instrument_fault_channels(source: str | Path, destination: str | Path, *, li
             if len(filters) != 1:
                 raise _error("MMC_ACCEPTANCE_INCOMPLETE", "The DC feedback filter is not unique.")
             add_probe(control_definition, "controller_dc_voltage_filtered", terminal, "MmcFilteredVdcPu", filters[0], units_override="pu", extra={"quantity": "outer_loop_filtered_dc_voltage", "time_constant_s": 0.005, "not_an_acceptance_voltage": True})
+        for signal, role, quantity in (
+            ("MmcDcDamping", "controller_dc_damping", "highpass_d_axis_current_reference_correction"),
+            ("MmcIdBeforeLimit", "controller_id_before_limit", "selected_d_axis_current_reference_before_total_limit"),
+            ("idref", "controller_id_after_limit", "d_axis_current_reference_after_total_limit"),
+        ):
+            labels = [item for item in _components(control_definition) if item.get("defn") == "master:datalabel" and dict(_parameters(item)).get("Name") == signal]
+            if labels:
+                source_label = next((item for item in labels if item.get("id") == "1877948868"), labels[0])
+                add_probe(control_definition, role, terminal, signal, source_label, kind="physical_state", units_override="pu", extra={"quantity": quantity})
+        actual_id = [item for item in _components(control_definition) if item.get("defn") == "master:pgb" and dict(_parameters(item)).get("Name") == "id"]
+        if len(actual_id) == 1:
+            add_probe(control_definition, "controller_id_actual", terminal, "idpu", actual_id[0], units_override="pu", extra={"quantity": "measured_d_axis_current", "normalization": "Ibase2_pk"})
         add_probe(main, "recovery_enable", terminal, f"Dblk{number}P", controls[0], kind="recovery_control", source_parameter="Dblk", polarity={"inactive": 0, "active": 1}, extra={"quantity": "deblocking_enable", "electrical_recovery_required": True})
+
+    for name, definition in definitions.items():
+        if name.startswith("MFE_Pole_") and any(dict(_parameters(item)).get("Name") == "MmcVzEffective" for item in _components(definition)):
+            probes.extend(component_record(definition, item) for item in _components(definition))
 
     # Update hierarchy calls from the actual specialized component graph.
     hierarchy = root.find("hierarchy")
@@ -592,6 +667,29 @@ def materialize_voltage_control_headroom(source: str | Path, destination: str | 
     return {"source": str(original), "source_sha256": before_hash, "destination": str(target), "destination_sha256": _sha256(target), "voltage_controller_owner": voltage_converter.get("id"), "parameter": "Imax", "before_pu": 1.0, "after_pu": current_limit_pu, "freeze_reference": "0.99999 * Imax", "freeze_reference_owner": threshold.get("id"), "phase_current_base_rms_ka": base, "phase_current_rms_ka": base * current_limit_pu, "phase_current_peak_ka": base * math.sqrt(2) * current_limit_pu, "arm_protection_limit_ka": 3.0}
 
 
+def materialize_terminal_two_charging(source: str | Path, destination: str | Path) -> dict[str, Any]:
+    """Bind the T2 charging transition to its existing independent setting."""
+
+    original = _regular(source)
+    target = _new_target(destination, (original,))
+    source_hash = _sha256(original)
+    root = ET.parse(original).getroot()
+    main = root.find("./definitions/Definition[@name='Main']")
+    if main is None:
+        raise _error("MMC_ACCEPTANCE_INCOMPLETE", "The original Main charging scope is missing.")
+    owners = {item.get("id"): item for item in _components(main)}
+    for owner, definition, parameter, value in (("584272924", "master:bin_delay", "T", "Tcharging1"), ("606940312", "master:bin_delay", "T", "Tcharging1"), ("2129272491", "master:datalabel", "Name", "Tcharging2")):
+        component = owners.get(owner)
+        if component is None or component.get("defn") != definition or dict(_parameters(component)).get(parameter) != value:
+            raise _error("MMC_ACCEPTANCE_INCOMPLETE", "The audited charging-delay source differs.", owner=owner)
+    delay = owners["606940312"]
+    next(item for item in delay.findall("./paramlist/param") if item.get("name") == "T").set("value", "Tcharging2")
+    _write_new_xml(root, target)
+    if _sha256(original) != source_hash:
+        raise _error("MMC_TEMPLATE_SOURCE_CHANGED", "The charging-delay source changed.")
+    return {"source": str(original), "source_sha256": source_hash, "destination": str(target), "destination_sha256": _sha256(target), "definition": "Main", "owner": "606940312", "parameter": "T", "before": "Tcharging1", "after": "Tcharging2", "terminal_one_unchanged": True}
+
+
 def materialize_dc_feedback_filter(source: str | Path, destination: str | Path, *, master: str | Path, time_constant_s: float = 0.005) -> dict[str, Any]:
     """Filter only the DC outer-loop error input; raw voltage remains available."""
 
@@ -664,10 +762,202 @@ def materialize_terminal_two_carrier(source: str | Path, destination: str | Path
     return {"source": str(original), "source_sha256": digest, "destination": str(target), "destination_sha256": _sha256(target), "owner_id": "1268416470", "parameter": "Cfreq", "before_ratio": 3.0, "after_ratio": 23.0, "fundamental_frequency_hz": 60.0, "cell_carrier_frequency_hz": 1380.0, "scope": "terminal_2_carrier_ratio_only", "arm_effective_switching_frequency_claimed": False}
 
 
+def materialize_dc_port_damping(source: str | Path, destination: str | Path, *, master: str | Path) -> dict[str, Any]:
+    """Add a zero-DC-gain damping term only to the power-mode current branch."""
+
+    original, master_path = _regular(source), _regular(master)
+    target = _new_target(destination, (original, master_path))
+    digest, master_digest = _sha256(original), _sha256(master_path)
+    root = ET.parse(original).getroot()
+    definition = next((item for item in root.findall("./definitions/Definition") if item.get("name") == "VSCControl2"), None)
+    if definition is None:
+        raise _error("MMC_ACCEPTANCE_INCOMPLETE", "The original power controller is missing.")
+    users = {item.get("id"): item for item in _components(definition)}
+    selector = users.get("1610070623")
+    limiter = users.get("1359229547")
+    filters = [item for item in users.values() if item.get("defn") == "master:realpole" and dict(_parameters(item)).get("COM") == "MMC DC feedback only"]
+    if selector is None or limiter is None or dict(_parameters(selector)).get("A") != "1" or dict(_parameters(selector)).get("DPath") != "1" or dict(_parameters(limiter)).get("UL") != "Imax" or len(filters) != 1:
+        raise _error("MMC_ACCEPTANCE_INCOMPLETE", "Power-mode selection, total limiter, or local DC feedback filter differs.")
+    expected_filter = {"G": "1.0", "T": "0.005 [s]", "Dim": "1", "Limit": "0", "Reset": "2", "YO": "Edc_Pu", "Min": "-10.0", "Max": "10.0", "COM": "MMC DC feedback only"}
+    if any(dict(_parameters(filters[0])).get(key) != value for key, value in expected_filter.items()) or any(filters[0].get(key) != value for key, value in {"x": "3600", "y": "3402", "orient": "0"}.items()):
+        raise _error("MMC_ACCEPTANCE_INCOMPLETE", "The complete zero-DC-gain filter contract differs.")
+    for signal, x in (("Edc_Pu", "3528"), ("MmcFilteredVdcPu", "3672")):
+        labels = [item for item in users.values() if item.get("defn") == "master:datalabel" and dict(_parameters(item)).get("Name") == signal and item.get("x") == x and item.get("y") == "3402"]
+        if len(labels) != 1:
+            raise _error("MMC_ACCEPTANCE_INCOMPLETE", "The local DC filter signal binding differs.", signal=signal)
+    for expected_points in ([(3528, 3402), (3564, 3402)], [(3636, 3402), (3672, 3402)]):
+        connections = []
+        for item in definition.findall("./schematic/Wire"):
+            observed = [(int(item.get("x", "0")) + int(point.get("x", "0")), int(item.get("y", "0")) + int(point.get("y", "0"))) for point in item.findall("vertex")]
+            if observed == expected_points or observed == list(reversed(expected_points)):
+                connections.append(item)
+        if len(connections) != 1:
+            raise _error("MMC_ACCEPTANCE_INCOMPLETE", "The local DC filter connection is missing or ambiguous.")
+    master_root = ET.parse(master_path).getroot()
+    for name, required in {"gain": {"IN:Dim": (-36, 0), "OUT:Dim": (36, 0)}, "sumjct": {"IND": (-36, 0), "INB": (0, -36), "OUT": (36, 0)}, "select": {"InA:Dim": (-36, -36)}}.items():
+        component_definition = next((item for item in master_root.findall("./definitions/Definition") if item.get("name") == name), None)
+        ports = {item.get("name"): item for item in component_definition.findall("./svg/port") if item.get("type") == "Real"} if component_definition is not None else {}
+        if any(port not in ports or (int(ports[port].get("x")), int(ports[port].get("y"))) != position for port, position in required.items()):
+            raise _error("MMC_ACCEPTANCE_INCOMPLETE", "The installed damping-network port metadata differs.", definition=name)
+    canvas = definition.find("schematic")
+    branch = next((item for item in canvas.findall("Wire") if item.get("id") == "2067107620"), None)
+    points = [(int(branch.get("x")) + int(item.get("x")), int(branch.get("y")) + int(item.get("y"))) for item in branch.findall("vertex")] if branch is not None else []
+    if points != [(2124, 1908), (2088, 1908), (2088, 1728), (1818, 1728)]:
+        raise _error("MMC_ACCEPTANCE_INCOMPLETE", "The power-mode PI-to-selector connection differs.")
+    branch.set("x", "1818")
+    branch.set("y", "1728")
+    branch.set("w", "82")
+    branch.set("h", "10")
+    for item in branch.findall("vertex"):
+        branch.remove(item)
+    ET.SubElement(branch, "vertex", {"x": "0", "y": "0"})
+    ET.SubElement(branch, "vertex", {"x": "72", "y": "0"})
+    used = {item.get("id") for item in root.iter()}
+    def next_id():
+        value = 2031000001
+        while str(value) in used:
+            value += 1
+        used.add(str(value))
+        return str(value)
+    def user(defn, x, y, params):
+        item = ET.SubElement(canvas, "User", {"classid": "UserCmp", "defn": defn, "id": next_id(), "x": str(x), "y": str(y), "orient": "0", "w": "84", "h": "58", "z": "1555", "link": "-1", "q": "4"})
+        group = ET.SubElement(item, "paramlist", {"name": "", "link": "-1"})
+        for key, value in params.items():
+            ET.SubElement(group, "param", {"name": key, "value": value})
+        return item
+    def label(name, x, y):
+        return user("master:datalabel", x, y, {"Name": name})
+    def wire(x, y, dx, dy):
+        item = ET.SubElement(canvas, "Wire", {"classid": "WireOrthogonal", "id": next_id(), "name": "", "x": str(x), "y": str(y), "orient": "0", "w": str(abs(dx) + 10), "h": str(abs(dy) + 10)})
+        ET.SubElement(item, "vertex", {"x": "0", "y": "0"})
+        ET.SubElement(item, "vertex", {"x": str(dx), "y": str(dy)})
+    subtract = {"DPath": "1", "A": "0", "B": "-1", "C": "0", "D": "1", "E": "0", "F": "0", "G": "0"}
+    label("Edc_Pu", 3168, 3492)
+    label("MmcFilteredVdcPu", 3240, 3420)
+    user("master:sumjct", 3240, 3492, subtract)
+    wire(3168, 3492, 36, 0)
+    wire(3240, 3420, 0, 36)
+    gain = user("master:gain", 3348, 3492, {"G": "1.5", "Dim": "1"})
+    wire(3276, 3492, 36, 0)
+    label("MmcDcDamping", 3420, 3492)
+    wire(3384, 3492, 36, 0)
+    label("Idref1", 3168, 3636)
+    label("MmcDcDamping", 3240, 3564)
+    user("master:sumjct", 3240, 3636, subtract)
+    wire(3168, 3636, 36, 0)
+    wire(3240, 3564, 0, 36)
+    label("MmcDampedPIdref", 3312, 3636)
+    wire(3276, 3636, 36, 0)
+    label("MmcDampedPIdref", 2124, 1908)
+    label("MmcIdBeforeLimit", 2232, 1944)
+    _write_new_xml(root, target)
+    if _sha256(original) != digest or _sha256(master_path) != master_digest:
+        raise _error("MMC_TEMPLATE_SOURCE_CHANGED", "A damping-network source changed.")
+    return {"source": str(original), "source_sha256": digest, "destination": str(target), "destination_sha256": _sha256(target), "master_sha256": master_digest, "gain_owner": gain.get("id"), "equation": "power_mode_id = Idref1 - 1.5 * (Edc_Pu - MmcFilteredVdcPu)", "gain_pu": 1.5, "dc_gain": 0.0, "branch": "P_mode_InA_before_Imag_limiter", "selector_owner": "1610070623", "total_current_limiter_owner": "1359229547", "replaced_wire_owner": "2067107620", "steady_power_order_changed": False}
+
+
+def materialize_arm_virtual_resistance(source: str | Path, destination: str | Path, *, master: str | Path) -> dict[str, Any]:
+    """Add high-pass circulating-current feedback to the common arm voltage."""
+
+    original, master_path = _regular(source), _regular(master)
+    target = _new_target(destination, (original, master_path))
+    digest, master_digest = _sha256(original), _sha256(master_path)
+    root = ET.parse(original).getroot()
+    definitions = {item.get("name"): item for item in root.findall("./definitions/Definition")}
+    pole = definitions.get("MMC_Hb_Pole_PWM")
+    main = definitions.get("Main")
+    if pole is None or main is None or any(dict(_parameters(item)).get("Name") == "MmcDcDamping" for item in _components(root)):
+        raise _error("MMC_ACCEPTANCE_INCOMPLETE", "Use the native baseline without the rejected d-axis damping experiment.")
+    for instance in _components(main):
+        if instance.get("defn", "").endswith(":MMC_Hb_PWM") and dict(_parameters(instance)).get("VdcBase") not in ("640", "640.0", "640 [kV]", "640.0 [kV]"):
+            raise _error("MMC_ACCEPTANCE_INCOMPLETE", "Virtual resistance requires the frozen 640 kV normalization.")
+    users = {item.get("id"): item for item in _components(pole)}
+    expected = {"166206085": ("master:datalabel", "Name", "Vz"), "1642798056": ("master:import", "Name", "Vz"), "1514910955": ("master:varrlc", "I", "IaTop"), "1386643874": ("master:varrlc", "I", "IaBtm")}
+    for owner, (defn, parameter, value) in expected.items():
+        if owner not in users or users[owner].get("defn") != defn or dict(_parameters(users[owner])).get(parameter) != value:
+            raise _error("MMC_ACCEPTANCE_INCOMPLETE", "The audited arm-current/common-voltage source differs.", owner=owner)
+    if dict(_parameters(users["148785169"])).get("B") != "1" or dict(_parameters(users["935854485"])).get("B") != "-1":
+        raise _error("MMC_ACCEPTANCE_INCOMPLETE", "The original common/differential voltage equations differ.")
+    master_root = ET.parse(master_path).getroot()
+    realpole = next((item for item in master_root.findall("./definitions/Definition") if item.get("name") == "realpole"), None)
+    if realpole is None or not any(item.get("name") == "T" and item.get("unit") == "s" for item in realpole.findall("./form/category/parameter")):
+        raise _error("MMC_ACCEPTANCE_INCOMPLETE", "The verified real-pole time-constant contract is missing.")
+    next(item for item in users["166206085"].findall("./paramlist/param") if item.get("name") == "Name").set("value", "MmcVzEffective")
+    used = {item.get("id") for item in root.iter()}
+    def next_id():
+        value = 2021000001
+        while str(value) in used:
+            value += 1
+        used.add(str(value))
+        return str(value)
+    canvas = pole.find("schematic")
+    def user(defn, x, y, params):
+        item = ET.SubElement(canvas, "User", {"classid": "UserCmp", "defn": defn, "id": next_id(), "x": str(x), "y": str(y), "orient": "0", "w": "84", "h": "58", "z": "165", "link": "-1", "q": "4"})
+        group = ET.SubElement(item, "paramlist", {"name": "", "link": "-1"})
+        for key, value in params.items():
+            ET.SubElement(group, "param", {"name": key, "value": value})
+        return item
+    def label(name, x, y):
+        return user("master:datalabel", x, y, {"Name": name})
+    def wire(x, y, dx, dy):
+        item = ET.SubElement(canvas, "Wire", {"classid": "WireOrthogonal", "id": next_id(), "name": "", "x": str(x), "y": str(y), "orient": "0", "w": str(abs(dx) + 10), "h": str(abs(dy) + 10)})
+        ET.SubElement(item, "vertex", {"x": "0", "y": "0"})
+        ET.SubElement(item, "vertex", {"x": str(dx), "y": str(dy)})
+    add = {"DPath": "1", "A": "0", "B": "1", "C": "0", "D": "1", "E": "0", "F": "0", "G": "0"}
+    subtract = {**add, "B": "-1"}
+    label("IaTop", 3132, 2700)
+    label("IaBtm", 3204, 2628)
+    user("master:sumjct", 3204, 2700, add)
+    wire(3132, 2700, 36, 0)
+    wire(3204, 2628, 0, 36)
+    user("master:gain", 3312, 2700, {"G": "0.5", "Dim": "1"})
+    wire(3240, 2700, 36, 0)
+    label("MmcIcircRaw", 3384, 2700)
+    wire(3348, 2700, 36, 0)
+    label("MmcIcircRaw", 3456, 2700)
+    filtered = user("master:realpole", 3528, 2700, {"G": "1.0", "T": "0.005 [s]", "Dim": "1", "Limit": "0", "Reset": "2", "YO": "MmcIcircRaw", "Min": "-100.0", "Max": "100.0", "COM": "MMC highpass arm damping"})
+    wire(3456, 2700, 36, 0)
+    label("MmcIcircLowpass", 3600, 2700)
+    wire(3564, 2700, 36, 0)
+    label("MmcIcircRaw", 3132, 2880)
+    label("MmcIcircLowpass", 3204, 2808)
+    user("master:sumjct", 3204, 2880, subtract)
+    wire(3132, 2880, 36, 0)
+    wire(3204, 2808, 0, 36)
+    label("MmcIcircHighpass", 3276, 2880)
+    wire(3240, 2880, 36, 0)
+    label("MmcIcircHighpass", 3348, 2880)
+    user("master:gain", 3420, 2880, {"G": "0.09375", "Dim": "1"})
+    wire(3348, 2880, 36, 0)
+    label("MmcVzResistance", 3492, 2880)
+    wire(3456, 2880, 36, 0)
+    label("Vz", 3132, 3060)
+    label("MmcVzResistance", 3204, 2988)
+    user("master:sumjct", 3204, 3060, subtract)
+    wire(3132, 3060, 36, 0)
+    wire(3204, 2988, 0, 36)
+    label("MmcVzEffective", 3276, 3060)
+    wire(3240, 3060, 36, 0)
+    _write_new_xml(root, target)
+    if _sha256(original) != digest or _sha256(master_path) != master_digest:
+        raise _error("MMC_TEMPLATE_SOURCE_CHANGED", "A virtual-resistance source changed.")
+    return {"source": str(original), "source_sha256": digest, "destination": str(target), "destination_sha256": _sha256(target), "master_sha256": master_digest, "resistance_per_arm_ohm": 30.0, "equivalent_dc_resistance_ohm": 20.0, "normalization_voltage_kv": 640.0, "gain_pu_per_ka": 0.09375, "filter_owner": filtered.get("id"), "time_constant_s": 0.005, "dc_gain": 0.0, "command_difference_unchanged": True, "equation": "Vz_effective = Vz - (2*30/640)*HP_5ms((IaTop+IaBtm)/2)", "physical_resistor_loss_claimed": False, "existing_cell_count_saturation_retained": True}
+
+
 __all__ = [
-    "REQUIRED_ROLES", "default_fault_checks", "finalize_fault_instrumentation",
-    "instrument_fault_channels", "materialize_dc_feedback_filter",
-    "materialize_terminal_two_carrier", "materialize_voltage_control_headroom",
-    "reachable_instances", "read_fault_output_dataset", "snapshot_output_dataset",
-    "verify_fault_instrumentation", "verify_output_dataset",
+    "REQUIRED_ROLES",
+    "default_fault_checks",
+    "finalize_fault_instrumentation",
+    "instrument_fault_channels",
+    "materialize_arm_virtual_resistance",
+    "materialize_dc_feedback_filter",
+    "materialize_dc_port_damping",
+    "materialize_terminal_two_carrier",
+    "materialize_terminal_two_charging",
+    "materialize_voltage_control_headroom",
+    "reachable_instances",
+    "read_fault_output_dataset",
+    "snapshot_output_dataset",
+    "verify_fault_instrumentation",
+    "verify_output_dataset",
 ]

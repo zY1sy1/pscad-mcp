@@ -28,8 +28,10 @@ from pscad_mcp.hvdc.builders.mmc.fault_channels import (
     default_fault_checks,
     finalize_fault_instrumentation,
     instrument_fault_channels,
+    materialize_arm_virtual_resistance,
     materialize_dc_feedback_filter,
     materialize_terminal_two_carrier,
+    materialize_terminal_two_charging,
     materialize_voltage_control_headroom,
     read_fault_output_dataset,
     snapshot_output_dataset,
@@ -95,6 +97,11 @@ def _steady(samples, contract, checks=None):
     window = checks["recovery_window_s"]
     frequency = checks["frequency_hz"]
     cycle_count = round((window[1] - window[0]) * frequency)
+    modulation = [item for item in contract.get("diagnostic_channels", []) if item["role"] == "modulation_request"]
+    if checks.get("require_modulation_evidence") is True:
+        expected_scopes = {f"{station}/{phase}/{arm}" for station in ("T1", "T2") for phase in ("A", "B", "C") for arm in ("upper", "lower")}
+        if len(modulation) != 12 or {item.get("model_scope") for item in modulation} != expected_scopes or any(len([sample for sample in samples["channels"] if sample.get("channel_id") == item["channel_id"]]) != 1 for item in modulation):
+            return {"verdict": "INCOMPLETE_ANALYSIS", "checks": [], "reason": "twelve unique arm modulation bindings and traces are required"}
     rows = []
     power = {}
     for binding in contract["channels"]:
@@ -138,6 +145,16 @@ def _steady(samples, contract, checks=None):
     if set(power) == {"T1", "T2"}:
         loss = power["T1"] + power["T2"]
         rows.append({"channel_id": "power_balance", "passed": power["T1"] > 0 > power["T2"] and 0 <= loss <= -power["T2"] * checks["maximum_power_loss_fraction"], "input_mw": power["T1"], "output_mw": -power["T2"], "loss_mw": loss})
+    for binding in contract.get("diagnostic_channels", []):
+        if binding["role"] != "modulation_request":
+            continue
+        traces = [item for item in samples["channels"] if item["channel_id"] == binding["channel_id"]]
+        if len(traces) != 1:
+            return {"verdict": "INCOMPLETE_ANALYSIS", "checks": rows, "reason": "a modulation trace is missing or ambiguous"}
+        channel = traces[0]
+        values = [value for instant, value in zip(channel["domain"], channel["values"]) if window[0] <= instant <= window[1]]
+        peak = max(abs(value) for value in values)
+        rows.append({"channel_id": binding["channel_id"], "passed": peak <= checks["modulation_abs_limit"], "absolute_peak_pu": peak, "limit_pu": checks["modulation_abs_limit"], "source": channel["output_part"], "window_s": window})
     return {"verdict": "PASS" if rows and all(item["passed"] for item in rows) else "FAIL", "checks": rows}
 
 
@@ -154,14 +171,18 @@ async def _run_case(service, root, source, library, master, name, fault):
         stage("materializing")
         native = case_root / "native.pscx"
         binding = materialize_template_native_scenario(source, native, dc_fault_time_s=2.5 if fault else 10.0, fault_duration_s=0.2)
+        charging = case_root / "charging.pscx"
+        record["charging_delay_repair"] = materialize_terminal_two_charging(native, charging)
         repaired = case_root / "operating_point.pscx"
-        record["operating_point_repair"] = materialize_voltage_control_headroom(native, repaired, current_limit_pu=1.1)
+        record["operating_point_repair"] = materialize_voltage_control_headroom(charging, repaired, current_limit_pu=1.1)
         filtered = case_root / "dc_feedback.pscx"
         record["feedback_filter"] = materialize_dc_feedback_filter(repaired, filtered, master=master)
         carrier = case_root / "carrier.pscx"
         record["carrier_diagnostic"] = materialize_terminal_two_carrier(filtered, carrier)
+        damped = case_root / "arm_virtual_resistance.pscx"
+        record["arm_virtual_resistance"] = materialize_arm_virtual_resistance(carrier, damped, master=master)
         project = case_root / f"MMC_{name}.pscx"
-        contract = instrument_fault_channels(carrier, project, library=library, master=master)
+        contract = instrument_fault_channels(damped, project, library=library, master=master)
         contract["required_checks"] = _checks()
         _write(case_root / "channels.json", contract)
         record.update({"native_binding": binding, "channel_contract_path": str(case_root / "channels.json"), "channel_contract_sha256": _hash(case_root / "channels.json"), "project": str(project), "project_instrumented_sha256": _hash(project)})
@@ -186,6 +207,14 @@ async def _run_case(service, root, source, library, master, name, fault):
             record["compiled_controls"].append({"path": str(compiled), "sha256": _hash(compiled), "freeze_tracks_imax": matched})
         if len(record["compiled_controls"]) != 2 or not all(item["freeze_tracks_imax"] for item in record["compiled_controls"]):
             raise RuntimeError("Generated antiwindup does not track actual Imax")
+        mains = list(project.parent.glob(project.stem + ".*/Main.f"))
+        if len(mains) != 1:
+            raise RuntimeError("Generated Main charging scope is not unique")
+        compiled_main = mains[0].read_text(encoding="utf-8")
+        charging_counts = {terminal: len(re.findall(r"CALL\s+EMTDC_XTTRANS\(0,Tcharging" + terminal + r",0\.0,", compiled_main, re.IGNORECASE)) for terminal in ("1", "2")}
+        record["compiled_charging"] = {"path": str(mains[0]), "sha256": _hash(mains[0]), "independent_delay_counts": charging_counts}
+        if charging_counts != {"1": 1, "2": 1}:
+            raise RuntimeError("Generated charging delays do not use the independent terminal settings")
         stage("running")
         started = time.time()
         record["started_after"] = started
