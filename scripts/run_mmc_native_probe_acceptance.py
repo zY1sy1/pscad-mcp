@@ -285,12 +285,18 @@ async def read_run_probes(
         identity = infx[call_id]
         family = families_by_owner[identity["owner"]]
         native_name = identity["name"].rsplit(":", 1)[-1]
-        expected_description = native_name + (
+        native_pattern = re.escape(family) + r"(?:_[1-9]\d*)?"
+        vector_suffix = (
             f":{identity['component'] + 1}" if identity["dimension"] > 1 else ""
         )
+        # INF may assign global name suffixes while INFX keeps the prototype
+        # name and distinguishes repeated poles through its full instance path.
         if (
-            re.fullmatch(re.escape(family) + r"(?:_[1-9]\d*)?", native_name) is None
-            or meta["description"] != expected_description
+            re.fullmatch(native_pattern, native_name) is None
+            or re.fullmatch(
+                native_pattern + re.escape(vector_suffix), meta["description"]
+            )
+            is None
         ):
             raise ValueError(
                 f"INF/INFX owner, instance, or vector component does not match the physical probe receipt at call ID {call_id}"

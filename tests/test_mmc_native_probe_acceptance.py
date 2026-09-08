@@ -53,9 +53,11 @@ def test_direct_attempt_requires_optin_before_writes(tmp_path, monkeypatch):
     assert list(tmp_path.iterdir()) == []
 
 
-@pytest.mark.parametrize("native_suffixes", [False, True])
+@pytest.mark.parametrize(
+    "native_suffixes,infx_suffixes", [(False, False), (True, True), (True, False)]
+)
 def test_reader_retains_large_vectors_and_actual_owner_mapping(
-    tmp_path, monkeypatch, native_suffixes
+    tmp_path, monkeypatch, native_suffixes, infx_suffixes
 ):
     from xml.etree import ElementTree as ET
 
@@ -75,11 +77,12 @@ def test_reader_retains_large_vectors_and_actual_owner_mapping(
         for pole in range(1 if family.startswith(("MMC_DC_", "MMC_VDC_")) else 6):
             dimension = 90 if "VCAP" in family else 1
             native_name = family + (f"_{pole}" if native_suffixes and pole else "")
+            infx_name = family + (f"_{pole}" if infx_suffixes and pole else "")
             ET.SubElement(
                 analogs,
                 "Analog",
                 {
-                    "name": f"Main(0)\\Pole({pole}):{native_name}",
+                    "name": f"Main(0)\\Pole({pole}):{infx_name}",
                     "index": str(len(expected)),
                     "dim": str(dimension),
                     "id": f"{owner}:{pole}",
@@ -147,6 +150,9 @@ def test_reader_retains_large_vectors_and_actual_owner_mapping(
     if native_suffixes:
         assert traces[-1]["description"] == "MMC_VCAP_BTM_5:90"
         assert traces[-1]["path"] == "Main/MMC_VCAP_BTM_5:90"
+        assert traces[-1]["infx"]["name"] == "Main(0)\\Pole(5):MMC_VCAP_BTM" + (
+            "_5" if infx_suffixes else ""
+        )
     for description in (traces[0]["description"], traces[-1]["description"]):
         existing = asyncio.run(
             adapter.read_psout(
