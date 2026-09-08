@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -106,6 +107,38 @@ def test_public_plan_rejects_a_stale_audit_source_hash(tmp_path):
     service, request, *_ = _plan_case(tmp_path, audit_change=lambda audit: audit["source_hashes"].update(project="0" * 64))
     with pytest.raises(BackendError):
         service.plan_model(request)
+
+
+@pytest.mark.parametrize("names", [["TL12A", "tl12a"], ["CON"], ["nul"], ["COM1"]])
+def test_public_plan_rejects_windows_ambiguous_line_names(tmp_path, synthetic_master, monkeypatch, names):
+    service, request, source, _library = _plan_case(tmp_path)
+    source.write_text('<project name="source"><Wire classid="TLine" /></project>')
+    executable = synthetic_master.parent / "bin" / "win" / "tline.exe"
+    executable.parent.mkdir(parents=True)
+    executable.write_bytes(b"synthetic executable; never executed")
+    monkeypatch.setattr(blank_service, "extract_tline_segments", lambda _source: [SimpleNamespace(name=name) for name in names])
+    monkeypatch.setattr(blank_service, "render_tli", lambda segment: "input " + segment.name)
+    with pytest.raises(BackendError):
+        service.plan_model(request)
+
+
+@pytest.mark.parametrize("change", [
+    {"ratings": {"dc_voltage_kv": 500.0, "power_mw": 2000.0}},
+    {"control_profile": "custom_control"},
+    {"fault_profile": "custom_fault"},
+])
+def test_public_plan_does_not_echo_unsupported_custom_requests_as_applied(tmp_path, change):
+    service, request, *_ = _plan_case(tmp_path)
+    with pytest.raises(BackendError):
+        service.plan_model({**request.to_dict(), **change})
+
+
+def test_public_plan_identifies_legacy_rating_metadata_separately_from_native_model(tmp_path):
+    service, request, *_ = _plan_case(tmp_path)
+    plan = service.plan_model(request)
+    assert plan["request_implementation"]["ratings"]["binding"] == "descriptive_only"
+    assert plan["request_implementation"]["native_model_basis"]["dc_pole_to_pole_voltage_kv"] == 640.0
+    assert plan["request_implementation"]["native_model_basis"]["controlled_terminal_active_power_mw"] == -900.0
 
 
 def test_blank_mmc_plan_records_audited_topology_and_source_hashes(tmp_path: Path) -> None:

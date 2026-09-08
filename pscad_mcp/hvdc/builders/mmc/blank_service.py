@@ -51,6 +51,7 @@ _MODEL_RECIPES = {
     "headroom_1p1": {"current_limit_pu": 1.1},
     "headroom_1p1_dc_filter_5ms": {"current_limit_pu": 1.1, "dc_feedback_time_constant_s": 0.005},
 }
+_WINDOWS_DEVICE = re.compile(r"(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])", re.IGNORECASE)
 
 
 def _default_master_path() -> Path:
@@ -119,6 +120,8 @@ def _project_name(value: str) -> str:
         raise _error("MMC_LAYOUT_INVALID", "project_name must be a single PSCAD identity.", "plan_blank_mmc_model")
     if not name[0].isalpha() or len(name) > 128 or any(not (char.isalnum() or char in "_.-") for char in name):
         raise _error("MMC_LAYOUT_INVALID", "project_name contains unsupported characters.", "plan_blank_mmc_model")
+    if _WINDOWS_DEVICE.fullmatch(name.split(".", 1)[0]):
+        raise _error("MMC_LAYOUT_INVALID", "project_name is a reserved Windows device identity.", "plan_blank_mmc_model")
     return name
 
 
@@ -179,7 +182,7 @@ def _line_contract(source: Path, master: Path, audit: Mapping[str, Any]) -> dict
     try:
         segments = extract_tline_segments(source)
         names = [item.name for item in segments]
-        if len(names) != len(set(names)) or any(re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", name) is None for name in names):
+        if len(names) != len({name.casefold() for name in names}) or any(re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", name) is None or _WINDOWS_DEVICE.fullmatch(name) for name in names):
             raise ValueError("Line names must be unique native identities")
         inputs = [{"name": segment.name, "input_sha256": hashlib.sha256(render_tli(segment).encode("utf-8")).hexdigest()} for segment in segments]
     except (TypeError, ValueError, OverflowError) as error:
@@ -223,6 +226,8 @@ class BlankMmcBuilderService:
         if simulation_duration_s is None and isinstance(request, Mapping):
             simulation_duration_s = request.get("simulation_duration_s")
         parsed = request if isinstance(request, BlankMmcRequest) else BlankMmcRequest.from_dict(request) if isinstance(request, Mapping) else BlankMmcRequest(project_name=request, folder=folder)
+        if dict(parsed.ratings) != {"dc_voltage_kv": 320.0, "power_mw": 1000.0} or parsed.control_profile != "active_reactive_dc_voltage" or parsed.fault_profile != "dc_pole_to_pole_and_recovery":
+            raise _error("MMC_BLUEPRINT_INVALID", "The fixed native template does not implement custom ratings or control/fault profiles.", "plan_blank_mmc_model", ratings=dict(parsed.ratings), control_profile=parsed.control_profile, fault_profile=parsed.fault_profile)
         parameters = dict(parsed.parameterization)
         unknown = sorted(set(parameters) - {"model_recipe", "master_path"})
         recipe = parameters.get("model_recipe", "raw")
@@ -278,6 +283,7 @@ class BlankMmcBuilderService:
             "schema_version": 1,
             "kind": "blank_mmc_native",
             "request": parsed.to_dict(),
+            "request_implementation": {"ratings": {"binding": "descriptive_only", "requested": dict(parsed.ratings)}, "control_profile": "audited_existing_native_controls", "fault_profile": "materialized_native_dc_fault", "native_model_basis": {"dc_pole_to_pole_voltage_kv": 640.0, "controlled_terminal_active_power_mw": -900.0, "rated_converter_mva": 1000.0}},
             "project_name": name,
             "workspace": str(self.workspace_root),
             "target_path": str(target),
