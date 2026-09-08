@@ -226,3 +226,13 @@ def test_acceptance_rejects_duplicate_or_reordered_required_windows():
     report = evaluate_acceptance(_series(), duplicate)
     assert report.verdict == "INCOMPLETE_ANALYSIS"
     assert any(result.name == "acceptance_contract" and result.state == AcceptanceState.INVALID.value for result in report.checks)
+
+
+def test_fault_summary_does_not_accept_truthy_strings():
+    from pscad_mcp.hvdc.builders.mmc.acceptance import evaluate_dc_fault_blocking
+    report = evaluate_dc_fault_blocking({
+        "fault_applied": "false", "negative_voltage_inserted": "false",
+        "blocked": "false", "recovered": "false",
+        "fault_current_peak_ka": 1.0, "fault_current_limit_ka": 20.0,
+    })
+    assert report["verdict"] == "INCOMPLETE_ANALYSIS"
