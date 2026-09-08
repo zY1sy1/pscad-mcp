@@ -137,8 +137,10 @@ def test_public_plan_identifies_legacy_rating_metadata_separately_from_native_mo
     service, request, *_ = _plan_case(tmp_path)
     plan = service.plan_model(request)
     assert plan["request_implementation"]["ratings"]["binding"] == "descriptive_only"
-    assert plan["request_implementation"]["native_model_basis"]["dc_pole_to_pole_voltage_kv"] == 640.0
-    assert plan["request_implementation"]["native_model_basis"]["controlled_terminal_active_power_mw"] == -900.0
+    assert plan["request_implementation"]["supported_native_contract"]["dc_pole_to_pole_voltage_kv"] == 640.0
+    assert plan["request_implementation"]["supported_native_contract"]["controlled_terminal_active_power_mw"] == -900.0
+    assert plan["request_implementation"]["supported_native_contract"]["observed"] is False
+    assert plan["request_implementation"]["template_ratings_observed"] is None
 
 
 def test_blank_mmc_plan_records_audited_topology_and_source_hashes(tmp_path: Path) -> None:
