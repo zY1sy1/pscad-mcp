@@ -151,9 +151,15 @@ The inverter gamma PI output is beta, so AO must be alpha=pi-beta after the
 existing beta limiter. This supersedes the direct-AO equation in the earlier
 physicalization design. The installed CIGRE benchmark labels the PI output
 BETAI and uses a native pi-minus-BETAI summing junction to produce AOI.
-The PI gains, state and beta limits are unchanged; the smoke AO interval is
-the complemented alpha interval. This restores the corrective feedback sign
-without retuning the controller or changing dynamic acceptance thresholds.
+The PI gains and initial state are unchanged. Gamma control uses the native
+gamma-PI beta upper limit 1.57 rad; 1.92 belongs to the separate native
+inverter current-control branch. The rectifier alpha upper limit is pi-0.52,
+the complement of the native current controller's beta lower limit, allowing
+it to oppose rising DC current during an AC fault. The existing 5 deg lower
+alpha bound remains unchanged. WP1B checks command values against these native
+actuator limits, including startup current limiting above 30 deg; it does not
+assert a steady-state firing-angle result. WP1C retains the measured 15+/-5 deg
+alpha requirement and every other physical and dynamic acceptance threshold.
 
 Internal valve orientation is fixed to literal UP=1 so the wrapper DC_POS/DC_NEG
 ports correspond to native DP/DN. The blueprint already connects the rectifier
@@ -188,3 +194,29 @@ Term=0 (behind the source impedance) are
 explicit. The prior Frequency_Hz->F binding left actual F0 at its 60 Hz default
 while the PLO, transformers and filters were configured for 50 Hz. This fix
 changes the active source setting, not controller gains or acceptance limits.
+
+## Fixed operating point restoration
+
+The retained operating current is 1 kA and the inverter valve voltage is
+230 kV line-to-line. Each six-pulse transformer MVA base is explicit through
+Rating_MVA -> Tmva: sqrt(2) * valve_LL_kV * I_dc_kA, matching the RMS current
+of a six-pulse bridge. This replaces the inherited 100 MVA default. The
+rectifier/inverter valve-voltage ratio follows the installed benchmark's
+213.4557/209.2288 ratio, giving 234.6465257/230 kV and
+331.8402990/325.2691193 MVA. Equal valve voltages had forced the corrected
+constant-gamma/current loops outside the declared alpha operating band.
+
+The retained DC resistance is 10 ohm. Both smoothing reactors are 1.1936 H,
+preserving the installed benchmark's total L/R of 0.23872 s (two 0.5968 H
+reactors and 5 ohm total resistance). The former two 0.1 H defaults gave
+0.02 s and excessive fault-current rise. The installed native mingam at
+50 Hz now takes a full-cycle minimum in the actual gamma feedback path and
+its exported measurement. It retains low-gamma events; it is not a filter
+applied only to an acceptance report. The phase-reference, transformer-base,
+actuator-limit, cycle-minimum, and inductance effects were separately tested
+in isolated licensed diagnostic copies on 2026-09-08.
+
+These corrections establish a meaningful operating point, not acceptance.
+The raw converter-voltage ripple criterion and its sensor location remain
+unchanged. Independent diagnostic changes to transformer leakage and midpoint
+capacitance were not packaged as a substitute for passing that physical check.

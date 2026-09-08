@@ -262,6 +262,7 @@ def _master_fixture_xml(
   {duplicate}
   <Definition name='xfmr-3p2w'>
     <form><category>
+      <parameter name='Tmva' type='Real' unit='MVA' intent='Input'><value>100</value></parameter>
       <parameter name='V1' type='Real' unit='kV' intent='Input'><value>230</value></parameter>
       <parameter name='V2' type='Real' unit='kV' intent='Input'><value>230</value></parameter>
       <parameter name='f' type='Real' unit='Hz' intent='Input'><value>50</value></parameter>
@@ -959,10 +960,11 @@ def test_resolver_maps_transformer_lookup_and_fixed_voltage_base(tmp_path):
 
     resolved = audited.resolve_component(
         "master:converter_transformer",
-        {"Ratio": 1.0, "Connection": "Y-delta", "PhaseShift_deg": 30.0},
+        {"Ratio": 1.0, "Rating_MVA": 325.2691193458119, "Connection": "Y-delta", "PhaseShift_deg": 30.0},
     )
 
     assert resolved.physical_parameters == {
+        "Tmva": 325.2691193458119,
         "V1": 230.0,
         "V2": 230.0,
         "f": 50.0,
@@ -972,8 +974,9 @@ def test_resolver_maps_transformer_lookup_and_fixed_voltage_base(tmp_path):
         "Lead": 1,
     }
     assert resolved.logical_parameters(
-        {"V2": 230.0, "YD1": 0, "YD2": 1, "Lead": 1}
+        {"Tmva": 325.2691193458119, "V2": 230.0, "YD1": 0, "YD2": 1, "Lead": 1}
     ) == {
+        "Rating_MVA": 325.2691193458119,
         "Ratio": 1.0,
         "Connection": "Y-delta",
         "PhaseShift_deg": 30.0,
@@ -989,7 +992,7 @@ def test_resolver_rejects_unreviewed_transformer_tuple(tmp_path):
     with pytest.raises(BackendError) as failure:
         audited.resolve_component(
             "master:converter_transformer",
-            {"Ratio": 1.0, "Connection": "Y-delta", "PhaseShift_deg": -30.0},
+            {"Ratio": 1.0, "Rating_MVA": 325.2691193458119, "Connection": "Y-delta", "PhaseShift_deg": -30.0},
         )
 
     assert failure.value.code == "MASTER_TRANSFORM_UNSUPPORTED"

@@ -122,7 +122,8 @@
       },
       "orientation": 0,
       "parameters": {
-        "Ratio": 1,
+        "Ratio": 1.0202022857273951,
+        "Rating_MVA": 331.8402990331341,
         "PhaseShift_deg": 0,
         "Connection": "Y-Y"
       },
@@ -146,7 +147,8 @@
       },
       "orientation": 0,
       "parameters": {
-        "Ratio": 1,
+        "Ratio": 1.0202022857273951,
+        "Rating_MVA": 331.8402990331341,
         "PhaseShift_deg": 30,
         "Connection": "Y-delta"
       },
@@ -241,7 +243,7 @@
       },
       "orientation": 0,
       "parameters": {
-        "Inductance_mH": 100
+        "Inductance_mH": 1193.6
       },
       "ports": [
         "IN",
@@ -276,7 +278,7 @@
       },
       "orientation": 0,
       "parameters": {
-        "Inductance_mH": 100
+        "Inductance_mH": 1193.6
       },
       "ports": [
         "IN",
@@ -367,6 +369,7 @@
       "orientation": 0,
       "parameters": {
         "Ratio": 1,
+        "Rating_MVA": 325.2691193458119,
         "PhaseShift_deg": 0,
         "Connection": "Y-Y"
       },
@@ -391,6 +394,7 @@
       "orientation": 0,
       "parameters": {
         "Ratio": 1,
+        "Rating_MVA": 325.2691193458119,
         "PhaseShift_deg": 30,
         "Connection": "Y-delta"
       },

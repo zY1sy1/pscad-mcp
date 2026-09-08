@@ -55,6 +55,7 @@ STYLE = {
     "pi_ctlr": (76, 61, 89208388),
     "hardlimit": (76, 58, 85352944),
     "maxmin": (76, 60, 79761838),
+    "mingam": (76, 40, 23589620),
     "unity": (40, 19, 39250382),
     "pgb": (70, 30, 63669868),
 }
@@ -540,7 +541,7 @@ def _rectifier_control(definitions: ET.Element) -> None:
             {
                 "GP": "1.0989",
                 "TI": "0.01092 [s]",
-                "YHI": "0.5235987755982988",
+                "YHI": "2.621592653589793",
                 "YLO": "0.08726646259971647",
                 "YINIT": "0.2617993877991494",
                 "Mthd": "0",
@@ -553,7 +554,7 @@ def _rectifier_control(definitions: ET.Element) -> None:
             684,
             225,
             {
-                "UL": "0.5235987755982988",
+                "UL": "2.621592653589793",
                 "LL": "0.08726646259971647",
                 "COM": "LCC_AO_Limit",
                 "Dim": "1",
@@ -626,6 +627,10 @@ def _inverter_control(definitions: ET.Element) -> None:
             },
         ),
         Component(
+            "gamma_cycle_minimum", "master:mingam", 414, 234,
+            {"FREQ": "50.0 [Hz]"},
+        ),
+        Component(
             "gamma_error",
             "master:sumjct",
             414,
@@ -650,7 +655,7 @@ def _inverter_control(definitions: ET.Element) -> None:
             {
                 "GP": "0.7506",
                 "TI": "0.0544 [s]",
-                "YHI": "1.92",
+                "YHI": "1.57",
                 "YLO": "0.52",
                 "YINIT": "1.57",
                 "Mthd": "0",
@@ -663,7 +668,7 @@ def _inverter_control(definitions: ET.Element) -> None:
             774,
             306,
             {
-                "UL": "1.92",
+                "UL": "1.57",
                 "LL": "0.52",
                 "COM": "LCC_AO_Limit",
                 "Dim": "1",
@@ -691,6 +696,7 @@ def _inverter_control(definitions: ET.Element) -> None:
             ((126, 198), (216, 198), (216, 234), (252, 234)),
         ),
         Wire("GAMMA_MIN_D", ((126, 270), (252, 270))),
+        Wire("GAMMA_MIN_TO_CYCLE", ((324, 234), (378, 234))),
         Wire(
             "GAMMA_ERROR",
             ((126, 342), (342, 342), (342, 306), (378, 306)),
@@ -698,9 +704,11 @@ def _inverter_control(definitions: ET.Element) -> None:
         Wire(
             "GAMMA_FANOUT",
             (
-                (324, 234),
-                (342, 234),
-                (342, 180),
+                (450, 234),
+                (486, 234),
+                (486, 144),
+                (378, 144),
+                (378, 180),
                 (396, 180),
                 (450, 180),
                 (468, 180),

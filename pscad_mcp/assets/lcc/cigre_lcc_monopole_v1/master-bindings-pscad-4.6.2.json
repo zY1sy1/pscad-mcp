@@ -194,6 +194,12 @@
       ],
       "parameters": [
         {
+          "logical": ["Rating_MVA"],
+          "physical": ["Tmva"],
+          "transform": {"kind": "identity"},
+          "physical_contracts": {"Tmva": {"type": "Real", "unit": "MVA"}}
+        },
+        {
           "logical": [
             "Ratio"
           ],
@@ -2627,6 +2633,20 @@
           }
         }
       ],
+      "evidence_parameters": []
+    },
+    {
+      "logical_name": "master:cycle_gamma_minimum",
+      "physical_definition": "mingam",
+      "shape": {"kind": "direct"},
+      "ports": [
+        {"logical": "IN", "physical": "IN", "kind": "data", "dimension": 1, "occurrence": 0},
+        {"logical": "OUT", "physical": "OUT", "kind": "data", "dimension": 1, "occurrence": 0}
+      ],
+      "parameters": [
+        {"logical": ["FREQ"], "physical": ["FREQ"], "transform": {"kind": "identity"}, "physical_contracts": {"FREQ": {"type": "Real", "unit": "Hz"}}}
+      ],
+      "fixed_parameters": [],
       "evidence_parameters": []
     }
   ]

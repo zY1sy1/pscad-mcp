@@ -153,6 +153,21 @@ def test_valid_no_fault_smoke_passes_without_acceptance_claims():
     assert "accepted" not in result
 
 
+def test_packaged_smoke_checks_current_limiting_against_actuator_range():
+    from pscad_mcp.hvdc.builders.lcc.assets import load_packaged_asset_set
+
+    declared = load_packaged_asset_set().smoke
+    samples = valid_samples()
+    for group in ("Y", "D"):
+        samples["channels"][f"Main/AO_RECT_{group}"]["values"] = [math.radians(45)] * 2001
+        samples["channels"][f"Main/AO_INV_{group}"]["values"] = [2.1] * 2001
+    assert _subject()(samples, declared)["checks"]["ao_within_limits"] is True
+    upper = declared["ao_limits_rad"]["Main/AO_RECT_Y"][1]
+    samples["channels"]["Main/AO_RECT_Y"]["values"][1] = upper + 0.001
+    with pytest.raises(BackendError, match="outside its hard limits"):
+        _subject()(samples, declared)
+
+
 def test_ao_limits_allow_only_text_serialization_noise():
     payload = valid_samples()
     lower = contract()["ao_limits_rad"]["Main/AO_RECT_Y"][0]

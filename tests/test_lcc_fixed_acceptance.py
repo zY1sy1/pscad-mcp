@@ -148,7 +148,7 @@ def _smoke_channel(name: str) -> dict[str, object]:
     if name.startswith("Main/AO_RECT_"):
         units, minimum, maximum = "rad", 0.2, 0.3
     elif name.startswith("Main/AO_INV_"):
-        units, minimum, maximum = "rad", 1.5, 2.4
+        units, minimum, maximum = "rad", 1.6, 2.4
     elif name == "Main/GAMMA_INV":
         units, minimum, maximum = "rad", 0.2, 0.4
     elif name.startswith("Main/ENABLE_"):

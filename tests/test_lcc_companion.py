@@ -97,6 +97,7 @@ USERS = {
         *("master:import" for _ in range(6)),
         *("master:export" for _ in range(3)),
         "master:maxmin",
+        "master:mingam",
         "master:sumjct",
         "master:sumjct",
         "master:const",
@@ -166,6 +167,7 @@ WIRES = {
     ),
     "InverterControl": (
         "GAMMA_MIN",
+        "GAMMA_MIN_TO_CYCLE",
         "GAMMA_ERROR",
         "BETA_TO_ALPHA",
         "PI_TO_ALPHA",
@@ -755,9 +757,11 @@ def test_generated_inverter_gamma_signal_uses_one_nonbranching_trunk():
         (378, 306),
     ]
     assert points("GAMMA_FANOUT") == [
-        (324, 234),
-        (342, 234),
-        (342, 180),
+        (450, 234),
+        (486, 234),
+        (486, 144),
+        (378, 144),
+        (378, 180),
         (396, 180),
         (450, 180),
         (468, 180),

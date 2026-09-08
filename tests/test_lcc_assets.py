@@ -191,6 +191,7 @@ def test_packaged_asset_exposes_hashed_wp1b_smoke_contract():
         "master:control_pi",
         "master:control_limiter",
         "master:control_minimum",
+        "master:cycle_gamma_minimum",
         "master:control_product",
         "master:real_constant",
         "master:integer_constant",

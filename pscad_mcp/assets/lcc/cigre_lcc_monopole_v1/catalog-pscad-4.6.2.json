@@ -138,6 +138,7 @@
           "minimum": 0.1,
           "maximum": 20
         },
+        "Rating_MVA": {"type": "float", "minimum": 1.0, "unit": "MVA"},
         "PhaseShift_deg": {
           "type": "float",
           "minimum": -180,
@@ -274,7 +275,7 @@
         "Inductance_mH": {
           "type": "float",
           "minimum": 0,
-          "maximum": 1000,
+          "maximum": 1193.6,
           "unit": "mH"
         }
       },

@@ -103,9 +103,10 @@ async def _runtime_backend(tmp_path, *, snap_wires: bool = False):
         ),
         (
             "converter_transformer",
-            {"Ratio": 1.0, "Connection": "Y-delta", "PhaseShift_deg": 30.0},
+            {"Ratio": 1.0, "Rating_MVA": 325.2691193458119, "Connection": "Y-delta", "PhaseShift_deg": 30.0},
             "xfmr-3p2w",
             {
+                "Tmva": 325.2691193458119,
                 "V1": 230.0,
                 "V2": 230.0,
                 "f": 50.0,
