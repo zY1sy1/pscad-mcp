@@ -121,7 +121,7 @@ async def _run_case(service, root, source, library, master, name, fault):
         record.update({"native_binding": binding, "channel_contract_path": str(case_root / "channels.json"), "channel_contract_sha256": _hash(case_root / "channels.json"), "project": str(project), "project_instrumented_sha256": _hash(project)})
         stage("loading")
         await service.load_projects([str(library), str(project)])
-        settings = {"time_duration": "5.0", "time_step": "50", "sample_step": "250", "PlotType": "1", "output_filename": project.stem + ".out", "StartType": "0", "startup_filename": ""}
+        settings = {"time_duration": "5.0", "time_step": "25", "sample_step": "250", "PlotType": "1", "output_filename": project.stem + ".out", "StartType": "0", "startup_filename": ""}
         await service.set_project_settings(project.stem, settings)
         observed = await service.get_project_settings(project.stem)
         record["settings"] = observed

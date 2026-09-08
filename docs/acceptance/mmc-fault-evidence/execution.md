@@ -132,3 +132,11 @@ T1 measured input power is explicitly distinguished from T2's controlled
 bounded by a predeclared 10% of delivered power. It is not a second 900 MW
 control target. Both pre-fault and recovered DC voltage and T2 power must
 independently meet the 5% nominal band as well as the pre/post recovery band.
+
+The fourth attempt (`fault-evidence-20260908T045334292345Z`, 60c124f) completed
+all readback and output identity checks. It retained a physical FAIL: no-fault
+terminal voltages averaged 519.75/501.03 kV, T1 FrzI remained active for 93.69%
+of the final window, while T2's power reference and stability checks passed.
+No-fault full-run arm peaks were 2.88057/2.75489 kA. T1 Imax is not increased
+further. The next convergence experiment changes only EMT timestep 50 to
+25 us, retaining 250 us output sampling and all physical/control criteria.
