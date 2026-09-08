@@ -65,6 +65,9 @@ def _complete_blueprint() -> dict[str, object]:
             "timer_component": "inverter_fault_timer",
             "shunt_component": "inverter_fault_shunt",
             "channel": "fault_active",
+            "control_mode": "embedded_emtdc",
+            "control_signal": "FAULT_ACTIVE",
+            "recovery_window_s": 0.5,
             "control_components": ["inverter_fault_shunt"],
             "control_parameter": "IS",
             "apply_value": 1,
@@ -171,6 +174,7 @@ def test_current_fixed_blueprint_reports_explicit_missing_fault_bindings():
     )
     assert result["status"] == "INCOMPLETE_ANALYSIS"
     assert result["reasons"] == [
+        "fault_control_inverter_invalid",
         "fault_timer_port_missing",
         "fault_shunt_phase_port_missing",
         "fault_state_adapter_port_missing",
@@ -229,6 +233,129 @@ def test_packaged_breaker_group_requires_one_resistor_branch_per_breaker():
         blueprint, _asset("catalog-pscad-4.6.2.json"), _production_inventory()
     )
     assert "fault_resistor_branch_unconnected" in result["reasons"]
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "reason"),
+    [
+        ("control_mode", "wall_clock", "fault_control_mode_invalid"),
+        ("control_signal", "bad signal", "fault_control_signal_invalid"),
+        ("recovery_window_s", 0.0, "fault_recovery_window_invalid"),
+    ],
+)
+def test_packaged_dynamic_event_rejects_invalid_control_contract(field, value, reason):
+    blueprint = _asset("blueprint.json")
+    blueprint["dynamic_events"][0][field] = value
+    result = inspect_fixed_lcc_fault_capability(
+        blueprint, _asset("catalog-pscad-4.6.2.json"), _production_inventory()
+    )
+    assert result["status"] == "INCOMPLETE_ANALYSIS"
+    assert reason in result["reasons"]
+
+
+def test_packaged_dynamic_event_requires_native_scheduler_capabilities():
+    blueprint = _asset("blueprint.json")
+    event = blueprint["dynamic_events"][0]
+    event["control_mode"] = "native_scheduler"
+    result = inspect_fixed_lcc_fault_capability(
+        blueprint,
+        _asset("catalog-pscad-4.6.2.json"),
+        {**_production_inventory(), "timed_control_capabilities": {
+            "native_schedule": False,
+            "simulation_clock": False,
+            "time_basis": "EMTDC",
+        }},
+    )
+    assert result["status"] == "INCOMPLETE_ANALYSIS"
+    assert "native_scheduler_unavailable" in result["reasons"]
+
+
+@pytest.mark.parametrize(
+    ("mutator", "reason"),
+    [
+        (
+            lambda blueprint: blueprint["components"]
+            .__getitem__(next(i for i, c in enumerate(blueprint["components"]) if c["logical_id"] == "inverter_fault_timer"))
+            ["parameters"].__setitem__("FaultTime_s", 0.9),
+            "fault_timer_event_mismatch",
+        ),
+        (
+            lambda blueprint: blueprint["nets"].append(copy.deepcopy(next(net for net in blueprint["nets"] if net.get("label") == "LCC_FAULT_ACTIVE"))),
+            "fault_control_producer_topology_invalid",
+        ),
+    ],
+)
+def test_packaged_dynamic_event_rejects_inconsistent_timer_or_control_producer(mutator, reason):
+    blueprint = _asset("blueprint.json")
+    mutator(blueprint)
+    result = inspect_fixed_lcc_fault_capability(
+        blueprint, _asset("catalog-pscad-4.6.2.json"), _production_inventory()
+    )
+    assert result["status"] == "INCOMPLETE_ANALYSIS"
+    assert reason in result["reasons"]
+
+
+def test_packaged_dynamic_event_rejects_duplicate_phase_branch():
+    blueprint = _asset("blueprint.json")
+    branch = copy.deepcopy(next(net for net in blueprint["nets"] if net["logical_id"] == "inverter_fault_branch_a"))
+    branch["logical_id"] = "inverter_fault_branch_a_duplicate"
+    blueprint["nets"].append(branch)
+    result = inspect_fixed_lcc_fault_capability(
+        blueprint, _asset("catalog-pscad-4.6.2.json"), _production_inventory()
+    )
+    assert result["status"] == "INCOMPLETE_ANALYSIS"
+    assert "fault_resistor_branch_duplicate" in result["reasons"]
+
+
+def test_breaker_control_rejects_using_event_active_as_open_command():
+    blueprint = _asset("blueprint.json")
+    event = blueprint["dynamic_events"][0]
+    event["event_signal"] = event["control_signal"]
+    result = inspect_fixed_lcc_fault_capability(
+        blueprint, _asset("catalog-pscad-4.6.2.json"), _production_inventory(),
+    )
+    assert result["status"] == "INCOMPLETE_ANALYSIS"
+    assert "fault_control_polarity_invalid" in result["reasons"]
+
+
+@pytest.mark.parametrize("mutation, reason", [
+    ("adapter", "fault_control_inverter_invalid"),
+    ("apply", "fault_control_polarity_invalid"),
+    ("clear", "fault_control_polarity_invalid"),
+    ("command", "fault_control_command_topology_invalid"),
+])
+def test_breaker_control_requires_verified_inverse_relation(mutation, reason):
+    blueprint = _asset("blueprint.json")
+    if mutation == "adapter":
+        next(c for c in blueprint["components"] if c["logical_id"] == "fault_open_adapter")["definition"] = "master:unity"
+    elif mutation in {"apply", "clear"}:
+        blueprint["dynamic_events"][0][mutation + "_value"] = 1 if mutation == "apply" else 0
+    else:
+        next(net for net in blueprint["nets"] if net.get("label") == "LCC_FAULT_OPEN")["endpoints"][0]["port"] = "IN"
+    result = inspect_fixed_lcc_fault_capability(
+        blueprint, _asset("catalog-pscad-4.6.2.json"), _production_inventory(),
+    )
+    assert result["status"] == "INCOMPLETE_ANALYSIS"
+    assert reason in result["reasons"]
+
+
+def test_packaged_dynamic_event_rejects_unrelated_second_control_label_net():
+    blueprint = _asset("blueprint.json")
+    blueprint["nets"].append(
+        {
+            "logical_id": "unrelated_fault_label",
+            "kind": "data",
+            "label": "LCC_FAULT_ACTIVE",
+            "endpoints": [
+                {"component": "fault_active_adapter", "port": "OUT"},
+                {"component": "fault_active_output", "port": "INPUT"},
+            ],
+        }
+    )
+    result = inspect_fixed_lcc_fault_capability(
+        blueprint, _asset("catalog-pscad-4.6.2.json"), _production_inventory()
+    )
+    assert "fault_control_producer_topology_invalid" in result["reasons"]
 
 
 def test_live_inventory_port_records_may_omit_direction_metadata():

@@ -14,7 +14,6 @@ from typing import Any
 
 from ....core.backend.base import BackendError
 
-
 MAX_CHANNEL_SAMPLES = 1_000_000
 PASS = "PASS"
 FAIL = "FAIL"
@@ -376,6 +375,7 @@ _UNIT_TO_SI = {
     "kVAr": ("reactive_power", 1_000.0),
     "MVAr": ("reactive_power", 1_000_000.0),
     "deg": ("angle", 1.0),
+    "rad": ("angle", 180.0 / math.pi),
     "pu": ("per_unit", 1.0),
 }
 

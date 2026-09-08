@@ -33,14 +33,16 @@ FORBIDDEN_STRUCTURAL_TAGS = {
 EXPECTED_MASTER_COUNTS = {
     "cigre_lcc_v1:LCC12PulseBridge": {
         "master:g6p200": 2,
-        "master:xnode": 8,
-        "master:breakout": 2,
-        "master:resistor": 6,
+        "master:xnode": 11,
+        "master:breakout": 3,
+        "master:nodeloop": 1,
+        "master:resistor": 9,
         "master:import": 3,
-        "master:export": 4,
-        "master:consti": 2,
-        "master:sumjct": 1,
+        "master:export": 5,
         "master:unity": 1,
+        "master:multimeter": 2,
+        "master:datalabel": 2,
+        "master:sumjct": 1,
     },
     "cigre_lcc_v1:RectifierControl": {
         "master:import": 4,
@@ -55,7 +57,9 @@ EXPECTED_MASTER_COUNTS = {
         "master:import": 6,
         "master:export": 3,
         "master:maxmin": 1,
-        "master:sumjct": 1,
+        "master:mingam": 1,
+        "master:sumjct": 2,
+        "master:const": 1,
         "master:mult": 1,
         "master:pi_ctlr": 1,
         "master:hardlimit": 1,
@@ -69,9 +73,12 @@ EXPECTED_MASTER_COUNTS = {
         "master:pgb": 2,
     },
     "cigre_lcc_v1:SignalInterface": {
-        "master:import": 3,
-        "master:export": 3,
-        "master:unity": 3,
+        "master:import": 13,
+        "master:export": 7,
+        "master:unity": 2,
+        "master:sumjct": 5,
+        "master:maxmin": 2,
+        "master:const": 2,
         "master:pgb": 3,
     },
 }
@@ -106,6 +113,9 @@ EXPECTED_PORTS = {
                 "ACD_C",
                 "DC_POS",
                 "DC_NEG",
+                "REF_A",
+                "REF_B",
+                "REF_C",
             )
         },
         **{
@@ -114,7 +124,7 @@ EXPECTED_PORTS = {
         },
         **{
             name: _port("data", "output")
-            for name in ("AM_Y", "AM_D", "GM_Y", "GM_D")
+            for name in ("AM_Y", "AM_D", "GM_Y", "GM_D", "P_AC")
         },
     },
     "cigre_lcc_v1:RectifierControl": {
@@ -151,11 +161,11 @@ EXPECTED_PORTS = {
     "cigre_lcc_v1:SignalInterface": {
         **{
             name: _port("data", "input")
-            for name in ("VDC_RECT_RAW", "VDC_INV_RAW", "IDC_RAW")
+            for name in ("VDC_RECT_RAW", "VDC_INV_RAW", "IDC_RAW", "AM_Y", "AM_D", "GM_Y", "GM_D", "P_RECT_A", "P_RECT_B", "P_RECT_C", "P_INV_A", "P_INV_B", "P_INV_C")
         },
         **{
             name: _port("data", "output")
-            for name in ("VDC_RECT", "VDC_INV", "IDC")
+            for name in ("VDC_RECT", "VDC_INV", "IDC", "ALPHA_RECT", "MU_RECT", "P_RECT", "P_INV")
         },
     },
 }
@@ -170,8 +180,17 @@ REQUIRED_CONNECTIONS = {
         "ENABLE_TO_KB_Y",
         "ENABLE_TO_KB_D",
         "ENABLE_CONVERSION",
-        "CB_ZERO_Y",
-        "CB_ZERO_D",
+        "CB_REFERENCE_Y",
+        "CB_REFERENCE_D",
+        "REFERENCE_BUS",
+        "REF_A_TO_ISOLATION",
+        "REF_B_TO_ISOLATION",
+        "REF_C_TO_ISOLATION",
+        "REF_A_TO_BREAKOUT",
+        "REF_B_TO_BREAKOUT",
+        "REF_C_TO_BREAKOUT",
+        "ACY_TO_METER", "ACD_TO_METER", "METER_TO_Y", "METER_TO_D",
+        "P_Y_TO_SUM", "P_D_TO_SUM", "P_AC_OUTPUT",
     },
     "cigre_lcc_v1:RectifierControl": {
         "CURRENT_ERROR",
@@ -185,7 +204,10 @@ REQUIRED_CONNECTIONS = {
     },
     "cigre_lcc_v1:InverterControl": {
         "GAMMA_MIN",
+        "GAMMA_MIN_TO_CYCLE",
         "GAMMA_ERROR",
+        "BETA_TO_ALPHA",
+        "PI_TO_ALPHA",
         "ENABLE_PRODUCT",
         "PI_TO_LIMIT",
         "AO_Y_OUTPUT",
@@ -207,10 +229,16 @@ REQUIRED_CONNECTIONS = {
     "cigre_lcc_v1:SignalInterface": {
         "VDC_RECT_RAW_TO_UNITY",
         "VDC_RECT_FANOUT",
-        "VDC_INV_RAW_TO_UNITY",
+        "VDC_INV_RAW_TO_NEGATE",
+        "VDC_INV_ZERO_TO_NEGATE",
         "VDC_INV_FANOUT",
         "IDC_RAW_TO_UNITY",
         "IDC_FANOUT",
+        "AM_Y_TO_MAX", "AM_D_TO_MAX", "ALPHA_MEASURED_OUTPUT",
+        "AM_Y_TO_OVERLAP", "AM_D_TO_OVERLAP", "GM_Y_TO_OVERLAP", "GM_D_TO_OVERLAP",
+        "PI_TO_OVERLAP_Y", "PI_TO_OVERLAP_D", "OVERLAP_Y_TO_MAX", "OVERLAP_D_TO_MAX", "OVERLAP_MEASURED_OUTPUT",
+        "P_RECT_A_TO_SUM", "P_RECT_B_TO_SUM", "P_RECT_C_TO_SUM", "P_RECT_TOTAL_OUTPUT",
+        "P_INV_A_TO_SUM", "P_INV_B_TO_SUM", "P_INV_C_TO_SUM", "P_INV_TOTAL_OUTPUT",
     },
 }
 

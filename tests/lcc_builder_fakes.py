@@ -56,9 +56,19 @@ class RecordingPscadService:
             )
             parameters = ET.SubElement(element, "parameters")
             for name, value in sorted(component["parameters"].items()):
-                ET.SubElement(parameters, "param", {"name": str(name), "value": str(value)})
+                ET.SubElement(
+                    parameters,
+                    "param",
+                    {"name": str(name), "value": self._xml_parameter_value(value)},
+                )
         path.parent.mkdir(parents=True, exist_ok=True)
         ET.ElementTree(root).write(path, encoding="utf-8", xml_declaration=True)
+
+    @staticmethod
+    def _xml_parameter_value(value: Any) -> str:
+        """Keep symbolic values verbatim while serializing XML attributes."""
+
+        return value if isinstance(value, str) else str(value)
 
     async def create_project(self, kind: str, filename: str, folder: str, *, confirm: bool = False) -> dict[str, str]:
         self._call("create_project", kind, filename, folder, confirm=confirm)

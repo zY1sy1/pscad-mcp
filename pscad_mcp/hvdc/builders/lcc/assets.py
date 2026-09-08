@@ -7,7 +7,7 @@ import json
 import os
 import re
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from importlib import resources
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
@@ -89,6 +89,7 @@ class LccAssetSet:
     hashes: dict[str, str]
     library_bytes: bytes
     files: dict[str, bytes]
+    dynamic: dict[str, Any] = field(default_factory=dict)
     root: None = None
     master_bindings: MasterBindingRegistry | None = None
     master_binding_hash: str | None = None
@@ -352,6 +353,7 @@ def load_asset_set(asset_root: str | Path) -> LccAssetSet:
         "acceptance.json",
         "golden.json",
         "smoke.json",
+        "dynamic.json",
         "PROVENANCE.md",
         "master-bindings-pscad-4.6.2.json",
         companion_library,
@@ -421,6 +423,16 @@ def load_asset_set(asset_root: str | Path) -> LccAssetSet:
             expected=expected_smoke_identity,
             observed=smoke.get("identity"),
         )
+    dynamic = _json_record(files, "dynamic.json")
+    expected_dynamic_identity = f"{name}/wp1c_dynamic"
+    if dynamic.get("identity") != expected_dynamic_identity:
+        raise _asset_error(
+            "LCC_ASSET_MISMATCH",
+            "The dynamic contract identity does not match the asset.",
+            "load_lcc_asset_set",
+            expected=expected_dynamic_identity,
+            observed=dynamic.get("identity"),
+        )
     return LccAssetSet(
         name=name,
         schema_version=schema_version,
@@ -435,6 +447,7 @@ def load_asset_set(asset_root: str | Path) -> LccAssetSet:
         hashes=dict(hashes),
         library_bytes=bytes(files[companion_library]),
         files=dict(files),
+        dynamic=dynamic,
         master_bindings=master_bindings,
         master_binding_hash=hashes[registry_asset],
     )

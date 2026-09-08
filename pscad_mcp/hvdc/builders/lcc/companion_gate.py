@@ -45,6 +45,10 @@ FIXTURES = (
             "AM_D",
             "GM_Y",
             "GM_D",
+            "REF_A",
+            "REF_B",
+            "REF_C",
+            "P_AC",
         ),
     ),
     CompanionFixture(
@@ -67,6 +71,10 @@ FIXTURES = (
             "AM_D",
             "GM_Y",
             "GM_D",
+            "REF_A",
+            "REF_B",
+            "REF_C",
+            "P_AC",
         ),
     ),
     CompanionFixture(
@@ -116,6 +124,9 @@ FIXTURES = (
             "VDC_RECT",
             "VDC_INV",
             "IDC",
+            "AM_Y", "AM_D", "GM_Y", "GM_D",
+            "P_RECT_A", "P_RECT_B", "P_RECT_C", "P_INV_A", "P_INV_B", "P_INV_C",
+            "ALPHA_RECT", "MU_RECT", "P_RECT", "P_INV",
         ),
     ),
 )
@@ -141,6 +152,8 @@ _FIXTURE_INPUTS = {
         "VDC_RECT_RAW",
         "VDC_INV_RAW",
         "IDC_RAW",
+        "AM_Y", "AM_D", "GM_Y", "GM_D",
+        "P_RECT_A", "P_RECT_B", "P_RECT_C", "P_INV_A", "P_INV_B", "P_INV_C",
     ),
 }
 _BRIDGE_ELECTRICAL_PORTS = (
@@ -152,7 +165,12 @@ _BRIDGE_ELECTRICAL_PORTS = (
     "ACD_C",
     "DC_POS",
     "DC_NEG",
+    "REF_A",
+    "REF_B",
+    "REF_C",
 )
+# Input harnesses must approach the module from the left of its output ports.
+_FIXTURE_POSITION = (1440, 180)
 
 
 def _error(code: str, message: str, operation: str, **details: Any) -> BackendError:
@@ -461,7 +479,7 @@ async def _add_fixture_harness(
     input_ports = _FIXTURE_INPUTS[fixture.definition]
     for source_index, port_name in enumerate(input_ports):
         contract = require_port(definition, port_name)
-        target = absolute_port((180, 180), contract.offset, 0)
+        target = absolute_port(_FIXTURE_POSITION, contract.offset, 0)
         integer = False
         if port_name in {"AO_Y", "AO_D"}:
             value = "0.2617993877991494" if fixture.parameters.get("UP") == 1 else "1.57"
@@ -504,7 +522,7 @@ async def _add_fixture_harness(
     if fixture.definition.endswith(":LCC12PulseBridge"):
         for index, port_name in enumerate(_BRIDGE_ELECTRICAL_PORTS):
             contract = require_port(definition, port_name)
-            target = absolute_port((180, 180), contract.offset, 0)
+            target = absolute_port(_FIXTURE_POSITION, contract.offset, 0)
             ground = (1080 + index * 72, 1080)
             await _service_call(
                 "create_fixture_harness",
@@ -676,8 +694,7 @@ async def run_companion_component_gate(
                 project_name,
                 library,
                 definition_name,
-                180,
-                180,
+                *_FIXTURE_POSITION,
                 0,
                 dict(fixture.parameters),
                 canvas_name="Main",

@@ -106,6 +106,9 @@ def _write_asset_files(root: Path) -> dict[str, bytes]:
         "smoke.json": (
             b'{"identity":"cigre_lcc_monopole_v1/wp1b_smoke"}'
         ),
+        "dynamic.json": (
+            b'{"identity":"cigre_lcc_monopole_v1/wp1c_dynamic"}'
+        ),
         "PROVENANCE.md": b"public source\n",
         "library/cigre_lcc_v1.pslx": library,
     }
@@ -182,15 +185,19 @@ def test_packaged_asset_exposes_hashed_wp1b_smoke_contract():
     assert asset_set.master_bindings.schema_version == 2
     assert "master:main_signal_import" in asset_set.master_bindings.by_logical_name
     assert set(asset_set.master_bindings.companion_by_logical_name) == {
+        "master:ac_node_reference",
         "master:six_pulse_bridge",
         "master:control_sum",
         "master:control_pi",
         "master:control_limiter",
         "master:control_minimum",
+        "master:cycle_gamma_minimum",
+        "master:measurement_burden_resistor",
+        "master:local_power_signal",
+        "master:converter_power_meter",
         "master:control_product",
         "master:real_constant",
         "master:integer_constant",
-        "master:signal_import",
         "master:electrical_pin",
         "master:signal_export",
         "master:integer_sum",
@@ -200,6 +207,26 @@ def test_packaged_asset_exposes_hashed_wp1b_smoke_contract():
         "master:real_to_integer",
         "master:phase_isolation_resistor",
     }
+
+
+def test_packaged_wp1c_contract_binds_inverse_timer_command_to_three_breakers():
+    assets = load_packaged_asset_set()
+    blueprint = assets.blueprint.to_dict()
+    event = blueprint["dynamic_events"][0]
+    components = {item["logical_id"]: item for item in blueprint["components"]}
+    nets = {item["logical_id"]: item for item in blueprint["nets"]}
+    assert assets.dynamic["identity"] == "cigre_lcc_monopole_v1/wp1c_dynamic"
+    assert event["control_mode"] == "embedded_emtdc"
+    assert event["control_signal"] == "LCC_FAULT_OPEN"
+    assert event["event_signal"] == "LCC_FAULT_ACTIVE"
+    assert assets.dynamic["event"]["control_signal"] == event["control_signal"]
+    assert assets.dynamic["event"]["event_signal"] == event["event_signal"]
+    assert event["recovery_window_s"] == pytest.approx(0.5)
+    assert {components[name]["parameters"]["NAME"] for name in event["control_components"]} == {event["control_signal"]}
+    assert nets["inverter_fault_active_integer"]["label"] == event["event_signal"]
+    assert nets["inverter_fault_open_integer"]["label"] == event["control_signal"]
+    assert assets.dynamic["bounded_dc_response"]["maximum_peak_to_prefault_ratio"] == pytest.approx(3.0)
+    assert assets.dynamic["threshold_source"]["scope"] == "engineering_only"
 
 
 def test_catalog_registry_reference_mismatch_is_rejected(tmp_path):

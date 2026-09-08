@@ -2,8 +2,18 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
-from pscad_mcp.hvdc.builders.lcc.dynamic_acceptance_cli import main
+import pytest
+
+from pscad_mcp.hvdc.builders.lcc import dynamic_acceptance_cli
+from pscad_mcp.hvdc.builders.lcc.dynamic_acceptance import (
+    validate_dynamic_lcc_acceptance_report,
+)
+from pscad_mcp.hvdc.builders.lcc.dynamic_acceptance_cli import main, run_exit_code
+from tests.lcc_dynamic_fakes import valid_wp1c_report
+
+ROOT = Path(__file__).parents[1]
 
 
 def _wave(values: list[float], units: str) -> dict[str, object]:
@@ -218,3 +228,296 @@ def test_evaluate_cli_records_failure_details_for_missing_required_channel(tmp_p
     payload = json.loads(report.read_text(encoding="utf-8"))
     assert payload["status"] == "FAIL"
     assert payload["failure"]["stage"] == "evaluation"
+
+
+@pytest.mark.parametrize(
+    ("preflight", "engineering", "expected"),
+    [("FAIL", "FAIL", 2), ("PASS", "FAIL", 1), ("PASS", "PASS", 0)],
+)
+def test_run_exit_code_separates_preflight_and_engineering(preflight, engineering, expected):
+    assert run_exit_code(preflight_status=preflight, engineering_verdict=engineering) == expected
+
+
+def _run_args(tmp_path: Path, report: Path) -> list[str]:
+    return [
+        "run",
+        "--repository-root", str(tmp_path),
+        "--workspace-root", str(report.parent),
+        "--master-path", str(tmp_path / "master.pslx"),
+        "--compiler-configuration", str(tmp_path / "fortran_compilers.xml"),
+        "--compiler-executable", str(tmp_path / "gfortran.exe"),
+        "--report", str(report),
+        "--commit", "a" * 40,
+        "--branch", "codex/wp1c",
+    ]
+
+
+def _fake_valid_report(report: Path) -> dict[str, object]:
+    payload = valid_wp1c_report()
+    workspace = report.parent.resolve()
+    payload["build"]["workspace"] = str(workspace)
+    for name, suffix in (("project", ".pscx"), ("library", ".pslx"), ("normalized_samples", ".json")):
+        payload["artifacts"][name]["path"] = str(workspace / f"{name}{suffix}")
+    payload["artifacts"]["selected_output"]["path"] = str(workspace / "run_01.out")
+    payload["artifacts"]["output_parts"][0]["path"] = str(workspace / "run_01.out")
+    payload["artifacts"]["output_metadata"][0]["path"] = str(workspace / "run.inf")
+    return payload
+
+
+def test_run_preflight_failure_returns_two_without_creating_service(tmp_path: Path):
+    report = tmp_path / "run" / "report.json"
+    calls: list[str] = []
+    code = main(
+        _run_args(tmp_path, report),
+        preflight_action=lambda _args: {"status": "FAIL", "sha256": "d" * 64, "snapshot": {}},
+        service_factory=lambda _request: calls.append("service") or (object(), object()),
+    )
+    assert code == 2
+    assert calls == []
+    persisted = json.loads(report.read_text(encoding="utf-8"))
+    assert validate_dynamic_lcc_acceptance_report(persisted)["failure"]["stage"] == "setup"
+
+
+def test_run_preflight_failure_does_not_overwrite_existing_report(tmp_path: Path):
+    report = tmp_path / "run" / "report.json"
+    report.parent.mkdir(parents=True)
+    sentinel = b"existing-report"
+    report.write_bytes(sentinel)
+    code = main(
+        _run_args(tmp_path, report),
+        preflight_action=lambda _args: {"status": "FAIL", "error": {"code": "PREFLIGHT_X", "message": "bad compiler"}},
+        service_factory=lambda _request: (_ for _ in ()).throw(AssertionError("must not create service")),
+    )
+    assert code == 2
+    assert report.read_bytes() == sentinel
+
+
+def test_run_preflight_failure_new_report_preserves_stable_code_and_reason(tmp_path: Path):
+    report = tmp_path / "run" / "report.json"
+    code = main(
+        _run_args(tmp_path, report),
+        preflight_action=lambda _args: {"status": "FAIL", "error": {"code": "PREFLIGHT_X", "message": "bad compiler"}, "details": {"source": "compiler"}},
+    )
+    assert code == 2
+    persisted = validate_dynamic_lcc_acceptance_report(json.loads(report.read_text(encoding="utf-8")))
+    assert persisted["failure"]["code"] == "LCC_DYNAMIC_PREFLIGHT_FAILED"
+    assert "bad compiler" in persisted["failure"]["message"]
+
+
+def test_run_preflight_failure_does_not_follow_dangling_report_symlink(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    report = tmp_path / "run" / "report-link.json"
+    target = report.parent / "target.json"
+    original_resolve = Path.resolve
+    original_is_symlink = Path.is_symlink
+
+    def fake_resolve(path: Path, *args, **kwargs):
+        if path == report:
+            return target
+        return original_resolve(path, *args, **kwargs)
+
+    def fake_is_symlink(path: Path) -> bool:
+        return path == report or original_is_symlink(path)
+
+    monkeypatch.setattr(Path, "resolve", fake_resolve)
+    monkeypatch.setattr(Path, "is_symlink", fake_is_symlink)
+
+    code = main(
+        _run_args(tmp_path, report),
+        preflight_action=lambda _args: {
+            "status": "FAIL",
+            "sha256": "d" * 64,
+            "snapshot": {},
+        },
+    )
+
+    assert code == 2
+    assert not target.exists()
+
+
+def test_run_preflight_failure_keeps_static_diagnostics_traceable(tmp_path: Path):
+    report = tmp_path / "run" / "report.json"
+    static = {
+        "status": "FAIL",
+        "checks": {"compiler": "FAIL", "processes": "PASS"},
+        "runtime": {"connected": False},
+        "external_pscad_processes": [{"pid": 123}],
+    }
+    code = main(
+        _run_args(tmp_path, report),
+        preflight_action=lambda _args: {
+            "status": "FAIL",
+            "sha256": "d" * 64,
+            "snapshot": {},
+            "static": static,
+        },
+    )
+
+    assert code == 2
+    persisted = validate_dynamic_lcc_acceptance_report(json.loads(report.read_text(encoding="utf-8")))
+    assert persisted["failure"]["code"] == "LCC_DYNAMIC_PREFLIGHT_FAILED"
+    assert "compiler" in persisted["failure"]["message"]
+    assert "external_pscad_processes" in persisted["failure"]["message"]
+
+
+def test_run_engineering_pass_with_incomplete_status_returns_zero(tmp_path: Path):
+    report = tmp_path / "run" / "report.json"
+    payload = _fake_valid_report(report)
+
+    async def fake_runner(request, **_kwargs):
+        request.report_path.parent.mkdir(parents=True, exist_ok=True)
+        request.report_path.write_text(json.dumps(payload), encoding="utf-8")
+        return payload
+
+    code = main(
+        _run_args(tmp_path, report),
+        preflight_action=lambda _args: {"status": "PASS", "sha256": "d" * 64, "snapshot": {}},
+        service_factory=lambda _request: (object(), object()),
+        run_action=fake_runner,
+    )
+    assert code == 0
+    assert json.loads(report.read_text(encoding="utf-8"))["status"] == "INCOMPLETE_ANALYSIS"
+
+
+def test_run_engineering_failure_returns_one(tmp_path: Path):
+    report = tmp_path / "run" / "report.json"
+    payload = _fake_valid_report(report)
+    payload["engineering_verdict"] = "FAIL"
+    payload["status"] = "FAIL"
+    payload["dynamic"] = {"evidence_source": "raw_pscad_output", "engineering_verdict": "FAIL", "checks": {}}
+    payload["physical"] = {"verdict": "FAIL", "checks": []}
+    payload["build"]["terminal_state"] = "failed"
+    payload["build"]["history"] = []
+    payload["artifacts"] = {
+        "project": None,
+        "library": None,
+        "selected_output": None,
+        "output_parts": [],
+        "output_metadata": [],
+        "normalized_samples": None,
+    }
+
+    async def fake_runner(request, **_kwargs):
+        request.report_path.parent.mkdir(parents=True, exist_ok=True)
+        request.report_path.write_text(json.dumps(payload), encoding="utf-8")
+        return payload
+
+    code = main(
+        _run_args(tmp_path, report),
+        preflight_action=lambda _args: {"status": "PASS", "sha256": "d" * 64, "snapshot": {}},
+        service_factory=lambda _request: (object(), object()),
+        run_action=fake_runner,
+    )
+    assert code == 1
+
+
+def test_run_service_factory_failure_persists_strict_report(tmp_path: Path):
+    report = tmp_path / "run" / "report.json"
+    code = main(
+        _run_args(tmp_path, report),
+        preflight_action=lambda _args: {"status": "PASS", "sha256": "d" * 64, "snapshot": {}},
+        service_factory=lambda _request: (_ for _ in ()).throw(RuntimeError("factory failed")),
+    )
+    assert code == 1
+    persisted = json.loads(report.read_text(encoding="utf-8"))
+    assert validate_dynamic_lcc_acceptance_report(persisted)["failure"]["stage"] == "setup"
+
+
+def test_run_service_factory_failure_does_not_overwrite_existing_report(tmp_path: Path):
+    report = tmp_path / "run" / "report.json"
+    report.parent.mkdir(parents=True)
+    sentinel = b"existing-report"
+    report.write_bytes(sentinel)
+    code = main(
+        _run_args(tmp_path, report),
+        preflight_action=lambda _args: {"status": "PASS", "sha256": "d" * 64, "snapshot": {}},
+        service_factory=lambda _request: (_ for _ in ()).throw(RuntimeError("factory failed")),
+    )
+    assert code == 1
+    assert report.read_bytes() == sentinel
+
+
+def test_dynamic_wrapper_uses_run_and_no_manual_sample_contract_inputs():
+    script = (ROOT / "scripts" / "run_fixed_lcc_dynamic_acceptance.ps1").read_text(encoding="utf-8")
+    assert "dynamic_acceptance_cli run" in script
+    assert "[string]$WorkspaceRoot" in script
+    assert "[string]$MasterPath" in script
+    assert "[string]$CompilerConfiguration" in script
+    assert "[string]$CompilerExecutable" in script
+    assert "[string]$ProjectName" in script
+    assert "[string]$Samples" not in script
+    assert "[string]$Golden" not in script
+    assert "[string]$Contract" not in script
+    for field in (
+        "FIXED_LCC_DYNAMIC_REPORT=",
+        "FIXED_LCC_DYNAMIC_REPORT_SHA256=",
+        "FIXED_LCC_DYNAMIC_ENGINEERING_VERDICT=",
+        "FIXED_LCC_DYNAMIC_STATUS=",
+    ):
+        assert field in script
+
+
+def test_dynamic_wrapper_maps_preflight_throws_to_exit_two():
+    script = (ROOT / "scripts" / "run_fixed_lcc_dynamic_acceptance.ps1").read_text(
+        encoding="utf-8"
+    )
+    assert "$PreflightComplete = $false" in script
+    assert "catch {" in script
+    assert "$ExitCode = 2" in script
+    assert "$ExitCode = $LASTEXITCODE" in script
+    assert "if (-not $PreflightComplete)" in script
+    assert "if ($LocationPushed)" in script
+
+
+def test_dynamic_wrapper_falls_back_to_common_repository_python_environment():
+    script = (ROOT / "scripts" / "run_fixed_lcc_dynamic_acceptance.ps1").read_text(
+        encoding="utf-8"
+    )
+    assert "rev-parse --path-format=absolute --git-common-dir" in script
+    assert "$CommonRoot = Split-Path -Parent $CommonGitDir" in script
+    assert "$Python = Join-Path $CommonRoot '.venv\\Scripts\\python.exe'" in script
+
+
+def test_dynamic_service_factory_requests_minimized_pscad(monkeypatch, tmp_path):
+    captured = {}
+    backend = object()
+    service = object()
+    builder = object()
+
+    def backend_factory(*args, **kwargs):
+        captured.update(kwargs)
+        return backend
+
+    monkeypatch.setattr(dynamic_acceptance_cli, "LegacyBackend", backend_factory)
+    monkeypatch.setattr(
+        dynamic_acceptance_cli,
+        "PscadService",
+        lambda provider, **kwargs: service,
+    )
+    monkeypatch.setattr(
+        dynamic_acceptance_cli,
+        "LccBuilderService",
+        lambda value, *, workspace_root: builder,
+    )
+
+    result = dynamic_acceptance_cli._service_factory(
+        SimpleNamespace(master_path=tmp_path / "master.pslx", workspace_root=tmp_path)
+    )
+
+    assert result == (service, builder)
+    assert captured["legacy_minimize"] is True
+
+
+def test_dynamic_completion_sentence_is_explicitly_post_run():
+    for relative in (
+        "README.md",
+        "docs/zh-CN/README.md",
+        "docs/superpowers/specs/2026-08-30-lcc-mmc-completion-roadmap-design.md",
+    ):
+        text = (ROOT / relative).read_text(encoding="utf-8")
+        assert "after a successful pre-wp6 run" in text.lower() or "成功运行后" in text
+        assert (
+            "fixed LCC WP1C current-commit dynamic engineering evidence completed;"
+            in text
+        )

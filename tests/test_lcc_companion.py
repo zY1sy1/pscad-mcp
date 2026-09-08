@@ -27,6 +27,10 @@ PORTS = {
         ("AM_D", "Transfer", "Output", "Real"),
         ("GM_Y", "Transfer", "Output", "Real"),
         ("GM_D", "Transfer", "Output", "Real"),
+        ("REF_A", "Natural", "", "NonRemovable"),
+        ("REF_B", "Natural", "", "NonRemovable"),
+        ("REF_C", "Natural", "", "NonRemovable"),
+        ("P_AC", "Transfer", "Output", "Real"),
     ),
     "RectifierControl": (
         ("VDC_MEAS", "Transfer", "Input", "Real"),
@@ -61,6 +65,8 @@ PORTS = {
         ("VDC_RECT", "Transfer", "Output", "Real"),
         ("VDC_INV", "Transfer", "Output", "Real"),
         ("IDC", "Transfer", "Output", "Real"),
+        *((name, "Transfer", "Input", "Real") for name in ("AM_Y", "AM_D", "GM_Y", "GM_D", "P_RECT_A", "P_RECT_B", "P_RECT_C", "P_INV_A", "P_INV_B", "P_INV_C")),
+        *((name, "Transfer", "Output", "Real") for name in ("ALPHA_RECT", "MU_RECT", "P_RECT", "P_INV")),
     ),
 }
 
@@ -68,16 +74,17 @@ USERS = {
     "LCC12PulseBridge": (
         "master:g6p200",
         "master:g6p200",
-        *("master:xnode" for _ in range(8)),
+        *("master:xnode" for _ in range(11)),
         "master:breakout",
         "master:breakout",
-        *("master:resistor" for _ in range(6)),
+        "master:breakout",
+        "master:nodeloop",
+        *("master:resistor" for _ in range(9)),
         *("master:import" for _ in range(3)),
-        *("master:export" for _ in range(4)),
-        "master:consti",
-        "master:consti",
-        "master:sumjct",
+        *("master:export" for _ in range(5)),
         "master:unity",
+        "master:multimeter", "master:multimeter",
+        "master:datalabel", "master:datalabel", "master:sumjct",
     ),
     "RectifierControl": (
         *("master:import" for _ in range(4)),
@@ -93,7 +100,10 @@ USERS = {
         *("master:import" for _ in range(6)),
         *("master:export" for _ in range(3)),
         "master:maxmin",
+        "master:mingam",
         "master:sumjct",
+        "master:sumjct",
+        "master:const",
         "master:mult",
         "master:pi_ctlr",
         "master:hardlimit",
@@ -113,15 +123,15 @@ USERS = {
         "master:pgb",
     ),
     "SignalInterface": (
-        "master:import",
-        "master:import",
-        "master:import",
-        "master:export",
-        "master:export",
-        "master:export",
+        *("master:import" for _ in range(13)),
+        *("master:export" for _ in range(7)),
         "master:unity",
         "master:unity",
-        "master:unity",
+        *("master:sumjct" for _ in range(5)),
+        "master:maxmin",
+        "master:maxmin",
+        "master:const",
+        "master:const",
         "master:pgb",
         "master:pgb",
         "master:pgb",
@@ -138,8 +148,17 @@ WIRES = {
         "ENABLE_TO_KB_Y",
         "ENABLE_TO_KB_D",
         "ENABLE_CONVERSION",
-        "CB_ZERO_Y",
-        "CB_ZERO_D",
+        "CB_REFERENCE_Y",
+        "CB_REFERENCE_D",
+        "REFERENCE_BUS",
+        "REF_A_TO_ISOLATION",
+        "REF_B_TO_ISOLATION",
+        "REF_C_TO_ISOLATION",
+        "REF_A_TO_BREAKOUT",
+        "REF_B_TO_BREAKOUT",
+        "REF_C_TO_BREAKOUT",
+        "ACY_TO_METER", "ACD_TO_METER", "METER_TO_Y", "METER_TO_D",
+        "P_Y_TO_SUM", "P_D_TO_SUM", "P_AC_OUTPUT",
     ),
     "RectifierControl": (
         "CURRENT_ERROR",
@@ -153,7 +172,10 @@ WIRES = {
     ),
     "InverterControl": (
         "GAMMA_MIN",
+        "GAMMA_MIN_TO_CYCLE",
         "GAMMA_ERROR",
+        "BETA_TO_ALPHA",
+        "PI_TO_ALPHA",
         "ENABLE_PRODUCT",
         "PI_TO_LIMIT",
         "AO_Y_OUTPUT",
@@ -175,10 +197,16 @@ WIRES = {
     "SignalInterface": (
         "VDC_RECT_RAW_TO_UNITY",
         "VDC_RECT_FANOUT",
-        "VDC_INV_RAW_TO_UNITY",
+        "VDC_INV_RAW_TO_NEGATE",
+        "VDC_INV_ZERO_TO_NEGATE",
         "VDC_INV_FANOUT",
         "IDC_RAW_TO_UNITY",
         "IDC_FANOUT",
+        "AM_Y_TO_MAX", "AM_D_TO_MAX", "ALPHA_MEASURED_OUTPUT",
+        "AM_Y_TO_OVERLAP", "AM_D_TO_OVERLAP", "GM_Y_TO_OVERLAP", "GM_D_TO_OVERLAP",
+        "PI_TO_OVERLAP_Y", "PI_TO_OVERLAP_D", "OVERLAP_Y_TO_MAX", "OVERLAP_D_TO_MAX", "OVERLAP_MEASURED_OUTPUT",
+        "P_RECT_A_TO_SUM", "P_RECT_B_TO_SUM", "P_RECT_C_TO_SUM", "P_RECT_TOTAL_OUTPUT",
+        "P_INV_A_TO_SUM", "P_INV_B_TO_SUM", "P_INV_C_TO_SUM", "P_INV_TOTAL_OUTPUT",
     ),
 }
 
@@ -199,6 +227,9 @@ XNODE_NAMES = (
     "ACD_C",
     "DC_POS",
     "DC_NEG",
+    "REF_A",
+    "REF_B",
+    "REF_C",
 )
 
 
@@ -382,9 +413,9 @@ def test_physical_bridge_requires_two_g6p200_and_scalar_ao(tmp_path):
 
     bridge = evidence["definitions"]["cigre_lcc_v1:LCC12PulseBridge"]
     assert bridge["master_instances"]["master:g6p200"] == 2
-    assert bridge["master_instances"]["master:xnode"] == 8
-    assert bridge["master_instances"]["master:breakout"] == 2
-    assert bridge["master_instances"]["master:resistor"] == 6
+    assert bridge["master_instances"]["master:xnode"] == 11
+    assert bridge["master_instances"]["master:breakout"] == 3
+    assert bridge["master_instances"]["master:resistor"] == 9
     assert bridge["ports"]["AO_Y"] == {
         "kind": "data",
         "dimension": 1,
@@ -397,6 +428,86 @@ def test_physical_bridge_requires_two_g6p200_and_scalar_ao(tmp_path):
         definition.rsplit(":", 1)[-1]: tuple(details["output_channels"])
         for definition, details in evidence["definitions"].items()
     } == OUTPUT_NAMES
+
+
+def test_generated_bridge_connects_each_phase_resistor_to_breakout(tmp_path):
+    root = ET.fromstring(render_library())
+    bridge = root.find("./definitions/Definition[@name='LCC12PulseBridge']")
+    assert bridge is not None
+
+    def wire_points(name):
+        wire = bridge.find(f"./schematic/Wire[@lcc_role='{name}']")
+        assert wire is not None
+        origin = (int(wire.get("x")), int(wire.get("y")))
+        return [
+            (origin[0] + int(vertex.get("x")), origin[1] + int(vertex.get("y")))
+            for vertex in wire.findall("./vertex")
+        ]
+
+    assert wire_points("ACY_A_TO_BREAKOUT") == [(182, 306), (216, 306)]
+    assert wire_points("ACY_B_TO_BREAKOUT") == [(182, 342), (216, 342)]
+    assert wire_points("ACY_C_TO_BREAKOUT") == [(182, 378), (216, 378)]
+    assert wire_points("ACD_A_TO_BREAKOUT") == [(182, 594), (216, 594)]
+    assert wire_points("ACD_B_TO_BREAKOUT") == [(182, 630), (216, 630)]
+    assert wire_points("ACD_C_TO_BREAKOUT") == [(182, 666), (216, 666)]
+
+
+def test_generated_bridge_keeps_native_dp_at_logical_dc_pos():
+    root = ET.fromstring(render_library())
+    bridge = root.find("./definitions/Definition[@name='LCC12PulseBridge']")
+    assert [
+        user.find("./paramlist/param[@name='UP']").get("value")
+        for user in bridge.findall("./schematic/User[@defn='master:g6p200']")
+    ] == ["1", "1"]
+
+
+def test_generated_bridge_uses_ac_node_references_for_phase_locking():
+    root = ET.fromstring(render_library())
+    schematic = root.find("./definitions/Definition[@name='LCC12PulseBridge']/schematic")
+    references = schematic.findall("./User[@defn='master:nodeloop']")
+    assert len(references) == 1
+    assert schematic.find("./User/paramlist/param[@value='LCC_CB_ZERO']") is None
+    bridges = schematic.findall("./User[@defn='master:g6p200']")
+    reference = references[0]
+    x, y = int(reference.get("x")), int(reference.get("y"))
+    assert reference.find("./paramlist/param[@name='View']").get("value") == "1"
+    for suffix, bridge, shift in zip(("Y", "D"), bridges, ("-1", "-2"), strict=True):
+        assert bridge.find("./paramlist/param[@name='KV']").get("value") == shift
+        wire = schematic.find(f"./Wire[@lcc_role='CB_REFERENCE_{suffix}']")
+        origin = (int(wire.get("x")), int(wire.get("y")))
+        points = [
+            (origin[0] + int(v.get("x")), origin[1] + int(v.get("y")))
+            for v in wire.findall("./vertex")
+        ]
+        assert points[0] == ((x, y - 36) if suffix == "Y" else (252, 540))
+        assert points[-1] == (int(bridge.get("x")) - 18, int(bridge.get("y")) - 90)
+        bus = schematic.find("./Wire[@lcc_role='REFERENCE_BUS']")
+        origin = (int(bus.get("x")), int(bus.get("y")))
+        bus_points = [
+            (origin[0] + int(v.get("x")), origin[1] + int(v.get("y")))
+            for v in bus.findall("./vertex")
+        ]
+        assert (x, y) in bus_points
+
+
+def test_generated_bridge_passes_enable_to_g6p200_deblock_input(tmp_path):
+    root = ET.fromstring(render_library())
+    bridge = root.find("./definitions/Definition[@name='LCC12PulseBridge']")
+    assert bridge is not None
+
+    def wire_points(name):
+        wire = bridge.find(f"./schematic/Wire[@lcc_role='{name}']")
+        assert wire is not None
+        origin = (int(wire.get("x")), int(wire.get("y")))
+        return [
+            (origin[0] + int(vertex.get("x")), origin[1] + int(vertex.get("y")))
+            for vertex in wire.findall("./vertex")
+        ]
+
+    assert wire_points("ENABLE_TO_KB_Y")[0] == (600, 486)
+    assert wire_points("ENABLE_TO_KB_D")[0] == (600, 486)
+    assert len(bridge.findall("./schematic/User[@defn='master:sumjct']")) == 1
+    assert bridge.find("./schematic/User[@defn='master:consti']") is None
 
 
 def test_generated_companion_contains_exact_wp1b_output_channels(tmp_path):
@@ -423,7 +534,7 @@ def test_generated_companion_contains_exact_wp1b_output_channels(tmp_path):
     assert [
         int(node.get("orient"))
         for node in bridge.findall("./schematic/User[@defn='master:xnode']")
-    ] == [2, 2, 2, 2, 2, 2, 6, 4]
+    ] == [2, 2, 2, 2, 2, 2, 6, 4, 2, 2, 2]
 
     def points(name):
         wire = bridge.find(f"./schematic/Wire[@lcc_role='{name}']")
@@ -445,8 +556,8 @@ def test_generated_companion_contains_exact_wp1b_output_channels(tmp_path):
 
     assert not crosses(points("ACY_TO_Y_B"), (180, 342))
     assert not crosses(points("ACD_TO_D_B"), (180, 630))
-    assert not crosses(points("ACY_TO_Y_BUS"), (216, 342))
-    assert not crosses(points("ACD_TO_D_BUS"), (216, 630))
+    assert not crosses(points("ACY_TO_METER"), (216, 342))
+    assert not crosses(points("ACD_TO_METER"), (216, 630))
     assert points("DC_POS_PATH") == [(360, 252), (360, 234), (360, 162)]
     assert points("DC_SERIES") == [
         (360, 540),
@@ -487,11 +598,10 @@ def test_generated_companion_contains_exact_wp1b_output_channels(tmp_path):
 
 @pytest.mark.parametrize(
     ("wire_name", "forbidden_port"),
-    [
-        ("CB_ZERO_Y", (360, 252)),
-        ("CB_ZERO_D", (360, 540)),
-        ("ENABLE_ORDER", (684, 486)),
-    ],
+        [
+            ("CB_REFERENCE_Y", (360, 252)),
+            ("CB_REFERENCE_D", (360, 540)),
+        ],
 )
 def test_generated_bridge_control_wires_do_not_cross_unrelated_ports(
     wire_name,
@@ -530,15 +640,18 @@ def test_generated_bridge_isolates_scalar_phase_ports_before_breakout():
         (108, 594),
         (108, 630),
         (108, 666),
+        (108, 918),
+        (108, 954),
+        (108, 990),
     ]
     assert [
         item.find("./paramlist/param[@name='R']").get("value")
         for item in resistors
-    ] == ["1.0e-6 [ohm]"] * 6
+    ] == ["0.001 [ohm]"] * 6 + ["1.0e-6 [ohm]"] * 3
     assert [
         int(item.get("orient"))
         for item in bridge.findall("./schematic/User[@defn='master:breakout']")
-    ] == [4, 4]
+    ] == [4, 4, 4]
 
 
 def test_generated_control_imports_avoid_reserved_internal_names():
@@ -562,6 +675,62 @@ def test_generated_control_imports_avoid_reserved_internal_names():
         assert {"VDC_MEAS", "IDC_MEAS"} <= port_names
         assert {"VDC_MEAS", "IDC_MEAS"} <= import_names
         assert not {"VDC", "IDC"} & import_names
+
+
+def test_generated_inverter_converts_beta_to_alpha_after_limiting():
+    root = ET.fromstring(render_library())
+    schematic = root.find("./definitions/Definition[@name='InverterControl']/schematic")
+    sums = [
+        user for user in schematic.findall("./User[@defn='master:sumjct']")
+        if user.find("./paramlist/param[@name='D']").get("value") == "-1"
+    ]
+    assert len(sums) == 1
+    parameters = {p.get("name"): p.get("value") for p in sums[0].findall("./paramlist/param")}
+    assert parameters == {"DPath": "1", "A": "0", "B": "1", "C": "0", "D": "-1", "E": "0", "F": "0", "G": "0"}
+    constants = schematic.findall("./User[@defn='master:const']")
+    assert len(constants) == 1
+    assert float(constants[0].find("./paramlist/param[@name='Value']").get("value")) == pytest.approx(3.141592653589793)
+    for name, expected in {
+        "BETA_TO_ALPHA": [(810, 306), (846, 306)],
+        "PI_TO_ALPHA": [(810, 90), (828, 90), (828, 270), (882, 270)],
+    }.items():
+        wire = schematic.find(f"./Wire[@lcc_role='{name}']")
+        origin = (int(wire.get("x")), int(wire.get("y")))
+        assert [
+            (origin[0] + int(v.get("x")), origin[1] + int(v.get("y")))
+            for v in wire.findall("./vertex")
+        ] == expected
+    for name in ("AO_Y_OUTPUT", "AO_D_OUTPUT", "AO_Y_MONITOR", "AO_D_MONITOR"):
+        wire = schematic.find(f"./Wire[@lcc_role='{name}']")
+        assert (int(wire.get("x")), int(wire.get("y"))) == (918, 306)
+
+
+def test_generated_inverter_alpha_nets_are_orthogonal_and_separate():
+    from pscad_mcp.topology.connectivity import build_connectivity
+    from pscad_mcp.topology.models import ProjectTopology, TopologyConductor
+
+    root = ET.fromstring(render_library())
+    schematic = root.find("./definitions/Definition[@name='InverterControl']/schematic")
+    ao_names = {"AO_Y_OUTPUT", "AO_D_OUTPUT", "AO_Y_MONITOR", "AO_D_MONITOR"}
+    conductors = []
+    for name in sorted(ao_names | {"PI_TO_ALPHA", "BETA_TO_ALPHA"}):
+        wire = schematic.find(f"./Wire[@lcc_role='{name}']")
+        origin = (int(wire.get("x")), int(wire.get("y")))
+        vertices = tuple(
+            (origin[0] + int(v.get("x")), origin[1] + int(v.get("y")))
+            for v in wire.findall("./vertex")
+        )
+        assert all(a[0] == b[0] or a[1] == b[1] for a, b in pairwise(vertices))
+        conductors.append(TopologyConductor(
+            key=name, object_id=name, canvas_key="InverterControl",
+            kind="wire", namespace="data", vertices=vertices,
+        ))
+    topology = build_connectivity(ProjectTopology(
+        "inverter_alpha", "4.6.2", conductors=tuple(conductors),
+    )).topology
+    assert {frozenset(net.conductor_keys) for net in topology.nets} == {
+        frozenset(ao_names), frozenset({"PI_TO_ALPHA"}), frozenset({"BETA_TO_ALPHA"}),
+    }
 
 
 def test_generated_inverter_gamma_signal_uses_one_nonbranching_trunk():
@@ -593,9 +762,11 @@ def test_generated_inverter_gamma_signal_uses_one_nonbranching_trunk():
         (378, 306),
     ]
     assert points("GAMMA_FANOUT") == [
-        (324, 234),
-        (342, 234),
-        (342, 180),
+        (450, 234),
+        (486, 234),
+        (486, 144),
+        (378, 144),
+        (378, 180),
         (396, 180),
         (450, 180),
         (468, 180),
@@ -625,28 +796,37 @@ def test_generated_signal_interface_isolates_raw_inputs_before_fanout():
         "VDC_RECT",
         "VDC_INV",
         "IDC",
+        "AM_Y", "AM_D", "GM_Y", "GM_D",
+        "P_RECT_A", "P_RECT_B", "P_RECT_C", "P_INV_A", "P_INV_B", "P_INV_C",
+        "ALPHA_RECT", "MU_RECT", "P_RECT", "P_INV",
     ]
     assert [
         item.get("value")
         for item in definition.findall(
             "./schematic/User[@defn='master:import']/paramlist/param[@name='Name']"
         )
-    ] == ["VDC_RECT_RAW", "VDC_INV_RAW", "IDC_RAW"]
+    ] == ["VDC_RECT_RAW", "VDC_INV_RAW", "IDC_RAW", "AM_Y", "AM_D", "GM_Y", "GM_D", "P_RECT_A", "P_RECT_B", "P_RECT_C", "P_INV_A", "P_INV_B", "P_INV_C"]
     unity = definition.findall("./schematic/User[@defn='master:unity']")
-    assert len(unity) == 3
+    assert len(unity) == 2
     assert [
         item.find("./paramlist/param[@name='OType']").get("value")
         for item in unity
-    ] == ["2", "2", "2"]
+    ] == ["2", "2"]
     assert {
         item.get("lcc_role") for item in definition.findall("./schematic/Wire")
     } == {
         "VDC_RECT_RAW_TO_UNITY",
         "VDC_RECT_FANOUT",
-        "VDC_INV_RAW_TO_UNITY",
+        "VDC_INV_RAW_TO_NEGATE",
+        "VDC_INV_ZERO_TO_NEGATE",
         "VDC_INV_FANOUT",
         "IDC_RAW_TO_UNITY",
         "IDC_FANOUT",
+        "AM_Y_TO_MAX", "AM_D_TO_MAX", "ALPHA_MEASURED_OUTPUT",
+        "AM_Y_TO_OVERLAP", "AM_D_TO_OVERLAP", "GM_Y_TO_OVERLAP", "GM_D_TO_OVERLAP",
+        "PI_TO_OVERLAP_Y", "PI_TO_OVERLAP_D", "OVERLAP_Y_TO_MAX", "OVERLAP_D_TO_MAX", "OVERLAP_MEASURED_OUTPUT",
+        "P_RECT_A_TO_SUM", "P_RECT_B_TO_SUM", "P_RECT_C_TO_SUM", "P_RECT_TOTAL_OUTPUT",
+        "P_INV_A_TO_SUM", "P_INV_B_TO_SUM", "P_INV_C_TO_SUM", "P_INV_TOTAL_OUTPUT",
     }
 
 

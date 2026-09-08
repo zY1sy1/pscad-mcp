@@ -141,8 +141,11 @@ PHASES = (
     "create_outputs",
     "save_and_validate",
     "compile",
+    "verify_dynamic_control",
+    "register_dynamic_events",
     "simulate",
     "smoke_validate",
+    "dynamic_accept",
     "accept",
     "publish",
 )
@@ -351,7 +354,10 @@ def _wp1b_connection_labels(blueprint) -> dict[str, str | None]:
             parent[right_root] = left_root
 
     for net in blueprint.nets:
-        if net.logical_id.startswith("inverter_fault_"):
+        if (
+            net.logical_id.startswith("inverter_fault_")
+            or net.logical_id.endswith("_telemetry")
+        ):
             continue
         endpoints = [
             (net.kind, f"{endpoint.component}:{endpoint.port}")
@@ -362,7 +368,10 @@ def _wp1b_connection_labels(blueprint) -> dict[str, str | None]:
 
     groups: dict[tuple[str, str], list[Any]] = defaultdict(list)
     for net in blueprint.nets:
-        if net.logical_id.startswith("inverter_fault_"):
+        if (
+            net.logical_id.startswith("inverter_fault_")
+            or net.logical_id.endswith("_telemetry")
+        ):
             continue
         endpoint = net.endpoints[0]
         root = find((net.kind, f"{endpoint.component}:{endpoint.port}"))
@@ -455,7 +464,7 @@ def _resolve_paths(request: LccPlanRequest, workspace: str | Path | PathPolicy) 
     staging_identity = Path(filename).stem
     final_filename = (
         f"{staging_identity}_PUBLISHED.pscx"
-        if request.verification_profile == WP1B_SMOKE_PROFILE
+        if request.verification_profile in {WP1B_SMOKE_PROFILE, WP1C_DYNAMIC_PROFILE}
         else filename
     )
     if isinstance(workspace, PathPolicy):
@@ -523,6 +532,8 @@ def _duration(request: LccPlanRequest, asset_set: LccAssetSet) -> float:
             )
         return float(expected)
     default = asset_set.blueprint.settings.get("simulation_duration_s")
+    if request.verification_profile == WP1C_DYNAMIC_PROFILE and request.simulation_duration_s is None:
+        default = 1.5
     if isinstance(default, bool) or not isinstance(default, (int, float)) or default <= 0:
         raise _error("LCC_BLUEPRINT_INVALID", "The blueprint simulation duration is invalid.")
     value = default if request.simulation_duration_s is None else request.simulation_duration_s
@@ -742,6 +753,24 @@ def create_plan(
                 reasons=capability.get("reasons", []),
             )
     duration = _duration(request, asset_set)
+    if request.verification_profile == WP1C_DYNAMIC_PROFILE:
+        event = blueprint.dynamic_events[0] if blueprint.dynamic_events else {}
+        bindings = capability.get("bindings", {})
+        try:
+            minimum_duration = (
+                float(event.get("time_s"))
+                + float(event.get("duration_s"))
+                + float(bindings.get("recovery_window_s"))
+            )
+        except (TypeError, ValueError):
+            minimum_duration = float("inf")
+        if duration + 1e-12 < minimum_duration:
+            raise _error(
+                "LCC_DYNAMIC_EVENT_UNAVAILABLE",
+                "Simulation duration does not cover the complete recovery window.",
+                simulation_duration_s=duration,
+                minimum_duration_s=minimum_duration,
+            )
     final_path, staging_path, project_name, _ = _resolve_paths(request, workspace)
     catalog = parse_catalog(asset_set.catalog)
     if catalog.pscad_version != asset_set.pscad_version:
@@ -963,7 +992,8 @@ def create_plan(
         )
     connection_labels = (
         _wp1b_connection_labels(blueprint)
-        if request.verification_profile == WP1B_SMOKE_PROFILE
+        if request.verification_profile
+        in {WP1B_SMOKE_PROFILE, WP1C_DYNAMIC_PROFILE}
         else {}
     )
     for net in blueprint.nets:
@@ -993,19 +1023,34 @@ def create_plan(
                 required_channels=list(required_paths),
             )
         planned_outputs = tuple(output_by_path[path] for path in required_paths)
-    if request.verification_profile != WP1B_SMOKE_PROFILE:
+    if request.verification_profile not in {
+        WP1B_SMOKE_PROFILE,
+        WP1C_DYNAMIC_PROFILE,
+    }:
         for output in planned_outputs:
             add("create_outputs", "create_output", output.logical_id, output.to_dict())
     add("save_and_validate", "save_and_validate", project_name, {})
     add("compile", "compile", project_name, {})
     if request.verification_profile == WP1C_DYNAMIC_PROFILE:
-        add(
-            "register_dynamic_events",
-            "register_dynamic_events",
-            project_name,
-            {"events": _dynamic_schedule_events(blueprint.dynamic_events)},
-        )
-    if request.verification_profile == WP1B_SMOKE_PROFILE:
+        dynamic_control = capability["bindings"]
+        if dynamic_control["control_mode"] == "embedded_emtdc":
+            add(
+                "verify_dynamic_control",
+                "verify_dynamic_control",
+                project_name,
+                dynamic_control,
+            )
+        else:
+            add(
+                "register_dynamic_events",
+                "register_dynamic_events",
+                project_name,
+                {"events": _dynamic_schedule_events(blueprint.dynamic_events)},
+            )
+    if request.verification_profile in {
+        WP1B_SMOKE_PROFILE,
+        WP1C_DYNAMIC_PROFILE,
+    }:
         for output in planned_outputs:
             add("create_outputs", "create_output", output.logical_id, output.to_dict())
     add("simulate", "simulate", project_name, {"duration_s": duration})
@@ -1019,6 +1064,16 @@ def create_plan(
                 "required_channels": list(
                     asset_set.smoke["required_channels"]
                 ),
+            },
+        )
+    elif request.verification_profile == WP1C_DYNAMIC_PROFILE:
+        add(
+            "dynamic_accept",
+            "dynamic_accept",
+            project_name,
+            {
+                "contract_sha256": asset_set.hashes["dynamic.json"],
+                "event": capability["bindings"]["event"],
             },
         )
     else:
@@ -1049,6 +1104,10 @@ def create_plan(
     }
     if request.verification_profile == WP1B_SMOKE_PROFILE:
         payload["smoke_contract_sha256"] = asset_set.hashes["smoke.json"]
+    if request.verification_profile == WP1C_DYNAMIC_PROFILE:
+        dynamic_metadata = dict(capability["bindings"])
+        dynamic_metadata["mode"] = dynamic_metadata.pop("control_mode")
+        payload["dynamic_control"] = dynamic_metadata
     if audited_master is not None:
         payload["master_sha256"] = audited_master.master_sha256
         payload["master_binding_registry_sha256"] = (
@@ -1066,7 +1125,11 @@ def create_plan(
         asset_hashes=dict(asset_set.hashes),
         pscad_version=asset_set.pscad_version,
         catalog_identity=catalog.identity,
-        metadata=payload["request"],
+        metadata=(
+            {**payload["request"], "dynamic_control": payload["dynamic_control"]}
+            if request.verification_profile == WP1C_DYNAMIC_PROFILE
+            else payload["request"]
+        ),
         master_sha256=payload.get("master_sha256"),
         master_binding_registry_sha256=payload.get(
             "master_binding_registry_sha256"

@@ -1,6 +1,7 @@
 import copy
 import json
 from dataclasses import FrozenInstanceError
+from pathlib import Path
 
 import pytest
 
@@ -161,6 +162,38 @@ def test_rejects_unknown_nested_fields():
     candidate["components"][0]["unexpected"] = "nope"
 
     _assert_invalid(candidate)
+
+
+@pytest.mark.parametrize("field", ["control_mode", "control_signal", "recovery_window_s"])
+def test_dynamic_event_wp1c_contract_rejects_partial_declarations(field):
+    asset_path = Path(__file__).parents[1] / "pscad_mcp" / "assets" / "lcc" / "cigre_lcc_monopole_v1" / "blueprint.json"
+    candidate = json.loads(asset_path.read_text(encoding="utf-8"))
+    candidate["dynamic_events"][0].pop(field)
+    _assert_invalid(candidate)
+
+
+def test_dynamic_event_legacy_contract_may_omit_all_control_fields():
+    asset_path = Path(__file__).parents[1] / "pscad_mcp" / "assets" / "lcc" / "cigre_lcc_monopole_v1" / "blueprint.json"
+    candidate = json.loads(asset_path.read_text(encoding="utf-8"))
+    event = candidate["dynamic_events"][0]
+    for field in ("control_mode", "control_signal", "event_signal", "recovery_window_s"):
+        event.pop(field)
+
+    parsed = parse_blueprint(candidate)
+    normalized = parsed.to_dict()["dynamic_events"][0]
+    assert all(field not in normalized for field in ("control_mode", "control_signal", "recovery_window_s"))
+
+
+def test_dynamic_event_wp1c_contract_fields_remain_strict_when_complete():
+    asset_path = Path(__file__).parents[1] / "pscad_mcp" / "assets" / "lcc" / "cigre_lcc_monopole_v1" / "blueprint.json"
+    candidate = json.loads(asset_path.read_text(encoding="utf-8"))
+
+    parsed = parse_blueprint(candidate)
+    event = parsed.to_dict()["dynamic_events"][0]
+    assert event["control_mode"] == "embedded_emtdc"
+    assert event["control_signal"] == "LCC_FAULT_OPEN"
+    assert event["event_signal"] == "LCC_FAULT_ACTIVE"
+    assert event["recovery_window_s"] == 0.5
 
 
 def test_record_serialization_normalizes_build_state_and_nested_records():

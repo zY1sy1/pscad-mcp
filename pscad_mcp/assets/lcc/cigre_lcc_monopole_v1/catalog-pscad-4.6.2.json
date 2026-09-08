@@ -124,6 +124,12 @@
             30,
             20
           ]
+        },
+        {
+          "name": "HV_N",
+          "kind": "electrical",
+          "dimension": 1,
+          "offset": [-36, 72]
         }
       ],
       "parameters": {
@@ -132,6 +138,7 @@
           "minimum": 0.1,
           "maximum": 20
         },
+        "Rating_MVA": {"type": "float", "minimum": 1.0, "unit": "MVA"},
         "PhaseShift_deg": {
           "type": "float",
           "minimum": -180,
@@ -194,7 +201,7 @@
           "dimension": 1,
           "offset": [
             0,
-            54
+            -54
           ]
         },
         {
@@ -203,7 +210,7 @@
           "dimension": 1,
           "offset": [
             0,
-            198
+            90
           ]
         },
         {
@@ -212,7 +219,7 @@
           "dimension": 1,
           "offset": [
             0,
-            342
+            234
           ]
         }
       ],
@@ -397,7 +404,10 @@
           ]
         }
       ],
-      "parameters": {},
+      "parameters": {
+        "ActivePowerSignal": {"type": "string"},
+        "ReactivePowerSignal": {"type": "string"}
+      },
       "bounding_box": [
         -20,
         -10,
@@ -485,7 +495,7 @@
         {"name": "B", "kind": "electrical", "dimension": 1, "offset": [-36, 0]}
       ],
       "parameters": {
-        "NAME": {"type": "float", "minimum": 0, "maximum": 1, "default": 0}
+        "NAME": {"type": "string", "required": true}
       },
       "bounding_box": [-36, -20, 36, 20],
       "metadata": {
@@ -528,6 +538,20 @@
         "input_type": "Integer",
         "output_type": "Real",
         "dimension": 1
+      }
+    },
+    {
+      "scoped_name": "master:fault_control_not",
+      "ports": [
+        {"name": "IN", "kind": "data", "dimension": 1, "offset": [0, 0]},
+        {"name": "OUT", "kind": "data", "dimension": 1, "offset": [36, 0]}
+      ],
+      "parameters": {},
+      "bounding_box": [-6, -18, 42, 18],
+      "metadata": {
+        "library": "master",
+        "characterized_for": "4.6.2",
+        "binding_registry": "master-bindings-pscad-4.6.2.json"
       }
     },
     {
@@ -686,6 +710,18 @@
             72,
             63
           ]
+        },
+        {
+          "name": "REF_A", "kind": "electrical", "dimension": 1, "offset": [-108, -198]
+        },
+        {
+          "name": "REF_B", "kind": "electrical", "dimension": 1, "offset": [-108, -180]
+        },
+        {
+          "name": "REF_C", "kind": "electrical", "dimension": 1, "offset": [-108, -162]
+        },
+        {
+          "name": "P_AC", "kind": "data", "dimension": 1, "offset": [72, 108]
         }
       ],
       "parameters": {
@@ -965,6 +1001,26 @@
       }
     },
     {
+      "scoped_name": "master:signal_import",
+      "ports": [
+        {
+          "name": "OUT",
+          "kind": "data",
+          "dimension": 1,
+          "offset": [36, 0]
+        }
+      ],
+      "parameters": {
+        "Name": {"type": "string"}
+      },
+      "bounding_box": [-36, -20, 36, 20],
+      "metadata": {
+        "library": "master",
+        "characterized_for": "4.6.2",
+        "binding_registry": "master-bindings-pscad-4.6.2.json"
+      }
+    },
+    {
       "scoped_name": "cigre_lcc_v1:SignalInterface",
       "ports": [
         {
@@ -1020,7 +1076,21 @@
             72,
             -18
           ]
-        }
+        },
+        {"name": "AM_Y", "kind": "data", "dimension": 1, "offset": [-108, -144]},
+        {"name": "AM_D", "kind": "data", "dimension": 1, "offset": [-108, -126]},
+        {"name": "GM_Y", "kind": "data", "dimension": 1, "offset": [-108, -108]},
+        {"name": "GM_D", "kind": "data", "dimension": 1, "offset": [-108, -90]},
+        {"name": "P_RECT_A", "kind": "data", "dimension": 1, "offset": [-108, 0]},
+        {"name": "P_RECT_B", "kind": "data", "dimension": 1, "offset": [-108, 18]},
+        {"name": "P_RECT_C", "kind": "data", "dimension": 1, "offset": [-108, 36]},
+        {"name": "P_INV_A", "kind": "data", "dimension": 1, "offset": [-108, 54]},
+        {"name": "P_INV_B", "kind": "data", "dimension": 1, "offset": [-90, 72]},
+        {"name": "P_INV_C", "kind": "data", "dimension": 1, "offset": [-108, 90]},
+        {"name": "ALPHA_RECT", "kind": "data", "dimension": 1, "offset": [72, 0]},
+        {"name": "MU_RECT", "kind": "data", "dimension": 1, "offset": [72, 18]},
+        {"name": "P_RECT", "kind": "data", "dimension": 1, "offset": [72, 36]},
+        {"name": "P_INV", "kind": "data", "dimension": 1, "offset": [72, 54]}
       ],
       "parameters": {},
       "bounding_box": [

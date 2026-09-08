@@ -14,7 +14,7 @@ TEMPLATE = ROOT / "pscad_mcp" / "assets" / "templates" / "empty_library.pslx"
 LIBRARY_NAME = "cigre_lcc_v1"
 
 COMMON_G6P200 = {
-    "UP": "$(UP)",
+    "UP": "1",
     "FP": "0",
     "SNUB": "1",
     "KV": "-2",
@@ -44,6 +44,7 @@ STYLE = {
     "g6p200": (115, 184, 113177439),
     "xnode": (18, 31, 114262475),
     "breakout": (40, 77, 6599472),
+    "nodeloop": (10, 74, 0),
     "resistor": (74, 30, 10319542),
     "import": (83, 22, 35483323),
     "export": (74, 21, 39049670),
@@ -54,8 +55,11 @@ STYLE = {
     "pi_ctlr": (76, 61, 89208388),
     "hardlimit": (76, 58, 85352944),
     "maxmin": (76, 60, 79761838),
+    "mingam": (76, 40, 23589620),
     "unity": (40, 19, 39250382),
     "pgb": (70, 30, 63669868),
+    "multimeter": (40, 51, 83966017),
+    "datalabel": (40, 21, 98359112),
 }
 
 
@@ -113,7 +117,7 @@ def _form(definition: ET.Element, name: str) -> None:
         {
             "type": "Choice",
             "name": "UP",
-            "desc": "Terminal direction",
+            "desc": "Terminal role",
         },
     )
     ET.SubElement(parameter, "value").text = "1"
@@ -143,6 +147,21 @@ def _svg(
         is_electrical = kind == "electrical"
         x = 72 if direction == "output" or name.startswith("DC_") else -72
         y = -63 + index * 9
+        if name in {"REF_A", "REF_B", "REF_C"}:
+            x, y = -108, -198 + 18 * "ABC".index(name[-1])
+        if name == "P_AC":
+            y = 108
+        if name in {"ALPHA_RECT", "MU_RECT", "P_RECT", "P_INV"}:
+            y = 18 * ("ALPHA_RECT", "MU_RECT", "P_RECT", "P_INV").index(name)
+        if definition.get("name") == "SignalInterface":
+            angle_inputs = ("AM_Y", "AM_D", "GM_Y", "GM_D")
+            power_inputs = ("P_RECT_A", "P_RECT_B", "P_RECT_C", "P_INV_A", "P_INV_B", "P_INV_C")
+            if name in angle_inputs:
+                x, y = -108, -144 + 18 * angle_inputs.index(name)
+            elif name in power_inputs:
+                x, y = -108, 18 * power_inputs.index(name)
+                if name == "P_INV_B":
+                    x = -90
         attributes = {
             "model": "Natural" if is_electrical else "Transfer",
             "name": name,
@@ -342,9 +361,19 @@ def _bridge_definition(definitions: ET.Element) -> None:
             (name, "data", "output", "Real")
             for name in ("AM_Y", "AM_D", "GM_Y", "GM_D")
         )
+        + tuple(
+            (name, "electrical", "bidirectional", "Real")
+            for name in ("REF_A", "REF_B", "REF_C")
+        )
+        + (("P_AC", "data", "output", "Real"),)
     )
-    g6_y = {**COMMON_G6P200, "KV": "-2"}
-    g6_d = {**COMMON_G6P200, "KV": "-1"}
+    g6_y = {**COMMON_G6P200, "KV": "-1"}
+    g6_d = {**COMMON_G6P200, "KV": "-2"}
+    power_meter = {
+        "MeasP": "1", "MeasQ": "0", "MeasI": "0", "MeasV": "0",
+        "RMS": "0", "IRMS": "0", "MeasPh": "0", "Dis": "0",
+        "S": "1.0 [MVA]", "TS": "0.0 [s]", "Freq": "50.0 [Hz]",
+    }
     components = (
         _pin("pin_acy_a", "ACY_A", 90, 306, 2),
         _pin("pin_acy_b", "ACY_B", 90, 342, 2),
@@ -375,45 +404,53 @@ def _bridge_definition(definitions: ET.Element) -> None:
             "master:resistor",
             108,
             306,
-            {"R": "1.0e-6 [ohm]"},
+            {"R": "0.001 [ohm]"},
         ),
         Component(
             "phase_isolation_acy_b",
             "master:resistor",
             108,
             342,
-            {"R": "1.0e-6 [ohm]"},
+            {"R": "0.001 [ohm]"},
         ),
         Component(
             "phase_isolation_acy_c",
             "master:resistor",
             108,
             378,
-            {"R": "1.0e-6 [ohm]"},
+            {"R": "0.001 [ohm]"},
         ),
         Component(
             "phase_isolation_acd_a",
             "master:resistor",
             108,
             594,
-            {"R": "1.0e-6 [ohm]"},
+            {"R": "0.001 [ohm]"},
         ),
         Component(
             "phase_isolation_acd_b",
             "master:resistor",
             108,
             630,
-            {"R": "1.0e-6 [ohm]"},
+            {"R": "0.001 [ohm]"},
         ),
         Component(
             "phase_isolation_acd_c",
             "master:resistor",
             108,
             666,
-            {"R": "1.0e-6 [ohm]"},
+            {"R": "0.001 [ohm]"},
         ),
         Component("bridge_y", "master:g6p200", 360, 342, g6_y),
         Component("bridge_d", "master:g6p200", 360, 630, g6_d),
+        Component("reference_primary", "master:nodeloop", 288, 936, {"View": "1"}),
+        Component("reference_breakout", "master:breakout", 180, 954, {"Dis": "0", "Com": "0"}, 4),
+        _pin("reference_pin_a", "REF_A", 90, 918, 2),
+        _pin("reference_pin_b", "REF_B", 90, 954, 2),
+        _pin("reference_pin_c", "REF_C", 90, 990, 2),
+        Component("reference_isolation_a", "master:resistor", 108, 918, {"R": "1.0e-6 [ohm]"}),
+        Component("reference_isolation_b", "master:resistor", 108, 954, {"R": "1.0e-6 [ohm]"}),
+        Component("reference_isolation_c", "master:resistor", 108, 990, {"R": "1.0e-6 [ohm]"}),
         _import("import_ao_y", "AO_Y", 504, 378),
         _import("import_ao_d", "AO_D", 504, 666),
         _import("import_enable", "ENABLE", 504, 486),
@@ -428,38 +465,31 @@ def _bridge_definition(definitions: ET.Element) -> None:
         _export("export_gm_y", "GM_Y", 504, 306),
         _export("export_am_d", "AM_D", 504, 576),
         _export("export_gm_d", "GM_D", 504, 594),
-        Component(
-            "const_enable_one", "master:consti", 600, 450, {"Name": "LCC_ENABLE_ONE", "Value": "1"}
-        ),
-        Component(
-            "const_cb_zero", "master:consti", 600, 540, {"Name": "LCC_CB_ZERO", "Value": "0"}
-        ),
-        Component(
-            "enable_inverter",
-            "master:sumjct",
-            720,
-            486,
-            {
-                "DPath": "0",
-                "A": "0",
-                "B": "0",
-                "C": "0",
-                "D": "1",
-                "E": "0",
-                "F": "-1",
-                "G": "0",
-            },
-        ),
+        Component("power_meter_y", "master:multimeter", 252, 324, {**power_meter, "P": "LCC_P_AC_Y"}),
+        Component("power_meter_d", "master:multimeter", 252, 612, {**power_meter, "P": "LCC_P_AC_D"}),
+        Component("power_signal_y", "master:datalabel", 810, 900, {"Name": "LCC_P_AC_Y"}),
+        Component("power_signal_d", "master:datalabel", 810, 972, {"Name": "LCC_P_AC_D"}),
+        Component("converter_power_sum", "master:sumjct", 1044, 900,
+            {"DPath": "1", "A": "0", "B": "0", "C": "0", "D": "1", "E": "0", "F": "1", "G": "0"}),
+        _export("converter_power_export", "P_AC", 1152, 900),
     )
     wires = (
         Wire("ACY_TO_Y", ((90, 306), (108, 306))),
+        Wire("ACY_A_TO_BREAKOUT", ((182, 306), (216, 306))),
+        Wire("ACY_B_TO_BREAKOUT", ((182, 342), (216, 342))),
+        Wire("ACY_C_TO_BREAKOUT", ((182, 378), (216, 378))),
         Wire("ACY_TO_Y_B", ((90, 342), (108, 342))),
         Wire("ACY_TO_Y_C", ((90, 378), (108, 378))),
-        Wire("ACY_TO_Y_BUS", ((180, 342), (180, 324), (324, 324), (324, 342))),
+        Wire("ACY_TO_METER", ((180, 342), (180, 324), (234, 324))),
+        Wire("METER_TO_Y", ((270, 324), (324, 324), (324, 342))),
         Wire("ACD_TO_D", ((90, 594), (108, 594))),
+        Wire("ACD_A_TO_BREAKOUT", ((182, 594), (216, 594))),
+        Wire("ACD_B_TO_BREAKOUT", ((182, 630), (216, 630))),
+        Wire("ACD_C_TO_BREAKOUT", ((182, 666), (216, 666))),
         Wire("ACD_TO_D_B", ((90, 630), (108, 630))),
         Wire("ACD_TO_D_C", ((90, 666), (108, 666))),
-        Wire("ACD_TO_D_BUS", ((180, 630), (180, 612), (324, 612), (324, 630))),
+        Wire("ACD_TO_METER", ((180, 630), (180, 612), (234, 612))),
+        Wire("METER_TO_D", ((270, 612), (324, 612), (324, 630))),
         Wire("DC_POS_PATH", ((360, 252), (360, 234), (360, 162))),
         Wire(
             "DC_SERIES",
@@ -469,32 +499,24 @@ def _bridge_definition(definitions: ET.Element) -> None:
         Wire("AO_Y_TO_BRIDGE_Y", ((540, 378), (414, 378))),
         Wire("AO_D_TO_BRIDGE_D", ((540, 666), (414, 666))),
         Wire("ENABLE_CONVERSION", ((540, 486), (564, 486))),
-        Wire("ENABLE_ONE", ((636, 450), (684, 450), (684, 486))),
-        Wire(
-            "ENABLE_ORDER",
-            ((600, 486), (648, 486), (648, 522), (720, 522)),
-        ),
-        Wire("ENABLE_TO_KB_Y", ((756, 486), (780, 486), (780, 396), (414, 396))),
-        Wire("ENABLE_TO_KB_D", ((756, 486), (792, 486), (792, 684), (414, 684))),
-        Wire(
-            "CB_ZERO_Y",
-            (
-                (636, 540),
-                (828, 540),
-                (828, 216),
-                (324, 216),
-                (324, 252),
-                (342, 252),
-            ),
-        ),
-        Wire(
-            "CB_ZERO_D",
-            ((636, 540), (636, 558), (324, 558), (324, 540), (342, 540)),
-        ),
+        Wire("ENABLE_TO_KB_Y", ((600, 486), (780, 486), (780, 396), (414, 396))),
+        Wire("ENABLE_TO_KB_D", ((600, 486), (792, 486), (792, 684), (414, 684))),
+        Wire("REFERENCE_BUS", ((180, 954), (180, 936), (288, 936))),
+        Wire("CB_REFERENCE_Y", ((288, 900), (252, 900), (252, 540), (252, 252), (342, 252))),
+        Wire("CB_REFERENCE_D", ((252, 540), (342, 540))),
+        Wire("REF_A_TO_ISOLATION", ((90, 918), (108, 918))),
+        Wire("REF_B_TO_ISOLATION", ((90, 954), (108, 954))),
+        Wire("REF_C_TO_ISOLATION", ((90, 990), (108, 990))),
+        Wire("REF_A_TO_BREAKOUT", ((182, 918), (216, 918))),
+        Wire("REF_B_TO_BREAKOUT", ((182, 954), (216, 954))),
+        Wire("REF_C_TO_BREAKOUT", ((182, 990), (216, 990))),
         Wire("AM_Y_OUTPUT", ((414, 288), (540, 288))),
         Wire("GM_Y_OUTPUT", ((414, 306), (540, 306))),
         Wire("AM_D_OUTPUT", ((414, 576), (540, 576))),
         Wire("GM_D_OUTPUT", ((414, 594), (540, 594))),
+        Wire("P_Y_TO_SUM", ((810, 900), (1008, 900))),
+        Wire("P_D_TO_SUM", ((810, 972), (1044, 972), (1044, 936))),
+        Wire("P_AC_OUTPUT", ((1080, 900), (1188, 900))),
     )
     _definition(
         definitions,
@@ -541,7 +563,7 @@ def _rectifier_control(definitions: ET.Element) -> None:
             {
                 "GP": "1.0989",
                 "TI": "0.01092 [s]",
-                "YHI": "0.5235987755982988",
+                "YHI": "2.621592653589793",
                 "YLO": "0.08726646259971647",
                 "YINIT": "0.2617993877991494",
                 "Mthd": "0",
@@ -554,7 +576,7 @@ def _rectifier_control(definitions: ET.Element) -> None:
             684,
             225,
             {
-                "UL": "0.5235987755982988",
+                "UL": "2.621592653589793",
                 "LL": "0.08726646259971647",
                 "COM": "LCC_AO_Limit",
                 "Dim": "1",
@@ -627,6 +649,10 @@ def _inverter_control(definitions: ET.Element) -> None:
             },
         ),
         Component(
+            "gamma_cycle_minimum", "master:mingam", 414, 234,
+            {"FREQ": "50.0 [Hz]"},
+        ),
+        Component(
             "gamma_error",
             "master:sumjct",
             414,
@@ -651,7 +677,7 @@ def _inverter_control(definitions: ET.Element) -> None:
             {
                 "GP": "0.7506",
                 "TI": "0.0544 [s]",
-                "YHI": "1.92",
+                "YHI": "1.57",
                 "YLO": "0.52",
                 "YINIT": "1.57",
                 "Mthd": "0",
@@ -664,12 +690,20 @@ def _inverter_control(definitions: ET.Element) -> None:
             774,
             306,
             {
-                "UL": "1.92",
+                "UL": "1.57",
                 "LL": "0.52",
                 "COM": "LCC_AO_Limit",
                 "Dim": "1",
                 "Limit": "0",
             },
+        ),
+        Component(
+            "pi_constant", "master:const", 774, 90,
+            {"Name": "LCC_PI_VALUE", "Value": "3.141592653589793"},
+        ),
+        Component(
+            "beta_to_alpha", "master:sumjct", 882, 306,
+            {"DPath": "1", "A": "0", "B": "1", "C": "0", "D": "-1", "E": "0", "F": "0", "G": "0"},
         ),
         _export("export_ao_y", "AO_Y", 936, 252),
         _export("export_ao_d", "AO_D", 936, 306),
@@ -684,6 +718,7 @@ def _inverter_control(definitions: ET.Element) -> None:
             ((126, 198), (216, 198), (216, 234), (252, 234)),
         ),
         Wire("GAMMA_MIN_D", ((126, 270), (252, 270))),
+        Wire("GAMMA_MIN_TO_CYCLE", ((324, 234), (378, 234))),
         Wire(
             "GAMMA_ERROR",
             ((126, 342), (342, 342), (342, 306), (378, 306)),
@@ -691,9 +726,11 @@ def _inverter_control(definitions: ET.Element) -> None:
         Wire(
             "GAMMA_FANOUT",
             (
-                (324, 234),
-                (342, 234),
-                (342, 180),
+                (450, 234),
+                (486, 234),
+                (486, 144),
+                (378, 144),
+                (378, 180),
                 (396, 180),
                 (450, 180),
                 (468, 180),
@@ -705,10 +742,12 @@ def _inverter_control(definitions: ET.Element) -> None:
         Wire("ENABLE_PRODUCT", ((126, 414), (540, 414), (540, 342))),
         Wire("PRODUCT_TO_PI", ((576, 306), (594, 306))),
         Wire("PI_TO_LIMIT", ((666, 306), (738, 306))),
-        Wire("AO_Y_OUTPUT", ((810, 306), (972, 252))),
-        Wire("AO_D_OUTPUT", ((810, 306), (972, 306))),
-        Wire("AO_Y_MONITOR", ((810, 306), (864, 180))),
-        Wire("AO_D_MONITOR", ((810, 306), (864, 414))),
+        Wire("BETA_TO_ALPHA", ((810, 306), (846, 306))),
+        Wire("PI_TO_ALPHA", ((810, 90), (828, 90), (828, 270), (882, 270))),
+        Wire("AO_Y_OUTPUT", ((918, 306), (954, 306), (954, 252), (972, 252))),
+        Wire("AO_D_OUTPUT", ((918, 306), (972, 306))),
+        Wire("AO_Y_MONITOR", ((918, 306), (936, 306), (936, 126), (864, 126), (864, 180))),
+        Wire("AO_D_MONITOR", ((918, 306), (936, 306), (936, 450), (864, 450), (864, 414))),
     )
     _definition(
         definitions,
@@ -784,6 +823,12 @@ def _signal_interface(definitions: ET.Element) -> None:
     ) + tuple(
         (name, "data", "output", "Real")
         for name in ("VDC_RECT", "VDC_INV", "IDC")
+    ) + tuple(
+        (name, "data", "input", "Real")
+        for name in ("AM_Y", "AM_D", "GM_Y", "GM_D", "P_RECT_A", "P_RECT_B", "P_RECT_C", "P_INV_A", "P_INV_B", "P_INV_C")
+    ) + tuple(
+        (name, "data", "output", "Real")
+        for name in ("ALPHA_RECT", "MU_RECT", "P_RECT", "P_INV")
     )
     components = (
         _import("import_vdc_rect", "VDC_RECT_RAW", 180, 126),
@@ -797,12 +842,13 @@ def _signal_interface(definitions: ET.Element) -> None:
             {"IType": "2", "OType": "2", "Dim": "1"},
         ),
         Component(
-            "isolate_vdc_inv",
-            "master:unity",
+            "invert_vdc_inv",
+            "master:sumjct",
             270,
             198,
-            {"IType": "2", "OType": "2", "Dim": "1"},
+            {"DPath": "1", "A": "0", "B": "1", "C": "0", "D": "-1", "E": "0", "F": "0", "G": "0"},
         ),
+        Component("inverter_voltage_zero", "master:const", 90, 198, {"Name": "LCC_VDC_ZERO", "Value": "0.0"}),
         Component(
             "isolate_idc",
             "master:unity",
@@ -816,14 +862,63 @@ def _signal_interface(definitions: ET.Element) -> None:
         _export("export_vdc_rect", "VDC_RECT", 342, 126),
         _export("export_vdc_inv", "VDC_INV", 342, 198),
         _export("export_idc", "IDC", 342, 270),
+        _import("import_am_y", "AM_Y", 90, 450),
+        _import("import_am_d", "AM_D", 90, 522),
+        _import("import_gm_y", "GM_Y", 90, 594),
+        _import("import_gm_d", "GM_D", 90, 738),
+        Component("maximum_alpha", "master:maxmin", 324, 450,
+            {"DPath": "1", "Type": "1", "A": "0", "B": "0", "C": "0", "D": "1", "E": "1", "F": "0", "G": "0"}),
+        Component("pi_constant", "master:const", 630, 378,
+            {"Name": "LCC_PI_VALUE", "Value": "3.141592653589793"}),
+        Component("overlap_y", "master:sumjct", 414, 594,
+            {"DPath": "1", "A": "0", "B": "1", "C": "0", "D": "-1", "E": "0", "F": "-1", "G": "0"}),
+        Component("overlap_d", "master:sumjct", 414, 738,
+            {"DPath": "1", "A": "0", "B": "1", "C": "0", "D": "-1", "E": "0", "F": "-1", "G": "0"}),
+        Component("maximum_overlap", "master:maxmin", 630, 648,
+            {"DPath": "1", "Type": "1", "A": "0", "B": "0", "C": "0", "D": "1", "E": "1", "F": "0", "G": "0"}),
+        _export("export_alpha", "ALPHA_RECT", 540, 450),
+        _export("export_overlap", "MU_RECT", 792, 648),
+        _import("import_p_rect_a", "P_RECT_A", 90, 1044),
+        _import("import_p_rect_b", "P_RECT_B", 90, 1116),
+        _import("import_p_rect_c", "P_RECT_C", 90, 1188),
+        _import("import_p_inv_a", "P_INV_A", 90, 1332),
+        _import("import_p_inv_b", "P_INV_B", 90, 1404),
+        _import("import_p_inv_c", "P_INV_C", 90, 1476),
+        Component("sum_p_rect", "master:sumjct", 414, 1080,
+            {"DPath": "1", "A": "0", "B": "0", "C": "0", "D": "1", "E": "1", "F": "1", "G": "0"}),
+        Component("sum_p_inv", "master:sumjct", 414, 1368,
+            {"DPath": "1", "A": "0", "B": "0", "C": "0", "D": "1", "E": "1", "F": "1", "G": "0"}),
+        _export("export_p_rect", "P_RECT", 540, 1080),
+        _export("export_p_inv", "P_INV", 540, 1368),
     )
     wires = (
         Wire("VDC_RECT_RAW_TO_UNITY", ((216, 126), (234, 126))),
         Wire("VDC_RECT_FANOUT", ((270, 126), (306, 126), (378, 126))),
-        Wire("VDC_INV_RAW_TO_UNITY", ((216, 198), (234, 198))),
-        Wire("VDC_INV_FANOUT", ((270, 198), (306, 198), (378, 198))),
+        Wire("VDC_INV_RAW_TO_NEGATE", ((216, 198), (234, 198))),
+        Wire("VDC_INV_ZERO_TO_NEGATE", ((126, 198), (144, 198), (144, 162), (270, 162))),
+        Wire("VDC_INV_FANOUT", ((306, 198), (378, 198))),
         Wire("IDC_RAW_TO_UNITY", ((216, 270), (234, 270))),
         Wire("IDC_FANOUT", ((270, 270), (306, 270), (378, 270))),
+        Wire("AM_Y_TO_MAX", ((126, 450), (198, 450), (288, 450))),
+        Wire("AM_D_TO_MAX", ((126, 522), (234, 522), (252, 522), (252, 486), (288, 486))),
+        Wire("ALPHA_MEASURED_OUTPUT", ((360, 450), (576, 450))),
+        Wire("AM_Y_TO_OVERLAP", ((198, 450), (198, 558), (378, 558), (378, 594))),
+        Wire("AM_D_TO_OVERLAP", ((234, 522), (234, 702), (378, 702), (378, 738))),
+        Wire("GM_Y_TO_OVERLAP", ((126, 594), (162, 594), (162, 630), (414, 630))),
+        Wire("GM_D_TO_OVERLAP", ((126, 738), (162, 738), (162, 774), (414, 774))),
+        Wire("PI_TO_OVERLAP_Y", ((666, 378), (720, 378), (720, 558), (414, 558))),
+        Wire("PI_TO_OVERLAP_D", ((720, 558), (720, 702), (414, 702))),
+        Wire("OVERLAP_Y_TO_MAX", ((450, 594), (504, 594), (504, 648), (594, 648))),
+        Wire("OVERLAP_D_TO_MAX", ((450, 738), (522, 738), (522, 684), (594, 684))),
+        Wire("OVERLAP_MEASURED_OUTPUT", ((666, 648), (828, 648))),
+        Wire("P_RECT_A_TO_SUM", ((126, 1044), (342, 1044), (342, 1080), (378, 1080))),
+        Wire("P_RECT_B_TO_SUM", ((126, 1116), (378, 1116))),
+        Wire("P_RECT_C_TO_SUM", ((126, 1188), (414, 1188), (414, 1116))),
+        Wire("P_RECT_TOTAL_OUTPUT", ((450, 1080), (576, 1080))),
+        Wire("P_INV_A_TO_SUM", ((126, 1332), (342, 1332), (342, 1368), (378, 1368))),
+        Wire("P_INV_B_TO_SUM", ((126, 1404), (378, 1404))),
+        Wire("P_INV_C_TO_SUM", ((126, 1476), (414, 1476), (414, 1404))),
+        Wire("P_INV_TOTAL_OUTPUT", ((450, 1368), (576, 1368))),
     )
     _definition(
         definitions,

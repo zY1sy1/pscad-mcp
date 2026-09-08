@@ -44,9 +44,16 @@ async def plan_lcc_model(
     folder: str | None = None,
     simulation_duration_s: float | None = None,
     blueprint: str = "cigre_lcc_monopole_v1",
+    verification_profile: str = "full_acceptance",
 ) -> dict[str, Any]:
     """Plan a fixed CIGRE LCC model build without changing the workspace."""
-    return _service().plan_model(project_name, folder, simulation_duration_s, blueprint)
+    return _service().plan_model(
+        project_name=project_name,
+        folder=folder,
+        simulation_duration_s=simulation_duration_s,
+        blueprint=blueprint,
+        verification_profile=verification_profile,
+    )
 
 
 async def build_lcc_model(
@@ -56,15 +63,17 @@ async def build_lcc_model(
     simulation_duration_s: float | None = None,
     blueprint: str = "cigre_lcc_monopole_v1",
     confirm: bool = False,
+    verification_profile: str = "full_acceptance",
 ) -> dict[str, Any]:
     """Start a confirmed fixed CIGRE LCC model build from a matching plan."""
     return await _service().build_model(
-        project_name,
-        expected_plan_hash,
-        folder,
-        simulation_duration_s,
-        blueprint,
-        confirm,
+        project_name=project_name,
+        expected_plan_hash=expected_plan_hash,
+        folder=folder,
+        simulation_duration_s=simulation_duration_s,
+        blueprint=blueprint,
+        verification_profile=verification_profile,
+        confirm=confirm,
     )
 
 

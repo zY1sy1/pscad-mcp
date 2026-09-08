@@ -23,37 +23,62 @@ def test_fixed_lcc_build_catalog_records_the_documented_backend_boundary():
     assert lcc_build.limitation_code == "LCC_BUILD_UNAVAILABLE"
 
 
-def test_lcc_wrappers_forward_values_through_builder_service(monkeypatch):
+def test_lcc_wrappers_preserve_old_positions_and_forward_profile_by_keyword(monkeypatch):
     calls = []
 
     class FakeBuilder:
-        def plan_model(self, *args):
-            calls.append(("plan", args))
+        def plan_model(self, **kwargs):
+            calls.append(("plan", kwargs))
             return {"plan_hash": "hash"}
 
-        async def build_model(self, *args):
-            calls.append(("build", args))
+        async def build_model(self, **kwargs):
+            calls.append(("build", kwargs))
             return {"build_id": "build"}
 
         def get_build_status(self, *args):
-            calls.append(("status", args))
             return {"state": "published"}
 
         def validate_model(self, *args):
-            calls.append(("validate", args))
             return {"valid": True}
 
     monkeypatch.setattr(lcc_tools, "_service", lambda: FakeBuilder())
 
     assert asyncio.run(lcc_tools.plan_lcc_model("Project", "Folder", 2.0, "bp")) == {"plan_hash": "hash"}
     assert asyncio.run(lcc_tools.build_lcc_model("Project", "hash", "Folder", 2.0, "bp", True)) == {"build_id": "build"}
-    assert asyncio.run(lcc_tools.get_lcc_build_status("build")) == {"state": "published"}
-    assert asyncio.run(lcc_tools.validate_lcc_model("Project", "bp", "output.pscx")) == {"valid": True}
+    assert asyncio.run(lcc_tools.plan_lcc_model("Dynamic", verification_profile="wp1c_dynamic")) == {"plan_hash": "hash"}
     assert calls == [
-        ("plan", ("Project", "Folder", 2.0, "bp")),
-        ("build", ("Project", "hash", "Folder", 2.0, "bp", True)),
-        ("status", ("build",)),
-        ("validate", ("Project", "bp", "output.pscx")),
+        (
+            "plan",
+            {
+                "project_name": "Project",
+                "folder": "Folder",
+                "simulation_duration_s": 2.0,
+                "blueprint": "bp",
+                "verification_profile": "full_acceptance",
+            },
+        ),
+        (
+            "build",
+            {
+                "project_name": "Project",
+                "expected_plan_hash": "hash",
+                "folder": "Folder",
+                "simulation_duration_s": 2.0,
+                "blueprint": "bp",
+                "verification_profile": "full_acceptance",
+                "confirm": True,
+            },
+        ),
+        (
+            "plan",
+            {
+                "project_name": "Dynamic",
+                "folder": None,
+                "simulation_duration_s": None,
+                "blueprint": "cigre_lcc_monopole_v1",
+                "verification_profile": "wp1c_dynamic",
+            },
+        ),
     ]
 
 

@@ -88,6 +88,93 @@ def test_concurrent_preflight_missing_managed_pid_fails_closed(monkeypatch, tmp_
     assert report["checks"]["runtime"] == "FAIL"
 
 
+@pytest.mark.parametrize("owned_leak", [False, True])
+def test_dynamic_runner_concurrent_scope_keeps_foreign_instance(monkeypatch, tmp_path, owned_leak):
+    from tests import test_lcc_dynamic_runner as dynamic
+
+    monkeypatch.setenv("PSCAD_MCP_ACCEPTANCE_CONCURRENT", "1")
+    value, staging = dynamic.valid_request(tmp_path)
+    service = dynamic._ConfigurableService(staging, managed_pid=42)
+    foreign = {"pid": 900, "name": "PSCAD.exe"}
+    def inventory():
+        return [foreign] + ([{"pid": 42}] if owned_leak and service.attached else [])
+    report = asyncio.run(dynamic.run_fixed_lcc_dynamic_acceptance(
+        value, service=service, builder=dynamic.PassingDynamicBuilder(staging),
+        process_reader=inventory, poll_interval_s=0,
+    ))
+    assert report["status"] == ("FAIL" if owned_leak else "INCOMPLETE_ANALYSIS")
+    assert report["runtime"]["remaining_processes"] == ([{"pid": 42}] if owned_leak else [])
+    assert service.quit_called
+    assert foreign in inventory()
+
+
+def test_dynamic_concurrent_run_requires_verified_ownership(monkeypatch, tmp_path):
+    from tests import test_lcc_dynamic_runner as dynamic
+
+    monkeypatch.setenv("PSCAD_MCP_ACCEPTANCE_CONCURRENT", "1")
+    value, staging = dynamic.valid_request(tmp_path)
+    service = dynamic.PassingDynamicService(staging)
+    builder = dynamic.PassingDynamicBuilder(staging)
+    report = asyncio.run(dynamic.run_fixed_lcc_dynamic_acceptance(
+        value, service=service, builder=builder,
+        process_reader=lambda: [{"pid": 900}], poll_interval_s=0,
+    ))
+    assert report["status"] == "FAIL"
+    assert report["failure"]["stage"] == "attach"
+    assert builder.plan_calls == []
+    assert service.quit_called
+
+
+def test_dynamic_real_cleanup_probes_the_owned_pid_directly(monkeypatch):
+    from pscad_mcp.acceptance import process_scope
+    from pscad_mcp.core.process_inventory import list_pscad_processes
+    from pscad_mcp.hvdc.builders.lcc.dynamic_runner import _remaining_runtime_processes
+
+    monkeypatch.setenv("PSCAD_MCP_ACCEPTANCE_CONCURRENT", "1")
+    monkeypatch.setattr(process_scope.psutil, "pid_exists", lambda pid: pid == 42)
+    assert asyncio.run(_remaining_runtime_processes({"managed_pid": 42}, list_pscad_processes)) == [{"pid": 42}]
+
+
+def test_dynamic_concurrent_terminator_never_targets_foreign_pid(monkeypatch, tmp_path):
+    from tests import test_lcc_dynamic_runner as dynamic
+
+    monkeypatch.setenv("PSCAD_MCP_ACCEPTANCE_CONCURRENT", "1")
+    value, staging = dynamic.valid_request(tmp_path)
+    processes = {900: {"pid": 900}}
+    terminated = []
+    class Service(dynamic._ConfigurableService):
+        async def attach_local(self):
+            await super().attach_local()
+            processes[42] = {"pid": 42}
+    def terminate(pid):
+        assert pid == 42
+        terminated.append(pid)
+        del processes[pid]
+    report = asyncio.run(dynamic.run_fixed_lcc_dynamic_acceptance(
+        value, service=Service(staging, managed_pid=42),
+        builder=dynamic.PassingDynamicBuilder(staging),
+        process_reader=lambda: list(processes.values()), process_terminator=terminate,
+        poll_interval_s=0,
+    ))
+    assert report["status"] == "INCOMPLETE_ANALYSIS"
+    assert terminated == [42]
+    assert processes == {900: {"pid": 900}}
+
+
+@pytest.mark.parametrize("enabled, expected", [("1", "allow"), ("0", "reject")])
+def test_dynamic_factory_passes_instance_launch_policy(monkeypatch, tmp_path, enabled, expected):
+    from types import SimpleNamespace
+    from pscad_mcp.hvdc.builders.lcc import dynamic_acceptance_cli as cli
+
+    monkeypatch.setenv("PSCAD_MCP_ACCEPTANCE_CONCURRENT", enabled)
+    captured = {}
+    monkeypatch.setattr(cli, "LegacyBackend", lambda *args, **kwargs: captured.update(kwargs))
+    monkeypatch.setattr(cli, "PscadService", lambda *args, **kwargs: object())
+    monkeypatch.setattr(cli, "LccBuilderService", lambda *args, **kwargs: object())
+    cli._service_factory(SimpleNamespace(master_path=tmp_path / "master.pslx", workspace_root=tmp_path))
+    assert captured["legacy_existing_policy"] == expected
+
+
 @pytest.mark.parametrize("kind", ["fixed", "native"])
 @pytest.mark.parametrize("remaining_pid, expected", [(900, "PASS"), (42, "FAIL")])
 def test_lcc_cleanup_distinguishes_foreign_and_owned_processes(

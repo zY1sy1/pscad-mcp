@@ -1,0 +1,59 @@
+{
+  "schema_version": 1,
+  "identity": "cigre_lcc_monopole_v1/wp1c_dynamic",
+  "event": {
+    "kind": "inverter_ac_disturbance",
+    "time_s": 0.8,
+    "duration_s": 0.1,
+    "recovery_window_s": 0.5,
+    "control_mode": "embedded_emtdc",
+    "control_signal": "LCC_FAULT_OPEN",
+    "event_signal": "LCC_FAULT_ACTIVE"
+  },
+  "required_channels": [
+    {"path": "Fault/LCC Fault Active", "units": "state"},
+    {"path": "Main/IDC", "units": "kA"},
+    {"path": "Main/VDC_RECT", "units": "kV"},
+    {"path": "Main/VDC_INV", "units": "kV"},
+    {"path": "Main/GAMMA_INV", "units": "rad"}
+  ],
+  "physical_evaluation": {
+    "window_s": [0.7, 0.8],
+    "end_inclusive": false
+  },
+  "disturbance": {
+    "inactive_max": 0.1,
+    "active_min": 0.9,
+    "maximum_edge_error_s": 0.0001
+  },
+  "failure_indication": {
+    "kind": "gamma_drop",
+    "channel": "Main/GAMMA_INV",
+    "units": "rad",
+    "minimum_drop_rad": 0.017453292519943295
+  },
+  "bounded_dc_response": {
+    "channel": "Main/IDC",
+    "units": "kA",
+    "prefault_window_s": 0.1,
+    "minimum_prefault_magnitude_ka": 0.001,
+    "maximum_peak_to_prefault_ratio": 3.0
+  },
+  "recovery": {
+    "window_s": 0.5,
+    "minimum_hold_s": 0.1,
+    "channels": [
+      {"path": "Main/IDC", "units": "kA", "relative_band": 0.2, "absolute_floor": 0.05},
+      {"path": "Main/VDC_RECT", "units": "kV", "relative_band": 0.2, "absolute_floor": 5.0},
+      {"path": "Main/VDC_INV", "units": "kV", "relative_band": 0.2, "absolute_floor": 5.0},
+      {"path": "Main/GAMMA_INV", "units": "rad", "relative_band": 0.2, "absolute_floor": 0.03490658503988659}
+    ]
+  },
+  "threshold_source": {
+    "kind": "approved_repository_engineering_contract",
+    "locator": "docs/superpowers/specs/2026-08-30-lcc-wp1a-native-acceptance-completion.md",
+    "sha256": "7d76cfc0a8a9350bec512d3b5d732cea52304cd074e6ef90ed8cd885ff1116ff",
+    "source_commit": "c6ad59f3f7638f8b884ea4b95e44c21cd31ff56c",
+    "scope": "engineering_only"
+  }
+}

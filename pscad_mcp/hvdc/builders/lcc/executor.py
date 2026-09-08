@@ -26,8 +26,12 @@ from ....topology.models import (
 from .acceptance import evaluate_acceptance
 from .assets import LccAssetSet, materialize_library, sha256_file
 from .catalog import parse_catalog, require_definition, require_port
+from .dynamic_acceptance import evaluate_fixed_lcc_dynamic_physical
+from .dynamic_evidence import derive_fixed_lcc_dynamic_evidence
 from .journal import AtomicJournal
 from .models import LccBuildPlan, LccBuildRecord, LccBuildState, LccPlanOperation
+from .output_channels import logical_output_payload
+from .output_dataset import legacy_output_stem, output_dataset_parts
 from .project_graph import (
     GraphComponent,
     GraphNet,
@@ -420,6 +424,7 @@ class LccExecutor:
         self._run_started_after: float | None = None
         self.output_file: str | None = None
         self.output_parts: list[str] = []
+        self._output_read_hashes: dict[str, str] = {}
         self._publication_created = False
         self._publication_hash: str | None = None
         self._simulation_active = False
@@ -543,12 +548,16 @@ class LccExecutor:
             await self._compile(operation)
         elif operation.kind == "register_dynamic_events":
             await self._register_dynamic_events(operation)
+        elif operation.kind == "verify_dynamic_control":
+            await self._verify_dynamic_control(operation)
         elif operation.kind == "simulate":
             await self._simulate(operation)
         elif operation.kind == "smoke_validate":
             await self._smoke_validate(operation)
         elif operation.kind == "accept":
             await self._accept(operation)
+        elif operation.kind == "dynamic_accept":
+            await self._dynamic_accept(operation)
         elif operation.kind == "publish":
             await self._publish(operation)
         else:
@@ -930,15 +939,27 @@ class LccExecutor:
         arguments = operation.arguments
         planned_vertices = arguments.get("vertices", ())
         endpoints = arguments.get("endpoints", ())
-        actual_start = None
-        actual_end = None
+        actual_points: list[tuple[int, int] | None] = []
         if isinstance(endpoints, (list, tuple)) and len(endpoints) >= 2:
-            actual_start = await _actual_endpoint(
-                self.service, self.project_name, self.component_ids, endpoints[0]
-            )
-            actual_end = await _actual_endpoint(
-                self.service, self.project_name, self.component_ids, endpoints[-1]
-            )
+            for endpoint in endpoints:
+                point = await _actual_endpoint(
+                    self.service, self.project_name, self.component_ids, endpoint
+                )
+                if point is None and isinstance(endpoint, str) and ":" in endpoint:
+                    component_name, port_name = endpoint.split(":", 1)
+                    component = self._logical_components.get(component_name)
+                    if component is not None:
+                        point = next(
+                            (
+                                port.absolute
+                                for port in component.ports
+                                if port.name == port_name
+                            ),
+                            None,
+                        )
+                actual_points.append(point)
+        actual_start = actual_points[0] if actual_points else None
+        actual_end = actual_points[-1] if actual_points else None
         vertices = [
             list(point)
             for point in _route_for_backend(
@@ -991,6 +1012,48 @@ class LccExecutor:
                 backend_response_type="split_ground_return",
                 wire_count=len(responses),
                 vertices=routes,
+            )
+            return
+        if (
+            label is not None
+            and isinstance(endpoints, (list, tuple))
+            and len(endpoints) > 2
+        ):
+            if any(point is None for point in actual_points):
+                self._raise_postcondition(
+                    "Every endpoint of a multi-terminal labeled net must have "
+                    "a resolved canvas point.",
+                    net=operation.target,
+                    endpoints=list(endpoints),
+                )
+            label_responses = []
+            for point in actual_points:
+                assert point is not None
+                created = await self.service.create_connection(
+                    self.project_name,
+                    list(point),
+                    list(point),
+                    label,
+                    kind == "electrical",
+                    canvas_name=canvas,
+                )
+                if not isinstance(created, dict):
+                    self._raise_postcondition(
+                        "Connection label creation returned invalid evidence.",
+                        net=operation.target,
+                    )
+                label_responses.append(created)
+            self._logical_nets[operation.target] = GraphNet(
+                kind,
+                tuple(tuple(int(value) for value in point) for point in vertices),
+                (str(label),),
+                tuple(str(endpoint) for endpoint in endpoints),
+            )
+            self._operation_completed(
+                backend_response_type="multi_endpoint_labeled",
+                wire_vertices=vertices,
+                wire_materialized=False,
+                label_count=len(label_responses),
             )
             return
         if label is not None or len(vertices) == 2:
@@ -1051,7 +1114,7 @@ class LccExecutor:
         call_id: Any,
     ) -> bool:
         if (
-            self.plan.verification_profile != "wp1b_smoke"
+            self.plan.verification_profile not in {"wp1b_smoke", "wp1c_dynamic"}
             or self.asset_set is None
             or not any(
                 entry.get("state") == LccBuildState.COMPILED.value
@@ -1059,9 +1122,10 @@ class LccExecutor:
             )
         ):
             return False
-        required = self.asset_set.smoke.get("required_channels")
-        if not isinstance(required, (list, tuple)) or selector not in required:
-            return False
+        if self.plan.verification_profile == "wp1b_smoke":
+            required = self.asset_set.smoke.get("required_channels")
+            if not isinstance(required, (list, tuple)) or selector not in required:
+                return False
         matches = [
             output
             for output in self.plan.blueprint.outputs
@@ -2008,6 +2072,138 @@ class LccExecutor:
         self.result = result
         self._operation_completed()
 
+    async def _verify_dynamic_control(
+        self, operation: LccPlanOperation
+    ) -> None:
+        self._operation_started(operation)
+        arguments = dict(operation.arguments)
+        if (
+            self.plan.verification_profile != "wp1c_dynamic"
+            or arguments.get("control_mode") != "embedded_emtdc"
+        ):
+            raise _error(
+                "LCC_DYNAMIC_EVENT_UNAVAILABLE",
+                "Embedded dynamic control verification was not selected.",
+                "verify_lcc_dynamic_control",
+            )
+        if not any(
+            item.get("state") == LccBuildState.COMPILED.value
+            for item in self.history
+        ):
+            raise _error(
+                "LCC_DYNAMIC_EVENT_UNAVAILABLE",
+                "Dynamic control verification requires a compiled project.",
+                "verify_lcc_dynamic_control",
+            )
+        signal = arguments.get("control_signal")
+        event_signal = arguments.get("event_signal")
+        control_adapter = arguments.get("control_adapter")
+        timer_name = arguments.get("timer_component")
+        consumers = arguments.get("control_components")
+        channel = arguments.get("channel")
+        if (
+            not isinstance(signal, str)
+            or not isinstance(event_signal, str)
+            or event_signal == signal
+            or not isinstance(control_adapter, str)
+            or not isinstance(timer_name, str)
+            or not isinstance(channel, str)
+        ):
+            raise _error(
+                "LCC_DYNAMIC_EVENT_UNAVAILABLE",
+                "Dynamic control identity is incomplete.",
+                "verify_lcc_dynamic_control",
+            )
+        if (
+            not isinstance(consumers, Sequence)
+            or isinstance(consumers, (str, bytes, bytearray))
+            or len(consumers) != 3
+            or not all(isinstance(name, str) and name for name in consumers)
+        ):
+            raise _error(
+                "LCC_DYNAMIC_EVENT_UNAVAILABLE",
+                "Dynamic control requires three breaker consumers.",
+                "verify_lcc_dynamic_control",
+            )
+        if len(set(consumers)) != 3:
+            raise _error(
+                "LCC_DYNAMIC_EVENT_UNAVAILABLE",
+                "Dynamic control requires three distinct breaker consumers.",
+                "verify_lcc_dynamic_control",
+            )
+        try:
+            await self._verify_master_binding_state(refresh_components=True)
+        except BackendError as error:
+            raise _error(
+                "LCC_DYNAMIC_EVENT_UNAVAILABLE",
+                "Compiled Master binding state could not be verified.",
+                "verify_lcc_dynamic_control",
+                upstream_code=error.code,
+            ) from error
+        timer_id = self.component_ids.get(timer_name)
+        control_adapter_id = self.component_ids.get(control_adapter)
+        adapter = self._logical_components.get(control_adapter)
+        consumer_ids = [self.component_ids.get(name) for name in consumers]
+        if (
+            timer_id is None or control_adapter_id is None
+            or adapter is None or adapter.definition != "master:fault_control_not"
+            or any(value is None for value in consumer_ids)
+        ):
+            raise _error(
+                "LCC_DYNAMIC_EVENT_UNAVAILABLE",
+                "Dynamic control components are absent after compile.",
+                "verify_lcc_dynamic_control",
+            )
+        timer_parameters = await self.service.get_component_parameters(
+            self.project_name, int(timer_id)
+        )
+        event = arguments.get("event")
+        if (
+            not isinstance(event, Mapping)
+            or not isinstance(timer_parameters, Mapping)
+            or not _same_setting(
+                event.get("time_s"), timer_parameters.get("FaultTime_s")
+            )
+            or not _same_setting(
+                event.get("duration_s"),
+                timer_parameters.get("FaultDuration_s"),
+            )
+        ):
+            raise _error(
+                "LCC_DYNAMIC_EVENT_UNAVAILABLE",
+                "Compiled fault timer parameters differ from the event contract.",
+                "verify_lcc_dynamic_control",
+            )
+        for name, component_id in zip(consumers, consumer_ids):
+            parameters = await self.service.get_component_parameters(
+                self.project_name, int(component_id)
+            )
+            if not isinstance(parameters, Mapping) or parameters.get("NAME") != signal:
+                raise _error(
+                    "LCC_DYNAMIC_EVENT_UNAVAILABLE",
+                    "A compiled fault breaker does not reference the inverse open command.",
+                    "verify_lcc_dynamic_control",
+                    logical_id=name,
+                    expected=signal,
+                    observed=parameters.get("NAME")
+                    if isinstance(parameters, Mapping)
+                    else None,
+                )
+        result = dict(self.result or {})
+        result["dynamic_control"] = {
+            "status": "PASS",
+            "mode": "embedded_emtdc",
+            "signal": signal,
+            "event_signal": event_signal,
+            "control_adapter_component_id": int(control_adapter_id),
+            "timer_component_id": int(timer_id),
+            "consumer_component_ids": [int(value) for value in consumer_ids],
+            "output": channel,
+            "source": "compiled_project_readback",
+        }
+        self.result = result
+        self._operation_completed()
+
     async def _stop_simulation(self, reason: str) -> None:
         if not self._simulation_active:
             return
@@ -2054,76 +2250,27 @@ class LccExecutor:
         self.journal.write(self._journal_payload())
 
     def _logical_output_payload(self, value: Any) -> Any:
-        if not isinstance(value, Mapping):
-            return value
-        raw_channels = value.get("channels")
-        if not isinstance(raw_channels, Sequence) or isinstance(
-            raw_channels,
-            (str, bytes, bytearray),
-        ):
-            return value
-        components = {
-            component.logical_id: component
-            for component in self.plan.blueprint.components
-        }
-        measurements = {
-            measurement.get("logical_id"): measurement
-            for measurement in self.plan.blueprint.measurements
-            if isinstance(measurement, Mapping)
-            and isinstance(measurement.get("logical_id"), str)
-        }
-        physical_to_logical = {}
-        for output in self.plan.blueprint.outputs:
-            measurement = measurements.get(output.measurement)
-            component_id = (
-                measurement.get("component")
-                if isinstance(measurement, Mapping)
-                else None
-            )
-            component = components.get(component_id)
-            if component is None:
-                continue
-            physical_path = (
-                component.definition.rsplit(":", 1)[-1]
-                + "/"
-                + output.path.rsplit("/", 1)[-1]
-            )
-            previous = physical_to_logical.setdefault(
-                physical_path,
-                output.path,
-            )
-            if previous != output.path:
-                raise _error(
-                    "LCC_OUTPUT_INCOMPLETE",
-                    "Physical output selectors are ambiguous.",
-                    "read_lcc_output",
-                    physical_path=physical_path,
-                )
-        normalized_channels = []
-        observed_paths = set()
-        for raw_channel in raw_channels:
-            if not isinstance(raw_channel, Mapping):
-                normalized_channels.append(raw_channel)
-                continue
-            channel = dict(raw_channel)
-            raw_path = channel.get("path")
-            if isinstance(raw_path, str) and raw_path in physical_to_logical:
-                channel["path"] = physical_to_logical[raw_path]
-            normalized_path = channel.get("path")
-            if (
-                isinstance(normalized_path, str)
-                and normalized_path in observed_paths
-            ):
-                raise _error(
-                    "LCC_OUTPUT_INCOMPLETE",
-                    "Logical output selectors are duplicated.",
-                    "read_lcc_output",
-                    path=normalized_path,
-                )
-            if isinstance(normalized_path, str):
-                observed_paths.add(normalized_path)
-            normalized_channels.append(channel)
-        return {**value, "channels": normalized_channels}
+        return logical_output_payload(value, self.plan.blueprint.to_dict())
+
+    def _snapshot_dynamic_output(self) -> dict[str, str]:
+        paths = [Path(part) for part in self.output_parts]
+        assert self.output_file is not None
+        selected = Path(self.output_file)
+        if output_dataset_parts(selected) != {path.absolute() for path in paths}:
+            raise _error("LCC_OUTPUT_INCOMPLETE", "The dynamic output dataset has an unlisted or missing part.", "read_lcc_output")
+        if selected.suffix.casefold() == ".out":
+            stem = legacy_output_stem(selected)
+            metadata = [selected.with_name(stem + suffix) for suffix in (".inf", ".infx")]
+            metadata = [path for path in metadata if path.exists()]
+            if not metadata:
+                raise _error("LCC_OUTPUT_INCOMPLETE", "The dynamic output metadata is missing.", "read_lcc_output")
+            paths.extend(metadata)
+        hashes = {}
+        for path in paths:
+            if path.is_symlink() or not path.is_file() or not path.resolve().is_relative_to(self.staging_path.resolve()):
+                raise _error("LCC_OUTPUT_INCOMPLETE", "The dynamic output dataset escaped staging.", "read_lcc_output")
+            hashes[str(path)] = sha256_file(path)
+        return hashes
 
     async def _acceptance_output(self) -> Any:
         discover = getattr(self.service, "discover_output_files", None)
@@ -2207,13 +2354,15 @@ class LccExecutor:
                 )
             candidates = sorted(set(candidates), key=str.casefold)
             self.output_file, self.output_parts = _select_output_dataset(candidates)
-            return self._logical_output_payload(
-                await read_output(
-                    self.output_file,
-                    max_samples=1_000_000,
-                    summary_only=False,
-                )
+            before_read = self._snapshot_dynamic_output() if self.plan.verification_profile == "wp1c_dynamic" else {}
+            payload = await read_output(
+                self.output_file, max_samples=1_000_000, summary_only=False,
             )
+            if before_read:
+                if before_read != self._snapshot_dynamic_output():
+                    raise _error("LCC_OUTPUT_INCOMPLETE", "The dynamic output dataset changed while being read.", "read_lcc_output")
+                self._output_read_hashes = before_read
+            return self._logical_output_payload(payload)
 
         get_project_output = getattr(self.service, "get_project_output", None)
         if not callable(get_project_output):
@@ -2320,6 +2469,87 @@ class LccExecutor:
                 acceptance=result,
             )
         self._record(LccBuildState.ACCEPTANCE_PASSED)
+
+    async def _dynamic_accept(self, operation: LccPlanOperation) -> None:
+        self._operation_started(operation)
+        if self.plan.verification_profile != "wp1c_dynamic" or self.asset_set is None:
+            raise _error(
+                "LCC_DYNAMIC_ACCEPTANCE_FAILED",
+                "Dynamic acceptance requires a verified WP1C asset set.",
+                "evaluate_lcc_dynamic_acceptance",
+            )
+        expected_hash = operation.arguments.get("contract_sha256")
+        if expected_hash != self.asset_set.hashes.get("dynamic.json"):
+            raise _error(
+                "LCC_ASSET_MISMATCH",
+                "The dynamic contract changed after planning.",
+                "evaluate_lcc_dynamic_acceptance",
+            )
+        output = await self._acceptance_output()
+        dynamic = derive_fixed_lcc_dynamic_evidence(
+            output,
+            self.asset_set.dynamic,
+            output_step_s=float(self.plan.blueprint.settings["output_step_s"]),
+        )
+        physical = evaluate_fixed_lcc_dynamic_physical(
+            output, self.asset_set.acceptance, self.asset_set.dynamic,
+        )
+        if self._output_read_hashes and self._output_read_hashes != self._snapshot_dynamic_output():
+            raise _error("LCC_OUTPUT_INCOMPLETE", "The dynamic output dataset changed during evaluation.", "read_lcc_output")
+        verdicts = {dynamic["engineering_verdict"], physical["verdict"]}
+        engineering = (
+            "FAIL"
+            if "FAIL" in verdicts
+            else "INCOMPLETE_ANALYSIS"
+            if "INCOMPLETE_ANALYSIS" in verdicts
+            else "PASS"
+        )
+        result = dict(self.result or {})
+        result.update(
+            {
+                "dynamic": dynamic,
+                "physical": physical,
+                "engineering_verdict": engineering,
+                "golden_verdict": "INCOMPLETE_ANALYSIS",
+                "status": "FAIL" if engineering == "FAIL" else "INCOMPLETE_ANALYSIS",
+                "output_file": self.output_file,
+                "output_parts": list(self.output_parts or ()),
+                "output_artifacts": [],
+                "output_metadata_artifacts": [
+                    {"path": path, "sha256": digest}
+                    for path, digest in self._output_read_hashes.items()
+                    if Path(path).suffix.casefold() in {".inf", ".infx"}
+                ],
+            }
+        )
+        if self.output_parts:
+            artifacts = []
+            for output_part in self.output_parts:
+                try:
+                    digest = sha256_file(Path(output_part))
+                    if self._output_read_hashes and self._output_read_hashes.get(output_part) != digest:
+                        raise _error("LCC_OUTPUT_INCOMPLETE", "The dynamic output changed after evaluation.", "read_lcc_output")
+                    artifacts.append(
+                        {"path": output_part, "sha256": digest}
+                    )
+                except BackendError as error:
+                    raise _error(
+                        "LCC_OUTPUT_INCOMPLETE",
+                        "The selected PSCAD output part could not be hashed for dynamic evidence.",
+                        "read_lcc_output",
+                        output_file=output_part,
+                        upstream_code=error.code,
+                    ) from error
+            result["output_artifacts"] = artifacts
+        self.result = result
+        if engineering != "PASS":
+            raise _error(
+                "LCC_DYNAMIC_ACCEPTANCE_FAILED",
+                "The fixed LCC dynamic engineering contract did not pass.",
+                "evaluate_lcc_dynamic_acceptance",
+                acceptance=result,
+            )
+        self._record(LccBuildState.DYNAMIC_ENGINEERING_PASSED)
 
     async def _publish(self, operation: LccPlanOperation) -> None:
         self._operation_started(operation)

@@ -478,6 +478,32 @@ fixture 和数据审计可以并行，但最终集成必须按依赖顺序进行
 8. 在 WP6 golden 可用前保持 `INCOMPLETE_ANALYSIS`；
 9. WP6 后重新运行并允许 accepted。
 
+当前执行边界：WP1B-before-WP1C 是强制顺序。历史 WP1B no-fault smoke
+报告仍标记为 `simulated/PASS`，不能改写为动态验收；companion baseline-gates plan
+要求 WP1B 与 WP1C 报告分别保留，并绑定同一 current commit、clean named
+checkout、原始（raw）PSCAD 输出和完整哈希。WP1C wrapper 的操作命令为：
+
+```powershell
+$env:PSCAD_MCP_ACCEPTANCE = '1'
+./scripts/run_fixed_lcc_dynamic_acceptance.ps1 `
+  -WorkspaceRoot 'D:\PSCAD-Workspace\lcc-wp1c-native-closure' `
+  -MasterPath 'C:\Program Files (x86)\PSCAD46\master.pslx' `
+  -CompilerConfiguration 'C:\Program Files (x86)\PSCAD46\fortran_compilers.xml' `
+  -CompilerExecutable 'C:\Program Files (x86)\GFortran\4.6\bin\gfortran.exe' `
+  -ProjectName 'WP1C_FIXED_LCC'
+```
+
+wrapper 退出码固定为：`2` 表示 preflight/environment 拒绝且未运行，`1` 表示
+运行或 engineering checks 失败，`0` 表示 engineering checks 成功。成功的
+pre-WP6 结果必须保留 `engineering_verdict=PASS`、`golden_verdict=INCOMPLETE_ANALYSIS`
+和 `status=INCOMPLETE_ANALYSIS`，并使用以下声明：
+
+> 成功运行后：fixed LCC WP1C current-commit dynamic engineering evidence completed; final status remains `INCOMPLETE_ANALYSIS` pending independent reviewed golden.
+
+WP6 是唯一的 independent-golden/final-accepted owner；只有 WP6 完成后，才可
+更新 baseline、发布或写入最终 accepted 状态。文档中的 implemented、offline-tested、
+licensed、published、accepted 必须继续按第 5 节词典区分。
+
 ### 9.5 WP1D：parametric LCC licensed 工程门
 
 任务：

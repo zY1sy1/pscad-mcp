@@ -93,6 +93,9 @@ def _snapshot(fixture) -> dict[str, object]:
         "ACD_C",
         "DC_POS",
         "DC_NEG",
+        "REF_A",
+        "REF_B",
+        "REF_C",
     }
     return {
         "definition": fixture.definition,
@@ -145,7 +148,7 @@ def _smoke_channel(name: str) -> dict[str, object]:
     if name.startswith("Main/AO_RECT_"):
         units, minimum, maximum = "rad", 0.2, 0.3
     elif name.startswith("Main/AO_INV_"):
-        units, minimum, maximum = "rad", 1.0, 1.7
+        units, minimum, maximum = "rad", 1.6, 2.4
     elif name == "Main/GAMMA_INV":
         units, minimum, maximum = "rad", 0.2, 0.4
     elif name.startswith("Main/ENABLE_"):
@@ -254,6 +257,34 @@ def valid_fixed_report() -> dict[str, object]:
         "explicit_exclusions": list(FIXED_EXCLUSIONS),
         "failure": None,
     }
+
+
+def test_report_accepts_exact_packaged_alpha_smoke_bounds():
+    from pscad_mcp.hvdc.builders.lcc.assets import load_packaged_asset_set
+
+    payload = valid_fixed_report()
+    limits = load_packaged_asset_set().smoke["ao_limits_rad"]
+    for name, (lower, upper) in limits.items():
+        payload["smoke"]["evidence"]["channels"][name].update(
+            minimum=lower, maximum=upper,
+        )
+    assert validate_fixed_lcc_acceptance_report(payload)["status"] == "PASS"
+    for name, (lower, upper) in limits.items():
+        assert fixed_acceptance._AO_LIMITS[name] == pytest.approx((lower, upper))
+
+
+@pytest.mark.parametrize("kind", ["electrical", "data"])
+def test_reference_ports_require_electrical_readback(kind):
+    payload = valid_fixed_report()
+    for fixture in payload["component_gate"]["fixtures"][:2]:
+        for snapshot in ("before_reload", "after_reload"):
+            for phase in "ABC":
+                fixture[snapshot]["ports"][f"REF_{phase}"]["kind"] = kind
+    if kind == "electrical":
+        assert validate_fixed_lcc_acceptance_report(payload)["status"] == "PASS"
+    else:
+        with pytest.raises(BackendError, match="Fixture port contract"):
+            validate_fixed_lcc_acceptance_report(payload)
 
 
 def test_valid_fixed_report_is_simulated_pass_with_exact_exclusions():

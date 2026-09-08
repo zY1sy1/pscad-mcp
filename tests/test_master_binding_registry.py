@@ -244,10 +244,14 @@ def _master_fixture_xml(
 <pslx>
   <Definition name='source3'>
     <form><category>
-      <parameter name='Vm' type='Real' unit='kV' intent='Input'><value>230</value></parameter>
-      <parameter name='F' type='Real' unit='Hz' intent='Input'><value>50</value></parameter>
+      <parameter name='Vm' desc='Base Voltage (L-L, RMS)' type='Real' unit='kV' intent='Input'><value>230</value></parameter>
+      <parameter name='F' desc='Base Frequency' type='Real' unit='Hz' intent='Input'><value>60</value></parameter>
+      <parameter name='Es' desc='Voltage Magnitude (L-L, RMS)' type='Real' unit='kV' intent='Input'><value>230</value></parameter>
+      <parameter name='F0' desc='Frequency' type='Real' unit='Hz' intent='Input'><value>60</value></parameter>
       <parameter name='Ph' type='Real' unit='deg' intent='Input'><value>0</value></parameter>
       <parameter name='View' type='Choice'><value>1</value><choice>0 = 3 phase</choice><choice>1 = single</choice></parameter>
+      <parameter name='Ctrl' type='Choice'><value>0</value><choice>0 = Fixed</choice><choice>2 = External</choice><choice>3 = Auto</choice></parameter>
+      <parameter name='Term' type='Choice'><value>0</value><choice>0 = Behind the Source Impedance</choice><choice>1 = At the Terminal</choice></parameter>
     </category></form>
     <svg>
       <port model='{source_a_model}' name='A' x='36' y='-36' dim='1' type='NonRemovable'/>
@@ -258,6 +262,7 @@ def _master_fixture_xml(
   {duplicate}
   <Definition name='xfmr-3p2w'>
     <form><category>
+      <parameter name='Tmva' type='Real' unit='MVA' intent='Input'><value>100</value></parameter>
       <parameter name='V1' type='Real' unit='kV' intent='Input'><value>230</value></parameter>
       <parameter name='V2' type='Real' unit='kV' intent='Input'><value>230</value></parameter>
       <parameter name='f' type='Real' unit='Hz' intent='Input'><value>50</value></parameter>
@@ -273,6 +278,12 @@ def _master_fixture_xml(
       <port model='Natural' name='A2' x='72' y='-36' dim='1' type='NonRemovable'/>
       <port model='Natural' name='B2' x='72' y='0' dim='1' type='NonRemovable'/>
       <port model='Natural' name='C2' x='72' y='36' dim='1' type='NonRemovable'/>
+      <port model='Natural' name='G1' x='-18' y='36' dim='1' mode='Electrical' type='NonRemovable'>(YD1==0)&amp;&amp;(View!=0)</port>
+      <port model='Natural' name='G2' x='0' y='36' dim='1' mode='Electrical' type='NonRemovable'>(YD2==0)&amp;&amp;(View!=0)</port>
+      <port model='Natural' name='G2' x='0' y='0' dim='1' mode='Electrical' type='Ground'>(YD2==1)</port>
+      <port model='Natural' name='G1' x='-18' y='0' dim='1' mode='Electrical' type='Ground'>(YD1==1)</port>
+      <port model='Natural' name='G1' x='-36' y='72' dim='1' mode='Electrical' type='NonRemovable'>(YD1==0)&amp;&amp;(View==0)</port>
+      <port model='Natural' name='G2' x='36' y='72' dim='1' mode='Electrical' type='NonRemovable'>(YD2==0)&amp;&amp;(View==0)</port>
     </svg>
   </Definition>
   <Definition name='cfilter'>
@@ -313,6 +324,8 @@ def _master_fixture_xml(
       <parameter name='BaseV' type='Real' unit='kV' intent='Input'><value>230</value></parameter>
       <parameter name='CurI' type='Text'><value>IDC</value></parameter>
       <parameter name='VolI' type='Text'><value>VDC</value></parameter>
+      <parameter name='P' type='Text'><value></value></parameter>
+      <parameter name='Q' type='Text'><value></value></parameter>
     </category></form>
     <svg>
       <port model='Natural' name='A' x='-18' y='0' dim='0' type='Removable'>MeasV+MeasP+MeasQ==0</port>
@@ -327,6 +340,10 @@ def _master_fixture_xml(
   <Definition name='datalabel'>
     <form><category><parameter name='Name' type='Text'><value>IMPORT</value></parameter></category></form>
     <svg><port model='Transfer' name='A' x='0' y='0' dim='0' mode='Input' type='Real'/></svg>
+  </Definition>
+  <Definition name='import'>
+    <form><category><parameter name='Name' type='Text'><value>IMPORT</value></parameter></category></form>
+    <svg><port model='Transfer' name='N' x='36' y='0' dim='0' mode='Output' type='Real'>true</port></svg>
   </Definition>
   <Definition name='breaker1'>
     <form><category>
@@ -366,6 +383,17 @@ def _master_fixture_xml(
       <port model='Transfer' name='B:Dim' x='0' y='0' dim='0' mode='Output' type='Integer'>(OType!=0)&amp;&amp;(OType!=2)</port>
       <port model='Transfer' name='A:Dim' x='-36' y='0' dim='0' mode='Input' type='Integer'>IType==1</port>
       <port model='Transfer' name='A:Dim' x='-36' y='0' dim='0' mode='Input' type='Logical'>IType==0</port>
+    </svg>
+  </Definition>
+  <Definition name='inv'>
+    <form><category>
+      <parameter name='INTR' type='Choice'><value>0</value><choice>0 = Disabled</choice><choice>1 = Enabled</choice></parameter>
+    </category></form>
+    <svg>
+      <port model='Transfer' name='IN' x='0' y='0' dim='1' mode='Input' type='Integer'>!(INTR==1)</port>
+      <port model='Transfer' name='OUT' x='36' y='0' dim='1' mode='Output' type='Integer'>!(INTR==1)</port>
+      <port model='Transfer' name='IN' x='0' y='0' dim='2' mode='Input' type='Real'>!(INTR==0)</port>
+      <port model='Transfer' name='OUT' x='36' y='0' dim='2' mode='Output' type='Real'>!(INTR==0)</port>
     </svg>
   </Definition>
   <Definition name='pgb'>
@@ -618,9 +646,11 @@ def test_packaged_registry_contains_exact_fixed_catalog_bindings():
         "master:dc_meter",
         "master:ground",
         "master:main_signal_import",
+        "master:signal_import",
         "master:breaker1",
         "master:tfault",
         "master:fault_state_integer_to_real",
+        "master:fault_control_not",
         "master:dynamic_output_channel",
     }
     assert (
@@ -638,6 +668,10 @@ def test_packaged_registry_contains_exact_fixed_catalog_bindings():
     assert (
         registry.by_logical_name["master:main_signal_import"].physical_definition
         == "datalabel"
+    )
+    assert (
+        registry.by_logical_name["master:signal_import"].physical_definition
+        == "import"
     )
 
 
@@ -657,7 +691,7 @@ def test_filter_expansion_offsets_are_pscad_grid_aligned():
     )
 
 
-def test_filter_expansion_phase_ports_do_not_coincide():
+def test_filter_expansion_is_a_shunt_with_distinct_phase_buses():
     module = _subject()
     registry = _packaged_registry(module)
     binding = registry.by_logical_name["master:ac_filter_branch"]
@@ -666,15 +700,44 @@ def test_filter_expansion_phase_ports_do_not_coincide():
         for item in binding.shape["instances"]
     }
     port_offsets = {"A": (0, -54), "B": (0, 54)}
-    points = [
-        (
+    points = {
+        port.logical: (
             instance_offsets[port.instance][0] + port_offsets[port.physical][0],
             instance_offsets[port.instance][1] + port_offsets[port.physical][1],
         )
         for port in binding.ports
-    ]
+    }
 
-    assert len(points) == len(set(points))
+    assert binding.shape["neutral"]["physical_port"] == "B"
+    assert binding.shape["neutral"]["ground_offset"] == (54, 54)
+    for phase in "ABC":
+        assert points[f"IN_{phase}"] == points[f"OUT_{phase}"]
+    assert len({points[f"IN_{phase}"] for phase in "ABC"}) == 3
+
+
+@pytest.mark.parametrize("raw_dimension", [0, 1, None])
+def test_adaptive_electrical_ports_preserve_raw_dimension_evidence(tmp_path, raw_dimension):
+    module = _subject()
+    binding = _minimal_binding()
+    binding["ports"][0]["dimension"] = 3
+    registry = module.parse_master_binding_registry(_registry_payload(binding))
+    dimension = "" if raw_dimension is None else f"dim='{raw_dimension}'"
+    master = tmp_path / "adaptive.pslx"
+    master.write_text(
+        "<project><definitions><Definition name='resistor'>"
+        "<form><category><parameter name='R' type='Real' unit='ohm'><value>1</value></parameter></category></form>"
+        f"<svg><port name='A' model='Natural' {dimension} x='0' y='0'/></svg>"
+        "</Definition></definitions></project>", encoding="utf-8",
+    )
+    if raw_dimension != 0:
+        with pytest.raises(BackendError) as failure:
+            module.audit_master_bindings(master, registry)
+        assert failure.value.code == "MASTER_PORT_MISMATCH"
+    else:
+        audited = module.audit_master_bindings(master, registry)
+        port = audited.definitions["master:test"]["selected_ports"]["IN"]
+        assert port["dimension"] == 3
+        assert port["raw_dimension"] == 0
 
 
 def test_registry_hash_is_stable_for_key_order():
@@ -708,6 +771,42 @@ def test_audit_resolves_all_packaged_bindings_and_preserves_source_hash(tmp_path
     assert selected["A"]["raw_dimension"] == 0
     assert selected["A"]["dimension"] == 1
     assert selected["A"]["kind"] == "electrical"
+
+
+def test_transformer_binding_selects_primary_y_neutral_in_three_phase_view(tmp_path):
+    module = _subject()
+    registry = _packaged_registry(module)
+    audited = module.audit_master_bindings(_write_master_fixture(tmp_path), registry)
+    selected = audited.definitions["master:converter_transformer"]["selected_ports"]
+
+    assert "HV_N" in selected
+    assert selected["HV_N"]["physical"] == "G1"
+    assert selected["HV_N"]["occurrence"] == 2
+    assert selected["HV_N"]["kind"] == "electrical"
+    assert selected["HV_N"]["dimension"] == 1
+    assert selected["HV_N"]["offset"] == (-36, 72)
+    assert selected["HV_N"]["condition"] == "(YD1==0)&&(View==0)"
+    assert all(port["physical"] != "G2" for port in selected.values())
+
+
+def test_fault_control_not_uses_native_scalar_integer_inversion(tmp_path):
+    module = _subject()
+    registry = _packaged_registry(module)
+    audited = module.audit_master_bindings(_write_master_fixture(tmp_path), registry)
+    binding = audited.resolve_component("master:fault_control_not", {})
+
+    assert binding.physical_definition == "inv"
+    assert binding.physical_parameters == {"INTR": 0}
+    ports = audited.definitions["master:fault_control_not"]["selected_ports"]
+    for name, offset in {"IN": (0, 0), "OUT": (36, 0)}.items():
+        assert ports[name]["physical"] == name
+        assert ports[name]["occurrence"] == 0
+        assert ports[name]["dimension"] == 1
+        assert ports[name]["type"] == "Integer"
+        assert ports[name]["offset"] == offset
+        assert ports[name]["condition"] == "!(INTR==1)"
+    breaker = registry.by_logical_name["master:breaker1"]
+    assert next(item.value for item in breaker.fixed_parameters if item.physical == "BOpen") == 2
 
 
 def test_audit_rejects_duplicate_physical_definitions(tmp_path):
@@ -840,6 +939,27 @@ def test_audit_rejects_fixed_or_lookup_values_outside_live_contract(
     assert failure.value.details["physical_parameter"] == physical_parameter
 
 
+def test_resolver_uses_active_source_values_and_fixed_bases(tmp_path):
+    module = _subject()
+    audited = module.audit_master_bindings(
+        _write_master_fixture(tmp_path), _packaged_registry(module)
+    )
+    requested = {"Amplitude_kV": 345.0, "Frequency_Hz": 47.5, "Phase_deg": 12.0}
+    resolved = audited.resolve_component("master:three_phase_source", requested)
+
+    assert resolved.physical_parameters == {
+        "Es": 345.0,
+        "F0": 47.5,
+        "Ph": 12.0,
+        "Vm": 230.0,
+        "F": 50.0,
+        "View": 0,
+        "Ctrl": 0,
+        "Term": 0,
+    }
+    assert resolved.logical_parameters(resolved.physical_parameters) == requested
+
+
 def test_resolver_round_trips_reactor_transform(tmp_path):
     module = _subject()
     audited = module.audit_master_bindings(
@@ -865,10 +985,11 @@ def test_resolver_maps_transformer_lookup_and_fixed_voltage_base(tmp_path):
 
     resolved = audited.resolve_component(
         "master:converter_transformer",
-        {"Ratio": 1.0, "Connection": "Y-delta", "PhaseShift_deg": 30.0},
+        {"Ratio": 1.0, "Rating_MVA": 325.2691193458119, "Connection": "Y-delta", "PhaseShift_deg": 30.0},
     )
 
     assert resolved.physical_parameters == {
+        "Tmva": 325.2691193458119,
         "V1": 230.0,
         "V2": 230.0,
         "f": 50.0,
@@ -878,8 +999,9 @@ def test_resolver_maps_transformer_lookup_and_fixed_voltage_base(tmp_path):
         "Lead": 1,
     }
     assert resolved.logical_parameters(
-        {"V2": 230.0, "YD1": 0, "YD2": 1, "Lead": 1}
+        {"Tmva": 325.2691193458119, "V2": 230.0, "YD1": 0, "YD2": 1, "Lead": 1}
     ) == {
+        "Rating_MVA": 325.2691193458119,
         "Ratio": 1.0,
         "Connection": "Y-delta",
         "PhaseShift_deg": 30.0,
@@ -895,7 +1017,7 @@ def test_resolver_rejects_unreviewed_transformer_tuple(tmp_path):
     with pytest.raises(BackendError) as failure:
         audited.resolve_component(
             "master:converter_transformer",
-            {"Ratio": 1.0, "Connection": "Y-delta", "PhaseShift_deg": -30.0},
+            {"Ratio": 1.0, "Rating_MVA": 325.2691193458119, "Connection": "Y-delta", "PhaseShift_deg": -30.0},
         )
 
     assert failure.value.code == "MASTER_TRANSFORM_UNSUPPORTED"

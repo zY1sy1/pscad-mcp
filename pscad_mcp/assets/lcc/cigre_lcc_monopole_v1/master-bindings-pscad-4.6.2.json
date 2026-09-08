@@ -38,13 +38,13 @@
             "Amplitude_kV"
           ],
           "physical": [
-            "Vm"
+            "Es"
           ],
           "transform": {
             "kind": "identity"
           },
           "physical_contracts": {
-            "Vm": {
+            "Es": {
               "type": "Real",
               "unit": "kV"
             }
@@ -55,13 +55,13 @@
             "Frequency_Hz"
           ],
           "physical": [
-            "F"
+            "F0"
           ],
           "transform": {
             "kind": "identity"
           },
           "physical_contracts": {
-            "F": {
+            "F0": {
               "type": "Real",
               "unit": "Hz"
             }
@@ -86,6 +86,40 @@
         }
       ],
       "fixed_parameters": [
+        {
+          "physical": "Vm",
+          "value": 230,
+          "contract": {
+            "type": "Real",
+            "unit": "kV"
+          }
+        },
+        {
+          "physical": "F",
+          "value": 50,
+          "contract": {
+            "type": "Real",
+            "unit": "Hz"
+          }
+        },
+        {
+          "physical": "Ctrl",
+          "value": 0,
+          "contract": {
+            "type": "Choice",
+            "unit": null,
+            "choices": ["0", "2", "3"]
+          }
+        },
+        {
+          "physical": "Term",
+          "value": 0,
+          "contract": {
+            "type": "Choice",
+            "unit": null,
+            "choices": ["0", "1"]
+          }
+        },
         {
           "physical": "View",
           "value": 0,
@@ -149,9 +183,22 @@
           "kind": "electrical",
           "dimension": 1,
           "occurrence": 0
+        },
+        {
+          "logical": "HV_N",
+          "physical": "G1",
+          "kind": "electrical",
+          "dimension": 1,
+          "occurrence": 2
         }
       ],
       "parameters": [
+        {
+          "logical": ["Rating_MVA"],
+          "physical": ["Tmva"],
+          "transform": {"kind": "identity"},
+          "physical_contracts": {"Tmva": {"type": "Real", "unit": "MVA"}}
+        },
         {
           "logical": [
             "Ratio"
@@ -297,14 +344,14 @@
           }
         ],
         "neutral": {
-          "physical_port": "N",
+        "physical_port": "B",
           "occurrence": 0,
           "ground_definition": "ground",
           "ground_port": "A",
           "ground_occurrence": 0,
-          "ground_offset": [
-            54,
-            -36
+        "ground_offset": [
+          54,
+          54
           ]
         }
       },
@@ -319,7 +366,7 @@
         },
         {
           "logical": "OUT_A",
-          "physical": "B",
+          "physical": "A",
           "kind": "electrical",
           "dimension": 1,
           "occurrence": 0,
@@ -335,7 +382,7 @@
         },
         {
           "logical": "OUT_B",
-          "physical": "B",
+          "physical": "A",
           "kind": "electrical",
           "dimension": 1,
           "occurrence": 0,
@@ -351,7 +398,7 @@
         },
         {
           "logical": "OUT_C",
-          "physical": "B",
+          "physical": "A",
           "kind": "electrical",
           "dimension": 1,
           "occurrence": 0,
@@ -590,7 +637,20 @@
           "occurrence": 1
         }
       ],
-      "parameters": [],
+      "parameters": [
+        {
+          "logical": ["ActivePowerSignal"],
+          "physical": ["P"],
+          "transform": {"kind": "identity"},
+          "physical_contracts": {"P": {"type": "Text", "unit": null}}
+        },
+        {
+          "logical": ["ReactivePowerSignal"],
+          "physical": ["Q"],
+          "transform": {"kind": "identity"},
+          "physical_contracts": {"Q": {"type": "Text", "unit": null}}
+        }
+      ],
       "fixed_parameters": [
         {
           "physical": "MeasP",
@@ -815,7 +875,7 @@
         {"physical": "ROFF", "value": 1000000, "contract": {"type": "Real", "unit": "ohm"}},
         {"physical": "RON", "value": 0.01, "contract": {"type": "Real", "unit": "ohm"}},
         {"physical": "PostIns", "value": 0, "contract": {"type": "Choice", "unit": null, "choices": ["0", "1"]}},
-        {"physical": "BOpen", "value": 0, "contract": {"type": "Choice", "unit": null, "choices": ["0", "2"]}}
+        {"physical": "BOpen", "value": 2, "contract": {"type": "Choice", "unit": null, "choices": ["0", "2"]}}
       ],
       "evidence_parameters": []
     },
@@ -850,6 +910,20 @@
       ],
       "fixed_parameters": [
         {"physical": "REP", "value": 0, "contract": {"type": "Choice", "unit": null, "choices": ["0", "1"]}}
+      ],
+      "evidence_parameters": []
+    },
+    {
+      "logical_name": "master:fault_control_not",
+      "physical_definition": "inv",
+      "shape": {"kind": "direct"},
+      "ports": [
+        {"logical": "IN", "physical": "IN", "kind": "data", "dimension": 1, "occurrence": 0},
+        {"logical": "OUT", "physical": "OUT", "kind": "data", "dimension": 1, "occurrence": 0}
+      ],
+      "parameters": [],
+      "fixed_parameters": [
+        {"physical": "INTR", "value": 0, "contract": {"type": "Choice", "unit": null, "choices": ["0", "1"]}}
       ],
       "evidence_parameters": []
     },
@@ -951,6 +1025,30 @@
         {"physical": "Max", "value": 2.0, "contract": {"type": "Real", "unit": ""}},
         {"physical": "Min", "value": -2.0, "contract": {"type": "Real", "unit": ""}}
       ],
+      "evidence_parameters": []
+    },
+    {
+      "logical_name": "master:signal_import",
+      "physical_definition": "import",
+      "shape": {"kind": "direct"},
+      "ports": [
+        {
+          "logical": "OUT",
+          "physical": "N",
+          "kind": "data",
+          "dimension": 1,
+          "occurrence": 0
+        }
+      ],
+      "parameters": [
+        {
+          "logical": ["Name"],
+          "physical": ["Name"],
+          "transform": {"kind": "identity"},
+          "physical_contracts": {"Name": {"type": "Text", "unit": null}}
+        }
+      ],
+      "fixed_parameters": [],
       "evidence_parameters": []
     }
   ],
@@ -1946,43 +2044,6 @@
       "evidence_parameters": []
     },
     {
-      "logical_name": "master:signal_import",
-      "physical_definition": "import",
-      "shape": {
-        "kind": "direct"
-      },
-      "ports": [
-        {
-          "logical": "OUT",
-          "physical": "N",
-          "kind": "data",
-          "dimension": 1,
-          "occurrence": 0
-        }
-      ],
-      "parameters": [
-        {
-          "logical": [
-            "Name"
-          ],
-          "physical": [
-            "Name"
-          ],
-          "transform": {
-            "kind": "identity"
-          },
-          "physical_contracts": {
-            "Name": {
-              "type": "Text",
-              "unit": null
-            }
-          }
-        }
-      ],
-      "fixed_parameters": [],
-      "evidence_parameters": []
-    },
-    {
       "logical_name": "master:electrical_pin",
       "physical_definition": "xnode",
       "shape": {
@@ -2526,6 +2587,20 @@
       "evidence_parameters": []
     },
     {
+      "logical_name": "master:ac_node_reference",
+      "physical_definition": "nodeloop",
+      "shape": {"kind": "direct"},
+      "ports": [
+        {"logical": "N", "physical": "N", "kind": "electrical", "dimension": 3, "occurrence": 0},
+        {"logical": "REFERENCE", "physical": "X1", "kind": "data", "dimension": 1, "occurrence": 2}
+      ],
+      "parameters": [],
+      "fixed_parameters": [
+        {"physical": "View", "value": 1, "contract": {"type": "Choice", "unit": null, "choices": ["0", "1"]}}
+      ],
+      "evidence_parameters": []
+    },
+    {
       "logical_name": "master:phase_isolation_resistor",
       "physical_definition": "resistor",
       "shape": {
@@ -2557,6 +2632,65 @@
             "unit": "ohm"
           }
         }
+      ],
+      "evidence_parameters": []
+    },
+    {
+      "logical_name": "master:cycle_gamma_minimum",
+      "physical_definition": "mingam",
+      "shape": {"kind": "direct"},
+      "ports": [
+        {"logical": "IN", "physical": "IN", "kind": "data", "dimension": 1, "occurrence": 0},
+        {"logical": "OUT", "physical": "OUT", "kind": "data", "dimension": 1, "occurrence": 0}
+      ],
+      "parameters": [
+        {"logical": ["FREQ"], "physical": ["FREQ"], "transform": {"kind": "identity"}, "physical_contracts": {"FREQ": {"type": "Real", "unit": "Hz"}}}
+      ],
+      "fixed_parameters": [],
+      "evidence_parameters": []
+    },
+    {
+      "logical_name": "master:measurement_burden_resistor",
+      "physical_definition": "resistor",
+      "shape": {"kind": "direct"},
+      "ports": [
+        {"logical": "A", "physical": "A", "kind": "electrical", "dimension": 1, "occurrence": 0},
+        {"logical": "B", "physical": "B", "kind": "electrical", "dimension": 1, "occurrence": 0}
+      ],
+      "parameters": [],
+      "fixed_parameters": [{"physical": "R", "value": 0.001, "contract": {"type": "Real", "unit": "ohm"}}],
+      "evidence_parameters": []
+    },
+    {
+      "logical_name": "master:local_power_signal",
+      "physical_definition": "datalabel",
+      "shape": {"kind": "direct"},
+      "ports": [{"logical": "OUT", "physical": "A", "kind": "data", "dimension": 1, "occurrence": 0}],
+      "parameters": [{"logical": ["Name"], "physical": ["Name"], "transform": {"kind": "identity"}, "physical_contracts": {"Name": {"type": "Text", "unit": null}}}],
+      "fixed_parameters": [],
+      "evidence_parameters": []
+    },
+    {
+      "logical_name": "master:converter_power_meter",
+      "physical_definition": "multimeter",
+      "shape": {"kind": "direct"},
+      "ports": [
+        {"logical": "A", "physical": "A", "kind": "electrical", "dimension": 3, "occurrence": 1},
+        {"logical": "B", "physical": "B", "kind": "electrical", "dimension": 3, "occurrence": 1}
+      ],
+      "parameters": [{"logical": ["P"], "physical": ["P"], "transform": {"kind": "identity"}, "physical_contracts": {"P": {"type": "Text", "unit": null}}}],
+      "fixed_parameters": [
+        {"physical": "MeasP", "value": 1, "contract": {"type": "Choice", "unit": null, "choices": ["0", "1"]}},
+        {"physical": "MeasQ", "value": 0, "contract": {"type": "Choice", "unit": null, "choices": ["0", "1"]}},
+        {"physical": "MeasI", "value": 0, "contract": {"type": "Choice", "unit": null, "choices": ["0", "1"]}},
+        {"physical": "MeasV", "value": 0, "contract": {"type": "Choice", "unit": null, "choices": ["0", "1"]}},
+        {"physical": "RMS", "value": 0, "contract": {"type": "Choice", "unit": null, "choices": ["0", "1", "2"]}},
+        {"physical": "IRMS", "value": 0, "contract": {"type": "Choice", "unit": null, "choices": ["0", "1", "2"]}},
+        {"physical": "MeasPh", "value": 0, "contract": {"type": "Choice", "unit": null, "choices": ["0", "1", "2"]}},
+        {"physical": "Dis", "value": 0, "contract": {"type": "Choice", "unit": null, "choices": ["0", "1"]}},
+        {"physical": "S", "value": 1.0, "contract": {"type": "Real", "unit": "MVA"}},
+        {"physical": "TS", "value": 0.0, "contract": {"type": "Real", "unit": "s"}},
+        {"physical": "Freq", "value": 50.0, "contract": {"type": "Real", "unit": "Hz"}}
       ],
       "evidence_parameters": []
     }

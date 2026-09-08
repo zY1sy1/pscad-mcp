@@ -125,25 +125,43 @@ release-gate 占位基线。
 当前 program baseline 已把 `lcc.fixed_autonomous` 记录为提交 `3a09c8f` 上的
 `simulated/PASS`：六个独立 companion fixture 全部编译，通过空白工程完整拓扑
 构建与 final 重编译，完成 0.1 s、2,001 样本的无故障 smoke，退出后无 PSCAD
-残留进程。该状态不是 `accepted`；扰动、换相失败/恢复、independent golden
-和最终验收仍属于 WP1C/WP6。
+残留进程。该报告属于历史 WP1B smoke；状态不是 `accepted`，必须先完成
+WP1B-before-WP1C 顺序，扰动、换相失败/恢复、independent golden 和最终验收
+仍属于后续门。
 
-WP1C 动态证据使用真实 PSCAD 导出的通道样本评估：
+companion baseline-gates plan 保持 WP1B 与 WP1C 报告分离，并要求两份报告绑定
+同一 current commit 与 clean named checkout。下方 `wp1b_smoke` 和
+`wp1c_dynamic` 只是证据阶段标识，不会修改仓库 baseline。
+
+WP1C 动态证据从 raw PSCAD output 通过已安装 wrapper 评估：
 
 ```powershell
+$env:PSCAD_MCP_ACCEPTANCE = '1'
 ./scripts/run_fixed_lcc_dynamic_acceptance.ps1 `
-  -Samples 'D:/PSCAD-Workspace/lcc-wp1c-dynamic/samples.json' `
-  -Golden 'D:/PSCAD-Workspace/lcc-wp1c-dynamic/golden.json' `
-  -Contract 'pscad_mcp/assets/lcc/cigre_lcc_monopole_v1/acceptance.json' `
-  -Report 'D:/PSCAD-Workspace/lcc-wp1c-dynamic/dynamic-report.json'
+  -WorkspaceRoot 'D:\PSCAD-Workspace\lcc-wp1c-native-closure' `
+  -MasterPath 'C:\Program Files (x86)\PSCAD46\master.pslx' `
+  -CompilerConfiguration 'C:\Program Files (x86)\PSCAD46\fortran_compilers.xml' `
+  -CompilerExecutable 'C:\Program Files (x86)\GFortran\4.6\bin\gfortran.exe' `
+  -ProjectName 'WP1C_FIXED_LCC'
 ```
 
-runner 会把报告绑定到干净的命名分支，并拒绝缺失或无界的扰动/恢复证据。
-物理证据通过但没有独立复核 golden 时，状态只能是
-`INCOMPLETE_ANALYSIS`，不会提升为 `accepted`。fixed 资产现已声明三条相互独立接地的
-逆变侧分相故障支路、同一 EMTDC 时刻的断路器控制和命名 fault-active `pgb` 输出通道；
-这仍只是随包/离线能力，
-在绑定完成真实编译且 PSCAD 运行产生所需证据前，不声明动态 licensed PASS。
+wrapper 要求 `PSCAD_MCP_ACCEPTANCE=1`、clean named checkout、精确 HEAD/branch、
+无既有 PSCAD 进程和 timestamped run root；它保留 raw output，并打印报告路径、
+SHA-256、engineering verdict 与 status。退出码 `2` 表示 preflight/environment
+拒绝（不运行），`1` 表示运行或 engineering checks 失败，`0` 表示 engineering
+checks 成功。成功的 pre-WP6 结果必须写成 `engineering_verdict=PASS` 且顶层
+`status=INCOMPLETE_ANALYSIS`，直到 independent reviewed golden 完成。fixed 资产
+声明三条独立接地的逆变侧分相故障支路、同一 EMTDC 时刻的断路器控制和命名
+fault-active `pgb` 输出通道；这不是最终验收声明。
+
+成功运行后：
+
+fixed LCC WP1C current-commit dynamic engineering evidence completed; final
+status remains `INCOMPLETE_ANALYSIS` pending independent reviewed golden.
+
+WP6 是唯一的 independent-golden/final-accepted owner。在 WP6 完成前，动态证据
+阶段明确标记为 `wp1c_dynamic`，并保持 `engineering_verdict=PASS`、
+`status=INCOMPLETE_ANALYSIS`；不发布 WP1C final-accepted 状态。
 
 可选的 `wp1c_dynamic` 规划 profile 会在创建任何 PSCAD 工程前执行无副作用的
 fault/event 能力门。它要求精确的 EMTDC 计时器、三相 fault shunt、

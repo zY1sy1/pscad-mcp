@@ -24,7 +24,8 @@ def test_master_binding_uses_installed_pscad_names_and_explicit_port_mapping():
     binding = master_definition_binding("master:three_phase_source")
     assert binding.definition == "source3"
     assert binding.port_map == {"A": "A", "B": "B", "C": "C"}
-    assert binding.parameter_map["Amplitude_kV"] == "Vm"
+    assert binding.parameter_map["Amplitude_kV"] == "Es"
+    assert binding.parameter_map["Frequency_Hz"] == "F0"
 
 
 def test_master_binding_marks_three_phase_filter_as_expansion():
@@ -95,15 +96,17 @@ async def _runtime_backend(tmp_path, *, snap_wires: bool = False):
     [
         (
             "three_phase_source",
-            {"Amplitude_kV": 230.0, "Frequency_Hz": 50.0, "Phase_deg": 0.0},
+            {"Amplitude_kV": 345.0, "Frequency_Hz": 47.5, "Phase_deg": 12.0},
             "source3",
-            {"Vm": 230.0, "F": 50.0, "Ph": 0.0, "View": 0},
+            {"Es": 345.0, "F0": 47.5, "Ph": 12.0, "Vm": 230.0, "F": 50.0,
+             "View": 0, "Ctrl": 0, "Term": 0},
         ),
         (
             "converter_transformer",
-            {"Ratio": 1.0, "Connection": "Y-delta", "PhaseShift_deg": 30.0},
+            {"Ratio": 1.0, "Rating_MVA": 325.2691193458119, "Connection": "Y-delta", "PhaseShift_deg": 30.0},
             "xfmr-3p2w",
             {
+                "Tmva": 325.2691193458119,
                 "V1": 230.0,
                 "V2": 230.0,
                 "f": 50.0,
@@ -127,9 +130,9 @@ async def _runtime_backend(tmp_path, *, snap_wires: bool = False):
         ),
         (
             "ac_meter",
-            {},
+            {"ActivePowerSignal": "P_RECT", "ReactivePowerSignal": "Q_RECT"},
             "multimeter",
-            {"MeasP": 1, "MeasQ": 1, "Freq": 50.0, "BaseV": 230.0},
+            {"MeasP": 1, "MeasQ": 1, "Freq": 50.0, "BaseV": 230.0, "P": "P_RECT", "Q": "Q_RECT"},
         ),
         (
             "dc_meter",
@@ -239,9 +242,9 @@ def test_legacy_expands_filter_and_grounds_each_neutral(tmp_path):
         assert item.values["dentry"] == 1
         assert item.values["V"] == pytest.approx(132.79056191361394)
     assert [tuple(wire.vertices) for wire in wires] == [
-        ((360, 144), (414, 144)),
-        ((360, 288), (414, 288)),
-        ((360, 432), (414, 432)),
+        ((360, 234), (414, 234)),
+        ((360, 378), (414, 378)),
+        ((360, 522), (414, 522)),
     ]
     assert parameters == {
         "Branch_MVAR": pytest.approx(50.0),
@@ -382,9 +385,9 @@ def test_filter_binding_pins_vendor_snapped_neutral_wire_endpoints(tmp_path):
         if item["role"] == "neutral_wire"
     ]
     assert wire_endpoints == [
-        [[2304, 162], [2358, 162]],
-        [[2304, 306], [2358, 306]],
-        [[2304, 450], [2358, 450]],
+        [[2304, 252], [2358, 252]],
+        [[2304, 396], [2358, 396]],
+        [[2304, 540], [2358, 540]],
     ]
 
 

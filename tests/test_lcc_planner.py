@@ -1,4 +1,6 @@
 import copy
+import hashlib
+import json
 from dataclasses import replace
 from pathlib import Path
 
@@ -8,6 +10,7 @@ from pscad_mcp.core.backend.base import BackendError
 from pscad_mcp.core.master_bindings import parse_master_binding_registry
 from pscad_mcp.hvdc.builders.lcc.assets import (
     LccAssetSet,
+    canonical_json,
     load_packaged_asset_set,
 )
 from pscad_mcp.hvdc.builders.lcc.catalog import parse_catalog
@@ -15,11 +18,131 @@ from pscad_mcp.hvdc.builders.lcc.planner import (
     WP1C_DYNAMIC_PROFILE,
     LccPlanRequest,
     _component_rectangles,
+    _duration,
     _dynamic_schedule_events,
     _net_route,
     _wp1b_connection_labels,
     create_plan,
 )
+from pscad_mcp.topology.connectivity import build_connectivity
+from pscad_mcp.topology.models import ProjectTopology, TopologyConductor
+
+
+def test_packaged_transformers_ground_only_their_primary_neutrals():
+    assets = load_packaged_asset_set()
+    catalog = parse_catalog(assets.catalog)
+    components = {
+        component.logical_id: component for component in assets.blueprint.components
+    }
+    transformers = {
+        name: component for name, component in components.items()
+        if component.definition == "master:converter_transformer"
+    }
+    primary_nets = {
+        endpoint.component: net
+        for net in assets.blueprint.nets
+        for endpoint in net.endpoints
+        if endpoint.component in transformers and endpoint.port == "HV_N"
+    }
+    assert len(transformers) == 4
+    assert set(primary_nets) == set(transformers)
+    neutral = next(
+        port for port in catalog.definitions["master:converter_transformer"].ports
+        if port.name == "HV_N"
+    )
+    assert (neutral.kind, neutral.dimension, neutral.offset) == (
+        "electrical", 1, (-36, 72),
+    )
+    for name, net in primary_nets.items():
+        assert "HV_N" in transformers[name].ports
+        assert net.kind == "electrical"
+        assert len(net.endpoints) == 2
+        ground = next(endpoint for endpoint in net.endpoints if endpoint.component != name)
+        assert components[ground.component].definition == "master:ground"
+        assert ground.port == "GND"
+        route = _net_route(net, components, catalog)
+        assert len(route) == 2
+        assert route[0][0] == route[1][0]
+        assert route[1][1] - route[0][1] == 36
+    assert not any(
+        endpoint.component in transformers and endpoint.port.startswith("LV_")
+        for net in assets.blueprint.nets
+        if any(components[end.component].definition == "master:ground" for end in net.endpoints)
+        for endpoint in net.endpoints
+    )
+
+    conductors = tuple(
+        TopologyConductor(
+            key=net.logical_id, canvas_key="Main", object_id=net.logical_id,
+            kind="wire", namespace="electrical",
+            vertices=_net_route(net, components, catalog),
+        )
+        for net in assets.blueprint.nets if net.kind == "electrical"
+    )
+    topology = build_connectivity(
+        ProjectTopology("primary_grounding", "4.6.2", conductors=conductors)
+    ).topology
+    groups = {frozenset(net.conductor_keys) for net in topology.nets}
+    for net in primary_nets.values():
+        assert frozenset({net.logical_id}) in groups
+
+
+def test_packaged_filter_bus_connects_supply_to_both_transformers():
+    assets = load_packaged_asset_set()
+    labels = _wp1b_connection_labels(assets.blueprint)
+    for station in ("rectifier", "inverter"):
+        bus_labels = []
+        for phase in "abc":
+            supply = (
+                f"{station}_meter_filter_a"
+                if phase == "a"
+                else f"{station}_source_filter_{phase}"
+            )
+            assert labels[supply] == labels[f"{station}_filter_{phase}_y"]
+            assert labels[supply] == labels[f"{station}_filter_{phase}_d"]
+            bus_labels.append(labels[supply])
+        assert len(set(bus_labels)) == 3
+
+
+@pytest.mark.parametrize("station", ["rectifier", "inverter"])
+def test_packaged_physical_supply_routes_keep_phase_buses_separate(station):
+    assets = load_packaged_asset_set()
+    catalog = parse_catalog(assets.catalog)
+    components = {
+        component.logical_id: component for component in assets.blueprint.components
+    }
+    supply_components = {
+        f"{station}_source", f"{station}_ac_meter", f"{station}_filter"
+    }
+    conductors = tuple(
+        TopologyConductor(
+            key=net.logical_id,
+            canvas_key="Main",
+            object_id=net.logical_id,
+            kind="wire",
+            namespace="electrical",
+            vertices=_net_route(net, components, catalog),
+        )
+        for net in assets.blueprint.nets
+        if net.kind == "electrical"
+        and any(endpoint.component in supply_components for endpoint in net.endpoints)
+    )
+    topology = build_connectivity(
+        ProjectTopology("physical_supply", "4.6.2", conductors=conductors)
+    ).topology
+    groups = [set(net.conductor_keys) for net in topology.nets]
+    # Each phase meter separates its source-side conductor from the filtered bus.
+    assert len(groups) == 6
+    for phase in "abc":
+        assert {f"{station}_source_{phase}_meter"} in groups
+        supply = (
+            f"{station}_meter_filter_a"
+            if phase == "a"
+            else f"{station}_source_filter_{phase}"
+        )
+        assert {
+            supply, f"{station}_filter_{phase}_y", f"{station}_filter_{phase}_d"
+        } in groups
 
 
 def test_dynamic_schedule_events_expand_to_native_on_off_commands():
@@ -89,6 +212,74 @@ def test_dynamic_schedule_events_reject_duplicate_control_targets():
     assert raised.value.code == "LCC_DYNAMIC_EVENT_UNAVAILABLE"
 from pscad_mcp.hvdc.builders.lcc.routing import route_intersects_rectangles
 from pscad_mcp.hvdc.builders.lcc.schema import parse_blueprint
+
+
+def packaged_dynamic_asset_set(
+    *, control_mode: str = "embedded_emtdc"
+) -> LccAssetSet:
+    assets = load_packaged_asset_set()
+    if control_mode == "embedded_emtdc":
+        return assets
+    blueprint = json.loads(assets.files["blueprint.json"].decode("utf-8"))
+    blueprint["dynamic_events"][0]["control_mode"] = control_mode
+    return replace(assets, blueprint=parse_blueprint(blueprint))
+
+
+def complete_live_inventory(
+    assets: LccAssetSet, *, native_schedule: bool = False
+) -> dict[str, object]:
+    registry = assets.master_bindings
+    assert registry is not None
+    definitions = {
+        item["scoped_name"]: {"ports": copy.deepcopy(item["ports"])}
+        for item in assets.catalog["definitions"]
+    }
+
+    for binding in registry.bindings:
+        definitions[binding.logical_name].update({
+            "physical_definition": binding.physical_definition,
+            "verification_state": "verified",
+            "selected_ports": {
+                port.logical: {
+                    "physical": port.physical,
+                    "occurrence": port.occurrence,
+                    "kind": port.kind,
+                    "dimension": port.dimension,
+                    "raw_dimension": port.dimension,
+                    "model": None,
+                    "type": None,
+                    "mode": None,
+                    "condition": None,
+                    "offset": [0, 0],
+                    "instance": port.instance,
+                }
+                for port in binding.ports
+            },
+        })
+    return {
+        "pscad_version": "4.6.2",
+        "master_path": "C:/PSCAD46/master.pslx",
+        "master_sha256": "a" * 64,
+        "master_binding_registry_sha256": registry.sha256,
+        "definitions": definitions,
+        "timed_control_capabilities": {
+            "native_schedule": native_schedule,
+            "simulation_clock": native_schedule,
+            "time_basis": "EMTDC" if native_schedule else "none",
+        },
+    }
+
+
+LEGACY_PLAN_SNAPSHOTS = {
+    "full_acceptance": {
+        "plan_hash": "9a4aced8ec1228c0c110152aebc5d66c475eaf711162d396ddfa8428a5ee8073",
+        "operations_hash": "bfac0b0fd2a5289266b39c229c2c08b8008fc27c0ef7fb07bd90d418a47c3389",
+    },
+    "wp1b_smoke": {
+        "plan_hash": "a57c7519435856dc26385f27afcf700c1b3b52ff46325716ad4517626dd42058",
+        "operations_hash": "0ce9ae4a11e938b29290095567b4d8c31f8693656d88feca2acd571ed492ddde",
+    },
+}
 
 BLUEPRINT = {
     "schema_version": 1,
@@ -561,7 +752,7 @@ def test_packaged_main_signal_imports_are_pscad_grid_aligned():
         if component.definition == "master:main_signal_import"
     ]
 
-    assert len(imports) == 3
+    assert len(imports) == 10
     assert all(
         coordinate % 18 == 0
         for component in imports
@@ -588,7 +779,15 @@ def test_packaged_raw_signal_route_bends_are_pscad_grid_aligned():
 def test_packaged_fixed_data_nets_do_not_create_main_canvas_labels():
     blueprint = load_packaged_asset_set().blueprint
 
-    assert all(net.label is None for net in blueprint.nets if net.kind == "data")
+    labels = {net.logical_id: net.label for net in blueprint.nets if net.kind == "data"}
+    assert labels["inverter_fault_active_integer"] == "LCC_FAULT_ACTIVE"
+    assert labels["inverter_fault_open_integer"] == "LCC_FAULT_OPEN"
+    assert all(
+        label is None
+        for logical_id, label in labels.items()
+        if logical_id not in {"inverter_fault_active_integer", "inverter_fault_open_integer"}
+    )
+    assert labels["alpha_rect_telemetry"] is None
 
 
 def test_wp1b_labels_consolidate_shared_ports_and_reuse_raw_signal_names():
@@ -608,7 +807,7 @@ def test_wp1b_labels_consolidate_shared_ports_and_reuse_raw_signal_names():
     assert labels["idc_raw"] == "LCC_IDC_RAW"
     assert labels["rectifier_return"] is None
     assert labels["inverter_return"] is None
-    assert len({label for label in labels.values() if label is not None}) == 48
+    assert len({label for label in labels.values() if label is not None}) == 56
 
 
 def test_wp1b_smoke_plan_uses_smoke_gate_and_hashes_profile(tmp_path):
@@ -675,6 +874,22 @@ def test_wp1b_smoke_plan_uses_smoke_gate_and_hashes_profile(tmp_path):
         for arguments in smoke_connections.values()
     )
     assert full_connections["ac"]["label"] is None
+
+
+@pytest.mark.parametrize("profile", ["full_acceptance", "wp1b_smoke"])
+def test_legacy_profile_plan_snapshots_match_current_asset_contract(profile):
+    assets = load_packaged_asset_set()
+    inventory = complete_live_inventory(assets)
+    plan = create_plan(
+        _request(verification_profile=profile),
+        assets,
+        inventory,
+        Path("C:/lcc-planner-snapshot"),
+    )
+    snapshot = LEGACY_PLAN_SNAPSHOTS[profile]
+    operation_payload = [operation.to_dict() for operation in plan.operations]
+    assert plan.plan_hash == snapshot["plan_hash"]
+    assert hashlib.sha256(canonical_json(operation_payload)).hexdigest() == snapshot["operations_hash"]
 
 
 def test_wp1b_smoke_plan_excludes_non_smoke_derived_outputs(tmp_path):
@@ -750,3 +965,136 @@ def test_dynamic_profile_fails_closed_when_fault_binding_is_missing(tmp_path):
         "fault_event_missing",
         "fault_channel_missing",
     ]
+
+
+def test_dynamic_profile_rejects_duration_shorter_than_recovery_before_path_resolution(tmp_path):
+    request = _request(
+        verification_profile=WP1C_DYNAMIC_PROFILE,
+        simulation_duration_s=1.39995,
+    )
+    assets = load_packaged_asset_set()
+    with pytest.raises(BackendError) as raised:
+        create_plan(request, assets, {"pscad_version": "4.6.2", "definitions": assets.catalog["definitions"]}, tmp_path)
+    assert raised.value.code == "LCC_DYNAMIC_EVENT_UNAVAILABLE"
+    assert raised.value.details["simulation_duration_s"] == pytest.approx(1.39995)
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.parametrize("duration, expected", [(1.4, 1.4), (None, 1.5)])
+def test_dynamic_profile_accepts_complete_recovery_duration(tmp_path, duration, expected):
+    request = _request(
+        verification_profile=WP1C_DYNAMIC_PROFILE,
+        simulation_duration_s=duration,
+    )
+    assets = load_packaged_asset_set()
+    assert _duration(request, assets) == pytest.approx(expected)
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_wp1c_embedded_plan_verifies_control_then_dynamically_accepts(tmp_path):
+    assets = packaged_dynamic_asset_set()
+    plan = create_plan(
+        _request(verification_profile=WP1C_DYNAMIC_PROFILE),
+        assets,
+        complete_live_inventory(assets),
+        tmp_path,
+    )
+    kinds = [item.kind for item in plan.operations]
+
+    assert kinds[kinds.index("compile") + 1] == "verify_dynamic_control"
+    output_indexes = [
+        index for index, kind in enumerate(kinds) if kind == "create_output"
+    ]
+    assert output_indexes
+    assert kinds.index("verify_dynamic_control") < min(output_indexes)
+    assert max(output_indexes) < kinds.index("simulate")
+    assert "register_dynamic_events" not in kinds
+    assert kinds[-3:] == ["simulate", "dynamic_accept", "publish"]
+    assert plan.metadata["dynamic_control"]["mode"] == "embedded_emtdc"
+    connections = {
+        item.target: item.arguments
+        for item in plan.operations
+        if item.kind == "connect_net"
+    }
+    expected_labels = _wp1b_connection_labels(assets.blueprint)
+    assert all(
+        connections[logical_id]["label"] == label
+        for logical_id, label in expected_labels.items()
+    )
+
+
+def test_wp1c_final_project_has_a_distinct_reload_identity(tmp_path):
+    assets = load_packaged_asset_set()
+    plan = create_plan(_request(verification_profile=WP1C_DYNAMIC_PROFILE), assets, complete_live_inventory(assets), tmp_path)
+    assert Path(plan.target_path).stem == "CIGRE_LCC_PUBLISHED"
+    assert Path(plan.staging_path).name == "CIGRE_LCC.staging"
+
+
+def test_wp1c_plan_binds_ac_meter_power_signal_names(tmp_path):
+    assets = load_packaged_asset_set()
+    plan = create_plan(
+        _request(verification_profile=WP1C_DYNAMIC_PROFILE),
+        assets,
+        complete_live_inventory(assets),
+        tmp_path,
+    )
+    placements = {
+        operation.target: operation.arguments
+        for operation in plan.operations
+        if operation.kind == "place_component"
+    }
+
+    assert placements["rectifier_ac_meter"]["parameters"] == {
+        "ActivePowerSignal": "LCC_P_RECT",
+        "ReactivePowerSignal": "LCC_Q_RECT",
+    }
+    assert placements["inverter_ac_meter"]["parameters"] == {
+        "ActivePowerSignal": "LCC_P_INV",
+        "ReactivePowerSignal": "LCC_Q_INV",
+    }
+
+
+def test_wp1c_plan_places_physical_acceptance_output_bindings(tmp_path):
+    assets = load_packaged_asset_set()
+    plan = create_plan(
+        _request(verification_profile=WP1C_DYNAMIC_PROFILE),
+        assets,
+        complete_live_inventory(assets),
+        tmp_path,
+    )
+    placements = {
+        operation.target: operation.arguments
+        for operation in plan.operations
+        if operation.kind == "place_component"
+    }
+
+    expected = {
+        "p_rect_output": ("P_RECT", "MW", "LCC_P_RECT"),
+        "p_inv_output": ("P_INV", "MW", "LCC_P_INV"),
+        "alpha_rect_output": ("ALPHA_RECT", "rad", "ALPHA"),
+        "mu_rect_output": ("MU_RECT", "rad", "ALPHA"),
+    }
+    for logical_id, (name, units, signal) in expected.items():
+        assert placements[logical_id]["definition"] == "master:dynamic_output_channel"
+        assert placements[logical_id]["parameters"] == {
+            "Group": "Main",
+            "Name": name,
+            "Units": units,
+        }
+        if logical_id in {"p_rect_output", "p_inv_output"}:
+            import_id = logical_id.removesuffix("_output") + "_import"
+            assert placements[import_id]["definition"] == "master:main_signal_import"
+            assert placements[import_id]["parameters"] == {"Name": signal}
+
+
+def test_native_scheduler_is_only_planned_when_explicitly_selected(tmp_path):
+    assets = packaged_dynamic_asset_set(control_mode="native_scheduler")
+    plan = create_plan(
+        _request(verification_profile=WP1C_DYNAMIC_PROFILE),
+        assets,
+        complete_live_inventory(assets, native_schedule=True),
+        tmp_path,
+    )
+    kinds = [item.kind for item in plan.operations]
+    assert kinds[kinds.index("compile") + 1] == "register_dynamic_events"
+    assert kinds[-3:] == ["simulate", "dynamic_accept", "publish"]

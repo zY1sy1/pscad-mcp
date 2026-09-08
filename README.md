@@ -213,29 +213,49 @@ The current program baseline records `lcc.fixed_autonomous` as
 `simulated/PASS` from the licensed no-fault WP1B run on commit `3a09c8f`.
 That run compiled all six isolated companion fixtures, built and recompiled a
 blank-case full topology, simulated 0.1 s, and verified 2,001 samples with no
-remaining PSCAD process. It is not `accepted`: disturbance, commutation
-failure/recovery, independent golden, and final acceptance remain WP1C/WP6
-work.
+remaining PSCAD process. It is historical. It is not `accepted`: WP1B smoke must
+run before WP1C dynamic evidence, while disturbance, commutation
+failure/recovery, independent golden, and final acceptance remain later gates.
 
-WP1C dynamic evidence is evaluated with real PSCAD-exported channel samples:
+The companion baseline-gates plan keeps WP1B and WP1C reports separate and
+requires both reports to own the same current commit and clean named checkout.
+The `wp1b_smoke` and `wp1c_dynamic` labels below are evidence-stage identifiers;
+they do not change the checked-in baseline.
+
+WP1C dynamic evidence is evaluated from raw PSCAD output by the installed
+wrapper:
 
 ```powershell
+$env:PSCAD_MCP_ACCEPTANCE = '1'
 ./scripts/run_fixed_lcc_dynamic_acceptance.ps1 `
-  -Samples 'D:/PSCAD-Workspace/lcc-wp1c-dynamic/samples.json' `
-  -Golden 'D:/PSCAD-Workspace/lcc-wp1c-dynamic/golden.json' `
-  -Contract 'pscad_mcp/assets/lcc/cigre_lcc_monopole_v1/acceptance.json' `
-  -Report 'D:/PSCAD-Workspace/lcc-wp1c-dynamic/dynamic-report.json'
+  -WorkspaceRoot 'D:\PSCAD-Workspace\lcc-wp1c-native-closure' `
+  -MasterPath 'C:\Program Files (x86)\PSCAD46\master.pslx' `
+  -CompilerConfiguration 'C:\Program Files (x86)\PSCAD46\fortran_compilers.xml' `
+  -CompilerExecutable 'C:\Program Files (x86)\GFortran\4.6\bin\gfortran.exe' `
+  -ProjectName 'WP1C_FIXED_LCC'
 ```
 
-The runner binds the report to a clean named checkout and rejects missing or
-unbounded disturbance/recovery evidence. Physical evidence without an
-independently reviewed golden is recorded as `INCOMPLETE_ANALYSIS`; it is never
-promoted to `accepted`. The fixed asset now declares three independently
-grounded inverter-side phase shunts, timed breaker controls, and the named
-fault-active `pgb` output channel. All three phase commands retain the same
-EMTDC timestamp. This is packaged/offline capability only: no dynamic
-licensed PASS is claimed until the bindings compile and a real PSCAD run
-produces the required evidence.
+The wrapper requires `PSCAD_MCP_ACCEPTANCE=1`, a clean named checkout, exact
+HEAD/branch discovery, no pre-existing PSCAD process, and a timestamped run
+root. It preserves raw output and prints the report path, SHA-256, engineering
+verdict, and status. Exit code `2` means preflight/environment refusal (no
+run), `1` means the run or engineering checks failed, and `0` means engineering
+checks completed successfully. A successful pre-WP6 run is recorded as
+`engineering_verdict=PASS` with top-level `status=INCOMPLETE_ANALYSIS` while
+independent reviewed golden remains pending. The fixed asset declares three
+independently grounded inverter-side phase shunts, timed breaker controls, and
+the named fault-active `pgb` output channel; this is not a final acceptance
+claim.
+
+After a successful pre-WP6 run:
+
+fixed LCC WP1C current-commit dynamic engineering evidence completed; final
+status remains `INCOMPLETE_ANALYSIS` pending independent reviewed golden.
+
+WP6 is the only independent-golden/final-accepted owner. Until WP6 completes,
+the dynamic evidence stage is explicitly `wp1c_dynamic` with
+`engineering_verdict=PASS` and `status=INCOMPLETE_ANALYSIS`; no WP1C
+final-accepted status is published.
 
 The opt-in planner profile `wp1c_dynamic` performs a side-effect-free
 fault/event capability gate before any PSCAD project is created. It requires an

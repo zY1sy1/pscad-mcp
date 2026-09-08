@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
+from pscad_mcp.hvdc.builders.lcc import fixed_acceptance_cli
 from pscad_mcp.hvdc.builders.lcc.fixed_acceptance_cli import main
 
 ROOT = Path(__file__).parents[1]
@@ -53,6 +55,36 @@ def fake_service_factory(_request):
 
 def fake_preflight(_arguments):
     return {"status": "PASS", "sha256": "d" * 64, "snapshot": {}}
+
+
+def test_fixed_service_factory_requests_minimized_pscad(monkeypatch, tmp_path):
+    captured = {}
+    backend = object()
+    service = object()
+    builder = object()
+
+    def backend_factory(*args, **kwargs):
+        captured.update(kwargs)
+        return backend
+
+    monkeypatch.setattr(fixed_acceptance_cli, "LegacyBackend", backend_factory)
+    monkeypatch.setattr(
+        fixed_acceptance_cli,
+        "PscadService",
+        lambda provider, **kwargs: service,
+    )
+    monkeypatch.setattr(
+        fixed_acceptance_cli,
+        "LccBuilderService",
+        lambda value, *, workspace_root: builder,
+    )
+
+    result = fixed_acceptance_cli._service_factory(
+        SimpleNamespace(master_path=tmp_path / "master.pslx", workspace_root=tmp_path)
+    )
+
+    assert result == (service, builder)
+    assert captured["legacy_minimize"] is True
 
 
 def test_run_action_writes_report_and_never_touches_baseline(tmp_path):
@@ -135,4 +167,15 @@ def test_powershell_runner_is_run_only_and_checks_cleanup():
     assert "FIXED_LCC_REPORT_SHA256=" in script
     assert "Get-Process" in script
     assert "git status --porcelain" in script
+
+
+def test_powershell_runner_executes_python_from_the_named_checkout():
+    script = (
+        ROOT / "scripts" / "run_fixed_lcc_smoke_acceptance.ps1"
+    ).read_text(encoding="utf-8")
+
+    invocation = script.index("& $Python -m pscad_mcp.hvdc.builders.lcc.fixed_acceptance_cli")
+    assert script.rfind("Push-Location $RepositoryRoot", 0, invocation) > script.index("$Python =")
+    assert script.index("Pop-Location", invocation) > invocation
+    assert "$PythonExitCode = $LASTEXITCODE" in script
     assert "Stop-Process" not in script

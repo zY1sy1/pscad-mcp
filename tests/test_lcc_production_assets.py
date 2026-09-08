@@ -21,23 +21,24 @@ def test_production_asset_set_has_fixed_identity_and_complete_contract():
     assert asset_set.blueprint.poles == 1
     assert asset_set.blueprint.terminals == 2
     assert sum(component.definition == "cigre_lcc_v1:LCC12PulseBridge" for component in asset_set.blueprint.components) == 2
-    assert len(asset_set.blueprint.outputs) == 18
+    assert len(asset_set.blueprint.outputs) == 20
     assert {output.path for output in asset_set.blueprint.outputs} == {
         "Main/VDC_RECT", "Main/VDC_INV", "Main/IDC", "Main/P_RECT", "Main/Q_RECT",
         "Main/P_INV", "Main/Q_INV", "Main/ALPHA_RECT", "Main/GAMMA_INV", "Main/MU_RECT", "Main/VAC_RECT_A",
         "Main/AO_RECT_Y", "Main/AO_RECT_D", "Main/AO_INV_Y", "Main/AO_INV_D", "Main/ENABLE_RECT", "Main/ENABLE_INV",
         "Fault/LCC Fault Active",
+        "Main/PCONV_RECT", "Main/PCONV_INV",
     }
     assert len(asset_set.acceptance["physical_checks"]) >= 8
     assert len(asset_set.golden["channels"]) == 11
     assert set(asset_set.hashes) == {
         "PROVENANCE.md", "acceptance.json", "blueprint.json", "catalog-pscad-4.6.2.json", "golden.json", "library/cigre_lcc_v1.pslx",
-        "master-bindings-pscad-4.6.2.json", "smoke.json",
+        "master-bindings-pscad-4.6.2.json", "smoke.json", "dynamic.json",
     }
     assert asset_set.master_bindings is not None
-    assert len(asset_set.master_bindings.bindings) == 14
+    assert len(asset_set.master_bindings.bindings) == 16
     assert asset_set.master_bindings.schema_version == 2
-    assert len(asset_set.master_bindings.companion_bindings) == 17
+    assert len(asset_set.master_bindings.companion_bindings) == 21
     assert asset_set.master_binding_hash == asset_set.hashes["master-bindings-pscad-4.6.2.json"]
     assert "Szechtman" in asset_set.provenance
     companion = validate_companion_library(

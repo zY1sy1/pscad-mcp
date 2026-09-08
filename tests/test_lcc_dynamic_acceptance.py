@@ -1,19 +1,42 @@
 from __future__ import annotations
 
 import copy
+import hashlib
+import json
 from pathlib import Path
 
 import pytest
 
 from pscad_mcp.core.backend.base import BackendError
 from pscad_mcp.hvdc.builders.lcc.dynamic_acceptance import (
+    evaluate_fixed_lcc_dynamic_physical,
     evaluate_fixed_lcc_dynamic_samples,
     validate_dynamic_lcc_acceptance_report,
 )
+from tests.lcc_dynamic_fakes import valid_wp1c_report
 
 
 def _wave(values: list[float], units: str) -> dict[str, object]:
     return {"units": units, "time": [0.0, 0.01, 0.02, 0.03], "values": values}
+
+
+@pytest.mark.parametrize("window", [
+    None,
+    {"window_s": [True, 0.8], "end_inclusive": False},
+    {"window_s": [0.7, float("nan")], "end_inclusive": False},
+    {"window_s": [0.8, 0.7], "end_inclusive": False},
+    {"window_s": [0.7, 0.8], "end_inclusive": True},
+    {"window_s": [0.7, 0.9], "end_inclusive": False},
+    {"window_s": [0.6, 0.8], "end_inclusive": False},
+])
+def test_wp1c_physical_window_rejects_missing_or_invalid_contract(window):
+    from tests.lcc_dynamic_fakes import dynamic_contract as wp1c_contract
+
+    contract = wp1c_contract()
+    contract["physical_evaluation"] = window
+    with pytest.raises(BackendError) as raised:
+        evaluate_fixed_lcc_dynamic_physical({}, {}, contract)
+    assert raised.value.code == "LCC_DYNAMIC_CONTRACT_INVALID"
 
 
 def dynamic_contract() -> dict[str, object]:
@@ -69,36 +92,9 @@ def placeholder_golden() -> dict[str, object]:
     return {"source": "independently reviewed reference run placeholder"}
 
 
-def valid_dynamic_report() -> dict[str, object]:
-    return {
-        "schema_version": 1,
-        "run_id": "dynamic-run-1",
-        "scope": "lcc.fixed_autonomous",
-        "builder_path": "lcc.fixed_autonomous",
-        "kind": "licensed_acceptance",
-        "capability_state": "accepted",
-        "commit": "a" * 40,
-        "generated_at_utc": "2026-09-01T00:00:00Z",
-        "status": "INCOMPLETE_ANALYSIS",
-        "repository": {"branch": "codex/wp1c", "commit": "a" * 40, "clean": True},
-        "dynamic": {
-            "event": {"kind": "inverter_ac_disturbance", "time_s": 0.8, "duration_s": 0.1},
-            "recovery": {"observed": True, "window_s": 0.5},
-            "required_channels": ["Main/VDC_RECT", "Main/IDC"],
-            "physical": {"verdict": "PASS"},
-        },
-        "golden": {"source": "independently reviewed reference run placeholder"},
-        "explicit_exclusions": ["independent_golden", "final_accepted"],
-        "failure": None,
-    }
-
-
 def test_dynamic_report_requires_event_and_recovery_evidence():
-    report = valid_dynamic_report()
+    report = valid_wp1c_report()
     assert validate_dynamic_lcc_acceptance_report(report)["status"] == "INCOMPLETE_ANALYSIS"
-    report["dynamic"]["recovery"] = None
-    with pytest.raises(BackendError):
-        validate_dynamic_lcc_acceptance_report(report)
 
 
 def test_dynamic_report_does_not_promote_placeholder_golden():
@@ -145,17 +141,97 @@ def test_dynamic_evaluator_stays_incomplete_without_golden_declarations():
 
 
 def test_dynamic_report_rejects_forged_pass_with_placeholder_golden():
-    report = valid_dynamic_report()
+    report = valid_wp1c_report()
     report["status"] = "PASS"
     with pytest.raises(BackendError):
         validate_dynamic_lcc_acceptance_report(report)
 
 
 def test_dynamic_report_requires_failure_details_for_fail_status():
-    report = valid_dynamic_report()
+    report = valid_wp1c_report()
     report["status"] = "FAIL"
     with pytest.raises(BackendError):
         validate_dynamic_lcc_acceptance_report(report)
+
+
+def test_wp1c_report_allows_engineering_pass_with_incomplete_golden():
+    report = valid_wp1c_report()
+    normalized = validate_dynamic_lcc_acceptance_report(report)
+    assert normalized["capability_state"] == "simulated"
+    assert normalized["kind"] == "licensed_simulation"
+    assert normalized["engineering_verdict"] == "PASS"
+    assert normalized["golden_verdict"] == "INCOMPLETE_ANALYSIS"
+    assert normalized["status"] == "INCOMPLETE_ANALYSIS"
+
+
+def test_wp1c_report_rejects_total_pass_without_reviewed_golden():
+    report = valid_wp1c_report()
+    report["status"] = "PASS"
+    with pytest.raises(BackendError) as raised:
+        validate_dynamic_lcc_acceptance_report(report)
+    assert raised.value.code == "LCC_DYNAMIC_REPORT_INVALID"
+
+
+@pytest.mark.parametrize(
+    ("section", "extra"),
+    [
+        ("dynamic", {"unexpected": True}),
+        ("artifacts", {"project": None}),
+        ("runtime", {"unexpected": True}),
+    ],
+)
+def test_dynamic_report_rejects_nested_schema_mutations(section, extra):
+    report = valid_wp1c_report()
+    report[section].update(extra)
+    with pytest.raises(BackendError):
+        validate_dynamic_lcc_acceptance_report(report)
+
+
+@pytest.mark.parametrize("group", ["output_parts", "output_metadata"])
+def test_dynamic_report_rejects_output_artifacts_outside_workspace(group):
+    report = valid_wp1c_report()
+    report["artifacts"][group][0]["path"] = "/outside/forged.out" if group == "output_parts" else "/outside/forged.inf"
+    with pytest.raises(BackendError):
+        validate_dynamic_lcc_acceptance_report(report)
+
+
+def test_dynamic_report_rejects_physical_pass_without_checks():
+    report = valid_wp1c_report()
+    report["physical"] = {"verdict": "PASS", "checks": []}
+    with pytest.raises(BackendError):
+        validate_dynamic_lcc_acceptance_report(report)
+
+
+def test_fail_report_with_minimal_sections_self_validates():
+    report = valid_wp1c_report()
+    report["status"] = "FAIL"
+    report["engineering_verdict"] = "FAIL"
+    report["golden_verdict"] = "INCOMPLETE_ANALYSIS"
+    report["failure"] = {"stage": "setup", "code": "X", "message": "broken"}
+    snapshot = {name: {"path": f"/tmp/{name}", "sha256": "a" * 64} for name in report["sources"]}
+    report["preflight"] = {"status": "FAIL", "sha256": hashlib.sha256(json.dumps(snapshot, sort_keys=True, separators=(",", ":")).encode()).hexdigest(), "snapshot": snapshot}
+    report["build"]["terminal_state"] = "failed"
+    report["build"]["history"] = []
+    report["dynamic"] = {"evidence_source": "raw_pscad_output", "engineering_verdict": "FAIL", "checks": {}}
+    report["physical"] = {"verdict": "FAIL", "checks": []}
+    report["artifacts"] = {
+        "project": None,
+        "library": None,
+        "selected_output": None,
+        "output_parts": [],
+        "output_metadata": [],
+        "normalized_samples": None,
+    }
+    report["runtime"] = {
+        "remaining_processes": [],
+        "managed_pid": None,
+        "backend": None,
+        "version": None,
+        "x64": None,
+        "licensed": None,
+        "quit_error": None,
+    }
+    assert validate_dynamic_lcc_acceptance_report(report)["status"] == "FAIL"
 
 
 def test_roadmap_names_wp1c_as_the_next_step():
@@ -166,6 +242,46 @@ def test_roadmap_names_wp1c_as_the_next_step():
 
 
 def test_readme_documents_dynamic_evidence_status():
-    readme = (Path(__file__).parents[1] / "README.md").read_text(encoding="utf-8")
-    assert "run_fixed_lcc_dynamic_acceptance.ps1" in readme
-    assert "INCOMPLETE_ANALYSIS" in readme
+    root = Path(__file__).parents[1]
+    required = {
+        "wp1b_smoke",
+        "wp1c_dynamic",
+        "engineering_verdict=PASS",
+        "status=INCOMPLETE_ANALYSIS",
+    }
+    for relative in ("README.md", "docs/zh-CN/README.md"):
+        readme = (root / relative).read_text(encoding="utf-8")
+        assert all(item in readme for item in required)
+        assert "WP1C accepted" not in readme
+        assert "-WorkspaceRoot" in readme
+        assert "-MasterPath" in readme
+        assert "-CompilerConfiguration" in readme
+        assert "-CompilerExecutable" in readme
+        assert "-ProjectName" in readme
+        assert "PSCAD_MCP_ACCEPTANCE=1" in readme
+        assert all(f"`{code}`" in readme for code in ("2", "1", "0"))
+        assert "raw output" in readme.lower()
+        assert "independent" in readme.lower() and "golden" in readme.lower()
+
+
+def test_roadmap_documents_wp1c_boundary_and_wp6_ownership():
+    roadmap = (
+        Path(__file__).parents[1]
+        / "docs"
+        / "superpowers"
+        / "specs"
+        / "2026-08-30-lcc-mmc-completion-roadmap-design.md"
+    ).read_text(encoding="utf-8")
+    required = (
+        "run_fixed_lcc_dynamic_acceptance.ps1",
+        "WP1B-before-WP1C",
+        "companion baseline-gates plan",
+        "WP6",
+        "independent-golden",
+        "final-accepted owner",
+        (
+            "fixed LCC WP1C current-commit dynamic engineering evidence completed; "
+            "final status remains `INCOMPLETE_ANALYSIS` pending independent reviewed golden."
+        ),
+    )
+    assert all(item in roadmap for item in required)

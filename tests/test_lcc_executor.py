@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import math
 import xml.etree.ElementTree as ET
 from dataclasses import replace
 from pathlib import Path
@@ -38,6 +39,7 @@ from pscad_mcp.hvdc.builders.lcc.project_graph import (
     ProjectGraph,
 )
 from tests.lcc_builder_fakes import RecordingPscadService
+from tests.lcc_dynamic_fakes import passing_raw_channels
 from tests.test_lcc_smoke import contract as smoke_contract
 from tests.test_lcc_smoke import mutate_samples, valid_samples
 
@@ -279,9 +281,9 @@ def test_saved_projection_accepts_only_registry_declared_filter_expansion(
         (1, "master:cfilter", (342, 198)),
         (2, "master:cfilter", (342, 342)),
         (3, "master:cfilter", (342, 486)),
-        (4, "master:ground", (396, 162)),
-        (5, "master:ground", (396, 306)),
-        (6, "master:ground", (396, 450)),
+        (4, "master:ground", (396, 252)),
+        (5, "master:ground", (396, 396)),
+        (6, "master:ground", (396, 540)),
     )
     saved = ProjectGraph(
         "executor",
@@ -299,9 +301,9 @@ def test_saved_projection_accepts_only_registry_declared_filter_expansion(
             for component_id, definition, location in physical_components
         ),
         (
-            GraphWire("electrical", ((342, 162), (396, 162))),
-            GraphWire("electrical", ((342, 306), (396, 306))),
-            GraphWire("electrical", ((342, 450), (396, 450))),
+            GraphWire("electrical", ((342, 252), (396, 252))),
+            GraphWire("electrical", ((342, 396), (396, 396))),
+            GraphWire("electrical", ((342, 540), (396, 540))),
         ),
         (),
         (),
@@ -589,6 +591,37 @@ def test_wp1b_compiled_predeclared_output_falls_back_to_asset_contract(
         with pytest.raises(BackendError) as failure:
             asyncio.run(executor._create_output(operation))
         assert failure.value.code == "LCC_OUTPUT_INCOMPLETE"
+
+
+def test_wp1c_compiled_predeclared_output_falls_back_to_asset_contract(tmp_path):
+    plan = _plan(tmp_path)
+    output = LccOutputSpec(
+        "vdc",
+        "Main/VDC",
+        "kV",
+        "dc_voltage",
+        measurement="vdc_measurement",
+    )
+    plan = replace(
+        plan,
+        verification_profile="wp1c_dynamic",
+        blueprint=replace(plan.blueprint, outputs=(output,)),
+    )
+    service = UnavailablePredeclaredOutputService()
+    executor = LccExecutor(
+        plan,
+        service,
+        tmp_path,
+        asset_set=load_packaged_asset_set(),
+    )
+    executor.history.append({"state": "compiled"})
+    operation = next(
+        item for item in plan.operations if item.kind == "create_output"
+    )
+
+    asyncio.run(executor._create_output(operation))
+
+    assert executor.history[-1]["verification"] == "compiled_asset_contract"
 
 
 def test_legacy_output_paths_are_mapped_from_measurement_components(tmp_path):
@@ -1222,6 +1255,153 @@ def test_executor_rejects_unresolved_or_ambiguous_dynamic_targets(
     assert backend.events is None
 
 
+def test_wp1c_executor_accepts_engineering_pass_without_forging_total_pass(
+    tmp_path,
+):
+    assets = load_packaged_asset_set()
+    base = _plan(tmp_path)
+    plan = replace(
+        base,
+        blueprint=replace(
+            base.blueprint,
+            settings={"simulation_duration_s": 1.5, "output_step_s": 0.00005},
+        ),
+        verification_profile="wp1c_dynamic",
+        asset_hashes={"dynamic.json": assets.hashes["dynamic.json"]},
+    )
+    service = RecordingPscadService(output=passing_raw_channels())
+    executor = LccExecutor(plan, service, tmp_path, asset_set=assets)
+    operation = LccPlanOperation(
+        sequence=1,
+        kind="dynamic_accept",
+        target="executor",
+        arguments={
+            "contract_sha256": assets.hashes["dynamic.json"],
+            "event": {"time_s": 0.8, "duration_s": 0.1},
+        },
+    )
+
+    asyncio.run(executor._dynamic_accept(operation))
+
+    assert executor.result["engineering_verdict"] == "PASS"
+    assert executor.result["golden_verdict"] == "INCOMPLETE_ANALYSIS"
+    assert executor.result["status"] == "INCOMPLETE_ANALYSIS"
+    assert any(
+        item.get("state") == "dynamic_engineering_passed"
+        for item in executor.history
+    )
+
+
+@pytest.mark.parametrize("drift", [None, "out", "inf", "new_part"])
+def test_wp1c_executor_binds_failed_checks_to_stable_output_metadata(tmp_path, drift):
+    assets = load_packaged_asset_set()
+    base = _plan(tmp_path)
+    plan = replace(
+        base, verification_profile="wp1c_dynamic",
+        blueprint=replace(base.blueprint, settings={"simulation_duration_s": 1.5, "output_step_s": 0.00005}),
+    )
+    raw = passing_raw_channels()
+    gamma = next(channel for channel in raw["channels"] if channel["path"] == "Main/GAMMA_INV")
+    gamma["values"] = [0.3] * len(gamma["values"])
+
+    class FileService(RecordingPscadService):
+        async def discover_output_files(self, project_name, **kwargs):
+            self.folder = Path(project_name).parent
+            for suffix in ("_01.out", ".inf"):
+                (self.folder / ("result" + suffix)).write_text("original", encoding="utf-8")
+            return [str(self.folder / "result_01.out")]
+
+        async def read_output_file(self, path, **kwargs):
+            if drift == "new_part":
+                (self.folder / "result_02.out").write_text("unbound extra part", encoding="utf-8")
+            elif drift:
+                (self.folder / ("result_01.out" if drift == "out" else "result.inf")).write_text("changed", encoding="utf-8")
+            return raw
+
+    executor = LccExecutor(plan, FileService(), tmp_path, asset_set=assets)
+    executor.staging_path.mkdir(parents=True, exist_ok=True)
+    executor.staging_file = executor.staging_path / "case.pscx"
+    operation = LccPlanOperation(
+        sequence=1, kind="dynamic_accept", target="executor",
+        arguments={"contract_sha256": assets.hashes["dynamic.json"]},
+    )
+    with pytest.raises(BackendError) as raised:
+        asyncio.run(executor._dynamic_accept(operation))
+    if drift:
+        assert raised.value.code == "LCC_OUTPUT_INCOMPLETE"
+    else:
+        assert raised.value.code == "LCC_DYNAMIC_ACCEPTANCE_FAILED"
+        assert raised.value.details["acceptance"]["output_metadata_artifacts"] == [{
+            "path": str(executor.staging_path / "result.inf"),
+            "sha256": hashlib.sha256(b"original").hexdigest(),
+        }]
+
+
+@pytest.mark.parametrize("prefault_violation", [False, True])
+@pytest.mark.parametrize("power_channel", ["Main/P_RECT", "Main/PCONV_RECT"])
+def test_wp1c_physical_checks_use_only_the_declared_prefault_window(tmp_path, prefault_violation, power_channel):
+    assets = load_packaged_asset_set()
+    original_contract = json.dumps(assets.acceptance, sort_keys=True)
+    base = _plan(tmp_path)
+    plan = replace(
+        base, verification_profile="wp1c_dynamic",
+        blueprint=replace(base.blueprint, settings={"simulation_duration_s": 1.5, "output_step_s": 0.00005}),
+    )
+    raw = passing_raw_channels()
+    power = next(channel for channel in raw["channels"] if channel["path"] == power_channel)
+    power["values"] = [9999.0 if t < 0.7 or t == 0.8 else value for t, value in zip(power["domain"], power["values"])]
+    if prefault_violation:
+        power["values"][power["domain"].index(0.7)] = 9999.0
+    executor = LccExecutor(plan, RecordingPscadService(output=raw), tmp_path, asset_set=assets)
+    operation = LccPlanOperation(
+        sequence=1, kind="dynamic_accept", target="executor",
+        arguments={"contract_sha256": assets.hashes["dynamic.json"]},
+    )
+    if prefault_violation:
+        with pytest.raises(BackendError) as raised:
+            asyncio.run(executor._dynamic_accept(operation))
+        assert raised.value.code == "LCC_DYNAMIC_ACCEPTANCE_FAILED"
+        assert executor.result["physical"]["verdict"] == "FAIL"
+    else:
+        asyncio.run(executor._dynamic_accept(operation))
+        assert executor.result["engineering_verdict"] == "PASS"
+    for check in executor.result["physical"]["physical_checks"]:
+        assert check["comparison_policy"]["window_s"] == [0.7, 0.8]
+        assert check["comparison_policy"]["end_inclusive"] is False
+    assert json.dumps(assets.acceptance, sort_keys=True) == original_contract
+
+
+def test_wp1c_executor_dynamic_failure_never_publishes(tmp_path):
+    assets = load_packaged_asset_set()
+    base = _plan(tmp_path)
+    plan = replace(
+        base,
+        blueprint=replace(
+            base.blueprint,
+            settings={"simulation_duration_s": 1.5, "output_step_s": 0.00005},
+        ),
+        verification_profile="wp1c_dynamic",
+        asset_hashes={"dynamic.json": assets.hashes["dynamic.json"]},
+    )
+    output = passing_raw_channels()
+    gamma = next(item for item in output["channels"] if item["path"] == "Main/GAMMA_INV")
+    gamma["values"] = [math.radians(18.0) for _ in gamma["values"]]
+    service = RecordingPscadService(output=output)
+    executor = LccExecutor(plan, service, tmp_path, asset_set=assets)
+    operation = LccPlanOperation(
+        sequence=1,
+        kind="dynamic_accept",
+        target="executor",
+        arguments={"contract_sha256": assets.hashes["dynamic.json"]},
+    )
+
+    with pytest.raises(BackendError) as raised:
+        asyncio.run(executor._dynamic_accept(operation))
+
+    assert raised.value.code == "LCC_DYNAMIC_ACCEPTANCE_FAILED"
+    assert "save_project_as" not in [call[0] for call in service.calls]
+
+
 def test_executor_rejects_dynamic_events_without_native_emtdc_scheduler(tmp_path):
     executor = LccExecutor(
         _plan(tmp_path),
@@ -1240,6 +1420,213 @@ def test_executor_rejects_dynamic_events_without_native_emtdc_scheduler(tmp_path
     with pytest.raises(BackendError) as raised:
         asyncio.run(executor._register_dynamic_events(operation))
     assert raised.value.code == "LCC_DYNAMIC_EVENT_UNAVAILABLE"
+
+
+def _dynamic_control_operation(**overrides):
+    arguments = {
+        "control_mode": "embedded_emtdc",
+        "control_signal": "LCC_FAULT_OPEN",
+        "event_signal": "LCC_FAULT_ACTIVE",
+        "control_adapter": "fault_open_adapter",
+        "timer_component": "inverter_fault_timer",
+        "control_components": [
+            "inverter_fault_breaker_a",
+            "inverter_fault_breaker_b",
+            "inverter_fault_breaker_c",
+        ],
+        "channel": "Fault/LCC Fault Active",
+        "event": {"time_s": 0.8, "duration_s": 0.1},
+    }
+    arguments.update(overrides)
+    return LccPlanOperation(
+        sequence=1,
+        kind="verify_dynamic_control",
+        target="CIGRE_LCC",
+        arguments=arguments,
+    )
+
+
+def _dynamic_control_executor(tmp_path, *, service=None, **plan_overrides):
+    plan = replace(_plan(tmp_path), verification_profile="wp1c_dynamic", **plan_overrides)
+    executor = LccExecutor(plan, service or RecordingPscadService(), tmp_path)
+    executor.history.append({"state": LccBuildState.COMPILED.value})
+    executor.component_ids = {
+        "inverter_fault_timer": 10,
+        "inverter_fault_breaker_a": 11,
+        "inverter_fault_breaker_b": 12,
+        "inverter_fault_breaker_c": 13,
+        "fault_open_adapter": 14,
+    }
+    executor.service.components = {
+        10: {"parameters": {"FaultTime_s": 0.8, "FaultDuration_s": 0.1}},
+        11: {"parameters": {"NAME": "LCC_FAULT_OPEN"}},
+        12: {"parameters": {"NAME": "LCC_FAULT_OPEN"}},
+        13: {"parameters": {"NAME": "LCC_FAULT_OPEN"}},
+    }
+    executor._logical_components["fault_open_adapter"] = GraphComponent(
+        "fault_open_adapter", "master:fault_control_not", "Main", (0, 0), 0, {},
+    )
+    return executor
+
+
+def test_executor_verifies_embedded_dynamic_control_after_compile(tmp_path):
+    service = RecordingPscadService()
+    executor = _dynamic_control_executor(tmp_path, service=service)
+
+    asyncio.run(executor._dispatch(_dynamic_control_operation()))
+
+    assert executor.result["dynamic_control"] == {
+        "status": "PASS",
+        "mode": "embedded_emtdc",
+        "signal": "LCC_FAULT_OPEN",
+        "event_signal": "LCC_FAULT_ACTIVE",
+        "control_adapter_component_id": 14,
+        "timer_component_id": 10,
+        "consumer_component_ids": [11, 12, 13],
+        "output": "Fault/LCC Fault Active",
+        "source": "compiled_project_readback",
+    }
+
+
+def test_executor_rejects_duplicate_dynamic_control_consumers(tmp_path):
+    service = RecordingPscadService()
+    executor = _dynamic_control_executor(tmp_path, service=service)
+    operation = _dynamic_control_operation(
+        control_components=[
+            "inverter_fault_breaker_a",
+            "inverter_fault_breaker_a",
+            "inverter_fault_breaker_a",
+        ]
+    )
+
+    with pytest.raises(BackendError) as raised:
+        asyncio.run(executor._verify_dynamic_control(operation))
+
+    assert raised.value.code == "LCC_DYNAMIC_EVENT_UNAVAILABLE"
+    assert "run_project" not in [call[0] for call in service.calls]
+
+
+def test_executor_rejects_missing_breaker_polarity_adapter(tmp_path):
+    executor = _dynamic_control_executor(tmp_path)
+    del executor.component_ids["fault_open_adapter"]
+    with pytest.raises(BackendError) as raised:
+        asyncio.run(executor._verify_dynamic_control(_dynamic_control_operation()))
+    assert raised.value.code == "LCC_DYNAMIC_EVENT_UNAVAILABLE"
+
+
+def test_executor_rejects_non_inverting_breaker_adapter(tmp_path):
+    executor = _dynamic_control_executor(tmp_path)
+    executor._logical_components["fault_open_adapter"] = replace(
+        executor._logical_components["fault_open_adapter"], definition="master:unity",
+    )
+    with pytest.raises(BackendError) as raised:
+        asyncio.run(executor._verify_dynamic_control(_dynamic_control_operation()))
+    assert raised.value.code == "LCC_DYNAMIC_EVENT_UNAVAILABLE"
+
+
+def test_recording_fake_persists_symbolic_parameter_values(tmp_path):
+    service = RecordingPscadService()
+    service.components = {
+        11: {
+            "id": 11,
+            "logical_id": "breaker",
+            "definition": "master:breaker",
+            "x": 0,
+            "y": 0,
+            "orientation": 0,
+            "parameters": {"NAME": "LCC_FAULT_ACTIVE"},
+        }
+    }
+    project = tmp_path / "readback.pscx"
+    service._write_project(project)
+
+    parameter = ET.parse(project).find("./definition/component/parameters/param")
+    assert parameter is not None
+    assert parameter.get("value") == "LCC_FAULT_ACTIVE"
+    assert asyncio.run(service.get_component_parameters("readback", 11))["NAME"] == "LCC_FAULT_ACTIVE"
+
+
+@pytest.mark.parametrize(
+    ("case", "operation_kwargs", "history", "component_ids", "components"),
+    [
+        (
+            "numeric_name",
+            {},
+            [{"state": LccBuildState.COMPILED.value}],
+            None,
+            {11: {"parameters": {"NAME": 1}}},
+        ),
+        (
+            "different_symbol",
+            {},
+            [{"state": LccBuildState.COMPILED.value}],
+            None,
+            {11: {"parameters": {"NAME": "OTHER_SIGNAL"}}},
+        ),
+        (
+            "missing_timer",
+            {},
+            [{"state": LccBuildState.COMPILED.value}],
+            {"inverter_fault_breaker_a": 11, "inverter_fault_breaker_b": 12, "inverter_fault_breaker_c": 13},
+            None,
+        ),
+        (
+            "timing_mismatch",
+            {"event": {"time_s": 0.7, "duration_s": 0.1}},
+            [{"state": LccBuildState.COMPILED.value}],
+            None,
+            None,
+        ),
+        (
+            "pre_compiled",
+            {},
+            [],
+            None,
+            None,
+        ),
+    ],
+)
+def test_executor_rejects_unavailable_embedded_dynamic_control(
+    tmp_path, case, operation_kwargs, history, component_ids, components
+):
+    executor = _dynamic_control_executor(tmp_path)
+    executor.history = list(history)
+    if component_ids is not None:
+        executor.component_ids = component_ids
+    if components is not None:
+        for component_id, component in components.items():
+            executor.service.components[component_id] = component
+    with pytest.raises(BackendError) as raised:
+        asyncio.run(executor._verify_dynamic_control(_dynamic_control_operation(**operation_kwargs)))
+    assert raised.value.code == "LCC_DYNAMIC_EVENT_UNAVAILABLE", case
+    assert "run_project" not in [call[0] for call in executor.service.calls]
+
+
+class DynamicMasterBindingFailureService(RecordingPscadService):
+    async def verify_master_binding_state(self, *args, **kwargs):
+        await super().verify_master_binding_state(*args, **kwargs)
+        raise BackendError(
+            "MASTER_SOURCE_CHANGED",
+            "Master changed after placement.",
+            "hvdc",
+            "verify_master_binding_state",
+        )
+
+
+def test_executor_maps_pinned_master_readback_failure_to_dynamic_unavailable(tmp_path):
+    service = DynamicMasterBindingFailureService()
+    executor = _dynamic_control_executor(
+        tmp_path,
+        service=service,
+        master_sha256="b" * 64,
+        master_binding_registry_sha256="a" * 64,
+    )
+
+    with pytest.raises(BackendError) as raised:
+        asyncio.run(executor._verify_dynamic_control(_dynamic_control_operation()))
+
+    assert raised.value.code == "LCC_DYNAMIC_EVENT_UNAVAILABLE"
+    assert "run_project" not in [call[0] for call in service.calls]
 
 
 def test_execute_build_rejects_unverified_companion_library_before_loading(tmp_path):
@@ -1647,6 +2034,61 @@ class GroundReturnEndpointService(RecordingPscadService):
         point = (1980, 207) if component_id == 1 else (1908, 450)
         name = "DC_POS" if component_id == 1 else "GND"
         return {name: {"name": name, "x": point[0], "y": point[1]}}
+
+
+class ThreeEndpointService(RecordingPscadService):
+    async def get_component_ports(self, project_name, component_id):
+        self._call("get_component_ports", project_name, component_id)
+        points = {
+            1: (0, 0),
+            2: (0, 18),
+            3: (36, 36),
+        }
+        x, y = points[component_id]
+        return {"A": {"name": "A", "x": x, "y": y}}
+
+
+def test_three_endpoint_labeled_electrical_net_uses_labels_without_crossing_wire(
+    tmp_path,
+):
+    service = ThreeEndpointService()
+    executor = LccExecutor(_plan(tmp_path), service, tmp_path)
+    executor.component_ids = {"source": 1, "meter": 2, "breaker": 3}
+    operation = LccPlanOperation(
+        1,
+        "connect_net",
+        "source_meter_breaker",
+        {
+            "kind": "electrical",
+            "vertices": [[0, 0], [0, 18], [36, 18], [36, 36]],
+            "endpoints": ["source:A", "meter:A", "breaker:A"],
+            "label": "SHARED_AC",
+        },
+        "connect_electrical:source_meter_breaker:000",
+        "connect_electrical",
+    )
+
+    asyncio.run(executor._connect_net(operation))
+
+    connections = [call for call in service.calls if call[0] == "create_connection"]
+    assert [call[1][1:5] for call in connections] == [
+        ([0, 0], [0, 0], "SHARED_AC", True),
+        ([0, 18], [0, 18], "SHARED_AC", True),
+        ([36, 36], [36, 36], "SHARED_AC", True),
+    ]
+    wires = [call for call in service.calls if call[0] == "create_wire"]
+    assert wires == []
+    assert executor._logical_nets["source_meter_breaker"].points == (
+        (0, 0),
+        (0, 18),
+        (36, 18),
+        (36, 36),
+    )
+    assert executor._logical_nets["source_meter_breaker"].endpoints == (
+        "source:A",
+        "meter:A",
+        "breaker:A",
+    )
 
 
 def test_ground_return_wires_terminate_at_both_component_ports(tmp_path):
