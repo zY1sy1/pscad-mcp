@@ -443,19 +443,36 @@ async def run_fixed_lcc_dynamic_acceptance(
             raise _terminal_build_error(record)
         if "dynamic_engineering_passed" not in report["build"]["history"]:
             raise _error(stage, "build did not publish dynamic engineering evidence")
-        artifact_sources = []
-        for candidate in (record, started):
+        artifact_sources = [
+            item for item in reversed(record["history"])
+            if isinstance(item, Mapping) and item.get("state") == "published"
+        ]
+        for candidate in (record, started, plan):
             if isinstance(candidate, Mapping):
                 nested = candidate.get("result")
-                artifact_sources.append(nested if isinstance(nested, Mapping) else candidate)
+                if isinstance(nested, Mapping):
+                    artifact_sources.append(nested)
+                artifact_sources.append(candidate)
+                planned = candidate.get("plan")
+                if isinstance(planned, Mapping):
+                    artifact_sources.append(planned)
         for artifact_key, path_keys, hash_keys in (
-            ("project", ("project_path", "project_file", "final_project_path"), ("project_sha256", "final_project_sha256")),
+            ("project", ("project_path", "project_file", "final_project_path", "target_path"), ("project_sha256", "final_project_sha256")),
             ("library", ("library_path", "final_library_path"), ("library_sha256", "final_library_sha256")),
         ):
-            path_value = next((item.get(key) for item in artifact_sources for key in path_keys if item.get(key)), None)
-            hash_value = next((item.get(key) for item in artifact_sources for key in hash_keys if item.get(key)), None)
+            path_value = hash_value = None
+            for item in artifact_sources:
+                path_value = next((item.get(key) for key in path_keys if item.get(key)), None)
+                if path_value is not None:
+                    # Keep the path and hash bound to the same publication record.
+                    hash_value = next((item.get(key) for key in hash_keys if item.get(key)), None)
+                    break
             if path_value is None:
-                fallback = request.workspace_root / (f"{request.project_name}.pscx" if artifact_key == "project" else "cigre_lcc_v1.pslx")
+                fallback = (
+                    request.workspace_root / f"{request.project_name}.pscx"
+                    if artifact_key == "project"
+                    else request.workspace_root / ".pscad-mcp" / "libraries" / "cigre_lcc_v1.pslx"
+                )
                 if _regular(fallback):
                     path_value = str(fallback)
             if path_value is None:
@@ -471,7 +488,15 @@ async def run_fixed_lcc_dynamic_acceptance(
         discover = getattr(service, "discover_output_files", None)
         file_reader = getattr(service, "read_output_file", None)
         if callable(discover) and callable(file_reader):
-            discovered = await _maybe(discover(request.project_name, started_after=run_started, max_files=1000))
+            discovery_project = request.project_name
+            staging_value = next((item.get("staging_path") for item in artifact_sources if item.get("staging_path")), None)
+            if staging_value is not None:
+                staging_root = Path(str(staging_value))
+                staging_project = staging_root / f"{staging_root.stem}.pscx"
+                if not _regular(staging_project) or not _contained(staging_project.absolute(), request.workspace_root.absolute()):
+                    raise _error(stage, "staging project is not a contained regular file")
+                discovery_project = str(staging_project.absolute())
+            discovered = await _maybe(discover(discovery_project, started_after=run_started, max_files=1000))
             if not isinstance(discovered, Sequence) or isinstance(discovered, (str, bytes, bytearray)):
                 raise _error(stage, "output discovery returned no file list")
             output_candidates = [Path(str(item)) for item in discovered if Path(str(item)).suffix.casefold() in {".out", ".psout"}]

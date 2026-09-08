@@ -54,6 +54,42 @@ def valid_request(tmp_path: Path) -> tuple[DynamicLccRunRequest, Path]:
     return request, staging
 
 
+@pytest.mark.parametrize("record_shape", ["plan", "journal", "started", "outside"])
+def test_runner_resolves_real_published_artifact_records(tmp_path, record_shape):
+    request, staging = valid_request(tmp_path)
+
+    class NativeRecordBuilder(PassingDynamicBuilder):
+        async def build_model(self, **kwargs):
+            result = await super().build_model(**kwargs)
+            original = Path(result["project_path"])
+            self.final = (tmp_path if record_shape == "outside" else original.parent) / "WP1C_FIXED_LCC_PUBLISHED.pscx"
+            original.rename(self.final)
+            self.library = request.workspace_root / ".pscad-mcp" / "libraries" / "cigre_lcc_v1.pslx"
+            self.library.parent.mkdir(parents=True)
+            Path(result["library_path"]).rename(self.library)
+            return {"build_id": "build-1", **({"target_path": str(self.final)} if record_shape == "started" else {})}
+
+        def get_build_status(self, build_id):
+            record = super().get_build_status(build_id)
+            if record_shape in {"plan", "outside"}:
+                record["plan"] = {"target_path": str(self.final)}
+            elif record_shape == "journal":
+                record["target_path"] = str(self.final)
+            return record
+
+    report = asyncio.run(run_fixed_lcc_dynamic_acceptance(
+        request, service=PassingDynamicService(staging), builder=NativeRecordBuilder(staging),
+        process_reader=list, poll_interval_s=0,
+    ))
+    if record_shape == "outside":
+        assert report["status"] == "FAIL"
+        assert "contained regular file" in report["failure"]["message"]
+    else:
+        assert report["engineering_verdict"] == "PASS"
+        assert Path(report["artifacts"]["project"]["path"]).name == "WP1C_FIXED_LCC_PUBLISHED.pscx"
+        assert Path(report["artifacts"]["library"]["path"]) == request.workspace_root / ".pscad-mcp" / "libraries" / "cigre_lcc_v1.pslx"
+
+
 def test_runner_rederives_output_and_persists_incomplete_success(tmp_path: Path):
     request, staging = valid_request(tmp_path)
     service = PassingDynamicService(staging)
@@ -74,6 +110,91 @@ def test_runner_rederives_output_and_persists_incomplete_success(tmp_path: Path)
     assert report["artifacts"]["project"]["sha256"]
     assert report["artifacts"]["library"]["sha256"]
     assert ("output", True) in service.calls
+
+
+@pytest.mark.parametrize("artifact_case", ["published", "hash_drift", "staging_hash"])
+def test_runner_binds_final_project_path_to_its_publication_hash(tmp_path, artifact_case):
+    request, staging = valid_request(tmp_path)
+
+    class PublishedBuilder(PassingDynamicBuilder):
+        async def build_model(self, **kwargs):
+            started = await super().build_model(**kwargs)
+            self.final = request.workspace_root / "WP1C_FIXED_LCC_PUBLISHED.pscx"
+            Path(started["project_path"]).rename(self.final)
+            self.final.write_text("published project", encoding="utf-8")
+            if artifact_case != "staging_hash":
+                started.pop("project_path")
+                started.pop("project_sha256")
+            return started
+
+        def get_build_status(self, build_id):
+            record = super().get_build_status(build_id)
+            record["plan"] = {"target_path": str(self.final)}
+            if artifact_case != "staging_hash":
+                record["history"][-1].update({
+                    "target_path": str(self.final),
+                    "final_project_sha256": hashlib.sha256(self.final.read_bytes()).hexdigest(),
+                })
+            if artifact_case == "hash_drift":
+                self.final.write_text("changed after publication", encoding="utf-8")
+            return record
+
+    report = asyncio.run(run_fixed_lcc_dynamic_acceptance(
+        request, service=PassingDynamicService(staging), builder=PublishedBuilder(staging),
+        process_reader=list, poll_interval_s=0,
+    ))
+    if artifact_case == "hash_drift":
+        assert report["status"] == "FAIL"
+        assert "project artifact hash mismatch" in report["failure"]["message"]
+    else:
+        assert report["engineering_verdict"] == "PASS"
+        final = request.workspace_root / "WP1C_FIXED_LCC_PUBLISHED.pscx"
+        assert report["artifacts"]["project"] == {
+            "path": str(final), "sha256": hashlib.sha256(final.read_bytes()).hexdigest(),
+        }
+
+
+def test_runner_rediscovers_outputs_from_the_actual_staging_project(tmp_path):
+    from pscad_mcp.core.path_policy import PathPolicy
+    from pscad_mcp.core.service import PscadService
+
+    request, staging = valid_request(tmp_path)
+    native_staging = request.workspace_root / ".pscad-mcp" / "lcc-builds" / f"{request.project_name}.staging"
+    generated = native_staging / f"{request.project_name}.gf42"
+    discovery = PscadService(
+        lambda: object(), path_policy=PathPolicy(workspace_root=str(request.workspace_root)),
+    )
+
+    class NativeBuilder(PassingDynamicBuilder):
+        async def build_model(self, **kwargs):
+            started = await super().build_model(**kwargs)
+            generated.mkdir(parents=True)
+            (native_staging / f"{request.project_name}.pscx").write_text("staging project", encoding="utf-8")
+            for name in ("run_01.out", "run.inf"):
+                (staging / name).rename(generated / name)
+            self.final = request.workspace_root / f"{request.project_name}_PUBLISHED.pscx"
+            Path(started["project_path"]).rename(self.final)
+            return started
+
+        def get_build_status(self, build_id):
+            record = super().get_build_status(build_id)
+            record["plan"] = {"target_path": str(self.final), "staging_path": str(native_staging)}
+            return record
+
+    class NativeDiscoveryService(PassingDynamicService):
+        async def discover_output_files(self, project_name, **kwargs):
+            return await discovery.discover_output_files(project_name, **kwargs)
+
+        async def read_output_file(self, file_path, **kwargs):
+            output = await self.get_project_output(request.project_name, summary_only=False)
+            return {**output, "output_file": file_path}
+
+    report = asyncio.run(run_fixed_lcc_dynamic_acceptance(
+        request, service=NativeDiscoveryService(staging), builder=NativeBuilder(staging),
+        process_reader=list, poll_interval_s=0,
+    ))
+    assert report["engineering_verdict"] == "PASS", report["failure"]
+    assert Path(report["artifacts"]["selected_output"]["path"]) == generated / "run_01.out"
 
 
 @pytest.mark.parametrize("artifact_case", ["valid", "valid_two_parts", "hash_drift", "outside_workspace", "stale", "pass_only", "metadata_drift", "new_part"])
