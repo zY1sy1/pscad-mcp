@@ -141,51 +141,65 @@ def _set_named_control(
     )
 
 
-def _station_instance(root: ET.Element) -> ET.Element | None:
-    for definition in root.iter():
-        if (
-            definition.tag.rsplit("}", 1)[-1].casefold() == "definition"
-            and (definition.attrib.get("name") or "").rsplit(":", 1)[-1].casefold()
-            == "station"
-        ):
-            for component in _components(definition):
-                values = dict(_parameters(component))
-                if "TFlt" in values or "FltDur" in values:
-                    return component
-    return None
+def _seconds(value: Any, field: str, *, positive: bool = False) -> str:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or not math.isfinite(float(value))
+        or value < 0
+        or positive and value == 0
+    ):
+        raise _error(
+            "MMC_TEMPLATE_NATIVE_BINDING_INVALID",
+            "Fault times must be finite and nonnegative; duration must be positive.",
+            field=field,
+        )
+    return _value(value, field)
 
 
-def _set_station_parameter(
+def _bind_fault_timer(
     root: ET.Element,
-    parameter: str,
-    value: str,
+    duration: str | None,
     bindings: list[dict[str, str]],
 ) -> None:
-    component = _station_instance(root)
-    if component is None:
+    main_definitions = [
+        node for node in root.iter()
+        if node.tag.rsplit("}", 1)[-1].casefold() == "definition"
+        and (node.get("name") or "").rsplit(":", 1)[-1] == "Main"
+    ]
+    matches = [
+        component for main in main_definitions for component in _components(main)
+        if (component.get("defn") or component.get("definition")) == "master:tfaultn"
+        and dict(_parameters(component)).get("TF") == "Flt_time"
+    ]
+    if len(main_definitions) != 1 or len(matches) != 1:
         raise _error(
-            "MMC_TEMPLATE_NATIVE_BINDING_MISSING",
-            "The template has no Station instance with native fault parameters.",
-            parameter=parameter,
+            "MMC_TEMPLATE_NATIVE_BINDING_AMBIGUOUS"
+            if len(main_definitions) > 1 or len(matches) > 1
+            else "MMC_TEMPLATE_NATIVE_BINDING_MISSING",
+            "The Main canvas must contain one fault timer driven by Flt_time.",
+            matches=len(matches),
         )
+    component = matches[0]
     owner = (component.attrib.get("id") or "").strip()
     params = [
         item
         for item in component.iter()
         if item.tag.rsplit("}", 1)[-1].casefold() == "param"
-        and item.attrib.get("name") == parameter
+        and item.attrib.get("name") == "DF"
     ]
-    if len(params) != 1:
+    if not owner or len(params) != 1:
         raise _error(
             "MMC_TEMPLATE_NATIVE_BINDING_MISSING",
-            "The Station instance has no unique native fault parameter.",
-            parameter=parameter,
+            "The active fault timer has no unique duration parameter or owner.",
+            parameter="DF",
             owner=owner,
         )
-    params[0].set("value", value)
-    bindings.append(
-        {"owner": owner, "name": parameter, "parameter": parameter, "value": value}
-    )
+    if duration is not None:
+        params[0].set("value", duration)
+        bindings.append(
+            {"owner": owner, "name": "Fault Duration", "parameter": "DF", "value": duration}
+        )
 
 
 def materialize_template_native_scenario(
@@ -231,6 +245,14 @@ def materialize_template_native_scenario(
             destination=str(destination_path),
         )
 
+    for field, value in (("fault_time_s", fault_time_s), ("dc_fault_time_s", dc_fault_time_s)):
+        if value is not None:
+            _seconds(value, field)
+    duration = (
+        _seconds(fault_duration_s, "fault_duration_s", positive=True)
+        if fault_duration_s is not None else None
+    )
+
     requested: dict[str, Any] = dict(controls or {})
     for key, value in (
         ("Fault Time", fault_time_s),
@@ -257,9 +279,8 @@ def materialize_template_native_scenario(
             "Specify either fault_time_s or dc_fault_time_s, not both.",
         )
     if dc_fault_time_s is not None:
-        # The official fault switches are driven by Flt_time, which is sourced
-        # from the named Fault Time variable.  TFlt is also bound on the
-        # Station instance for templates that use it in the pole model.
+        # The Main timer uses Flt_time; the unused Station wrapper does not
+        # control the duration of the simulated fault switches.
         requested.setdefault("Fault Time", dc_fault_time_s)
 
     try:
@@ -274,21 +295,11 @@ def materialize_template_native_scenario(
     bindings: list[dict[str, str]] = []
     for raw_name, raw_value in requested.items():
         canonical = _CONTROL_NAMES[raw_name.casefold()]
+        if canonical == "Fault Time":
+            _seconds(raw_value, canonical)
         _set_named_control(root, canonical, _value(raw_value, canonical), bindings)
-    if dc_fault_time_s is not None:
-        _set_station_parameter(
-            root, "TFlt", _value(dc_fault_time_s, "dc_fault_time_s"), bindings
-        )
-    elif fault_time_s is not None:
-        # The official Station instance forwards TFlt to the MMC fault model;
-        # binding it alongside Fault Time keeps AC and DC scenarios explicit.
-        _set_station_parameter(
-            root, "TFlt", _value(fault_time_s, "fault_time_s"), bindings
-        )
-    if fault_duration_s is not None:
-        _set_station_parameter(
-            root, "FltDur", _value(fault_duration_s, "fault_duration_s"), bindings
-        )
+    if duration is not None or any(name.casefold() == "fault time" for name in requested):
+        _bind_fault_timer(root, duration, bindings)
 
     destination_path.parent.mkdir(parents=True, exist_ok=True)
     try:
@@ -356,17 +367,31 @@ def _find_sample(
     tokens: tuple[str, ...],
     *,
     prefer_activity: bool = False,
+    selector: str | None = None,
+    role: str,
+    invalid: list[str],
 ) -> tuple[Mapping[str, Any], tuple[float, ...], tuple[float, ...]] | None:
     matches: list[tuple[Mapping[str, Any], tuple[float, ...], tuple[float, ...]]] = []
+    matched_count = 0
     for channel in channels:
         text = " ".join(
             str(channel.get(key, "")) for key in ("path", "description", "name")
         ).casefold()
-        if not any(token in text for token in tokens):
+        if (
+            channel.get("path") != selector if selector is not None
+            else not any(token in text for token in tokens)
+        ):
             continue
+        matched_count += 1
         sample = _sample_record(channel)
         if sample is not None:
             matches.append((channel, sample[0], sample[1]))
+        else:
+            invalid.append(f"samples:{role}")
+    if matched_count > 1:
+        invalid.append(f"ambiguous:{role}")
+        if not prefer_activity:
+            return None
     if not matches:
         return None
     if not prefer_activity:
@@ -379,6 +404,7 @@ def evaluate_template_native_dc_fault(
     *,
     fault_current_limit_ka: float,
     topology: SubmoduleTopology | str = SubmoduleTopology.FULL_BRIDGE,
+    channel_selectors: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
     """Evaluate explicit waveform evidence from a template-native DC fault.
 
@@ -400,24 +426,43 @@ def evaluate_template_native_dc_fault(
         }
     raw_channels = samples.get("channels") if isinstance(samples, Mapping) else None
     channels = [item for item in raw_channels if isinstance(item, Mapping)] if isinstance(raw_channels, (list, tuple)) else []
-    fault = _find_sample(
-        channels,
-        ("fault mode", "dc fault active"),
-        prefer_activity=True,
-    )
-    current = _find_sample(channels, ("dc fault current", "fault current"))
-    blocked = _find_sample(channels, ("de-blocking", "block status", "blocked"))
-    inserted = _find_sample(channels, ("v_inserted", "inserted voltage", "negative insertion"))
     missing: list[str] = []
     invalid: list[str] = []
-    for name, sample in (
+    try:
+        valid_limit = not isinstance(fault_current_limit_ka, bool) and math.isfinite(float(fault_current_limit_ka)) and float(fault_current_limit_ka) >= 0
+    except (TypeError, ValueError, OverflowError):
+        valid_limit = False
+    if not valid_limit:
+        invalid.append("fault_current_limit_ka")
+    roles = {"fault_applied", "fault_current", "blocked", "negative_voltage_inserted"}
+    selectors = dict(channel_selectors) if isinstance(channel_selectors, Mapping) else {}
+    if channel_selectors is not None and not isinstance(channel_selectors, Mapping):
+        invalid.append("channel_selectors")
+    if set(selectors) - roles or any(not isinstance(value, str) or not value.strip() for value in selectors.values()):
+        invalid.append("channel_selectors")
+    fault = _find_sample(
+        channels,
+        ("fault mode", "dc fault active", "fault_active"),
+        prefer_activity=True,
+        selector=selectors.get("fault_applied"), role="fault_applied", invalid=invalid,
+    )
+    current = _find_sample(channels, ("dc fault current", "fault current"), selector=selectors.get("fault_current"), role="fault_current", invalid=invalid)
+    blocked = _find_sample(channels, ("de-blocking", "block status", "blocked", "blocking_state"), selector=selectors.get("blocked"), role="blocked", invalid=invalid)
+    inserted = _find_sample(channels, ("v_inserted", "inserted voltage", "negative insertion"), selector=selectors.get("negative_voltage_inserted"), role="negative_voltage_inserted", invalid=invalid)
+    selected = (
         ("fault_applied", fault),
         ("fault_current", current),
         ("blocked", blocked),
         ("negative_voltage_inserted", inserted),
-    ):
+    )
+    for name, sample in selected:
         if sample is None:
             missing.append(name)
+        elif name in {"fault_applied", "blocked"}:
+            if sample[0].get("units") != "1":
+                invalid.append(f"units:{name}")
+            if any(value not in (0.0, 1.0) for value in sample[2]):
+                invalid.append(f"binary:{name}")
     if fault is not None and current is not None and fault[1] != current[1]:
         invalid.append("time_alignment")
     if fault is not None and blocked is not None and fault[1] != blocked[1]:
@@ -432,7 +477,12 @@ def evaluate_template_native_dc_fault(
         "recovered": False,
         "bounded_fault_current": False,
     }
-    evidence: dict[str, Any] = {}
+    evidence: dict[str, Any] = {
+        "selected_channels": {
+            name: {key: sample[0][key] for key in ("path", "call_id", "description", "units", "group") if key in sample[0]}
+            for name, sample in selected if sample is not None
+        }
+    }
     fault_indices: list[int] = []
     if fault is not None:
         fault_times, fault_values = fault[1], fault[2]
@@ -440,21 +490,34 @@ def evaluate_template_native_dc_fault(
         checks["fault_applied"] = bool(fault_indices)
         evidence["fault_time_s"] = fault_times[fault_indices[0]] if fault_indices else None
     if current is not None:
-        peak = max((abs(value) for value in current[2]), default=float("nan"))
-        evidence["fault_current_peak_ka"] = peak
-        try:
-            limit = float(fault_current_limit_ka)
-            checks["bounded_fault_current"] = math.isfinite(limit) and limit >= 0 and math.isfinite(peak) and peak <= limit
-        except (TypeError, ValueError, OverflowError):
-            checks["bounded_fault_current"] = False
-    if inserted is not None and fault_indices:
-        values = inserted[2]
-        checks["negative_voltage_inserted"] = any(values[index] < -1e-9 for index in fault_indices if index < len(values))
+        unit = current[0].get("units")
+        scale = {"kA": 1.0, "A": 0.001}.get(unit) if isinstance(unit, str) else None
+        if scale is None:
+            invalid.append("units:fault_current")
+        else:
+            peak = max(abs(value) * scale for value in current[2])
+            evidence["fault_current_peak_ka"] = peak
+            try:
+                limit = float(fault_current_limit_ka)
+                checks["bounded_fault_current"] = not isinstance(fault_current_limit_ka, bool) and math.isfinite(limit) and limit >= 0 and math.isfinite(peak) and peak <= limit
+            except (TypeError, ValueError, OverflowError):
+                checks["bounded_fault_current"] = False
+    if inserted is not None:
+        unit = inserted[0].get("units")
+        scale = {"kV": 1.0, "V": 0.001}.get(unit) if isinstance(unit, str) else None
+        if scale is None:
+            invalid.append("units:negative_voltage_inserted")
+        elif fault_indices:
+            values = inserted[2]
+            checks["negative_voltage_inserted"] = any(values[index] * scale < -1e-9 for index in fault_indices if index < len(values))
     if blocked is not None and fault_indices:
         values = blocked[2]
-        checks["blocked"] = any(values[index] <= 0 for index in fault_indices if index < len(values))
+        identity = " ".join(str(blocked[0].get(key, "")) for key in ("path", "description", "name")).casefold()
+        active = 0 if "de-blocking" in identity else 1
+        evidence["blocking_active_value"] = active
+        checks["blocked"] = any(values[index] == active for index in fault_indices if index < len(values))
         last_fault = fault_indices[-1]
-        checks["recovered"] = any(value > 0 for value in values[last_fault + 1 :])
+        checks["recovered"] = any(value == 1 - active for value in values[last_fault + 1 :])
     if missing or invalid:
         verdict = "INCOMPLETE_ANALYSIS"
     else:
