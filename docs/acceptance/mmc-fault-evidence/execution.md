@@ -176,3 +176,32 @@ phase-shifted carriers; 1380 Hz is the individual carrier frequency and is not
 claimed as the effective arm switching frequency. Added min/max outputs measure
 actual single-submodule voltages in each arm, to distinguish capacitor imbalance
 from a stable capacitor sum. All original physical bands remain fixed.
+
+The seventh attempt (`fault-evidence-20260908T063325715595Z`, 9451bfa) found
+almost no change after T2's carrier ratio changed: raw DC voltages averaged
+613.589/600.019 kV versus 613.703/599.997 kV in the preceding case. It retained
+physical FAIL with all identities, support copies and cleanup verified. New
+single-cell extrema in the final window were 7.160-11.460 kV at T1 and
+7.606-8.617 kV at T2. These diagnostics do not certify individual cell balance.
+
+The original line comprises two 200 km segments in series, hence 400 km total.
+Independent source-backed modal approximation placed its lowest parallel
+mode near 310 Hz, close to the observed 303 Hz; this is supporting evidence,
+not a proof of the closed-loop cause. The line geometry/constants remain fixed.
+
+The next experiment uses the seventh run as its fixed baseline and adds only
+power-mode DC-port damping: `Idref1 - 1.5*(Edc_Pu-MmcFilteredVdcPu)` feeds InA
+of the existing mode selector before the total Imag/Imax limiter. At T2, negative
+d-axis reference exports power to the AC system, so a positive raw-minus-filtered
+voltage increment makes the current request more negative and increases DC
+power absorption. The local high-pass has zero DC gain and retains the prior
+TIMEZERO initialization. T1 remains in DC-voltage mode, so its selected branch
+is unchanged. All current limiting and FrzI paths see the combined request.
+
+The 1.5 pu gain corresponds to approximately 0.00366 S static incremental
+conductance at 1000 MVA/640 kV, compared with the 900 MW constant-power magnitude
+of 0.00220 S. This estimate does not include current-loop delay, transformer
+leakage or saturation and is not claimed as a stability proof. Actual damping,
+selected d-axis reference before/after limiting, actual dq current and physical
+station DC current are saved for phase/amplitude diagnosis. The average power
+target, raw-voltage acceptance and all physical limits remain unchanged.

@@ -633,6 +633,26 @@ def test_carrier_diagnostic_changes_only_terminal_two_ratio(tmp_path, installed_
     assert result["before_ratio"] == 3.0
 
 
+def test_dc_damping_is_in_power_branch_before_total_current_limit(tmp_path, installed_sources):
+    from xml.etree import ElementTree as ET
+
+    from pscad_mcp.hvdc.builders.mmc.template_audit import _components, _parameters
+    project, _, master = installed_sources
+    filtered = tmp_path / "filtered.pscx"
+    fault_channels.materialize_dc_feedback_filter(project, filtered, master=master)
+    derived = tmp_path / "damped.pscx"
+    result = fault_channels.materialize_dc_port_damping(filtered, derived, master=master)
+    root = ET.parse(derived).getroot()
+    components = {item.get("id"): item for item in _components(root)}
+    assert dict(_parameters(components["1359229547"]))["UL"] == "Imax"
+    assert dict(_parameters(components["1610070623"]))["A"] == "1"
+    assert result["equation"] == "power_mode_id = Idref1 - 1.5 * (Edc_Pu - MmcFilteredVdcPu)"
+    assert result["dc_gain"] == 0.0
+    assert result["branch"] == "P_mode_InA_before_Imag_limiter"
+    assert components[result["gain_owner"]].get("defn") == "master:gain"
+    assert dict(_parameters(components[result["gain_owner"]]))["G"] == "1.5"
+
+
 def test_owned_session_is_cleaned_when_status_raises(monkeypatch):
     import asyncio
 

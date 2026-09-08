@@ -29,6 +29,7 @@ from pscad_mcp.hvdc.builders.mmc.fault_channels import (
     finalize_fault_instrumentation,
     instrument_fault_channels,
     materialize_dc_feedback_filter,
+    materialize_dc_port_damping,
     materialize_terminal_two_carrier,
     materialize_voltage_control_headroom,
     read_fault_output_dataset,
@@ -160,8 +161,10 @@ async def _run_case(service, root, source, library, master, name, fault):
         record["feedback_filter"] = materialize_dc_feedback_filter(repaired, filtered, master=master)
         carrier = case_root / "carrier.pscx"
         record["carrier_diagnostic"] = materialize_terminal_two_carrier(filtered, carrier)
+        damped = case_root / "dc_port_damping.pscx"
+        record["dc_port_damping"] = materialize_dc_port_damping(carrier, damped, master=master)
         project = case_root / f"MMC_{name}.pscx"
-        contract = instrument_fault_channels(carrier, project, library=library, master=master)
+        contract = instrument_fault_channels(damped, project, library=library, master=master)
         contract["required_checks"] = _checks()
         _write(case_root / "channels.json", contract)
         record.update({"native_binding": binding, "channel_contract_path": str(case_root / "channels.json"), "channel_contract_sha256": _hash(case_root / "channels.json"), "project": str(project), "project_instrumented_sha256": _hash(project)})
