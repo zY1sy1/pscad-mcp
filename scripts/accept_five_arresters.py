@@ -78,6 +78,8 @@ async def accept(source, destination, report):
         tree = ET.parse(dst)
         for p in tree.findall('.//User[@defn="master:pgb"]/paramlist/param[@name="enab"]'):
             p.set('value', '0')
+        for p in tree.findall('.//Frame/paramlist/param[@name="state"]'):
+            p.set('value', '0')
         tree.write(dst, encoding='utf-8', xml_declaration=True)
         assert physical_signature(src) == physical_signature(dst)
     try:
@@ -136,7 +138,7 @@ async def accept(source, destination, report):
             entry['elapsed_complete_at'] = time.time()
             write_report(destination, report)
     finally:
-        original_error = sys.exception()
+        original_error = sys.exc_info()[1]
         cleanup = report['cleanup'] = {'owned_pid': managed_acceptance_pid(runtime) if runtime else None}
         cleanup_problems = []
         try:
@@ -198,7 +200,7 @@ def main():
         'runner_sha256': sha(Path(__file__)), 'concurrent_acceptance': True,
         'immutable_inputs': {str(p): sha(p) for p in immutable}, 'cases': {},
         'scope': 'Exclusive five-arrester ideal-switch operation; original physical criteria unchanged',
-        'gui_streaming': 'disabled in run copies; full EMTDC disk output retained'}
+        'gui_streaming': 'disabled and frames collapsed in run copies; full EMTDC disk output retained'}
     write_report(destination, report)
     try:
         subprocess.run(['git', 'merge-base', '--is-ancestor', 'db65d74', 'HEAD'], cwd=REPOSITORY, check=True)

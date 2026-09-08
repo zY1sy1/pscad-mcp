@@ -10,14 +10,14 @@ import shutil
 import sys
 import time
 import xml.etree.ElementTree as ET
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from PIL import Image, ImageGrab
 
 REPOSITORY = Path(__file__).resolve().parents[1]
 SOURCE = Path(os.environ.get('ARRESTER_PREVIEW_SOURCE', 'C:/Users/335/Documents/PSCAD-MCP/five_arresters_20260908'))
-OUTPUT = SOURCE / 'native_preview' / datetime.now(UTC).strftime('%Y%m%d-%H%M%SZ')
+OUTPUT = SOURCE / 'native_preview' / datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%SZ')
 OUTPUT.mkdir(parents=True, exist_ok=False)
 sys.path.insert(0, str(REPOSITORY))
 os.environ.update(PSCAD_MCP_ACCEPTANCE='1', PSCAD_MCP_ACCEPTANCE_CONCURRENT='1',

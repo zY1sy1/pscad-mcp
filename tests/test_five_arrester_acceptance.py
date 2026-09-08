@@ -57,6 +57,7 @@ def runner(monkeypatch):
     spec = importlib.util.spec_from_file_location("five_arrester_acceptance_test", RUNNER)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
+    module.sys = SimpleNamespace(exc_info=sys.exc_info)
     return module
 
 
