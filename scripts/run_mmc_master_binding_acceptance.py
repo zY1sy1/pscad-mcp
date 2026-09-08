@@ -7,6 +7,7 @@ import asyncio
 import math
 import os
 import re
+import shutil
 import sys
 import time
 import uuid
@@ -23,6 +24,11 @@ from pscad_mcp.acceptance.process_scope import (
     concurrent_acceptance_enabled,
     managed_acceptance_pid,
 )
+from pscad_mcp.acceptance.project_finalization import (
+    compare_project_finalization,
+    snapshot_project_semantics,
+)
+from pscad_mcp.core.backend import legacy_support
 from pscad_mcp.core.backend.base import BackendError
 from pscad_mcp.core.backend.legacy import LegacyBackend
 from pscad_mcp.core.master_bindings import AuditedMasterRegistry
@@ -133,6 +139,7 @@ def _code_snapshot() -> dict[str, Any]:
             for path in (
                 Path(__file__).resolve(),
                 REPOSITORY / "tests/test_mmc_master_binding_acceptance.py",
+                REPOSITORY / "tests/test_acceptance_project_finalization.py",
             )
         }
     )
@@ -445,6 +452,102 @@ def _validate_saved_wires(readback, support, project_path, project_sha256) -> No
         )
 
 
+def _artifact(path: Path) -> dict[str, Any]:
+    return {
+        "path": str(path),
+        "sha256": _sha256(path),
+        "bytes": path.stat().st_size,
+        "mtime_ns": path.stat().st_mtime_ns,
+    }
+
+
+def _executables(run_dir: Path, project_path: Path) -> list[Path]:
+    return sorted(run_dir.rglob(project_path.stem + ".exe"))
+
+
+def _validate_fresh_executables(compilation) -> None:
+    artifacts = compilation.get("artifacts", [])
+    started = compilation.get("started_after_ns")
+    _check(
+        compilation.get("executables_before_build") == []
+        and type(started) is int
+        and started > 0
+        and isinstance(artifacts, list)
+        and artifacts
+        and all(
+            _sha(item.get("sha256"))
+            and item.get("bytes", 0) > 0
+            and type(item.get("mtime_ns")) is int
+            and item["mtime_ns"] >= started
+            and str(item.get("path", "")).casefold().endswith(".exe")
+            for item in artifacts
+        ),
+        "A fresh compiled executable is required",
+    )
+
+
+def _validate_finalization(finalization, project) -> None:
+    _check(isinstance(finalization, dict), "Project finalization evidence is required")
+    comparison = finalization.get("semantic_comparison", {})
+    expected = compare_project_finalization(
+        comparison.get("authored"), comparison.get("finalized")
+    )
+    initial = finalization.get("compile", {})
+    authored = finalization.get("authored_project_artifact", {})
+    clean = finalization.get("clean", {})
+    _check(
+        comparison == expected
+        and comparison["finalized"]["path"] == project["path"]
+        and comparison["finalized"]["sha256"]
+        == project["sha256"]
+        == finalization.get("sha256_after_clean")
+        and authored.get("sha256") == comparison["authored"]["sha256"]
+        and authored.get("bytes", 0) > 0
+        and initial.get("success") is True
+        and not _messages_have_errors(initial.get("messages"))
+        and clean.get("mode") == "vendor_project_clean"
+        and clean.get("project") == project["name"]
+        and str(clean.get("result", {}).get("success", "")).casefold() == "true"
+        and clean.get("executables_after_clean") == [],
+        "Project finalization or owned clean evidence differs",
+    )
+    _validate_fresh_executables(initial)
+    initial_artifacts = {item["path"]: item for item in initial["artifacts"]}
+    preserved = finalization.get("artifacts", [])
+    _check(
+        len(preserved) == len(initial_artifacts)
+        and {item.get("original_path") for item in preserved} == set(initial_artifacts)
+        and set(clean.get("executables_before_clean", [])) == set(initial_artifacts)
+        and all(
+            item.get("path") != item["original_path"]
+            and all(
+                item.get(key) == initial_artifacts[item["original_path"]][key]
+                for key in ("sha256", "bytes")
+            )
+            for item in preserved
+        ),
+        "The canonicalization build artifacts must be preserved separately",
+    )
+
+
+def _delivered_artifact_hashes(report) -> dict[str, str]:
+    finalization = report.get("finalization", {})
+    artifacts = {
+        item["path"]: item["sha256"]
+        for item in (
+            *report["compile"].get("artifacts", []),
+            *finalization.get("artifacts", []),
+        )
+    }
+    authored = finalization.get("authored_project_artifact", {})
+    if authored.get("sha256"):
+        artifacts[authored["path"]] = authored["sha256"]
+    project = report.get("project", {})
+    if project.get("sha256"):
+        artifacts[project["path"]] = project["sha256"]
+    return artifacts
+
+
 def validate_mmc_master_binding_report(payload: object) -> dict[str, Any]:
     """Validate finalized evidence without inspecting live PSCAD processes."""
     _check(isinstance(payload, dict), "MMC binding report must be an object")
@@ -498,6 +601,7 @@ def validate_mmc_master_binding_report(payload: object) -> dict[str, Any]:
             "pscad_mcp/core/backend/legacy.py",
             "pscad_mcp/hvdc/builders/mmc/master_bindings.py",
             "pscad_mcp/acceptance/process_scope.py",
+            "pscad_mcp/acceptance/project_finalization.py",
         )
     }
     _check(
@@ -558,19 +662,7 @@ def validate_mmc_master_binding_report(payload: object) -> dict[str, Any]:
             ),
             "Compile binding gate differs from readback",
         )
-    artifacts = compilation.get("artifacts", [])
-    _check(
-        compilation.get("executables_before_build") == []
-        and isinstance(artifacts, list)
-        and artifacts
-        and all(
-            _sha(item.get("sha256"))
-            and item.get("bytes", 0) > 0
-            and str(item.get("path", "")).casefold().endswith(".exe")
-            for item in artifacts
-        ),
-        "A fresh compiled executable is required",
-    )
+    _validate_fresh_executables(compilation)
     project = payload.get("project", {})
     _check(
         _sha(project.get("sha256"))
@@ -579,14 +671,14 @@ def validate_mmc_master_binding_report(payload: object) -> dict[str, Any]:
         == project["sha256"],
         "The finalized compiled project hash must be stable",
     )
+    _validate_finalization(payload.get("finalization"), project)
     _validate_saved_wires(
         payload.get("wire_readback"),
         payload["support"],
         project["path"],
         project["sha256"],
     )
-    artifact_hashes = {item["path"]: item["sha256"] for item in artifacts}
-    artifact_hashes[project["path"]] = project["sha256"]
+    artifact_hashes = _delivered_artifact_hashes(payload)
     _check(
         payload.get("artifacts_immutable") is True
         and payload.get("artifact_hashes_after_cleanup") == artifact_hashes,
@@ -834,6 +926,125 @@ async def _persistence(service, project, bindings, context, bounded):
     return result
 
 
+async def _compile_fixture(
+    service, project_path, run_dir, component_ids, context, record, bounded, timeout
+):
+    project_name = project_path.stem
+    record["success"] = False
+    record["binding_gate"] = await bounded(
+        service.backend.verify_master_binding_state(
+            project_name,
+            component_ids,
+            context.audited.master_sha256,
+            context.audited.registry.sha256,
+        )
+    )
+    record["executables_before_build"] = [
+        str(path) for path in _executables(run_dir, project_path)
+    ]
+    _check(
+        not record["executables_before_build"],
+        "A fresh fixture must not contain a pre-existing project executable",
+    )
+    record["started_at"] = _stamp()
+    record["started_after"] = time.time()
+    record["started_after_ns"] = time.time_ns()
+    record["result"] = await bounded(service.build_project(project_name), timeout)
+    record["messages"] = await bounded(
+        service.get_project_output(project_name, structured=True)
+    )
+    _check(
+        not _messages_have_errors(record["messages"]), "PSCAD reported compiler errors"
+    )
+    executables = _executables(run_dir, project_path)
+    _check(
+        executables
+        and all(
+            path.is_file()
+            and not path.is_symlink()
+            and path.resolve().is_relative_to(run_dir.resolve())
+            for path in executables
+        ),
+        "The build produced no fresh project executable",
+    )
+    record["artifacts"] = [_artifact(path) for path in executables]
+    _validate_fresh_executables(record)
+    record["success"] = True
+
+
+async def _finalize_project(
+    service, project_path, run_dir, component_ids, context, record, bounded, timeout
+):
+    project_name = project_path.stem
+    evidence_dir = run_dir / "canonicalization"
+    evidence_dir.mkdir()
+    authored = snapshot_project_semantics(project_path)
+    authored_copy = evidence_dir / "authored.pscx"
+    shutil.copy2(project_path, authored_copy)
+    record["authored_project_artifact"] = _artifact(authored_copy)
+    _check(
+        record["authored_project_artifact"]["sha256"] == authored["sha256"],
+        "The authored project changed while preserving finalization evidence",
+    )
+    record["semantic_comparison"] = {"authored": authored}
+    record["compile"] = {}
+    await _compile_fixture(
+        service,
+        project_path,
+        run_dir,
+        component_ids,
+        context,
+        record["compile"],
+        bounded,
+        timeout,
+    )
+    record["save_result"] = await bounded(
+        service.save_project(project_name, confirm=True)
+    )
+    finalized = snapshot_project_semantics(project_path)
+    record["semantic_comparison"]["finalized"] = finalized
+    record["semantic_comparison"] = compare_project_finalization(authored, finalized)
+    record["artifacts"] = []
+    for index, item in enumerate(record["compile"]["artifacts"]):
+        source = Path(item["path"])
+        copy = evidence_dir / f"initial-{index}-{source.name}"
+        shutil.copy2(source, copy)
+        preserved = {**_artifact(copy), "original_path": str(source)}
+        _check(
+            preserved["sha256"] == item["sha256"],
+            "The canonicalization executable changed while preserving evidence",
+        )
+        record["artifacts"].append(preserved)
+    clean = record["clean"] = {
+        "mode": "vendor_project_clean",
+        "project": project_name,
+        "executables_before_clean": [
+            str(path) for path in _executables(run_dir, project_path)
+        ],
+    }
+    native_project = await bounded(service.backend._project(project_name))
+    operation = getattr(native_project, "clean", None)
+    _check(callable(operation), "The owned vendor project has no clean capability")
+    response = await bounded(
+        service.backend.executor.run_safe(operation, timeout=timeout), timeout
+    )
+    clean["result"] = legacy_support.response_payload(response)
+    legacy_support.require_success(response, "clean_project", {"project": project_name})
+    clean["executables_after_clean"] = [
+        str(path) for path in _executables(run_dir, project_path)
+    ]
+    _check(
+        not clean["executables_after_clean"],
+        "The owned project clean left a canonicalization executable behind",
+    )
+    record["sha256_after_clean"] = _sha256(project_path)
+    _check(
+        record["sha256_after_clean"] == finalized["sha256"],
+        "The finalized project changed during owned clean",
+    )
+    return finalized["sha256"]
+
+
 async def run_attempt(
     args: argparse.Namespace, run_dir: Path, *, service_factory=_service
 ) -> dict[str, Any]:
@@ -962,7 +1173,7 @@ async def run_attempt(
         report["bindings"] = await _read_bindings(
             service, project_name, component_ids, context, bounded
         )
-        report["project"]["sha256_before_compile"] = _sha256(project_path)
+        authored_sha256 = _sha256(project_path)
         report["wire_readback"] = await bounded(
             asyncio.to_thread(read_saved_fixture_wires, project_path, report["support"])
         )
@@ -970,63 +1181,53 @@ async def run_attempt(
             report["wire_readback"],
             report["support"],
             str(project_path),
-            report["project"]["sha256_before_compile"],
+            authored_sha256,
+        )
+        report["authored_wire_readback"] = report["wire_readback"]
+        begin("finalize_project")
+        report["finalization"] = {}
+        report["project"]["sha256"] = await _finalize_project(
+            service,
+            project_path,
+            run_dir,
+            component_ids,
+            context,
+            report["finalization"],
+            bounded,
+            args.build_timeout,
+        )
+        report["bindings"] = await _read_bindings(
+            service, project_name, component_ids, context, bounded
+        )
+        report["wire_readback"] = await bounded(
+            asyncio.to_thread(read_saved_fixture_wires, project_path, report["support"])
+        )
+        _validate_saved_wires(
+            report["wire_readback"],
+            report["support"],
+            str(project_path),
+            report["project"]["sha256"],
         )
         begin("compile")
-        report["compile"]["binding_gate"] = await bounded(
-            service.backend.verify_master_binding_state(
-                project_name,
-                component_ids,
-                context.audited.master_sha256,
-                registry.sha256,
-            )
-        )
-        report["compile"]["executables_before_build"] = [
-            str(path) for path in run_dir.rglob(project_path.stem + ".exe")
-        ]
-        _check(
-            not report["compile"]["executables_before_build"],
-            "A fresh fixture must not contain a pre-existing project executable",
-        )
-        report["compile"]["started_at"] = _stamp()
-        report["compile"]["started_after"] = time.time()
-        report["compile"]["result"] = await bounded(
-            service.build_project(project_name), args.build_timeout
-        )
-        report["compile"]["messages"] = await bounded(
-            service.get_project_output(project_name, structured=True)
-        )
-        _check(
-            not _messages_have_errors(report["compile"]["messages"]),
-            "PSCAD reported compiler errors",
-        )
-        executables = list(run_dir.rglob(project_path.stem + ".exe"))
-        _check(
-            executables
-            and all(
-                path.is_file()
-                and not path.is_symlink()
-                and path.resolve().is_relative_to(run_dir.resolve())
-                for path in executables
-            ),
-            "The build produced no fresh project executable",
-        )
-        report["compile"]["artifacts"] = [
-            {
-                "path": str(path),
-                "sha256": _sha256(path),
-                "bytes": path.stat().st_size,
-                "mtime_ns": path.stat().st_mtime_ns,
-            }
-            for path in sorted(executables)
-        ]
-        await bounded(service.save_project(project_name, confirm=True))
-        report["project"]["sha256_after_compile"] = report["project"]["sha256"] = (
-            _sha256(project_path)
-        )
+        report["project"]["sha256_before_compile"] = _sha256(project_path)
         _check(
             report["project"]["sha256_before_compile"] == report["project"]["sha256"],
-            "The saved project changed during compilation",
+            "The finalized project changed before the fresh compile",
+        )
+        await _compile_fixture(
+            service,
+            project_path,
+            run_dir,
+            component_ids,
+            context,
+            report["compile"],
+            bounded,
+            args.build_timeout,
+        )
+        report["project"]["sha256_after_compile"] = _sha256(project_path)
+        _check(
+            report["project"]["sha256_after_compile"] == report["project"]["sha256"],
+            "The finalized project changed during compilation",
         )
         report["compile"]["success"] = True
         begin("persistence")
@@ -1108,13 +1309,7 @@ async def run_attempt(
             ):
                 report["status"] = "FAIL"
                 report.setdefault("failure_category", "implementation_defect")
-            artifacts = {
-                item["path"]: item["sha256"]
-                for item in report["compile"].get("artifacts", [])
-            }
-            project = report.get("project", {})
-            if project.get("sha256"):
-                artifacts[project["path"]] = project["sha256"]
+            artifacts = _delivered_artifact_hashes(report)
             report["artifact_hashes_after_cleanup"] = {
                 path: _sha256(Path(path)) for path in artifacts
             }

@@ -215,6 +215,13 @@ class Session:
         mutate_project_on_quit=False,
         wire_mutation=None,
         wire_index=0,
+        normalize_metadata=False,
+        finalization_mutation=None,
+        finalized_drift=None,
+        skip_second_executable=False,
+        clean_leaves_executable=False,
+        clean_changes_project=False,
+        clean_error=False,
     ):
         self.context = audit_mmc_master_bindings(master)
         self.backend = self
@@ -230,6 +237,15 @@ class Session:
         self.no_executable = no_executable
         self.mutate_project_on_quit = mutate_project_on_quit
         self.wire_mutation, self.wire_index = wire_mutation, wire_index
+        self.normalize_metadata = normalize_metadata
+        self.finalization_mutation = finalization_mutation
+        self.finalized_drift = finalized_drift
+        self.skip_second_executable = skip_second_executable
+        self.clean_leaves_executable = clean_leaves_executable
+        self.clean_changes_project = clean_changes_project
+        self.clean_error = clean_error
+        self.build_count = 0
+        self.executor = SimpleNamespace(run_safe=self.run_safe)
         self.reloaded = False
         self.runtime = {
             "connected": True,
@@ -398,12 +414,42 @@ class Session:
     async def save_project(self, project, *, confirm):
         self.calls.append(("save", project))
         root = ET.Element("project", name=project, version="4.6.2")
+        normalized = self.normalize_metadata and self.build_count > 0
+        settings = ET.SubElement(root, "paramlist", name="Settings")
+        ET.SubElement(
+            settings,
+            "param",
+            name="revisor",
+            value="user, 1" if normalized else "user, 0",
+        )
         definitions = ET.SubElement(root, "definitions")
         schematic = ET.SubElement(
-            ET.SubElement(definitions, "Definition", name="Main"),
+            ET.SubElement(
+                definitions,
+                "Definition",
+                name="Main",
+                date="1" if normalized else "0",
+                crc="456" if normalized else "123",
+            ),
             "schematic",
             classid="UserCanvas",
         )
+        sequence = ET.SubElement(schematic, "paramlist")
+        ET.SubElement(sequence, "param", name="auto_sequence", value="1")
+        for item in self.components.values():
+            user = ET.SubElement(
+                schematic,
+                "User",
+                id=str(item["id"]),
+                defn=item["definition"],
+                x=str(item["location"]["x"]),
+                y=str(item["location"]["y"]),
+                orient=str(item["orientation"]),
+                z="1" if normalized else "-1",
+            )
+            parameters = ET.SubElement(user, "paramlist")
+            for name, value in item["parameters"].items():
+                ET.SubElement(parameters, "param", name=name, value=str(value))
         for index, (wire_id, requested) in enumerate(self.wires.items()):
             mutation = self.wire_mutation if index == self.wire_index else None
             if mutation == "missing":
@@ -429,6 +475,8 @@ class Session:
                 x=str(origin[0]),
                 y=str(origin[1]),
                 orient="0",
+                w="118" if normalized else "82",
+                h="28" if normalized else "10",
             )
             for x, y in vertices:
                 ET.SubElement(
@@ -436,6 +484,11 @@ class Session:
                 )
             if mutation == "duplicate":
                 parent.append(copy.deepcopy(wire))
+        if self.build_count == 1:
+            if self.finalization_mutation == "parameter":
+                root.find(".//User/paramlist/param[@name='R']").set("value", "11")
+            elif self.finalization_mutation == "wire":
+                root.find(".//Wire/vertex").set("x", "18")
         ET.ElementTree(root).write(self.path, encoding="utf-8", xml_declaration=True)
 
     async def reload_project(self, project, filename):
@@ -452,9 +505,38 @@ class Session:
 
     async def build_project(self, project):
         self.calls.append(("build", project))
-        if not self.no_executable:
-            self.path.with_suffix(".exe").write_bytes(b"offline compiler test artifact")
+        self.build_count += 1
+        if not self.no_executable and not (
+            self.skip_second_executable and self.build_count == 2
+        ):
+            self.path.with_suffix(".exe").write_bytes(
+                f"offline compiler test artifact {self.build_count}".encode("ascii")
+            )
+        if self.finalized_drift and self.build_count == 2:
+            tree = ET.parse(self.path)
+            if self.finalized_drift == "metadata":
+                tree.find("./paramlist/param[@name='revisor']").set("value", "user, 2")
+            else:
+                tree.find(".//User/paramlist/param[@name='R']").set("value", "11")
+            tree.write(self.path, encoding="utf-8", xml_declaration=True)
         return "Project built successfully"
+
+    async def _project(self, name):
+        assert name == self.path.stem
+        return self
+
+    async def run_safe(self, function, *args, timeout=None):
+        return function(*args)
+
+    def clean(self):
+        self.calls.append(("clean", self.path.stem))
+        if not self.clean_leaves_executable:
+            self.path.with_suffix(".exe").unlink()
+        if self.clean_changes_project:
+            tree = ET.parse(self.path)
+            tree.find("./paramlist/param[@name='revisor']").set("value", "user, 2")
+            tree.write(self.path, encoding="utf-8", xml_declaration=True)
+        return ET.Element("result", success="false" if self.clean_error else "true")
 
     async def get_project_output(self, project, *, structured):
         assert structured
@@ -475,8 +557,20 @@ class Session:
         self.calls.append(("disconnect",))
 
 
-def attempt(tmp_path, monkeypatch, **session_options):
+def attempt(tmp_path, monkeypatch, *, source_code_drift=False, **session_options):
     module = runner()
+    baseline_code = module._code_snapshot()
+    snapshot_calls = 0
+
+    def code_snapshot():
+        nonlocal snapshot_calls
+        snapshot_calls += 1
+        result = copy.deepcopy(baseline_code)
+        if source_code_drift and snapshot_calls > 1:
+            result["source_code_hashes"][str(SCRIPT.resolve())] = "b" * 64
+        return result
+
+    monkeypatch.setattr(module, "_code_snapshot", code_snapshot)
     for name in (
         "PSCAD_MCP_ACCEPTANCE",
         "PSCAD_MCP_MASTER_BINDING_ACCEPTANCE",
@@ -540,6 +634,123 @@ def test_registry_complete_fixture_preserves_normalized_rx_and_scoped_evidence(
     assert session.calls[-1] == ("quit", True)
     assert report["source_hashes_before"] == report["source_hashes_after"]
     assert str(SCRIPT.resolve()) in report["code_before"]["source_code_hashes"]
+
+
+def test_native_metadata_is_finalized_before_a_clean_fresh_compile(
+    tmp_path, monkeypatch
+):
+    module, report, session = attempt(tmp_path, monkeypatch, normalize_metadata=True)
+    assert report["status"] == "PASS", report.get("error")
+    finalization = report["finalization"]
+    semantic = finalization["semantic_comparison"]
+    assert semantic["semantic_structure_unchanged"] is True
+    assert semantic["metadata_changes"]
+    assert semantic["authored"]["sha256"] != semantic["finalized"]["sha256"]
+    assert semantic["finalized"]["sha256"] == report["project"]["sha256"]
+    assert finalization["clean"]["executables_after_clean"] == []
+    assert finalization["sha256_after_clean"] == report["project"]["sha256"]
+    assert report["wire_readback"]["project_sha256"] == report["project"]["sha256"]
+    assert report["compile"]["executables_before_build"] == []
+    assert (
+        report["compile"]["artifacts"][0]["sha256"]
+        != finalization["artifacts"][0]["sha256"]
+    )
+    assert all(Path(item["path"]).is_file() for item in finalization["artifacts"])
+    assert Path(finalization["authored_project_artifact"]["path"]).is_file()
+    build_calls = [i for i, call in enumerate(session.calls) if call[0] == "build"]
+    clean_call = next(i for i, call in enumerate(session.calls) if call[0] == "clean")
+    assert len(build_calls) == 2 and build_calls[0] < clean_call < build_calls[1]
+    assert not any(call[0] == "save" for call in session.calls[build_calls[1] :])
+    assert module.validate_mmc_master_binding_report(report) is report
+
+
+@pytest.mark.parametrize("mutation", ["parameter", "wire"])
+def test_compiler_finalization_rejects_authored_semantic_drift(
+    tmp_path, monkeypatch, mutation
+):
+    _, report, session = attempt(
+        tmp_path, monkeypatch, normalize_metadata=True, finalization_mutation=mutation
+    )
+    assert report["status"] == "FAIL"
+    assert report["failed_stage"] == "finalize_project"
+    assert "semantic" in report["error"]["message"]
+    assert session.build_count == 1
+    assert report["cleanup"]["owned_process_cleaned"] is True
+
+
+@pytest.mark.parametrize("mutation", ["parameter", "metadata"])
+def test_finalized_project_rejects_any_hash_drift_during_fresh_compile(
+    tmp_path, monkeypatch, mutation
+):
+    _, report, session = attempt(
+        tmp_path, monkeypatch, normalize_metadata=True, finalized_drift=mutation
+    )
+    assert report["status"] == "FAIL"
+    assert report["failed_stage"] == "compile"
+    assert (
+        report["project"]["sha256_before_compile"]
+        != report["project"]["sha256_after_compile"]
+    )
+    assert report["cleanup"]["owned_process_cleaned"] is True
+    assert session.build_count == 2
+
+
+@pytest.mark.parametrize(
+    "failure", ["clean_leaves_executable", "skip_second_executable"]
+)
+def test_canonicalization_executable_cannot_satisfy_fresh_build(
+    tmp_path, monkeypatch, failure
+):
+    _, report, session = attempt(tmp_path, monkeypatch, **{failure: True})
+    assert report["status"] == "FAIL"
+    assert report["failed_stage"] == (
+        "finalize_project" if failure == "clean_leaves_executable" else "compile"
+    )
+    assert session.build_count == (1 if failure == "clean_leaves_executable" else 2)
+    assert report["cleanup"]["owned_process_cleaned"] is True
+
+
+@pytest.mark.parametrize(
+    "mutation", ["missing", "project_hash", "semantics", "clean", "preserved_artifact"]
+)
+def test_pass_report_requires_finalization_evidence(tmp_path, monkeypatch, mutation):
+    module, report, _ = attempt(tmp_path, monkeypatch)
+    assert report["status"] == "PASS", report.get("error")
+    assert "finalization" in report
+    if mutation == "missing":
+        del report["finalization"]
+    elif mutation == "project_hash":
+        report["finalization"]["semantic_comparison"]["finalized"]["sha256"] = "b" * 64
+    elif mutation == "semantics":
+        report["finalization"]["semantic_comparison"]["authored"]["semantics"][
+            "attributes"
+        ]["name"] = "Other"
+    elif mutation == "clean":
+        report["finalization"]["clean"]["executables_after_clean"] = ["stale.exe"]
+    else:
+        report["finalization"]["artifacts"][0]["sha256"] = "b" * 64
+    with pytest.raises(ValueError):
+        module.validate_mmc_master_binding_report(report)
+
+
+@pytest.mark.parametrize("failure", ["clean_changes_project", "clean_error"])
+def test_owned_clean_must_succeed_without_changing_finalized_input(
+    tmp_path, monkeypatch, failure
+):
+    _, report, session = attempt(tmp_path, monkeypatch, **{failure: True})
+    assert report["status"] == "FAIL"
+    assert report["failed_stage"] == "finalize_project"
+    assert session.build_count == 1
+    assert report["cleanup"]["owned_process_cleaned"] is True
+
+
+def test_runtime_source_hash_drift_cannot_pass(tmp_path, monkeypatch):
+    _, report, session = attempt(tmp_path, monkeypatch, source_code_drift=True)
+    assert session.build_count == 2
+    assert report["status"] == "FAIL"
+    assert report["source_code_immutable"] is False
+    assert report["source_inputs_immutable"] is True
+    assert report["cleanup"]["owned_process_cleaned"] is True
 
 
 @pytest.mark.parametrize(
@@ -654,9 +865,9 @@ def test_compiler_messages_override_success_string_and_preserve_failure(
 ):
     _, report, session = attempt(tmp_path, monkeypatch, compiler_error=True)
     assert report["status"] == "FAIL"
-    assert report["failed_stage"] == "compile"
-    assert report["compile"]["success"] is False
-    assert report["compile"]["messages"][0]["severity"] == "error"
+    assert report["failed_stage"] == "finalize_project"
+    assert report["finalization"]["compile"]["success"] is False
+    assert report["finalization"]["compile"]["messages"][0]["severity"] == "error"
     assert report["cleanup"]["owned_process_cleaned"] is True
     assert session.calls[-1] == ("quit", True)
     assert report["source_inputs_immutable"] is True
@@ -711,7 +922,7 @@ def test_cleanup_timeout_cannot_produce_pass_even_after_owned_pid_exits(
 def test_build_success_without_an_executable_is_not_acceptance(tmp_path, monkeypatch):
     _, report, _ = attempt(tmp_path, monkeypatch, no_executable=True)
     assert report["status"] == "FAIL"
-    assert report["failed_stage"] == "compile"
+    assert report["failed_stage"] == "finalize_project"
     assert report["cleanup"]["owned_process_cleaned"] is True
 
 
