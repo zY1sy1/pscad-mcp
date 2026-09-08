@@ -37,8 +37,12 @@ def _compiler_support(library: Path) -> dict[str, object]:
     required = "Obj_Files_2016_03_25" in text
     hashes: dict[str, str] = {}
     files: dict[str, dict[str, str]] = {}
-    if support.is_dir():
+    support_present = support.is_dir() and support.resolve().is_relative_to(library.parent.resolve())
+    if support_present:
         for path in sorted(item for item in support.rglob("*") if item.is_file()):
+            if path.is_symlink() or not path.resolve().is_relative_to(library.parent.resolve()):
+                support_present = False
+                continue
             hashes[path.relative_to(support).as_posix()] = _sha256(path)
             if not path.is_symlink():
                 relative = path.relative_to(library.parent).as_posix()
@@ -53,7 +57,8 @@ def _compiler_support(library: Path) -> dict[str, object]:
             continue
         normalized = raw.replace("\\", "/")
         parts = tuple(part for part in normalized.split("/") if part not in ("", "."))
-        invalid_path = Path(normalized).is_absolute() or PureWindowsPath(raw).is_absolute() or ".." in parts
+        windows_path = PureWindowsPath(raw)
+        invalid_path = bool(Path(normalized).is_absolute() or windows_path.root or windows_path.drive or windows_path.anchor or ".." in parts)
         unsupported_macro = "$" in normalized.replace("$(Compiler)", "")
         matches: list[Path] = []
         if not invalid_path and not unsupported_macro and not any(character in normalized for character in ("*", "?", "[", "]")):
@@ -75,7 +80,7 @@ def _compiler_support(library: Path) -> dict[str, object]:
     return {
         "required": required,
         "root": str(support),
-        "present": support.is_dir(),
+        "present": support_present,
         "hashes": hashes,
         "link_libraries": {"required": bool(declarations), "present": all_present, "declarations": declarations, "files": [linked[key] for key in sorted(linked)]},
         "files": [files[key] for key in sorted(files)],

@@ -144,6 +144,41 @@ def test_audit_legacy_fixture_without_libs_remains_compatible(tmp_path):
     assert report["compiler_support"]["link_libraries"] == {"required": False, "present": True, "declarations": [], "files": []}
 
 
+@pytest.mark.parametrize("declared", [r"\lib\intermediate.lib", r"C:lib\intermediate.lib"])
+def test_audit_rejects_windows_anchored_nonabsolute_link_paths(tmp_path, declared):
+    from xml.etree import ElementTree as ET
+    project, library = make_synthetic_official_shape(tmp_path)
+    tree = ET.parse(library)
+    params = ET.SubElement(tree.getroot(), "paramlist", {"name": "Libs"})
+    ET.SubElement(params, "param", {"name": "0", "value": declared})
+    tree.write(library, encoding="utf-8")
+    substitute = tmp_path / "lib" / "intermediate.lib"
+    substitute.parent.mkdir()
+    substitute.write_bytes(b"unrelated-sibling")
+    report = audit_mmc_template(project, library)
+    assert report["compatible"] is False
+    assert report["compiler_support"]["files"] == []
+
+
+def test_audit_rejects_object_directory_resolving_outside_library(tmp_path, monkeypatch):
+    project, library = make_synthetic_official_shape(tmp_path)
+    library.write_text(library.read_text().replace("</library>", '<param name="object" value="Obj_Files_2016_03_25/gf42/x.obj" /></library>'))
+    support = tmp_path / "Obj_Files_2016_03_25"
+    support.mkdir()
+    (support / "x.obj").write_bytes(b"synthetic-object")
+    real_resolve = Path.resolve
+    outside = tmp_path.parent / "foreign-object-tree"
+    def resolve(path, *args, **kwargs):
+        if path == support or support in path.parents:
+            return outside / path.relative_to(support)
+        return real_resolve(path, *args, **kwargs)
+    monkeypatch.setattr(Path, "resolve", resolve)
+    report = audit_mmc_template(project, library)
+    assert report["compatible"] is False
+    assert report["compiler_support"]["present"] is False
+    assert report["compiler_support"]["files"] == []
+
+
 def test_audit_records_template_native_emt_control_contract(tmp_path: Path) -> None:
     project, library = make_synthetic_official_shape(tmp_path)
     text = project.read_text(encoding="utf-8")
