@@ -167,6 +167,8 @@ _BRIDGE_ELECTRICAL_PORTS = (
     "REF_B",
     "REF_C",
 )
+# Input harnesses must approach the module from the left of its output ports.
+_FIXTURE_POSITION = (1440, 180)
 
 
 def _error(code: str, message: str, operation: str, **details: Any) -> BackendError:
@@ -475,7 +477,7 @@ async def _add_fixture_harness(
     input_ports = _FIXTURE_INPUTS[fixture.definition]
     for source_index, port_name in enumerate(input_ports):
         contract = require_port(definition, port_name)
-        target = absolute_port((180, 180), contract.offset, 0)
+        target = absolute_port(_FIXTURE_POSITION, contract.offset, 0)
         integer = False
         if port_name in {"AO_Y", "AO_D"}:
             value = "0.2617993877991494" if fixture.parameters.get("UP") == 1 else "1.57"
@@ -518,7 +520,7 @@ async def _add_fixture_harness(
     if fixture.definition.endswith(":LCC12PulseBridge"):
         for index, port_name in enumerate(_BRIDGE_ELECTRICAL_PORTS):
             contract = require_port(definition, port_name)
-            target = absolute_port((180, 180), contract.offset, 0)
+            target = absolute_port(_FIXTURE_POSITION, contract.offset, 0)
             ground = (1080 + index * 72, 1080)
             await _service_call(
                 "create_fixture_harness",
@@ -690,8 +692,7 @@ async def run_companion_component_gate(
                 project_name,
                 library,
                 definition_name,
-                180,
-                180,
+                *_FIXTURE_POSITION,
                 0,
                 dict(fixture.parameters),
                 canvas_name="Main",

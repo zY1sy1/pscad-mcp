@@ -583,3 +583,25 @@ def test_fixture_input_harness_uses_non_crossing_bend_order(tmp_path):
         432,
         378,
     ]
+
+
+def test_fixture_input_wires_do_not_drive_module_output_ports(tmp_path):
+    from pscad_mcp.hvdc.builders.lcc.catalog import parse_catalog
+    from pscad_mcp.hvdc.builders.lcc.companion import EXPECTED_PORTS
+
+    assets, master, registry, master_hash, registry_hash = _inputs(tmp_path)
+    service = CompanionGateFakeService()
+    result = asyncio.run(_subject()(service, assets, tmp_path / "fixtures",
+        master_path=master, registry_path=registry,
+        expected_master_sha256=master_hash, expected_registry_sha256=registry_hash))
+    assert result["status"] == "PASS"
+    module = next(call[1] for call in service.calls if call[0] == "add_canvas_component" and call[1][2] == "SignalInterface")
+    ports = parse_catalog(assets.catalog).definitions["cigre_lcc_v1:SignalInterface"].ports
+    outputs = [(module[3] + port.offset[0], module[4] + port.offset[1]) for port in ports
+        if EXPECTED_PORTS["cigre_lcc_v1:SignalInterface"][port.name]["direction"] == "output"]
+    wires = [call[1][1] for call in service.calls if call[0] == "create_wire" and call[1][0] == "signal_interface"]
+    for wire in wires:
+        for left, right in zip(wire, wire[1:]):
+            for x, y in outputs:
+                assert not (left[0] == right[0] == x and min(left[1], right[1]) <= y <= max(left[1], right[1])
+                    or left[1] == right[1] == y and min(left[0], right[0]) <= x <= max(left[0], right[0]))
