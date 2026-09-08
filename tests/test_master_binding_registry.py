@@ -715,6 +715,31 @@ def test_filter_expansion_is_a_shunt_with_distinct_phase_buses():
     assert len({points[f"IN_{phase}"] for phase in "ABC"}) == 3
 
 
+@pytest.mark.parametrize("raw_dimension", [0, 1, None])
+def test_adaptive_electrical_ports_preserve_raw_dimension_evidence(tmp_path, raw_dimension):
+    module = _subject()
+    binding = _minimal_binding()
+    binding["ports"][0]["dimension"] = 3
+    registry = module.parse_master_binding_registry(_registry_payload(binding))
+    dimension = "" if raw_dimension is None else f"dim='{raw_dimension}'"
+    master = tmp_path / "adaptive.pslx"
+    master.write_text(
+        "<project><definitions><Definition name='resistor'>"
+        "<form><category><parameter name='R' type='Real' unit='ohm'><value>1</value></parameter></category></form>"
+        f"<svg><port name='A' model='Natural' {dimension} x='0' y='0'/></svg>"
+        "</Definition></definitions></project>", encoding="utf-8",
+    )
+    if raw_dimension != 0:
+        with pytest.raises(BackendError) as failure:
+            module.audit_master_bindings(master, registry)
+        assert failure.value.code == "MASTER_PORT_MISMATCH"
+    else:
+        audited = module.audit_master_bindings(master, registry)
+        port = audited.definitions["master:test"]["selected_ports"]["IN"]
+        assert port["dimension"] == 3
+        assert port["raw_dimension"] == 0
+
+
 def test_registry_hash_is_stable_for_key_order():
     module = _subject()
     payload = _registry_payload()

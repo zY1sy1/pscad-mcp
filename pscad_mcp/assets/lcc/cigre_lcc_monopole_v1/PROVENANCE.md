@@ -33,7 +33,7 @@ records. `RectifierControl` uses current-error PI and hard limiting;
 interfaces use audited `pin`, `breakout`, `import`, and `export` primitives.
 PSCAD 4.6.2 does not permit individual `breakout` array elements to be
 externalized directly. Each of the six scalar AC phase ports therefore uses
-an audited `master:resistor` fixed at `1e-6 ohm` before the internal
+an audited `master:resistor` fixed at `1e-3 ohm` before the internal
 three-phase breakout; this deterministic phase-isolation branch preserves the
 scalar external contract while giving each array element an internal node.
 The no-fault smoke channels use ten audited `master:pgb` output blocks inside
@@ -127,7 +127,8 @@ reload, and compile readback; this is not independent waveform golden evidence.
 The bridge CB input requires an electrical node reference, not an integer
 block command. A shared installed `master:nodeloop` with `View=1` receives
 three explicit primary-bus REF_A/B/C ports and routes X1 to both CB inputs.
-The scalar reference ports use the same 1e-6 ohm isolation as the valve ports.
+The scalar reference ports retain 1e-6 ohm isolation; the measured valve ports
+use 1e-3 ohm to avoid an ill-conditioned matrix with ideal current meters.
 Installed `Choosing_a_Converter_Transformer.htm` requires a nearly sinusoidal
 reference, usually at the filtered bus. The Y-Y group uses KV=-1 and the
 Y-delta lagging group uses KV=-2, matching native transformer Lead=1 (Lags).
@@ -206,10 +207,13 @@ rectifier/inverter valve-voltage ratio follows the installed benchmark's
 331.8402990/325.2691193 MVA. Equal valve voltages had forced the corrected
 constant-gamma/current loops outside the declared alpha operating band.
 
-The retained DC resistance is 10 ohm. Both smoothing reactors are 1.1936 H,
-preserving the installed benchmark's total L/R of 0.23872 s (two 0.5968 H
-reactors and 5 ohm total resistance). The former two 0.1 H defaults gave
-0.02 s and excessive fault-current rise. The installed native mingam at
+The retained DC resistance is 10 ohm. Both smoothing reactors are 0.2 H.
+The measured initial fault voltage impulse of 0.45023 kV*s informed this
+case-specific sizing. An isolated 0.2 H-per-terminal run produced a 2.7205
+peak/prefault current ratio and 8.897% raw converter-voltage ripple under
+the unchanged limits of 3.0 and 10%. The former 0.1 H defaults gave excessive
+fault-current rise; scaling the reference L/R to 1.1936 H per terminal
+unnecessarily increased raw voltage ripple in this case. The native mingam at
 50 Hz now takes a full-cycle minimum in the actual gamma feedback path and
 its exported measurement. It retains low-gamma events; it is not a filter
 applied only to an acceptance report. The phase-reference, transformer-base,
@@ -220,3 +224,19 @@ These corrections establish a meaningful operating point, not acceptance.
 The raw converter-voltage ripple criterion and its sensor location remain
 unchanged. Independent diagnostic changes to transformer leakage and midpoint
 capacitance were not packaged as a substitute for passing that physical check.
+
+Two native three-phase power meters per bridge measure instantaneous power
+at the Y and delta valve-group AC inputs (P3PH3, S=1 MVA, TS=0). Their native
+sum is exported through the module's DSDYN interface as P_AC and recorded as
+PCONV_RECT/PCONV_INV. This matches the existing DC voltage/current transfer
+phase. Direct DSOUT plotting instead led the DC measurements by one step;
+no output data is shifted during acceptance. The 1e-3 ohm phase measurement
+burden avoids the singular matrix observed with ideal ammeters next to
+1e-6 ohm branches, with negligible added nominal loss.
+
+The 5% pointwise AC/DC product check now uses independent converter AC power
+PCONV_RECT at the same physical boundary as VDC_RECT*IDC. The former grid-side
+power included transformer energy exchange and measurement smoothing. The
+original P_RECT/P_INV grid meters and their 100 MW terminal-balance check are
+retained. Every existing physical threshold remains unchanged; converter power
+is neither VDC*IDC nor an assumed multiple of one phase.

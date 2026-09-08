@@ -51,6 +51,8 @@ def passing_raw_channels(*, step_s: float = 0.00005, end_s: float = 1.5) -> dict
             ),
             channel("Main/P_RECT", "MW", constant(500.0)),
             channel("Main/P_INV", "MW", constant(-480.0)),
+            channel("Main/PCONV_RECT", "MW", constant(500.0)),
+            channel("Main/PCONV_INV", "MW", constant(-480.0)),
             channel("Main/ALPHA_RECT", "rad", constant(math.radians(15.0))),
             channel("Main/MU_RECT", "rad", constant(math.radians(10.0))),
         ]

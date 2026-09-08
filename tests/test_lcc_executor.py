@@ -1338,7 +1338,8 @@ def test_wp1c_executor_binds_failed_checks_to_stable_output_metadata(tmp_path, d
 
 
 @pytest.mark.parametrize("prefault_violation", [False, True])
-def test_wp1c_physical_checks_use_only_the_declared_prefault_window(tmp_path, prefault_violation):
+@pytest.mark.parametrize("power_channel", ["Main/P_RECT", "Main/PCONV_RECT"])
+def test_wp1c_physical_checks_use_only_the_declared_prefault_window(tmp_path, prefault_violation, power_channel):
     assets = load_packaged_asset_set()
     original_contract = json.dumps(assets.acceptance, sort_keys=True)
     base = _plan(tmp_path)
@@ -1347,7 +1348,7 @@ def test_wp1c_physical_checks_use_only_the_declared_prefault_window(tmp_path, pr
         blueprint=replace(base.blueprint, settings={"simulation_duration_s": 1.5, "output_step_s": 0.00005}),
     )
     raw = passing_raw_channels()
-    power = next(channel for channel in raw["channels"] if channel["path"] == "Main/P_RECT")
+    power = next(channel for channel in raw["channels"] if channel["path"] == power_channel)
     power["values"] = [9999.0 if t < 0.7 or t == 0.8 else value for t, value in zip(power["domain"], power["values"])]
     if prefault_violation:
         power["values"][power["domain"].index(0.7)] = 9999.0

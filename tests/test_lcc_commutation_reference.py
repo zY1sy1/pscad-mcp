@@ -22,7 +22,7 @@ def test_bridge_references_are_independent_of_valve_terminals():
     for wire in schematic.findall("Wire"):
         origin = (int(wire.get("x")), int(wire.get("y")))
         points = [(origin[0] + int(v.get("x")), origin[1] + int(v.get("y"))) for v in wire.findall("vertex")]
-        if wire.get("lcc_role") in {"ACY_TO_Y_BUS", "ACD_TO_D_BUS"}:
+        if wire.get("lcc_role") in {"ACY_TO_METER", "ACD_TO_METER", "METER_TO_Y", "METER_TO_D"}:
             assert location not in points
         elif wire.get("lcc_role") == "REFERENCE_BUS":
             assert location in points

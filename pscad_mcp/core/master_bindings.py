@@ -1043,9 +1043,10 @@ def _select_port(
     selected = matches[logical_port.occurrence]
     observed_kind = _normalized_kind(selected)
     observed_dimension = _normalized_dimension(selected)
+    adaptive_electrical = selected.dim == 0 and observed_kind == "electrical"
     if (
         observed_kind != logical_port.kind
-        or observed_dimension != logical_port.dimension
+        or (observed_dimension != logical_port.dimension and not adaptive_electrical)
     ):
         raise _runtime_error(
             "MASTER_PORT_MISMATCH",
@@ -1189,6 +1190,7 @@ def _definition_evidence(
     selected_ports = {
         logical_port.logical: {
             **_port_evidence(_select_port(metadata, binding, logical_port)),
+            "dimension": logical_port.dimension,
             "instance": logical_port.instance,
         }
         for logical_port in binding.ports

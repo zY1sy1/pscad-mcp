@@ -38,8 +38,11 @@ EXPECTED_MASTER_COUNTS = {
         "master:nodeloop": 1,
         "master:resistor": 9,
         "master:import": 3,
-        "master:export": 4,
+        "master:export": 5,
         "master:unity": 1,
+        "master:multimeter": 2,
+        "master:datalabel": 2,
+        "master:sumjct": 1,
     },
     "cigre_lcc_v1:RectifierControl": {
         "master:import": 4,
@@ -121,7 +124,7 @@ EXPECTED_PORTS = {
         },
         **{
             name: _port("data", "output")
-            for name in ("AM_Y", "AM_D", "GM_Y", "GM_D")
+            for name in ("AM_Y", "AM_D", "GM_Y", "GM_D", "P_AC")
         },
     },
     "cigre_lcc_v1:RectifierControl": {
@@ -186,6 +189,8 @@ REQUIRED_CONNECTIONS = {
         "REF_A_TO_BREAKOUT",
         "REF_B_TO_BREAKOUT",
         "REF_C_TO_BREAKOUT",
+        "ACY_TO_METER", "ACD_TO_METER", "METER_TO_Y", "METER_TO_D",
+        "P_Y_TO_SUM", "P_D_TO_SUM", "P_AC_OUTPUT",
     },
     "cigre_lcc_v1:RectifierControl": {
         "CURRENT_ERROR",

@@ -30,6 +30,7 @@ PORTS = {
         ("REF_A", "Natural", "", "NonRemovable"),
         ("REF_B", "Natural", "", "NonRemovable"),
         ("REF_C", "Natural", "", "NonRemovable"),
+        ("P_AC", "Transfer", "Output", "Real"),
     ),
     "RectifierControl": (
         ("VDC_MEAS", "Transfer", "Input", "Real"),
@@ -80,8 +81,10 @@ USERS = {
         "master:nodeloop",
         *("master:resistor" for _ in range(9)),
         *("master:import" for _ in range(3)),
-        *("master:export" for _ in range(4)),
+        *("master:export" for _ in range(5)),
         "master:unity",
+        "master:multimeter", "master:multimeter",
+        "master:datalabel", "master:datalabel", "master:sumjct",
     ),
     "RectifierControl": (
         *("master:import" for _ in range(4)),
@@ -154,6 +157,8 @@ WIRES = {
         "REF_A_TO_BREAKOUT",
         "REF_B_TO_BREAKOUT",
         "REF_C_TO_BREAKOUT",
+        "ACY_TO_METER", "ACD_TO_METER", "METER_TO_Y", "METER_TO_D",
+        "P_Y_TO_SUM", "P_D_TO_SUM", "P_AC_OUTPUT",
     ),
     "RectifierControl": (
         "CURRENT_ERROR",
@@ -501,7 +506,7 @@ def test_generated_bridge_passes_enable_to_g6p200_deblock_input(tmp_path):
 
     assert wire_points("ENABLE_TO_KB_Y")[0] == (600, 486)
     assert wire_points("ENABLE_TO_KB_D")[0] == (600, 486)
-    assert bridge.find("./schematic/User[@defn='master:sumjct']") is None
+    assert len(bridge.findall("./schematic/User[@defn='master:sumjct']")) == 1
     assert bridge.find("./schematic/User[@defn='master:consti']") is None
 
 
@@ -551,8 +556,8 @@ def test_generated_companion_contains_exact_wp1b_output_channels(tmp_path):
 
     assert not crosses(points("ACY_TO_Y_B"), (180, 342))
     assert not crosses(points("ACD_TO_D_B"), (180, 630))
-    assert not crosses(points("ACY_TO_Y_BUS"), (216, 342))
-    assert not crosses(points("ACD_TO_D_BUS"), (216, 630))
+    assert not crosses(points("ACY_TO_METER"), (216, 342))
+    assert not crosses(points("ACD_TO_METER"), (216, 630))
     assert points("DC_POS_PATH") == [(360, 252), (360, 234), (360, 162)]
     assert points("DC_SERIES") == [
         (360, 540),
@@ -642,7 +647,7 @@ def test_generated_bridge_isolates_scalar_phase_ports_before_breakout():
     assert [
         item.find("./paramlist/param[@name='R']").get("value")
         for item in resistors
-    ] == ["1.0e-6 [ohm]"] * 9
+    ] == ["0.001 [ohm]"] * 6 + ["1.0e-6 [ohm]"] * 3
     assert [
         int(item.get("orient"))
         for item in bridge.findall("./schematic/User[@defn='master:breakout']")

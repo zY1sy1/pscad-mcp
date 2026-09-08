@@ -111,6 +111,7 @@
         <port model="Natural" name="REF_A" x="-108" y="-198" dim="1" mode="Electrical" type="NonRemovable">true</port>
         <port model="Natural" name="REF_B" x="-108" y="-180" dim="1" mode="Electrical" type="NonRemovable">true</port>
         <port model="Natural" name="REF_C" x="-108" y="-162" dim="1" mode="Electrical" type="NonRemovable">true</port>
+        <port model="Transfer" name="P_AC" x="72" y="99" dim="1" mode="Output" type="Real">true</port>
       </svg>
       <schematic classid="UserCanvas">
         <paramlist>
@@ -178,32 +179,32 @@
         </User>
         <User classid="UserCmp" name="" defn="master:resistor" id="988726893" x="108" y="306" w="74" h="30" z="110" orient="0" link="-1" q="4">
           <paramlist link="-1" name="" crc="10319542">
-            <param name="R" value="1.0e-6 [ohm]" />
+            <param name="R" value="0.001 [ohm]" />
           </paramlist>
         </User>
         <User classid="UserCmp" name="" defn="master:resistor" id="362963424" x="108" y="342" w="74" h="30" z="120" orient="0" link="-1" q="4">
           <paramlist link="-1" name="" crc="10319542">
-            <param name="R" value="1.0e-6 [ohm]" />
+            <param name="R" value="0.001 [ohm]" />
           </paramlist>
         </User>
         <User classid="UserCmp" name="" defn="master:resistor" id="727039583" x="108" y="378" w="74" h="30" z="130" orient="0" link="-1" q="4">
           <paramlist link="-1" name="" crc="10319542">
-            <param name="R" value="1.0e-6 [ohm]" />
+            <param name="R" value="0.001 [ohm]" />
           </paramlist>
         </User>
         <User classid="UserCmp" name="" defn="master:resistor" id="425133298" x="108" y="594" w="74" h="30" z="140" orient="0" link="-1" q="4">
           <paramlist link="-1" name="" crc="10319542">
-            <param name="R" value="1.0e-6 [ohm]" />
+            <param name="R" value="0.001 [ohm]" />
           </paramlist>
         </User>
         <User classid="UserCmp" name="" defn="master:resistor" id="1818084650" x="108" y="630" w="74" h="30" z="150" orient="0" link="-1" q="4">
           <paramlist link="-1" name="" crc="10319542">
-            <param name="R" value="1.0e-6 [ohm]" />
+            <param name="R" value="0.001 [ohm]" />
           </paramlist>
         </User>
         <User classid="UserCmp" name="" defn="master:resistor" id="1897914217" x="108" y="666" w="74" h="30" z="160" orient="0" link="-1" q="4">
           <paramlist link="-1" name="" crc="10319542">
-            <param name="R" value="1.0e-6 [ohm]" />
+            <param name="R" value="0.001 [ohm]" />
           </paramlist>
         </User>
         <User classid="UserCmp" name="" defn="master:g6p200" id="1841912349" x="360" y="342" w="115" h="184" z="170" orient="0" link="-1" q="4">
@@ -345,6 +346,65 @@
             <param name="Name" value="GM_D" />
           </paramlist>
         </User>
+        <User classid="UserCmp" name="" defn="master:multimeter" id="131689044" x="252" y="324" w="40" h="51" z="350" orient="0" link="-1" q="4">
+          <paramlist link="-1" name="" crc="83966017">
+            <param name="MeasP" value="1" />
+            <param name="MeasQ" value="0" />
+            <param name="MeasI" value="0" />
+            <param name="MeasV" value="0" />
+            <param name="RMS" value="0" />
+            <param name="IRMS" value="0" />
+            <param name="MeasPh" value="0" />
+            <param name="Dis" value="0" />
+            <param name="S" value="1.0 [MVA]" />
+            <param name="TS" value="0.0 [s]" />
+            <param name="Freq" value="50.0 [Hz]" />
+            <param name="P" value="LCC_P_AC_Y" />
+          </paramlist>
+        </User>
+        <User classid="UserCmp" name="" defn="master:multimeter" id="1933640707" x="252" y="612" w="40" h="51" z="360" orient="0" link="-1" q="4">
+          <paramlist link="-1" name="" crc="83966017">
+            <param name="MeasP" value="1" />
+            <param name="MeasQ" value="0" />
+            <param name="MeasI" value="0" />
+            <param name="MeasV" value="0" />
+            <param name="RMS" value="0" />
+            <param name="IRMS" value="0" />
+            <param name="MeasPh" value="0" />
+            <param name="Dis" value="0" />
+            <param name="S" value="1.0 [MVA]" />
+            <param name="TS" value="0.0 [s]" />
+            <param name="Freq" value="50.0 [Hz]" />
+            <param name="P" value="LCC_P_AC_D" />
+          </paramlist>
+        </User>
+        <User classid="UserCmp" name="" defn="master:datalabel" id="936377845" x="810" y="900" w="40" h="21" z="370" orient="0" link="-1" q="4">
+          <paramlist link="-1" name="" crc="98359112">
+            <param name="Name" value="LCC_P_AC_Y" />
+          </paramlist>
+        </User>
+        <User classid="UserCmp" name="" defn="master:datalabel" id="1968769874" x="810" y="972" w="40" h="21" z="380" orient="0" link="-1" q="4">
+          <paramlist link="-1" name="" crc="98359112">
+            <param name="Name" value="LCC_P_AC_D" />
+          </paramlist>
+        </User>
+        <User classid="UserCmp" name="" defn="master:sumjct" id="1998019016" x="1044" y="900" w="76" h="60" z="390" orient="0" link="-1" q="4">
+          <paramlist link="-1" name="" crc="6678153">
+            <param name="DPath" value="1" />
+            <param name="A" value="0" />
+            <param name="B" value="0" />
+            <param name="C" value="0" />
+            <param name="D" value="1" />
+            <param name="E" value="0" />
+            <param name="F" value="1" />
+            <param name="G" value="0" />
+          </paramlist>
+        </User>
+        <User classid="UserCmp" name="" defn="master:export" id="1958906306" x="1152" y="900" w="74" h="21" z="400" orient="0" link="-1" q="4">
+          <paramlist link="-1" name="" crc="39049670">
+            <param name="Name" value="P_AC" />
+          </paramlist>
+        </User>
         <Wire classid="WireOrthogonal" name="" lcc_role="ACY_TO_Y" x="90" y="306" w="28" h="10" orient="0" id="519349417">
           <vertex x="0" y="0" />
           <vertex x="18" y="0" />
@@ -369,139 +429,158 @@
           <vertex x="0" y="0" />
           <vertex x="18" y="0" />
         </Wire>
-        <Wire classid="WireOrthogonal" name="" lcc_role="ACY_TO_Y_BUS" x="180" y="342" w="154" h="28" orient="0" id="337227865">
+        <Wire classid="WireOrthogonal" name="" lcc_role="ACY_TO_METER" x="180" y="342" w="64" h="28" orient="0" id="1503705845">
           <vertex x="0" y="0" />
           <vertex x="0" y="-18" />
-          <vertex x="108" y="-18" />
-          <vertex x="144" y="-18" />
-          <vertex x="144" y="0" />
+          <vertex x="54" y="-18" />
         </Wire>
-        <Wire classid="WireOrthogonal" name="" lcc_role="ACD_TO_D" x="90" y="594" w="28" h="10" orient="0" id="870262723">
+        <Wire classid="WireOrthogonal" name="" lcc_role="METER_TO_Y" x="270" y="324" w="64" h="28" orient="0" id="442012876">
+          <vertex x="0" y="0" />
+          <vertex x="54" y="0" />
+          <vertex x="54" y="18" />
+        </Wire>
+        <Wire classid="WireOrthogonal" name="" lcc_role="ACD_TO_D" x="90" y="594" w="28" h="10" orient="0" id="412984976">
           <vertex x="0" y="0" />
           <vertex x="18" y="0" />
         </Wire>
-        <Wire classid="WireOrthogonal" name="" lcc_role="ACD_A_TO_BREAKOUT" x="182" y="594" w="44" h="10" orient="0" id="1761301635">
+        <Wire classid="WireOrthogonal" name="" lcc_role="ACD_A_TO_BREAKOUT" x="182" y="594" w="44" h="10" orient="0" id="113504200">
           <vertex x="0" y="0" />
           <vertex x="34" y="0" />
         </Wire>
-        <Wire classid="WireOrthogonal" name="" lcc_role="ACD_B_TO_BREAKOUT" x="182" y="630" w="44" h="10" orient="0" id="368016582">
+        <Wire classid="WireOrthogonal" name="" lcc_role="ACD_B_TO_BREAKOUT" x="182" y="630" w="44" h="10" orient="0" id="392081607">
           <vertex x="0" y="0" />
           <vertex x="34" y="0" />
         </Wire>
-        <Wire classid="WireOrthogonal" name="" lcc_role="ACD_C_TO_BREAKOUT" x="182" y="666" w="44" h="10" orient="0" id="1886300498">
+        <Wire classid="WireOrthogonal" name="" lcc_role="ACD_C_TO_BREAKOUT" x="182" y="666" w="44" h="10" orient="0" id="246673111">
           <vertex x="0" y="0" />
           <vertex x="34" y="0" />
         </Wire>
-        <Wire classid="WireOrthogonal" name="" lcc_role="ACD_TO_D_B" x="90" y="630" w="28" h="10" orient="0" id="1168439979">
+        <Wire classid="WireOrthogonal" name="" lcc_role="ACD_TO_D_B" x="90" y="630" w="28" h="10" orient="0" id="963455705">
           <vertex x="0" y="0" />
           <vertex x="18" y="0" />
         </Wire>
-        <Wire classid="WireOrthogonal" name="" lcc_role="ACD_TO_D_C" x="90" y="666" w="28" h="10" orient="0" id="110324251">
+        <Wire classid="WireOrthogonal" name="" lcc_role="ACD_TO_D_C" x="90" y="666" w="28" h="10" orient="0" id="53375640">
           <vertex x="0" y="0" />
           <vertex x="18" y="0" />
         </Wire>
-        <Wire classid="WireOrthogonal" name="" lcc_role="ACD_TO_D_BUS" x="180" y="630" w="154" h="28" orient="0" id="982832526">
+        <Wire classid="WireOrthogonal" name="" lcc_role="ACD_TO_METER" x="180" y="630" w="64" h="28" orient="0" id="1885947537">
           <vertex x="0" y="0" />
           <vertex x="0" y="-18" />
-          <vertex x="108" y="-18" />
-          <vertex x="144" y="-18" />
-          <vertex x="144" y="0" />
+          <vertex x="54" y="-18" />
         </Wire>
-        <Wire classid="WireOrthogonal" name="" lcc_role="DC_POS_PATH" x="360" y="252" w="10" h="100" orient="0" id="1157626914">
+        <Wire classid="WireOrthogonal" name="" lcc_role="METER_TO_D" x="270" y="612" w="64" h="28" orient="0" id="1376146636">
+          <vertex x="0" y="0" />
+          <vertex x="54" y="0" />
+          <vertex x="54" y="18" />
+        </Wire>
+        <Wire classid="WireOrthogonal" name="" lcc_role="DC_POS_PATH" x="360" y="252" w="10" h="100" orient="0" id="1929569993">
           <vertex x="0" y="0" />
           <vertex x="0" y="-18" />
           <vertex x="0" y="-90" />
         </Wire>
-        <Wire classid="WireOrthogonal" name="" lcc_role="DC_SERIES" x="360" y="540" w="10" h="118" orient="0" id="136271">
+        <Wire classid="WireOrthogonal" name="" lcc_role="DC_SERIES" x="360" y="540" w="10" h="118" orient="0" id="1037329700">
           <vertex x="0" y="0" />
           <vertex x="0" y="-18" />
           <vertex x="0" y="-90" />
           <vertex x="0" y="-108" />
         </Wire>
-        <Wire classid="WireOrthogonal" name="" lcc_role="DC_NEG_PATH" x="360" y="720" w="10" h="118" orient="0" id="1718545">
+        <Wire classid="WireOrthogonal" name="" lcc_role="DC_NEG_PATH" x="360" y="720" w="10" h="118" orient="0" id="1345934477">
           <vertex x="0" y="0" />
           <vertex x="0" y="18" />
           <vertex x="0" y="108" />
         </Wire>
-        <Wire classid="WireOrthogonal" name="" lcc_role="AO_Y_TO_BRIDGE_Y" x="540" y="378" w="136" h="10" orient="0" id="443908619">
+        <Wire classid="WireOrthogonal" name="" lcc_role="AO_Y_TO_BRIDGE_Y" x="540" y="378" w="136" h="10" orient="0" id="1573492861">
           <vertex x="0" y="0" />
           <vertex x="-126" y="0" />
         </Wire>
-        <Wire classid="WireOrthogonal" name="" lcc_role="AO_D_TO_BRIDGE_D" x="540" y="666" w="136" h="10" orient="0" id="1508621118">
+        <Wire classid="WireOrthogonal" name="" lcc_role="AO_D_TO_BRIDGE_D" x="540" y="666" w="136" h="10" orient="0" id="1250154355">
           <vertex x="0" y="0" />
           <vertex x="-126" y="0" />
         </Wire>
-        <Wire classid="WireOrthogonal" name="" lcc_role="ENABLE_CONVERSION" x="540" y="486" w="34" h="10" orient="0" id="465059133">
+        <Wire classid="WireOrthogonal" name="" lcc_role="ENABLE_CONVERSION" x="540" y="486" w="34" h="10" orient="0" id="1026327305">
           <vertex x="0" y="0" />
           <vertex x="24" y="0" />
         </Wire>
-        <Wire classid="WireOrthogonal" name="" lcc_role="ENABLE_TO_KB_Y" x="600" y="486" w="376" h="100" orient="0" id="1557305961">
+        <Wire classid="WireOrthogonal" name="" lcc_role="ENABLE_TO_KB_Y" x="600" y="486" w="376" h="100" orient="0" id="1266035346">
           <vertex x="0" y="0" />
           <vertex x="180" y="0" />
           <vertex x="180" y="-90" />
           <vertex x="-186" y="-90" />
         </Wire>
-        <Wire classid="WireOrthogonal" name="" lcc_role="ENABLE_TO_KB_D" x="600" y="486" w="388" h="208" orient="0" id="310388435">
+        <Wire classid="WireOrthogonal" name="" lcc_role="ENABLE_TO_KB_D" x="600" y="486" w="388" h="208" orient="0" id="56149471">
           <vertex x="0" y="0" />
           <vertex x="192" y="0" />
           <vertex x="192" y="198" />
           <vertex x="-186" y="198" />
         </Wire>
-        <Wire classid="WireOrthogonal" name="" lcc_role="REFERENCE_BUS" x="180" y="954" w="118" h="28" orient="0" id="1365600430">
+        <Wire classid="WireOrthogonal" name="" lcc_role="REFERENCE_BUS" x="180" y="954" w="118" h="28" orient="0" id="203704274">
           <vertex x="0" y="0" />
           <vertex x="0" y="-18" />
           <vertex x="108" y="-18" />
         </Wire>
-        <Wire classid="WireOrthogonal" name="" lcc_role="CB_REFERENCE_Y" x="288" y="900" w="100" h="658" orient="0" id="997962453">
+        <Wire classid="WireOrthogonal" name="" lcc_role="CB_REFERENCE_Y" x="288" y="900" w="100" h="658" orient="0" id="443318138">
           <vertex x="0" y="0" />
           <vertex x="-36" y="0" />
           <vertex x="-36" y="-360" />
           <vertex x="-36" y="-648" />
           <vertex x="54" y="-648" />
         </Wire>
-        <Wire classid="WireOrthogonal" name="" lcc_role="CB_REFERENCE_D" x="252" y="540" w="100" h="10" orient="0" id="1094037314">
+        <Wire classid="WireOrthogonal" name="" lcc_role="CB_REFERENCE_D" x="252" y="540" w="100" h="10" orient="0" id="1262577037">
           <vertex x="0" y="0" />
           <vertex x="90" y="0" />
         </Wire>
-        <Wire classid="WireOrthogonal" name="" lcc_role="REF_A_TO_ISOLATION" x="90" y="918" w="28" h="10" orient="0" id="1581807084">
+        <Wire classid="WireOrthogonal" name="" lcc_role="REF_A_TO_ISOLATION" x="90" y="918" w="28" h="10" orient="0" id="1728749892">
           <vertex x="0" y="0" />
           <vertex x="18" y="0" />
         </Wire>
-        <Wire classid="WireOrthogonal" name="" lcc_role="REF_B_TO_ISOLATION" x="90" y="954" w="28" h="10" orient="0" id="631415905">
+        <Wire classid="WireOrthogonal" name="" lcc_role="REF_B_TO_ISOLATION" x="90" y="954" w="28" h="10" orient="0" id="633401274">
           <vertex x="0" y="0" />
           <vertex x="18" y="0" />
         </Wire>
-        <Wire classid="WireOrthogonal" name="" lcc_role="REF_C_TO_ISOLATION" x="90" y="990" w="28" h="10" orient="0" id="1757231346">
+        <Wire classid="WireOrthogonal" name="" lcc_role="REF_C_TO_ISOLATION" x="90" y="990" w="28" h="10" orient="0" id="74908231">
           <vertex x="0" y="0" />
           <vertex x="18" y="0" />
         </Wire>
-        <Wire classid="WireOrthogonal" name="" lcc_role="REF_A_TO_BREAKOUT" x="182" y="918" w="44" h="10" orient="0" id="891189065">
+        <Wire classid="WireOrthogonal" name="" lcc_role="REF_A_TO_BREAKOUT" x="182" y="918" w="44" h="10" orient="0" id="688826865">
           <vertex x="0" y="0" />
           <vertex x="34" y="0" />
         </Wire>
-        <Wire classid="WireOrthogonal" name="" lcc_role="REF_B_TO_BREAKOUT" x="182" y="954" w="44" h="10" orient="0" id="806836883">
+        <Wire classid="WireOrthogonal" name="" lcc_role="REF_B_TO_BREAKOUT" x="182" y="954" w="44" h="10" orient="0" id="1907908618">
           <vertex x="0" y="0" />
           <vertex x="34" y="0" />
         </Wire>
-        <Wire classid="WireOrthogonal" name="" lcc_role="REF_C_TO_BREAKOUT" x="182" y="990" w="44" h="10" orient="0" id="284135090">
+        <Wire classid="WireOrthogonal" name="" lcc_role="REF_C_TO_BREAKOUT" x="182" y="990" w="44" h="10" orient="0" id="1028185087">
           <vertex x="0" y="0" />
           <vertex x="34" y="0" />
         </Wire>
-        <Wire classid="WireOrthogonal" name="" lcc_role="AM_Y_OUTPUT" x="414" y="288" w="136" h="10" orient="0" id="620451260">
+        <Wire classid="WireOrthogonal" name="" lcc_role="AM_Y_OUTPUT" x="414" y="288" w="136" h="10" orient="0" id="560793518">
           <vertex x="0" y="0" />
           <vertex x="126" y="0" />
         </Wire>
-        <Wire classid="WireOrthogonal" name="" lcc_role="GM_Y_OUTPUT" x="414" y="306" w="136" h="10" orient="0" id="7100930">
+        <Wire classid="WireOrthogonal" name="" lcc_role="GM_Y_OUTPUT" x="414" y="306" w="136" h="10" orient="0" id="1599840970">
           <vertex x="0" y="0" />
           <vertex x="126" y="0" />
         </Wire>
-        <Wire classid="WireOrthogonal" name="" lcc_role="AM_D_OUTPUT" x="414" y="576" w="136" h="10" orient="0" id="1714107258">
+        <Wire classid="WireOrthogonal" name="" lcc_role="AM_D_OUTPUT" x="414" y="576" w="136" h="10" orient="0" id="1670079969">
           <vertex x="0" y="0" />
           <vertex x="126" y="0" />
         </Wire>
-        <Wire classid="WireOrthogonal" name="" lcc_role="GM_D_OUTPUT" x="414" y="594" w="136" h="10" orient="0" id="1382860291">
+        <Wire classid="WireOrthogonal" name="" lcc_role="GM_D_OUTPUT" x="414" y="594" w="136" h="10" orient="0" id="1897184000">
           <vertex x="0" y="0" />
           <vertex x="126" y="0" />
+        </Wire>
+        <Wire classid="WireOrthogonal" name="" lcc_role="P_Y_TO_SUM" x="810" y="900" w="208" h="10" orient="0" id="279089761">
+          <vertex x="0" y="0" />
+          <vertex x="198" y="0" />
+        </Wire>
+        <Wire classid="WireOrthogonal" name="" lcc_role="P_D_TO_SUM" x="810" y="972" w="244" h="46" orient="0" id="612409504">
+          <vertex x="0" y="0" />
+          <vertex x="234" y="0" />
+          <vertex x="234" y="-36" />
+        </Wire>
+        <Wire classid="WireOrthogonal" name="" lcc_role="P_AC_OUTPUT" x="1080" y="900" w="118" h="10" orient="0" id="8632006">
+          <vertex x="0" y="0" />
+          <vertex x="108" y="0" />
         </Wire>
       </schematic>
     </Definition>

@@ -33,6 +33,7 @@ FIXTURE_PORTS = {
         "REF_A",
         "REF_B",
         "REF_C",
+        "P_AC",
     },
     "cigre_lcc_v1:RectifierControl": {
         "VDC_MEAS",

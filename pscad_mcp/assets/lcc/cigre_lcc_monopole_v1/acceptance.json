@@ -24,7 +24,7 @@
   "physical_checks": [
     {"name": "rectifier_dc_voltage", "kind": "dc_magnitude_polarity", "channel": "Main/VDC_RECT", "units": "kV", "polarity": "positive", "min": 0.0, "max": 1000.0, "window": [0.0, 0.03], "required": true},
     {"name": "inverter_dc_voltage", "kind": "dc_magnitude_polarity", "channel": "Main/VDC_INV", "units": "kV", "polarity": "negative", "min": 0.0, "max": 1000.0, "window": [0.0, 0.03], "required": true},
-    {"name": "dc_power_product", "kind": "pdc_product", "voltage_channel": "Main/VDC_RECT", "current_channel": "Main/IDC", "power_channel": "Main/P_RECT", "voltage_units": "kV", "current_units": "kA", "power_units": "MW", "max_percent": 5.0, "window": [0.0, 0.03], "required": true},
+    {"name": "dc_power_product", "kind": "pdc_product", "voltage_channel": "Main/VDC_RECT", "current_channel": "Main/IDC", "power_channel": "Main/PCONV_RECT", "voltage_units": "kV", "current_units": "kA", "power_units": "MW", "max_percent": 5.0, "window": [0.0, 0.03], "required": true},
     {"name": "terminal_power_balance", "kind": "terminal_power_balance", "rectifier_power_channel": "Main/P_RECT", "inverter_power_channel": "Main/P_INV", "units": "MW", "loss_allowance": 100.0, "window": [0.0, 0.03], "required": true},
     {"name": "rectifier_alpha", "kind": "angle_interval", "channel": "Main/ALPHA_RECT", "units": "deg", "min": 0.0, "max": 90.0, "window": [0.0, 0.03], "required": true},
     {"name": "inverter_gamma", "kind": "angle_interval", "channel": "Main/GAMMA_INV", "units": "deg", "min": 10.0, "max": 40.0, "window": [0.0, 0.03], "required": true},

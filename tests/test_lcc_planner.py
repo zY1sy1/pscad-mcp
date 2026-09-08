@@ -272,12 +272,12 @@ def complete_live_inventory(
 
 LEGACY_PLAN_SNAPSHOTS = {
     "full_acceptance": {
-        "plan_hash": "d65eb2b173afa11277d192fc3bb98718c4a076d205f37d38bb39f56e820f0f17",
-        "operations_hash": "ab85d33b5790b0da919e6cef31349b66083e87af85fc787b634adb77a089a986",
+        "plan_hash": "4938a9ce6922ddd80fa9c63cc0f5cc450992e3776d4cbac8d3321da8eef2fc17",
+        "operations_hash": "094c987eafb2d3860383985535e3778cf36bf5f4723ddfdc067037330f2e850e",
     },
     "wp1b_smoke": {
-        "plan_hash": "34347098b21fd3f49d7a26b2812abd4937c3673e4abef90b8d4a04f67b6eb87b",
-        "operations_hash": "7226e4105f0597c337bd6602e110e772c36209a5af769b3713bc3496a33a10f1",
+        "plan_hash": "a02f0de33cc00b6124309a45f9b986e2924600cf68fa3ba0c030eaf37aed6a9c",
+        "operations_hash": "341b505ed523d95afad9aac86c79edd14c504e0c659bbf6443f04b7b4f20cd39",
     },
 }
 

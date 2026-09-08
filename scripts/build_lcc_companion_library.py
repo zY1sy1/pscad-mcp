@@ -58,6 +58,8 @@ STYLE = {
     "mingam": (76, 40, 23589620),
     "unity": (40, 19, 39250382),
     "pgb": (70, 30, 63669868),
+    "multimeter": (40, 51, 83966017),
+    "datalabel": (40, 21, 98359112),
 }
 
 
@@ -361,9 +363,15 @@ def _bridge_definition(definitions: ET.Element) -> None:
             (name, "electrical", "bidirectional", "Real")
             for name in ("REF_A", "REF_B", "REF_C")
         )
+        + (("P_AC", "data", "output", "Real"),)
     )
     g6_y = {**COMMON_G6P200, "KV": "-1"}
     g6_d = {**COMMON_G6P200, "KV": "-2"}
+    power_meter = {
+        "MeasP": "1", "MeasQ": "0", "MeasI": "0", "MeasV": "0",
+        "RMS": "0", "IRMS": "0", "MeasPh": "0", "Dis": "0",
+        "S": "1.0 [MVA]", "TS": "0.0 [s]", "Freq": "50.0 [Hz]",
+    }
     components = (
         _pin("pin_acy_a", "ACY_A", 90, 306, 2),
         _pin("pin_acy_b", "ACY_B", 90, 342, 2),
@@ -394,42 +402,42 @@ def _bridge_definition(definitions: ET.Element) -> None:
             "master:resistor",
             108,
             306,
-            {"R": "1.0e-6 [ohm]"},
+            {"R": "0.001 [ohm]"},
         ),
         Component(
             "phase_isolation_acy_b",
             "master:resistor",
             108,
             342,
-            {"R": "1.0e-6 [ohm]"},
+            {"R": "0.001 [ohm]"},
         ),
         Component(
             "phase_isolation_acy_c",
             "master:resistor",
             108,
             378,
-            {"R": "1.0e-6 [ohm]"},
+            {"R": "0.001 [ohm]"},
         ),
         Component(
             "phase_isolation_acd_a",
             "master:resistor",
             108,
             594,
-            {"R": "1.0e-6 [ohm]"},
+            {"R": "0.001 [ohm]"},
         ),
         Component(
             "phase_isolation_acd_b",
             "master:resistor",
             108,
             630,
-            {"R": "1.0e-6 [ohm]"},
+            {"R": "0.001 [ohm]"},
         ),
         Component(
             "phase_isolation_acd_c",
             "master:resistor",
             108,
             666,
-            {"R": "1.0e-6 [ohm]"},
+            {"R": "0.001 [ohm]"},
         ),
         Component("bridge_y", "master:g6p200", 360, 342, g6_y),
         Component("bridge_d", "master:g6p200", 360, 630, g6_d),
@@ -455,6 +463,13 @@ def _bridge_definition(definitions: ET.Element) -> None:
         _export("export_gm_y", "GM_Y", 504, 306),
         _export("export_am_d", "AM_D", 504, 576),
         _export("export_gm_d", "GM_D", 504, 594),
+        Component("power_meter_y", "master:multimeter", 252, 324, {**power_meter, "P": "LCC_P_AC_Y"}),
+        Component("power_meter_d", "master:multimeter", 252, 612, {**power_meter, "P": "LCC_P_AC_D"}),
+        Component("power_signal_y", "master:datalabel", 810, 900, {"Name": "LCC_P_AC_Y"}),
+        Component("power_signal_d", "master:datalabel", 810, 972, {"Name": "LCC_P_AC_D"}),
+        Component("converter_power_sum", "master:sumjct", 1044, 900,
+            {"DPath": "1", "A": "0", "B": "0", "C": "0", "D": "1", "E": "0", "F": "1", "G": "0"}),
+        _export("converter_power_export", "P_AC", 1152, 900),
     )
     wires = (
         Wire("ACY_TO_Y", ((90, 306), (108, 306))),
@@ -463,14 +478,16 @@ def _bridge_definition(definitions: ET.Element) -> None:
         Wire("ACY_C_TO_BREAKOUT", ((182, 378), (216, 378))),
         Wire("ACY_TO_Y_B", ((90, 342), (108, 342))),
         Wire("ACY_TO_Y_C", ((90, 378), (108, 378))),
-        Wire("ACY_TO_Y_BUS", ((180, 342), (180, 324), (288, 324), (324, 324), (324, 342))),
+        Wire("ACY_TO_METER", ((180, 342), (180, 324), (234, 324))),
+        Wire("METER_TO_Y", ((270, 324), (324, 324), (324, 342))),
         Wire("ACD_TO_D", ((90, 594), (108, 594))),
         Wire("ACD_A_TO_BREAKOUT", ((182, 594), (216, 594))),
         Wire("ACD_B_TO_BREAKOUT", ((182, 630), (216, 630))),
         Wire("ACD_C_TO_BREAKOUT", ((182, 666), (216, 666))),
         Wire("ACD_TO_D_B", ((90, 630), (108, 630))),
         Wire("ACD_TO_D_C", ((90, 666), (108, 666))),
-        Wire("ACD_TO_D_BUS", ((180, 630), (180, 612), (288, 612), (324, 612), (324, 630))),
+        Wire("ACD_TO_METER", ((180, 630), (180, 612), (234, 612))),
+        Wire("METER_TO_D", ((270, 612), (324, 612), (324, 630))),
         Wire("DC_POS_PATH", ((360, 252), (360, 234), (360, 162))),
         Wire(
             "DC_SERIES",
@@ -495,6 +512,9 @@ def _bridge_definition(definitions: ET.Element) -> None:
         Wire("GM_Y_OUTPUT", ((414, 306), (540, 306))),
         Wire("AM_D_OUTPUT", ((414, 576), (540, 576))),
         Wire("GM_D_OUTPUT", ((414, 594), (540, 594))),
+        Wire("P_Y_TO_SUM", ((810, 900), (1008, 900))),
+        Wire("P_D_TO_SUM", ((810, 972), (1044, 972), (1044, 936))),
+        Wire("P_AC_OUTPUT", ((1080, 900), (1188, 900))),
     )
     _definition(
         definitions,

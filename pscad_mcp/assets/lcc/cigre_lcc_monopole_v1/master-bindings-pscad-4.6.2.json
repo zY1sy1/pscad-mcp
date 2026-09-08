@@ -2648,6 +2648,51 @@
       ],
       "fixed_parameters": [],
       "evidence_parameters": []
+    },
+    {
+      "logical_name": "master:measurement_burden_resistor",
+      "physical_definition": "resistor",
+      "shape": {"kind": "direct"},
+      "ports": [
+        {"logical": "A", "physical": "A", "kind": "electrical", "dimension": 1, "occurrence": 0},
+        {"logical": "B", "physical": "B", "kind": "electrical", "dimension": 1, "occurrence": 0}
+      ],
+      "parameters": [],
+      "fixed_parameters": [{"physical": "R", "value": 0.001, "contract": {"type": "Real", "unit": "ohm"}}],
+      "evidence_parameters": []
+    },
+    {
+      "logical_name": "master:local_power_signal",
+      "physical_definition": "datalabel",
+      "shape": {"kind": "direct"},
+      "ports": [{"logical": "OUT", "physical": "A", "kind": "data", "dimension": 1, "occurrence": 0}],
+      "parameters": [{"logical": ["Name"], "physical": ["Name"], "transform": {"kind": "identity"}, "physical_contracts": {"Name": {"type": "Text", "unit": null}}}],
+      "fixed_parameters": [],
+      "evidence_parameters": []
+    },
+    {
+      "logical_name": "master:converter_power_meter",
+      "physical_definition": "multimeter",
+      "shape": {"kind": "direct"},
+      "ports": [
+        {"logical": "A", "physical": "A", "kind": "electrical", "dimension": 3, "occurrence": 1},
+        {"logical": "B", "physical": "B", "kind": "electrical", "dimension": 3, "occurrence": 1}
+      ],
+      "parameters": [{"logical": ["P"], "physical": ["P"], "transform": {"kind": "identity"}, "physical_contracts": {"P": {"type": "Text", "unit": null}}}],
+      "fixed_parameters": [
+        {"physical": "MeasP", "value": 1, "contract": {"type": "Choice", "unit": null, "choices": ["0", "1"]}},
+        {"physical": "MeasQ", "value": 0, "contract": {"type": "Choice", "unit": null, "choices": ["0", "1"]}},
+        {"physical": "MeasI", "value": 0, "contract": {"type": "Choice", "unit": null, "choices": ["0", "1"]}},
+        {"physical": "MeasV", "value": 0, "contract": {"type": "Choice", "unit": null, "choices": ["0", "1"]}},
+        {"physical": "RMS", "value": 0, "contract": {"type": "Choice", "unit": null, "choices": ["0", "1", "2"]}},
+        {"physical": "IRMS", "value": 0, "contract": {"type": "Choice", "unit": null, "choices": ["0", "1", "2"]}},
+        {"physical": "MeasPh", "value": 0, "contract": {"type": "Choice", "unit": null, "choices": ["0", "1", "2"]}},
+        {"physical": "Dis", "value": 0, "contract": {"type": "Choice", "unit": null, "choices": ["0", "1"]}},
+        {"physical": "S", "value": 1.0, "contract": {"type": "Real", "unit": "MVA"}},
+        {"physical": "TS", "value": 0.0, "contract": {"type": "Real", "unit": "s"}},
+        {"physical": "Freq", "value": 50.0, "contract": {"type": "Real", "unit": "Hz"}}
+      ],
+      "evidence_parameters": []
     }
   ]
 }

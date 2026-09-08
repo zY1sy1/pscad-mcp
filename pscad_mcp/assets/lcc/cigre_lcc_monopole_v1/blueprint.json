@@ -48,7 +48,7 @@
     {
       "name": "Main",
       "width": 2800,
-      "height": 1080,
+      "height": 1200,
       "grid": 10
     }
   ],
@@ -192,7 +192,8 @@
         "GM_D",
         "REF_A",
         "REF_B",
-        "REF_C"
+        "REF_C",
+        "P_AC"
       ],
       "role": "power"
     },
@@ -243,7 +244,7 @@
       },
       "orientation": 0,
       "parameters": {
-        "Inductance_mH": 1193.6
+        "Inductance_mH": 200.0
       },
       "ports": [
         "IN",
@@ -278,7 +279,7 @@
       },
       "orientation": 0,
       "parameters": {
-        "Inductance_mH": 1193.6
+        "Inductance_mH": 200.0
       },
       "ports": [
         "IN",
@@ -333,7 +334,8 @@
         "GM_D",
         "REF_A",
         "REF_B",
-        "REF_C"
+        "REF_C",
+        "P_AC"
       ],
       "role": "power"
     },
@@ -929,6 +931,16 @@
       "logical_id": "p_inv_c_import", "definition": "master:main_signal_import",
       "location": {"x": 1044, "y": 972}, "orientation": 0,
       "parameters": {"Name": "LCC_P_INV_C"}, "ports": ["OUT"], "role": "measurement"
+    },
+    {
+      "logical_id": "p_conv_rect_output", "definition": "master:dynamic_output_channel",
+      "location": {"x": 1800, "y": 1080}, "orientation": 0,
+      "parameters": {"Group": "Main", "Name": "PCONV_RECT", "Units": "MW"}, "ports": ["INPUT"], "role": "measurement"
+    },
+    {
+      "logical_id": "p_conv_inv_output", "definition": "master:dynamic_output_channel",
+      "location": {"x": 1800, "y": 1134}, "orientation": 0,
+      "parameters": {"Group": "Main", "Name": "PCONV_INV", "Units": "MW"}, "ports": ["INPUT"], "role": "measurement"
     }
   ],
   "nets": [
@@ -2499,9 +2511,25 @@
       "logical_id": "p_inv_c_measurement", "kind": "data",
       "endpoints": [{"component": "p_inv_c_import", "port": "OUT"}, {"component": "signal_interface", "port": "P_INV_C"}],
       "route": {"vertices": [[1044, 972], [1206, 972], [1206, 630], [1242, 630]], "policy": "orthogonal"}
+    },
+    {
+      "logical_id": "p_conv_rect_telemetry", "kind": "data",
+      "endpoints": [{"component": "rectifier_bridge", "port": "P_AC"}, {"component": "p_conv_rect_output", "port": "INPUT"}],
+      "route": {"vertices": [[872, 309], [972, 309], [972, 1080], [1800, 1080]], "policy": "orthogonal"}
+    },
+    {
+      "logical_id": "p_conv_inv_telemetry", "kind": "data",
+      "endpoints": [{"component": "inverter_bridge", "port": "P_AC"}, {"component": "p_conv_inv_output", "port": "INPUT"}],
+      "route": {"vertices": [[1972, 309], [2052, 309], [2052, 1134], [1800, 1134]], "policy": "orthogonal"}
     }
   ],
   "measurements": [
+    {
+      "logical_id": "p_conv_rect_measurement", "kind": "data", "component": "rectifier_bridge", "port": "P_AC", "channels": ["Main/PCONV_RECT"]
+    },
+    {
+      "logical_id": "p_conv_inv_measurement", "kind": "data", "component": "inverter_bridge", "port": "P_AC", "channels": ["Main/PCONV_INV"]
+    },
     {
       "logical_id": "vdc_rect_measurement",
       "kind": "data",
@@ -2667,6 +2695,12 @@
     }
   ],
   "outputs": [
+    {
+      "logical_id": "p_conv_rect", "path": "Main/PCONV_RECT", "units": "MW", "role": "rectifier_converter_ac_power", "measurement": "p_conv_rect_measurement"
+    },
+    {
+      "logical_id": "p_conv_inv", "path": "Main/PCONV_INV", "units": "MW", "role": "inverter_converter_ac_power", "measurement": "p_conv_inv_measurement"
+    },
     {
       "logical_id": "vdc_rect",
       "path": "Main/VDC_RECT",

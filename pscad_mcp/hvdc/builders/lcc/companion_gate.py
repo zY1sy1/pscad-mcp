@@ -48,6 +48,7 @@ FIXTURES = (
             "REF_A",
             "REF_B",
             "REF_C",
+            "P_AC",
         ),
     ),
     CompanionFixture(
@@ -73,6 +74,7 @@ FIXTURES = (
             "REF_A",
             "REF_B",
             "REF_C",
+            "P_AC",
         ),
     ),
     CompanionFixture(

@@ -275,7 +275,7 @@
         "Inductance_mH": {
           "type": "float",
           "minimum": 0,
-          "maximum": 1193.6,
+          "maximum": 1000,
           "unit": "mH"
         }
       },
@@ -719,6 +719,9 @@
         },
         {
           "name": "REF_C", "kind": "electrical", "dimension": 1, "offset": [-108, -162]
+        },
+        {
+          "name": "P_AC", "kind": "data", "dimension": 1, "offset": [72, 99]
         }
       ],
       "parameters": {

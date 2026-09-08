@@ -57,6 +57,30 @@ def test_measurement_summing_junctions_satisfy_native_input_minimum():
         assert sum(int(parameters[name]) != 0 for name in "ABCDEFG") >= 2
 
 
+def test_converter_power_uses_independent_ac_measurements_and_module_export():
+    root = ET.fromstring(render_library())
+    bridge = root.find("./definitions/Definition[@name='LCC12PulseBridge']")
+    meters = bridge.findall("schematic/User[@defn='master:multimeter']")
+    assert len(meters) == 2
+    for meter in meters:
+        parameters = {p.get("name"): p.get("value") for p in meter.findall("paramlist/param")}
+        assert parameters["MeasP"] == "1"
+        assert parameters["TS"] == "0.0 [s]"
+        assert parameters["S"] == "1.0 [MVA]"
+    assert bridge.find("svg/port[@name='P_AC'][@mode='Output']") is not None
+    assert bridge.find("schematic/User[@defn='master:export']/paramlist/param[@name='Name'][@value='P_AC']") is not None
+
+
+def test_power_product_and_grid_balance_keep_distinct_physical_boundaries():
+    root = Path("pscad_mcp/assets/lcc/cigre_lcc_monopole_v1")
+    checks = {item["name"]: item for item in json.loads((root / "acceptance.json").read_text())["physical_checks"]}
+    assert checks["dc_power_product"]["power_channel"] == "Main/PCONV_RECT"
+    assert checks["dc_power_product"]["max_percent"] == 5.0
+    assert checks["terminal_power_balance"]["rectifier_power_channel"] == "Main/P_RECT"
+    assert checks["terminal_power_balance"]["inverter_power_channel"] == "Main/P_INV"
+    assert checks["terminal_power_balance"]["loss_allowance"] == 100.0
+
+
 def test_angle_routes_and_current_power_routes_preserve_distinct_signals():
     from pscad_mcp.hvdc.builders.lcc.catalog import parse_catalog
     from pscad_mcp.hvdc.builders.lcc.executor import _route_for_backend

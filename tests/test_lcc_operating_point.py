@@ -27,11 +27,12 @@ def test_transformer_mva_base_matches_fixed_dc_current_and_voltage_ratio(tmp_pat
         assert physical["Tmva"] == pytest.approx(math.sqrt(2) * physical["V2"])
 
 
-def test_smoothing_reactors_preserve_reference_line_time_constant():
+def test_smoothing_reactors_use_verified_case_specific_sizing():
     blueprint = json.loads((ASSETS / "blueprint.json").read_text())
     components = {item["logical_id"]: item for item in blueprint["components"]}
-    total_h = sum(components[name]["parameters"]["Inductance_mH"] / 1000 for name in ("dc_smoothing_reactor", "inverter_smoothing_reactor"))
-    assert total_h / components["dc_line"]["parameters"]["Resistance_ohm"] == pytest.approx(2 * 0.5968 / 5.0)
+    for name in ("dc_smoothing_reactor", "inverter_smoothing_reactor"):
+        assert components[name]["parameters"]["Inductance_mH"] == 200.0
+    assert components["dc_line"]["parameters"]["Resistance_ohm"] == 10.0
 
 
 def test_native_control_limits_cover_current_limiting_and_gamma_control():
