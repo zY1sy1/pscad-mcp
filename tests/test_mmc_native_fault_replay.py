@@ -127,10 +127,13 @@ def test_replay_save_allows_only_verified_virtual_root_rebinding(tmp_path, chang
         assert replay._verify_replay_saved_model(original, saved, contract) is True
 
 
-@pytest.mark.parametrize("changed", [None, "python_pid", "checks_sha256", "copied_bundle_hashes", "parent_channel_contract_sha256", "replay_saved_model_verified", "copied_dependency"])
+@pytest.mark.parametrize("changed", [None, "python_pid", "checks_sha256", "copied_bundle_hashes", "parent_channel_contract_sha256", "replay_saved_model_verified", "copied_dependency", "supplemental_missing", "supplemental_other_dataset", "supplemental_valid"])
 def test_replay_supervisor_requires_complete_matching_worker_evidence(tmp_path, monkeypatch, changed):
     monkeypatch.setenv("PSCAD_MCP_MMC_ACCEPTANCE", "1")
     arguments = _request(tmp_path, monkeypatch)
+    supplemental = changed is not None and changed.startswith("supplemental_")
+    if supplemental:
+        arguments.update({"verification_context": {"scope": "joint_test"}, "worker_module": "tests.mmc_joint_acceptance"})
 
     class Process:
         pid = 731
@@ -157,16 +160,22 @@ def test_replay_supervisor_requires_complete_matching_worker_evidence(tmp_path, 
                   "checks_sha256": request["checks_sha256"], "replay_saved_model_verified": True,
                   "acceptance": {"verdict": "PASS"}, "output_identity": snapshot_output_dataset(output),
                   "replay_channel_contract": {"project_path": str(worker / "SavedCase.pscx")}}
-        if changed == "copied_dependency":
+        if supplemental and changed != "supplemental_missing":
+            report.update({"verification_context_sha256": request["verification_context_sha256"],
+                           "supplemental_saved_validation": {"verdict": "PASS"},
+                           "supplemental_evidence": {"verdict": "PASS", "output_identity": json.loads(json.dumps(report["output_identity"]))}})
+            if changed == "supplemental_other_dataset":
+                report["supplemental_evidence"]["output_identity"]["primary"] = "different-run.out"
+        elif changed == "copied_dependency":
             (copied_bundle / "library.pslx").write_text("CHANGED dependency")
-        elif changed:
+        elif changed and not supplemental:
             report[changed] = "changed"
         (worker / "report.json").write_text(json.dumps(report))
         return Process()
 
     monkeypatch.setattr(replay.asyncio, "create_subprocess_exec", launch)
     result = asyncio.run(replay.verify_native_fault_replay(**arguments))
-    assert result["status"] == ("FAIL" if changed else "PASS")
+    assert result["status"] == ("PASS" if changed in (None, "supplemental_valid") else "FAIL")
     assert result["worker_exit_code"] == 0
     if changed is None:
         assert result["artifacts"]["request.json"]["sha256"]
@@ -174,8 +183,8 @@ def test_replay_supervisor_requires_complete_matching_worker_evidence(tmp_path, 
         assert result["artifacts"]["supervisor-report.json"]["sha256"]
 
 
-@pytest.mark.parametrize(("verdict", "changed_dependency"), [("PASS", False), ("FAIL", False), ("PASS", True)])
-def test_independent_worker_uses_frozen_dependencies_and_cleans_its_own_session(tmp_path, monkeypatch, verdict, changed_dependency):
+@pytest.mark.parametrize(("verdict", "changed_dependency", "supplemental_verdict"), [("PASS", False, None), ("FAIL", False, None), ("PASS", True, None), ("PASS", False, "PASS"), ("PASS", False, "FAIL"), ("PASS", False, "MISSING"), ("PASS", False, "OTHER_DATASET")])
+def test_independent_worker_uses_frozen_dependencies_and_cleans_its_own_session(tmp_path, monkeypatch, verdict, changed_dependency, supplemental_verdict):
     from pscad_mcp.hvdc.builders.mmc import blank_service
 
     monkeypatch.setenv("PSCAD_MCP_MMC_ACCEPTANCE", "1")
@@ -192,6 +201,9 @@ def test_independent_worker_uses_frozen_dependencies_and_cleans_its_own_session(
                "checks_contract": default_fault_checks(), "settings": {}, "source_identities": {"master": {}, "library": {"path": str(source_bundle / "library.pslx")}}}
     request["channel_contract_sha256"] = replay._json_hash(request["channel_contract"])
     request["checks_sha256"] = replay._json_hash(request["checks_contract"])
+    if supplemental_verdict:
+        request["verification_context"] = {"scope": "joint_test", "schedule_sha256": "a" * 64}
+        request["verification_context_sha256"] = replay._json_hash(request["verification_context"])
     replay._write(request_path, request)
     calls = []
 
@@ -248,11 +260,30 @@ def test_independent_worker_uses_frozen_dependencies_and_cleans_its_own_session(
     monkeypatch.setattr(blank_service, "_verify_runtime_master", runtime_master)
     monkeypatch.setattr(blank_service, "_run_native_fault_case", run)
     monkeypatch.setattr(replay, "evaluate_template_native_dc_fault", lambda *args, **kwargs: {"verdict": verdict})
-    result = asyncio.run(replay._worker(request_path, replay._hash(request_path)))
-    assert result["status"] == ("FAIL" if changed_dependency else verdict), result.get("error")
+    verifiers = {}
+    if supplemental_verdict and supplemental_verdict != "MISSING":
+        def saved_verifier(context, project, contract):
+            calls.append("supplemental_saved")
+            assert context == request["verification_context"]
+            return {"verdict": "PASS"}
+
+        def dataset_verifier(context, project, contract, samples):
+            calls.append("supplemental_dataset")
+            assert Path(samples["identity"]["primary"]).parent == project.parent
+            identity = json.loads(json.dumps(samples["identity"]))
+            if supplemental_verdict == "OTHER_DATASET":
+                identity["primary"] = "different-run.out"
+            return {"verdict": "PASS" if supplemental_verdict == "OTHER_DATASET" else supplemental_verdict, "output_identity": identity}
+
+        verifiers = {"saved_verifier": saved_verifier, "dataset_verifier": dataset_verifier}
+    result = asyncio.run(replay._worker(request_path, replay._hash(request_path), **verifiers))
+    assert result["status"] == ("FAIL" if changed_dependency or supplemental_verdict not in (None, "PASS") else verdict), result.get("error")
     assert result["owned_process_cleaned"] is True
+    if supplemental_verdict == "MISSING":
+        assert calls == []
+        return
     assert result["replay_saved_model_verified"] is True
-    assert calls == ["attach", "quit", "wait_owned"]
+    assert calls == (["attach", "supplemental_saved", "supplemental_dataset", "quit", "wait_owned"] if supplemental_verdict else ["attach", "quit", "wait_owned"])
 
 
 def test_communication_error_preserves_report_and_unresolved_owned_cleanup(tmp_path, monkeypatch):
