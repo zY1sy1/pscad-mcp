@@ -87,6 +87,8 @@ the registry or companion library.
 - `tfault -> tfault`, with explicit fault-time and duration parameters.
 - `fault_state_integer_to_real -> unity`, fixed to Integer input, Real output,
   and scalar dimension.
+- `fault_control_not -> inv`, fixed to non-interpolated Integer input/output,
+  converts the logical fault-active signal to the breaker open command.
 - `dynamic_output_channel -> pgb`, with explicit group, name, units, and enabled
   output-channel settings for the fault-active signal.
 
@@ -102,10 +104,15 @@ separate from the packaged provenance and from full-model waveform acceptance.
 
 For the installed `master.pslx`, inspection records the `breaker1` control
 parameter as `content_type="Variable"`; the protected Definition body is not
-copied. The official example pattern is `breaker1.NAME=LCC_FAULT_ACTIVE`,
-with the matching data label `LCC_FAULT_ACTIVE` on the event signal. This
-supports the embedded EMTDC timer contract only and is engineering provenance,
-not an independent waveform golden.
+copied. Installed 4.6.2 help `Master_Library_Models/Breakers/1p_break.htm`
+defines the named input as 0=closed and 1=open. Therefore all three shunts use
+`breaker1.NAME=LCC_FAULT_OPEN`, produced by native `inv` from the embedded
+timer's `LCC_FAULT_ACTIVE`. Physical apply/clear values are 0/1, while the
+logical fault monitor remains 1 during the event. `BOpen=2` aligns the initial
+graphic only; it does not control subsequent breaker operation. This corrects
+the former direct active-signal binding, which applied the shunt before and
+after the intended event. The inverse producer chain must survive save,
+reload, and compile readback; this is not independent waveform golden evidence.
 
 The bridge CB input requires an electrical node reference, not an integer
 block command. Each six-pulse group now uses an installed `master:nodeloop`

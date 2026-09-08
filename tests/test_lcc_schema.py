@@ -176,7 +176,7 @@ def test_dynamic_event_legacy_contract_may_omit_all_control_fields():
     asset_path = Path(__file__).parents[1] / "pscad_mcp" / "assets" / "lcc" / "cigre_lcc_monopole_v1" / "blueprint.json"
     candidate = json.loads(asset_path.read_text(encoding="utf-8"))
     event = candidate["dynamic_events"][0]
-    for field in ("control_mode", "control_signal", "recovery_window_s"):
+    for field in ("control_mode", "control_signal", "event_signal", "recovery_window_s"):
         event.pop(field)
 
     parsed = parse_blueprint(candidate)
@@ -191,7 +191,8 @@ def test_dynamic_event_wp1c_contract_fields_remain_strict_when_complete():
     parsed = parse_blueprint(candidate)
     event = parsed.to_dict()["dynamic_events"][0]
     assert event["control_mode"] == "embedded_emtdc"
-    assert event["control_signal"] == "LCC_FAULT_ACTIVE"
+    assert event["control_signal"] == "LCC_FAULT_OPEN"
+    assert event["event_signal"] == "LCC_FAULT_ACTIVE"
     assert event["recovery_window_s"] == 0.5
 
 

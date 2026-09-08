@@ -7,7 +7,8 @@
     "duration_s": 0.1,
     "recovery_window_s": 0.5,
     "control_mode": "embedded_emtdc",
-    "control_signal": "LCC_FAULT_ACTIVE"
+    "control_signal": "LCC_FAULT_OPEN",
+    "event_signal": "LCC_FAULT_ACTIVE"
   },
   "required_channels": [
     {"path": "Fault/LCC Fault Active", "units": "state"},

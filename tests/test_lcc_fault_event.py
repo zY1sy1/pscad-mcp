@@ -174,6 +174,7 @@ def test_current_fixed_blueprint_reports_explicit_missing_fault_bindings():
     )
     assert result["status"] == "INCOMPLETE_ANALYSIS"
     assert result["reasons"] == [
+        "fault_control_inverter_invalid",
         "fault_timer_port_missing",
         "fault_shunt_phase_port_missing",
         "fault_state_adapter_port_missing",
@@ -304,6 +305,38 @@ def test_packaged_dynamic_event_rejects_duplicate_phase_branch():
     )
     assert result["status"] == "INCOMPLETE_ANALYSIS"
     assert "fault_resistor_branch_duplicate" in result["reasons"]
+
+
+def test_breaker_control_rejects_using_event_active_as_open_command():
+    blueprint = _asset("blueprint.json")
+    event = blueprint["dynamic_events"][0]
+    event["event_signal"] = event["control_signal"]
+    result = inspect_fixed_lcc_fault_capability(
+        blueprint, _asset("catalog-pscad-4.6.2.json"), _production_inventory(),
+    )
+    assert result["status"] == "INCOMPLETE_ANALYSIS"
+    assert "fault_control_polarity_invalid" in result["reasons"]
+
+
+@pytest.mark.parametrize("mutation, reason", [
+    ("adapter", "fault_control_inverter_invalid"),
+    ("apply", "fault_control_polarity_invalid"),
+    ("clear", "fault_control_polarity_invalid"),
+    ("command", "fault_control_command_topology_invalid"),
+])
+def test_breaker_control_requires_verified_inverse_relation(mutation, reason):
+    blueprint = _asset("blueprint.json")
+    if mutation == "adapter":
+        next(c for c in blueprint["components"] if c["logical_id"] == "fault_open_adapter")["definition"] = "master:unity"
+    elif mutation in {"apply", "clear"}:
+        blueprint["dynamic_events"][0][mutation + "_value"] = 1 if mutation == "apply" else 0
+    else:
+        next(net for net in blueprint["nets"] if net.get("label") == "LCC_FAULT_OPEN")["endpoints"][0]["port"] = "IN"
+    result = inspect_fixed_lcc_fault_capability(
+        blueprint, _asset("catalog-pscad-4.6.2.json"), _production_inventory(),
+    )
+    assert result["status"] == "INCOMPLETE_ANALYSIS"
+    assert reason in result["reasons"]
 
 
 def test_packaged_dynamic_event_rejects_unrelated_second_control_label_net():

@@ -272,12 +272,12 @@ def complete_live_inventory(
 
 LEGACY_PLAN_SNAPSHOTS = {
     "full_acceptance": {
-        "plan_hash": "4fa7171b2826a7b56dfafd9de9ba16bf28c7d8b86e7107c609b2e4ca7f2a26fb",
-        "operations_hash": "1fb0f4d4ff5e39b34edcb9322ffa44811b69b75b8ad166717c029e4ec8617667",
+        "plan_hash": "d52dadb89b42ec07f1da7790a3bba607f878e78b926653f7e17c077012e9f761",
+        "operations_hash": "8debe9d175a9d35ec1674e9e02df8b356ec53a8529ea34b5c338d979026a959f",
     },
     "wp1b_smoke": {
-        "plan_hash": "07834e8a0e7514e52eff65a3ff6c23ce07250e7ee86891124caa0683b2d6a353",
-        "operations_hash": "939285f4ab62f29baecfd80a00ccd25f2c57b1381e89ebbfab04429ea84001e6",
+        "plan_hash": "74017f050a2c9f3474a6dd355288e6b29e9a6c0049cef3547e7c59e6c54b0bff",
+        "operations_hash": "f03ce2046e7ce36a4bd8107040af24dfcde7c38c7bd7161150f5f48c8aea0746",
     },
 }
 
@@ -752,7 +752,7 @@ def test_packaged_main_signal_imports_are_pscad_grid_aligned():
         if component.definition == "master:main_signal_import"
     ]
 
-    assert len(imports) == 5
+    assert len(imports) == 6
     assert all(
         coordinate % 18 == 0
         for component in imports
@@ -781,10 +781,11 @@ def test_packaged_fixed_data_nets_do_not_create_main_canvas_labels():
 
     labels = {net.logical_id: net.label for net in blueprint.nets if net.kind == "data"}
     assert labels["inverter_fault_active_integer"] == "LCC_FAULT_ACTIVE"
+    assert labels["inverter_fault_open_integer"] == "LCC_FAULT_OPEN"
     assert all(
         label is None
         for logical_id, label in labels.items()
-        if logical_id not in {"inverter_fault_active_integer", "alpha_rect_telemetry"}
+        if logical_id not in {"inverter_fault_active_integer", "inverter_fault_open_integer", "alpha_rect_telemetry"}
     )
     assert labels["alpha_rect_telemetry"] == "ALPHA"
 

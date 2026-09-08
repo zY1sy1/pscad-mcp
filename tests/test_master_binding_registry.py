@@ -384,6 +384,17 @@ def _master_fixture_xml(
       <port model='Transfer' name='A:Dim' x='-36' y='0' dim='0' mode='Input' type='Logical'>IType==0</port>
     </svg>
   </Definition>
+  <Definition name='inv'>
+    <form><category>
+      <parameter name='INTR' type='Choice'><value>0</value><choice>0 = Disabled</choice><choice>1 = Enabled</choice></parameter>
+    </category></form>
+    <svg>
+      <port model='Transfer' name='IN' x='0' y='0' dim='1' mode='Input' type='Integer'>!(INTR==1)</port>
+      <port model='Transfer' name='OUT' x='36' y='0' dim='1' mode='Output' type='Integer'>!(INTR==1)</port>
+      <port model='Transfer' name='IN' x='0' y='0' dim='2' mode='Input' type='Real'>!(INTR==0)</port>
+      <port model='Transfer' name='OUT' x='36' y='0' dim='2' mode='Output' type='Real'>!(INTR==0)</port>
+    </svg>
+  </Definition>
   <Definition name='pgb'>
     <form><category>
       <parameter name='Name' type='Text'><value>Untitled</value></parameter>
@@ -638,6 +649,7 @@ def test_packaged_registry_contains_exact_fixed_catalog_bindings():
         "master:breaker1",
         "master:tfault",
         "master:fault_state_integer_to_real",
+        "master:fault_control_not",
         "master:dynamic_output_channel",
     }
     assert (
@@ -749,6 +761,26 @@ def test_transformer_binding_selects_primary_y_neutral_in_three_phase_view(tmp_p
     assert selected["HV_N"]["offset"] == (-36, 72)
     assert selected["HV_N"]["condition"] == "(YD1==0)&&(View==0)"
     assert all(port["physical"] != "G2" for port in selected.values())
+
+
+def test_fault_control_not_uses_native_scalar_integer_inversion(tmp_path):
+    module = _subject()
+    registry = _packaged_registry(module)
+    audited = module.audit_master_bindings(_write_master_fixture(tmp_path), registry)
+    binding = audited.resolve_component("master:fault_control_not", {})
+
+    assert binding.physical_definition == "inv"
+    assert binding.physical_parameters == {"INTR": 0}
+    ports = audited.definitions["master:fault_control_not"]["selected_ports"]
+    for name, offset in {"IN": (0, 0), "OUT": (36, 0)}.items():
+        assert ports[name]["physical"] == name
+        assert ports[name]["occurrence"] == 0
+        assert ports[name]["dimension"] == 1
+        assert ports[name]["type"] == "Integer"
+        assert ports[name]["offset"] == offset
+        assert ports[name]["condition"] == "!(INTR==1)"
+    breaker = registry.by_logical_name["master:breaker1"]
+    assert next(item.value for item in breaker.fixed_parameters if item.physical == "BOpen") == 2
 
 
 def test_audit_rejects_duplicate_physical_definitions(tmp_path):

@@ -869,7 +869,7 @@
         {"physical": "ROFF", "value": 1000000, "contract": {"type": "Real", "unit": "ohm"}},
         {"physical": "RON", "value": 0.01, "contract": {"type": "Real", "unit": "ohm"}},
         {"physical": "PostIns", "value": 0, "contract": {"type": "Choice", "unit": null, "choices": ["0", "1"]}},
-        {"physical": "BOpen", "value": 0, "contract": {"type": "Choice", "unit": null, "choices": ["0", "2"]}}
+        {"physical": "BOpen", "value": 2, "contract": {"type": "Choice", "unit": null, "choices": ["0", "2"]}}
       ],
       "evidence_parameters": []
     },
@@ -904,6 +904,20 @@
       ],
       "fixed_parameters": [
         {"physical": "REP", "value": 0, "contract": {"type": "Choice", "unit": null, "choices": ["0", "1"]}}
+      ],
+      "evidence_parameters": []
+    },
+    {
+      "logical_name": "master:fault_control_not",
+      "physical_definition": "inv",
+      "shape": {"kind": "direct"},
+      "ports": [
+        {"logical": "IN", "physical": "IN", "kind": "data", "dimension": 1, "occurrence": 0},
+        {"logical": "OUT", "physical": "OUT", "kind": "data", "dimension": 1, "occurrence": 0}
+      ],
+      "parameters": [],
+      "fixed_parameters": [
+        {"physical": "INTR", "value": 0, "contract": {"type": "Choice", "unit": null, "choices": ["0", "1"]}}
       ],
       "evidence_parameters": []
     },

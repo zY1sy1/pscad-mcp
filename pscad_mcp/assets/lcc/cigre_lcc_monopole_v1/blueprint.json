@@ -31,7 +31,8 @@
       "shunt_component": "inverter_fault_shunt_group",
       "channel": "Fault/LCC Fault Active",
       "control_mode": "embedded_emtdc",
-      "control_signal": "LCC_FAULT_ACTIVE",
+      "control_signal": "LCC_FAULT_OPEN",
+      "event_signal": "LCC_FAULT_ACTIVE",
       "recovery_window_s": 0.5,
       "control_components": [
         "inverter_fault_breaker_a",
@@ -39,8 +40,8 @@
         "inverter_fault_breaker_c"
       ],
       "control_parameter": "NAME",
-      "apply_value": 1,
-      "clear_value": 0
+      "apply_value": 0,
+      "clear_value": 1
     }
   ],
   "canvases": [
@@ -467,7 +468,7 @@
       },
       "orientation": 2,
       "parameters": {
-        "NAME": "LCC_FAULT_ACTIVE"
+        "NAME": "LCC_FAULT_OPEN"
       },
       "ports": [
         "A",
@@ -484,7 +485,7 @@
       },
       "orientation": 2,
       "parameters": {
-        "NAME": "LCC_FAULT_ACTIVE"
+        "NAME": "LCC_FAULT_OPEN"
       },
       "ports": [
         "A",
@@ -501,7 +502,7 @@
       },
       "orientation": 2,
       "parameters": {
-        "NAME": "LCC_FAULT_ACTIVE"
+        "NAME": "LCC_FAULT_OPEN"
       },
       "ports": [
         "A",
@@ -632,6 +633,24 @@
         "IN",
         "OUT"
       ],
+      "role": "signal_adapter"
+    },
+    {
+      "logical_id": "fault_open_adapter",
+      "definition": "master:fault_control_not",
+      "location": {"x": 2824, "y": 486},
+      "orientation": 0,
+      "parameters": {},
+      "ports": ["IN", "OUT"],
+      "role": "signal_adapter"
+    },
+    {
+      "logical_id": "fault_open_signal",
+      "definition": "master:main_signal_import",
+      "location": {"x": 2952, "y": 486},
+      "orientation": 0,
+      "parameters": {"Name": "LCC_FAULT_OPEN"},
+      "ports": ["OUT"],
       "role": "signal_adapter"
     },
     {
@@ -2250,9 +2269,27 @@
         {
           "component": "fault_active_adapter",
           "port": "IN"
+        },
+        {
+          "component": "fault_open_adapter",
+          "port": "IN"
         }
       ],
-      "label": "LCC_FAULT_ACTIVE"
+      "label": "LCC_FAULT_ACTIVE",
+      "route": {
+        "vertices": [[2744, 400], [2744, 360], [2824, 360], [2824, 400], [2824, 486]],
+        "policy": "orthogonal"
+      }
+    },
+    {
+      "logical_id": "inverter_fault_open_integer",
+      "kind": "data",
+      "endpoints": [
+        {"component": "fault_open_adapter", "port": "OUT"},
+        {"component": "fault_open_signal", "port": "OUT"}
+      ],
+      "label": "LCC_FAULT_OPEN",
+      "route": {"vertices": [[2860, 486], [2952, 486]], "policy": "orthogonal"}
     },
     {
       "logical_id": "inverter_fault_active_signal",

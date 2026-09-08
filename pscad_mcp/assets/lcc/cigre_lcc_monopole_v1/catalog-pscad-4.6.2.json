@@ -540,6 +540,20 @@
       }
     },
     {
+      "scoped_name": "master:fault_control_not",
+      "ports": [
+        {"name": "IN", "kind": "data", "dimension": 1, "offset": [0, 0]},
+        {"name": "OUT", "kind": "data", "dimension": 1, "offset": [36, 0]}
+      ],
+      "parameters": {},
+      "bounding_box": [-6, -18, 42, 18],
+      "metadata": {
+        "library": "master",
+        "characterized_for": "4.6.2",
+        "binding_registry": "master-bindings-pscad-4.6.2.json"
+      }
+    },
+    {
       "scoped_name": "master:dynamic_output_channel",
       "ports": [
         {"name": "INPUT", "kind": "data", "dimension": 1, "offset": [0, 0]}

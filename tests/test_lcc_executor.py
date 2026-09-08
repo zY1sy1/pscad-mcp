@@ -1424,7 +1424,9 @@ def test_executor_rejects_dynamic_events_without_native_emtdc_scheduler(tmp_path
 def _dynamic_control_operation(**overrides):
     arguments = {
         "control_mode": "embedded_emtdc",
-        "control_signal": "LCC_FAULT_ACTIVE",
+        "control_signal": "LCC_FAULT_OPEN",
+        "event_signal": "LCC_FAULT_ACTIVE",
+        "control_adapter": "fault_open_adapter",
         "timer_component": "inverter_fault_timer",
         "control_components": [
             "inverter_fault_breaker_a",
@@ -1452,13 +1454,17 @@ def _dynamic_control_executor(tmp_path, *, service=None, **plan_overrides):
         "inverter_fault_breaker_a": 11,
         "inverter_fault_breaker_b": 12,
         "inverter_fault_breaker_c": 13,
+        "fault_open_adapter": 14,
     }
     executor.service.components = {
         10: {"parameters": {"FaultTime_s": 0.8, "FaultDuration_s": 0.1}},
-        11: {"parameters": {"NAME": "LCC_FAULT_ACTIVE"}},
-        12: {"parameters": {"NAME": "LCC_FAULT_ACTIVE"}},
-        13: {"parameters": {"NAME": "LCC_FAULT_ACTIVE"}},
+        11: {"parameters": {"NAME": "LCC_FAULT_OPEN"}},
+        12: {"parameters": {"NAME": "LCC_FAULT_OPEN"}},
+        13: {"parameters": {"NAME": "LCC_FAULT_OPEN"}},
     }
+    executor._logical_components["fault_open_adapter"] = GraphComponent(
+        "fault_open_adapter", "master:fault_control_not", "Main", (0, 0), 0, {},
+    )
     return executor
 
 
@@ -1471,7 +1477,9 @@ def test_executor_verifies_embedded_dynamic_control_after_compile(tmp_path):
     assert executor.result["dynamic_control"] == {
         "status": "PASS",
         "mode": "embedded_emtdc",
-        "signal": "LCC_FAULT_ACTIVE",
+        "signal": "LCC_FAULT_OPEN",
+        "event_signal": "LCC_FAULT_ACTIVE",
+        "control_adapter_component_id": 14,
         "timer_component_id": 10,
         "consumer_component_ids": [11, 12, 13],
         "output": "Fault/LCC Fault Active",
@@ -1495,6 +1503,24 @@ def test_executor_rejects_duplicate_dynamic_control_consumers(tmp_path):
 
     assert raised.value.code == "LCC_DYNAMIC_EVENT_UNAVAILABLE"
     assert "run_project" not in [call[0] for call in service.calls]
+
+
+def test_executor_rejects_missing_breaker_polarity_adapter(tmp_path):
+    executor = _dynamic_control_executor(tmp_path)
+    del executor.component_ids["fault_open_adapter"]
+    with pytest.raises(BackendError) as raised:
+        asyncio.run(executor._verify_dynamic_control(_dynamic_control_operation()))
+    assert raised.value.code == "LCC_DYNAMIC_EVENT_UNAVAILABLE"
+
+
+def test_executor_rejects_non_inverting_breaker_adapter(tmp_path):
+    executor = _dynamic_control_executor(tmp_path)
+    executor._logical_components["fault_open_adapter"] = replace(
+        executor._logical_components["fault_open_adapter"], definition="master:unity",
+    )
+    with pytest.raises(BackendError) as raised:
+        asyncio.run(executor._verify_dynamic_control(_dynamic_control_operation()))
+    assert raised.value.code == "LCC_DYNAMIC_EVENT_UNAVAILABLE"
 
 
 def test_recording_fake_persists_symbolic_parameter_values(tmp_path):

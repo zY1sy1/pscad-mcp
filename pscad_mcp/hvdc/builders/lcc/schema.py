@@ -93,6 +93,7 @@ _DYNAMIC_EVENT_KEYS = {
     "channel",
     "control_mode",
     "control_signal",
+    "event_signal",
     "recovery_window_s",
     "control_component",
     "control_components",
@@ -108,6 +109,7 @@ _DYNAMIC_EVENT_REQUIRED_KEYS = _DYNAMIC_EVENT_KEYS - {
     # metadata continue to parse; partial declarations are rejected below.
     "control_mode",
     "control_signal",
+    "event_signal",
     "recovery_window_s",
 }
 _PARAMETRIC_TOP_LEVEL_KEYS = {
@@ -487,6 +489,10 @@ def _parse_dynamic_events(value: Any) -> tuple[dict[str, Any], ...]:
                 f"{context}.recovery_window_s",
                 positive=True,
             )
+        if "event_signal" in normalized:
+            if not present_contract:
+                raise _invalid(f"{context}.event_signal requires a control contract.", context=context)
+            normalized["event_signal"] = _text(normalized["event_signal"], f"{context}.event_signal")
         parsed.append(
             {
                 key: _json_value(item, f"{context}.{key}")

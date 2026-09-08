@@ -165,6 +165,27 @@ def _embedded_control_reasons(
         ):
             reasons.append("native_scheduler_unavailable")
         return reasons
+    event_signal = event.get("event_signal")
+    if not isinstance(event_signal, str) or not _SIGNAL_RE.fullmatch(event_signal):
+        reasons.append("fault_event_signal_invalid")
+    if event_signal == signal or any(
+        type(event.get(field)) not in (int, float) or event.get(field) != expected
+        for field, expected in (("apply_value", 0), ("clear_value", 1))
+    ):
+        reasons.append("fault_control_polarity_invalid")
+    inverter = components.get("fault_open_adapter", {})
+    definition = _definition_inventory(inventory).get("master:fault_control_not", {})
+    anchor = components.get("fault_open_signal", {})
+    if (
+        inverter.get("definition") != "master:fault_control_not"
+        or inverter.get("parameters", {}) != {}
+        or not _has_port(definition, "IN", kind="data", dimension=1, direction="input")
+        or not _has_port(definition, "OUT", kind="data", dimension=1, direction="output")
+        or anchor.get("definition") != "master:main_signal_import"
+        or not isinstance(anchor.get("parameters"), Mapping)
+        or anchor["parameters"].get("Name") != signal
+    ):
+        reasons.append("fault_control_inverter_invalid")
     consumers = event.get("control_components")
     consumer_names = list(consumers) if isinstance(consumers, Sequence) and not isinstance(consumers, (str, bytes, bytearray)) else []
     if (
@@ -179,19 +200,19 @@ def _embedded_control_reasons(
         )
     ):
         reasons.append("fault_control_consumer_mismatch")
-    adapter_id = "fault_active_adapter"
-    labeled_nets = [net for net in nets if net.get("label") == signal]
-    expected_producer = {"inverter_fault_timer:Y", f"{adapter_id}:IN"}
-    producer_endpoints = (
-        {
-            f"{endpoint.get('component')}:{endpoint.get('port')}"
-            for endpoint in _records(labeled_nets[0].get("endpoints", ()), "net.endpoints")
-        }
-        if labeled_nets
-        else set()
-    )
-    if len(labeled_nets) != 1 or producer_endpoints != expected_producer:
+    def matches_net(label: Any, expected: set[str]) -> bool:
+        labeled = [net for net in nets if net.get("label") == label]
+        if len(labeled) != 1 or labeled[0].get("kind") != "data":
+            return False
+        endpoints = _records(labeled[0].get("endpoints", ()), "net.endpoints")
+        return len(endpoints) == len(expected) and {
+            f"{endpoint.get('component')}:{endpoint.get('port')}" for endpoint in endpoints
+        } == expected
+
+    if not matches_net(event_signal, {"inverter_fault_timer:Y", "fault_active_adapter:IN", "fault_open_adapter:IN"}):
         reasons.append("fault_control_producer_topology_invalid")
+    if not matches_net(signal, {"fault_open_adapter:OUT", "fault_open_signal:OUT"}):
+        reasons.append("fault_control_command_topology_invalid")
     return reasons
 
 
@@ -460,6 +481,8 @@ def inspect_fixed_lcc_fault_capability(
             "event": event,
             "control_mode": events[0].get("control_mode"),
             "control_signal": events[0].get("control_signal"),
+            "event_signal": events[0].get("event_signal"),
+            "control_adapter": "fault_open_adapter" if breaker_group and events[0].get("control_mode") == "embedded_emtdc" else None,
             "recovery_window_s": events[0].get("recovery_window_s"),
             "timer_component": timer_id,
             "timer": timer_id,

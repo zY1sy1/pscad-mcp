@@ -2095,11 +2095,16 @@ class LccExecutor:
                 "verify_lcc_dynamic_control",
             )
         signal = arguments.get("control_signal")
+        event_signal = arguments.get("event_signal")
+        control_adapter = arguments.get("control_adapter")
         timer_name = arguments.get("timer_component")
         consumers = arguments.get("control_components")
         channel = arguments.get("channel")
         if (
             not isinstance(signal, str)
+            or not isinstance(event_signal, str)
+            or event_signal == signal
+            or not isinstance(control_adapter, str)
             or not isinstance(timer_name, str)
             or not isinstance(channel, str)
         ):
@@ -2135,8 +2140,14 @@ class LccExecutor:
                 upstream_code=error.code,
             ) from error
         timer_id = self.component_ids.get(timer_name)
+        control_adapter_id = self.component_ids.get(control_adapter)
+        adapter = self._logical_components.get(control_adapter)
         consumer_ids = [self.component_ids.get(name) for name in consumers]
-        if timer_id is None or any(value is None for value in consumer_ids):
+        if (
+            timer_id is None or control_adapter_id is None
+            or adapter is None or adapter.definition != "master:fault_control_not"
+            or any(value is None for value in consumer_ids)
+        ):
             raise _error(
                 "LCC_DYNAMIC_EVENT_UNAVAILABLE",
                 "Dynamic control components are absent after compile.",
@@ -2169,7 +2180,7 @@ class LccExecutor:
             if not isinstance(parameters, Mapping) or parameters.get("NAME") != signal:
                 raise _error(
                     "LCC_DYNAMIC_EVENT_UNAVAILABLE",
-                    "A compiled fault breaker does not reference the timer signal.",
+                    "A compiled fault breaker does not reference the inverse open command.",
                     "verify_lcc_dynamic_control",
                     logical_id=name,
                     expected=signal,
@@ -2182,6 +2193,8 @@ class LccExecutor:
             "status": "PASS",
             "mode": "embedded_emtdc",
             "signal": signal,
+            "event_signal": event_signal,
+            "control_adapter_component_id": int(control_adapter_id),
             "timer_component_id": int(timer_id),
             "consumer_component_ids": [int(value) for value in consumer_ids],
             "output": channel,
