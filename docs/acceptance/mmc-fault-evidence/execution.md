@@ -240,3 +240,37 @@ The existing comparator still limits the number of selected cells to the
 physical count. Additionally, any steady request with absolute modulation
 above 2 pu fails the diagnostic gate; implicit clipping cannot manufacture a
 passing working point. All original nominal, recovery and current bounds remain.
+
+The ninth physical attempt (`fault-evidence-20260908T075010061627Z`, f441438)
+reduced the 303 Hz voltage component to roughly 6.25/7.90 kV at T1/T2, but
+retained physical FAIL. Raw DC means were 547.38/533.43 kV with 4.94%/5.33%
+relative RMS ripple. T2 power remained -900.06 MW, while arm requests reached
+2.3-2.56 pu and T1's current request stayed at 1.1 pu with FrzI continuously
+active. This is an unaccepted diagnostic, not grounds to raise damping or
+accept modulation clipping. The official transformer has no active tap and
+its compiled ratio is 230/370 kV; measured current-ratio evidence confirms
+that ratio. Apparent power inferred only from P/Q omits waveform distortion.
+
+Revision f108bac adds exact-node measurements of the physical AC command
+magnitude before DC normalization (VSCControl2 multiplier 736319288, output
+3204/2034) and the normalized magnitude before the 1.5 clamp (divider
+235800143, output 3204/1944). It also observes local converter-side Edc,
+each phase's Vref/Vz and deblocking ramp. These distinguish the existing
+line-side voltage base from local DC and actual arm capacitor sums.
+
+Per-arm energy is measured from the full 76-cell vector. The installed cell
+form declares C in uF, and compiled Main forwards 2800.0 without SI conversion.
+The diagnostic therefore uses `0.5e-6*C*SUM(Vc**2)` in MJ when Vc is kV.
+`FULLCELL1_EXE` return RVD1_5 is also exposed as the vendor aggregate equivalent
+source voltage; it is not asserted to be the selected-cell voltage sum.
+The energy formula and the original cell unit declaration are checked before
+instrumentation, and their generated-code form is retained with the run.
+
+Revision c5ed2e2 repairs an independently verified source binding: Main T2
+charging-delay owner 606940312 previously used Tcharging1 even though the
+terminal has its own Tcharging2 signal (label owner 2129272491). The derived
+copy now uses Tcharging2; T1 delay owner 584272924 retains Tcharging1. A
+regression proves that this is the only source-XML change, and the runner
+requires one generated EMTDC_XTTRANS call for each terminal setting. Original
+settings are 0.02 s for T1 and 0.0 s for T2, so the correction also removes
+the unintended 20 ms delay at T2.

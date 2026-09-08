@@ -285,6 +285,24 @@ def test_capacitor_energy_and_aggregate_source_keep_actual_cell_outputs(tmp_path
     assert "0.5e-6*$C*SUM($Vc**2)" in next(item.text for item in definition.findall("./script/segment") if item.get("name") == "Dsout")
 
 
+def test_sorter_diagnostics_observe_same_step_permutation_and_input(tmp_path, installed_sources):
+    from xml.etree import ElementTree as ET
+    project, library, master = installed_sources
+    derived = tmp_path / "observed.pscx"
+    contract = fault_channels.instrument_fault_channels(project, derived, library=library, master=master)
+    for role in ("sort_index_invalid", "sort_index_inversions", "sort_requested_count", "sort_enable", "capacitor_charge_power", "capacitor_current_sum"):
+        bindings = [item for item in contract["diagnostic_channels"] if item["role"] == role]
+        assert len(bindings) == 12
+    tree = ET.parse(derived)
+    sorter = next(item for item in tree.findall("./definitions/Definition") if item.get("name") == "MmcObservedSorter")
+    script = next(item.text for item in sorter.findall("./script/segment") if item.get("name") == "Fortran")
+    assert script.index("CALL E_SORTER") < script.index("MFEINV")
+    assert "$IN($OUT" in script
+    assert "MmcObservedSorter" in contract["readback_scripts"]
+    calls = [item for definition in tree.findall("./definitions/Definition") if definition.get("name", "").startswith("MFE_Pole_") for item in definition.findall("./schematic/User") if item.get("defn", "").endswith(":MmcObservedSorter")]
+    assert len(calls) == 12
+
+
 def test_voltage_base_diagnostics_bind_physical_and_preclamp_nodes(tmp_path, installed_sources):
     from xml.etree import ElementTree as ET
     project, library, master = installed_sources
