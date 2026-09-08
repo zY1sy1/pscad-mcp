@@ -2,7 +2,10 @@ import asyncio
 import copy
 import importlib
 import json
+import os
+import time
 import xml.etree.ElementTree as ET
+from pathlib import Path
 
 import pytest
 
@@ -258,6 +261,31 @@ def test_rehashed_invalid_serialized_plan_is_revalidated_before_mutation(tmp_pat
     assert not destination.exists()
 
 
+@pytest.mark.parametrize(
+    "source_name,destination_name", [("source", "source"), ("source-a", "SOURCE_a")]
+)
+def test_embedded_copy_rejects_equal_native_names_in_different_directories(
+    tmp_path, source_name, destination_name
+):
+    source, master, event = _inputs(tmp_path)
+    named_source = source.with_name(source_name + ".pscx")
+    if named_source != source:
+        source.rename(named_source)
+    plan = _module().plan_embedded_control(
+        named_source,
+        [event],
+        master_path=master,
+        time_step_s=1e-5,
+        output_step_s=1e-5,
+        duration_s=0.05,
+        max_timing_error_s=2e-5,
+    )
+    destination = tmp_path / "other" / (destination_name + ".pscx")
+    with pytest.raises(BackendError):
+        _module().materialize_embedded_control(plan, destination)
+    assert not destination.exists()
+
+
 def _samples(plan, *, rise=0.02, fall=0.03):
     times = [index * 1e-5 for index in range(5001)]
     return {
@@ -270,6 +298,128 @@ def _samples(plan, *, rise=0.02, fall=0.03):
             }
         ]
     }
+
+
+def _write_dataset(root, plan, *, value=None):
+    directory = root / "derived.gf42"
+    directory.mkdir(exist_ok=True)
+    channel = plan["event_channels"][0]
+    samples = _samples(plan)["channels"][0]
+    output = directory / "derived_01.out"
+    output.write_text(
+        "\n".join(
+            f"{t:.8f} {v if value is None else value}"
+            for t, v in zip(samples["domain"], samples["values"])
+        )
+        + "\n"
+    )
+    (directory / "derived.inf").write_text(
+        f'PGB(1) Output Desc="{channel["description"]}" Group="EMT events" Max=2 Min=-2 Units="1"\n'
+    )
+    metadata = ET.Element("Output", device="EMTDC")
+    domain = ET.SubElement(metadata, "Domain", name="Time", unit="s", skew="0.0")
+    ET.SubElement(domain, "Sample", rate="100000.0", end="5000")
+    analogs = ET.SubElement(metadata, "List", classid="Analog")
+    ET.SubElement(
+        analogs,
+        "Analog",
+        name="Main(0):" + channel["description"],
+        index="0",
+        id=channel["owner"] + ":0",
+        label="EMT events",
+        dim="1",
+        unit="1",
+    )
+    ET.ElementTree(metadata).write(directory / "derived.infx")
+    return output
+
+
+@pytest.mark.parametrize(
+    "fault",
+    [
+        None,
+        "owner",
+        "part",
+        "time_units",
+        "stale",
+        "wrong_waveform",
+        "missing",
+        "extra_segment",
+    ],
+)
+def test_output_evidence_is_fresh_complete_and_bound_to_infx_owner(tmp_path, fault):
+    _source, _master, plan = _plan(tmp_path)
+    project = tmp_path / "derived.pscx"
+    _module().materialize_embedded_control(plan, project)
+    output = _write_dataset(
+        tmp_path, plan, value=0 if fault == "wrong_waveform" else None
+    )
+    infx = output.with_name("derived.infx")
+    metadata = ET.parse(infx)
+    if fault in {"owner", "part"}:
+        metadata.find(".//Analog").set(
+            "id", "123:0" if fault == "owner" else "2000000000:1"
+        )
+        metadata.write(infx)
+    if fault == "time_units":
+        metadata.find("Domain").set("unit", "ms")
+        metadata.write(infx)
+    if fault == "extra_segment":
+        output.with_name("derived_02.out").write_text("0 1\n")
+    assert hasattr(_module(), "read_event_evidence"), (
+        "Frozen OUT/INF/INFX validation is missing"
+    )
+    started = time.time() + 1 if fault == "stale" else 0.0
+    outputs = [] if fault == "missing" else [str(output)]
+    if fault is None:
+        result = _module().read_event_evidence(
+            plan, project, outputs, started_after=started
+        )
+        assert result["measured_events"][0]["rise_time_s"] == 0.02
+        assert result["output_evidence"]["bindings"][0]["infx"]["id"] == "2000000000:0"
+        assert {item["kind"] for item in result["output_evidence"]["files"]} == {
+            "OUT",
+            "INF",
+            "INFX",
+            "project",
+        }
+    else:
+        with pytest.raises(BackendError):
+            _module().read_event_evidence(plan, project, outputs, started_after=started)
+
+
+def test_output_evidence_detects_data_change_even_when_mtime_is_preserved(
+    tmp_path, monkeypatch
+):
+    _source, _master, plan = _plan(tmp_path)
+    project = tmp_path / "derived.pscx"
+    _module().materialize_embedded_control(plan, project)
+    output = _write_dataset(tmp_path, plan)
+    original_read = Path.read_bytes
+    changed = False
+
+    def read_then_change(path):
+        nonlocal changed
+        payload = original_read(path)
+        if path == output and not changed:
+            changed = True
+            before = path.stat()
+            path.write_bytes(payload.replace(b" 1.0", b" 0.0"))
+            os.utime(path, ns=(before.st_atime_ns, before.st_mtime_ns))
+        return payload
+
+    monkeypatch.setattr(Path, "read_bytes", read_then_change)
+    with pytest.raises(BackendError, match="changed"):
+        _module().read_event_evidence(plan, project, [output], started_after=0)
+
+
+def test_event_measurement_rejects_a_longer_unrequested_time_domain(tmp_path):
+    _source, _master, plan = _plan(tmp_path)
+    samples = _samples(plan)
+    samples["channels"][0]["domain"].extend(index * 1e-5 for index in range(5001, 6001))
+    samples["channels"][0]["values"].extend([0.0] * 1000)
+    with pytest.raises(BackendError):
+        _module().measure_event_waveforms(plan, samples)
 
 
 @pytest.mark.parametrize("fault", ["missing", "late", "duration", "gap"])
@@ -292,8 +442,10 @@ def test_event_waveform_requires_both_edges_and_fully_sampled_interval(tmp_path,
 
 
 @pytest.mark.parametrize("build_error", [False, True])
+@pytest.mark.parametrize("identity_problem", [None, "already_loaded", "wrong_filename"])
+@pytest.mark.parametrize("explicit_old_output", [False, True])
 def test_public_scenario_compiles_embedded_events_before_run_and_verifies_output(
-    tmp_path, build_error
+    tmp_path, build_error, identity_problem, explicit_old_output
 ):
     source, _, plan = _plan(tmp_path)
     profile_dir = tmp_path / ".pscad-mcp" / "hvdc-profiles"
@@ -325,18 +477,31 @@ def test_public_scenario_compiles_embedded_events_before_run_and_verifies_output
             }
         )
     )
-    output = tmp_path / "result_01.out"
-    output.write_text("fresh fake output")
+    output = tmp_path / "derived.gf42" / "derived_01.out"
 
     class Backend:
         def __init__(self):
             self.calls = []
+            self.loaded = False
 
         async def load_projects(self, files):
             self.calls.append("load")
+            self.loaded = True
 
         async def list_projects(self):
-            return [{"name": "derived", "type": "Case"}]
+            if not self.loaded and identity_problem != "already_loaded":
+                return []
+            return [
+                {
+                    "name": "derived",
+                    "type": "Case",
+                    **(
+                        {"filename": str(source)}
+                        if identity_problem == "wrong_filename"
+                        else {}
+                    ),
+                }
+            ]
 
         async def save_project(self, project, *, confirm):
             assert project == "derived"
@@ -366,6 +531,7 @@ def test_public_scenario_compiles_embedded_events_before_run_and_verifies_output
         async def run_project(self, project):
             assert project == "derived"
             self.calls.append("run")
+            _write_dataset(tmp_path, plan, value=0 if explicit_old_output else None)
 
         async def get_run_status(self, project):
             return {"status": "completed"}
@@ -401,6 +567,11 @@ def test_public_scenario_compiles_embedded_events_before_run_and_verifies_output
         "analysis": {},
         "run": {"timeout_s": 2},
     }
+    if explicit_old_output:
+        old_directory = tmp_path / "old"
+        old_directory.mkdir()
+        old_output = _write_dataset(old_directory, plan)
+        scenario["output_files"] = [str(old_output)]
 
     async def exercise():
         result = await service.run_scenario(str(source), scenario, confirm=True)
@@ -411,7 +582,18 @@ def test_public_scenario_compiles_embedded_events_before_run_and_verifies_output
             await asyncio.sleep(0)
         return await service.scenario_status(result["scenario_id"])
 
+    if explicit_old_output:
+        with pytest.raises(BackendError, match="explicit"):
+            asyncio.run(exercise())
+        assert backend.calls == []
+        return
     result = asyncio.run(exercise())
+    if identity_problem:
+        assert result["status"] == "failed"
+        assert result["error"]["code"] == "HVDC_TIMED_CONTROL_UNAVAILABLE"
+        assert "save" not in backend.calls and "run" not in backend.calls
+        assert result["reservation_held"] is False
+        return
     if build_error:
         assert result["status"] == "failed"
         assert result["error"]["code"] == "HVDC_SCENARIO_BUILD_FAILED"

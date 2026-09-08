@@ -266,3 +266,13 @@ def test_polling_normalizes_nested_only_binding_before_execution():
         "value": 1}], mode="simulation_clock_polling"))
     assert backend.writes == [("case", 17, {"Value": 1})]
     assert result[0]["timing_error_s"] == pytest.approx(0.05)
+
+
+def test_mixed_target_forms_cannot_dispatch_two_values_at_the_same_time():
+    backend = PollingTimingBackend()
+    backend.times = iter([1.05, 1.05, 1.05])
+    events = [{"time_s": 1.0, "component_id": 17, "parameter_name": "Value", "value": 1},
+              {"time_s": 1.0, "target": {"instance_path": "Main", "owner": "17", "parameter": "Value"}, "value": 0}]
+    with pytest.raises(BackendError, match="conflict"):
+        asyncio.run(dispatch_timed_events(backend, "case", events, mode="simulation_clock_polling"))
+    assert backend.writes == []

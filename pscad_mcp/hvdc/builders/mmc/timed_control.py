@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import io
 import itertools
 import json
 import math
@@ -53,6 +54,10 @@ def _identity(path: str | Path) -> dict[str, str]:
         "path": str(resolved),
         "sha256": hashlib.sha256(resolved.read_bytes()).hexdigest(),
     }
+
+
+def native_project_identity(value: str | Path) -> str:
+    return re.sub(r"[^A-Za-z0-9_]", "_", Path(value).stem).casefold()
 
 
 def schedule_sha256(plan: Mapping[str, Any]) -> str:
@@ -536,8 +541,27 @@ def materialize_embedded_control(
         source_hashes=plan["source_hashes"],
     )
     if validated["schedule_sha256"] != plan["schedule_sha256"]:
-        raise _error("The serialized schedule contains unplanned target or output bindings.")
+        raise _error(
+            "The serialized schedule contains unplanned target or output bindings."
+        )
     path = Path(destination).expanduser()
+    source_names = {native_project_identity(plan["scenario_source"]["path"])}
+    source_names.add(
+        native_project_identity(
+            ET.parse(plan["scenario_source"]["path"]).getroot().get("name", "")
+        )
+    )
+    source_names.update(
+        native_project_identity(item["path"])
+        for item in plan["source_hashes"].values()
+        if Path(item["path"]).suffix.casefold() == ".pscx"
+    )
+    if native_project_identity(path) in source_names:
+        raise _error(
+            "The derived project must have a distinct PSCAD runtime name.",
+            source_names=sorted(source_names),
+            destination=str(path),
+        )
     if (
         path.exists()
         or path.is_symlink()
@@ -645,6 +669,7 @@ def measure_event_waveforms(
             times[0] < 0
             or times[0] > output_step + 1e-12
             or times[-1] < plan["duration_s"] - output_step - 1e-12
+            or times[-1] > plan["duration_s"] + output_step + 1e-12
         ):
             raise _error("Event output does not cover the planned simulation interval.")
         if any(
@@ -711,3 +736,247 @@ def measure_event_waveforms(
                 }
             )
     return sorted(measurements, key=lambda item: item["rise_time_s"])
+
+
+def read_event_evidence(
+    plan: Mapping[str, Any],
+    project: str | Path,
+    output_files: Sequence[str | Path],
+    *,
+    started_after: float,
+) -> dict[str, Any]:
+    """Bind frozen, fresh legacy OUT parts to their actual INF/INFX owners."""
+    from ....builders.blueprint.output import _ATTRIBUTE, _PGB
+    from ....core.pscad_adapter import (
+        _legacy_first_numeric_row,
+        _legacy_next_nonblank,
+        _legacy_numeric_row,
+    )
+
+    project_path = Path(project).resolve()
+    readback = verify_embedded_control(plan, project_path)
+    if not math.isfinite(started_after) or started_after < 0 or not output_files:
+        raise _error("A timed run requires its own newly discovered output files.")
+    paths = [Path(path).resolve() for path in output_files]
+    directories = {path.parent for path in paths}
+    if len(directories) != 1:
+        raise _error("Timed outputs must come from one derived-project data set.")
+    directory = directories.pop()
+    if (
+        directory.parent != project_path.parent
+        or not directory.name.casefold().startswith(project_path.stem.casefold() + ".")
+    ):
+        raise _error(
+            "Timed outputs do not belong to the current derived project.",
+            directory=str(directory),
+            project=str(project_path),
+        )
+    inf_path = directory / (project_path.stem + ".inf")
+    infx_path = directory / (project_path.stem + ".infx")
+    snapshots: list[dict[str, Any]] = []
+
+    def snapshot(path: Path, kind: str) -> bytes:
+        if not path.is_file() or path.is_symlink():
+            raise _error(
+                "A required timed output is not a regular file.", path=str(path)
+            )
+        before = path.stat()
+        payload = path.read_bytes()
+        after = path.stat()
+        if (
+            before.st_mtime_ns != after.st_mtime_ns
+            or before.st_size != len(payload)
+            or after.st_size != len(payload)
+        ):
+            raise _error("A timed output changed while being frozen.", path=str(path))
+        if kind == "OUT" and after.st_mtime < started_after:
+            raise _error(
+                "An OUT part predates this simulation run.",
+                path=str(path),
+                run_started_at=started_after,
+                modified_at=after.st_mtime,
+            )
+        snapshots.append(
+            {
+                "kind": kind,
+                "path": str(path),
+                "sha256": hashlib.sha256(payload).hexdigest(),
+                "size_bytes": len(payload),
+                "mtime_ns": after.st_mtime_ns,
+            }
+        )
+        return payload
+
+    snapshot(project_path, "project")
+    inf_bytes = snapshot(inf_path, "INF")
+    infx = ET.fromstring(snapshot(infx_path, "INFX"))
+    domains = infx.findall("Domain")
+    if (
+        infx.get("device") != "EMTDC"
+        or len(domains) != 1
+        or domains[0].get("name") != "Time"
+        or domains[0].get("unit") != "s"
+    ):
+        raise _error("INFX does not declare one EMTDC time domain in seconds.")
+    rates = domains[0].findall("Sample")
+    try:
+        rate = float(rates[0].get("rate", "nan")) if len(rates) == 1 else float("nan")
+        sample_count = int(rates[0].get("end", "-1")) + 1 if len(rates) == 1 else 0
+    except ValueError as error:
+        raise _error("INFX sampling metadata is invalid.") from error
+    if (
+        not math.isfinite(rate)
+        or not math.isclose(rate, 1 / plan["output_step_s"], rel_tol=1e-9)
+        or sample_count < 3
+    ):
+        raise _error("INFX sampling metadata differs from the predeclared output step.")
+    analogs = infx.findall("./List[@classid='Analog']/Analog")
+    try:
+        analogs.sort(key=lambda item: int(item.get("index", "-1")))
+        count = 0
+        for analog in analogs:
+            if (
+                int(analog.get("index", "-1")) != count
+                or int(analog.get("dim", "0")) < 1
+            ):
+                raise _error("INFX channel indices are ambiguous or incomplete.")
+            count += int(analog.get("dim"))
+    except ValueError as error:
+        raise _error("INFX channel indices are invalid.") from error
+    metadata = []
+    for line in inf_bytes.decode("utf-8").splitlines():
+        match = _PGB.match(line)
+        if match:
+            metadata.append(
+                {
+                    "call_id": int(match.group(1)),
+                    **{
+                        name.casefold(): quoted if quoted != "" else bare
+                        for name, quoted, bare in _ATTRIBUTE.findall(match.group(2))
+                    },
+                }
+            )
+    if [item["call_id"] for item in metadata] != list(range(1, count + 1)):
+        raise _error("INF and INFX do not describe the same contiguous channel set.")
+    bindings = []
+    for channel in plan["event_channels"]:
+        matches = [
+            item
+            for item in analogs
+            if item.get("id", "").split(":")[0] == channel["owner"]
+            and item.get("name", "").startswith("Main(0):")
+        ]
+        if (
+            len(matches) != 1
+            or matches[0].get("id") != channel["owner"] + ":0"
+            or matches[0].get("name") != "Main(0):" + channel["description"]
+            or matches[0].get("unit") != channel["units"]
+            or matches[0].get("dim") != "1"
+        ):
+            raise _error(
+                "The actual INFX owner, instance, component part or unit differs from the event selector.",
+                selector=channel,
+            )
+        analog = matches[0]
+        index = int(analog.get("index"))
+        inf = metadata[index]
+        if (
+            inf.get("desc") != channel["description"]
+            or inf.get("units") != channel["units"]
+            or inf.get("group") != analog.get("label")
+        ):
+            raise _error(
+                "The INF selector does not match the bound INFX channel.",
+                selector=channel,
+            )
+        bindings.append(
+            {
+                "event_selector": {
+                    key: channel[key]
+                    for key in (
+                        "description",
+                        "instance_path",
+                        "owner",
+                        "definition",
+                        "port",
+                    )
+                },
+                "infx": dict(analog.attrib),
+                "inf": dict(inf),
+                "index": index,
+                "out_part": index // 10 + 1,
+                "out_column": index % 10 + 1,
+            }
+        )
+    expected = [
+        directory / f"{project_path.stem}_{part:02d}.out"
+        for part in range(1, (count + 9) // 10 + 1)
+    ]
+    found = list(directory.glob(project_path.stem + "_*.out"))
+    if (
+        len(paths) != len(set(paths))
+        or set(paths) != set(expected)
+        or set(found) != set(expected)
+    ):
+        raise _error(
+            "The newly discovered OUT part set is incomplete or contains unrelated files.",
+            expected=[str(path) for path in expected],
+            observed=[str(path) for path in paths],
+        )
+    streams = [io.StringIO(snapshot(path, "OUT").decode("utf-8")) for path in expected]
+    lines = [_legacy_first_numeric_row(stream) for stream in streams]
+    times = []
+    selected_values = [[] for _ in bindings]
+    while any(lines):
+        if not all(lines):
+            raise _error("OUT parts have different sample counts.")
+        try:
+            rows = [_legacy_numeric_row(line) for line in lines]
+        except ValueError as error:
+            raise _error("An OUT part contains invalid numeric data.") from error
+        if any(
+            row is None or len(row) != min(10, count - part * 10) + 1
+            for part, row in enumerate(rows)
+        ):
+            raise _error("An OUT part has the wrong column count.")
+        if any(row[0] != rows[0][0] for row in rows):
+            raise _error("OUT parts do not have the same EMTDC time domain.")
+        times.append(rows[0][0])
+        for binding, values in zip(bindings, selected_values):
+            values.append(rows[binding["out_part"] - 1][binding["out_column"]])
+        lines = [_legacy_next_nonblank(stream) for stream in streams]
+    if len(times) != sample_count:
+        raise _error(
+            "OUT sample count differs from the compiled INFX time domain.",
+            expected=sample_count,
+            observed=len(times),
+        )
+    samples = {
+        "channels": [
+            {
+                "description": channel["description"],
+                "units": channel["units"],
+                "domain": times,
+                "values": values,
+            }
+            for channel, values in zip(plan["event_channels"], selected_values)
+        ]
+    }
+    measured = measure_event_waveforms(plan, samples)
+    for item in snapshots:
+        if _identity(item["path"])["sha256"] != item["sha256"]:
+            raise _error(
+                "A frozen timed data set changed during validation.", path=item["path"]
+            )
+    if _identity(project_path)["sha256"] != readback["project_sha256"]:
+        raise _error("The derived project changed during event validation.")
+    return {
+        "measured_events": measured,
+        "output_evidence": {
+            "files": snapshots,
+            "bindings": bindings,
+            "sample_count": sample_count,
+            "time_domain": dict(domains[0].attrib),
+            "sampling": dict(rates[0].attrib),
+        },
+    }

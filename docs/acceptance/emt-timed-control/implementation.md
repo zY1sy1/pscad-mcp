@@ -16,6 +16,20 @@ for vendor operations. Real OUT/INF samples must cover both edges and the
 complete interval at the planned output step. Registration does not substitute
 for waveform evidence.
 
+Embedded runs reject explicit `output_files`. Only the current derived
+project's newly discovered complete OUT part set is eligible. OUT, INF, INFX
+and the saved project are snapshotted as bytes, hashed before interpretation,
+then rehashed afterward. The INFX Main instance, owner, part, index, dimension
+and unit must match the planned PGB; the INF channel must match that same
+index. Every OUT part must be fresh for the run and have the same full time
+domain. INFX sampling and the numeric output domain are both checked.
+
+Source and derived native names are compared after PSCAD name normalization.
+The destination namespace must be absent before load, and exactly one new
+case must appear afterward. A returned filename is checked when available;
+Legacy 4.6 exposes no filename getter, so evidence explicitly records the
+verified namespace admission instead of claiming a filename readback.
+
 PWM candidate staging accepts explicit `timed_control_options` with
 `master_path` and `max_timing_error_s`. It binds the schedule to the candidate's
 saved scenario source and uses a separate derived name per event scenario.
@@ -40,6 +54,7 @@ Related shared scenario/LCC test providers declare the new verified timing
 contract; their coarse synthetic clocks are not licensed timing evidence.
 
 B's isolated compiler-audit change `f517945` was imported as `9506586`.
+Its subsequent path-boundary fix `26b242c` was imported as `f6db91e`.
 The remaining template/fault instrumentation modules remain owned by B.
 
 ## Fresh Evidence Protocol

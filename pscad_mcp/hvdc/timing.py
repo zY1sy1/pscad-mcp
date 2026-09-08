@@ -70,9 +70,11 @@ def normalize_timed_events(events: Sequence[Mapping[str, Any]]) -> list[dict[str
     for event in result:
         target = event.get("target")
         if isinstance(target, Mapping):
-            key = tuple(str(target.get(field, "")) for field in ("instance_path", "owner", "parameter"))
+            key = (str(target.get("instance_path", "Main")), str(target.get("owner", "")), str(target.get("parameter", "")))
         else:
-            key = (str(event.get("instance_path", "")), str(event.get("component_id", target)), str(event.get("parameter_name", "")))
+            key = (str(event.get("instance_path", "Main")), str(event.get("component_id", target)), str(event.get("parameter_name", "")))
+        if key[1].isdigit():
+            key = (key[0], str(int(key[1])), key[2])
         earlier = previous.get(key)
         if earlier and (event["time_s"] < earlier.get("end_time_s", earlier["time_s"]) or event["time_s"] == earlier["time_s"]):
             raise _timing_error("Events conflict on the same target.", events=[earlier["event_id"], event["event_id"]])

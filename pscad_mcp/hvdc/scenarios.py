@@ -633,7 +633,13 @@ async def _orchestrate_scenario(service: Any, record: dict[str, Any], normalized
     record["started_at"] = _utc_now()
     embedded = normalized.get("timed_control")
     if embedded is not None:
-        from .builders.mmc.timed_control import verify_embedded_control
+        from .builders.mmc.timed_control import (
+            native_project_identity,
+            verify_embedded_control,
+        )
+        before_load = await backend.list_projects()
+        if any(native_project_identity(str(item.get("name", ""))) == native_project_identity(target_project) for item in before_load):
+            raise BackendError("HVDC_TIMED_CONTROL_UNAVAILABLE", "The derived runtime namespace is already loaded.", "hvdc", "embedded_control", {"path": target_project, "inventory": before_load})
         await _await_tracked_operation(service, record, "embedded:load", backend.load_projects([target_project]))
         projects = await backend.list_projects()
         record["loaded_projects"] = deepcopy(projects)
@@ -641,6 +647,11 @@ async def _orchestrate_scenario(service: Any, record: dict[str, Any], normalized
         if len(names) != 1:
             raise BackendError("HVDC_TIMED_CONTROL_UNAVAILABLE", "The derived project has no unique loaded case identity.", "hvdc", "embedded_control", {"path": target_project, "matches": names, "inventory": projects})
         record["runtime_project_name"] = names[0]
+        loaded = next(item for item in projects if item.get("name") == names[0])
+        filename = loaded.get("filename", loaded.get("file_path", loaded.get("path")))
+        if filename is not None and (not Path(filename).is_absolute() or _path_key(filename) != _path_key(target_project)):
+            raise BackendError("HVDC_TIMED_CONTROL_UNAVAILABLE", "The loaded project filename differs from the derived artifact.", "hvdc", "embedded_control", {"expected": target_project, "observed": filename})
+        record["runtime_project_binding"] = {"expected_path": target_project, "name": names[0], "filename_verified": filename is not None, "namespace_absent_before_load": True}
         await _await_tracked_operation(service, record, "embedded:save", backend.save_project(names[0], confirm=True))
         readback = verify_embedded_control(embedded, target_project)
         await _await_tracked_operation(service, record, "embedded:build", backend.build_project(names[0]))
@@ -859,17 +870,15 @@ async def _orchestrate_scenario(service: Any, record: dict[str, Any], normalized
         await _capture_outputs(service, record)
         if embedded is not None:
             from .builders.mmc.timed_control import (
-                measure_event_waveforms,
+                read_event_evidence,
                 verify_embedded_control,
             )
             if not record["output_files"]:
                 raise BackendError("HVDC_TIMED_CONTROL_UNAVAILABLE", "The embedded run produced no event waveform files.", "hvdc", "embedded_control")
-            sample_count = math.ceil(embedded["duration_s"] / embedded["output_step_s"]) + 2
-            samples = await backend.read_output_file(record["output_files"][0], max_samples=sample_count, summary_only=False)
-            measured = measure_event_waveforms(embedded, samples)
-            record["timing_basis"].update({"kind": "embedded_control_measured", "measured_events": measured,
+            evidence = await asyncio.to_thread(read_event_evidence, embedded, record["target_project"], record["output_files"], started_after=record["run_started_at_epoch"])
+            record["timing_basis"].update({"kind": "embedded_control_measured", **evidence,
                 "readback": verify_embedded_control(embedded, record["target_project"])})
-            record["partial_completion"]["applied_events"] = measured
+            record["partial_completion"]["applied_events"] = evidence["measured_events"]
 
 
 async def _scenario_worker(service: Any, record: dict[str, Any], normalized: dict[str, Any], timeout_s: float) -> None:
@@ -1001,6 +1010,8 @@ async def run_scenario(
             )
             if not isinstance(embedded, Mapping) or normalized.get("parameter_changes"):
                 raise BackendError("HVDC_TIMED_CONTROL_UNAVAILABLE", "Embedded schedules require a complete prehashed plan and no additional parameter changes.", "hvdc", "embedded_control")
+            if normalized.get("output_files"):
+                raise BackendError("HVDC_TIMED_CONTROL_UNAVAILABLE", "Embedded acceptance cannot consume explicit output_files; it requires this run's discovered data set.", "hvdc", "embedded_control")
             normalized["timed_control"] = deepcopy(dict(embedded))
             embedded_bindings = bind_embedded_request(embedded, service._resolve_project(project_name), normalized["events"], profile_data)
             target_project = str(service.path_policy.resolve(str(normalized["derived_project"]), suffixes={".pscx"}, must_exist=False))

@@ -31,8 +31,8 @@ from pscad_mcp.hvdc.builders.mmc.engines.pwm import (
 from pscad_mcp.hvdc.builders.mmc.scenarios import prepare_timed_scenario
 from pscad_mcp.hvdc.builders.mmc.template_audit import discover_official_mmc_template
 from pscad_mcp.hvdc.builders.mmc.timed_control import (
-    measure_event_waveforms,
     plan_embedded_control,
+    read_event_evidence,
     verify_embedded_control,
 )
 from pscad_mcp.hvdc.service import HvdcDomainService
@@ -292,9 +292,12 @@ async def _minimal_run(root, *, official=False):
         )
         report["source_immutable"] = True
         report["measured_events"] = terminal["timing_basis"]["measured_events"]
+        report["output_evidence"] = terminal["timing_basis"]["output_evidence"]
         report["readback"] = terminal["timing_basis"]["readback"]
         files = sorted(
-            {Path(path) for path in terminal["output_files"]} | set(root.rglob("*.inf"))
+            {Path(path) for path in terminal["output_files"]}
+            | set(root.rglob("*.inf"))
+            | set(root.rglob("*.infx"))
         )
         report["outputs"] = [_identity(path) for path in files]
         _write_json(root / "output-index.json", report["outputs"])
@@ -414,14 +417,17 @@ async def _replay_run(parent):
             str(derived), started_after=started_at
         )
         assert outputs
-        samples = await service.read_output_file(
-            outputs[0], max_samples=5002, summary_only=False
+        report.update(
+            await asyncio.to_thread(
+                read_event_evidence, plan, derived, outputs, started_after=started_at
+            )
         )
-        report["measured_events"] = measure_event_waveforms(plan, samples)
         report["outputs"] = [
             _identity(path)
             for path in sorted(
-                {Path(path) for path in outputs} | set(root.rglob("*.inf"))
+                {Path(path) for path in outputs}
+                | set(root.rglob("*.inf"))
+                | set(root.rglob("*.infx"))
             )
         ]
         assert _identity(frozen["path"]) == frozen
