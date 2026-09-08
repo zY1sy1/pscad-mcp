@@ -20,10 +20,10 @@ energy duty alongside current shares. Do not claim a global hardware optimum.
 - [x] Reconstruct the piecewise-linear static I-V network using SciPy roots.
 - [x] Validate that network against existing native PSCAD results before search.
 - [x] Search fixed-span candidates and expanded-span target cases.
-- [ ] Generate independent PSCAD copies and run every shortlisted case.
-- [ ] Compare measured current shares with predictions; retain all failed evidence.
-- [ ] Verify no reopening, KCL, waveform completeness, input hashes and owned cleanup.
-- [ ] Deliver optimized native cases, a comparison plot, data and a scoped recommendation.
+- [x] Generate independent PSCAD copies and run every shortlisted case.
+- [x] Compare measured current shares with predictions; retain all failed evidence.
+- [x] Verify no reopening, KCL, waveform completeness, input hashes and owned cleanup.
+- [x] Deliver optimized native cases, a comparison plot, data and a scoped recommendation.
 
 Implementation files: scripts/arrester_ratio_search.py for static prediction
 and search; scripts/run_arrester_ratio_study.py for native copies and validation;
@@ -36,3 +36,14 @@ attempt and its outputs are retained under the first study's runs directory.
 The copied-case description now has a text prefix. Independent review also led
 to strict preflight checks for search-code, source and candidate hashes. Final
 evidence must come from a fresh search and run with the finalized code.
+
+Final evidence is in
+`C:/Users/335/Documents/PSCAD-MCP/five_arrester_ratio_optimization_20260908_final`.
+All six native cases pass at code revision
+`238fedd1413ae8f031247ef754cf1d4dd0ca34fd`. The continuous fixed-span result is
+100/88.826306/77.904293/68.246790/60 kV and gives 86.9509% in each later stage.
+The exhaustive integer-grid result is 100/89/78/68/60 kV (minimum 86.4445%).
+The 95% and 99% copies achieve 95.01% and 99.01%, with final residual scales
+49.789455 and 29.083811 kV and peak source currents 3.3512 and 4.4175 kA.
+All original input hashes remain unchanged; owned PSCAD PID 19576 and all owned
+EMTDC executables exited. Thirty-two focused tests and static checks passed.
