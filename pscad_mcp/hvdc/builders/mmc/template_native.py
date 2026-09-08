@@ -27,6 +27,7 @@ _CONTROL_NAMES = {
     "dblk t1": "Dblk T1",
     "dblk t2": "Dblk T2",
     "ccsc enable": "CCSC Enable",
+    "flt location": "Flt Location",
 }
 
 
@@ -289,6 +290,32 @@ def materialize_template_native_scenario(
             root, "FltDur", _value(fault_duration_s, "fault_duration_s"), bindings
         )
 
+    fault_execution: dict[str, Any] = {}
+    if dc_fault_time_s is not None:
+        main = next((item for item in root.findall("./definitions/Definition") if item.get("name") == "Main"), None)
+        timers = [item for item in _components(main) if item.get("defn") == "master:tfaultn" and dict(_parameters(item)).get("TF") == "Flt_time"] if main is not None else []
+        if timers:
+            if len(timers) != 1:
+                raise _error("MMC_TEMPLATE_NATIVE_BINDING_AMBIGUOUS", "The actual DC fault timer is not unique.")
+            duration = _value(fault_duration_s, "fault_duration_s") if fault_duration_s is not None else dict(_parameters(timers[0]))["DF"]
+            timer_params = [item for item in timers[0].findall("./paramlist/param") if item.get("name") == "DF"]
+            if len(timer_params) != 1:
+                raise _error("MMC_TEMPLATE_NATIVE_BINDING_MISSING", "The actual DC fault timer has no unique duration.")
+            timer_params[0].set("value", duration)
+            bindings.append({"owner": timers[0].get("id"), "name": "DC fault timer", "parameter": "DF", "value": duration})
+            _set_named_control(root, "Flt Location", "3", bindings)
+            switches = [item for item in _components(main) if item.get("defn") == "master:fault_sw" and dict(_parameters(item)).get("Name") == "DC_flt_2_PN"]
+            if len(switches) != 1:
+                raise _error("MMC_TEMPLATE_NATIVE_BINDING_MISSING", "The terminal-2 P-N fault branch is not unique.")
+            clearing = next((item for item in switches[0].findall("./paramlist/param") if item.get("name") == "OpCur"), None)
+            if clearing is None:
+                raise _error("MMC_TEMPLATE_NATIVE_BINDING_MISSING", "The imposed fault clearing mode is missing.")
+            # Removing an externally imposed fault at a specified EMT time is
+            # distinct from modelling a current-zero-only circuit breaker.
+            clearing.set("value", "1")
+            bindings.append({"owner": switches[0].get("id"), "name": "DC_flt_2_PN", "parameter": "OpCur", "value": "1"})
+            fault_execution = {"timer_owner": timers[0].get("id"), "timer_start_signal": "Flt_time", "timer_duration_s": float(duration), "fault_location": 3, "fault_switch_owner": switches[0].get("id"), "fault_switch_signal": "DC_flt_2_PN", "clearing_policy": "imposed_fault_removed_at_scheduled_time", "actual_state_required": "OPENBR"}
+
     destination_path.parent.mkdir(parents=True, exist_ok=True)
     try:
         ET.ElementTree(root).write(
@@ -324,6 +351,7 @@ def materialize_template_native_scenario(
         "timing_basis": "template_embedded_emt",
         "bindings": bindings,
         "controls": observed,
+        "fault_execution": fault_execution,
     }
 
 
@@ -440,6 +468,12 @@ def evaluate_template_native_dc_fault(
         for key in ("output_part", "metadata_file", "hash", "metadata_sha256"):
             if not channel.get(key):
                 invalid.append(f"source_identity:{channel_id}:{key}")
+        if isinstance(identity, Mapping):
+            files = list(identity.get("files", {}).values())
+            for path_key, hash_key in (("output_part", "hash"), ("metadata_file", "metadata_sha256")):
+                members = [item for item in files if item.get("path") == channel.get(path_key) and item.get("sha256") == channel.get(hash_key)]
+                if len(members) != 1:
+                    invalid.append(f"dataset_membership:{channel_id}:{path_key}")
         source_units, target_units = channel.get("units"), units[role]
         factor = 1.0 if source_units == target_units else factors.get((source_units, target_units))
         if factor is None or binding.get("units") != target_units:
@@ -468,7 +502,7 @@ def evaluate_template_native_dc_fault(
     windows: dict[str, tuple[float, float]] = {}
     numbers: dict[str, float] = {}
     try:
-        for key in ("output_step_s", "max_timing_error_s", "negative_voltage_max_kv", "fault_current_limit_ka", "voltage_recovery_relative_tolerance", "power_recovery_relative_tolerance", "arm_rms_recovery_relative_tolerance", "capacitor_recovery_relative_tolerance", "steady_relative_rms_tolerance", "minimum_operating_fraction", "arm_rms_floor_ka"):
+        for key in ("output_step_s", "max_timing_error_s", "frequency_hz", "nominal_target_relative_tolerance", "arm_rms_stability_relative_tolerance", "arm_peak_limit_ka", "negative_voltage_max_kv", "fault_current_limit_ka", "voltage_recovery_relative_tolerance", "power_recovery_relative_tolerance", "arm_rms_recovery_relative_tolerance", "capacitor_recovery_relative_tolerance", "steady_relative_rms_tolerance", "minimum_operating_fraction", "arm_rms_floor_ka"):
             value = checks_contract[key]
             if isinstance(value, bool) or not math.isfinite(float(value)):
                 raise ValueError(key)
@@ -484,6 +518,11 @@ def evaluate_template_native_dc_fault(
             raise ValueError("time_or_physical_contract")
         if any(numbers[key] <= 0 for key in numbers if key != "negative_voltage_max_kv"):
             raise ValueError("positive_limits")
+        pre_duration = windows["prefault"][1] - windows["prefault"][0]
+        post_duration = windows["recovery"][1] - windows["recovery"][0]
+        cycles = pre_duration * numbers["frequency_hz"]
+        if abs(pre_duration - post_duration) > 1e-9 or round(cycles) < 2 or abs(cycles - round(cycles)) > 1e-7:
+            raise ValueError("equal_complete_cycle_windows")
     except (KeyError, TypeError, ValueError, OverflowError):
         invalid.append("invalid_checks_contract")
     if domain and "invalid_checks_contract" not in invalid:
@@ -553,18 +592,35 @@ def evaluate_template_native_dc_fault(
                 pre = rms(before) if role == "i_arm" else math.fsum(before) / len(before)
                 post = rms(after) if role == "i_arm" else math.fsum(after) / len(after)
                 nominal = channel["binding"].get("nominal")
-                reference_ok = abs(pre) >= numbers["arm_rms_floor_ka"] if role == "i_arm" else isinstance(nominal, (int, float)) and not isinstance(nominal, bool) and math.isfinite(nominal) and nominal != 0 and pre * nominal > 0 and abs(pre - nominal) <= abs(nominal) * (1 - numbers["minimum_operating_fraction"])
-                ripple = rms([value - pre for value in before]) / abs(pre) if role != "i_arm" and pre else None
-                stable = role == "i_arm" or (ripple is not None and ripple <= numbers["steady_relative_rms_tolerance"])
+                reference_ok = abs(pre) >= numbers["arm_rms_floor_ka"] if role == "i_arm" else isinstance(nominal, (int, float)) and not isinstance(nominal, bool) and math.isfinite(nominal) and nominal != 0 and pre * nominal > 0 and abs(pre) >= abs(nominal) * numbers["minimum_operating_fraction"] and abs(pre - nominal) <= abs(nominal) * numbers["nominal_target_relative_tolerance"]
+                def cycle_variation(window_name: str, reference: float, channel=channel, rms=rms) -> float | None:
+                    window_start, window_end = windows[window_name]
+                    cycle_count = round((window_end - window_start) * numbers["frequency_hz"])
+                    bins: list[list[float]] = [[] for _ in range(cycle_count)]
+                    for index in indices[window_name]:
+                        cycle_index = math.floor((domain[index] - window_start) * numbers["frequency_hz"] + 1e-8)
+                        if 0 <= cycle_index < cycle_count:
+                            bins[cycle_index].append(channel["values"][index])
+                    if any(len(values) < 2 for values in bins):
+                        invalid.append("insufficient_cycle_samples:" + channel["source"]["channel_id"])
+                        return None
+                    return max(abs(rms(values) - reference) / abs(reference) for values in bins) if reference else None
+                ripple = cycle_variation("prefault", pre) if role == "i_arm" else rms([value - pre for value in before]) / abs(pre) if pre else None
+                stability_limit = numbers["arm_rms_stability_relative_tolerance"] if role == "i_arm" else numbers["steady_relative_rms_tolerance"]
+                stable = ripple is not None and ripple <= stability_limit
                 reference_ok = bool(reference_ok and stable)
+                if role == "i_arm":
+                    reference_ok = reference_ok and max(abs(value) for value in before) <= numbers["arm_peak_limit_ka"]
                 tolerance = numbers[tolerance_key + "_recovery_relative_tolerance"]
                 error = abs(post - pre) / abs(pre) if reference_ok and pre else None
-                post_ripple = rms([value - post for value in after]) / abs(post) if role != "i_arm" and post else None
-                post_stable = role == "i_arm" or (post_ripple is not None and post_ripple <= numbers["steady_relative_rms_tolerance"])
+                post_ripple = cycle_variation("recovery", post) if role == "i_arm" else rms([value - post for value in after]) / abs(post) if post else None
+                post_stable = post_ripple is not None and post_ripple <= stability_limit
+                if role == "i_arm":
+                    post_stable = post_stable and max(abs(value) for value in after) <= numbers["arm_peak_limit_ka"]
                 recovered = bool(reference_ok and error is not None and error <= tolerance and post_stable)
                 recovery_ok.append(recovered)
-                add(f"{role}_operating_point", reference_ok, {"nominal": nominal, "minimum_operating_fraction": numbers["minimum_operating_fraction"], "arm_rms_floor_ka": numbers["arm_rms_floor_ka"], "maximum_relative_rms_ripple": numbers["steady_relative_rms_tolerance"]}, {"value": pre, "relative_rms_ripple": ripple}, windows["prefault"], channel["source"])
-                add(f"{role}_recovery", recovered, {"relative_tolerance": tolerance, "maximum_relative_rms_ripple": numbers["steady_relative_rms_tolerance"]}, {"before": pre, "after": post, "relative_error": error, "after_relative_rms_ripple": post_ripple}, windows["recovery"], channel["source"])
+                add(f"{role}_operating_point", reference_ok, {"nominal": nominal, "nominal_target_relative_tolerance": numbers["nominal_target_relative_tolerance"], "minimum_operating_fraction": numbers["minimum_operating_fraction"], "arm_rms_floor_ka": numbers["arm_rms_floor_ka"], "arm_peak_limit_ka": numbers["arm_peak_limit_ka"], "maximum_relative_rms_ripple": stability_limit}, {"value": pre, "peak_absolute": max(abs(value) for value in before), "relative_rms_ripple": ripple}, windows["prefault"], channel["source"])
+                add(f"{role}_recovery", recovered, {"relative_tolerance": tolerance, "maximum_relative_rms_ripple": stability_limit}, {"before": pre, "after": post, "peak_absolute": max(abs(value) for value in after), "relative_error": error, "after_relative_rms_ripple": post_ripple}, windows["recovery"], channel["source"])
         checks["recovered"] = all(recovery_ok)
     verdict = "INCOMPLETE_ANALYSIS" if missing or invalid else "PASS" if all(checks.values()) else "FAIL"
     return {

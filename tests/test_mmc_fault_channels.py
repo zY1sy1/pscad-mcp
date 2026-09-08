@@ -16,7 +16,7 @@ from pscad_mcp.hvdc.builders.mmc.template_native import (
 
 
 def fault_fixture() -> tuple[dict, dict, dict]:
-    times = [round(index * 0.01, 8) for index in range(101)]
+    times = [round(index * 0.005, 8) for index in range(201)]
     active = [int(0.4 <= value < 0.6) for value in times]
     channels = []
     contracts = []
@@ -47,7 +47,10 @@ def fault_fixture() -> tuple[dict, dict, dict]:
             "hash": "a" * 64, "metadata_sha256": "b" * 64,
         })
     checks = {
-        "schema_version": 1, "time_basis": "EMTDC", "time_units": "s", "output_step_s": 0.01,
+        "schema_version": 1, "time_basis": "EMTDC", "time_units": "s", "output_step_s": 0.005,
+        "frequency_hz": 60.0, "arm_rms_stability_relative_tolerance": 0.05,
+        "nominal_target_relative_tolerance": 0.05,
+        "arm_peak_limit_ka": 3.0,
         "max_timing_error_s": 0.011, "fault_window_s": [0.4, 0.6],
         "prefault_window_s": [0.1, 0.3], "recovery_window_s": [0.8, 1.0],
         "negative_voltage_max_kv": -1.0, "fault_current_limit_ka": 20.0,
@@ -262,3 +265,161 @@ def test_compile_metadata_can_precede_fresh_output(tmp_path):
     os.utime(metadata, (start - 100, start - 100))
     manifest = fault_channels.snapshot_output_dataset(part, started_after=start)
     fault_channels.verify_output_dataset(manifest)
+
+
+def test_first_vendor_save_can_rebind_only_virtual_root(tmp_path, installed_sources):
+    from xml.etree import ElementTree as ET
+    project, library, master = installed_sources
+    derived = tmp_path / "observed.pscx"
+    contract = fault_channels.instrument_fault_channels(project, derived, library=library, master=master)
+    tree = ET.parse(derived)
+    tree.find("./hierarchy/call").set("link", "777777")
+    tree.write(derived, encoding="utf-8")
+    finalized = fault_channels.finalize_fault_instrumentation(derived, contract)
+    assert finalized["readback"]["matched"] is True
+    assert finalized["virtual_root_rebinding"]["after"] == "Station[777777]"
+    assert all(channel["instance_path"].startswith("Station[777777]/") for channel in finalized["channels"])
+    tree = ET.parse(derived)
+    next(item for item in tree.findall(".//User") if item.get("id") == "1167847391").set("id", "999")
+    tree.write(derived, encoding="utf-8")
+    with pytest.raises(BackendError):
+        fault_channels.finalize_fault_instrumentation(derived, finalized)
+
+
+@pytest.mark.parametrize("defect", ["delete_wire", "move_wire", "port_position", "port_condition"])
+def test_measurement_connectivity_and_port_readback_cannot_drift(tmp_path, installed_sources, defect):
+    from xml.etree import ElementTree as ET
+    project, library, master = installed_sources
+    derived = tmp_path / "observed.pscx"
+    contract = fault_channels.instrument_fault_channels(project, derived, library=library, master=master)
+    tree = ET.parse(derived)
+    if "wire" in defect:
+        generated_pgb = next(item for item in tree.findall(".//User") if item.get("id") == contract["channels"][0]["owner_id"])
+        canvas = next(item for item in tree.findall(".//schematic") if generated_pgb in list(item))
+        wire = next(item for item in canvas.findall("Wire") if item.get("y") == generated_pgb.get("y") and item.get("x") == str(int(generated_pgb.get("x")) - 72))
+        if defect == "delete_wire":
+            canvas.remove(wire)
+        else:
+            wire.find("vertex").set("x", "18")
+    else:
+        definition = next(item for item in tree.findall("./definitions/Definition") if item.get("name") == "MmcObservedFullCell")
+        port = next(item for item in definition.findall("./svg/port") if item.get("name") == "Ntop")
+        if defect == "port_position":
+            port.set("y", "-72")
+        else:
+            port.text = "DTBP==1"
+    tree.write(derived, encoding="utf-8")
+    with pytest.raises(BackendError) as error:
+        fault_channels.verify_fault_instrumentation(derived, contract)
+    assert error.value.code == "MMC_POSTCONDITION_FAILED"
+
+
+def test_channel_file_hash_must_belong_to_frozen_dataset(tmp_path):
+    samples, contract, checks = fault_fixture()
+    part = output_fixture(tmp_path)
+    manifest = fault_channels.snapshot_output_dataset(part)
+    for channel in samples["channels"]:
+        channel.update(output_part=str(part), metadata_file=str(part.with_name("case.inf")), hash=manifest["files"][part.name]["sha256"], metadata_sha256=manifest["files"]["case.inf"]["sha256"])
+    samples["identity"] = manifest
+    samples["channels"][0]["hash"] = "0" * 64
+    report = evaluate(samples, contract, checks)
+    assert report["verdict"] == "INCOMPLETE_ANALYSIS"
+    assert any("dataset_membership" in item for item in report["invalid_evidence"])
+
+
+@pytest.mark.parametrize("defect", ["unequal", "partial_cycle", "frequency_missing"])
+def test_arm_comparison_requires_equal_complete_cycle_windows(defect):
+    samples, contract, checks = fault_fixture()
+    if defect == "unequal":
+        checks["recovery_window_s"] = [0.8, 0.81]
+    elif defect == "partial_cycle":
+        checks["prefault_window_s"] = [0.1, 0.305]
+        checks["recovery_window_s"] = [0.795, 1.0]
+    else:
+        checks.pop("frequency_hz")
+    assert evaluate(samples, contract, checks)["verdict"] == "INCOMPLETE_ANALYSIS"
+
+
+def test_equal_arm_rms_with_unstable_cycle_rms_does_not_pass():
+    samples, contract, checks = fault_fixture()
+    channel = next(item for item in samples["channels"] if item["description"] == "i_arm")
+    channel["values"] = [1.0 if int(round(time * 60, 5)) % 2 else 2.0 for time in channel["domain"]]
+    report = evaluate(samples, contract, checks)
+    assert report["verdict"] == "FAIL"
+    check = next(item for item in report["check_results"] if item["name"] == "i_arm_operating_point")
+    assert check["status"] == "FAIL"
+
+
+def test_native_dc_fault_binds_the_actual_timer_branch_and_clearing(tmp_path, installed_sources):
+    from xml.etree import ElementTree as ET
+
+    from pscad_mcp.hvdc.builders.mmc.template_audit import _components, _parameters
+    from pscad_mcp.hvdc.builders.mmc.template_native import (
+        materialize_template_native_scenario,
+    )
+    project, _, _ = installed_sources
+    derived = tmp_path / "native.pscx"
+    record = materialize_template_native_scenario(project, derived, dc_fault_time_s=2.5, fault_duration_s=0.2)
+    root = ET.parse(derived).getroot()
+    timer = next(item for item in _components(root) if item.get("id") == "1067520513")
+    assert dict(_parameters(timer))["DF"] == "0.2"
+    location = next(item for item in _components(root) if item.get("id") == "1311596185")
+    assert dict(_parameters(location))["Value"] == "3"
+    switch = next(item for item in _components(root) if item.get("id") == "983117456")
+    assert dict(_parameters(switch))["OpCur"] == "1"
+    assert record["fault_execution"]["clearing_policy"] == "imposed_fault_removed_at_scheduled_time"
+
+
+def test_stable_recovery_at_wrong_dc_reference_fails():
+    samples, contract, checks = fault_fixture()
+    channel = next(item for item in samples["channels"] if item["description"] == "v_dc")
+    channel["values"] = [600.0 if value == 640 else value for value in channel["values"]]
+    assert evaluate(samples, contract, checks)["verdict"] == "FAIL"
+
+
+def test_compiler_metadata_must_match_measured_owner(tmp_path, installed_sources):
+    import asyncio
+    from xml.etree import ElementTree as ET
+    project, library, master = installed_sources
+    derived = tmp_path / "observed.pscx"
+    contract = fault_channels.instrument_fault_channels(project, derived, library=library, master=master)
+    binding = contract["channels"][0]
+    contract["channels"] = [binding]
+    description = binding["selector"]["description"]
+    (tmp_path / "case.inf").write_text(f'PGB(1) Output Desc="{description}" Group="{fault_channels.OUTPUT_GROUP}" Max=1 Min=0 Units="1"\n', encoding="ascii")
+    part = tmp_path / "case_01.out"
+    part.write_text("0.0 0.0\n0.1 1.0\n", encoding="ascii")
+    metadata = ET.Element("Output", {"device": "EMTDC"})
+    ET.SubElement(metadata, "Domain", {"name": "Time", "unit": "s"})
+    ET.SubElement(metadata, "Analog", {"name": "Main(0):" + description, "id": "wrong-owner:0", "index": "0", "label": fault_channels.OUTPUT_GROUP, "dim": "1", "unit": "1"})
+    ET.ElementTree(metadata).write(tmp_path / "case.infx", encoding="utf-8")
+    async def reader(*args, **kwargs):
+        return {"channels": [{"description": description, "group": fault_channels.OUTPUT_GROUP, "units": "1", "domain": [0.0, 0.1], "values": [0.0, 1.0]}]}
+    with pytest.raises(BackendError) as error:
+        asyncio.run(fault_channels.read_fault_output_dataset(reader, part, contract))
+    assert error.value.code == "MMC_OUTPUT_IDENTITY_CHANGED"
+
+
+def test_derived_voltage_controller_has_bounded_current_headroom_and_matching_freeze(tmp_path, installed_sources):
+    from xml.etree import ElementTree as ET
+
+    from pscad_mcp.hvdc.builders.mmc.template_audit import _components, _parameters
+    project, _, _ = installed_sources
+    destination = tmp_path / "headroom.pscx"
+    report = fault_channels.materialize_voltage_control_headroom(project, destination, current_limit_pu=1.05)
+    root = ET.parse(destination).getroot()
+    users = {item.get("id"): item for item in _components(root)}
+    assert dict(_parameters(users["976600655"]))["Imax"] == "1.05"
+    assert dict(_parameters(users["800413106"]))["Imax"] == "1"
+    assert users["278203269"].get("defn") == "master:gain"
+    assert dict(_parameters(users["278203269"]))["G"] == "0.99999"
+    assert report["freeze_reference"] == "0.99999 * Imax"
+    assert all(dict(_parameters(users[owner]))["IvlMax"] == "3.0 [kA]" for owner in ("1167847391", "1268416470"))
+    assert report["phase_current_peak_ka"] == pytest.approx(1.05 * 1000 / (3 ** 0.5 * 370) * 2 ** 0.5)
+
+
+def test_steady_arm_current_must_respect_existing_hard_peak_limit():
+    samples, contract, checks = fault_fixture()
+    channel = next(item for item in samples["channels"] if item["description"] == "i_arm")
+    channel["values"] = [3.1 for _ in channel["values"]]
+    assert evaluate(samples, contract, checks)["verdict"] == "FAIL"

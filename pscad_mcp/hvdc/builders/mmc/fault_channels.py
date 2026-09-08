@@ -80,9 +80,18 @@ def _metadata(path: Path) -> list[dict[str, Any]]:
 async def read_fault_output_dataset(reader: Any, primary: str | Path, channel_contract: Mapping[str, Any], *, started_after: float | None = None) -> dict[str, Any]:
     """Use the existing output reader per exact selector, retaining file identity."""
 
+    project_readback = verify_fault_instrumentation(channel_contract["project_path"], channel_contract)
+    if project_readback["project_sha256"] != channel_contract["readback"]["project_sha256"]:
+        raise _error("MMC_OUTPUT_IDENTITY_CHANGED", "The frozen measured project changed after its last readback.")
     manifest = snapshot_output_dataset(primary, started_after=started_after)
     inf = next(Path(value["path"]) for key, value in manifest["files"].items() if key.casefold().endswith(".inf"))
     metadata = _metadata(inf)
+    infx_paths = [Path(value["path"]) for name, value in manifest["files"].items() if name.casefold().endswith(".infx")]
+    if len(infx_paths) != 1:
+        raise _error("MMC_OUTPUT_IDENTITY_CHANGED", "Runtime owner identity requires one compiled INFX companion.")
+    infx = ET.parse(infx_paths[0]).getroot()
+    if infx.get("device") != "EMTDC" or not any(item.get("name") == "Time" and item.get("unit") == "s" for item in infx.findall("Domain")):
+        raise _error("MMC_OUTPUT_IDENTITY_CHANGED", "The compiled output has no EMTDC time domain in seconds.")
     ids = sorted(item["call_id"] for item in metadata)
     if ids != list(range(1, len(ids) + 1)) or not ids:
         raise _error("MMC_OUTPUT_IDENTITY_CHANGED", "Output channel numbers must be complete and unique.")
@@ -90,17 +99,25 @@ async def read_fault_output_dataset(reader: Any, primary: str | Path, channel_co
     observed_parts = {name.casefold() for name in manifest["files"] if name.casefold().endswith(".out")}
     if expected_parts != observed_parts:
         raise _error("MMC_OUTPUT_IDENTITY_CHANGED", "The numbered output set disagrees with INF metadata.", expected=sorted(expected_parts), observed=sorted(observed_parts))
+    bulk = await reader(str(primary), max_samples=1_000_000, summary_only=False)
+    bulk_channels = bulk.get("channels", []) if isinstance(bulk, Mapping) else []
     channels = []
     missing = []
-    for binding in channel_contract.get("channels", []):
+    for binding in [*channel_contract.get("channels", []), *channel_contract.get("diagnostic_channels", [])]:
         selector = binding["selector"]
         candidates = [item for item in metadata if item["description"] == selector["description"] and item["group"] == selector.get("group", "")]
         if len(candidates) != 1:
             missing.append({"channel_id": binding["channel_id"], "matches": len(candidates)})
             continue
         selected = candidates[0]
-        result = await reader(str(primary), channel=f"{selected['group']}/{selected['description']}" if selected["group"] else selected["description"], max_samples=1_000_000, summary_only=False)
-        traces = result.get("channels", []) if isinstance(result, Mapping) else []
+        compiled = [item for item in infx.iter("Analog") if item.get("name", "").endswith(":" + selected["description"]) and item.get("label") == selected["group"]]
+        expected_instance = binding["definition_name"] + "(0):" + selected["description"]
+        if len(compiled) != 1 or compiled[0].get("name") != expected_instance or compiled[0].get("id") != binding["owner_id"] + ":0" or compiled[0].get("index") != str(selected["call_id"] - 1) or compiled[0].get("dim") != str(binding["dimension"]) or compiled[0].get("unit") != selected["units"]:
+            raise _error("MMC_OUTPUT_IDENTITY_CHANGED", "Compiled channel owner, scope, index or units disagree with the measured project.", channel_id=binding["channel_id"], observed=[dict(item.attrib) for item in compiled])
+        traces = [item for item in bulk_channels if item.get("description") == selected["description"] and item.get("group") == selected["group"]]
+        if not traces:
+            result = await reader(str(primary), channel=f"{selected['group']}/{selected['description']}" if selected["group"] else selected["description"], max_samples=1_000_000, summary_only=False)
+            traces = result.get("channels", []) if isinstance(result, Mapping) else []
         if len(traces) != 1:
             missing.append({"channel_id": binding["channel_id"], "matches": len(traces)})
             continue
@@ -110,9 +127,11 @@ async def read_fault_output_dataset(reader: Any, primary: str | Path, channel_co
         part_name = f"{manifest['base']}_{(selected['call_id'] - 1) // 10 + 1:02d}.out"
         part = next(value for name, value in manifest["files"].items() if name.casefold() == part_name.casefold())
         times = trace.get("domain", trace.get("time", []))
-        channels.append({**trace, **selector, "channel_id": binding["channel_id"], "dimension": binding["dimension"], "call_id": selected["call_id"], "output_part": part["path"], "metadata_file": str(inf), "hash": part["sha256"], "metadata_sha256": _sha256(inf), "sample_count": len(times), "time_bounds_s": [times[0], times[-1]] if times else None})
+        channels.append({**trace, **selector, "channel_id": binding["channel_id"], "dimension": binding["dimension"], "call_id": selected["call_id"], "output_part": part["path"], "metadata_file": str(inf), "hash": part["sha256"], "metadata_sha256": _sha256(inf), "compiler_metadata_file": str(infx_paths[0]), "compiler_metadata_sha256": _sha256(infx_paths[0]), "compiled_identity": dict(compiled[0].attrib), "sample_count": len(times), "time_bounds_s": [times[0], times[-1]] if times else None})
     verify_output_dataset(manifest)
-    return {"channels": channels, "identity": manifest, "missing_selectors": missing, "evidence_kind": "licensed_output"}
+    if verify_fault_instrumentation(channel_contract["project_path"], channel_contract) != project_readback:
+        raise _error("MMC_OUTPUT_IDENTITY_CHANGED", "The measured project changed during output reading.")
+    return {"channels": channels, "identity": manifest, "missing_selectors": missing, "evidence_kind": "pscad_output", "project_readback": project_readback}
 
 
 def instrument_fault_channels(source: str | Path, destination: str | Path, *, library: str | Path, master: str | Path, expected_source_hashes: Mapping[str, Any] | None = None) -> dict[str, Any]:
@@ -197,11 +216,12 @@ def instrument_fault_channels(source: str | Path, destination: str | Path, *, li
     expose(observed_fault, "MmcClosed", "Dsout", "1-E_BtoI(OPENBR($NBR,$SS))", "INTEGER")
     channels: list[dict[str, Any]] = []
     probes: list[dict[str, Any]] = []
+    wires: list[dict[str, Any]] = []
 
     def component_record(definition: ET.Element, component: ET.Element) -> dict[str, Any]:
         return {"definition_name": definition.get("name"), "owner_id": component.get("id"), "definition": component.get("defn"), "parameters": dict(_parameters(component)), "position": {key: component.get(key) for key in ("x", "y", "orient")}}
 
-    def add_probe(definition: ET.Element, role: str, scope: str, signal: str, source_component: ET.Element, *, kind: str = "physical_measurement", source_parameter: str | None = None, polarity: dict[str, int] | None = None, nominal: float | None = None, extra: dict[str, Any] | None = None) -> None:
+    def add_probe(definition: ET.Element, role: str, scope: str, signal: str, source_component: ET.Element, *, kind: str = "physical_measurement", source_parameter: str | None = None, polarity: dict[str, int] | None = None, nominal: float | None = None, extra: dict[str, Any] | None = None, units_override: str | None = None) -> None:
         channel_id = f"MFE_{scope.replace('/', '_')}_{role}"
         slot = len(channels)
         x, y = 3600, 3600 + 54 * slot
@@ -212,11 +232,13 @@ def instrument_fault_channels(source: str | Path, destination: str | Path, *, li
         set_param(label, "Name", signal)
         pgb = ET.SubElement(canvas, "User", {"classid": "UserCmp", "defn": "master:pgb", "id": allocate(channel_id), "x": str(x), "y": str(y), "orient": "0", "w": "84", "h": "38", "z": str(22000 + slot), "link": "-1", "q": "4"})
         units = "kV" if role in ("v_inserted", "v_dc", "v_cap") else "kA" if role in ("i_arm", "i_dc_fault") else "MW" if role == "p_active" else "1"
+        units = units_override or units
         for name, value in {"Name": channel_id, "Group": OUTPUT_GROUP, "Display": "1", "Scale": "1.0", "Units": units, "mrun": "0", "Pol": "0", "Max": "1000.0", "Min": "-1000.0", "UseSignalName": "0", "enab": "1"}.items():
             set_param(pgb, name, value)
         wire = ET.SubElement(canvas, "Wire", {"classid": "WireOrthogonal", "id": allocate(channel_id + ":wire"), "name": "", "x": str(x - 72), "y": str(y), "w": "82", "h": "10", "orient": "0"})
         ET.SubElement(wire, "vertex", {"x": "0", "y": "0"})
         ET.SubElement(wire, "vertex", {"x": "72", "y": "0"})
+        wires.append({"definition_name": definition.get("name"), "owner_id": wire.get("id"), "attributes": {key: wire.get(key) for key in ("classid", "x", "y", "orient")}, "vertices": [dict(item.attrib) for item in wire.findall("vertex")]})
         source_record = {"kind": kind, "owner_id": source_component.get("id"), "definition": source_component.get("defn"), "parameter": source_parameter, "signal_name": signal, **(extra or {})}
         channels.append({"channel_id": channel_id, "role": role, "model_scope": scope, "definition_name": definition.get("name"), "owner_id": pgb.get("id"), "definition": "master:pgb", "signal_source": source_record, "selector": {"description": channel_id, "group": OUTPUT_GROUP, "port": "Signl"}, "units": units, "dimension": 1, "polarity": polarity, "nominal": nominal, "output_part": None, "metadata_file": None, "sample_count": None, "time_bounds_s": None, "hash": None})
         probes.extend(component_record(definition, component) for component in (label, pgb, source_component))
@@ -274,6 +296,19 @@ def instrument_fault_channels(source: str | Path, destination: str | Path, *, li
         controls = [item for item in _components(main) if item.get("defn", "").endswith(":VSCConverter") and dict(_parameters(item)).get("Dblk") == f"Dblk{number}P"]
         if len(controls) != 1:
             raise _error("MMC_ACCEPTANCE_INCOMPLETE", "The terminal recovery enable is missing.", terminal=terminal)
+        vsc_name = "MFE_VSC_" + terminal
+        vsc = clone_definition(definitions["VSCConverter"], vsc_name)
+        controls[0].set("defn", namespace + ":" + vsc_name)
+        control_name = "MFE_Control_" + terminal
+        control_definition = clone_definition(definitions["VSCControl2"], control_name)
+        control_calls = [item for item in _components(vsc) if item.get("defn", "").endswith(":VSCControl2")]
+        if len(control_calls) != 1:
+            raise _error("MMC_ACCEPTANCE_INCOMPLETE", "The actual station controller is not unique.")
+        control_calls[0].set("defn", namespace + ":" + control_name)
+        freeze_source = next(item for item in _components(control_definition) if item.get("id") == "1356454688")
+        magnitude_source = next(item for item in _components(control_definition) if item.get("id") == "1359229547")
+        add_probe(control_definition, "controller_freeze", terminal, "FrzI", freeze_source, kind="physical_state", polarity={"inactive": 0, "active": 1}, extra={"quantity": "actual_current_limit_antiwindup_freeze"})
+        add_probe(control_definition, "controller_current_magnitude", terminal, "Imag", magnitude_source, units_override="pu", extra={"quantity": "dq_current_reference_magnitude", "base": "sqrt(2)*Sbase/(sqrt(3)*Vtr_2)"})
         add_probe(main, "recovery_enable", terminal, f"Dblk{number}P", controls[0], kind="recovery_control", source_parameter="Dblk", polarity={"inactive": 0, "active": 1}, extra={"quantity": "deblocking_enable", "electrical_recovery_required": True})
 
     # Update hierarchy calls from the actual specialized component graph.
@@ -298,7 +333,9 @@ def instrument_fault_channels(source: str | Path, destination: str | Path, *, li
         channel["signal_source"]["instance_path"] = channel["instance_path"] + "/" + channel["signal_source"]["definition"].rsplit(":", 1)[-1] + "[" + channel["signal_source"]["owner_id"] + "]"
     target.parent.mkdir(parents=True, exist_ok=True)
     ET.ElementTree(root).write(target, encoding="utf-8", xml_declaration=False)
-    contract = {"schema_version": 1, "source_hashes": {name: {"path": str(paths[name]), "sha256": hashes[name]} for name in paths}, "project_path": str(target), "channels": channels, "readback_components": probes, "readback_scripts": {item.get("name"): _script_hash(item) for item in (observed_cell, observed_fault)}, "instrumented_project_sha256": _sha256(target), "reachable_instances": reachable}
+    contract = {"schema_version": 1, "source_hashes": {name: {"path": str(paths[name]), "sha256": hashes[name]} for name in paths}, "project_path": str(target), "channels": channels, "readback_components": probes, "readback_wires": wires, "readback_ports": {name: _ports(definition) for name, definition in definitions.items() if name.startswith(("MFE_", "MmcObserved"))}, "readback_scripts": {item.get("name"): _script_hash(item) for item in (observed_cell, observed_fault)}, "instrumented_project_sha256": _sha256(target), "reachable_instances": reachable}
+    contract["diagnostic_channels"] = [item for item in channels if item["role"] not in REQUIRED_ROLES]
+    contract["channels"] = [item for item in channels if item["role"] in REQUIRED_ROLES]
     contract["readback"] = verify_fault_instrumentation(target, contract)
     for name, path in paths.items():
         if _sha256(path) != hashes[name]:
@@ -337,8 +374,14 @@ def _script_hash(definition: ET.Element) -> str:
     return hashlib.sha256(json.dumps(scripts, sort_keys=True, ensure_ascii=True).encode("ascii")).hexdigest()
 
 
+def _ports(definition: ET.Element) -> list[dict[str, Any]]:
+    return [{"attributes": dict(item.attrib), "condition": (item.text or "").strip()} for item in definition.findall("./svg/port")]
+
+
 def verify_fault_instrumentation(project: str | Path, contract: Mapping[str, Any]) -> dict[str, Any]:
     path = _regular(project)
+    if contract.get("vendor_finalized") and _sha256(path) != contract.get("instrumented_project_sha256"):
+        raise _error("MMC_POSTCONDITION_FAILED", "The frozen instrumented project hash changed.")
     root = ET.parse(path).getroot()
     definitions = {item.get("name"): item for item in root.findall("./definitions/Definition")}
     for expected in contract.get("readback_components", []):
@@ -349,9 +392,112 @@ def verify_fault_instrumentation(project: str | Path, contract: Mapping[str, Any
     for name, digest in contract.get("readback_scripts", {}).items():
         if name not in definitions or _script_hash(definitions[name]) != digest:
             raise _error("MMC_POSTCONDITION_FAILED", "A physical measurement implementation changed after saving.", definition=name)
+    for name, ports in contract.get("readback_ports", {}).items():
+        if name not in definitions or _ports(definitions[name]) != ports:
+            raise _error("MMC_POSTCONDITION_FAILED", "A measurement port or its activation condition changed.", definition=name)
+    for wire in contract.get("readback_wires", []):
+        scope = definitions.get(wire["definition_name"])
+        matches = [item for item in scope.findall("./schematic/Wire") if item.get("id") == wire["owner_id"]] if scope is not None else []
+        if len(matches) != 1 or any(matches[0].get(key) != value for key, value in wire["attributes"].items()) or [dict(item.attrib) for item in matches[0].findall("vertex")] != wire["vertices"]:
+            raise _error("MMC_POSTCONDITION_FAILED", "A physical measurement connection changed.", wire=wire)
     if reachable_instances(root) != contract.get("reachable_instances"):
         raise _error("MMC_POSTCONDITION_FAILED", "The running instance hierarchy changed after saving.")
     return {"matched": True, "project_path": str(path), "project_sha256": _sha256(path)}
+
+
+def finalize_fault_instrumentation(project: str | Path, contract: Mapping[str, Any]) -> dict[str, Any]:
+    """Freeze the vendor's first-save document root before any simulation."""
+
+    result = copy.deepcopy(dict(contract))
+    if result.get("vendor_finalized"):
+        result["readback"] = verify_fault_instrumentation(project, result)
+        return result
+    observed = reachable_instances(ET.parse(project).getroot())
+    expected = result["reachable_instances"]
+    if not expected or not observed:
+        raise _error("MMC_POSTCONDITION_FAILED", "The vendor save removed the running hierarchy.")
+    before, after = expected[0]["instance_path"], observed[0]["instance_path"]
+    if before != after:
+        normalized = [{**item, "instance_path": before + item["instance_path"][len(after):]} for item in observed]
+        if normalized != expected or expected[0]["definition_name"] != "Station" or observed[0]["definition_name"] != "Station":
+            raise _error("MMC_POSTCONDITION_FAILED", "Vendor save changed actual running instances, not only the document root.")
+        result["virtual_root_rebinding"] = {"before": before, "after": after, "source": "first_vendor_save", "project_sha256": _sha256(Path(project))}
+        for channel in [*result["channels"], *result.get("diagnostic_channels", [])]:
+            for record, key in ((channel, "instance_path"), (channel["selector"], "instance_path"), (channel["signal_source"], "instance_path")):
+                if not record[key].startswith(before + "/"):
+                    raise _error("MMC_POSTCONDITION_FAILED", "A channel is outside the expected document root.")
+                record[key] = after + record[key][len(before):]
+        result["reachable_instances"] = observed
+    result["readback"] = verify_fault_instrumentation(project, result)
+    result["instrumented_project_sha256"] = result["readback"]["project_sha256"]
+    result["vendor_finalized"] = True
+    return result
+
+
+def materialize_voltage_control_headroom(source: str | Path, destination: str | Path, *, current_limit_pu: float = 1.05) -> dict[str, Any]:
+    """Repair the voltage-controller current and antiwindup reference together.
+
+    This bounded adjustment retains the installed 3 kA arm protection. It is
+    specific to the audited 1000 MVA, 370 kV converter with a 900 MW setpoint.
+    """
+
+    original = _regular(source)
+    target = Path(destination).expanduser().resolve()
+    if target == original or target.exists() or target.is_symlink():
+        raise _error("MMC_BUILD_CONFLICT", "A control repair requires a new derived copy.")
+    if isinstance(current_limit_pu, bool) or not isinstance(current_limit_pu, (int, float)) or not 1.0 < current_limit_pu <= 1.1:
+        raise _error("MMC_TEMPLATE_NATIVE_BINDING_INVALID", "The audited current headroom range is above 1.0 and at most 1.1 pu.")
+    before_hash = _sha256(original)
+    root = ET.parse(original).getroot()
+    definitions = {item.get("name"): item for item in root.findall("./definitions/Definition")}
+    main = definitions.get("Main")
+    controller = definitions.get("VSCControl2")
+    if main is None or controller is None:
+        raise _error("MMC_ACCEPTANCE_INCOMPLETE", "The audited converter control graph is absent.")
+    voltage_converters = [item for item in _components(main) if item.get("defn", "").endswith(":VSCConverter") and dict(_parameters(item)).get("dmode") == "0"]
+    if len(voltage_converters) != 1:
+        raise _error("MMC_ACCEPTANCE_INCOMPLETE", "There must be exactly one DC-voltage controller.")
+    voltage_converter = voltage_converters[0]
+    values = dict(_parameters(voltage_converter))
+    scalar = lambda value: float(re.match(r"[+-]?[\d.]+", value.strip()).group())
+    if scalar(values.get("Sbase", "0")) != 1000 or scalar(values.get("Vtr_2", "0")) != 370 or scalar(values.get("Imax", "0")) != 1:
+        raise _error("MMC_ACCEPTANCE_INCOMPLETE", "The headroom repair requires the audited original current base and limit.")
+    for instance in _components(main):
+        if instance.get("defn", "").endswith(":MMC_Hb_PWM") and scalar(dict(_parameters(instance)).get("IvlMax", "0")) != 3:
+            raise _error("MMC_ACCEPTANCE_INCOMPLETE", "The original 3 kA arm protection must remain present.")
+    limit = next(item for item in voltage_converter.findall("./paramlist/param") if item.get("name") == "Imax")
+    limit.set("value", format(current_limit_pu, ".15g"))
+    threshold = next((item for item in _components(controller) if item.get("id") == "278203269"), None)
+    if threshold is None or threshold.get("defn") != "master:const" or dict(_parameters(threshold)).get("Value") != "0.99999" or threshold.get("orient") != "0":
+        raise _error("MMC_ACCEPTANCE_INCOMPLETE", "The audited antiwindup constant is absent or differs.")
+    threshold.set("defn", "master:gain")
+    threshold.set("name", "master:gain")
+    params = threshold.find("paramlist")
+    for item in list(params):
+        params.remove(item)
+    for key, value in (("G", "0.99999"), ("Dim", "1")):
+        ET.SubElement(params, "param", {"name": key, "value": value})
+    used = {item.get("id") for item in root.iter()}
+    def next_id():
+        value = 2050000001
+        while str(value) in used:
+            value += 1
+        used.add(str(value))
+        return str(value)
+    x, y = int(threshold.get("x")), int(threshold.get("y"))
+    canvas = controller.find("schematic")
+    imported = ET.SubElement(canvas, "User", {"classid": "UserCmp", "defn": "master:import", "id": next_id(), "x": str(x - 108), "y": str(y), "orient": "0", "w": "80", "h": "22", "z": "715", "link": "-1", "q": "4"})
+    params = ET.SubElement(imported, "paramlist", {"name": "", "link": "-1"})
+    ET.SubElement(params, "param", {"name": "Name", "value": "Imax"})
+    wire = ET.SubElement(canvas, "Wire", {"classid": "WireOrthogonal", "id": next_id(), "name": "", "x": str(x - 72), "y": str(y), "orient": "0", "w": "46", "h": "10"})
+    ET.SubElement(wire, "vertex", {"x": "0", "y": "0"})
+    ET.SubElement(wire, "vertex", {"x": "36", "y": "0"})
+    target.parent.mkdir(parents=True, exist_ok=True)
+    ET.ElementTree(root).write(target, encoding="utf-8", xml_declaration=False)
+    if _sha256(original) != before_hash:
+        raise _error("MMC_TEMPLATE_SOURCE_CHANGED", "The control repair source changed while reading.")
+    base = 1000 / (math.sqrt(3) * 370)
+    return {"source": str(original), "source_sha256": before_hash, "destination": str(target), "destination_sha256": _sha256(target), "voltage_controller_owner": voltage_converter.get("id"), "parameter": "Imax", "before_pu": 1.0, "after_pu": current_limit_pu, "freeze_reference": "0.99999 * Imax", "freeze_reference_owner": threshold.get("id"), "phase_current_base_rms_ka": base, "phase_current_rms_ka": base * current_limit_pu, "phase_current_peak_ka": base * math.sqrt(2) * current_limit_pu, "arm_protection_limit_ka": 3.0}
 
 
 __all__ = ["REQUIRED_ROLES", "instrument_fault_channels", "reachable_instances", "read_fault_output_dataset", "snapshot_output_dataset", "verify_fault_instrumentation", "verify_output_dataset"]
