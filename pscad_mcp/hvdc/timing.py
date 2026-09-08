@@ -5,8 +5,8 @@ from __future__ import annotations
 import asyncio
 import math
 import time
-from copy import deepcopy
 from collections.abc import Mapping, Sequence
+from copy import deepcopy
 from typing import Any
 
 from ..core.backend.base import BackendError
@@ -123,6 +123,11 @@ async def dispatch_timed_events(
         binding = target if isinstance(target, Mapping) else {"owner": event.get("component_id"), "parameter": event.get("parameter_name")}
         if not str(binding.get("owner", "")).isdigit() or not isinstance(binding.get("parameter"), str) or not binding["parameter"].strip():
             raise _timing_error("Every dispatched event requires an exact numeric owner and parameter.", event_id=event["event_id"])
+        if isinstance(target, Mapping):
+            if ("component_id" in event and str(event["component_id"]) != str(binding["owner"])) or ("parameter_name" in event and event["parameter_name"] != binding["parameter"]):
+                raise _timing_error("Flat and nested timed-control targets conflict.", event_id=event["event_id"])
+            event.setdefault("component_id", str(binding["owner"]))
+            event.setdefault("parameter_name", binding["parameter"])
     if mode == "native":
         if await select_timing_mode(backend, project_name) != "native":
             raise _timing_error("Native registration requires verified native capability.")

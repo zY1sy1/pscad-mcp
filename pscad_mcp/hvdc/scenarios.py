@@ -2,22 +2,24 @@
 
 from __future__ import annotations
 
-import math
 import asyncio
+import math
 import os
 import time
-from copy import deepcopy
 from collections.abc import Mapping
+from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
-from uuid import uuid4
 from typing import Any
+from uuid import uuid4
 
 from ..core.backend.base import BackendError
 from ..core.service import ConfirmationRequired
 from .audit import file_evidence, json_safe, profile_evidence
 from .builders.lcc.modes import (
     SUPPORTED_MODES as LCC_OPERATING_MODES,
+)
+from .builders.lcc.modes import (
     execute_lcc_schedule,
     mode_acceptance_contract,
     preflight_lcc_switching,
@@ -25,7 +27,6 @@ from .builders.lcc.modes import (
 from .preflight import preflight_scenario
 from .profiles import bind_profile_project, load_profile
 from .scanner import scan_project
-
 
 _UNSUPPORTED_TARGETS = {"insert_fault", "add_component", "rewire", "insert_breaker"}
 _MAX_TIMEOUT_S = 86_400.0
@@ -429,7 +430,7 @@ async def _attempt_containment(
     timeout_s: float,
 ) -> bool:
     backend = service.backend_service
-    target_project = record["target_project"]
+    target_project = record.get("runtime_project_name") or record["target_project"]
     stop = None
     stop_name = None
     for name in ("stop_simulation", "stop_project"):
@@ -630,6 +631,34 @@ async def _orchestrate_scenario(service: Any, record: dict[str, Any], normalized
     target_project = record["target_project"]
     transition_scenario(record, "running")
     record["started_at"] = _utc_now()
+    embedded = normalized.get("timed_control")
+    if embedded is not None:
+        from .builders.mmc.timed_control import verify_embedded_control
+        await _await_tracked_operation(service, record, "embedded:load", backend.load_projects([target_project]))
+        projects = await backend.list_projects()
+        record["loaded_projects"] = deepcopy(projects)
+        names = [item["name"] for item in projects if str(item.get("type", "")).casefold() == "case" and item.get("name") == Path(target_project).stem]
+        if len(names) != 1:
+            raise BackendError("HVDC_TIMED_CONTROL_UNAVAILABLE", "The derived project has no unique loaded case identity.", "hvdc", "embedded_control", {"path": target_project, "matches": names, "inventory": projects})
+        record["runtime_project_name"] = names[0]
+        await _await_tracked_operation(service, record, "embedded:save", backend.save_project(names[0], confirm=True))
+        readback = verify_embedded_control(embedded, target_project)
+        await _await_tracked_operation(service, record, "embedded:build", backend.build_project(names[0]))
+        messages_provider = getattr(backend, "get_project_output", None)
+        if callable(messages_provider):
+            messages = await messages_provider(names[0], structured=True)
+            failures = [item for item in messages if str(item.get("severity", "")).casefold() in {"error", "fatal"}]
+            if failures:
+                raise BackendError("HVDC_SCENARIO_BUILD_FAILED", "Embedded scenario compilation failed.", "hvdc", "embedded_control", {"messages": failures})
+        await _await_tracked_operation(service, record, "embedded:save_compiled", backend.save_project(names[0], confirm=True))
+        readback = verify_embedded_control(embedded, target_project)
+        checked = await preflight_scenario(service, record["project_name"], target_project,
+            {**normalized, "events": []}, confirm=True, runtime_project_name=names[0])
+        record["preflight"].update({**checked, "timing_mode": "embedded_control"})
+        record["timing_basis"] = {"kind": "embedded_control_precompiled", "time_basis": "EMTDC",
+            "schedule_source": "embedded_control", "schedule_sha256": embedded["schedule_sha256"],
+            "max_timing_error_s": embedded["max_timing_error_s"], "readback": readback}
+        target_project = names[0]
     for index, change in enumerate(normalized.get("parameter_changes", [])):
         await _apply_verified_change(service, record, target_project, change, f"parameter_change:{index}")
     events = [
@@ -638,7 +667,7 @@ async def _orchestrate_scenario(service: Any, record: dict[str, Any], normalized
             "event_id": str(event.get("event_id") or f"{record['scenario_id']}:event:{index}"),
         }
         for index, event in enumerate(
-            sorted(normalized.get("events", []), key=lambda item: float(item["time_s"]))
+            sorted([] if embedded is not None else normalized.get("events", []), key=lambda item: float(item["time_s"]))
         )
     ]
     preflight = record.get("preflight", {})
@@ -769,7 +798,7 @@ async def _orchestrate_scenario(service: Any, record: dict[str, Any], normalized
                         "mutation_scope_locked": True,
                     },
                 )
-        else:
+        elif embedded is None:
             record["timing_basis"] = {"kind": "not_applicable"}
         if events and timing_mode == "simulation_clock_polling":
             from .timing import dispatch_timed_events
@@ -828,6 +857,19 @@ async def _orchestrate_scenario(service: Any, record: dict[str, Any], normalized
         raise
     else:
         await _capture_outputs(service, record)
+        if embedded is not None:
+            from .builders.mmc.timed_control import (
+                measure_event_waveforms,
+                verify_embedded_control,
+            )
+            if not record["output_files"]:
+                raise BackendError("HVDC_TIMED_CONTROL_UNAVAILABLE", "The embedded run produced no event waveform files.", "hvdc", "embedded_control")
+            sample_count = math.ceil(embedded["duration_s"] / embedded["output_step_s"]) + 2
+            samples = await backend.read_output_file(record["output_files"][0], max_samples=sample_count, summary_only=False)
+            measured = measure_event_waveforms(embedded, samples)
+            record["timing_basis"].update({"kind": "embedded_control_measured", "measured_events": measured,
+                "readback": verify_embedded_control(embedded, record["target_project"])})
+            record["partial_completion"]["applied_events"] = measured
 
 
 async def _scenario_worker(service: Any, record: dict[str, Any], normalized: dict[str, Any], timeout_s: float) -> None:
@@ -930,6 +972,8 @@ async def run_scenario(
         raise BackendError(first["code"], first["message"], "hvdc", "run_hvdc_scenario", {key: value for key, value in first.items() if key not in {"code", "message"}})
     if not confirm:
         raise ConfirmationRequired("run_hvdc_scenario")
+    from .timing import normalize_timed_events
+    normalize_timed_events(normalized.get("events", []))
     mutating = bool(normalized.get("parameter_changes") or normalized.get("events"))
     target_project = project_name
     if mutating and not normalized.get("derived_project"):
@@ -948,7 +992,21 @@ async def run_scenario(
     scenario_id = f"hvdc-{uuid4().hex}"
     await service._reserve_scenario(scenario_id)
     try:
-        if mutating:
+        embedded = normalized.get("timed_control")
+        embedded_bindings = None
+        if embedded is not None:
+            from .builders.mmc.timed_control import (
+                bind_embedded_request,
+                materialize_embedded_control,
+            )
+            if not isinstance(embedded, Mapping) or normalized.get("parameter_changes"):
+                raise BackendError("HVDC_TIMED_CONTROL_UNAVAILABLE", "Embedded schedules require a complete prehashed plan and no additional parameter changes.", "hvdc", "embedded_control")
+            normalized["timed_control"] = deepcopy(dict(embedded))
+            embedded_bindings = bind_embedded_request(embedded, service._resolve_project(project_name), normalized["events"], profile_data)
+            target_project = str(service.path_policy.resolve(str(normalized["derived_project"]), suffixes={".pscx"}, must_exist=False))
+            materialized = materialize_embedded_control(embedded, target_project)
+            normalized["timed_control"] = materialized
+        elif mutating:
             target_project = await _resolve_target_project(service, project_name, str(normalized["derived_project"]))
         elif _is_path_like(target_project):
             target_project = str(service._resolve_mutation_project(target_project))
@@ -1022,13 +1080,13 @@ async def run_scenario(
             )
             normalized["_lcc_switching_token"] = lcc_preflight
             normalized["_lcc_switching_confirm"] = confirm
-        preflight = await preflight_scenario(
-            service,
-            project_name,
-            target_project,
-            normalized,
-            confirm=confirm,
-        )
+        if embedded_bindings is None:
+            preflight = await preflight_scenario(
+                service, project_name, target_project, normalized, confirm=confirm,
+            )
+        else:
+            preflight = {"timing_mode": "embedded_control", "resolved_commands": embedded_bindings,
+                         "schedule_sha256": embedded["schedule_sha256"], "compile_pending": True}
         if lcc_preflight is not None:
             preflight["lcc_switching"] = {
                 "timing_mode": lcc_preflight.timing_mode,
@@ -1064,6 +1122,7 @@ async def run_scenario(
         "profile": profile_evidence(str(normalized["profile"]), profile_data),
         "preflight": dict(preflight),
         "run": deepcopy(normalized.get("run", {})),
+        **({"timed_control": deepcopy(normalized["timed_control"])} if normalized.get("timed_control") is not None else {}),
     }
     for label, candidate in (("source", project_name), ("derived", target_project)):
         try:

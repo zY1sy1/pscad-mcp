@@ -216,7 +216,8 @@ def test_native_provider_cannot_rewrite_the_contract_or_callers_request():
 
 def test_direct_native_dispatch_requires_verified_capabilities():
     class Backend(NativeTimingBackend):
-        calls = []
+        def __init__(self):
+            self.calls = []
 
         async def get_timed_control_capabilities(self, project_name):
             return {"native_schedule": True, "time_basis": "wall_clock"}
@@ -234,7 +235,8 @@ def test_direct_native_dispatch_requires_verified_capabilities():
 
 def test_missing_event_value_fails_before_any_native_registration():
     class Backend(NativeTimingBackend):
-        calls = []
+        def __init__(self):
+            self.calls = []
 
         async def schedule_timed_controls(self, project_name, events):
             self.calls.append(events)
@@ -245,3 +247,22 @@ def test_missing_event_value_fails_before_any_native_registration():
         asyncio.run(dispatch_timed_events(backend, "case", [{"event_id": "a", "time_s": 1,
             "component_id": 17, "parameter_name": "Value"}], mode="native"))
     assert backend.calls == []
+
+
+def test_conflicting_flat_and_nested_target_fails_before_any_write():
+    backend = PollingTimingBackend()
+    events = [{"time_s": 0.4, "component_id": 17, "parameter_name": "Value", "value": 1},
+              {"time_s": 1.0, "component_id": 18, "parameter_name": "Value", "value": 0,
+               "target": {"instance_path": "Main", "owner": "17", "parameter": "Value"}}]
+    with pytest.raises(BackendError):
+        asyncio.run(dispatch_timed_events(backend, "case", events, mode="simulation_clock_polling"))
+    assert backend.writes == []
+
+
+def test_polling_normalizes_nested_only_binding_before_execution():
+    backend = PollingTimingBackend()
+    result = asyncio.run(dispatch_timed_events(backend, "case", [{"time_s": 1,
+        "target": {"instance_path": "Main", "owner": "17", "parameter": "Value"},
+        "value": 1}], mode="simulation_clock_polling"))
+    assert backend.writes == [("case", 17, {"Value": 1})]
+    assert result[0]["timing_error_s"] == pytest.approx(0.05)

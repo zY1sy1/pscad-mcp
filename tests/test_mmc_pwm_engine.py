@@ -1,14 +1,16 @@
 import asyncio
+import json
 from dataclasses import replace
 from pathlib import Path
+from xml.etree import ElementTree as ET
 
 import pytest
 
 from pscad_mcp.core.backend.base import BackendError
-from pscad_mcp.hvdc.builders.mmc.engines.pwm import execute_pwm_candidate
 from pscad_mcp.hvdc.builders.mmc.engines.pwm import (
     _copy_library_support,
     _legacy_output_settings,
+    execute_pwm_candidate,
 )
 from tests.mmc_parametric_fakes import (
     RecordingMmcService,
@@ -140,6 +142,80 @@ def _scenario_payloads(plan) -> list[dict[str, object]]:
         }
         for name in plan.scenarios
     ]
+
+
+def test_pwm_bound_scenario_plans_embedded_control_against_staged_source(tmp_path):
+    from pscad_mcp.hvdc.builders.mmc.engines.pwm import _bound_scenarios
+    from tests.test_mmc_timed_control import MASTER, PROJECT
+
+    project, library = make_synthetic_official_shape(tmp_path / "source")
+    plan = replace(pwm_plan(project, library, tmp_path), scenarios=("pulse",))
+    staged = tmp_path / "scenario_source.pscx"
+    staged.write_text(PROJECT)
+    master = tmp_path / "master.pslx"
+    master.write_text(MASTER)
+    directory = tmp_path / ".pscad-mcp" / "hvdc-profiles"
+    directory.mkdir(parents=True)
+    (directory / "pulse.json").write_text(json.dumps({
+        "profile_version": 2, "required_assets": [], "project_fingerprints": [], "mappings": [],
+        "command_bindings": [{"canonical": "probe", "component": {"canvas": "Main", "component_id": "17", "definition": "master:const"},
+            "parameter_name": "Value", "allowed_values": [0, 1], "semantics": "active_high", "read_back": True}],
+        "result_channels": [], "metric_roles": {}, "sequences": [],
+    }))
+    scenario = {"name": "pulse", "profile": "pulse", "events": [{"event_id": "pulse", "time_s": 0.02, "end_time_s": 0.03,
+        "target": "probe", "before_value": 0, "value": 1, "after_value": 0, "units": "1"}],
+        "time_step_s": 1e-5, "output_step_s": 1e-5, "duration_s": 0.05,
+        "timed_control_options": {"master_path": str(master), "max_timing_error_s": 2e-5}}
+    bound = _bound_scenarios(plan, [scenario], staged, tmp_path / "candidate.pscx")[0]
+    assert bound["timed_control"]["scenario_source"]["sha256"] == sha256(staged)
+    assert bound["timed_control"]["events"][0]["target"]["owner"] == "17"
+    assert bound["timed_control"]["source_hashes"]["project"]["sha256"] == plan.source_hashes["project"]
+    assert bound["derived_project"] != str(tmp_path / "candidate.pscx")
+    assert not Path(bound["derived_project"]).exists()
+
+
+def test_pwm_copies_declared_compiler_library_tree(tmp_path):
+    source = tmp_path / "original"
+    source.mkdir()
+    library = source / "intermediate.pslx"
+    library.write_text('<project><paramlist name="Libs"><param name="0" value=".\\lib\\$(Compiler)\\intermediate.lib"/></paramlist></project>')
+    binary = source / "lib" / "gf42" / "intermediate.lib"
+    binary.parent.mkdir(parents=True)
+    binary.write_bytes(b"compiler library fixture")
+    stage = tmp_path / "stage"
+    stage.mkdir()
+    result = _copy_library_support(library, stage)
+    assert result == stage / "lib"
+    assert (stage / "lib" / "gf42" / "intermediate.lib").read_bytes() == binary.read_bytes()
+
+
+def test_pwm_rejects_unplanned_compiler_support_before_staging(tmp_path):
+    project, library = make_synthetic_official_shape(tmp_path / "source")
+    root = ET.parse(library)
+    params = ET.SubElement(root.getroot(), "paramlist", name="Libs")
+    ET.SubElement(params, "param", name="0", value=".\\lib\\$(Compiler)\\intermediate.lib")
+    root.write(library)
+    binary = library.parent / "lib" / "gf42" / "intermediate.lib"
+    binary.parent.mkdir(parents=True)
+    binary.write_bytes(b"frozen compiler input")
+    plan = replace(pwm_plan(project, library, tmp_path), asset_hashes={})
+    service = RecordingMmcService(tmp_path)
+    with pytest.raises(BackendError) as raised:
+        asyncio.run(execute_pwm_candidate(plan, service))
+    assert raised.value.code == "MMC_SOURCE_HASH_MISMATCH"
+    assert not (tmp_path / ".mmc-candidates").exists()
+
+
+def test_pwm_planner_hashes_audited_compiler_support_inputs(tmp_path):
+    from pscad_mcp.hvdc.builders.mmc.parametric_planner import create_parametric_plan
+    from tests.mmc_parametric_fakes import avm_assets, pwm_audit, valid_request
+
+    binary = tmp_path / "intermediate.lib"
+    binary.write_bytes(b"frozen compiler input")
+    identity = {"path": str(binary.resolve()), "relative_path": "lib/gf42/intermediate.lib", "sha256": sha256(binary)}
+    audit = replace(pwm_audit(), compiler_support={"required": True, "present": True, "files": [identity]})
+    parent = create_parametric_plan(valid_request(model_fidelity="detailed_pwm"), "CASE", tmp_path, audit, avm_assets())
+    assert dict(parent.engine_plans[0].asset_hashes) == {identity["path"]: identity["sha256"]}
 
 
 def test_pwm_engine_copies_then_mutates_only_staging(tmp_path: Path) -> None:

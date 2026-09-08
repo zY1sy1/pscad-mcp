@@ -18,7 +18,6 @@ from .parametric_models import (
     parse_parametric_request,
 )
 
-
 STANDARD_SCENARIOS = (
     "startup", "forward_steady", "active_power_step", "reactive_power_step",
     "power_reversal", "reverse_steady", "ac_three_phase_fault",
@@ -192,6 +191,17 @@ def create_parametric_plan(
     if not isinstance(audit_sources, Mapping):
         raise _error("MMC_TEMPLATE_INVALID", "PWM source paths must be a mapping.")
     source_paths = {str(key): str(value) for key, value in audit_sources.items()}
+    compiler_support = audit.get("compiler_support", {})
+    support_files = compiler_support.get("files", ()) if isinstance(compiler_support, Mapping) else ()
+    if not isinstance(support_files, (list, tuple)) or any(not isinstance(item, Mapping) or not isinstance(item.get("path"), str) or not Path(item["path"]).is_absolute() for item in support_files):
+        raise _error("MMC_SOURCE_HASH_MISSING", "Audited compiler support requires absolute source file identities.")
+    support_hashes = {item["path"]: item.get("sha256") for item in support_files}
+    if len(support_hashes) != len(support_files):
+        raise _error("MMC_SOURCE_HASH_MISSING", "Audited compiler support file identities must be unique.")
+    if support_hashes:
+        support_hashes = _hashes(support_hashes, "PWM compiler support")
+    elif isinstance(compiler_support, Mapping) and compiler_support.get("required") is True:
+        raise _error("MMC_SOURCE_HASH_MISSING", "Required compiler support was not hashed by the audit; re-audit before planning.")
     asset_hashes = _hashes(getattr(avm_assets, "hashes", None), "AVM asset")
     if "detailed_pwm" in requested_engines:
         if audit.get("compatible") is not True:
@@ -223,7 +233,7 @@ def create_parametric_plan(
         if engine == "detailed_pwm":
             bindings = tuple(dict(item) for item in (*audit.get("role_bindings", ()), *audit.get("writable_parameter_bindings", ())))
             dependencies = tuple(dict(item) for item in audit.get("absolute_paths", ()))
-            plan_source_paths, plan_source_hashes, plan_asset_hashes = source_paths, source_hashes, {}
+            plan_source_paths, plan_source_hashes, plan_asset_hashes = source_paths, source_hashes, support_hashes
             native_timing = bool(
                 isinstance(audit.get("template_native_controls"), Mapping)
                 and audit["template_native_controls"].get("available") is True
