@@ -869,6 +869,10 @@ class PscadService:
     async def get_project_definitions(self, project_name: str) -> list[str]:
         return await self.backend.project_definitions(project_name)
 
+    async def get_master_library_identity(self) -> dict[str, Any]:
+        """Read Master identity from the existing connection without selecting a backend."""
+        return await self.backend.get_master_library_identity()
+
     async def get_lcc_inventory(
         self,
         catalog: Mapping[str, Any],
