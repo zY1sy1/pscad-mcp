@@ -103,6 +103,7 @@ class MmcTemplateAudit:
     compiler_support: dict[str, object] = field(default_factory=dict)
     template_native_controls: dict[str, object] = field(default_factory=dict)
     submodule_topology: dict[str, object] = field(default_factory=dict)
+    instance_bindings: tuple[dict[str, object], ...] = ()
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -304,32 +305,64 @@ def _template_native_controls(root: ET.Element) -> dict[str, object]:
     }
 
 
-def _submodule_topology(project_root: ET.Element, _library_root: ET.Element) -> dict[str, object]:
-    """Detect the electrical cell contract from project-owned instances.
+def _reachable_instances(project_root: ET.Element, library_root: ET.Element) -> list[dict[str, object]]:
+    project_namespace = _text(project_root.get("name")) or "project"
+    library_namespace = _text(library_root.get("namespace") or library_root.get("name")) or "intermediate"
+    definitions: dict[str, ET.Element] = {}
+    for namespace, root in ((project_namespace, project_root), (library_namespace, library_root)):
+        for definition in root.iter():
+            if _name(definition.tag) == "definition" and definition.get("name"):
+                definitions[(namespace + ":" + definition.get("name").rsplit(":", 1)[-1]).casefold()] = definition
+    root_name = project_namespace + ":Main"
+    if root_name.casefold() not in definitions:
+        return []
+    main_paths = []
+    def find_main(parent: ET.Element, prefix: str) -> None:
+        for call in parent.findall("call"):
+            name = _text(call.get("name")).rsplit(":", 1)[-1]
+            path = (prefix + "/" if prefix else "") + name + "[" + _text(call.get("link")) + "]"
+            if name.casefold() == "main":
+                main_paths.append(path)
+            find_main(call, path)
+    hierarchy = project_root.find("hierarchy")
+    if hierarchy is not None:
+        find_main(hierarchy, "")
+    if len(main_paths) > 1:
+        raise _error("MMC_TEMPLATE_INVALID", "The runtime Main entry is ambiguous.", "audit_mmc_template", paths=main_paths)
+    records: list[dict[str, object]] = []
+    def visit(qualified: str, path: str, stack: tuple[str, ...]) -> None:
+        key = qualified.casefold()
+        if key in stack:
+            raise _error("MMC_TEMPLATE_INVALID", "A reachable definition recursively instantiates itself.", "audit_mmc_template", instance_path=path)
+        definition = definitions.get(key)
+        if definition is None:
+            return
+        for component in _components(definition):
+            referenced = _text(component.get("defn") or component.get("definition") or component.get("type"))
+            owner = _text(component.get("id"))
+            local = referenced.rsplit(":", 1)[-1]
+            child_path = path + "/" + local + "[" + owner + "]"
+            records.append({"owner_id": owner, "definition": referenced, "component_name": _text(component.get("name")), "instance_path": child_path, "parent_instance_path": path, "parameters": dict(_parameters(component))})
+            resolved = project_namespace + referenced[len("project"):] if referenced.startswith("project:") else referenced
+            visit(resolved, child_path, (*stack, key))
+    visit(root_name, main_paths[0] if main_paths else "Main", ())
+    return records
 
-    A PSLX library necessarily contains component prototypes inside its
-    definitions.  Counting those prototypes as instantiated cells makes a
-    half-bridge project look like a full-bridge project whenever the library
-    happens to ship both families.  Only the PSCX component graph is evidence
-    of the selected topology; the library argument is retained for API
-    compatibility and future definition-availability checks.
-    """
+
+def _submodule_topology(project_root: ET.Element, library_root: ET.Element) -> dict[str, object]:
+    """Count actual Main-reachable cells, including resolved library instances."""
 
     full_cells: list[dict[str, str]] = []
     hbridge_count = 0
     half_cells: list[dict[str, str]] = []
     firing_block_count = 0
-    for component in _components(project_root):
-        definition = _text(
-            component.attrib.get("definition")
-            or component.attrib.get("defn")
-            or component.attrib.get("type")
-        )
+    for instance in _reachable_instances(project_root, library_root):
+        definition = str(instance["definition"])
         local = definition.rsplit(":", 1)[-1].casefold()
-        values = dict(_parameters(component))
-        owner = _text(component.attrib.get("id"))
-        if local in {"fullcellr_n", "fullcellr_n_sdt"}:
-            full_cells.append({"owner": owner, "definition": definition, "dtbp": values.get("DTBP", "")})
+        values = instance["parameters"]
+        owner = str(instance["owner_id"])
+        if local in {"fullcellr_n", "fullcellr_n_sdt", "mmcobservedfullcell"}:
+            full_cells.append({"owner": owner, "definition": definition, "dtbp": values.get("DTBP", ""), "instance_path": str(instance["instance_path"])})
         elif local in {"firinghbridge"}:
             hbridge_count += 1
         elif local == "halfcell_sdt":
@@ -399,29 +432,27 @@ def build_template_audit(project: Path, library: Path) -> MmcTemplateAudit:
     pwm_count = 0
     station_roles: set[str] = set()
     hierarchy_calls = _hierarchy_call_names(project_root)
+    converter_names = {"vscconverter", "mfe_vsc_t1", "mfe_vsc_t2"}
     writable_links = {
         _text(element.attrib.get("link"))
         for element in project_root.iter()
         if _name(element.tag) == "call"
         and _text(element.attrib.get("link"))
         and _text(element.attrib.get("name")).rsplit(":", 1)[-1].casefold()
-        in {"vscconverter", "dctl"}
+        in converter_names | {"dctl"}
     }
     has_station_hierarchy = (
         sum(name.rsplit(":", 1)[-1].casefold() == "station" for name in hierarchy_calls)
         == 1
     )
     converter_hierarchy_count = sum(
-        name.rsplit(":", 1)[-1].casefold() == "vscconverter" for name in hierarchy_calls
+        name.rsplit(":", 1)[-1].casefold() in converter_names for name in hierarchy_calls
     )
-    for index, component in enumerate(_components(project_root)):
-        owner = _text(component.attrib.get("id")) or f"component-{index}"
-        component_name = _text(component.attrib.get("name"))
-        definition = _text(
-            component.attrib.get("definition")
-            or component.attrib.get("defn")
-            or component.attrib.get("type")
-        )
+    instances = _reachable_instances(project_root, library_root)
+    for instance in instances:
+        owner = str(instance["owner_id"])
+        component_name = str(instance["component_name"])
+        definition = str(instance["definition"])
         description = f"{component_name} {definition}".casefold()
         role = (
             "station_p"
@@ -430,8 +461,8 @@ def build_template_audit(project: Path, library: Path) -> MmcTemplateAudit:
             if "station_vdc" in description
             else ""
         )
-        if not role and definition.rsplit(":", 1)[-1].casefold() == "vscconverter":
-            parameter_values = dict(_parameters(component))
+        if not role and definition.rsplit(":", 1)[-1].casefold() in converter_names:
+            parameter_values = instance["parameters"]
             mode = parameter_values.get("dmode", "").strip()
             if mode == "0":
                 role = "station_vdc"
@@ -439,7 +470,7 @@ def build_template_audit(project: Path, library: Path) -> MmcTemplateAudit:
                 role = "station_p"
         if role:
             station_roles.add(role)
-            roles.append({"role": role, "owner": owner, "definition": definition})
+            roles.append({"role": role, "owner": owner, "definition": definition, "instance_path": str(instance["instance_path"])})
         if "pwm" in description:
             pwm_count += 1
             roles.append(
@@ -447,13 +478,17 @@ def build_template_audit(project: Path, library: Path) -> MmcTemplateAudit:
                     "role": f"pwm_converter_{pwm_count}",
                     "owner": owner,
                     "definition": definition,
+                    "instance_path": str(instance["instance_path"]),
                 }
             )
-        for parameter, value in _parameters(component):
+        for parameter, value in instance["parameters"].items():
             if not hierarchy_calls or owner in writable_links:
                 bindings.append(
-                    {"owner": owner, "parameter": parameter, "value": value}
+                    {"owner": owner, "parameter": parameter, "value": value, "instance_path": str(instance["instance_path"])}
                 )
+    for index, component in enumerate(_components(project_root)):
+        owner = _text(component.attrib.get("id")) or f"component-{index}"
+        for parameter, value in _parameters(component):
             kind = _path_kind(parameter, value)
             if not kind or not _is_absolute(value):
                 continue
@@ -523,6 +558,7 @@ def build_template_audit(project: Path, library: Path) -> MmcTemplateAudit:
         compiler_support=compiler_support,
         template_native_controls=template_native_controls,
         submodule_topology=submodule_topology,
+        instance_bindings=tuple(instances),
     )
 
 

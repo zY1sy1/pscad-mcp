@@ -301,3 +301,32 @@ def test_installed_example_exposes_station_and_pwm_hierarchy_roles() -> None:
     assert report["compatible"] is True
     assert {"station_p", "station_vdc"} <= roles
     assert len([role for role in roles if role.startswith("pwm_converter_")]) >= 2
+
+
+def test_installed_topology_counts_reachable_arm_instances():
+    try:
+        project, library = discover_official_mmc_template()
+    except BackendError:
+        pytest.skip("Installed MMC source is unavailable")
+    report = audit_mmc_template(project, library)
+    assert report["submodule_topology"]["full_cell_instances"] == 12
+    cells = [item for item in report["instance_bindings"] if item["definition"] == "intermediate:FullCellR_n"]
+    assert len(cells) == 12
+    assert len({item["instance_path"] for item in cells}) == 12
+    assert all("Main[" in item["instance_path"] and "MMC_Hb_PWM[" in item["instance_path"] for item in cells)
+
+
+def test_unused_fullbridge_definition_cannot_override_active_halfbridge(tmp_path):
+    from xml.etree import ElementTree as ET
+    project, library = make_synthetic_official_shape(tmp_path)
+    tree = ET.parse(project)
+    main = tree.find("./definitions/Definition/schematic")
+    ET.SubElement(main, "User", {"classid": "UserCmp", "id": "active-half", "defn": "intermediate:HalfCell_Sdt"})
+    unused = ET.SubElement(tree.find("definitions"), "Definition", {"name": "UnusedFullbridge"})
+    canvas = ET.SubElement(unused, "schematic")
+    ET.SubElement(canvas, "User", {"classid": "UserCmp", "id": "unused-cell", "defn": "intermediate:FullCellR_n"})
+    ET.SubElement(canvas, "User", {"classid": "UserCmp", "id": "unused-firing", "defn": "intermediate:FiringHBridge"})
+    tree.write(project, encoding="utf-8")
+    report = audit_mmc_template(project, library)
+    assert report["submodule_topology"]["declared"] == "half_bridge"
+    assert report["submodule_topology"]["full_cell_instances"] == 0

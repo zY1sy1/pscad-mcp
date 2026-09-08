@@ -38,6 +38,7 @@ def default_fault_checks() -> dict[str, Any]:
         "nominal_target_relative_tolerance": 0.05, "arm_peak_limit_ka": 3.0,
         "maximum_power_loss_fraction": 0.1,
         "modulation_abs_limit": 2.0,
+        "require_modulation_evidence": True,
         "fault_window_s": [2.5, 2.7], "prefault_window_s": [2.0, 2.4], "recovery_window_s": [4.6, 5.0],
         "negative_voltage_max_kv": -1.0, "fault_current_limit_ka": 20.0,
         "voltage_recovery_relative_tolerance": 0.05, "power_recovery_relative_tolerance": 0.05,
@@ -276,6 +277,11 @@ def instrument_fault_channels(source: str | Path, destination: str | Path, *, li
     expose(observed_cell, "MmcCapSum", "Dsout", "SUM($Vc)", "REAL")
     expose(observed_cell, "MmcCapMin", "Dsout", "MINVAL($Vc)", "REAL")
     expose(observed_cell, "MmcCapMax", "Dsout", "MAXVAL($Vc)", "REAL")
+    capacitance = [item for item in observed_cell.findall("./form/category/parameter") if item.get("name") == "C"]
+    if len(capacitance) != 1 or capacitance[0].get("unit") != "uF":
+        raise _error("MMC_ACCEPTANCE_INCOMPLETE", "The actual cell capacitance unit must be audited before computing energy.")
+    expose(observed_cell, "MmcCapEnergy", "Dsout", "0.5e-6*$C*SUM($Vc**2)", "REAL")
+    expose(observed_cell, "MmcEquivalentSource", "Dsdyn", "RVD1_5", "REAL")
     expose(observed_cell, "MmcBlocked", "Dsdyn", "IVD1_1", "INTEGER")
     observed_fault = clone_definition(masters["fault_sw"], "MmcObservedFaultSwitch")
     expose(observed_fault, "MmcClosed", "Dsout", "1-E_BtoI(OPENBR($NBR,$SS))", "INTEGER")
@@ -308,6 +314,21 @@ def instrument_fault_channels(source: str | Path, destination: str | Path, *, li
         channels.append({"channel_id": channel_id, "role": role, "model_scope": scope, "definition_name": definition.get("name"), "owner_id": pgb.get("id"), "definition": "master:pgb", "signal_source": source_record, "selector": {"description": channel_id, "group": OUTPUT_GROUP, "port": "Signl"}, "units": units, "dimension": 1, "polarity": polarity, "nominal": nominal, "output_part": None, "metadata_file": None, "sample_count": None, "time_bounds_s": None, "hash": None})
         probes.extend(component_record(definition, component) for component in (label, pgb, source_component))
 
+    def add_node_probe(definition: ET.Element, role: str, scope: str, signal: str, owner: str, x: int, y: int, units: str, quantity: str) -> None:
+        sources = [item for item in _components(definition) if item.get("id") == owner]
+        if len(sources) != 1:
+            raise _error("MMC_ACCEPTANCE_INCOMPLETE", "A voltage-base diagnostic owner is not unique.", owner=owner)
+        canvas = definition.find("schematic")
+        matching_wires = [item for item in canvas.findall("Wire") if any(int(item.get("x", "0")) + int(vertex.get("x", "0")) == x and int(item.get("y", "0")) + int(vertex.get("y", "0")) == y for vertex in item.findall("vertex"))]
+        if not matching_wires:
+            raise _error("MMC_ACCEPTANCE_INCOMPLETE", "A voltage-base diagnostic node has no audited wire.", owner=owner, x=x, y=y)
+        alias = ET.SubElement(canvas, "User", {"classid": "UserCmp", "defn": "master:datalabel", "id": allocate(scope + ":" + signal + ":node"), "x": str(x), "y": str(y), "orient": "0", "w": "72", "h": "22", "z": "1", "link": "-1", "q": "4"})
+        set_param(alias, "Name", signal)
+        probes.append(component_record(definition, alias))
+        for wire in matching_wires:
+            wires.append({"definition_name": definition.get("name"), "owner_id": wire.get("id"), "attributes": {key: wire.get(key) for key in ("classid", "x", "y", "orient")}, "vertices": [dict(item.attrib) for item in wire.findall("vertex")]})
+        add_probe(definition, role, scope, signal, sources[0], kind="control_quantity", units_override=units, extra={"quantity": quantity, "node": {"x": x, "y": y}})
+
     main = definitions["Main"]
     switches = [item for item in _components(main) if item.get("defn") == "master:fault_sw" and dict(_parameters(item)).get("Name") == "DC_flt_2_PN"]
     if len(switches) != 1:
@@ -326,6 +347,10 @@ def instrument_fault_channels(source: str | Path, destination: str | Path, *, li
         pwm_name = f"MFE_PWM_{terminal}"
         pwm = clone_definition(definitions["MMC_Hb_PWM"], pwm_name)
         converter.set("defn", namespace + ":" + pwm_name)
+        local_dc = [item for item in _components(pwm) if item.get("id") == "2025177284" and item.get("defn") == "master:voltmeter" and dict(_parameters(item)).get("Name") == "Edc"]
+        if len(local_dc) != 1:
+            raise _error("MMC_ACCEPTANCE_INCOMPLETE", "The converter-side pole-to-pole voltmeter is missing.")
+        add_probe(pwm, "v_dc_converter", terminal, "Edc", local_dc[0], source_parameter="Name", units_override="kV", extra={"quantity": "converter_side_dc_pole_to_pole_voltage", "not_an_acceptance_voltage": True})
         poles = [item for item in _components(pwm) if item.get("defn", "").endswith(":MMC_Hb_Pole_PWM")]
         if len(poles) != 3:
             raise _error("MMC_ACCEPTANCE_INCOMPLETE", "The converter must expose three phase poles.", terminal=terminal)
@@ -333,6 +358,12 @@ def instrument_fault_channels(source: str | Path, destination: str | Path, *, li
             pole_name = f"MFE_Pole_{terminal}_{phase}"
             pole_definition = clone_definition(definitions["MMC_Hb_Pole_PWM"], pole_name)
             pole.set("defn", namespace + ":" + pole_name)
+            for signal, owner, role, quantity in (("Vref", "1233804117", "phase_ac_reference", "phase_ac_voltage_reference_after_dc_normalization_and_clamp"), ("Vz", "1642798056", "phase_common_reference", "original_ccsc_common_voltage_reference")):
+                sources = [item for item in _components(pole_definition) if item.get("id") == owner and dict(_parameters(item)).get("Name") == signal]
+                if len(sources) != 1:
+                    raise _error("MMC_ACCEPTANCE_INCOMPLETE", "A phase-voltage diagnostic source is missing.", signal=signal)
+                add_probe(pole_definition, role, f"{terminal}/{phase}", signal, sources[0], kind="control_quantity", units_override="pu", extra={"quantity": quantity})
+            add_node_probe(pole_definition, "arm_deblocking_ramp", f"{terminal}/{phase}", "MmcDeblockingRamp", "263038724", 2304, 468, "pu", "deblocking_ramp_before_arm_voltage_sum")
             if any(dict(_parameters(item)).get("Name") == "MmcVzEffective" for item in _components(pole_definition)):
                 for wire in pole_definition.findall("./schematic/Wire"):
                     wires.append({"definition_name": pole_name, "owner_id": wire.get("id"), "attributes": {key: wire.get(key) for key in ("classid", "x", "y", "orient")}, "vertices": [dict(item.attrib) for item in wire.findall("vertex")]})
@@ -350,6 +381,8 @@ def instrument_fault_channels(source: str | Path, destination: str | Path, *, li
                 labels = [item for item in _components(pole_definition) if item.get("defn") == "master:datalabel" and dict(_parameters(item)).get("Name") == signal]
                 if labels:
                     add_probe(pole_definition, "modulation_request", f"{terminal}/{phase}/{arm}", signal, labels[0], units_override="pu", extra={"quantity": "signed_arm_voltage_request", "requested_voltage_equation": "0.5*Vref*sum(Vc)", "carrier_range": [0.0, 2.0], "physical_cell_count_bounded": True})
+                else:
+                    raise _error("MMC_ACCEPTANCE_INCOMPLETE", "Every arm requires its actual signed modulation request.", scope=f"{terminal}/{phase}/{arm}", signal=signal)
             cells = [item for item in _components(pole_definition) if item.get("defn") == "intermediate:FullCellR_n"]
             if len(cells) != 2 or any(dict(_parameters(item)).get("DTBP") != "0" for item in cells):
                 raise _error("MMC_ACCEPTANCE_INCOMPLETE", "Every pole must contain two unconditional full-bridge cell groups.")
@@ -357,12 +390,14 @@ def instrument_fault_channels(source: str | Path, destination: str | Path, *, li
                 instance.set("defn", namespace + ":MmcObservedFullCell")
                 arm_suffix = "Top" if arm == "upper" else "Btm"
                 scope = f"{terminal}/{phase}/{arm}"
-                for parameter, signal in (("MmcInserted", f"MmcV{arm_suffix}"), ("MmcCapSum", f"MmcVc{arm_suffix}"), ("MmcCapMin", f"MmcVcMin{arm_suffix}"), ("MmcCapMax", f"MmcVcMax{arm_suffix}"), ("MmcBlocked", f"MmcBlock{arm_suffix}")):
+                for parameter, signal in (("MmcInserted", f"MmcV{arm_suffix}"), ("MmcCapSum", f"MmcVc{arm_suffix}"), ("MmcCapMin", f"MmcVcMin{arm_suffix}"), ("MmcCapMax", f"MmcVcMax{arm_suffix}"), ("MmcCapEnergy", f"MmcEnergy{arm_suffix}"), ("MmcEquivalentSource", f"MmcEquivalent{arm_suffix}"), ("MmcBlocked", f"MmcBlock{arm_suffix}")):
                     set_param(instance, parameter, signal)
                 add_probe(pole_definition, "v_inserted", scope, f"MmcV{arm_suffix}", instance, source_parameter="MmcInserted", extra={"quantity": "cell_group_terminal_voltage", "positive_port": "Ntop", "negative_port": "Nbtm", "condition": {"DTBP": "0"}})
                 add_probe(pole_definition, "v_cap", scope, f"MmcVc{arm_suffix}", instance, source_parameter="MmcCapSum", nominal=640.0, extra={"quantity": "sum_of_submodule_capacitor_voltages", "expression": "SUM(Vc)", "cell_count_expression": dict(_parameters(instance))["DimC"]})
                 add_probe(pole_definition, "v_cap_minimum", scope, f"MmcVcMin{arm_suffix}", instance, source_parameter="MmcCapMin", units_override="kV", extra={"quantity": "single_submodule_voltage_extremum", "expression": "MINVAL(Vc)", "cell_count_expression": dict(_parameters(instance))["DimC"]})
                 add_probe(pole_definition, "v_cap_maximum", scope, f"MmcVcMax{arm_suffix}", instance, source_parameter="MmcCapMax", units_override="kV", extra={"quantity": "single_submodule_voltage_extremum", "expression": "MAXVAL(Vc)", "cell_count_expression": dict(_parameters(instance))["DimC"]})
+                add_probe(pole_definition, "arm_capacitor_energy", scope, f"MmcEnergy{arm_suffix}", instance, source_parameter="MmcCapEnergy", units_override="MJ", extra={"quantity": "sum_of_actual_submodule_capacitor_energies", "expression": "0.5*C_uF*1e-6*SUM(Vc_kV**2)", "capacitance_expression": dict(_parameters(instance))["C"], "capacitance_unit": "uF", "unit_derivation": "F*kV**2=MJ"})
+                add_probe(pole_definition, "cell_equivalent_source_voltage", scope, f"MmcEquivalent{arm_suffix}", instance, source_parameter="MmcEquivalentSource", units_override="kV", extra={"quantity": "vendor_cell_group_equivalent_source_voltage", "expression": "FULLCELL1_EXE RVD1_5", "branch_equation": "EBRD(BRx)=-RVD1_5", "not_a_direct_selected_cell_sum": True})
                 add_probe(pole_definition, "blocking_state", scope, f"MmcBlock{arm_suffix}", instance, kind="physical_state", source_parameter="MmcBlocked", polarity={"inactive": 0, "active": 1}, extra={"quantity": "firing_based_cell_group_blocked", "expression": "Block_Finder_H result"})
                 current_signal = "IaTop" if arm == "upper" else "IaBtm"
                 current_sources = [item for item in _components(pole_definition) if item.get("defn") == "master:varrlc" and dict(_parameters(item)).get("I") == current_signal]
@@ -394,6 +429,8 @@ def instrument_fault_channels(source: str | Path, destination: str | Path, *, li
         if len(control_calls) != 1:
             raise _error("MMC_ACCEPTANCE_INCOMPLETE", "The actual station controller is not unique.")
         control_calls[0].set("defn", namespace + ":" + control_name)
+        add_node_probe(control_definition, "controller_ac_magnitude_kv", terminal, "MmcAcMagnitudeKv", "736319288", 3204, 2034, "kV", "phase_voltage_command_magnitude_before_dc_normalization")
+        add_node_probe(control_definition, "controller_ac_magnitude_preclamp", terminal, "MmcAcMagnitudePreclamp", "235800143", 3204, 1944, "pu", "phase_voltage_command_magnitude_before_1p5_clamp")
         probes.extend(component_record(control_definition, item) for item in _components(control_definition))
         for wire in control_definition.findall("./schematic/Wire"):
             wires.append({"definition_name": control_name, "owner_id": wire.get("id"), "attributes": {key: wire.get(key) for key in ("classid", "x", "y", "orient")}, "vertices": [dict(item.attrib) for item in wire.findall("vertex")]})

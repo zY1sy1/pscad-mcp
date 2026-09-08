@@ -96,6 +96,11 @@ def _steady(samples, contract, checks=None):
     window = checks["recovery_window_s"]
     frequency = checks["frequency_hz"]
     cycle_count = round((window[1] - window[0]) * frequency)
+    modulation = [item for item in contract.get("diagnostic_channels", []) if item["role"] == "modulation_request"]
+    if checks.get("require_modulation_evidence") is True:
+        expected_scopes = {f"{station}/{phase}/{arm}" for station in ("T1", "T2") for phase in ("A", "B", "C") for arm in ("upper", "lower")}
+        if len(modulation) != 12 or {item.get("model_scope") for item in modulation} != expected_scopes or any(len([sample for sample in samples["channels"] if sample.get("channel_id") == item["channel_id"]]) != 1 for item in modulation):
+            return {"verdict": "INCOMPLETE_ANALYSIS", "checks": [], "reason": "twelve unique arm modulation bindings and traces are required"}
     rows = []
     power = {}
     for binding in contract["channels"]:
@@ -142,7 +147,10 @@ def _steady(samples, contract, checks=None):
     for binding in contract.get("diagnostic_channels", []):
         if binding["role"] != "modulation_request":
             continue
-        channel = next(item for item in samples["channels"] if item["channel_id"] == binding["channel_id"])
+        traces = [item for item in samples["channels"] if item["channel_id"] == binding["channel_id"]]
+        if len(traces) != 1:
+            return {"verdict": "INCOMPLETE_ANALYSIS", "checks": rows, "reason": "a modulation trace is missing or ambiguous"}
+        channel = traces[0]
         values = [value for instant, value in zip(channel["domain"], channel["values"]) if window[0] <= instant <= window[1]]
         peak = max(abs(value) for value in values)
         rows.append({"channel_id": binding["channel_id"], "passed": peak <= checks["modulation_abs_limit"], "absolute_peak_pu": peak, "limit_pu": checks["modulation_abs_limit"], "source": channel["output_part"], "window_s": window})

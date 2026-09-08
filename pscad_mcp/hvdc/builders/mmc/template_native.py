@@ -423,7 +423,12 @@ def evaluate_template_native_dc_fault(
     raw_channels = samples.get("channels", [])
     channels = [item for item in raw_channels if isinstance(item, Mapping)] if isinstance(raw_channels, (list, tuple)) else []
     selected: dict[str, list[dict[str, Any]]] = {role: [] for role in REQUIRED_ROLES}
+    require_modulation = checks_contract.get("require_modulation_evidence") is True
+    if require_modulation:
+        selected["modulation_request"] = []
+        bindings = [*bindings, *[item for item in channel_contract.get("diagnostic_channels", []) if item.get("role") == "modulation_request"]]
     units = {"fault_active": "1", "blocking_state": "1", "recovery_enable": "1", "v_inserted": "kV", "v_dc": "kV", "v_cap": "kV", "i_dc_fault": "kA", "i_arm": "kA", "p_active": "MW"}
+    units["modulation_request"] = "pu"
     factors = {("A", "kA"): 0.001, ("V", "kV"): 0.001, ("W", "MW"): 0.000001, ("kW", "MW"): 0.001}
     domain: tuple[float, ...] | None = None
     binding_ids = set()
@@ -509,6 +514,11 @@ def evaluate_template_native_dc_fault(
     for role, values in selected.items():
         if not values:
             missing.append(role)
+    if require_modulation:
+        modulation = selected["modulation_request"]
+        expected_scopes = {f"{station}/{phase}/{arm}" for station in ("T1", "T2") for phase in ("A", "B", "C") for arm in ("upper", "lower")}
+        if len(modulation) != 12 or {item["binding"].get("model_scope") for item in modulation} != expected_scopes:
+            invalid.append("modulation_coverage")
     balance_inputs = [item for item in selected["p_active"] if item["binding"].get("nominal_role") == "power_balance_input"]
     balance_outputs = [item for item in selected["p_active"] if item["binding"].get("nominal_role") == "controlled_active_power"]
     if balance_inputs and not balance_outputs:
@@ -517,6 +527,11 @@ def evaluate_template_native_dc_fault(
     windows: dict[str, tuple[float, float]] = {}
     numbers: dict[str, float] = {}
     try:
+        if require_modulation:
+            modulation_limit = checks_contract["modulation_abs_limit"]
+            if isinstance(modulation_limit, bool) or not math.isfinite(float(modulation_limit)) or not 0 < float(modulation_limit) <= 2:
+                raise ValueError("modulation_limit")
+            numbers["modulation_abs_limit"] = float(modulation_limit)
         for key in ("output_step_s", "max_timing_error_s", "frequency_hz", "nominal_target_relative_tolerance", "maximum_power_loss_fraction", "arm_rms_stability_relative_tolerance", "arm_peak_limit_ka", "negative_voltage_max_kv", "fault_current_limit_ka", "voltage_recovery_relative_tolerance", "power_recovery_relative_tolerance", "arm_rms_recovery_relative_tolerance", "capacitor_recovery_relative_tolerance", "steady_relative_rms_tolerance", "minimum_operating_fraction", "arm_rms_floor_ka"):
             value = checks_contract[key]
             if isinstance(value, bool) or not math.isfinite(float(value)):
@@ -594,6 +609,13 @@ def evaluate_template_native_dc_fault(
             recovery_ok.append(recovered)
             add("unblocked_after_fault", recovered, {"active": 0}, {"blocked_samples": sum(channel["values"][index] for index in indices["recovery"])}, windows["recovery"], channel["source"])
         checks["blocked"] = all(blocked_ok)
+        if require_modulation:
+            for channel in selected["modulation_request"]:
+                for window_name in ("prefault", "recovery"):
+                    peak = max(abs(channel["values"][index]) for index in indices[window_name])
+                    passed = peak <= numbers["modulation_abs_limit"]
+                    recovery_ok.append(passed)
+                    add("modulation_bounded_" + window_name, passed, {"absolute_limit_pu": numbers["modulation_abs_limit"]}, {"absolute_peak_pu": peak}, windows[window_name], channel["source"])
         if balance_inputs:
             for window_name in ("prefault", "recovery"):
                 means = [math.fsum(item["values"][index] for index in indices[window_name]) / len(indices[window_name]) for item in balance_inputs + balance_outputs]

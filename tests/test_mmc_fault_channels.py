@@ -271,6 +271,57 @@ def test_cell_voltage_extrema_keep_single_submodule_units(tmp_path, installed_so
     assert all(item["signal_source"]["quantity"] == "single_submodule_voltage_extremum" for item in minimum + maximum)
 
 
+def test_capacitor_energy_and_aggregate_source_keep_actual_cell_outputs(tmp_path, installed_sources):
+    from xml.etree import ElementTree as ET
+    project, library, master = installed_sources
+    derived = tmp_path / "observed.pscx"
+    contract = fault_channels.instrument_fault_channels(project, derived, library=library, master=master)
+    energy = [item for item in contract["diagnostic_channels"] if item["role"] == "arm_capacitor_energy"]
+    equivalent = [item for item in contract["diagnostic_channels"] if item["role"] == "cell_equivalent_source_voltage"]
+    assert len(energy) == len(equivalent) == 12
+    assert all(item["units"] == "MJ" and item["signal_source"]["expression"] == "0.5*C_uF*1e-6*SUM(Vc_kV**2)" for item in energy)
+    assert all(item["units"] == "kV" and item["signal_source"]["expression"] == "FULLCELL1_EXE RVD1_5" for item in equivalent)
+    definition = next(item for item in ET.parse(derived).findall("./definitions/Definition") if item.get("name") == "MmcObservedFullCell")
+    assert "0.5e-6*$C*SUM($Vc**2)" in next(item.text for item in definition.findall("./script/segment") if item.get("name") == "Dsout")
+
+
+def test_voltage_base_diagnostics_bind_physical_and_preclamp_nodes(tmp_path, installed_sources):
+    from xml.etree import ElementTree as ET
+    project, library, master = installed_sources
+    derived = tmp_path / "observed.pscx"
+    contract = fault_channels.instrument_fault_channels(project, derived, library=library, master=master)
+    diagnostics = contract["diagnostic_channels"]
+    for role, count, units in (("v_dc_converter", 2, "kV"), ("controller_ac_magnitude_kv", 2, "kV"), ("controller_ac_magnitude_preclamp", 2, "pu"), ("phase_ac_reference", 6, "pu"), ("arm_deblocking_ramp", 6, "pu")):
+        bindings = [item for item in diagnostics if item["role"] == role]
+        assert len(bindings) == count
+        assert all(item["units"] == units for item in bindings)
+    ac = next(item for item in diagnostics if item["role"] == "controller_ac_magnitude_kv")
+    assert ac["signal_source"]["owner_id"] == "736319288"
+    assert ac["signal_source"]["quantity"] == "phase_voltage_command_magnitude_before_dc_normalization"
+    tree = ET.parse(derived)
+    definition = next(item for item in tree.findall("./definitions/Definition") if item.get("name") == ac["definition_name"])
+    node = next(item for item in definition.findall("./schematic/User") if any(param.get("name") == "Name" and param.get("value") == "MmcAcMagnitudeKv" for param in item.findall("./paramlist/param")) and item.get("x") == "3204")
+    assert node.get("y") == "2034"
+    node.set("y", "2052")
+    tree.write(derived, encoding="utf-8")
+    with pytest.raises(BackendError):
+        fault_channels.verify_fault_instrumentation(derived, contract)
+
+
+def test_audit_preserves_reachable_roles_after_instrumentation(tmp_path, installed_sources):
+    from pscad_mcp.hvdc.builders.mmc.template_audit import audit_mmc_template
+    project, library, master = installed_sources
+    derived = tmp_path / "observed.pscx"
+    fault_channels.instrument_fault_channels(project, derived, library=library, master=master)
+    report = audit_mmc_template(derived, library)
+    assert report["compatible"] is True
+    assert report["submodule_topology"]["full_cell_instances"] == 12
+    stations = [item for item in report["role_bindings"] if item["role"] in ("station_p", "station_vdc")]
+    assert len(stations) == 2
+    assert all(item["definition"].rsplit(":", 1)[-1] in ("MFE_VSC_T1", "MFE_VSC_T2") for item in stations)
+    assert all("Main[" in item["instance_path"] for item in stations)
+
+
 def test_readback_detects_changed_source_parameter(tmp_path, installed_sources):
     from xml.etree import ElementTree as ET
     project, library, master = installed_sources
@@ -728,6 +779,55 @@ def test_virtual_resistance_instrumentation_freezes_final_cell_definitions(tmp_p
     instrumented = tmp_path / "observed.pscx"
     contract = fault_channels.instrument_fault_channels(modified, instrumented, library=library, master=master)
     assert fault_channels.verify_fault_instrumentation(instrumented, contract)["matched"] is True
+
+
+def test_instrumentation_requires_every_arm_modulation_source(tmp_path, installed_sources):
+    from xml.etree import ElementTree as ET
+
+    from pscad_mcp.hvdc.builders.mmc.template_audit import _parameters
+    project, library, master = installed_sources
+    tree = ET.parse(project)
+    for definition in tree.findall("./definitions/Definition"):
+        if definition.get("name") == "MMC_Hb_Pole_PWM":
+            canvas = definition.find("schematic")
+            for component in list(canvas):
+                if component.get("defn") == "master:datalabel" and dict(_parameters(component)).get("Name") == "VrefT":
+                    canvas.remove(component)
+    changed = tmp_path / "source.pscx"
+    tree.write(changed, encoding="utf-8")
+    with pytest.raises(BackendError) as error:
+        fault_channels.instrument_fault_channels(changed, tmp_path / "derived.pscx", library=library, master=master)
+    assert error.value.code == "MMC_ACCEPTANCE_INCOMPLETE"
+
+
+@pytest.mark.parametrize("missing", ["binding", "sample"])
+def test_steady_requires_all_twelve_modulation_bindings_and_samples(missing):
+    from tests.test_mmc_fault_evidence_real import _steady
+    samples, contract, checks = fault_fixture()
+    checks.update(require_modulation_evidence=True, modulation_abs_limit=2.0)
+    for item in samples["channels"]:
+        item["channel_id"] = item["description"]
+    contract["diagnostic_channels"] = []
+    for station in ("T1", "T2"):
+        for phase in ("A", "B", "C"):
+            for arm in ("upper", "lower"):
+                channel_id = f"MFE_{station}_{phase}_{arm}_modulation_request"
+                contract["diagnostic_channels"].append({"role": "modulation_request", "channel_id": channel_id, "model_scope": f"{station}/{phase}/{arm}"})
+                samples["channels"].append({"channel_id": channel_id, "domain": samples["channels"][0]["domain"], "values": [1.0] * len(samples["channels"][0]["domain"]), "output_part": "synthetic_01.out"})
+    if missing == "binding":
+        contract["diagnostic_channels"].pop()
+    else:
+        samples["channels"].pop()
+    result = _steady(samples, contract, checks)
+    assert result["verdict"] == "INCOMPLETE_ANALYSIS"
+
+
+def test_fault_evaluation_requires_requested_modulation_coverage():
+    samples, contract, checks = fault_fixture()
+    checks.update(require_modulation_evidence=True, modulation_abs_limit=2.0)
+    result = evaluate(samples, contract, checks)
+    assert result["verdict"] == "INCOMPLETE_ANALYSIS"
+    assert "modulation_coverage" in result["invalid_evidence"]
 
 
 def test_owned_session_is_cleaned_when_status_raises(monkeypatch):
