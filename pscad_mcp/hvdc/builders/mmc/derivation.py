@@ -6,7 +6,9 @@ import math
 from collections.abc import Mapping
 from typing import Any
 
+from ....core.backend.base import BackendError
 from ..common.serialization import content_hash
+from .electrical import arm_energy
 from .parametric_models import (
     MmcCandidate,
     MmcConstraintResult,
@@ -38,6 +40,52 @@ _AVM_REFERENCE: dict[str, Any] = {
     "control_sample_time_s": 100e-6,
     "control_bandwidth_hz": 80.0,
 }
+
+
+_ENERGY_OVERRIDE_UNITS = {
+    "stored_energy_mj": {"MJ": 1.0, "J": 1e-6},
+    "equivalent_arm_capacitance_f": {"F": 1.0, "uF": 1e-6},
+}
+_CAPACITOR_VOLTAGE_TARGET = "equivalent_capacitor_voltage_target_kv"
+
+
+def _error(code: str, message: str, **details: Any) -> BackendError:
+    return BackendError(code, message, "hvdc", "derive_mmc_parameters", details)
+
+
+def _synchronize_arm_energy(
+    parameters: dict[str, Any],
+    target_voltage_kv: float,
+    *,
+    capacitance_supplied: bool = False,
+    energy_supplied: bool = False,
+) -> None:
+    voltage_v = target_voltage_kv * 1000.0
+    energy_mj = float(parameters["stored_energy_mj"])
+    if capacitance_supplied:
+        capacitance_f = float(parameters["equivalent_arm_capacitance_f"])
+        energy_from_capacitance_mj = arm_energy(capacitance_f, voltage_v) / 1e6 * 12.0
+        if energy_supplied and not math.isclose(
+            energy_mj, energy_from_capacitance_mj, rel_tol=1e-9, abs_tol=0.0
+        ):
+            raise _error(
+                "MMC_ENERGY_INFEASIBLE",
+                "Stored-energy and capacitance overrides disagree at the capacitor-voltage target.",
+                stored_energy_mj=energy_mj,
+                energy_from_capacitance_mj=energy_from_capacitance_mj,
+                equivalent_capacitor_voltage_target_kv=target_voltage_kv,
+            )
+        if not energy_supplied:
+            energy_mj = energy_from_capacitance_mj
+    capacitance_f = 2.0 * (energy_mj / 12.0 * 1e6) / voltage_v / voltage_v
+    arm_energy(capacitance_f, voltage_v)
+    parameters.update(
+        {
+            "stored_energy_mj": energy_mj,
+            "equivalent_arm_capacitance_f": capacitance_f,
+            _CAPACITOR_VOLTAGE_TARGET: target_voltage_kv,
+        }
+    )
 
 
 def _grid(station: object, power_mw: float, voltage_scale: float) -> tuple[float, float, float]:
@@ -110,18 +158,37 @@ def _engine_candidates(
         "station_vdc_grid_r_ohm": common["station_vdc_grid_r_ohm"],
         "station_vdc_grid_x_ohm": common["station_vdc_grid_x_ohm"],
         "line_resistance_ohm": common["line_resistance_ohm"],
-        "equivalent_arm_capacitance_f": (
-            2.0
-            * float(reference["stored_energy_mj"])
-            * power_scale
-            * 1_000_000.0
-            / 12.0
-            / ((request.dc_voltage_kv * 1_000.0 / 2.0) ** 2)
-        ),
         "loss_per_arm_mw": common["loss_budget_mw"] / 12.0,
     }
     for name, override in request.engineering_overrides.items():
-        base_parameters[name] = override["value"]
+        if name == _CAPACITOR_VOLTAGE_TARGET:
+            raise _error(
+                "MMC_REQUEST_INVALID",
+                "The equivalent capacitor-voltage target is fixed at half the requested DC voltage.",
+                field=f"engineering_overrides.{name}",
+            )
+        unit_factors = _ENERGY_OVERRIDE_UNITS.get(name)
+        if unit_factors is None:
+            base_parameters[name] = override["value"]
+            continue
+        unit = override["unit"]
+        if unit not in unit_factors:
+            raise _error(
+                "MMC_REQUEST_INVALID",
+                "The energy override has an incompatible unit.",
+                field=f"engineering_overrides.{name}",
+                unit=unit,
+                supported_units=sorted(unit_factors),
+            )
+        base_parameters[name] = override["value"] * unit_factors[unit]
+    # Preserve the existing half-normalized capacitor-voltage convention.
+    capacitor_voltage_target_kv = request.dc_voltage_kv / 2.0
+    _synchronize_arm_energy(
+        base_parameters,
+        capacitor_voltage_target_kv,
+        capacitance_supplied="equivalent_arm_capacitance_f" in request.engineering_overrides,
+        energy_supplied="stored_energy_mj" in request.engineering_overrides,
+    )
     switching_frequency = float(reference.get("switching_frequency_hz", 0.0))
     control_sample = float(reference["control_sample_time_s"])
     nominal_step = min(control_sample / 5.0, 1.0 / switching_frequency / 40.0) if switching_frequency else control_sample / 2.0
@@ -140,6 +207,7 @@ def _engine_candidates(
     result: list[MmcCandidate] = []
     for index, (purpose, parameter_changes, setting_changes) in enumerate(variants):
         parameters = {**base_parameters, **parameter_changes}
+        _synchronize_arm_energy(parameters, capacitor_voltage_target_kv)
         settings = {**base_settings, **setting_changes}
         result.append(_candidate(engine, index, purpose, parameters, settings, constraints))
     return tuple(result)

@@ -118,7 +118,7 @@ def arm_losses(current_a: float, resistance_ohm: float, switching_loss_coefficie
 
 
 def arm_energy_derivative(inserted_voltage_v: float, arm_current_a: float, loss_w: float) -> float:
-    """Return ``v_inserted * i_arm - p_loss_arm`` with a strict loss guard."""
+    """Return signed arm power minus non-negative losses, allowing discharge."""
 
     voltage = _finite(inserted_voltage_v, "inserted_voltage_v", code="MMC_ENERGY_INFEASIBLE")
     current = _finite(arm_current_a, "arm_current_a", code="MMC_ENERGY_INFEASIBLE")
@@ -126,8 +126,6 @@ def arm_energy_derivative(inserted_voltage_v: float, arm_current_a: float, loss_
     inserted_power = voltage * current
     if not math.isfinite(inserted_power):
         raise _error("MMC_ENERGY_INFEASIBLE", "inserted arm power is non-finite.", "arm_energy_derivative")
-    if loss > inserted_power:
-        raise _error("MMC_ENERGY_INFEASIBLE", "arm loss exceeds inserted arm power.", "arm_energy_derivative", inserted_power_w=inserted_power, loss_w=loss)
     derivative = inserted_power - loss
     if not math.isfinite(derivative):
         raise _error("MMC_ENERGY_INFEASIBLE", "arm energy derivative is non-finite.", "arm_energy_derivative")
