@@ -510,3 +510,112 @@ def test_headroom_repair_converts_explicit_equivalent_units(tmp_path, installed_
     tree.write(changed, encoding="utf-8")
     report = fault_channels.materialize_voltage_control_headroom(changed, tmp_path / "derived.pscx")
     assert report["arm_protection_limit_ka"] == 3.0
+
+
+@pytest.mark.parametrize("operation", ["instrument", "headroom", "native"])
+def test_derived_writers_never_replace_a_racing_target(tmp_path, installed_sources, monkeypatch, operation):
+    project, library, master = installed_sources
+    destination = (tmp_path / "racing.pscx").resolve()
+    real_exists = Path.exists
+    raced = False
+    def exists(path):
+        nonlocal raced
+        if path == destination and not raced:
+            raced = True
+            path.write_bytes(b"foreign-owner")
+            return False
+        return real_exists(path)
+    monkeypatch.setattr(Path, "exists", exists)
+    with pytest.raises(BackendError) as error:
+        if operation == "instrument":
+            fault_channels.instrument_fault_channels(project, destination, library=library, master=master)
+        elif operation == "headroom":
+            fault_channels.materialize_voltage_control_headroom(project, destination)
+        else:
+            from pscad_mcp.hvdc.builders.mmc.template_native import (
+                materialize_template_native_scenario,
+            )
+            materialize_template_native_scenario(project, destination, dc_fault_time_s=2.5, fault_duration_s=0.2)
+    assert error.value.code == "MMC_BUILD_CONFLICT"
+    assert destination.read_bytes() == b"foreign-owner"
+
+
+@pytest.mark.parametrize("operation", ["instrument", "headroom"])
+def test_raw_dangling_destination_is_rejected_before_resolution(tmp_path, installed_sources, monkeypatch, operation):
+    project, library, master = installed_sources
+    alias = tmp_path / "alias.pscx"
+    redirected = tmp_path / "redirected.pscx"
+    real_resolve, real_symlink = Path.resolve, Path.is_symlink
+    monkeypatch.setattr(Path, "resolve", lambda path, *args, **kwargs: redirected if path == alias else real_resolve(path, *args, **kwargs))
+    monkeypatch.setattr(Path, "is_symlink", lambda path: True if path == alias else real_symlink(path))
+    with pytest.raises(BackendError):
+        if operation == "instrument":
+            fault_channels.instrument_fault_channels(project, alias, library=library, master=master)
+        else:
+            fault_channels.materialize_voltage_control_headroom(project, alias)
+    assert not redirected.exists()
+
+
+def test_dc_feedback_filter_changes_only_the_outer_feedback_branch(tmp_path, installed_sources):
+    from xml.etree import ElementTree as ET
+
+    from pscad_mcp.hvdc.builders.mmc.template_audit import _components, _parameters
+    project, _, master = installed_sources
+    destination = tmp_path / "filtered.pscx"
+    result = fault_channels.materialize_dc_feedback_filter(project, destination, master=master, time_constant_s=0.005)
+    root = ET.parse(destination).getroot()
+    users = {item.get("id"): item for item in _components(root)}
+    assert dict(_parameters(users["177754199"]))["Name"] == "MmcFilteredVdcPu"
+    assert all(dict(_parameters(users[owner]))["Name"] == "Edc_Pu" for owner in ("1379729478", "1453282758"))
+    added = users[result["filter_owner"]]
+    assert added.get("defn") == "master:realpole"
+    assert dict(_parameters(added)) == {"G": "1.0", "T": "0.005 [s]", "Dim": "1", "Limit": "0", "Reset": "2", "YO": "Edc_Pu", "Min": "-10.0", "Max": "10.0", "COM": "MMC DC feedback only"}
+    assert result["initialization"] == "reset_to_raw_feedback_at_timezero"
+    assert result["raw_feedback_label_owners"] == ["1379729478", "1453282758"]
+
+
+def test_owned_session_is_cleaned_when_status_raises(monkeypatch):
+    import asyncio
+
+    from tests.test_mmc_fault_evidence_real import _with_owned_connection
+    monkeypatch.setenv("PSCAD_MCP_ACCEPTANCE_CONCURRENT", "1")
+    class Backend:
+        def __init__(self):
+            self.owns_process = True
+            self.session_details = {"managed_pid": 42, "mode": "managed-launch"}
+    backend = Backend()
+    class Service:
+        _backend = backend
+        quit_called = False
+        async def attach_local(self):
+            return "owned launch"
+        async def status(self):
+            raise RuntimeError("status unavailable after owned launch")
+        async def quit_pscad(self, **kwargs):
+            self.quit_called = True
+            backend.owns_process = False
+    service = Service()
+    report = {}
+    async def operation():
+        raise AssertionError("must not start case execution")
+    with pytest.raises(RuntimeError, match="status unavailable"):
+        asyncio.run(_with_owned_connection(service, backend, report, operation, process_reader=list))
+    assert service.quit_called
+    assert report["launch_ownership"]["session"]["managed_pid"] == 42
+    assert report["owned_process_cleaned"] is True
+
+
+def test_reanalysis_rejects_a_changed_frozen_channel_contract(tmp_path):
+    import importlib.util
+    import json
+    module_path = Path(__file__).parents[1] / "docs/acceptance/mmc-fault-evidence/reanalyse.py"
+    spec = importlib.util.spec_from_file_location("mmc_reanalysis_test", module_path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    contract_path = tmp_path / "channels.json"
+    contract_path.write_text('{"schema_version":1}', encoding="ascii")
+    record = {"channel_contract_path": str(contract_path), "channel_contract_sha256": hashlib.sha256(contract_path.read_bytes()).hexdigest()}
+    contract_path.write_text('{"schema_version":1,"changed":true}', encoding="ascii")
+    with pytest.raises(BackendError):
+        module.load_frozen_case(record)
+    assert json.loads(contract_path.read_text())["changed"] is True

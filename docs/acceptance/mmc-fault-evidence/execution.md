@@ -140,3 +140,23 @@ of the final window, while T2's power reference and stability checks passed.
 No-fault full-run arm peaks were 2.88057/2.75489 kA. T1 Imax is not increased
 further. The next convergence experiment changes only EMT timestep 50 to
 25 us, retaining 250 us output sampling and all physical/control criteria.
+
+The fifth attempt (`fault-evidence-20260908T050725531192Z`, 770fad7) used 25 us.
+Both runs completed with valid identities and clean owned-process exit.
+Steady-state voltages remained 520.40/504.23 kV, while T2 power was stable at
+-900.024 MW. This does not support coarse timestep as the main undervoltage
+cause. Full-run arm peaks were 2.74209/2.26094 kA. A diagnostic FFT of the frozen
+4-5 s raw waveforms showed dominant DC-voltage content near 303 Hz, also visible
+in T1's limited current reference.
+
+The next single-variable experiment inserts a 5 ms first-order real-pole
+filter only in VSCControl2's DC outer-loop error feedback branch. Owner
+177754199 changes from Edc_Pu to the filtered signal; the other two Edc_Pu
+labels, raw physical voltage outputs, PWM normalization and fast protection
+remain unchanged. The Master realpole uses unit gain, no output limiting,
+and TIMEZERO reset to the actual raw Edc_Pu input, so snapshot or nonzero initial
+voltage is not replaced by an artificial zero. Its 31.8 Hz corner is above the
+DC-loop scale (roughly 4.6-6.5 Hz from the installed capacitor energy and PI
+gains) and attenuates 303 Hz by about 19.6 dB. This is a controller feedback
+change; acceptance uses only raw physical DC voltage. Only the five-second
+no-fault case runs until the unchanged nominal/stability gate closes.

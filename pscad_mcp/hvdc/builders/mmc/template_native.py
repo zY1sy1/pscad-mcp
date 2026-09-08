@@ -318,11 +318,8 @@ def materialize_template_native_scenario(
 
     destination_path.parent.mkdir(parents=True, exist_ok=True)
     try:
-        ET.ElementTree(root).write(
-            destination_path,
-            encoding="utf-8",
-            xml_declaration=False,
-        )
+        from .fault_channels import _write_new_xml
+        _write_new_xml(root, destination_path)
     except OSError as error:
         raise _error(
             "MMC_TEMPLATE_NATIVE_WRITE_FAILED",
@@ -335,7 +332,6 @@ def materialize_template_native_scenario(
         destination_hash = _sha256(destination_path)
         source_hash = _sha256(source_path)
     except (BackendError, OSError) as error:
-        destination_path.unlink(missing_ok=True)
         if isinstance(error, BackendError):
             raise
         raise _error(

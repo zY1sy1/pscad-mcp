@@ -38,6 +38,25 @@ def _regular(path: str | Path) -> Path:
     return raw.resolve()
 
 
+def _new_target(destination: str | Path, sources: tuple[Path, ...] = ()) -> Path:
+    raw = Path(destination).expanduser()
+    if raw.is_symlink():
+        raise _error("MMC_BUILD_CONFLICT", "A derived destination must not be a symbolic link.", destination=str(raw))
+    target = raw.resolve()
+    if target in sources or target.exists() or target.is_symlink():
+        raise _error("MMC_BUILD_CONFLICT", "A derived destination must be a new file.", destination=str(target))
+    return target
+
+
+def _write_new_xml(root: ET.Element, target: Path) -> None:
+    target.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with target.open("xb") as stream:
+            ET.ElementTree(root).write(stream, encoding="utf-8", xml_declaration=False)
+    except FileExistsError as error:
+        raise _error("MMC_BUILD_CONFLICT", "Another owner created the derived destination.", destination=str(target)) from error
+
+
 def snapshot_output_dataset(primary: str | Path, *, started_after: float | None = None) -> dict[str, Any]:
     """Freeze every numbered part and INF/INFX companion before reading."""
 
@@ -167,9 +186,7 @@ def instrument_fault_channels(source: str | Path, destination: str | Path, *, li
         digest = expected.get("sha256") if isinstance(expected, Mapping) else expected
         if hashes.get(name) != digest:
             raise _error("MMC_TEMPLATE_SOURCE_CHANGED", "The instrumentation source differs from its frozen identity.", source=name, expected=digest, observed=hashes.get(name))
-    target = Path(destination).expanduser().resolve()
-    if target in paths.values() or target.exists() or target.is_symlink():
-        raise _error("MMC_BUILD_CONFLICT", "Instrumentation requires a new derived project.", destination=str(target))
+    target = _new_target(destination, tuple(paths.values()))
     root, library_root, master_root = (ET.parse(paths[name]).getroot() for name in ("project", "library", "master"))
     definitions = {item.get("name"): item for item in root.findall("./definitions/Definition")}
     vendor = {item.get("name"): item for item in library_root.findall("./definitions/Definition")}
@@ -332,10 +349,18 @@ def instrument_fault_channels(source: str | Path, destination: str | Path, *, li
         if len(control_calls) != 1:
             raise _error("MMC_ACCEPTANCE_INCOMPLETE", "The actual station controller is not unique.")
         control_calls[0].set("defn", namespace + ":" + control_name)
+        probes.extend(component_record(control_definition, item) for item in _components(control_definition))
+        for wire in control_definition.findall("./schematic/Wire"):
+            wires.append({"definition_name": control_name, "owner_id": wire.get("id"), "attributes": {key: wire.get(key) for key in ("classid", "x", "y", "orient")}, "vertices": [dict(item.attrib) for item in wire.findall("vertex")]})
         freeze_source = next(item for item in _components(control_definition) if item.get("id") == "1356454688")
         magnitude_source = next(item for item in _components(control_definition) if item.get("id") == "1359229547")
         add_probe(control_definition, "controller_freeze", terminal, "FrzI", freeze_source, kind="physical_state", polarity={"inactive": 0, "active": 1}, extra={"quantity": "actual_current_limit_antiwindup_freeze"})
         add_probe(control_definition, "controller_current_magnitude", terminal, "Imag", magnitude_source, units_override="pu", extra={"quantity": "dq_current_reference_magnitude", "base": "sqrt(2)*Sbase/(sqrt(3)*Vtr_2)"})
+        filters = [item for item in _components(control_definition) if item.get("defn") == "master:realpole" and dict(_parameters(item)).get("COM") == "MMC DC feedback only"]
+        if filters:
+            if len(filters) != 1:
+                raise _error("MMC_ACCEPTANCE_INCOMPLETE", "The DC feedback filter is not unique.")
+            add_probe(control_definition, "controller_dc_voltage_filtered", terminal, "MmcFilteredVdcPu", filters[0], units_override="pu", extra={"quantity": "outer_loop_filtered_dc_voltage", "time_constant_s": 0.005, "not_an_acceptance_voltage": True})
         add_probe(main, "recovery_enable", terminal, f"Dblk{number}P", controls[0], kind="recovery_control", source_parameter="Dblk", polarity={"inactive": 0, "active": 1}, extra={"quantity": "deblocking_enable", "electrical_recovery_required": True})
 
     # Update hierarchy calls from the actual specialized component graph.
@@ -358,8 +383,7 @@ def instrument_fault_channels(source: str | Path, destination: str | Path, *, li
         channel["instance_path"] = scopes[0]["instance_path"]
         channel["selector"].update({"owner_id": channel["owner_id"], "instance_path": channel["instance_path"]})
         channel["signal_source"]["instance_path"] = channel["instance_path"] + "/" + channel["signal_source"]["definition"].rsplit(":", 1)[-1] + "[" + channel["signal_source"]["owner_id"] + "]"
-    target.parent.mkdir(parents=True, exist_ok=True)
-    ET.ElementTree(root).write(target, encoding="utf-8", xml_declaration=False)
+    _write_new_xml(root, target)
     contract = {"schema_version": 1, "source_hashes": {name: {"path": str(paths[name]), "sha256": hashes[name]} for name in paths}, "project_path": str(target), "channels": channels, "readback_components": probes, "readback_wires": wires, "readback_ports": {name: _ports(definition) for name, definition in definitions.items() if name.startswith(("MFE_", "MmcObserved"))}, "readback_scripts": {item.get("name"): _script_hash(item) for item in (observed_cell, observed_fault)}, "instrumented_project_sha256": _sha256(target), "reachable_instances": reachable}
     contract["diagnostic_channels"] = [item for item in channels if item["role"] not in REQUIRED_ROLES]
     contract["channels"] = [item for item in channels if item["role"] in REQUIRED_ROLES]
@@ -411,9 +435,16 @@ def verify_fault_instrumentation(project: str | Path, contract: Mapping[str, Any
         raise _error("MMC_POSTCONDITION_FAILED", "The frozen instrumented project hash changed.")
     root = ET.parse(path).getroot()
     definitions = {item.get("name"): item for item in root.findall("./definitions/Definition")}
+    scope_components = {}
+    scope_wires = {}
+    for name, definition in definitions.items():
+        by_id: dict[str, list[ET.Element]] = {}
+        for item in _components(definition):
+            by_id.setdefault(item.get("id"), []).append(item)
+        scope_components[name] = by_id
+        scope_wires[name] = {item.get("id"): item for item in definition.findall("./schematic/Wire")}
     for expected in contract.get("readback_components", []):
-        scope = definitions.get(expected["definition_name"])
-        matches = [item for item in _components(scope) if item.get("id") == expected["owner_id"]] if scope is not None else []
+        matches = scope_components.get(expected["definition_name"], {}).get(expected["owner_id"], [])
         if len(matches) != 1 or matches[0].get("defn") != expected["definition"] or any(dict(_parameters(matches[0])).get(key) != value for key, value in expected["parameters"].items()) or any(matches[0].get(key) != value for key, value in expected["position"].items()):
             raise _error("MMC_POSTCONDITION_FAILED", "A measured source, label or output changed after saving.", expected=expected)
     for name, digest in contract.get("readback_scripts", {}).items():
@@ -423,9 +454,8 @@ def verify_fault_instrumentation(project: str | Path, contract: Mapping[str, Any
         if name not in definitions or _ports(definitions[name]) != ports:
             raise _error("MMC_POSTCONDITION_FAILED", "A measurement port or its activation condition changed.", definition=name)
     for wire in contract.get("readback_wires", []):
-        scope = definitions.get(wire["definition_name"])
-        matches = [item for item in scope.findall("./schematic/Wire") if item.get("id") == wire["owner_id"]] if scope is not None else []
-        if len(matches) != 1 or any(matches[0].get(key) != value for key, value in wire["attributes"].items()) or [dict(item.attrib) for item in matches[0].findall("vertex")] != wire["vertices"]:
+        match = scope_wires.get(wire["definition_name"], {}).get(wire["owner_id"])
+        if match is None or any(match.get(key) != value for key, value in wire["attributes"].items()) or [dict(item.attrib) for item in match.findall("vertex")] != wire["vertices"]:
             raise _error("MMC_POSTCONDITION_FAILED", "A physical measurement connection changed.", wire=wire)
     if reachable_instances(root) != contract.get("reachable_instances"):
         raise _error("MMC_POSTCONDITION_FAILED", "The running instance hierarchy changed after saving.")
@@ -469,9 +499,7 @@ def materialize_voltage_control_headroom(source: str | Path, destination: str | 
     """
 
     original = _regular(source)
-    target = Path(destination).expanduser().resolve()
-    if target == original or target.exists() or target.is_symlink():
-        raise _error("MMC_BUILD_CONFLICT", "A control repair requires a new derived copy.")
+    target = _new_target(destination, (original,))
     if isinstance(current_limit_pu, bool) or not isinstance(current_limit_pu, (int, float)) or not 1.0 < current_limit_pu <= 1.1:
         raise _error("MMC_TEMPLATE_NATIVE_BINDING_INVALID", "The audited current headroom range is above 1.0 and at most 1.1 pu.")
     before_hash = _sha256(original)
@@ -531,12 +559,64 @@ def materialize_voltage_control_headroom(source: str | Path, destination: str | 
     wire = ET.SubElement(canvas, "Wire", {"classid": "WireOrthogonal", "id": next_id(), "name": "", "x": str(x - 72), "y": str(y), "orient": "0", "w": "46", "h": "10"})
     ET.SubElement(wire, "vertex", {"x": "0", "y": "0"})
     ET.SubElement(wire, "vertex", {"x": "36", "y": "0"})
-    target.parent.mkdir(parents=True, exist_ok=True)
-    ET.ElementTree(root).write(target, encoding="utf-8", xml_declaration=False)
+    _write_new_xml(root, target)
     if _sha256(original) != before_hash:
         raise _error("MMC_TEMPLATE_SOURCE_CHANGED", "The control repair source changed while reading.")
     base = 1000 / (math.sqrt(3) * 370)
     return {"source": str(original), "source_sha256": before_hash, "destination": str(target), "destination_sha256": _sha256(target), "voltage_controller_owner": voltage_converter.get("id"), "parameter": "Imax", "before_pu": 1.0, "after_pu": current_limit_pu, "freeze_reference": "0.99999 * Imax", "freeze_reference_owner": threshold.get("id"), "phase_current_base_rms_ka": base, "phase_current_rms_ka": base * current_limit_pu, "phase_current_peak_ka": base * math.sqrt(2) * current_limit_pu, "arm_protection_limit_ka": 3.0}
+
+
+def materialize_dc_feedback_filter(source: str | Path, destination: str | Path, *, master: str | Path, time_constant_s: float = 0.005) -> dict[str, Any]:
+    """Filter only the DC outer-loop error input; raw voltage remains available."""
+
+    original, master_path = _regular(source), _regular(master)
+    target = _new_target(destination, (original, master_path))
+    if isinstance(time_constant_s, bool) or time_constant_s != 0.005:
+        raise _error("MMC_TEMPLATE_NATIVE_BINDING_INVALID", "The frozen DC feedback filter contract is 5 ms.")
+    source_hash, master_hash = _sha256(original), _sha256(master_path)
+    root = ET.parse(original).getroot()
+    master_root = ET.parse(master_path).getroot()
+    filter_definition = next((item for item in master_root.findall("./definitions/Definition") if item.get("name") == "realpole"), None)
+    ports = {item.get("name"): item for item in filter_definition.findall("./svg/port")} if filter_definition is not None else {}
+    if any(name not in ports or ports[name].get("x") != position or (ports[name].text or "").strip() != "true" for name, position in (("I:Dim", "-36"), ("O:Dim", "36"))):
+        raise _error("MMC_ACCEPTANCE_INCOMPLETE", "The installed real-pole port contract differs.")
+    definition = next((item for item in root.findall("./definitions/Definition") if item.get("name") == "VSCControl2"), None)
+    if definition is None:
+        raise _error("MMC_ACCEPTANCE_INCOMPLETE", "The DC outer controller is absent.")
+    users = {item.get("id"): item for item in _components(definition)}
+    feedback = users.get("177754199")
+    summing = users.get("1475059159")
+    if feedback is None or summing is None or feedback.get("defn") != "master:datalabel" or dict(_parameters(feedback)).get("Name") != "Edc_Pu" or dict(_parameters(summing)).get("B") != "-1":
+        raise _error("MMC_ACCEPTANCE_INCOMPLETE", "The exact raw DC-error feedback branch differs.")
+    for owner in ("1379729478", "1453282758"):
+        if owner not in users or dict(_parameters(users[owner])).get("Name") != "Edc_Pu":
+            raise _error("MMC_ACCEPTANCE_INCOMPLETE", "A protected raw DC-voltage branch differs.")
+    next(item for item in feedback.findall("./paramlist/param") if item.get("name") == "Name").set("value", "MmcFilteredVdcPu")
+    used = {item.get("id") for item in root.iter()}
+    def new_id():
+        value = 2041000001
+        while str(value) in used:
+            value += 1
+        used.add(str(value))
+        return str(value)
+    canvas = definition.find("schematic")
+    def user(defn, x, params):
+        item = ET.SubElement(canvas, "User", {"classid": "UserCmp", "defn": defn, "id": new_id(), "x": str(x), "y": "3402", "orient": "0", "w": "84", "h": "58", "z": "1375", "link": "-1", "q": "4"})
+        group = ET.SubElement(item, "paramlist", {"name": "", "link": "-1"})
+        for key, value in params.items():
+            ET.SubElement(group, "param", {"name": key, "value": value})
+        return item
+    user("master:datalabel", 3528, {"Name": "Edc_Pu"})
+    filtered = user("master:realpole", 3600, {"G": "1.0", "T": "0.005 [s]", "Dim": "1", "Limit": "0", "Reset": "2", "YO": "Edc_Pu", "Min": "-10.0", "Max": "10.0", "COM": "MMC DC feedback only"})
+    user("master:datalabel", 3672, {"Name": "MmcFilteredVdcPu"})
+    for x in (3528, 3636):
+        wire = ET.SubElement(canvas, "Wire", {"classid": "WireOrthogonal", "id": new_id(), "name": "", "x": str(x), "y": "3402", "orient": "0", "w": "46", "h": "10"})
+        ET.SubElement(wire, "vertex", {"x": "0", "y": "0"})
+        ET.SubElement(wire, "vertex", {"x": "36", "y": "0"})
+    _write_new_xml(root, target)
+    if _sha256(original) != source_hash or _sha256(master_path) != master_hash:
+        raise _error("MMC_TEMPLATE_SOURCE_CHANGED", "A filter materialization source changed.")
+    return {"source": str(original), "source_sha256": source_hash, "destination": str(target), "destination_sha256": _sha256(target), "master_sha256": master_hash, "filter_owner": filtered.get("id"), "time_constant_s": time_constant_s, "initialization": "reset_to_raw_feedback_at_timezero", "feedback_label_owner": feedback.get("id"), "raw_feedback_label_owners": ["1379729478", "1453282758"], "scope": "dc_outer_loop_feedback_only", "raw_voltage_acceptance": True}
 
 
 __all__ = ["REQUIRED_ROLES", "instrument_fault_channels", "reachable_instances", "read_fault_output_dataset", "snapshot_output_dataset", "verify_fault_instrumentation", "verify_output_dataset"]
