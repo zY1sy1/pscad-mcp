@@ -1,6 +1,7 @@
 import asyncio
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from xml.etree import ElementTree as ET
 
 import pytest
@@ -126,7 +127,7 @@ def test_replay_save_allows_only_verified_virtual_root_rebinding(tmp_path, chang
         assert replay._verify_replay_saved_model(original, saved, contract) is True
 
 
-@pytest.mark.parametrize("changed", [None, "python_pid", "checks_sha256", "copied_bundle_hashes", "parent_channel_contract_sha256", "replay_saved_model_verified"])
+@pytest.mark.parametrize("changed", [None, "python_pid", "checks_sha256", "copied_bundle_hashes", "parent_channel_contract_sha256", "replay_saved_model_verified", "copied_dependency"])
 def test_replay_supervisor_requires_complete_matching_worker_evidence(tmp_path, monkeypatch, changed):
     monkeypatch.setenv("PSCAD_MCP_MMC_ACCEPTANCE", "1")
     arguments = _request(tmp_path, monkeypatch)
@@ -143,6 +144,9 @@ def test_replay_supervisor_requires_complete_matching_worker_evidence(tmp_path, 
         request = json.loads(request_path.read_text())
         worker = request_path.parent / "worker"
         worker.mkdir()
+        copied_bundle = worker / Path(request["bundle"]["path"]).name
+        copied_bundle.mkdir()
+        (copied_bundle / "library.pslx").write_bytes((Path(request["bundle"]["path"]) / "library.pslx").read_bytes())
         (worker / "SavedCase.pscx").write_bytes(Path(request["project"]["path"]).read_bytes())
         output = worker / "SavedCase_01.out"
         output.write_text("0 0\n5 0\n")
@@ -153,7 +157,9 @@ def test_replay_supervisor_requires_complete_matching_worker_evidence(tmp_path, 
                   "checks_sha256": request["checks_sha256"], "replay_saved_model_verified": True,
                   "acceptance": {"verdict": "PASS"}, "output_identity": snapshot_output_dataset(output),
                   "replay_channel_contract": {"project_path": str(worker / "SavedCase.pscx")}}
-        if changed:
+        if changed == "copied_dependency":
+            (copied_bundle / "library.pslx").write_text("CHANGED dependency")
+        elif changed:
             report[changed] = "changed"
         (worker / "report.json").write_text(json.dumps(report))
         return Process()
@@ -168,8 +174,8 @@ def test_replay_supervisor_requires_complete_matching_worker_evidence(tmp_path, 
         assert result["artifacts"]["supervisor-report.json"]["sha256"]
 
 
-@pytest.mark.parametrize("verdict", ["PASS", "FAIL"])
-def test_independent_worker_uses_frozen_dependencies_and_cleans_its_own_session(tmp_path, monkeypatch, verdict):
+@pytest.mark.parametrize(("verdict", "changed_dependency"), [("PASS", False), ("FAIL", False), ("PASS", True)])
+def test_independent_worker_uses_frozen_dependencies_and_cleans_its_own_session(tmp_path, monkeypatch, verdict, changed_dependency):
     from pscad_mcp.hvdc.builders.mmc import blank_service
 
     monkeypatch.setenv("PSCAD_MCP_MMC_ACCEPTANCE", "1")
@@ -230,6 +236,8 @@ def test_independent_worker_uses_frozen_dependencies_and_cleans_its_own_session(
         replay._write(channel_path, contract)
         record["result"]["channel_contract_path"] = str(channel_path)
         checkpoint("saved_and_bound")
+        if changed_dependency:
+            library.write_text("CHANGED dependency")
         output = project.parent / "SavedCase_01.out"
         output.write_text("0 0\n5 0\n")
         (output.parent / "SavedCase.inf").write_text("metadata")
@@ -241,7 +249,98 @@ def test_independent_worker_uses_frozen_dependencies_and_cleans_its_own_session(
     monkeypatch.setattr(blank_service, "_run_native_fault_case", run)
     monkeypatch.setattr(replay, "evaluate_template_native_dc_fault", lambda *args, **kwargs: {"verdict": verdict})
     result = asyncio.run(replay._worker(request_path, replay._hash(request_path)))
-    assert result["status"] == verdict, result.get("error")
+    assert result["status"] == ("FAIL" if changed_dependency else verdict), result.get("error")
     assert result["owned_process_cleaned"] is True
     assert result["replay_saved_model_verified"] is True
     assert calls == ["attach", "quit", "wait_owned"]
+
+
+def test_communication_error_preserves_report_and_unresolved_owned_cleanup(tmp_path, monkeypatch):
+    monkeypatch.setenv("PSCAD_MCP_MMC_ACCEPTANCE", "1")
+    arguments = _request(tmp_path, monkeypatch)
+
+    class Process:
+        pid = 731
+        returncode = 1
+
+        async def communicate(self):
+            raise OSError("pipe read failure")
+
+    async def launch(*args, **kwargs):
+        request_path = Path(args[args.index("--request") + 1])
+        replay._write(request_path.parent / "worker" / "ownership.json", {"request_sha256": replay._hash(request_path)})
+        return Process()
+
+    async def unresolved(_):
+        return {"owned_process_cleaned": False, "cleanup_pending": True}
+
+    monkeypatch.setattr(replay.asyncio, "create_subprocess_exec", launch)
+    monkeypatch.setattr(replay, "_terminate_owned_pscad", unresolved)
+    result = asyncio.run(replay.verify_native_fault_replay(**arguments))
+    assert result["status"] == "FAIL"
+    assert result["cleanup_pending"] is True
+    assert result["owned_process_cleaned"] is False
+    assert "pipe read failure" in result["error"]["message"]
+    assert Path(result["supervisor_report_path"]).is_file()
+
+
+def test_dependency_snapshot_supports_pathlib_before_python_312(tmp_path, monkeypatch):
+    arguments = _request(tmp_path, monkeypatch)
+    monkeypatch.delattr(Path, "is_junction", raising=False)
+    assert replay._files(arguments["bundle"]) == arguments["dependency_files"]
+
+
+def test_dependency_snapshot_still_rejects_windows_reparse_directories(tmp_path, monkeypatch):
+    arguments = _request(tmp_path, monkeypatch)
+    root = arguments["bundle"]
+    actual_lstat = Path.lstat
+
+    def fake_lstat(path):
+        value = actual_lstat(path)
+        return SimpleNamespace(st_mode=value.st_mode, st_file_attributes=0x400) if path == root else value
+
+    monkeypatch.delattr(Path, "is_junction", raising=False)
+    monkeypatch.setattr(Path, "lstat", fake_lstat)
+    with pytest.raises(ValueError, match="regular directory"):
+        replay._files(root)
+
+
+@pytest.mark.parametrize("kill_fails", [False, True])
+def test_python_finalization_errors_preserve_pending_process_state(tmp_path, kill_fails):
+    class Process:
+        returncode = None
+
+        def terminate(self):
+            raise OSError("terminate failed")
+
+        def kill(self):
+            if kill_fails:
+                raise OSError("kill failed")
+            self.returncode = -9
+
+        async def wait(self):
+            return self.returncode
+
+    async def broken_pipe():
+        raise OSError("pipe read failure")
+
+    async def exercise():
+        result = {"status": "FAIL", "cleanup_pending": False, "owned_process_cleaned": True}
+        await replay._finalize_python_worker(Process(), asyncio.create_task(broken_pipe()), tmp_path, result)
+        return result
+
+    result = asyncio.run(exercise())
+    assert result["status"] == "FAIL"
+    assert result["cleanup_pending"] is kill_fails
+    assert {item["stage"] for item in result["finalization_errors"]} >= {"terminate", "worker_log"}
+
+
+def test_failed_supervisor_report_write_does_not_erase_cleanup_state(tmp_path, monkeypatch):
+    def failed_write(*args):
+        raise OSError("report device unavailable")
+
+    monkeypatch.setattr(replay, "_write", failed_write)
+    result = replay._supervisor_report(tmp_path, {"status": "FAIL", "cleanup_pending": True, "owned_process_cleaned": False})
+    assert result["cleanup_pending"] is True
+    assert result["owned_process_cleaned"] is False
+    assert result["report_write_error"] == "report device unavailable"
