@@ -210,3 +210,38 @@ The preceding affected A/B/public software gate reported 257 passed, 1 skipped;
 that gate also has no licensed meaning. Ruff is clean for the joint harness
 and tests. Independent review closed all three public replay findings at
 `80e9f8706ad0219dc7199b5a44cd653789f0d0ee` with Spec/Quality PASS.
+
+## Durable Offline Case
+
+The joint harness was committed as
+`61fd11b0810a3aeb7455dcfaa38a7d7a04c67be2`. Running its preparation CLI produced
+`D:/PSCAD-Workspace/mmc-timing-fault-integration/joint-software-61fd11b/preparation.json`.
+The scope is `offline_joint_contract`, the static status is `PASS`, and
+`physical_acceptance_verified` remains `false`. No PSCAD instance or simulation
+was launched. The exact identities are:
+
+- Preparation canonical hash:
+  `1bc47f9bfc59e439a8a00717bbbf348b79baeed458fd28bcb5682114bfe87c5d`.
+- Derived `JointFaultCase.pscx`:
+  `2f71fbc231c1fbb370aa79ab6c802a07335c7130ef69a59a682c7ef5d9e65b8d`.
+- Formal A handoff file:
+  `e91b009b2a8224e23d4043d0802011d55769436f6d4218bbfa50083bcb1380bb`.
+- Formal A canonical schedule:
+  `5f799315640b6760c86f345b3ce791d77301ab2b6cc832a96ca25ad036f5e917`.
+- New joint canonical schedule:
+  `b6b5841a2668e5465ce254cc6de7274bededbd49d91bc0999fcba9abba341d8e`.
+- Production fault checks:
+  `b7bfa3900a410af5c98f65501e5d3f6e5bad4ff809277156d04e3276c25e0ce1`.
+
+The case has 56 physical/recovery channels, 94 diagnostic channels, one separate
+scheduled command channel, and 16 frozen dependency/evidence copies. B's
+accepted handoff is explicitly pending. The final affected software command
+(joint, timing, public service/tools, replay and production fault contracts)
+reports 262 passed, 1 skipped in 51.34 s; Ruff is clean.
+
+For B's public-service intake, the cherry-pick order is `b38a40f`, `64ac799`,
+`daee2b1`, `03b5406`, `1e79aed`, `71014e3`, `6e965ef`, `80e9f87`.
+The first commit supplies the documentation file edited by later commits.
+`6e965ef` requires B's `c5ed2e2` charging helper. Do not cherry-pick integration
+merge commits or the joint harness when taking only the public fault service.
+B confirmed intake will occur at a safe boundary of its sorting-repair run.
