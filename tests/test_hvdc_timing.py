@@ -276,3 +276,34 @@ def test_mixed_target_forms_cannot_dispatch_two_values_at_the_same_time():
     with pytest.raises(BackendError, match="conflict"):
         asyncio.run(dispatch_timed_events(backend, "case", events, mode="simulation_clock_polling"))
     assert backend.writes == []
+
+
+def test_polling_rejects_non_main_scope_before_any_event_write():
+    backend = PollingTimingBackend()
+    backend.times = iter([1.0, 1.0, 2.0, 2.0])
+    events = [{"event_id": "main", "time_s": 1.0, "component_id": 17, "parameter_name": "Value", "value": 1},
+              {"event_id": "other", "time_s": 2.0, "target": {"instance_path": "Other", "owner": "17", "parameter": "Value"}, "value": 0}]
+    with pytest.raises(BackendError, match="Main"):
+        asyncio.run(dispatch_timed_events(backend, "case", events, mode="simulation_clock_polling"))
+    assert backend.writes == []
+
+
+@pytest.mark.parametrize("declared_scope", [False, True])
+def test_native_non_main_scope_requires_explicit_provider_support(declared_scope):
+    class Backend(NativeTimingBackend):
+        async def get_timed_control_capabilities(self, project_name):
+            result = await super().get_timed_control_capabilities(project_name)
+            if declared_scope:
+                result["supported_instance_paths"] = ["Main", "Other"]
+            return result
+
+        async def schedule_timed_controls(self, project_name, events):
+            return events
+
+    events = [{"event_id": "other", "time_s": 1.0, "target": {"instance_path": "Other", "owner": "17", "parameter": "Value"}, "value": 0}]
+    if declared_scope:
+        result = asyncio.run(dispatch_timed_events(Backend(), "case", events, mode="native"))
+        assert result[0]["target"]["instance_path"] == "Other"
+    else:
+        with pytest.raises(BackendError, match="scope"):
+            asyncio.run(dispatch_timed_events(Backend(), "case", events, mode="native"))

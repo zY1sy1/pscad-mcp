@@ -970,6 +970,8 @@ def read_event_evidence(
             )
     if _identity(project_path)["sha256"] != readback["project_sha256"]:
         raise _error("The derived project changed during event validation.")
+    if set(directory.glob(project_path.stem + "_*.out")) != set(expected):
+        raise _error("The OUT part set changed while validating the frozen data set.")
     return {
         "measured_events": measured,
         "output_evidence": {

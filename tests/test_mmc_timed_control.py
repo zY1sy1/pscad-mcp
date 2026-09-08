@@ -6,6 +6,7 @@ import os
 import time
 import xml.etree.ElementTree as ET
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -420,6 +421,105 @@ def test_event_measurement_rejects_a_longer_unrequested_time_domain(tmp_path):
     samples["channels"][0]["values"].extend([0.0] * 1000)
     with pytest.raises(BackendError):
         _module().measure_event_waveforms(plan, samples)
+
+
+def test_output_evidence_rejects_a_part_added_during_reading(tmp_path, monkeypatch):
+    _source, _master, plan = _plan(tmp_path)
+    project = tmp_path / "derived.pscx"
+    _module().materialize_embedded_control(plan, project)
+    output = _write_dataset(tmp_path, plan)
+    original_read = Path.read_bytes
+    added = False
+
+    def read_then_add(path):
+        nonlocal added
+        payload = original_read(path)
+        if path == output and not added:
+            added = True
+            output.with_name("derived_02.out").write_text("0 1\n")
+        return payload
+
+    monkeypatch.setattr(Path, "read_bytes", read_then_add)
+    with pytest.raises(BackendError, match="part set"):
+        _module().read_event_evidence(plan, project, [output], started_after=0)
+
+
+def test_acceptance_cleanup_attempts_owned_quit_even_if_domain_shutdown_fails(
+    monkeypatch,
+):
+    from tests.test_emt_timed_control_real import _close_owned_instance
+
+    monkeypatch.setenv("PSCAD_MCP_ACCEPTANCE_CONCURRENT", "1")
+    calls = []
+
+    class Domain:
+        async def shutdown(self, timeout_s):
+            calls.append("shutdown")
+            raise RuntimeError("pending scenario cleanup")
+
+    class Service:
+        _backend = SimpleNamespace(
+            owns_process=True, session_details={"managed_pid": 4242}
+        )
+
+        async def quit_pscad(self, *, confirm):
+            assert confirm is True
+            calls.append("quit")
+
+    report = {"status": "PASS", "runtime": {"session": {"managed_pid": 4242}}}
+    asyncio.run(
+        _close_owned_instance(
+            Service(), report, domain=Domain(), process_reader=list
+        )
+    )
+    assert calls == ["shutdown", "quit"]
+    assert report["status"] == "FAIL"
+    assert report["remaining_processes"] == []
+    assert report["cleanup_errors"][0]["stage"] == "scenario_shutdown"
+
+
+@pytest.mark.parametrize("failure_phase", ["status", "attach_after_ownership"])
+def test_acceptance_status_failure_uses_cached_ownership_without_another_launch(
+    tmp_path, monkeypatch, failure_phase
+):
+    from tests import test_emt_timed_control_real as runner
+
+    monkeypatch.setenv("PSCAD_MCP_ACCEPTANCE_CONCURRENT", "1")
+    _source, master, _event = _inputs(tmp_path)
+    monkeypatch.setattr(runner, "MASTER", master)
+    monkeypatch.setattr(runner, "list_pscad_processes", list)
+    calls = []
+
+    class Service:
+        path_policy = PathPolicy(workspace_root=str(tmp_path))
+        _backend = SimpleNamespace(
+            owns_process=True, session_details={"managed_pid": 4242}
+        )
+
+        async def attach_local(self):
+            calls.append("attach")
+            if failure_phase == "attach_after_ownership":
+                raise RuntimeError("heartbeat unavailable after managed launch")
+
+        async def status(self):
+            calls.append("status")
+            raise RuntimeError("heartbeat unavailable after successful attach")
+
+        async def quit_pscad(self, *, confirm):
+            calls.append("quit")
+            self._backend = None
+
+    monkeypatch.setattr(runner, "_service", lambda root: Service())
+    report = asyncio.run(runner._minimal_run(tmp_path))
+    assert calls == (
+        ["attach", "status", "quit"]
+        if failure_phase == "status"
+        else ["attach", "quit"]
+    )
+    assert report["status"] == "FAIL"
+    assert "heartbeat unavailable" in report["error"]["message"]
+    assert report["cleanup_runtime"]["session"]["managed_pid"] == 4242
+    assert report["remaining_processes"] == []
 
 
 @pytest.mark.parametrize("fault", ["missing", "late", "duration", "gap"])

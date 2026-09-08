@@ -24,6 +24,12 @@ def _timing_error(message: str, **details: Any) -> BackendError:
 
 async def select_timing_mode(backend: Any, project_name: str) -> str:
     capabilities = await backend.get_timed_control_capabilities(project_name)
+    return _timing_mode_from_capabilities(capabilities, project_name)
+
+
+def _timing_mode_from_capabilities(capabilities: Any, project_name: str) -> str:
+    if not isinstance(capabilities, Mapping):
+        raise _timing_error("The backend timing contract must be a mapping.")
     if (
         capabilities.get("time_basis") != "EMTDC"
         or capabilities.get("time_units") != "s"
@@ -130,18 +136,31 @@ async def dispatch_timed_events(
                 raise _timing_error("Flat and nested timed-control targets conflict.", event_id=event["event_id"])
             event.setdefault("component_id", str(binding["owner"]))
             event.setdefault("parameter_name", binding["parameter"])
+            if "instance_path" in event and event["instance_path"] != target.get("instance_path", "Main"):
+                raise _timing_error("Flat and nested timed-control scopes conflict.", event_id=event["event_id"])
+        scope = target.get("instance_path", "Main") if isinstance(target, Mapping) else event.get("instance_path", "Main")
+        if mode == "simulation_clock_polling" and scope != "Main":
+            raise _timing_error("Clock polling can resolve Main instance targets only.", event_id=event["event_id"], instance_path=scope)
     if mode == "native":
-        if await select_timing_mode(backend, project_name) != "native":
+        capabilities = await backend.get_timed_control_capabilities(project_name)
+        if _timing_mode_from_capabilities(capabilities, project_name) != "native":
             raise _timing_error("Native registration requires verified native capability.")
+        scopes = capabilities.get("supported_instance_paths", ["Main"])
+        if not isinstance(scopes, (list, tuple)) or not scopes or any(not isinstance(scope, str) or not scope for scope in scopes):
+            raise _timing_error("Native instance scope support must be explicitly enumerated.")
+        for event in normalized:
+            target = event.get("target")
+            scope = target.get("instance_path", "Main") if isinstance(target, Mapping) else event.get("instance_path", "Main")
+            if scope not in scopes:
+                raise _timing_error("The native provider has not verified this instance scope.", instance_path=scope)
         acknowledgements = await backend.schedule_timed_controls(project_name, deepcopy(normalized))
         return validate_native_acknowledgements(normalized, acknowledgements)
     if mode != "simulation_clock_polling":
         raise _timing_error("Unknown timed-control mode.", mode=mode)
     if any("end_time_s" in event for event in normalized):
         raise _timing_error("Clock polling accepts point events only; explicitly schedule both interval edges.")
-    if await select_timing_mode(backend, project_name) not in {"native", "simulation_clock_polling"}:
-        raise _timing_error("Clock polling requires a verified provider.")
     capabilities = await backend.get_timed_control_capabilities(project_name)
+    _timing_mode_from_capabilities(capabilities, project_name)
     bound = capabilities.get("max_timing_error_s")
     if isinstance(bound, bool) or not isinstance(bound, (int, float)) or not math.isfinite(bound) or bound < 0 or capabilities.get("simulation_clock") is not True:
         raise _timing_error("Clock polling requires a finite predeclared timing error bound.")

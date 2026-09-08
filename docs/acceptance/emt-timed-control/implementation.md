@@ -23,12 +23,16 @@ then rehashed afterward. The INFX Main instance, owner, part, index, dimension
 and unit must match the planned PGB; the INF channel must match that same
 index. Every OUT part must be fresh for the run and have the same full time
 domain. INFX sampling and the numeric output domain are both checked.
+The complete part set is enumerated again after reading to detect added files.
 
 Source and derived native names are compared after PSCAD name normalization.
 The destination namespace must be absent before load, and exactly one new
 case must appear afterward. A returned filename is checked when available;
 Legacy 4.6 exposes no filename getter, so evidence explicitly records the
 verified namespace admission instead of claiming a filename readback.
+Polling uses the Main-only component API and rejects other instance paths
+before any event writes. Native providers must explicitly enumerate any
+supported instance paths beyond Main.
 
 PWM candidate staging accepts explicit `timed_control_options` with
 `master_path` and `max_timing_error_s`. It binds the schedule to the candidate's
@@ -67,6 +71,10 @@ After the first owned instance quits, a second Python process and owned PSCAD
 instance load a byte-identical copy of the frozen saved project, with hashed
 companion libraries, compile and run it. No second source regeneration occurs.
 Both run reports and their OUT/INF indexes remain distinct.
+Runner cleanup reads the already established backend's cached managed identity,
+so failed status acquisition cannot hide ownership or launch a replacement.
+Scenario shutdown and owned quit have independent error handling; a failed
+shutdown does not skip quitting the owned instance.
 
 The dedicated numerical contract is `[0.02, 0.03)` s, final time 0.05 s,
 integration/output steps 10 us, and a maximum absolute error of 20 us per

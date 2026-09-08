@@ -19,6 +19,7 @@ import pytest
 
 from pscad_mcp.acceptance.preflight_cli import _service
 from pscad_mcp.acceptance.process_scope import (
+    managed_acceptance_pid,
     remaining_acceptance_processes,
     require_acceptance_ownership,
 )
@@ -50,6 +51,59 @@ def _write_json(path, payload):
     Path(path).write_text(
         json.dumps(payload, indent=2, ensure_ascii=True, default=str), encoding="utf-8"
     )
+
+
+async def _close_owned_instance(service, report, *, domain=None, process_reader=None):
+    """Use the existing managed connection even if status/scene cleanup failed."""
+    backend = getattr(service, "_backend", None)
+    session = getattr(backend, "session_details", {})
+    runtime = {
+        "session": dict(session),
+        "owns_process": bool(getattr(backend, "owns_process", False)),
+        "source": "cached_managed_connection",
+    }
+    report["cleanup_runtime"] = runtime
+    errors = []
+    if domain is not None:
+        try:
+            await domain.shutdown(timeout_s=15)
+        except BaseException as error:  # noqa: BLE001 - quit still must be attempted
+            errors.append({"stage": "scenario_shutdown", "message": str(error)})
+    trusted = runtime["owns_process"] and managed_acceptance_pid(runtime) is not None
+    if trusted:
+        try:
+            await service.quit_pscad(confirm=True)
+        except BaseException as error:  # noqa: BLE001 - retain owned cleanup evidence
+            errors.append({"stage": "owned_quit", "message": str(error)})
+        try:
+            for _ in range(100):
+                remaining = remaining_acceptance_processes(
+                    runtime, process_reader or list_pscad_processes
+                )
+                if not remaining:
+                    break
+                await asyncio.sleep(0.1)
+            report["remaining_processes"] = remaining
+            if remaining:
+                errors.append(
+                    {
+                        "stage": "owned_exit",
+                        "message": "The owned PSCAD PID remains alive.",
+                    }
+                )
+        except BaseException as error:  # noqa: BLE001 - never substitute an empty inventory
+            errors.append({"stage": "owned_exit", "message": str(error)})
+    else:
+        errors.append(
+            {
+                "stage": "ownership",
+                "message": "No verified managed connection is available for cleanup.",
+            }
+        )
+    report["cleanup_errors"] = errors
+    if errors:
+        report["cleanup_error"] = "; ".join(item["message"] for item in errors)
+        report["status"] = "FAIL"
 
 
 async def _minimal_run(root, *, official=False):
@@ -311,23 +365,10 @@ async def _minimal_run(root, *, official=False):
         )
         report["traceback"] = traceback.format_exc()
     finally:
-        if connected:
-            try:
-                await domain.shutdown(timeout_s=15)
-                await service.quit_pscad(confirm=True)
-                for _ in range(100):
-                    remaining = remaining_acceptance_processes(
-                        report["runtime"], list_pscad_processes
-                    )
-                    if not remaining:
-                        break
-                    await asyncio.sleep(0.1)
-                report["remaining_processes"] = remaining
-                if remaining:
-                    report["status"] = "FAIL"
-            except BaseException as error:  # noqa: BLE001 - cleanup is part of the report
-                report["cleanup_error"] = str(error)
-                report["status"] = "FAIL"
+        if connected or bool(
+            getattr(getattr(service, "_backend", None), "owns_process", False)
+        ):
+            await _close_owned_instance(service, report, domain=domain)
         _write_json(root / "report.json", report)
     return report
 
@@ -445,22 +486,10 @@ async def _replay_run(parent):
         )
         report["traceback"] = traceback.format_exc()
     finally:
-        if connected:
-            try:
-                await service.quit_pscad(confirm=True)
-                for _ in range(100):
-                    remaining = remaining_acceptance_processes(
-                        report["runtime"], list_pscad_processes
-                    )
-                    if not remaining:
-                        break
-                    await asyncio.sleep(0.1)
-                report["remaining_processes"] = remaining
-                if remaining:
-                    report["status"] = "FAIL"
-            except BaseException as error:  # noqa: BLE001 - cleanup is part of the report
-                report["cleanup_error"] = str(error)
-                report["status"] = "FAIL"
+        if connected or bool(
+            getattr(getattr(service, "_backend", None), "owns_process", False)
+        ):
+            await _close_owned_instance(service, report)
         _write_json(root / "report.json", report)
     return report
 
