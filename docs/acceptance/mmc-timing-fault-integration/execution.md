@@ -158,3 +158,17 @@ that exact derived stage before instrumentation. `raw` still applies no
 headroom, filter, carrier or damping tuning and remains physically unverified.
 The affected public service/tool/replay software gate reports 64 passed,
 1 skipped after this integration.
+
+Independent review of `71014e3` identified three software defects: replay did
+not rehash its copied dependencies after execution, pipe/finalization errors
+could escape before recording unresolved ownership, and direct
+`Path.is_junction()` calls required Python 3.12 despite the declared 3.10 floor.
+Fresh failing regressions reproduced each defect. Replay now records actual
+dependency hashes at save/build/run/cleanup checkpoints and the supervisor
+independently hashes the copied compiler inputs. Public execution persists
+pending replay ownership before awaiting the worker. Communication, process
+termination, log and report-write errors retain their cleanup state and block
+publication. Reparse rejection uses the repository's compatible `lstat`
+pattern. The focused public/replay/tool/Master gate reports 77 passed,
+1 skipped, with Ruff clean after these fixes. Licensed acceptance remains
+pending and is not inferred from these software results.

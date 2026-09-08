@@ -18,6 +18,7 @@ from xml.etree import ElementTree as ET
 
 import psutil
 
+from ....acceptance.evidence import _is_reparse_point
 from ....acceptance.preflight_cli import _service
 from ....acceptance.process_scope import require_acceptance_ownership
 from .fault_channels import (
@@ -42,15 +43,21 @@ def _write(path: Path, value) -> None:
 
 
 def _files(root: Path) -> dict[str, str]:
-    if root.is_symlink() or root.is_junction() or not root.is_dir():
+    if not root.is_dir() or _is_reparse_point(root.lstat()):
         raise ValueError("Replay bundle must be a regular directory")
     result = {}
     for path in sorted(root.rglob("*")):
-        if path.is_symlink() or path.is_junction() or not path.resolve().is_relative_to(root.resolve()):
+        if _is_reparse_point(path.lstat()) or not path.resolve().is_relative_to(root.resolve()):
             raise ValueError("Replay inputs must not escape their bundle")
         if path.is_file():
             result[path.relative_to(root).as_posix()] = _hash(path)
     return result
+
+
+def _dependency_hashes(bundle, expected):
+    from .blank_service import _bundle_file
+
+    return {relative: _hash(_bundle_file(bundle, relative)) for relative in expected}
 
 
 async def _terminate_owned_pscad(ownership):
@@ -82,13 +89,43 @@ async def _terminate_owned_pscad(ownership):
 
 def _supervisor_report(root, result):
     result["supervisor_report_path"] = str(root / "supervisor-report.json")
-    if result["status"] == "PASS":
-        result["artifacts"] = {name: {"path": str(root / name), "sha256": digest} for name, digest in _files(root).items()}
-    _write(Path(result["supervisor_report_path"]), result)
-    digest = _hash(Path(result["supervisor_report_path"]))
-    if result["status"] == "PASS":
-        result["artifacts"]["supervisor-report.json"] = {"path": result["supervisor_report_path"], "sha256": digest}
-    return {**result, "supervisor_report_sha256": digest}
+    try:
+        if result["status"] == "PASS":
+            result["artifacts"] = {name: {"path": str(root / name), "sha256": digest} for name, digest in _files(root).items()}
+        _write(Path(result["supervisor_report_path"]), result)
+        digest = _hash(Path(result["supervisor_report_path"]))
+        if result["status"] == "PASS":
+            result["artifacts"]["supervisor-report.json"] = {"path": result["supervisor_report_path"], "sha256": digest}
+        return {**result, "supervisor_report_sha256": digest}
+    except (OSError, TypeError, ValueError) as error:
+        return {**result, "status": "FAIL", "report_write_error": str(error)}
+
+
+async def _finalize_python_worker(process, communication, root, result):
+    errors = []
+    if process.returncode is None:
+        for command in ("terminate", "kill"):
+            try:
+                getattr(process, command)()
+                await asyncio.wait_for(process.wait(), timeout=10)
+                break
+            except BaseException as error:  # noqa: BLE001 - preserve termination failures and try the owned fallback
+                errors.append({"stage": command, "type": type(error).__name__, "message": str(error)})
+    result["worker_exit_code"] = process.returncode
+    if process.returncode is None:
+        result.update({"python_cleanup_pending": True, "cleanup_pending": True, "owned_process_cleaned": False})
+    if communication is not None:
+        try:
+            output, _ = await asyncio.wait_for(asyncio.shield(communication), timeout=1)
+            (root / "worker.log").write_bytes(output)
+        except BaseException as error:  # noqa: BLE001 - a broken pipe/log cannot erase ownership evidence
+            errors.append({"stage": "worker_log", "type": type(error).__name__, "message": str(error)})
+            if not communication.done():
+                communication.cancel()
+                await asyncio.gather(communication, return_exceptions=True)
+    if errors:
+        result["status"] = "FAIL"
+        result["finalization_errors"] = errors
 
 
 async def verify_native_fault_replay(*, project, bundle, channel_contract, checks_contract, settings, source_identities, dependency_files, workspace):
@@ -119,6 +156,7 @@ async def verify_native_fault_replay(*, project, bundle, channel_contract, check
     process = None
     communication = None
     try:
+        result.update({"launch_attempted": True, "owned_process_cleaned": False, "cleanup_pending": True})
         process = await asyncio.create_subprocess_exec(sys.executable, "-m", __name__, "--request", str(request_path), "--request-sha256", request_hash,
             cwd=Path(__file__).resolve().parents[4], env=environment, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
             **({"creationflags": 0x08000000} if os.name == "nt" else {}))
@@ -139,6 +177,10 @@ async def verify_native_fault_replay(*, project, bundle, channel_contract, check
             raise ValueError("Original replay inputs changed")
         if report.get("copied_project_sha256") != request["project"]["sha256"] or report.get("copied_bundle_hashes") != request["bundle"]["files"] or report.get("parent_channel_contract_sha256") != request["channel_contract_sha256"] or report.get("checks_sha256") != request["checks_sha256"]:
             raise ValueError("Replay lineage differs from the frozen request")
+        child_hashes = _dependency_hashes(root / "worker" / bundle.name, request["bundle"]["files"])
+        result["supervisor_dependency_hashes"] = child_hashes
+        if child_hashes != request["bundle"]["files"]:
+            raise ValueError("The actual replay compiler dependency copies changed")
         if report.get("acceptance", {}).get("verdict") != "PASS":
             raise ValueError("Independent worker did not satisfy the frozen physical checks")
         if report.get("replay_saved_model_verified") is not True:
@@ -158,20 +200,10 @@ async def verify_native_fault_replay(*, project, bundle, channel_contract, check
                     if ownership.get("request_sha256") != request_hash:
                         raise ValueError("Ownership record does not belong to this replay request")
                     result.update(await _terminate_owned_pscad(ownership))
-                except (OSError, ValueError, TypeError) as error:
+                except BaseException as error:  # noqa: BLE001 - keep unresolved owned cleanup in the final report
                     result["cleanup_error"] = str(error)
         if process is not None:
-            if process.returncode is None:
-                process.terminate()
-                try:
-                    await asyncio.wait_for(asyncio.shield(communication), timeout=10)
-                except asyncio.TimeoutError:
-                    process.kill()
-                    await asyncio.wait_for(asyncio.shield(communication), timeout=10)
-            result["worker_exit_code"] = process.returncode
-            if communication is not None and communication.done() and not communication.cancelled():
-                output, _ = communication.result()
-                (root / "worker.log").write_bytes(output)
+            await _finalize_python_worker(process, communication, root, result)
         if result.get("cleanup_pending") or result.get("worker_exit_code") not in (None, 0):
             result["status"] = "FAIL"
     return _supervisor_report(root, result)
@@ -230,8 +262,17 @@ async def _worker(request_path: Path, expected_hash: str):
     report_path = root / "report.json"
     service = _service(root)
     ownership = None
+    bundle = None
+
+    def verify_dependencies(stage):
+        observed = _dependency_hashes(bundle, request["bundle"]["files"])
+        report.setdefault("dependency_snapshots", {})[stage] = observed
+        report["copied_bundle_hashes"] = observed
+        if observed != request["bundle"]["files"]:
+            raise ValueError("A frozen replay dependency changed during " + stage)
 
     def checkpoint(stage):
+        verify_dependencies(stage)
         if stage == "saved_and_bound":
             saved_contract = json.loads(Path(report["result"]["channel_contract_path"]).read_text(encoding="utf-8"))
             report["replay_saved_model_verified"] = _verify_replay_saved_model(original, project, saved_contract)
@@ -254,7 +295,7 @@ async def _worker(request_path: Path, expected_hash: str):
         if _hash(project) != request["project"]["sha256"] or _files(bundle) != request["bundle"]["files"]:
             raise ValueError("The copied replay model or dependencies differ")
         report["copied_project_sha256"] = _hash(project)
-        report["copied_bundle_hashes"] = request["bundle"]["files"]
+        verify_dependencies("copied")
         contract = copy.deepcopy(request["channel_contract"])
         verify_fault_instrumentation(project, contract)
         contract["project_path"] = str(project)
@@ -272,6 +313,7 @@ async def _worker(request_path: Path, expected_hash: str):
         report["runtime_master"] = await _verify_runtime_master(service, request["source_identities"]["master"])
         library = bundle / Path(request["source_identities"]["library"]["path"]).name
         contract, samples = await _run_native_fault_case(service, project, library, contract, request["checks_contract"], request["settings"], root / "evidence", report, checkpoint)
+        verify_dependencies("after_run")
         acceptance = evaluate_template_native_dc_fault(samples, channel_contract=contract, checks_contract=request["checks_contract"], fault_current_limit_ka=request["checks_contract"]["fault_current_limit_ka"])
         report["acceptance"] = acceptance
         report["output_identity"] = samples["identity"]
@@ -303,6 +345,11 @@ async def _worker(request_path: Path, expected_hash: str):
                     report.update(await _terminate_owned_pscad(ownership))
         except BaseException as error:  # noqa: BLE001 - preserve unknown ownership, never infer a foreign PID
             report.update({"cleanup_error": str(error), "owned_process_cleaned": False, "cleanup_pending": True})
+        if bundle is not None and bundle.is_dir():
+            try:
+                verify_dependencies("after_cleanup")
+            except BaseException as error:  # noqa: BLE001 - cleanup does not waive frozen dependency identity
+                report.update({"status": "FAIL", "dependency_error": str(error)})
         if not report["owned_process_cleaned"]:
             report["status"] = "FAIL"
         _write(report_path, report)

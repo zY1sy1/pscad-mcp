@@ -476,6 +476,30 @@ def test_pending_native_compile_retains_lease_until_its_vendor_token_settles(tmp
     asyncio.run(exercise())
 
 
+def test_raised_replay_failure_cannot_erase_pending_ownership_or_release_lease(tmp_path, monkeypatch):
+    service, request, *_ = _protocol_case(tmp_path, monkeypatch, verdict="PASS")
+    plan = service.plan_model(request)
+
+    async def broken_replay(**kwargs):
+        raise OSError("pipe read failure before cleanup report")
+
+    service._replay_verifier = broken_replay
+
+    async def exercise():
+        started = await service.build_model(request, plan["plan_hash"], confirm=True)
+        await service._tasks[started["build_id"]]
+        record = service.get_build_status(started["build_id"])
+        assert record["state"] == "failed"
+        assert record["result"]["reload"]["cleanup_pending"] is True
+        assert started["build_id"] in service._leases
+        assert record["containment"]["confirmed"] is False
+        # This synthetic verifier created no process; clear only its fixture state.
+        service._statuses[started["build_id"]]["result"]["reload"]["cleanup_pending"] = False
+        await service.shutdown()
+
+    asyncio.run(exercise())
+
+
 def test_blank_mmc_plan_records_audited_topology_and_source_hashes(tmp_path: Path) -> None:
     template = tmp_path / "template.pscx"
     library = tmp_path / "library.pslx"

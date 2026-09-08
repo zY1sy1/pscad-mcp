@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Any
 from xml.etree import ElementTree as ET
 
+from ....acceptance.evidence import _is_reparse_point
 from ....core.backend.base import BackendError
 from ....core.path_policy import PathPolicy
 from ....core.service import ConfirmationRequired
@@ -946,6 +947,8 @@ async def _execute_native_mmc_plan(
     if replay_verifier is None:
         from .native_fault_replay import verify_native_fault_replay
         replay_verifier = verify_native_fault_replay
+    record["result"]["reload"] = {"status": "FAIL", "cleanup_pending": True, "owned_process_cleaned": False,
+                                   "workspace": str(staging / "reload-verification"), "phase": "verification_requested"}
     checkpoint("verifying_reload")
     replay = await replay_verifier(project=project, bundle=bundle, channel_contract=contract, checks_contract=plan["checks_contract"],
         settings=plan["settings"], source_identities=plan["source_identities"],
@@ -971,7 +974,7 @@ def _bundle_file(bundle: Path, relative: str) -> Path:
         raise _error("MMC_LAYOUT_INVALID", "A bundle member must be a relative path inside its bundle.", "validate_blank_mmc_model", path=relative)
     path = bundle / child
     for ancestor in (path, *path.parents):
-        if ancestor.is_symlink() or ancestor.is_junction():
+        if _is_reparse_point(ancestor.lstat()):
             raise _error("MMC_LAYOUT_INVALID", "Bundle members must not traverse links.", "validate_blank_mmc_model", path=str(path))
         if ancestor == bundle:
             break
@@ -983,7 +986,7 @@ def _bundle_file(bundle: Path, relative: str) -> Path:
 def _bundle_files(bundle: Path, *, omit_manifest: bool = False) -> dict[str, str]:
     identities = {}
     for path in sorted(bundle.rglob("*")):
-        if path.is_symlink() or path.is_junction():
+        if _is_reparse_point(path.lstat()):
             raise _error("MMC_LAYOUT_INVALID", "Bundle members must not be links.", "validate_blank_mmc_model", path=str(path))
         if path.is_file():
             relative = path.relative_to(bundle).as_posix()
