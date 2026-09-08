@@ -128,10 +128,11 @@ def test_native_fault_evidence_stays_incomplete_without_explicit_inserted_voltag
 
     assert result["verdict"] == "INCOMPLETE_ANALYSIS"
     assert result["checks"]["negative_voltage_inserted"] is False
-    assert result["missing_channels"] == ["negative_voltage_inserted"]
+    assert "v_inserted" in result["missing_channels"]
+    assert "channel_contract_missing" in result["invalid_evidence"]
 
 
-def test_native_fault_evidence_can_pass_only_with_all_explicit_channels() -> None:
+def test_four_text_labels_do_not_substitute_for_physical_identity_contract() -> None:
     result = evaluate_template_native_dc_fault(
         {
             "channels": [
@@ -164,13 +165,13 @@ def test_native_fault_evidence_can_pass_only_with_all_explicit_channels() -> Non
         fault_current_limit_ka=2.0,
     )
 
-    assert result["verdict"] == "PASS"
+    assert result["verdict"] == "INCOMPLETE_ANALYSIS"
     assert result["checks"] == {
-        "fault_applied": True,
-        "negative_voltage_inserted": True,
-        "blocked": True,
-        "recovered": True,
-        "bounded_fault_current": True,
+        "fault_applied": False,
+        "negative_voltage_inserted": False,
+        "blocked": False,
+        "recovered": False,
+        "bounded_fault_current": False,
     }
 
 
@@ -211,7 +212,7 @@ def test_dc_fault_time_uses_the_template_fault_timer(tmp_path: Path) -> None:
     }
 
 
-def test_native_fault_evidence_prefers_an_active_duplicate_fault_channel() -> None:
+def test_native_fault_evidence_cannot_choose_an_active_duplicate_by_amplitude() -> None:
     base = [0.0, 0.3, 0.5]
     result = evaluate_template_native_dc_fault(
         {
@@ -225,5 +226,6 @@ def test_native_fault_evidence_prefers_an_active_duplicate_fault_channel() -> No
         fault_current_limit_ka=2.0,
     )
 
-    assert result["evidence"]["fault_time_s"] == 0.3
-    assert result["checks"]["fault_applied"] is True
+    assert "fault_time_s" not in result["evidence"]
+    assert result["checks"]["fault_applied"] is False
+    assert result["verdict"] == "INCOMPLETE_ANALYSIS"
