@@ -444,6 +444,28 @@ def test_output_evidence_rejects_a_part_added_during_reading(tmp_path, monkeypat
         _module().read_event_evidence(plan, project, [output], started_after=0)
 
 
+def test_runner_cleans_real_service_pending_owned_backend(monkeypatch):
+    from pscad_mcp.core.service import PscadService
+    from tests.test_emt_timed_control_real import _close_owned_instance
+    from tests.test_service_attach_cleanup import AttachBackend
+
+    monkeypatch.setenv("PSCAD_MCP_ACCEPTANCE_CONCURRENT", "1")
+    backend = AttachBackend("owned")
+    service = PscadService(lambda: backend)
+    report = {"status": "FAIL"}
+
+    async def exercise():
+        with pytest.raises(BackendError):
+            await service.attach_local()
+        await _close_owned_instance(service, report, process_reader=list)
+
+    asyncio.run(exercise())
+    assert backend.calls == ["attach", "quit", "quit"]
+    assert report["cleanup_runtime"]["session"]["managed_pid"] == 4242
+    assert report["cleanup_errors"] == []
+    assert report["remaining_processes"] == []
+
+
 def test_acceptance_cleanup_attempts_owned_quit_even_if_domain_shutdown_fails(
     monkeypatch,
 ):
@@ -468,9 +490,7 @@ def test_acceptance_cleanup_attempts_owned_quit_even_if_domain_shutdown_fails(
 
     report = {"status": "PASS", "runtime": {"session": {"managed_pid": 4242}}}
     asyncio.run(
-        _close_owned_instance(
-            Service(), report, domain=Domain(), process_reader=list
-        )
+        _close_owned_instance(Service(), report, domain=Domain(), process_reader=list)
     )
     assert calls == ["shutdown", "quit"]
     assert report["status"] == "FAIL"

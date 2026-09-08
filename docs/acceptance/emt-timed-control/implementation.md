@@ -75,6 +75,11 @@ Runner cleanup reads the already established backend's cached managed identity,
 so failed status acquisition cannot hide ownership or launch a replacement.
 Scenario shutdown and owned quit have independent error handling; a failed
 shutdown does not skip quitting the owned instance.
+Failed owned attaches are quarantined by `PscadService` in a separate pending
+cleanup reference. They do not grant business access or permit another attach.
+The runner consumes this reference when normal `_backend` was never established;
+quit, shutdown and repair retain it until cleanup succeeds. The shared service
+change has an independent test file suitable for both acceptance workers.
 
 The dedicated numerical contract is `[0.02, 0.03)` s, final time 0.05 s,
 integration/output steps 10 us, and a maximum absolute error of 20 us per

@@ -56,6 +56,8 @@ def _write_json(path, payload):
 async def _close_owned_instance(service, report, *, domain=None, process_reader=None):
     """Use the existing managed connection even if status/scene cleanup failed."""
     backend = getattr(service, "_backend", None)
+    if backend is None:
+        backend = getattr(service, "_pending_cleanup_backend", None)
     session = getattr(backend, "session_details", {})
     runtime = {
         "session": dict(session),
@@ -365,8 +367,10 @@ async def _minimal_run(root, *, official=False):
         )
         report["traceback"] = traceback.format_exc()
     finally:
-        if connected or bool(
-            getattr(getattr(service, "_backend", None), "owns_process", False)
+        if (
+            connected
+            or bool(getattr(getattr(service, "_backend", None), "owns_process", False))
+            or getattr(service, "_pending_cleanup_backend", None) is not None
         ):
             await _close_owned_instance(service, report, domain=domain)
         _write_json(root / "report.json", report)
@@ -486,8 +490,10 @@ async def _replay_run(parent):
         )
         report["traceback"] = traceback.format_exc()
     finally:
-        if connected or bool(
-            getattr(getattr(service, "_backend", None), "owns_process", False)
+        if (
+            connected
+            or bool(getattr(getattr(service, "_backend", None), "owns_process", False))
+            or getattr(service, "_pending_cleanup_backend", None) is not None
         ):
             await _close_owned_instance(service, report)
         _write_json(root / "report.json", report)
