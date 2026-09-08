@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 from pathlib import Path
 from types import SimpleNamespace
+from xml.etree import ElementTree as ET
 
 import pytest
 
@@ -55,7 +57,7 @@ def _plan_case(tmp_path, *, parameterization=None, audit_change=None):
 
 
 def test_public_plan_uses_frozen_production_windows_and_raw_recipe(tmp_path, synthetic_master):
-    service, request, source, library = _plan_case(tmp_path)
+    service, request, *_ = _plan_case(tmp_path)
     plan = service.plan_model(request)
     assert plan["settings"] == {"simulation_duration_s": 5.0, "time_step_s": 25e-6, "output_step_s": 250e-6, "output_enabled": True}
     assert plan["fault"] == {"kind": "dc_pole_to_pole", "time_s": 2.5, "removal_time_s": 2.7}
@@ -143,6 +145,321 @@ def test_public_plan_identifies_legacy_rating_metadata_separately_from_native_mo
     assert plan["request_implementation"]["template_ratings_observed"] is None
 
 
+def _protocol_case(tmp_path, monkeypatch, *, verdict="FAIL", bad_master=False, read_error=False):
+    """Synthetic protocol fixture; no licensed model acceptance is claimed."""
+    service, request, source, library = _plan_case(tmp_path)
+    master = blank_service._default_master_path()
+    calls = []
+
+    def materialize(origin, destination, **kwargs):
+        calls.append("materialize_fault")
+        root = ET.parse(origin).getroot()
+        root.set("fault_time_s", str(kwargs["dc_fault_time_s"]))
+        root.set("fault_duration_s", str(kwargs["fault_duration_s"]))
+        ET.ElementTree(root).write(destination)
+        return {"source": str(origin), "source_sha256": blank_service._sha256(Path(origin)), "destination": str(destination), "destination_sha256": blank_service._sha256(Path(destination)), "bindings": []}
+
+    def instrument(origin, destination, **kwargs):
+        calls.append("instrument")
+        root = ET.parse(origin).getroot()
+        root.set("name", Path(destination).stem)
+        root.set("instrumented", "true")
+        ET.ElementTree(root).write(destination)
+        return {"schema_version": 1, "project_path": str(destination), "channels": [{"channel_id": "fault_active", "role": "fault_active"}], "diagnostic_channels": [], "readback": {"matched": True, "project_sha256": blank_service._sha256(Path(destination))}}
+
+    def finalize(project, contract):
+        calls.append("finalize")
+        return {**contract, "project_path": str(project), "vendor_finalized": True, "instrumented_project_sha256": blank_service._sha256(Path(project)), "readback": {"matched": True, "project_path": str(project), "project_sha256": blank_service._sha256(Path(project))}}
+
+    def verify(project, contract):
+        observed = blank_service._sha256(Path(project))
+        if observed != contract["readback"]["project_sha256"]:
+            raise BackendError("MMC_POSTCONDITION_FAILED", "Fixture saved model drifted", "test", "verify")
+        return {"matched": True, "project_path": str(project), "project_sha256": observed}
+
+    async def read(reader, primary, contract, *, started_after):
+        calls.append("read")
+        indexes = list(Path(primary).parents[1].rglob("output-index.json"))
+        assert indexes, "Output snapshot must be persisted before parsing"
+        if read_error:
+            raise BackendError("MMC_OUTPUT_IDENTITY_CHANGED", "wrong metadata or OUT parts", "test", "read")
+        return {"channels": [], "identity": blank_service.snapshot_output_dataset(primary, started_after=started_after), "evidence_kind": "pscad_output", "checks_contract": {"fault_current_limit_ka": 99999}}
+
+    def evaluate(samples, *, checks_contract, channel_contract, fault_current_limit_ka, topology):
+        calls.append("evaluate")
+        assert checks_contract == default_fault_checks()
+        assert fault_current_limit_ka == 20.0
+        assert channel_contract["vendor_finalized"] is True
+        return {"verdict": verdict, "checks": {"fault_applied": verdict == "PASS"}, "check_results": [{"status": verdict, "expected": 20.0, "observed": 1.0, "source": "synthetic protocol", "window": [2.5, 2.7]}]}
+
+    class Backend:
+        def __init__(self):
+            self.projects = {}
+            self.settings = {}
+
+        async def get_master_library_identity(self):
+            calls.append("runtime_master")
+            return {"master_path": str(master), "master_sha256": "0" * 64 if bad_master else blank_service._sha256(master), "pscad_version": "4.6.2"}
+
+        async def list_projects(self):
+            return [{"name": name, "type": "Case" if path.suffix == ".pscx" else "Library", "filename": str(path)} for name, path in self.projects.items()]
+
+        async def load_projects(self, paths):
+            calls.append("load")
+            for path in paths:
+                self.projects[Path(path).stem] = Path(path)
+
+        async def set_project_settings(self, name, settings):
+            assert name in self.projects
+            self.settings[name] = dict(settings)
+
+        async def get_project_settings(self, name):
+            return self.settings[name]
+
+        async def save_project(self, name, *, confirm):
+            calls.append("save")
+
+        async def build_project(self, name):
+            calls.append("compile")
+
+        async def get_project_output(self, name, structured=True):
+            return []
+
+        async def run_project(self, name):
+            calls.append("run")
+            project = self.projects[name]
+            data = project.parent / (name + ".gf42")
+            data.mkdir()
+            (data / (name + "_01.out")).write_text("0 0\n5 0\n")
+            (data / (name + ".inf")).write_text('PGB(1) Output Desc="fault_active" Group="TEST" Max=1 Min=0 Units="1"\n')
+            (data / (name + ".infx")).write_text('<Output device="EMTDC"/>')
+
+        async def get_run_status(self, name):
+            return {"status": "completed"}
+
+        async def discover_output_files(self, project, *, started_after, max_files):
+            assert Path(project).is_file()
+            return [str(path) for path in Path(project).parent.glob(Path(project).stem + ".*/*.out")]
+
+        async def read_output_file(self, *args, **kwargs):
+            raise AssertionError("The contract reader boundary must be used")
+
+    async def replay(**kwargs):
+        calls.append("replay")
+        assert kwargs["checks_contract"] == default_fault_checks()
+        assert ET.parse(kwargs["project"]).getroot().get("fault_time_s") == "2.5"
+        report_path = Path(kwargs["workspace"]) / "worker" / "report.json"
+        result = {"status": "PASS", "project_sha256": blank_service._sha256(Path(kwargs["project"])),
+                  "checks_sha256": hashlib.sha256(blank_service.json_bytes(kwargs["checks_contract"])).hexdigest(),
+                  "parent_channel_contract_sha256": hashlib.sha256(blank_service.json_bytes(kwargs["channel_contract"])).hexdigest(),
+                  "owned_process_cleaned": True, "worker_exit_code": 0}
+        blank_service._write_evidence(report_path, result)
+        return {**result, "report_path": str(report_path), "report_sha256": blank_service._sha256(report_path),
+                "artifacts": {"worker/report.json": {"path": str(report_path), "sha256": blank_service._sha256(report_path)}}}
+
+    for name, callback in {"materialize_template_native_scenario": materialize, "instrument_fault_channels": instrument,
+        "finalize_fault_instrumentation": finalize, "verify_fault_instrumentation": verify,
+        "read_fault_output_dataset": read, "evaluate_template_native_dc_fault": evaluate}.items():
+        monkeypatch.setattr(blank_service, name, callback, raising=False)
+    builder = BlankMmcBuilderService(Backend(), workspace_root=tmp_path / "workspace", audit_loader=service.audit_loader, replay_verifier=replay)
+    return builder, request, calls, source, library
+
+
+@pytest.mark.parametrize("read_error", [False, True])
+def test_public_fault_failure_retains_history_frozen_evidence_and_never_publishes(tmp_path, monkeypatch, read_error):
+    service, request, calls, source, library = _protocol_case(tmp_path, monkeypatch, read_error=read_error)
+    hashes = [blank_service._sha256(path) for path in (source, library)]
+    plan = service.plan_model(request)
+
+    async def exercise():
+        started = await service.build_model(request, plan["plan_hash"], confirm=True)
+        await service._tasks[started["build_id"]]
+        return service.get_build_status(started["build_id"])
+
+    record = asyncio.run(exercise())
+    assert record["state"] == "failed"
+    assert record["result"]["output_index_sha256"]
+    assert record["result"]["channel_contract_sha256"]
+    assert len(record["history"]) >= 5
+    assert record["error"]["code"] == ("MMC_OUTPUT_IDENTITY_CHANGED" if read_error else "MMC_ACCEPTANCE_FAILED")
+    assert not Path(plan["target_path"]).exists()
+    assert "replay" not in calls
+    assert [blank_service._sha256(path) for path in (source, library)] == hashes
+
+
+def test_public_runtime_master_must_match_planned_identity_before_staging(tmp_path, monkeypatch):
+    service, request, calls, *_ = _protocol_case(tmp_path, monkeypatch, bad_master=True)
+    plan = service.plan_model(request)
+
+    async def exercise():
+        started = await service.build_model(request, plan["plan_hash"], confirm=True)
+        await service._tasks[started["build_id"]]
+        return service.get_build_status(started["build_id"])
+
+    record = asyncio.run(exercise())
+    assert record["state"] == "failed"
+    assert "load" not in calls and "materialize_fault" not in calls
+    assert not Path(plan["staging_path"]).exists()
+
+
+def test_public_publication_uses_tested_instrumented_fault_case(tmp_path, monkeypatch):
+    service, request, calls, *_ = _protocol_case(tmp_path, monkeypatch, verdict="PASS")
+    plan = service.plan_model(request)
+
+    async def exercise():
+        started = await service.build_model(request, plan["plan_hash"], confirm=True)
+        await service._tasks[started["build_id"]]
+        return service.get_build_status(started["build_id"])
+
+    record = asyncio.run(exercise())
+    assert record["state"] == "published", record.get("error")
+    target = Path(plan["target_path"])
+    root = ET.parse(target).getroot()
+    assert root.get("instrumented") == "true"
+    assert root.get("fault_time_s") == "2.5"
+    assert float(root.get("fault_duration_s")) == pytest.approx(0.2)
+    assert calls.index("evaluate") < calls.index("replay")
+    assert record["result"]["final_project_sha256"] == record["result"]["tested_project_sha256"]
+    result = service.validate_model(str(target))
+    assert result["accepted"] is True
+    assert result["acceptance"]["verdict"] == "PASS"
+    manifest = json.loads(Path(record["result"]["publication_manifest"]).read_text())
+    assert manifest["output_index_sha256"]
+    assert manifest["bundle_files"][Path(request.library_path).name]
+    assert manifest["bundle_files"]["reload/worker/report.json"]
+
+
+@pytest.mark.parametrize("changed", ["worker_exit_code", "parent_channel_contract_sha256", "report_sha256", "artifacts"])
+def test_public_publication_requires_completed_replay_report_and_lineage(tmp_path, monkeypatch, changed):
+    service, request, *_ = _protocol_case(tmp_path, monkeypatch, verdict="PASS")
+    plan = service.plan_model(request)
+    verifier = service._replay_verifier
+
+    async def corrupt_replay(**kwargs):
+        result = await verifier(**kwargs)
+        result[changed] = {} if changed == "artifacts" else "changed"
+        return result
+
+    service._replay_verifier = corrupt_replay
+
+    async def exercise():
+        started = await service.build_model(request, plan["plan_hash"], confirm=True)
+        await service._tasks[started["build_id"]]
+        return service.get_build_status(started["build_id"])
+
+    record = asyncio.run(exercise())
+    assert record["state"] == "failed"
+    assert not Path(plan["target_path"]).exists()
+
+
+@pytest.mark.parametrize("relative_path", ["evidence/checks.json", "evidence/published-channels.json", "outputs/ProtocolCase_01.out", "library.pslx"])
+def test_public_validation_rejects_changed_published_bundle(tmp_path, monkeypatch, relative_path):
+    service, request, *_ = _protocol_case(tmp_path, monkeypatch, verdict="PASS")
+    plan = service.plan_model(request)
+
+    async def exercise():
+        started = await service.build_model(request, plan["plan_hash"], confirm=True)
+        await service._tasks[started["build_id"]]
+        return service.get_build_status(started["build_id"])
+
+    record = asyncio.run(exercise())
+    assert record["state"] == "published", record.get("error")
+    bundle = Path(record["result"]["bundle_path"])
+    if relative_path.startswith("outputs/"):
+        changed = Path(record["result"]["published_output_file"])
+    elif relative_path == "library.pslx":
+        changed = Path(record["result"]["final_library_path"])
+    else:
+        changed = bundle / relative_path
+    changed.write_bytes(changed.read_bytes() + b" ")
+    with pytest.raises(BackendError):
+        service.validate_model(plan["target_path"])
+
+
+def test_public_copy_failure_keeps_partial_publication_in_staging(tmp_path, monkeypatch):
+    service, request, *_ = _protocol_case(tmp_path, monkeypatch, verdict="PASS")
+    plan = service.plan_model(request)
+    copytree = blank_service.shutil.copytree
+
+    def interrupted_copy(source, destination, *args, **kwargs):
+        copytree(source, destination, *args, **kwargs)
+        raise OSError("Interrupted publication copy")
+
+    monkeypatch.setattr(blank_service.shutil, "copytree", interrupted_copy)
+
+    async def exercise():
+        started = await service.build_model(request, plan["plan_hash"], confirm=True)
+        await service._tasks[started["build_id"]]
+        return service.get_build_status(started["build_id"])
+
+    record = asyncio.run(exercise())
+    target = Path(plan["target_path"])
+    assert record["state"] == "failed"
+    assert not target.exists()
+    assert not target.with_suffix(".bundle").exists()
+    assert Path(record["result"]["output_index_path"]).is_file()
+
+
+def test_failed_native_run_retains_lease_until_project_stop_is_confirmed(tmp_path, monkeypatch):
+    service, request, *_ = _protocol_case(tmp_path, monkeypatch)
+    plan = service.plan_model(request)
+
+    async def interrupted(name):
+        raise BackendError("MMC_BUILD_TIMED_OUT", "Vendor run did not settle", "test", "run")
+
+    async def stopped(name):
+        return {"status": "stopped"}
+
+    service.pscad_service.run_project = interrupted
+
+    async def exercise():
+        started = await service.build_model(request, plan["plan_hash"], confirm=True)
+        await service._tasks[started["build_id"]]
+        record = service.get_build_status(started["build_id"])
+        assert record["containment"]["confirmed"] is False
+        assert started["build_id"] in service._leases
+        with pytest.raises(blank_service.PendingCleanupError):
+            await service.shutdown(timeout_s=0.01)
+        service.pscad_service.stop_simulation = stopped
+        service.pscad_service.get_run_status = stopped
+        await service.shutdown()
+        assert not service._leases
+
+    asyncio.run(exercise())
+
+
+def test_pending_native_compile_retains_lease_until_its_vendor_token_settles(tmp_path, monkeypatch):
+    from pscad_mcp.core.executor import ExecutorSettlementToken
+
+    service, request, *_ = _protocol_case(tmp_path, monkeypatch)
+    plan = service.plan_model(request)
+    token = ExecutorSettlementToken(operation_id=1, generation=0, operation="build")
+    owner = None
+
+    class Executor:
+        def pending_settlements_for(self, task):
+            return (token,) if task is owner and not token.settled else ()
+
+    async def interrupted(name):
+        nonlocal owner
+        owner = asyncio.current_task()
+        raise BackendError("EXECUTOR_TIMEOUT", "Compile remains live", "test", "build")
+
+    service.pscad_service.executor = Executor()
+    service.pscad_service.build_project = interrupted
+
+    async def exercise():
+        started = await service.build_model(request, plan["plan_hash"], confirm=True)
+        await service._tasks[started["build_id"]]
+        assert started["build_id"] in service._leases
+        assert service.get_build_status(started["build_id"])["pending_vendor_calls"] == 1
+        token.settle()
+        await service.shutdown()
+        assert not service._leases
+
+    asyncio.run(exercise())
+
+
 def test_blank_mmc_plan_records_audited_topology_and_source_hashes(tmp_path: Path) -> None:
     template = tmp_path / "template.pscx"
     library = tmp_path / "library.pslx"
@@ -220,6 +537,10 @@ class _MmcNativeFake:
         self.calls: list[str] = []
         self.project: Path | None = None
         self.settings: dict[str, object] = {}
+
+    async def get_master_library_identity(self):
+        master = blank_service._default_master_path()
+        return {"master_path": str(master), "master_sha256": blank_service._sha256(master), "pscad_version": "4.6.2"}
 
     async def load_projects(self, paths: list[str]) -> None:
         self.calls.append("load_projects")
@@ -330,7 +651,10 @@ def test_blank_mmc_validation_uses_audited_half_bridge_capability(tmp_path: Path
 
     result = asyncio.run(call())
 
-    assert result["acceptance"]["verdict"] == "NOT_APPLICABLE"
+    assert result["acceptance"]["verdict"] == "INCOMPLETE_ANALYSIS"
+    assert result["capabilities"]["intrinsic_dc_fault_blocking"] is False
+    assert result["acceptance_scope"]["intrinsic_dc_fault_blocking"] == "NOT_APPLICABLE"
+    assert result["valid"] is True and result["accepted"] is False
 
 
 def test_blank_mmc_plan_rejects_non_finite_duration(tmp_path: Path) -> None:
@@ -392,7 +716,7 @@ def test_blank_mmc_plan_rejects_a_dangling_destination_link(tmp_path: Path) -> N
     assert raised.value.code == "MMC_BUILD_CONFLICT"
 
 
-def test_blank_mmc_validation_accepts_a_minimal_output_reader(tmp_path: Path) -> None:
+def test_blank_mmc_validation_requires_frozen_contract_before_reading(tmp_path: Path) -> None:
     project = tmp_path / "MMC_CASE.pscx"
     library = tmp_path / "intermediate.pslx"
     output = tmp_path / "MMC_CASE.out"
@@ -402,7 +726,7 @@ def test_blank_mmc_validation_accepts_a_minimal_output_reader(tmp_path: Path) ->
 
     class MinimalReader:
         async def read_output_file(self, file_path: str) -> dict[str, object]:
-            return {"channels": []}
+            raise AssertionError("Uncontracted samples must not be read")
 
     service = BlankMmcBuilderService(
         MinimalReader(),
@@ -417,7 +741,8 @@ def test_blank_mmc_validation_accepts_a_minimal_output_reader(tmp_path: Path) ->
         library_path=str(library),
     )
 
-    assert result["acceptance"]["verdict"] == "NOT_APPLICABLE"
+    assert result["acceptance"]["verdict"] == "INCOMPLETE_ANALYSIS"
+    assert result["accepted"] is False
 
 
 def test_blank_mmc_validation_rejects_partial_template_pair(tmp_path: Path) -> None:
