@@ -1,0 +1,678 @@
+{
+  "schema_version": 1,
+  "source_hashes": {
+    "master": {
+      "path": "C:\\Program Files (x86)\\PSCAD46\\master.pslx",
+      "sha256": "062a614e68d8b18541f42b6bac95e0777d4de6f923fdf3d558ca8ff40255d939"
+    },
+    "project": {
+      "path": "C:\\Users\\Public\\Documents\\PSCAD\\4.6\\Examples\\ModelsInProgress\\H_MMC_Mono_DC.pscx",
+      "sha256": "1900be93877400fba228b1808a5310980d801b0260d7df998df6c5a2f6a035dd"
+    },
+    "library": {
+      "path": "C:\\Users\\Public\\Documents\\PSCAD\\4.6\\Examples\\ModelsInProgress\\intermediate.pslx",
+      "sha256": "08466778704e547d7d9d80af99a48c09292dd3a51056ac26216c3913d5cc3a1b"
+    },
+    "compiler_support:lib/gf42/intermediate.lib": {
+      "path": "C:\\Users\\Public\\Documents\\PSCAD\\4.6\\Examples\\ModelsInProgress\\lib\\gf42\\intermediate.lib",
+      "sha256": "fc3719341c3f4c381f17724b6c3aec34fb9eaa4967c2cd3be454dc4a74826c8e"
+    },
+    "compiler_support:lib/gf46/intermediate.lib": {
+      "path": "C:\\Users\\Public\\Documents\\PSCAD\\4.6\\Examples\\ModelsInProgress\\lib\\gf46\\intermediate.lib",
+      "sha256": "43ad8943ff5d4af86b27195d948562e7079f5f9cdf2d7c5459aa3e528c8e76b9"
+    },
+    "compiler_support:lib/if12/intermediate.lib": {
+      "path": "C:\\Users\\Public\\Documents\\PSCAD\\4.6\\Examples\\ModelsInProgress\\lib\\if12\\intermediate.lib",
+      "sha256": "0bf43074d48b6497da8e5039b2a988e3afd51fc0cd89001eb6fd93bab1c0e1ad"
+    },
+    "compiler_support:lib/if15/intermediate.lib": {
+      "path": "C:\\Users\\Public\\Documents\\PSCAD\\4.6\\Examples\\ModelsInProgress\\lib\\if15\\intermediate.lib",
+      "sha256": "5934db6699e3c81b0cecf8649d6a457638d21382865f03361f764037001e6e80"
+    },
+    "compiler_support:lib/if15_x86/intermediate.lib": {
+      "path": "C:\\Users\\Public\\Documents\\PSCAD\\4.6\\Examples\\ModelsInProgress\\lib\\if15_x86\\intermediate.lib",
+      "sha256": "e7c2c13e1cc94c57f651a09e045e16d0c9dd7dd9279505e53445d39c03065a4d"
+    },
+    "compiler_support:lib/if9/intermediate.lib": {
+      "path": "C:\\Users\\Public\\Documents\\PSCAD\\4.6\\Examples\\ModelsInProgress\\lib\\if9\\intermediate.lib",
+      "sha256": "d4023e1f2e6f9090c064fa81d5875d3682b89942a475bc437dec1b0bceb73398"
+    }
+  },
+  "scenario_source": {
+    "path": "D:\\PSCAD-Workspace\\emt-timed-control\\pwm-67d0ec55df634e95958e4af7bdbab6f3\\pwm_source.pscx",
+    "sha256": "1900be93877400fba228b1808a5310980d801b0260d7df998df6c5a2f6a035dd"
+  },
+  "time_basis": "EMTDC",
+  "schedule_source": "embedded_control",
+  "time_step_s": 1E-05,
+  "output_step_s": 1E-05,
+  "duration_s": 0.05,
+  "max_timing_error_s": 2E-05,
+  "events": [
+    {
+      "event_id": "pulse",
+      "time_s": 0.02,
+      "end_time_s": 0.03,
+      "target": {
+        "instance_path": "Main",
+        "owner": "450184592",
+        "definition": "master:var",
+        "parameter": "Value"
+      },
+      "before_value": -900.0,
+      "value": -800.0,
+      "after_value": -900.0,
+      "units": "MW",
+      "event_selector": {
+        "description": "EMT_EVENT_450184592",
+        "instance_path": "Main",
+        "owner": "2000000000",
+        "definition": "master:pgb",
+        "port": "Signl"
+      }
+    }
+  ],
+  "event_channels": [
+    {
+      "channel_id": "EMT_EVENT_450184592",
+      "description": "EMT_EVENT_450184592",
+      "role": "control_command",
+      "instance_path": "Main",
+      "owner": "2000000000",
+      "definition": "master:pgb",
+      "port": "Signl",
+      "units": "MW",
+      "polarity": {
+        "inactive": -900.0,
+        "active": -800.0
+      },
+      "control_owner": "450184592",
+      "control_definition": "EMT_Control_450184592",
+      "definition_id": "2000000001",
+      "x": 3402,
+      "y": 414
+    }
+  ],
+  "schedule_sha256": "5f799315640b6760c86f345b3ce791d77301ab2b6cc832a96ca25ad036f5e917",
+  "producer_revision": "216c18ba187f0b86194c4f91dfd3c19d1b281714",
+  "readback": {
+    "matched": true,
+    "project_path": "D:\\PSCAD-Workspace\\emt-timed-control\\pwm-67d0ec55df634e95958e4af7bdbab6f3\\emt_run.pscx",
+    "project_sha256": "2751406ffbdebdab135d37fd05c05ff0f88a1e7ace72e054f93ad61d86dec715",
+    "schedule_sha256": "5f799315640b6760c86f345b3ce791d77301ab2b6cc832a96ca25ad036f5e917",
+    "bindings": [
+      {
+        "channel_id": "EMT_EVENT_450184592",
+        "description": "EMT_EVENT_450184592",
+        "role": "control_command",
+        "instance_path": "Main",
+        "owner": "2000000000",
+        "definition": "master:pgb",
+        "port": "Signl",
+        "units": "MW",
+        "polarity": {
+          "inactive": -900.0,
+          "active": -800.0
+        },
+        "control_owner": "450184592",
+        "control_definition": "EMT_Control_450184592",
+        "definition_id": "2000000001",
+        "x": 3402,
+        "y": 414
+      }
+    ]
+  },
+  "run_evidence": [
+    {
+      "run_id": "pwm-67d0ec55df634e95958e4af7bdbab6f3/initial",
+      "scope": "emt_timing_pwm_command",
+      "role": "control_command",
+      "report_path": "D:/PSCAD-Workspace/emt-timed-control/pwm-67d0ec55df634e95958e4af7bdbab6f3/report.json",
+      "report_sha256": "939c14a98816c102e76b89640760d3a4e69050a9f4f0d0636066451e60e5b5f4",
+      "output_index_path": "D:/PSCAD-Workspace/emt-timed-control/pwm-67d0ec55df634e95958e4af7bdbab6f3/output-index.json",
+      "output_index_sha256": "1fabd17a8808fe81493334e8df33a2b6cc444c305d58f4babf1f33bbf5aca9be",
+      "measured_events": [
+        {
+          "event_id": "pulse",
+          "rise_time_s": 0.02,
+          "fall_time_s": 0.03,
+          "rise_error_s": 0.0,
+          "fall_error_s": 0.0,
+          "duration_s": 0.009999999999999998,
+          "active_sample_count": 1000,
+          "sample_count": 5001,
+          "time_range_s": [
+            0.0,
+            0.05
+          ],
+          "units": "MW",
+          "event_selector": {
+            "description": "EMT_EVENT_450184592",
+            "instance_path": "Main",
+            "owner": "2000000000",
+            "definition": "master:pgb",
+            "port": "Signl"
+          }
+        }
+      ],
+      "output_evidence": {
+        "files": [
+          {
+            "kind": "project",
+            "path": "D:\\PSCAD-Workspace\\emt-timed-control\\pwm-67d0ec55df634e95958e4af7bdbab6f3\\emt_run.pscx",
+            "sha256": "2751406ffbdebdab135d37fd05c05ff0f88a1e7ace72e054f93ad61d86dec715",
+            "size_bytes": 1012763,
+            "mtime_ns": 1788848256853001900
+          },
+          {
+            "kind": "INF",
+            "path": "D:\\PSCAD-Workspace\\emt-timed-control\\pwm-67d0ec55df634e95958e4af7bdbab6f3\\emt_run.gf42\\emt_run.inf",
+            "sha256": "3e4f7398eb0d07026dd404f54699da84b3ac88093bd2372da72296639d5e0235",
+            "size_bytes": 16393,
+            "mtime_ns": 1788848264429440700
+          },
+          {
+            "kind": "INFX",
+            "path": "D:\\PSCAD-Workspace\\emt-timed-control\\pwm-67d0ec55df634e95958e4af7bdbab6f3\\emt_run.gf42\\emt_run.infx",
+            "sha256": "cd8fa4c8591bb74c6da553ca0ec2a1bf1dcee7c9ade7b8a5f8f8bcd0131d26b5",
+            "size_bytes": 19813,
+            "mtime_ns": 1788848264300753700
+          },
+          {
+            "kind": "OUT",
+            "path": "D:\\PSCAD-Workspace\\emt-timed-control\\pwm-67d0ec55df634e95958e4af7bdbab6f3\\emt_run.gf42\\emt_run_01.out",
+            "sha256": "1252a5b116966504fe3592f59a79ba4c3e2a89eb1aac0252cbfb9dc792c5b701",
+            "size_bytes": 1325339,
+            "mtime_ns": 1788848268554365700
+          },
+          {
+            "kind": "OUT",
+            "path": "D:\\PSCAD-Workspace\\emt-timed-control\\pwm-67d0ec55df634e95958e4af7bdbab6f3\\emt_run.gf42\\emt_run_02.out",
+            "sha256": "2f2d9c9b4845709f357848d0db7104971acb5af3cb58cd65d755d57c1b9d630d",
+            "size_bytes": 1325339,
+            "mtime_ns": 1788848268554365700
+          },
+          {
+            "kind": "OUT",
+            "path": "D:\\PSCAD-Workspace\\emt-timed-control\\pwm-67d0ec55df634e95958e4af7bdbab6f3\\emt_run.gf42\\emt_run_03.out",
+            "sha256": "cadf89ebca1855e94d764f5e26d33c2aa5b98a89de7008a982232d14c3386511",
+            "size_bytes": 1325339,
+            "mtime_ns": 1788848268554365700
+          },
+          {
+            "kind": "OUT",
+            "path": "D:\\PSCAD-Workspace\\emt-timed-control\\pwm-67d0ec55df634e95958e4af7bdbab6f3\\emt_run.gf42\\emt_run_04.out",
+            "sha256": "b0d014085a00e660032ae7febe64fe3570e49e159b9b4742e5ec369d602c6efc",
+            "size_bytes": 1325339,
+            "mtime_ns": 1788848268554365700
+          },
+          {
+            "kind": "OUT",
+            "path": "D:\\PSCAD-Workspace\\emt-timed-control\\pwm-67d0ec55df634e95958e4af7bdbab6f3\\emt_run.gf42\\emt_run_05.out",
+            "sha256": "2339e4093cf9f4873f0b7ea696c799a7b317f477f9e2a016cd6b42504e45d46e",
+            "size_bytes": 1325339,
+            "mtime_ns": 1788848268554365700
+          },
+          {
+            "kind": "OUT",
+            "path": "D:\\PSCAD-Workspace\\emt-timed-control\\pwm-67d0ec55df634e95958e4af7bdbab6f3\\emt_run.gf42\\emt_run_06.out",
+            "sha256": "15e0de147dad9134c2dd5a80f9e1f75f35675273e18f1c3383866e789ae17d07",
+            "size_bytes": 1325339,
+            "mtime_ns": 1788848268554365700
+          },
+          {
+            "kind": "OUT",
+            "path": "D:\\PSCAD-Workspace\\emt-timed-control\\pwm-67d0ec55df634e95958e4af7bdbab6f3\\emt_run.gf42\\emt_run_07.out",
+            "sha256": "a2253db96763d8ecfd07350e39f860302c5280d29eedaee0ac60794f7470949d",
+            "size_bytes": 1325339,
+            "mtime_ns": 1788848268554365700
+          },
+          {
+            "kind": "OUT",
+            "path": "D:\\PSCAD-Workspace\\emt-timed-control\\pwm-67d0ec55df634e95958e4af7bdbab6f3\\emt_run.gf42\\emt_run_08.out",
+            "sha256": "084d5ea7275e406780ebadbf0c614efcfdf248ab7eb0dd9022a8ccdbf520fc89",
+            "size_bytes": 1325339,
+            "mtime_ns": 1788848268554365700
+          },
+          {
+            "kind": "OUT",
+            "path": "D:\\PSCAD-Workspace\\emt-timed-control\\pwm-67d0ec55df634e95958e4af7bdbab6f3\\emt_run.gf42\\emt_run_09.out",
+            "sha256": "033935ff3512dda338ed2ec9c5ff8ea6ceae67f303def8630801e70a15a5464c",
+            "size_bytes": 1325339,
+            "mtime_ns": 1788848268554365700
+          },
+          {
+            "kind": "OUT",
+            "path": "D:\\PSCAD-Workspace\\emt-timed-control\\pwm-67d0ec55df634e95958e4af7bdbab6f3\\emt_run.gf42\\emt_run_10.out",
+            "sha256": "182474546558813b5b7e5e73f4c964ad86de24f84455aabbc4c9b40426000faa",
+            "size_bytes": 1325339,
+            "mtime_ns": 1788848268554365700
+          },
+          {
+            "kind": "OUT",
+            "path": "D:\\PSCAD-Workspace\\emt-timed-control\\pwm-67d0ec55df634e95958e4af7bdbab6f3\\emt_run.gf42\\emt_run_11.out",
+            "sha256": "52d2cfb68c8ebb517c66d49e3fb2ebcd12035081cb9e6609b2a084810e56aaa1",
+            "size_bytes": 1325339,
+            "mtime_ns": 1788848268555366000
+          },
+          {
+            "kind": "OUT",
+            "path": "D:\\PSCAD-Workspace\\emt-timed-control\\pwm-67d0ec55df634e95958e4af7bdbab6f3\\emt_run.gf42\\emt_run_12.out",
+            "sha256": "ad70c16aca8705e659b5f23af6b4bd2f7cc5e4b02b89470cb977669ca0df65ba",
+            "size_bytes": 1325339,
+            "mtime_ns": 1788848268555366000
+          },
+          {
+            "kind": "OUT",
+            "path": "D:\\PSCAD-Workspace\\emt-timed-control\\pwm-67d0ec55df634e95958e4af7bdbab6f3\\emt_run.gf42\\emt_run_13.out",
+            "sha256": "e77c86797e37360deee49a1a6ae65ef6b19600f25cd8e243ece1de48fdf3f5a3",
+            "size_bytes": 1325339,
+            "mtime_ns": 1788848268555366000
+          },
+          {
+            "kind": "OUT",
+            "path": "D:\\PSCAD-Workspace\\emt-timed-control\\pwm-67d0ec55df634e95958e4af7bdbab6f3\\emt_run.gf42\\emt_run_14.out",
+            "sha256": "eb0af0037ff6ba626d3ca97caf4b21bbb3ed0bf7d70c7539d82be32fca51be9b",
+            "size_bytes": 1325339,
+            "mtime_ns": 1788848268555366000
+          },
+          {
+            "kind": "OUT",
+            "path": "D:\\PSCAD-Workspace\\emt-timed-control\\pwm-67d0ec55df634e95958e4af7bdbab6f3\\emt_run.gf42\\emt_run_15.out",
+            "sha256": "76bf5c10cd34fa38f04f407a49181a4cb94554c5be85ea671ef83c9b928758fc",
+            "size_bytes": 1325339,
+            "mtime_ns": 1788848268555366000
+          },
+          {
+            "kind": "OUT",
+            "path": "D:\\PSCAD-Workspace\\emt-timed-control\\pwm-67d0ec55df634e95958e4af7bdbab6f3\\emt_run.gf42\\emt_run_16.out",
+            "sha256": "ef793db090008379ba17cfd26d22c4b9bf7480be1a115566398a2aba5f8ad94f",
+            "size_bytes": 1325339,
+            "mtime_ns": 1788848268555366000
+          },
+          {
+            "kind": "OUT",
+            "path": "D:\\PSCAD-Workspace\\emt-timed-control\\pwm-67d0ec55df634e95958e4af7bdbab6f3\\emt_run.gf42\\emt_run_17.out",
+            "sha256": "20b49f188168d77371fb9a0cf1d89fdb65cce4514f31ffb96539aab86f1289fb",
+            "size_bytes": 1325339,
+            "mtime_ns": 1788848268555366000
+          },
+          {
+            "kind": "OUT",
+            "path": "D:\\PSCAD-Workspace\\emt-timed-control\\pwm-67d0ec55df634e95958e4af7bdbab6f3\\emt_run.gf42\\emt_run_18.out",
+            "sha256": "78ee1ae008ec1c1942b9e3ee0d50caa43adbcefa6e7e1455e58a9c767428bbde",
+            "size_bytes": 1085291,
+            "mtime_ns": 1788848268555366000
+          }
+        ],
+        "bindings": [
+          {
+            "event_selector": {
+              "description": "EMT_EVENT_450184592",
+              "instance_path": "Main",
+              "owner": "2000000000",
+              "definition": "master:pgb",
+              "port": "Signl"
+            },
+            "infx": {
+              "name": "Main(0):EMT_EVENT_450184592",
+              "index": "0",
+              "id": "2000000000:0",
+              "label": "EMT events",
+              "dim": "1",
+              "unit": "MW",
+              "min": "-2",
+              "max": "2"
+            },
+            "inf": {
+              "call_id": 1,
+              "desc": "EMT_EVENT_450184592",
+              "group": "EMT events",
+              "max": "2",
+              "min": "-2",
+              "units": "MW"
+            },
+            "index": 0,
+            "out_part": 1,
+            "out_column": 1
+          }
+        ],
+        "sample_count": 5001,
+        "time_domain": {
+          "name": "Time",
+          "unit": "s",
+          "mult": "0.0",
+          "skew": "0.0"
+        },
+        "sampling": {
+          "rate": "100000.0",
+          "end": "5000"
+        }
+      },
+      "python_pid": 12704,
+      "managed_pid": 2124,
+      "remaining_processes": []
+    },
+    {
+      "run_id": "pwm-67d0ec55df634e95958e4af7bdbab6f3/reloaded_saved_project",
+      "scope": "emt_saved_project_reload",
+      "role": "control_command",
+      "report_path": "D:/PSCAD-Workspace/emt-timed-control/pwm-67d0ec55df634e95958e4af7bdbab6f3/reload/report.json",
+      "report_sha256": "81165d465ff616084a6312796dd8335e77b13d26f2793dcb0d1b26e913ba07b0",
+      "output_index_path": "D:/PSCAD-Workspace/emt-timed-control/pwm-67d0ec55df634e95958e4af7bdbab6f3/reload/output-index.json",
+      "output_index_sha256": "d87e49be0e37b1604c5fc1f36ebd7070bfa55ef201325ad09ade2b3b3a2e0490",
+      "measured_events": [
+        {
+          "event_id": "pulse",
+          "rise_time_s": 0.02,
+          "fall_time_s": 0.03,
+          "rise_error_s": 0.0,
+          "fall_error_s": 0.0,
+          "duration_s": 0.009999999999999998,
+          "active_sample_count": 1000,
+          "sample_count": 5001,
+          "time_range_s": [
+            0.0,
+            0.05
+          ],
+          "units": "MW",
+          "event_selector": {
+            "description": "EMT_EVENT_450184592",
+            "instance_path": "Main",
+            "owner": "2000000000",
+            "definition": "master:pgb",
+            "port": "Signl"
+          }
+        }
+      ],
+      "output_evidence": {
+        "files": [
+          {
+            "kind": "project",
+            "path": "D:\\PSCAD-Workspace\\emt-timed-control\\pwm-67d0ec55df634e95958e4af7bdbab6f3\\reload\\emt_run.pscx",
+            "sha256": "773af89dddc34f37ebe95373eb2814c169e0fe84135a65c099775946e9b0ce93",
+            "size_bytes": 1044532,
+            "mtime_ns": 1788848280356044000
+          },
+          {
+            "kind": "INF",
+            "path": "D:\\PSCAD-Workspace\\emt-timed-control\\pwm-67d0ec55df634e95958e4af7bdbab6f3\\reload\\emt_run.gf42\\emt_run.inf",
+            "sha256": "3e4f7398eb0d07026dd404f54699da84b3ac88093bd2372da72296639d5e0235",
+            "size_bytes": 16393,
+            "mtime_ns": 1788848281631875100
+          },
+          {
+            "kind": "INFX",
+            "path": "D:\\PSCAD-Workspace\\emt-timed-control\\pwm-67d0ec55df634e95958e4af7bdbab6f3\\reload\\emt_run.gf42\\emt_run.infx",
+            "sha256": "9cfa84d6480fb5422a6e0bc243ecd2910a137ce2184a3ec37e4953d0d28a9b9b",
+            "size_bytes": 19813,
+            "mtime_ns": 1788848281490089200
+          },
+          {
+            "kind": "OUT",
+            "path": "D:\\PSCAD-Workspace\\emt-timed-control\\pwm-67d0ec55df634e95958e4af7bdbab6f3\\reload\\emt_run.gf42\\emt_run_01.out",
+            "sha256": "1252a5b116966504fe3592f59a79ba4c3e2a89eb1aac0252cbfb9dc792c5b701",
+            "size_bytes": 1325339,
+            "mtime_ns": 1788848286033034400
+          },
+          {
+            "kind": "OUT",
+            "path": "D:\\PSCAD-Workspace\\emt-timed-control\\pwm-67d0ec55df634e95958e4af7bdbab6f3\\reload\\emt_run.gf42\\emt_run_02.out",
+            "sha256": "2f2d9c9b4845709f357848d0db7104971acb5af3cb58cd65d755d57c1b9d630d",
+            "size_bytes": 1325339,
+            "mtime_ns": 1788848286033034400
+          },
+          {
+            "kind": "OUT",
+            "path": "D:\\PSCAD-Workspace\\emt-timed-control\\pwm-67d0ec55df634e95958e4af7bdbab6f3\\reload\\emt_run.gf42\\emt_run_03.out",
+            "sha256": "cadf89ebca1855e94d764f5e26d33c2aa5b98a89de7008a982232d14c3386511",
+            "size_bytes": 1325339,
+            "mtime_ns": 1788848286033034400
+          },
+          {
+            "kind": "OUT",
+            "path": "D:\\PSCAD-Workspace\\emt-timed-control\\pwm-67d0ec55df634e95958e4af7bdbab6f3\\reload\\emt_run.gf42\\emt_run_04.out",
+            "sha256": "b0d014085a00e660032ae7febe64fe3570e49e159b9b4742e5ec369d602c6efc",
+            "size_bytes": 1325339,
+            "mtime_ns": 1788848286033034400
+          },
+          {
+            "kind": "OUT",
+            "path": "D:\\PSCAD-Workspace\\emt-timed-control\\pwm-67d0ec55df634e95958e4af7bdbab6f3\\reload\\emt_run.gf42\\emt_run_05.out",
+            "sha256": "2339e4093cf9f4873f0b7ea696c799a7b317f477f9e2a016cd6b42504e45d46e",
+            "size_bytes": 1325339,
+            "mtime_ns": 1788848286033034400
+          },
+          {
+            "kind": "OUT",
+            "path": "D:\\PSCAD-Workspace\\emt-timed-control\\pwm-67d0ec55df634e95958e4af7bdbab6f3\\reload\\emt_run.gf42\\emt_run_06.out",
+            "sha256": "15e0de147dad9134c2dd5a80f9e1f75f35675273e18f1c3383866e789ae17d07",
+            "size_bytes": 1325339,
+            "mtime_ns": 1788848286033034400
+          },
+          {
+            "kind": "OUT",
+            "path": "D:\\PSCAD-Workspace\\emt-timed-control\\pwm-67d0ec55df634e95958e4af7bdbab6f3\\reload\\emt_run.gf42\\emt_run_07.out",
+            "sha256": "a2253db96763d8ecfd07350e39f860302c5280d29eedaee0ac60794f7470949d",
+            "size_bytes": 1325339,
+            "mtime_ns": 1788848286033034400
+          },
+          {
+            "kind": "OUT",
+            "path": "D:\\PSCAD-Workspace\\emt-timed-control\\pwm-67d0ec55df634e95958e4af7bdbab6f3\\reload\\emt_run.gf42\\emt_run_08.out",
+            "sha256": "084d5ea7275e406780ebadbf0c614efcfdf248ab7eb0dd9022a8ccdbf520fc89",
+            "size_bytes": 1325339,
+            "mtime_ns": 1788848286033034400
+          },
+          {
+            "kind": "OUT",
+            "path": "D:\\PSCAD-Workspace\\emt-timed-control\\pwm-67d0ec55df634e95958e4af7bdbab6f3\\reload\\emt_run.gf42\\emt_run_09.out",
+            "sha256": "033935ff3512dda338ed2ec9c5ff8ea6ceae67f303def8630801e70a15a5464c",
+            "size_bytes": 1325339,
+            "mtime_ns": 1788848286033034400
+          },
+          {
+            "kind": "OUT",
+            "path": "D:\\PSCAD-Workspace\\emt-timed-control\\pwm-67d0ec55df634e95958e4af7bdbab6f3\\reload\\emt_run.gf42\\emt_run_10.out",
+            "sha256": "182474546558813b5b7e5e73f4c964ad86de24f84455aabbc4c9b40426000faa",
+            "size_bytes": 1325339,
+            "mtime_ns": 1788848286033034400
+          },
+          {
+            "kind": "OUT",
+            "path": "D:\\PSCAD-Workspace\\emt-timed-control\\pwm-67d0ec55df634e95958e4af7bdbab6f3\\reload\\emt_run.gf42\\emt_run_11.out",
+            "sha256": "52d2cfb68c8ebb517c66d49e3fb2ebcd12035081cb9e6609b2a084810e56aaa1",
+            "size_bytes": 1325339,
+            "mtime_ns": 1788848286034036300
+          },
+          {
+            "kind": "OUT",
+            "path": "D:\\PSCAD-Workspace\\emt-timed-control\\pwm-67d0ec55df634e95958e4af7bdbab6f3\\reload\\emt_run.gf42\\emt_run_12.out",
+            "sha256": "ad70c16aca8705e659b5f23af6b4bd2f7cc5e4b02b89470cb977669ca0df65ba",
+            "size_bytes": 1325339,
+            "mtime_ns": 1788848286034036300
+          },
+          {
+            "kind": "OUT",
+            "path": "D:\\PSCAD-Workspace\\emt-timed-control\\pwm-67d0ec55df634e95958e4af7bdbab6f3\\reload\\emt_run.gf42\\emt_run_13.out",
+            "sha256": "e77c86797e37360deee49a1a6ae65ef6b19600f25cd8e243ece1de48fdf3f5a3",
+            "size_bytes": 1325339,
+            "mtime_ns": 1788848286034036300
+          },
+          {
+            "kind": "OUT",
+            "path": "D:\\PSCAD-Workspace\\emt-timed-control\\pwm-67d0ec55df634e95958e4af7bdbab6f3\\reload\\emt_run.gf42\\emt_run_14.out",
+            "sha256": "eb0af0037ff6ba626d3ca97caf4b21bbb3ed0bf7d70c7539d82be32fca51be9b",
+            "size_bytes": 1325339,
+            "mtime_ns": 1788848286034036300
+          },
+          {
+            "kind": "OUT",
+            "path": "D:\\PSCAD-Workspace\\emt-timed-control\\pwm-67d0ec55df634e95958e4af7bdbab6f3\\reload\\emt_run.gf42\\emt_run_15.out",
+            "sha256": "76bf5c10cd34fa38f04f407a49181a4cb94554c5be85ea671ef83c9b928758fc",
+            "size_bytes": 1325339,
+            "mtime_ns": 1788848286034036300
+          },
+          {
+            "kind": "OUT",
+            "path": "D:\\PSCAD-Workspace\\emt-timed-control\\pwm-67d0ec55df634e95958e4af7bdbab6f3\\reload\\emt_run.gf42\\emt_run_16.out",
+            "sha256": "ef793db090008379ba17cfd26d22c4b9bf7480be1a115566398a2aba5f8ad94f",
+            "size_bytes": 1325339,
+            "mtime_ns": 1788848286034036300
+          },
+          {
+            "kind": "OUT",
+            "path": "D:\\PSCAD-Workspace\\emt-timed-control\\pwm-67d0ec55df634e95958e4af7bdbab6f3\\reload\\emt_run.gf42\\emt_run_17.out",
+            "sha256": "20b49f188168d77371fb9a0cf1d89fdb65cce4514f31ffb96539aab86f1289fb",
+            "size_bytes": 1325339,
+            "mtime_ns": 1788848286034036300
+          },
+          {
+            "kind": "OUT",
+            "path": "D:\\PSCAD-Workspace\\emt-timed-control\\pwm-67d0ec55df634e95958e4af7bdbab6f3\\reload\\emt_run.gf42\\emt_run_18.out",
+            "sha256": "78ee1ae008ec1c1942b9e3ee0d50caa43adbcefa6e7e1455e58a9c767428bbde",
+            "size_bytes": 1085291,
+            "mtime_ns": 1788848286034036300
+          }
+        ],
+        "bindings": [
+          {
+            "event_selector": {
+              "description": "EMT_EVENT_450184592",
+              "instance_path": "Main",
+              "owner": "2000000000",
+              "definition": "master:pgb",
+              "port": "Signl"
+            },
+            "infx": {
+              "name": "Main(0):EMT_EVENT_450184592",
+              "index": "0",
+              "id": "2000000000:0",
+              "label": "EMT events",
+              "dim": "1",
+              "unit": "MW",
+              "min": "-2",
+              "max": "2"
+            },
+            "inf": {
+              "call_id": 1,
+              "desc": "EMT_EVENT_450184592",
+              "group": "EMT events",
+              "max": "2",
+              "min": "-2",
+              "units": "MW"
+            },
+            "index": 0,
+            "out_part": 1,
+            "out_column": 1
+          }
+        ],
+        "sample_count": 5001,
+        "time_domain": {
+          "name": "Time",
+          "unit": "s",
+          "mult": "0.0",
+          "skew": "0.0"
+        },
+        "sampling": {
+          "rate": "100000.0",
+          "end": "5000"
+        }
+      },
+      "python_pid": 45444,
+      "managed_pid": 20040,
+      "remaining_processes": []
+    }
+  ],
+  "acceptance_report": {
+    "path": "D:/PSCAD-Workspace/emt-timed-control/pwm-67d0ec55df634e95958e4af7bdbab6f3/acceptance.json",
+    "sha256": "8025e1413b347c7e5ca10d6afd91410f63e5e29710b08fcd49943d6a59f1cfe4"
+  },
+  "independent_minimal_timing_gate": {
+    "scope": "emt_timing_minimal",
+    "schedule_sha256": "ee01e00ab8dd0d562bf997da9c523285a1ab4c0d26e3b3d362824a7a5beb426b",
+    "acceptance_report": {
+      "path": "D:/PSCAD-Workspace/emt-timed-control/minimal-5314c22dd448410880833837817c4736/acceptance.json",
+      "sha256": "f799b9ef8ace40f11bbd3b8fbf4464128207e6f2654621230a61180f8a53161b"
+    },
+    "first_report": {
+      "path": "D:/PSCAD-Workspace/emt-timed-control/minimal-5314c22dd448410880833837817c4736/report.json",
+      "sha256": "457760ad58ae968dbdc34e182f67b338e5c46eb74edb04710a76a508a6929e6d"
+    },
+    "reload_report": {
+      "path": "D:/PSCAD-Workspace/emt-timed-control/minimal-5314c22dd448410880833837817c4736/reload/report.json",
+      "sha256": "07c3662437d11343ac8d93cffb127982a7b6fab992d01ad3601e397b7f2dbba8"
+    },
+    "first_output_index": {
+      "path": "D:/PSCAD-Workspace/emt-timed-control/minimal-5314c22dd448410880833837817c4736/output-index.json",
+      "sha256": "d17ada194bc7805152698387aec41673bebf63a925ed802a179a504b7092b1b6"
+    },
+    "reload_output_index": {
+      "path": "D:/PSCAD-Workspace/emt-timed-control/minimal-5314c22dd448410880833837817c4736/reload/output-index.json",
+      "sha256": "aedb9ca7bb2552f85fc01df306f4193880fc1f07de4f83430daa543cfbd45987"
+    },
+    "measured_events": [
+      {
+        "event_id": "pulse",
+        "rise_time_s": 0.02,
+        "fall_time_s": 0.03,
+        "rise_error_s": 0.0,
+        "fall_error_s": 0.0,
+        "duration_s": 0.009999999999999998,
+        "active_sample_count": 1000,
+        "sample_count": 5001,
+        "time_range_s": [
+          0.0,
+          0.05
+        ],
+        "units": "1",
+        "event_selector": {
+          "description": "EMT_EVENT_1929761577",
+          "instance_path": "Main",
+          "owner": "2000000000",
+          "definition": "master:pgb",
+          "port": "Signl"
+        }
+      }
+    ]
+  },
+  "supported_scope": {
+    "instance_path": "Main",
+    "definitions": [
+      "master:const",
+      "master:var"
+    ],
+    "parameter": "Value",
+    "orientation": 0,
+    "events": "bounded non-overlapping intervals on scalar Real OUT signals",
+    "role": "control_command",
+    "unsupported": [
+      "unverified native timing",
+      "non-Main polling",
+      "converter parameter schedules",
+      "fault-type switch schedules",
+      "power reversal physical acceptance",
+      "DC fault physical acceptance"
+    ]
+  },
+  "verification": {
+    "full_pytest": {
+      "passed": 2517,
+      "skipped": 50,
+      "duration_s": 50.68,
+      "exit_code": 0
+    },
+    "minimal_licensed": {
+      "passed": 1,
+      "duration_s": 14.94,
+      "exit_code": 0
+    },
+    "pwm_licensed": {
+      "passed": 1,
+      "duration_s": 36.92,
+      "exit_code": 0
+    },
+    "independent_spec_review": "PASS",
+    "independent_quality_review": "PASS"
+  }
+}
