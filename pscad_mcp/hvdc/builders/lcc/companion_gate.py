@@ -45,6 +45,9 @@ FIXTURES = (
             "AM_D",
             "GM_Y",
             "GM_D",
+            "REF_A",
+            "REF_B",
+            "REF_C",
         ),
     ),
     CompanionFixture(
@@ -67,6 +70,9 @@ FIXTURES = (
             "AM_D",
             "GM_Y",
             "GM_D",
+            "REF_A",
+            "REF_B",
+            "REF_C",
         ),
     ),
     CompanionFixture(
@@ -152,6 +158,9 @@ _BRIDGE_ELECTRICAL_PORTS = (
     "ACD_C",
     "DC_POS",
     "DC_NEG",
+    "REF_A",
+    "REF_B",
+    "REF_C",
 )
 
 

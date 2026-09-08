@@ -154,6 +154,9 @@ _ELECTRICAL_BRIDGE_PORTS = {
     "ACD_C",
     "DC_POS",
     "DC_NEG",
+    "REF_A",
+    "REF_B",
+    "REF_C",
 }
 _MANIFEST_SOURCES = {
     "registry": "master-bindings-pscad-4.6.2.json",

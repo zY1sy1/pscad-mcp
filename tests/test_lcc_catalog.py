@@ -124,6 +124,9 @@ def test_fixed_catalog_uses_scalar_ao_contracts():
         "AM_D",
         "GM_Y",
         "GM_D",
+        "REF_A",
+        "REF_B",
+        "REF_C",
     }
     assert require_port(bridge, "AO_Y").dimension == 1
     assert require_port(bridge, "AO_D").dimension == 1

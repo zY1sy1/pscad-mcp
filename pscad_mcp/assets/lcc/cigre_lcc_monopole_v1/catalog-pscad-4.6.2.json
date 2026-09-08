@@ -709,6 +709,15 @@
             72,
             63
           ]
+        },
+        {
+          "name": "REF_A", "kind": "electrical", "dimension": 1, "offset": [-108, -198]
+        },
+        {
+          "name": "REF_B", "kind": "electrical", "dimension": 1, "offset": [-108, -180]
+        },
+        {
+          "name": "REF_C", "kind": "electrical", "dimension": 1, "offset": [-108, -162]
         }
       ],
       "parameters": {

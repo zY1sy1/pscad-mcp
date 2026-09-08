@@ -115,14 +115,20 @@ after the intended event. The inverse producer chain must survive save,
 reload, and compile readback; this is not independent waveform golden evidence.
 
 The bridge CB input requires an electrical node reference, not an integer
-block command. Each six-pulse group now uses an installed `master:nodeloop`
-with `View=1` on its own valve-side AC vector and routes X1 to CB. The installed
-Motor_Drive_SVM example confirms the direct-bus node-reference topology. With
-the reference taken after the transformer, both groups use the Master Y-Y/D-D
-phase configuration `KV=-1`; no transformer phase shift is applied twice.
-Compiled phase-node indices and actual firing angles still require licensed
-verification. The previous constant-zero CB compiled to three identical
-phase-node indices and could not supply a three-phase synchronization signal.
+block command. A shared installed `master:nodeloop` with `View=1` receives
+three explicit primary-bus REF_A/B/C ports and routes X1 to both CB inputs.
+The scalar reference ports use the same 1e-6 ohm isolation as the valve ports.
+Installed `Choosing_a_Converter_Transformer.htm` requires a nearly sinusoidal
+reference, usually at the filtered bus. The Y-Y group uses KV=-1 and the
+Y-delta lagging group uses KV=-2, matching native transformer Lead=1 (Lags).
+The former valve-side reference was distorted by commutation: a held 150 deg
+inverter order produced AM near 182.7 deg and GM near 352.7 deg. The isolated
+2026-09-08 primary-reference comparison restored AM near 150 deg and GM near
+16.6 deg, without angle wrapping or changing controller gains. Compiled DTA/MAP
+records verify the three distinct primary reference nodes. These diagnostic
+results establish the reference defect; closed-loop acceptance remains a
+separate gate. The earlier constant-zero CB also failed to supply a valid
+three-phase synchronization signal.
 
 The installed PSCAD 4.6.2 help, `6_Pulse_Bridge/Firing_and_Blocking_Control.htm`
 inside `ol-help.chm`, defines KB=0 as blocking all firing pulses and KB=1 as

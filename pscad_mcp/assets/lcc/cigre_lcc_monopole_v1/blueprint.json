@@ -187,7 +187,10 @@
         "AM_Y",
         "AM_D",
         "GM_Y",
-        "GM_D"
+        "GM_D",
+        "REF_A",
+        "REF_B",
+        "REF_C"
       ],
       "role": "power"
     },
@@ -325,7 +328,10 @@
         "AM_Y",
         "AM_D",
         "GM_Y",
-        "GM_D"
+        "GM_D",
+        "REF_A",
+        "REF_B",
+        "REF_C"
       ],
       "role": "power"
     },
@@ -1097,6 +1103,54 @@
         {"component": "inverter_fault_ground_c", "port": "GND"}
       ],
       "route": {"vertices": [[2916, 280], [2980, 280]], "policy": "orthogonal"}
+    },
+    {
+      "logical_id": "rectifier_reference_a",
+      "kind": "electrical",
+      "endpoints": [
+        {"component": "rectifier_transformer_y", "port": "HV_A"},
+        {"component": "rectifier_bridge", "port": "REF_A"}
+      ]
+    },
+    {
+      "logical_id": "rectifier_reference_b",
+      "kind": "electrical",
+      "endpoints": [
+        {"component": "rectifier_transformer_y", "port": "HV_B"},
+        {"component": "rectifier_bridge", "port": "REF_B"}
+      ]
+    },
+    {
+      "logical_id": "rectifier_reference_c",
+      "kind": "electrical",
+      "endpoints": [
+        {"component": "rectifier_transformer_y", "port": "HV_C"},
+        {"component": "rectifier_bridge", "port": "REF_C"}
+      ]
+    },
+    {
+      "logical_id": "inverter_reference_a",
+      "kind": "electrical",
+      "endpoints": [
+        {"component": "inverter_transformer_y", "port": "HV_A"},
+        {"component": "inverter_bridge", "port": "REF_A"}
+      ]
+    },
+    {
+      "logical_id": "inverter_reference_b",
+      "kind": "electrical",
+      "endpoints": [
+        {"component": "inverter_transformer_y", "port": "HV_B"},
+        {"component": "inverter_bridge", "port": "REF_B"}
+      ]
+    },
+    {
+      "logical_id": "inverter_reference_c",
+      "kind": "electrical",
+      "endpoints": [
+        {"component": "inverter_transformer_y", "port": "HV_C"},
+        {"component": "inverter_bridge", "port": "REF_C"}
+      ]
     },
     {
       "logical_id": "rectifier_filter_a_y",

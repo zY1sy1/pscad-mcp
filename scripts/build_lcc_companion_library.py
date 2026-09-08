@@ -144,6 +144,8 @@ def _svg(
         is_electrical = kind == "electrical"
         x = 72 if direction == "output" or name.startswith("DC_") else -72
         y = -63 + index * 9
+        if name in {"REF_A", "REF_B", "REF_C"}:
+            x, y = -108, -198 + 18 * "ABC".index(name[-1])
         attributes = {
             "model": "Natural" if is_electrical else "Transfer",
             "name": name,
@@ -343,9 +345,13 @@ def _bridge_definition(definitions: ET.Element) -> None:
             (name, "data", "output", "Real")
             for name in ("AM_Y", "AM_D", "GM_Y", "GM_D")
         )
+        + tuple(
+            (name, "electrical", "bidirectional", "Real")
+            for name in ("REF_A", "REF_B", "REF_C")
+        )
     )
     g6_y = {**COMMON_G6P200, "KV": "-1"}
-    g6_d = {**COMMON_G6P200, "KV": "-1"}
+    g6_d = {**COMMON_G6P200, "KV": "-2"}
     components = (
         _pin("pin_acy_a", "ACY_A", 90, 306, 2),
         _pin("pin_acy_b", "ACY_B", 90, 342, 2),
@@ -415,8 +421,14 @@ def _bridge_definition(definitions: ET.Element) -> None:
         ),
         Component("bridge_y", "master:g6p200", 360, 342, g6_y),
         Component("bridge_d", "master:g6p200", 360, 630, g6_d),
-        Component("reference_y", "master:nodeloop", 288, 324, {"View": "1"}),
-        Component("reference_d", "master:nodeloop", 288, 612, {"View": "1"}),
+        Component("reference_primary", "master:nodeloop", 288, 936, {"View": "1"}),
+        Component("reference_breakout", "master:breakout", 180, 954, {"Dis": "0", "Com": "0"}, 4),
+        _pin("reference_pin_a", "REF_A", 90, 918, 2),
+        _pin("reference_pin_b", "REF_B", 90, 954, 2),
+        _pin("reference_pin_c", "REF_C", 90, 990, 2),
+        Component("reference_isolation_a", "master:resistor", 108, 918, {"R": "1.0e-6 [ohm]"}),
+        Component("reference_isolation_b", "master:resistor", 108, 954, {"R": "1.0e-6 [ohm]"}),
+        Component("reference_isolation_c", "master:resistor", 108, 990, {"R": "1.0e-6 [ohm]"}),
         _import("import_ao_y", "AO_Y", 504, 378),
         _import("import_ao_d", "AO_D", 504, 666),
         _import("import_enable", "ENABLE", 504, 486),
@@ -458,8 +470,15 @@ def _bridge_definition(definitions: ET.Element) -> None:
         Wire("ENABLE_CONVERSION", ((540, 486), (564, 486))),
         Wire("ENABLE_TO_KB_Y", ((600, 486), (780, 486), (780, 396), (414, 396))),
         Wire("ENABLE_TO_KB_D", ((600, 486), (792, 486), (792, 684), (414, 684))),
-        Wire("CB_REFERENCE_Y", ((288, 288), (288, 252), (342, 252))),
-        Wire("CB_REFERENCE_D", ((288, 576), (288, 540), (342, 540))),
+        Wire("REFERENCE_BUS", ((180, 954), (180, 936), (288, 936))),
+        Wire("CB_REFERENCE_Y", ((288, 900), (252, 900), (252, 540), (252, 252), (342, 252))),
+        Wire("CB_REFERENCE_D", ((252, 540), (342, 540))),
+        Wire("REF_A_TO_ISOLATION", ((90, 918), (108, 918))),
+        Wire("REF_B_TO_ISOLATION", ((90, 954), (108, 954))),
+        Wire("REF_C_TO_ISOLATION", ((90, 990), (108, 990))),
+        Wire("REF_A_TO_BREAKOUT", ((182, 918), (216, 918))),
+        Wire("REF_B_TO_BREAKOUT", ((182, 954), (216, 954))),
+        Wire("REF_C_TO_BREAKOUT", ((182, 990), (216, 990))),
         Wire("AM_Y_OUTPUT", ((414, 288), (540, 288))),
         Wire("GM_Y_OUTPUT", ((414, 306), (540, 306))),
         Wire("AM_D_OUTPUT", ((414, 576), (540, 576))),

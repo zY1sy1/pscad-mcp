@@ -33,10 +33,10 @@ FORBIDDEN_STRUCTURAL_TAGS = {
 EXPECTED_MASTER_COUNTS = {
     "cigre_lcc_v1:LCC12PulseBridge": {
         "master:g6p200": 2,
-        "master:xnode": 8,
-        "master:breakout": 2,
-        "master:nodeloop": 2,
-        "master:resistor": 6,
+        "master:xnode": 11,
+        "master:breakout": 3,
+        "master:nodeloop": 1,
+        "master:resistor": 9,
         "master:import": 3,
         "master:export": 4,
         "master:unity": 1,
@@ -106,6 +106,9 @@ EXPECTED_PORTS = {
                 "ACD_C",
                 "DC_POS",
                 "DC_NEG",
+                "REF_A",
+                "REF_B",
+                "REF_C",
             )
         },
         **{
@@ -172,6 +175,13 @@ REQUIRED_CONNECTIONS = {
         "ENABLE_CONVERSION",
         "CB_REFERENCE_Y",
         "CB_REFERENCE_D",
+        "REFERENCE_BUS",
+        "REF_A_TO_ISOLATION",
+        "REF_B_TO_ISOLATION",
+        "REF_C_TO_ISOLATION",
+        "REF_A_TO_BREAKOUT",
+        "REF_B_TO_BREAKOUT",
+        "REF_C_TO_BREAKOUT",
     },
     "cigre_lcc_v1:RectifierControl": {
         "CURRENT_ERROR",

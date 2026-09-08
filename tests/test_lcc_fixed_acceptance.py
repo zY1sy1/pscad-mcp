@@ -93,6 +93,9 @@ def _snapshot(fixture) -> dict[str, object]:
         "ACD_C",
         "DC_POS",
         "DC_NEG",
+        "REF_A",
+        "REF_B",
+        "REF_C",
     }
     return {
         "definition": fixture.definition,
@@ -268,6 +271,20 @@ def test_report_accepts_exact_packaged_alpha_smoke_bounds():
     assert validate_fixed_lcc_acceptance_report(payload)["status"] == "PASS"
     for name, (lower, upper) in limits.items():
         assert fixed_acceptance._AO_LIMITS[name] == pytest.approx((lower, upper))
+
+
+@pytest.mark.parametrize("kind", ["electrical", "data"])
+def test_reference_ports_require_electrical_readback(kind):
+    payload = valid_fixed_report()
+    for fixture in payload["component_gate"]["fixtures"][:2]:
+        for snapshot in ("before_reload", "after_reload"):
+            for phase in "ABC":
+                fixture[snapshot]["ports"][f"REF_{phase}"]["kind"] = kind
+    if kind == "electrical":
+        assert validate_fixed_lcc_acceptance_report(payload)["status"] == "PASS"
+    else:
+        with pytest.raises(BackendError, match="Fixture port contract"):
+            validate_fixed_lcc_acceptance_report(payload)
 
 
 def test_valid_fixed_report_is_simulated_pass_with_exact_exclusions():

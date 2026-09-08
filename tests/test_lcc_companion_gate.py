@@ -30,6 +30,9 @@ FIXTURE_PORTS = {
         "AM_D",
         "GM_Y",
         "GM_D",
+        "REF_A",
+        "REF_B",
+        "REF_C",
     },
     "cigre_lcc_v1:RectifierControl": {
         "VDC_MEAS",
@@ -155,6 +158,9 @@ class CompanionGateFakeService:
             "ACD_C",
             "DC_POS",
             "DC_NEG",
+            "REF_A",
+            "REF_B",
+            "REF_C",
         }
         if definition in FIXTURE_PORTS:
             port_names = FIXTURE_PORTS[definition]
@@ -540,8 +546,8 @@ def test_component_gate_connects_fixture_harness_before_each_build(tmp_path):
         for call in service.calls[:first_build]
         if call[0] == "create_wire"
     ]
-    assert len(bridge_wires) == 11
-    assert len({wire[1][0] for wire in bridge_wires}) == 11
+    assert len(bridge_wires) == 14
+    assert len({wire[1][0] for wire in bridge_wires}) == 14
 
 
 def test_fixture_input_harness_uses_non_crossing_bend_order(tmp_path):

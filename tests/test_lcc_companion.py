@@ -27,6 +27,9 @@ PORTS = {
         ("AM_D", "Transfer", "Output", "Real"),
         ("GM_Y", "Transfer", "Output", "Real"),
         ("GM_D", "Transfer", "Output", "Real"),
+        ("REF_A", "Natural", "", "NonRemovable"),
+        ("REF_B", "Natural", "", "NonRemovable"),
+        ("REF_C", "Natural", "", "NonRemovable"),
     ),
     "RectifierControl": (
         ("VDC_MEAS", "Transfer", "Input", "Real"),
@@ -68,12 +71,12 @@ USERS = {
     "LCC12PulseBridge": (
         "master:g6p200",
         "master:g6p200",
-        *("master:xnode" for _ in range(8)),
+        *("master:xnode" for _ in range(11)),
+        "master:breakout",
         "master:breakout",
         "master:breakout",
         "master:nodeloop",
-        "master:nodeloop",
-        *("master:resistor" for _ in range(6)),
+        *("master:resistor" for _ in range(9)),
         *("master:import" for _ in range(3)),
         *("master:export" for _ in range(4)),
         "master:unity",
@@ -141,6 +144,13 @@ WIRES = {
         "ENABLE_CONVERSION",
         "CB_REFERENCE_Y",
         "CB_REFERENCE_D",
+        "REFERENCE_BUS",
+        "REF_A_TO_ISOLATION",
+        "REF_B_TO_ISOLATION",
+        "REF_C_TO_ISOLATION",
+        "REF_A_TO_BREAKOUT",
+        "REF_B_TO_BREAKOUT",
+        "REF_C_TO_BREAKOUT",
     ),
     "RectifierControl": (
         "CURRENT_ERROR",
@@ -202,6 +212,9 @@ XNODE_NAMES = (
     "ACD_C",
     "DC_POS",
     "DC_NEG",
+    "REF_A",
+    "REF_B",
+    "REF_C",
 )
 
 
@@ -385,9 +398,9 @@ def test_physical_bridge_requires_two_g6p200_and_scalar_ao(tmp_path):
 
     bridge = evidence["definitions"]["cigre_lcc_v1:LCC12PulseBridge"]
     assert bridge["master_instances"]["master:g6p200"] == 2
-    assert bridge["master_instances"]["master:xnode"] == 8
-    assert bridge["master_instances"]["master:breakout"] == 2
-    assert bridge["master_instances"]["master:resistor"] == 6
+    assert bridge["master_instances"]["master:xnode"] == 11
+    assert bridge["master_instances"]["master:breakout"] == 3
+    assert bridge["master_instances"]["master:resistor"] == 9
     assert bridge["ports"]["AO_Y"] == {
         "kind": "data",
         "dimension": 1,
@@ -437,22 +450,23 @@ def test_generated_bridge_uses_ac_node_references_for_phase_locking():
     root = ET.fromstring(render_library())
     schematic = root.find("./definitions/Definition[@name='LCC12PulseBridge']/schematic")
     references = schematic.findall("./User[@defn='master:nodeloop']")
-    assert len(references) == 2
+    assert len(references) == 1
     assert schematic.find("./User/paramlist/param[@value='LCC_CB_ZERO']") is None
     bridges = schematic.findall("./User[@defn='master:g6p200']")
-    for suffix, reference, bridge in zip(("Y", "D"), references, bridges, strict=True):
-        x, y = int(reference.get("x")), int(reference.get("y"))
-        assert reference.find("./paramlist/param[@name='View']").get("value") == "1"
-        assert bridge.find("./paramlist/param[@name='KV']").get("value") == "-1"
+    reference = references[0]
+    x, y = int(reference.get("x")), int(reference.get("y"))
+    assert reference.find("./paramlist/param[@name='View']").get("value") == "1"
+    for suffix, bridge, shift in zip(("Y", "D"), bridges, ("-1", "-2"), strict=True):
+        assert bridge.find("./paramlist/param[@name='KV']").get("value") == shift
         wire = schematic.find(f"./Wire[@lcc_role='CB_REFERENCE_{suffix}']")
         origin = (int(wire.get("x")), int(wire.get("y")))
         points = [
             (origin[0] + int(v.get("x")), origin[1] + int(v.get("y")))
             for v in wire.findall("./vertex")
         ]
-        assert points[0] == (x, y - 36)
+        assert points[0] == ((x, y - 36) if suffix == "Y" else (252, 540))
         assert points[-1] == (int(bridge.get("x")) - 18, int(bridge.get("y")) - 90)
-        bus = schematic.find(f"./Wire[@lcc_role='AC{suffix}_TO_{suffix}_BUS']")
+        bus = schematic.find("./Wire[@lcc_role='REFERENCE_BUS']")
         origin = (int(bus.get("x")), int(bus.get("y")))
         bus_points = [
             (origin[0] + int(v.get("x")), origin[1] + int(v.get("y")))
@@ -505,7 +519,7 @@ def test_generated_companion_contains_exact_wp1b_output_channels(tmp_path):
     assert [
         int(node.get("orient"))
         for node in bridge.findall("./schematic/User[@defn='master:xnode']")
-    ] == [2, 2, 2, 2, 2, 2, 6, 4]
+    ] == [2, 2, 2, 2, 2, 2, 6, 4, 2, 2, 2]
 
     def points(name):
         wire = bridge.find(f"./schematic/Wire[@lcc_role='{name}']")
@@ -611,15 +625,18 @@ def test_generated_bridge_isolates_scalar_phase_ports_before_breakout():
         (108, 594),
         (108, 630),
         (108, 666),
+        (108, 918),
+        (108, 954),
+        (108, 990),
     ]
     assert [
         item.find("./paramlist/param[@name='R']").get("value")
         for item in resistors
-    ] == ["1.0e-6 [ohm]"] * 6
+    ] == ["1.0e-6 [ohm]"] * 9
     assert [
         int(item.get("orient"))
         for item in bridge.findall("./schematic/User[@defn='master:breakout']")
-    ] == [4, 4]
+    ] == [4, 4, 4]
 
 
 def test_generated_control_imports_avoid_reserved_internal_names():
