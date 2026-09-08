@@ -103,6 +103,47 @@ def test_audit_records_official_library_object_dependencies(tmp_path: Path) -> N
     assert report["compatible"] is True
 
 
+def test_audit_binds_declared_compiler_libraries_and_legacy_object_union(tmp_path):
+    from xml.etree import ElementTree as ET
+    project, library = make_synthetic_official_shape(tmp_path)
+    tree = ET.parse(library)
+    params = ET.SubElement(tree.getroot(), "paramlist", {"name": "Libs"})
+    ET.SubElement(params, "param", {"name": "0", "value": r".\lib\$(Compiler)\intermediate.lib"})
+    tree.write(library, encoding="utf-8")
+    linked = tmp_path / "lib" / "gf42" / "intermediate.lib"
+    linked.parent.mkdir(parents=True)
+    linked.write_bytes(b"synthetic-compiler-library")
+    object_file = tmp_path / "Obj_Files_2016_03_25" / "gf42" / "x.obj"
+    object_file.parent.mkdir(parents=True)
+    object_file.write_bytes(b"synthetic-object")
+    report = audit_mmc_template(project, library)
+    support = report["compiler_support"]
+    assert support["link_libraries"]["required"] is True
+    assert support["link_libraries"]["present"] is True
+    assert support["link_libraries"]["files"][0] == {"path": str(linked.resolve()), "relative_path": "lib/gf42/intermediate.lib", "compiler": "gf42", "sha256": sha256(linked)}
+    assert {item["relative_path"] for item in support["files"]} == {"lib/gf42/intermediate.lib", "Obj_Files_2016_03_25/gf42/x.obj"}
+    assert report["compatible"] is True
+
+
+def test_audit_rejects_missing_declared_link_library(tmp_path):
+    from xml.etree import ElementTree as ET
+    project, library = make_synthetic_official_shape(tmp_path)
+    tree = ET.parse(library)
+    params = ET.SubElement(tree.getroot(), "paramlist", {"name": "Libs"})
+    ET.SubElement(params, "param", {"name": "0", "value": r".\lib\$(Compiler)\intermediate.lib"})
+    tree.write(library, encoding="utf-8")
+    report = audit_mmc_template(project, library)
+    assert report["compatible"] is False
+    assert report["compiler_support"]["link_libraries"]["present"] is False
+
+
+def test_audit_legacy_fixture_without_libs_remains_compatible(tmp_path):
+    project, library = make_synthetic_official_shape(tmp_path)
+    report = audit_mmc_template(project, library)
+    assert report["compatible"] is True
+    assert report["compiler_support"]["link_libraries"] == {"required": False, "present": True, "declarations": [], "files": []}
+
+
 def test_audit_records_template_native_emt_control_contract(tmp_path: Path) -> None:
     project, library = make_synthetic_official_shape(tmp_path)
     text = project.read_text(encoding="utf-8")

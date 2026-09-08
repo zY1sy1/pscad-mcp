@@ -36,14 +36,49 @@ def _compiler_support(library: Path) -> dict[str, object]:
         text = ""
     required = "Obj_Files_2016_03_25" in text
     hashes: dict[str, str] = {}
+    files: dict[str, dict[str, str]] = {}
     if support.is_dir():
         for path in sorted(item for item in support.rglob("*") if item.is_file()):
             hashes[path.relative_to(support).as_posix()] = _sha256(path)
+            if not path.is_symlink():
+                relative = path.relative_to(library.parent).as_posix()
+                files[relative] = {"path": str(path.resolve()), "relative_path": relative, "sha256": _sha256(path)}
+    root = _parse(library, "library")
+    declarations: list[dict[str, object]] = []
+    linked: dict[str, dict[str, str]] = {}
+    all_present = True
+    for parameter in root.findall("./paramlist[@name='Libs']/param"):
+        raw = _text(parameter.get("value"))
+        if not raw:
+            continue
+        normalized = raw.replace("\\", "/")
+        parts = tuple(part for part in normalized.split("/") if part not in ("", "."))
+        invalid_path = Path(normalized).is_absolute() or PureWindowsPath(raw).is_absolute() or ".." in parts
+        unsupported_macro = "$" in normalized.replace("$(Compiler)", "")
+        matches: list[Path] = []
+        if not invalid_path and not unsupported_macro and not any(character in normalized for character in ("*", "?", "[", "]")):
+            pattern = "/".join(parts).replace("$(Compiler)", "*")
+            matches = sorted(path for path in library.parent.glob(pattern) if path.is_file() and not path.is_symlink() and path.resolve().is_relative_to(library.parent.resolve()))
+        declaration: dict[str, object] = {"parameter": _text(parameter.get("name")), "declared_path": raw, "resolved_files": []}
+        for path in matches:
+            relative = path.relative_to(library.parent).as_posix()
+            item = {"path": str(path.resolve()), "relative_path": relative, "sha256": _sha256(path)}
+            if "$(Compiler)" in parts:
+                item["compiler"] = Path(relative).parts[parts.index("$(Compiler)")]
+            linked[relative] = item
+            files[relative] = item
+            declaration["resolved_files"].append(relative)
+        if not matches:
+            all_present = False
+            declaration["reason"] = "unsupported_or_external_path" if invalid_path or unsupported_macro else "missing_library"
+        declarations.append(declaration)
     return {
         "required": required,
         "root": str(support),
         "present": support.is_dir(),
         "hashes": hashes,
+        "link_libraries": {"required": bool(declarations), "present": all_present, "declarations": declarations, "files": [linked[key] for key in sorted(linked)]},
+        "files": [files[key] for key in sorted(files)],
     }
 
 
@@ -458,6 +493,9 @@ def build_template_audit(project: Path, library: Path) -> MmcTemplateAudit:
     submodule_topology = _submodule_topology(project_root, library_root)
     if compiler_support["required"] and not compiler_support["present"]:
         warnings.append("The sibling compiler object tree is missing.")
+        compatible = False
+    if not compiler_support["link_libraries"]["present"]:
+        warnings.append("A declared sibling compiler library is missing or unresolved.")
         compatible = False
     if version != "4.6.2":
         warnings.append("The installed MMC template does not declare PSCAD 4.6.2.")
