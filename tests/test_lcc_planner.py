@@ -1023,6 +1023,13 @@ def test_wp1c_embedded_plan_verifies_control_then_dynamically_accepts(tmp_path):
     )
 
 
+def test_wp1c_final_project_has_a_distinct_reload_identity(tmp_path):
+    assets = load_packaged_asset_set()
+    plan = create_plan(_request(verification_profile=WP1C_DYNAMIC_PROFILE), assets, complete_live_inventory(assets), tmp_path)
+    assert Path(plan.target_path).stem == "CIGRE_LCC_PUBLISHED"
+    assert Path(plan.staging_path).name == "CIGRE_LCC.staging"
+
+
 def test_wp1c_plan_binds_ac_meter_power_signal_names(tmp_path):
     assets = load_packaged_asset_set()
     plan = create_plan(

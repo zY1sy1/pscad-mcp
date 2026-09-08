@@ -464,7 +464,7 @@ def _resolve_paths(request: LccPlanRequest, workspace: str | Path | PathPolicy) 
     staging_identity = Path(filename).stem
     final_filename = (
         f"{staging_identity}_PUBLISHED.pscx"
-        if request.verification_profile == WP1B_SMOKE_PROFILE
+        if request.verification_profile in {WP1B_SMOKE_PROFILE, WP1C_DYNAMIC_PROFILE}
         else filename
     )
     if isinstance(workspace, PathPolicy):
