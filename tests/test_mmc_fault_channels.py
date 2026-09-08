@@ -86,6 +86,27 @@ def test_production_fault_contract_preserves_physical_limits_and_isolated_window
     assert fault_channels.default_fault_checks()["fault_window_s"] == [2.5, 2.7]
 
 
+@pytest.mark.parametrize("injection", ["band", "window", "limit"])
+def test_observations_cannot_authorize_their_own_acceptance_contract(injection):
+    samples, contract, checks = fault_fixture()
+    if injection == "band":
+        checks["nominal_target_relative_tolerance"] = 0.2
+        channel = next(item for item in samples["channels"] if item["description"] == "v_dc")
+        channel["values"] = [600.0 if value == 640.0 else value for value in channel["values"]]
+    elif injection == "window":
+        checks["prefault_window_s"] = [0.0, 0.2]
+    else:
+        checks["fault_current_limit_ka"] = 200.0
+    samples["channel_contract"] = contract
+    samples["checks_contract"] = checks
+    report = evaluate_template_native_dc_fault(samples, fault_current_limit_ka=checks["fault_current_limit_ka"])
+    assert report["verdict"] == "INCOMPLETE_ANALYSIS"
+    assert "channel_contract_missing" in report["invalid_evidence"]
+    report = evaluate_template_native_dc_fault(samples, channel_contract=contract, fault_current_limit_ka=checks["fault_current_limit_ka"])
+    assert report["verdict"] == "INCOMPLETE_ANALYSIS"
+    assert "checks_contract_missing" in report["invalid_evidence"]
+
+
 def test_a_high_activity_duplicate_cannot_override_the_bound_station():
     samples, contract, checks = fault_fixture()
     other = copy.deepcopy(samples["channels"][0])
@@ -651,6 +672,53 @@ def test_dc_damping_is_in_power_branch_before_total_current_limit(tmp_path, inst
     assert result["branch"] == "P_mode_InA_before_Imag_limiter"
     assert components[result["gain_owner"]].get("defn") == "master:gain"
     assert dict(_parameters(components[result["gain_owner"]]))["G"] == "1.5"
+
+
+@pytest.mark.parametrize("parameter,value", [("G", "0.5"), ("T", "0.006 [s]"), ("Dim", "2"), ("Limit", "1"), ("Reset", "0"), ("YO", "0")])
+def test_dc_damping_rejects_a_changed_filter_contract(tmp_path, installed_sources, parameter, value):
+    from xml.etree import ElementTree as ET
+    project, _, master = installed_sources
+    filtered = tmp_path / "filtered.pscx"
+    record = fault_channels.materialize_dc_feedback_filter(project, filtered, master=master)
+    tree = ET.parse(filtered)
+    element = next(item for item in tree.findall(".//User") if item.get("id") == record["filter_owner"])
+    next(item for item in element.findall("./paramlist/param") if item.get("name") == parameter).set("value", value)
+    tree.write(filtered, encoding="utf-8")
+    with pytest.raises(BackendError):
+        fault_channels.materialize_dc_port_damping(filtered, tmp_path / "damped.pscx", master=master)
+
+
+def test_dc_damping_rejects_a_disconnected_filter(tmp_path, installed_sources):
+    from xml.etree import ElementTree as ET
+    project, _, master = installed_sources
+    filtered = tmp_path / "filtered.pscx"
+    fault_channels.materialize_dc_feedback_filter(project, filtered, master=master)
+    tree = ET.parse(filtered)
+    scope = next(item for item in tree.findall("./definitions/Definition") if item.get("name") == "VSCControl2").find("schematic")
+    wire = next(item for item in scope.findall("Wire") if item.get("x") == "3528" and item.get("y") == "3402")
+    scope.remove(wire)
+    tree.write(filtered, encoding="utf-8")
+    with pytest.raises(BackendError):
+        fault_channels.materialize_dc_port_damping(filtered, tmp_path / "damped.pscx", master=master)
+
+
+def test_virtual_resistance_uses_measured_arm_current_and_common_voltage_channel(tmp_path, installed_sources):
+    from xml.etree import ElementTree as ET
+
+    from pscad_mcp.hvdc.builders.mmc.template_audit import _components, _parameters
+    project, _, master = installed_sources
+    destination = tmp_path / "virtual_resistance.pscx"
+    result = fault_channels.materialize_arm_virtual_resistance(project, destination, master=master)
+    root = ET.parse(destination).getroot()
+    users = {item.get("id"): item for item in _components(root)}
+    assert dict(_parameters(users["166206085"]))["Name"] == "MmcVzEffective"
+    assert dict(_parameters(users["1642798056"]))["Name"] == "Vz"
+    assert result["resistance_per_arm_ohm"] == 30.0
+    assert result["equivalent_dc_resistance_ohm"] == 20.0
+    assert result["gain_pu_per_ka"] == 0.09375
+    assert result["command_difference_unchanged"] is True
+    assert dict(_parameters(users[result["filter_owner"]]))["YO"] == "MmcIcircRaw"
+    assert result["dc_gain"] == 0.0
 
 
 def test_owned_session_is_cleaned_when_status_raises(monkeypatch):

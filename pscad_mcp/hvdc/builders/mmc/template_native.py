@@ -398,8 +398,8 @@ def evaluate_template_native_dc_fault(
             "reason": "half_bridge does not claim intrinsic DC-fault blocking",
         }
     samples = samples if isinstance(samples, Mapping) else {}
-    channel_contract = channel_contract or samples.get("channel_contract", {})
-    checks_contract = checks_contract or samples.get("checks_contract", {})
+    channel_contract = channel_contract if channel_contract is not None else {}
+    checks_contract = checks_contract if checks_contract is not None else {}
     missing: list[str] = []
     invalid: list[str] = []
     check_results: list[dict[str, Any]] = []

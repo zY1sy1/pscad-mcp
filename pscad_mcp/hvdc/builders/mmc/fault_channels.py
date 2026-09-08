@@ -37,6 +37,7 @@ def default_fault_checks() -> dict[str, Any]:
         "frequency_hz": 60.0, "arm_rms_stability_relative_tolerance": 0.05,
         "nominal_target_relative_tolerance": 0.05, "arm_peak_limit_ka": 3.0,
         "maximum_power_loss_fraction": 0.1,
+        "modulation_abs_limit": 2.0,
         "fault_window_s": [2.5, 2.7], "prefault_window_s": [2.0, 2.4], "recovery_window_s": [4.6, 5.0],
         "negative_voltage_max_kv": -1.0, "fault_current_limit_ka": 20.0,
         "voltage_recovery_relative_tolerance": 0.05, "power_recovery_relative_tolerance": 0.05,
@@ -332,6 +333,24 @@ def instrument_fault_channels(source: str | Path, destination: str | Path, *, li
             pole_name = f"MFE_Pole_{terminal}_{phase}"
             pole_definition = clone_definition(definitions["MMC_Hb_Pole_PWM"], pole_name)
             pole.set("defn", namespace + ":" + pole_name)
+            if any(dict(_parameters(item)).get("Name") == "MmcVzEffective" for item in _components(pole_definition)):
+                probes.extend(component_record(pole_definition, item) for item in _components(pole_definition))
+                for wire in pole_definition.findall("./schematic/Wire"):
+                    wires.append({"definition_name": pole_name, "owner_id": wire.get("id"), "attributes": {key: wire.get(key) for key in ("classid", "x", "y", "orient")}, "vertices": [dict(item.attrib) for item in wire.findall("vertex")]})
+                for signal, role, units, quantity in (
+                    ("MmcIcircRaw", "circulating_current_raw", "kA", "half_sum_of_measured_arm_currents"),
+                    ("MmcIcircHighpass", "circulating_current_highpass", "kA", "local_highpass_circulating_current"),
+                    ("Vz", "circulating_voltage_raw", "pu", "original_ccsc_common_voltage_reference"),
+                    ("MmcVzEffective", "circulating_voltage_effective", "pu", "common_voltage_reference_with_virtual_resistance"),
+                ):
+                    sources = [item for item in _components(pole_definition) if item.get("defn") in ("master:datalabel", "master:import") and dict(_parameters(item)).get("Name") == signal]
+                    if not sources:
+                        raise _error("MMC_ACCEPTANCE_INCOMPLETE", "A virtual-resistance diagnostic source is missing.", signal=signal)
+                    add_probe(pole_definition, role, f"{terminal}/{phase}", signal, sources[0], units_override=units, extra={"quantity": quantity})
+            for arm, signal in (("upper", "VrefT"), ("lower", "VrefB")):
+                labels = [item for item in _components(pole_definition) if item.get("defn") == "master:datalabel" and dict(_parameters(item)).get("Name") == signal]
+                if labels:
+                    add_probe(pole_definition, "modulation_request", f"{terminal}/{phase}/{arm}", signal, labels[0], units_override="pu", extra={"quantity": "signed_arm_voltage_request", "requested_voltage_equation": "0.5*Vref*sum(Vc)", "carrier_range": [0.0, 2.0], "physical_cell_count_bounded": True})
             cells = [item for item in _components(pole_definition) if item.get("defn") == "intermediate:FullCellR_n"]
             if len(cells) != 2 or any(dict(_parameters(item)).get("DTBP") != "0" for item in cells):
                 raise _error("MMC_ACCEPTANCE_INCOMPLETE", "Every pole must contain two unconditional full-bridge cell groups.")
@@ -696,6 +715,21 @@ def materialize_dc_port_damping(source: str | Path, destination: str | Path, *, 
     filters = [item for item in users.values() if item.get("defn") == "master:realpole" and dict(_parameters(item)).get("COM") == "MMC DC feedback only"]
     if selector is None or limiter is None or dict(_parameters(selector)).get("A") != "1" or dict(_parameters(selector)).get("DPath") != "1" or dict(_parameters(limiter)).get("UL") != "Imax" or len(filters) != 1:
         raise _error("MMC_ACCEPTANCE_INCOMPLETE", "Power-mode selection, total limiter, or local DC feedback filter differs.")
+    expected_filter = {"G": "1.0", "T": "0.005 [s]", "Dim": "1", "Limit": "0", "Reset": "2", "YO": "Edc_Pu", "Min": "-10.0", "Max": "10.0", "COM": "MMC DC feedback only"}
+    if any(dict(_parameters(filters[0])).get(key) != value for key, value in expected_filter.items()) or any(filters[0].get(key) != value for key, value in {"x": "3600", "y": "3402", "orient": "0"}.items()):
+        raise _error("MMC_ACCEPTANCE_INCOMPLETE", "The complete zero-DC-gain filter contract differs.")
+    for signal, x in (("Edc_Pu", "3528"), ("MmcFilteredVdcPu", "3672")):
+        labels = [item for item in users.values() if item.get("defn") == "master:datalabel" and dict(_parameters(item)).get("Name") == signal and item.get("x") == x and item.get("y") == "3402"]
+        if len(labels) != 1:
+            raise _error("MMC_ACCEPTANCE_INCOMPLETE", "The local DC filter signal binding differs.", signal=signal)
+    for expected_points in ([(3528, 3402), (3564, 3402)], [(3636, 3402), (3672, 3402)]):
+        connections = []
+        for item in definition.findall("./schematic/Wire"):
+            observed = [(int(item.get("x", "0")) + int(point.get("x", "0")), int(item.get("y", "0")) + int(point.get("y", "0"))) for point in item.findall("vertex")]
+            if observed == expected_points or observed == list(reversed(expected_points)):
+                connections.append(item)
+        if len(connections) != 1:
+            raise _error("MMC_ACCEPTANCE_INCOMPLETE", "The local DC filter connection is missing or ambiguous.")
     master_root = ET.parse(master_path).getroot()
     for name, required in {"gain": {"IN:Dim": (-36, 0), "OUT:Dim": (36, 0)}, "sumjct": {"IND": (-36, 0), "INB": (0, -36), "OUT": (36, 0)}, "select": {"InA:Dim": (-36, -36)}}.items():
         component_definition = next((item for item in master_root.findall("./definitions/Definition") if item.get("name") == name), None)
@@ -759,11 +793,107 @@ def materialize_dc_port_damping(source: str | Path, destination: str | Path, *, 
     return {"source": str(original), "source_sha256": digest, "destination": str(target), "destination_sha256": _sha256(target), "master_sha256": master_digest, "gain_owner": gain.get("id"), "equation": "power_mode_id = Idref1 - 1.5 * (Edc_Pu - MmcFilteredVdcPu)", "gain_pu": 1.5, "dc_gain": 0.0, "branch": "P_mode_InA_before_Imag_limiter", "selector_owner": "1610070623", "total_current_limiter_owner": "1359229547", "replaced_wire_owner": "2067107620", "steady_power_order_changed": False}
 
 
+def materialize_arm_virtual_resistance(source: str | Path, destination: str | Path, *, master: str | Path) -> dict[str, Any]:
+    """Add high-pass circulating-current feedback to the common arm voltage."""
+
+    original, master_path = _regular(source), _regular(master)
+    target = _new_target(destination, (original, master_path))
+    digest, master_digest = _sha256(original), _sha256(master_path)
+    root = ET.parse(original).getroot()
+    definitions = {item.get("name"): item for item in root.findall("./definitions/Definition")}
+    pole = definitions.get("MMC_Hb_Pole_PWM")
+    main = definitions.get("Main")
+    if pole is None or main is None or any(dict(_parameters(item)).get("Name") == "MmcDcDamping" for item in _components(root)):
+        raise _error("MMC_ACCEPTANCE_INCOMPLETE", "Use the native baseline without the rejected d-axis damping experiment.")
+    for instance in _components(main):
+        if instance.get("defn", "").endswith(":MMC_Hb_PWM") and dict(_parameters(instance)).get("VdcBase") not in ("640", "640.0", "640 [kV]", "640.0 [kV]"):
+            raise _error("MMC_ACCEPTANCE_INCOMPLETE", "Virtual resistance requires the frozen 640 kV normalization.")
+    users = {item.get("id"): item for item in _components(pole)}
+    expected = {"166206085": ("master:datalabel", "Name", "Vz"), "1642798056": ("master:import", "Name", "Vz"), "1514910955": ("master:varrlc", "I", "IaTop"), "1386643874": ("master:varrlc", "I", "IaBtm")}
+    for owner, (defn, parameter, value) in expected.items():
+        if owner not in users or users[owner].get("defn") != defn or dict(_parameters(users[owner])).get(parameter) != value:
+            raise _error("MMC_ACCEPTANCE_INCOMPLETE", "The audited arm-current/common-voltage source differs.", owner=owner)
+    if dict(_parameters(users["148785169"])).get("B") != "1" or dict(_parameters(users["935854485"])).get("B") != "-1":
+        raise _error("MMC_ACCEPTANCE_INCOMPLETE", "The original common/differential voltage equations differ.")
+    master_root = ET.parse(master_path).getroot()
+    realpole = next((item for item in master_root.findall("./definitions/Definition") if item.get("name") == "realpole"), None)
+    if realpole is None or not any(item.get("name") == "T" and item.get("unit") == "s" for item in realpole.findall("./form/category/parameter")):
+        raise _error("MMC_ACCEPTANCE_INCOMPLETE", "The verified real-pole time-constant contract is missing.")
+    next(item for item in users["166206085"].findall("./paramlist/param") if item.get("name") == "Name").set("value", "MmcVzEffective")
+    used = {item.get("id") for item in root.iter()}
+    def next_id():
+        value = 2021000001
+        while str(value) in used:
+            value += 1
+        used.add(str(value))
+        return str(value)
+    canvas = pole.find("schematic")
+    def user(defn, x, y, params):
+        item = ET.SubElement(canvas, "User", {"classid": "UserCmp", "defn": defn, "id": next_id(), "x": str(x), "y": str(y), "orient": "0", "w": "84", "h": "58", "z": "165", "link": "-1", "q": "4"})
+        group = ET.SubElement(item, "paramlist", {"name": "", "link": "-1"})
+        for key, value in params.items():
+            ET.SubElement(group, "param", {"name": key, "value": value})
+        return item
+    def label(name, x, y):
+        return user("master:datalabel", x, y, {"Name": name})
+    def wire(x, y, dx, dy):
+        item = ET.SubElement(canvas, "Wire", {"classid": "WireOrthogonal", "id": next_id(), "name": "", "x": str(x), "y": str(y), "orient": "0", "w": str(abs(dx) + 10), "h": str(abs(dy) + 10)})
+        ET.SubElement(item, "vertex", {"x": "0", "y": "0"})
+        ET.SubElement(item, "vertex", {"x": str(dx), "y": str(dy)})
+    add = {"DPath": "1", "A": "0", "B": "1", "C": "0", "D": "1", "E": "0", "F": "0", "G": "0"}
+    subtract = {**add, "B": "-1"}
+    label("IaTop", 3132, 2700)
+    label("IaBtm", 3204, 2628)
+    user("master:sumjct", 3204, 2700, add)
+    wire(3132, 2700, 36, 0)
+    wire(3204, 2628, 0, 36)
+    user("master:gain", 3312, 2700, {"G": "0.5", "Dim": "1"})
+    wire(3240, 2700, 36, 0)
+    label("MmcIcircRaw", 3384, 2700)
+    wire(3348, 2700, 36, 0)
+    label("MmcIcircRaw", 3456, 2700)
+    filtered = user("master:realpole", 3528, 2700, {"G": "1.0", "T": "0.005 [s]", "Dim": "1", "Limit": "0", "Reset": "2", "YO": "MmcIcircRaw", "Min": "-100.0", "Max": "100.0", "COM": "MMC highpass arm damping"})
+    wire(3456, 2700, 36, 0)
+    label("MmcIcircLowpass", 3600, 2700)
+    wire(3564, 2700, 36, 0)
+    label("MmcIcircRaw", 3132, 2880)
+    label("MmcIcircLowpass", 3204, 2808)
+    user("master:sumjct", 3204, 2880, subtract)
+    wire(3132, 2880, 36, 0)
+    wire(3204, 2808, 0, 36)
+    label("MmcIcircHighpass", 3276, 2880)
+    wire(3240, 2880, 36, 0)
+    label("MmcIcircHighpass", 3348, 2880)
+    user("master:gain", 3420, 2880, {"G": "0.09375", "Dim": "1"})
+    wire(3348, 2880, 36, 0)
+    label("MmcVzResistance", 3492, 2880)
+    wire(3456, 2880, 36, 0)
+    label("Vz", 3132, 3060)
+    label("MmcVzResistance", 3204, 2988)
+    user("master:sumjct", 3204, 3060, subtract)
+    wire(3132, 3060, 36, 0)
+    wire(3204, 2988, 0, 36)
+    label("MmcVzEffective", 3276, 3060)
+    wire(3240, 3060, 36, 0)
+    _write_new_xml(root, target)
+    if _sha256(original) != digest or _sha256(master_path) != master_digest:
+        raise _error("MMC_TEMPLATE_SOURCE_CHANGED", "A virtual-resistance source changed.")
+    return {"source": str(original), "source_sha256": digest, "destination": str(target), "destination_sha256": _sha256(target), "master_sha256": master_digest, "resistance_per_arm_ohm": 30.0, "equivalent_dc_resistance_ohm": 20.0, "normalization_voltage_kv": 640.0, "gain_pu_per_ka": 0.09375, "filter_owner": filtered.get("id"), "time_constant_s": 0.005, "dc_gain": 0.0, "command_difference_unchanged": True, "equation": "Vz_effective = Vz - (2*30/640)*HP_5ms((IaTop+IaBtm)/2)", "physical_resistor_loss_claimed": False, "existing_cell_count_saturation_retained": True}
+
+
 __all__ = [
-    "REQUIRED_ROLES", "default_fault_checks", "finalize_fault_instrumentation",
-    "instrument_fault_channels", "materialize_dc_feedback_filter",
+    "REQUIRED_ROLES",
+    "default_fault_checks",
+    "finalize_fault_instrumentation",
+    "instrument_fault_channels",
+    "materialize_arm_virtual_resistance",
+    "materialize_dc_feedback_filter",
     "materialize_dc_port_damping",
-    "materialize_terminal_two_carrier", "materialize_voltage_control_headroom",
-    "reachable_instances", "read_fault_output_dataset", "snapshot_output_dataset",
-    "verify_fault_instrumentation", "verify_output_dataset",
+    "materialize_terminal_two_carrier",
+    "materialize_voltage_control_headroom",
+    "reachable_instances",
+    "read_fault_output_dataset",
+    "snapshot_output_dataset",
+    "verify_fault_instrumentation",
+    "verify_output_dataset",
 ]

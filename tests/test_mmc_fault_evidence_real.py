@@ -28,8 +28,8 @@ from pscad_mcp.hvdc.builders.mmc.fault_channels import (
     default_fault_checks,
     finalize_fault_instrumentation,
     instrument_fault_channels,
+    materialize_arm_virtual_resistance,
     materialize_dc_feedback_filter,
-    materialize_dc_port_damping,
     materialize_terminal_two_carrier,
     materialize_voltage_control_headroom,
     read_fault_output_dataset,
@@ -139,6 +139,13 @@ def _steady(samples, contract, checks=None):
     if set(power) == {"T1", "T2"}:
         loss = power["T1"] + power["T2"]
         rows.append({"channel_id": "power_balance", "passed": power["T1"] > 0 > power["T2"] and 0 <= loss <= -power["T2"] * checks["maximum_power_loss_fraction"], "input_mw": power["T1"], "output_mw": -power["T2"], "loss_mw": loss})
+    for binding in contract.get("diagnostic_channels", []):
+        if binding["role"] != "modulation_request":
+            continue
+        channel = next(item for item in samples["channels"] if item["channel_id"] == binding["channel_id"])
+        values = [value for instant, value in zip(channel["domain"], channel["values"]) if window[0] <= instant <= window[1]]
+        peak = max(abs(value) for value in values)
+        rows.append({"channel_id": binding["channel_id"], "passed": peak <= checks["modulation_abs_limit"], "absolute_peak_pu": peak, "limit_pu": checks["modulation_abs_limit"], "source": channel["output_part"], "window_s": window})
     return {"verdict": "PASS" if rows and all(item["passed"] for item in rows) else "FAIL", "checks": rows}
 
 
@@ -161,8 +168,8 @@ async def _run_case(service, root, source, library, master, name, fault):
         record["feedback_filter"] = materialize_dc_feedback_filter(repaired, filtered, master=master)
         carrier = case_root / "carrier.pscx"
         record["carrier_diagnostic"] = materialize_terminal_two_carrier(filtered, carrier)
-        damped = case_root / "dc_port_damping.pscx"
-        record["dc_port_damping"] = materialize_dc_port_damping(carrier, damped, master=master)
+        damped = case_root / "arm_virtual_resistance.pscx"
+        record["arm_virtual_resistance"] = materialize_arm_virtual_resistance(carrier, damped, master=master)
         project = case_root / f"MMC_{name}.pscx"
         contract = instrument_fault_channels(damped, project, library=library, master=master)
         contract["required_checks"] = _checks()
