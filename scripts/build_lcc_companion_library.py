@@ -146,6 +146,17 @@ def _svg(
         y = -63 + index * 9
         if name in {"REF_A", "REF_B", "REF_C"}:
             x, y = -108, -198 + 18 * "ABC".index(name[-1])
+        if name in {"ALPHA_RECT", "MU_RECT", "P_RECT", "P_INV"}:
+            y = 18 * ("ALPHA_RECT", "MU_RECT", "P_RECT", "P_INV").index(name)
+        if definition.get("name") == "SignalInterface":
+            angle_inputs = ("AM_Y", "AM_D", "GM_Y", "GM_D")
+            power_inputs = ("P_RECT_A", "P_RECT_B", "P_RECT_C", "P_INV_A", "P_INV_B", "P_INV_C")
+            if name in angle_inputs:
+                x, y = -108, -144 + 18 * angle_inputs.index(name)
+            elif name in power_inputs:
+                x, y = -108, 18 * power_inputs.index(name)
+                if name == "P_INV_B":
+                    x = -90
         attributes = {
             "model": "Natural" if is_electrical else "Transfer",
             "name": name,
@@ -782,6 +793,12 @@ def _signal_interface(definitions: ET.Element) -> None:
     ) + tuple(
         (name, "data", "output", "Real")
         for name in ("VDC_RECT", "VDC_INV", "IDC")
+    ) + tuple(
+        (name, "data", "input", "Real")
+        for name in ("AM_Y", "AM_D", "GM_Y", "GM_D", "P_RECT_A", "P_RECT_B", "P_RECT_C", "P_INV_A", "P_INV_B", "P_INV_C")
+    ) + tuple(
+        (name, "data", "output", "Real")
+        for name in ("ALPHA_RECT", "MU_RECT", "P_RECT", "P_INV")
     )
     components = (
         _import("import_vdc_rect", "VDC_RECT_RAW", 180, 126),
@@ -795,12 +812,13 @@ def _signal_interface(definitions: ET.Element) -> None:
             {"IType": "2", "OType": "2", "Dim": "1"},
         ),
         Component(
-            "isolate_vdc_inv",
-            "master:unity",
+            "invert_vdc_inv",
+            "master:sumjct",
             270,
             198,
-            {"IType": "2", "OType": "2", "Dim": "1"},
+            {"DPath": "1", "A": "0", "B": "1", "C": "0", "D": "-1", "E": "0", "F": "0", "G": "0"},
         ),
+        Component("inverter_voltage_zero", "master:const", 90, 198, {"Name": "LCC_VDC_ZERO", "Value": "0.0"}),
         Component(
             "isolate_idc",
             "master:unity",
@@ -814,14 +832,63 @@ def _signal_interface(definitions: ET.Element) -> None:
         _export("export_vdc_rect", "VDC_RECT", 342, 126),
         _export("export_vdc_inv", "VDC_INV", 342, 198),
         _export("export_idc", "IDC", 342, 270),
+        _import("import_am_y", "AM_Y", 90, 450),
+        _import("import_am_d", "AM_D", 90, 522),
+        _import("import_gm_y", "GM_Y", 90, 594),
+        _import("import_gm_d", "GM_D", 90, 738),
+        Component("maximum_alpha", "master:maxmin", 324, 450,
+            {"DPath": "1", "Type": "1", "A": "0", "B": "0", "C": "0", "D": "1", "E": "1", "F": "0", "G": "0"}),
+        Component("pi_constant", "master:const", 630, 378,
+            {"Name": "LCC_PI_VALUE", "Value": "3.141592653589793"}),
+        Component("overlap_y", "master:sumjct", 414, 594,
+            {"DPath": "1", "A": "0", "B": "1", "C": "0", "D": "-1", "E": "0", "F": "-1", "G": "0"}),
+        Component("overlap_d", "master:sumjct", 414, 738,
+            {"DPath": "1", "A": "0", "B": "1", "C": "0", "D": "-1", "E": "0", "F": "-1", "G": "0"}),
+        Component("maximum_overlap", "master:maxmin", 630, 648,
+            {"DPath": "1", "Type": "1", "A": "0", "B": "0", "C": "0", "D": "1", "E": "1", "F": "0", "G": "0"}),
+        _export("export_alpha", "ALPHA_RECT", 540, 450),
+        _export("export_overlap", "MU_RECT", 792, 648),
+        _import("import_p_rect_a", "P_RECT_A", 90, 1044),
+        _import("import_p_rect_b", "P_RECT_B", 90, 1116),
+        _import("import_p_rect_c", "P_RECT_C", 90, 1188),
+        _import("import_p_inv_a", "P_INV_A", 90, 1332),
+        _import("import_p_inv_b", "P_INV_B", 90, 1404),
+        _import("import_p_inv_c", "P_INV_C", 90, 1476),
+        Component("sum_p_rect", "master:sumjct", 414, 1080,
+            {"DPath": "1", "A": "0", "B": "0", "C": "0", "D": "1", "E": "1", "F": "1", "G": "0"}),
+        Component("sum_p_inv", "master:sumjct", 414, 1368,
+            {"DPath": "1", "A": "0", "B": "0", "C": "0", "D": "1", "E": "1", "F": "1", "G": "0"}),
+        _export("export_p_rect", "P_RECT", 540, 1080),
+        _export("export_p_inv", "P_INV", 540, 1368),
     )
     wires = (
         Wire("VDC_RECT_RAW_TO_UNITY", ((216, 126), (234, 126))),
         Wire("VDC_RECT_FANOUT", ((270, 126), (306, 126), (378, 126))),
-        Wire("VDC_INV_RAW_TO_UNITY", ((216, 198), (234, 198))),
-        Wire("VDC_INV_FANOUT", ((270, 198), (306, 198), (378, 198))),
+        Wire("VDC_INV_RAW_TO_NEGATE", ((216, 198), (234, 198))),
+        Wire("VDC_INV_ZERO_TO_NEGATE", ((126, 198), (144, 198), (144, 162), (270, 162))),
+        Wire("VDC_INV_FANOUT", ((306, 198), (378, 198))),
         Wire("IDC_RAW_TO_UNITY", ((216, 270), (234, 270))),
         Wire("IDC_FANOUT", ((270, 270), (306, 270), (378, 270))),
+        Wire("AM_Y_TO_MAX", ((126, 450), (198, 450), (288, 450))),
+        Wire("AM_D_TO_MAX", ((126, 522), (234, 522), (252, 522), (252, 486), (288, 486))),
+        Wire("ALPHA_MEASURED_OUTPUT", ((360, 450), (576, 450))),
+        Wire("AM_Y_TO_OVERLAP", ((198, 450), (198, 558), (378, 558), (378, 594))),
+        Wire("AM_D_TO_OVERLAP", ((234, 522), (234, 702), (378, 702), (378, 738))),
+        Wire("GM_Y_TO_OVERLAP", ((126, 594), (162, 594), (162, 630), (414, 630))),
+        Wire("GM_D_TO_OVERLAP", ((126, 738), (162, 738), (162, 774), (414, 774))),
+        Wire("PI_TO_OVERLAP_Y", ((666, 378), (720, 378), (720, 558), (414, 558))),
+        Wire("PI_TO_OVERLAP_D", ((720, 558), (720, 702), (414, 702))),
+        Wire("OVERLAP_Y_TO_MAX", ((450, 594), (504, 594), (504, 648), (594, 648))),
+        Wire("OVERLAP_D_TO_MAX", ((450, 738), (522, 738), (522, 684), (594, 684))),
+        Wire("OVERLAP_MEASURED_OUTPUT", ((666, 648), (828, 648))),
+        Wire("P_RECT_A_TO_SUM", ((126, 1044), (342, 1044), (342, 1080), (378, 1080))),
+        Wire("P_RECT_B_TO_SUM", ((126, 1116), (378, 1116))),
+        Wire("P_RECT_C_TO_SUM", ((126, 1188), (414, 1188), (414, 1116))),
+        Wire("P_RECT_TOTAL_OUTPUT", ((450, 1080), (576, 1080))),
+        Wire("P_INV_A_TO_SUM", ((126, 1332), (342, 1332), (342, 1368), (378, 1368))),
+        Wire("P_INV_B_TO_SUM", ((126, 1404), (378, 1404))),
+        Wire("P_INV_C_TO_SUM", ((126, 1476), (414, 1476), (414, 1404))),
+        Wire("P_INV_TOTAL_OUTPUT", ((450, 1368), (576, 1368))),
     )
     _definition(
         definitions,

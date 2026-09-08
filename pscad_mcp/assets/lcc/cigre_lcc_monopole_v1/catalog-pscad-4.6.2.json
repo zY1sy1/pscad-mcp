@@ -1072,7 +1072,21 @@
             72,
             -18
           ]
-        }
+        },
+        {"name": "AM_Y", "kind": "data", "dimension": 1, "offset": [-108, -144]},
+        {"name": "AM_D", "kind": "data", "dimension": 1, "offset": [-108, -126]},
+        {"name": "GM_Y", "kind": "data", "dimension": 1, "offset": [-108, -108]},
+        {"name": "GM_D", "kind": "data", "dimension": 1, "offset": [-108, -90]},
+        {"name": "P_RECT_A", "kind": "data", "dimension": 1, "offset": [-108, 0]},
+        {"name": "P_RECT_B", "kind": "data", "dimension": 1, "offset": [-108, 18]},
+        {"name": "P_RECT_C", "kind": "data", "dimension": 1, "offset": [-108, 36]},
+        {"name": "P_INV_A", "kind": "data", "dimension": 1, "offset": [-108, 54]},
+        {"name": "P_INV_B", "kind": "data", "dimension": 1, "offset": [-90, 72]},
+        {"name": "P_INV_C", "kind": "data", "dimension": 1, "offset": [-108, 90]},
+        {"name": "ALPHA_RECT", "kind": "data", "dimension": 1, "offset": [72, 0]},
+        {"name": "MU_RECT", "kind": "data", "dimension": 1, "offset": [72, 18]},
+        {"name": "P_RECT", "kind": "data", "dimension": 1, "offset": [72, 36]},
+        {"name": "P_INV", "kind": "data", "dimension": 1, "offset": [72, 54]}
       ],
       "parameters": {},
       "bounding_box": [

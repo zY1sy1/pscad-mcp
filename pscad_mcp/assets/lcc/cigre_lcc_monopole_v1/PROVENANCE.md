@@ -43,7 +43,17 @@ external integer enable contract is unchanged.
 The three meter tags are imported on the generated Main canvas by the audited
 `master:main_signal_import` binding. `SignalInterface` receives those values
 through explicit raw input ports and passes each through a Real-to-Real
-`unity` adapter before one non-branching wire drives its monitor and output.
+adapter before one non-branching wire drives its monitor and output.
+The inverter line is connected to native DN while DP is grounded; its
+line-to-ground meter is therefore negated by a native summing junction to
+report converter voltage V(DP)-V(DN). Rectifier alpha is the maximum of the
+two native AM outputs. Overlap is computed separately for each valve group
+as pi-AM-GM, then the larger overlap is exported. These measurements never
+substitute the controller's alpha order or clamp the measured angles.
+Each terminal uses three independent single-phase AC meters in the
+grid-to-converter direction. Their active powers are added by native
+summing junctions. P_RECT/P_INV are measured three-phase totals, not three
+times phase A or a substituted VDC*IDC product.
 The generated Main canvas also contains three independent inverter-side
 phase-to-ground fault branches. Each branch uses an audited scalar `breaker1`,
 a dedicated `0.01 ohm` `resistor`, and its own audited `ground`. The breakers

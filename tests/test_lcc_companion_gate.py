@@ -67,6 +67,9 @@ FIXTURE_PORTS = {
         "VDC_RECT",
         "VDC_INV",
         "IDC",
+        "AM_Y", "AM_D", "GM_Y", "GM_D",
+        "P_RECT_A", "P_RECT_B", "P_RECT_C", "P_INV_A", "P_INV_B", "P_INV_C",
+        "ALPHA_RECT", "MU_RECT", "P_RECT", "P_INV",
     },
 }
 

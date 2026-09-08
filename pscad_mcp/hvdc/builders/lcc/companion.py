@@ -69,9 +69,12 @@ EXPECTED_MASTER_COUNTS = {
         "master:pgb": 2,
     },
     "cigre_lcc_v1:SignalInterface": {
-        "master:import": 3,
-        "master:export": 3,
-        "master:unity": 3,
+        "master:import": 13,
+        "master:export": 7,
+        "master:unity": 2,
+        "master:sumjct": 5,
+        "master:maxmin": 2,
+        "master:const": 2,
         "master:pgb": 3,
     },
 }
@@ -154,11 +157,11 @@ EXPECTED_PORTS = {
     "cigre_lcc_v1:SignalInterface": {
         **{
             name: _port("data", "input")
-            for name in ("VDC_RECT_RAW", "VDC_INV_RAW", "IDC_RAW")
+            for name in ("VDC_RECT_RAW", "VDC_INV_RAW", "IDC_RAW", "AM_Y", "AM_D", "GM_Y", "GM_D", "P_RECT_A", "P_RECT_B", "P_RECT_C", "P_INV_A", "P_INV_B", "P_INV_C")
         },
         **{
             name: _port("data", "output")
-            for name in ("VDC_RECT", "VDC_INV", "IDC")
+            for name in ("VDC_RECT", "VDC_INV", "IDC", "ALPHA_RECT", "MU_RECT", "P_RECT", "P_INV")
         },
     },
 }
@@ -219,10 +222,16 @@ REQUIRED_CONNECTIONS = {
     "cigre_lcc_v1:SignalInterface": {
         "VDC_RECT_RAW_TO_UNITY",
         "VDC_RECT_FANOUT",
-        "VDC_INV_RAW_TO_UNITY",
+        "VDC_INV_RAW_TO_NEGATE",
+        "VDC_INV_ZERO_TO_NEGATE",
         "VDC_INV_FANOUT",
         "IDC_RAW_TO_UNITY",
         "IDC_FANOUT",
+        "AM_Y_TO_MAX", "AM_D_TO_MAX", "ALPHA_MEASURED_OUTPUT",
+        "AM_Y_TO_OVERLAP", "AM_D_TO_OVERLAP", "GM_Y_TO_OVERLAP", "GM_D_TO_OVERLAP",
+        "PI_TO_OVERLAP_Y", "PI_TO_OVERLAP_D", "OVERLAP_Y_TO_MAX", "OVERLAP_D_TO_MAX", "OVERLAP_MEASURED_OUTPUT",
+        "P_RECT_A_TO_SUM", "P_RECT_B_TO_SUM", "P_RECT_C_TO_SUM", "P_RECT_TOTAL_OUTPUT",
+        "P_INV_A_TO_SUM", "P_INV_B_TO_SUM", "P_INV_C_TO_SUM", "P_INV_TOTAL_OUTPUT",
     },
 }
 

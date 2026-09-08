@@ -64,6 +64,8 @@ PORTS = {
         ("VDC_RECT", "Transfer", "Output", "Real"),
         ("VDC_INV", "Transfer", "Output", "Real"),
         ("IDC", "Transfer", "Output", "Real"),
+        *((name, "Transfer", "Input", "Real") for name in ("AM_Y", "AM_D", "GM_Y", "GM_D", "P_RECT_A", "P_RECT_B", "P_RECT_C", "P_INV_A", "P_INV_B", "P_INV_C")),
+        *((name, "Transfer", "Output", "Real") for name in ("ALPHA_RECT", "MU_RECT", "P_RECT", "P_INV")),
     ),
 }
 
@@ -117,15 +119,15 @@ USERS = {
         "master:pgb",
     ),
     "SignalInterface": (
-        "master:import",
-        "master:import",
-        "master:import",
-        "master:export",
-        "master:export",
-        "master:export",
+        *("master:import" for _ in range(13)),
+        *("master:export" for _ in range(7)),
         "master:unity",
         "master:unity",
-        "master:unity",
+        *("master:sumjct" for _ in range(5)),
+        "master:maxmin",
+        "master:maxmin",
+        "master:const",
+        "master:const",
         "master:pgb",
         "master:pgb",
         "master:pgb",
@@ -188,10 +190,16 @@ WIRES = {
     "SignalInterface": (
         "VDC_RECT_RAW_TO_UNITY",
         "VDC_RECT_FANOUT",
-        "VDC_INV_RAW_TO_UNITY",
+        "VDC_INV_RAW_TO_NEGATE",
+        "VDC_INV_ZERO_TO_NEGATE",
         "VDC_INV_FANOUT",
         "IDC_RAW_TO_UNITY",
         "IDC_FANOUT",
+        "AM_Y_TO_MAX", "AM_D_TO_MAX", "ALPHA_MEASURED_OUTPUT",
+        "AM_Y_TO_OVERLAP", "AM_D_TO_OVERLAP", "GM_Y_TO_OVERLAP", "GM_D_TO_OVERLAP",
+        "PI_TO_OVERLAP_Y", "PI_TO_OVERLAP_D", "OVERLAP_Y_TO_MAX", "OVERLAP_D_TO_MAX", "OVERLAP_MEASURED_OUTPUT",
+        "P_RECT_A_TO_SUM", "P_RECT_B_TO_SUM", "P_RECT_C_TO_SUM", "P_RECT_TOTAL_OUTPUT",
+        "P_INV_A_TO_SUM", "P_INV_B_TO_SUM", "P_INV_C_TO_SUM", "P_INV_TOTAL_OUTPUT",
     ),
 }
 
@@ -779,28 +787,37 @@ def test_generated_signal_interface_isolates_raw_inputs_before_fanout():
         "VDC_RECT",
         "VDC_INV",
         "IDC",
+        "AM_Y", "AM_D", "GM_Y", "GM_D",
+        "P_RECT_A", "P_RECT_B", "P_RECT_C", "P_INV_A", "P_INV_B", "P_INV_C",
+        "ALPHA_RECT", "MU_RECT", "P_RECT", "P_INV",
     ]
     assert [
         item.get("value")
         for item in definition.findall(
             "./schematic/User[@defn='master:import']/paramlist/param[@name='Name']"
         )
-    ] == ["VDC_RECT_RAW", "VDC_INV_RAW", "IDC_RAW"]
+    ] == ["VDC_RECT_RAW", "VDC_INV_RAW", "IDC_RAW", "AM_Y", "AM_D", "GM_Y", "GM_D", "P_RECT_A", "P_RECT_B", "P_RECT_C", "P_INV_A", "P_INV_B", "P_INV_C"]
     unity = definition.findall("./schematic/User[@defn='master:unity']")
-    assert len(unity) == 3
+    assert len(unity) == 2
     assert [
         item.find("./paramlist/param[@name='OType']").get("value")
         for item in unity
-    ] == ["2", "2", "2"]
+    ] == ["2", "2"]
     assert {
         item.get("lcc_role") for item in definition.findall("./schematic/Wire")
     } == {
         "VDC_RECT_RAW_TO_UNITY",
         "VDC_RECT_FANOUT",
-        "VDC_INV_RAW_TO_UNITY",
+        "VDC_INV_RAW_TO_NEGATE",
+        "VDC_INV_ZERO_TO_NEGATE",
         "VDC_INV_FANOUT",
         "IDC_RAW_TO_UNITY",
         "IDC_FANOUT",
+        "AM_Y_TO_MAX", "AM_D_TO_MAX", "ALPHA_MEASURED_OUTPUT",
+        "AM_Y_TO_OVERLAP", "AM_D_TO_OVERLAP", "GM_Y_TO_OVERLAP", "GM_D_TO_OVERLAP",
+        "PI_TO_OVERLAP_Y", "PI_TO_OVERLAP_D", "OVERLAP_Y_TO_MAX", "OVERLAP_D_TO_MAX", "OVERLAP_MEASURED_OUTPUT",
+        "P_RECT_A_TO_SUM", "P_RECT_B_TO_SUM", "P_RECT_C_TO_SUM", "P_RECT_TOTAL_OUTPUT",
+        "P_INV_A_TO_SUM", "P_INV_B_TO_SUM", "P_INV_C_TO_SUM", "P_INV_TOTAL_OUTPUT",
     }
 
 

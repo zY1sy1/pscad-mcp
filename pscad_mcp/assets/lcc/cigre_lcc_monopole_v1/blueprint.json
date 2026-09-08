@@ -48,7 +48,7 @@
     {
       "name": "Main",
       "width": 2800,
-      "height": 900,
+      "height": 1080,
       "grid": 10
     }
   ],
@@ -804,7 +804,10 @@
         "IDC_RAW",
         "VDC_RECT",
         "VDC_INV",
-        "IDC"
+        "IDC",
+        "AM_Y", "AM_D", "GM_Y", "GM_D",
+        "P_RECT_A", "P_RECT_B", "P_RECT_C", "P_INV_A", "P_INV_B", "P_INV_C",
+        "ALPHA_RECT", "MU_RECT", "P_RECT", "P_INV"
       ],
       "role": "measurement"
     },
@@ -837,7 +840,7 @@
     {
       "logical_id": "p_rect_output",
       "definition": "master:dynamic_output_channel",
-      "location": {"x": 1180, "y": 702},
+      "location": {"x": 1800, "y": 972},
       "orientation": 0,
       "parameters": {"Group": "Main", "Name": "P_RECT", "Units": "MW"},
       "ports": ["INPUT"],
@@ -846,7 +849,7 @@
     {
       "logical_id": "p_inv_import",
       "definition": "master:main_signal_import",
-      "location": {"x": 1044, "y": 756},
+      "location": {"x": 1044, "y": 864},
       "orientation": 0,
       "parameters": {"Name": "LCC_P_INV"},
       "ports": ["OUT"],
@@ -855,7 +858,7 @@
     {
       "logical_id": "p_inv_output",
       "definition": "master:dynamic_output_channel",
-      "location": {"x": 1180, "y": 756},
+      "location": {"x": 1800, "y": 1026},
       "orientation": 0,
       "parameters": {"Group": "Main", "Name": "P_INV", "Units": "MW"},
       "ports": ["INPUT"],
@@ -864,7 +867,7 @@
     {
       "logical_id": "alpha_rect_output",
       "definition": "master:dynamic_output_channel",
-      "location": {"x": 1180, "y": 810},
+      "location": {"x": 1800, "y": 864},
       "orientation": 0,
       "parameters": {"Group": "Main", "Name": "ALPHA_RECT", "Units": "rad"},
       "ports": ["INPUT"],
@@ -873,11 +876,55 @@
     {
       "logical_id": "mu_rect_output",
       "definition": "master:dynamic_output_channel",
-      "location": {"x": 1180, "y": 864},
+      "location": {"x": 1800, "y": 918},
       "orientation": 0,
       "parameters": {"Group": "Main", "Name": "MU_RECT", "Units": "rad"},
       "ports": ["INPUT"],
       "role": "measurement"
+    },
+    {
+      "logical_id": "rectifier_ac_meter_b", "definition": "master:ac_meter",
+      "location": {"x": 220, "y": 210}, "orientation": 0,
+      "parameters": {"ActivePowerSignal": "LCC_P_RECT_B", "ReactivePowerSignal": "LCC_Q_RECT_B"},
+      "ports": ["A", "B"], "role": "measurement"
+    },
+    {
+      "logical_id": "rectifier_ac_meter_c", "definition": "master:ac_meter",
+      "location": {"x": 220, "y": 270}, "orientation": 0,
+      "parameters": {"ActivePowerSignal": "LCC_P_RECT_C", "ReactivePowerSignal": "LCC_Q_RECT_C"},
+      "ports": ["A", "B"], "role": "measurement"
+    },
+    {
+      "logical_id": "inverter_ac_meter_b", "definition": "master:ac_meter",
+      "location": {"x": 2500, "y": 210}, "orientation": 4,
+      "parameters": {"ActivePowerSignal": "LCC_P_INV_B", "ReactivePowerSignal": "LCC_Q_INV_B"},
+      "ports": ["A", "B"], "role": "measurement"
+    },
+    {
+      "logical_id": "inverter_ac_meter_c", "definition": "master:ac_meter",
+      "location": {"x": 2500, "y": 270}, "orientation": 4,
+      "parameters": {"ActivePowerSignal": "LCC_P_INV_C", "ReactivePowerSignal": "LCC_Q_INV_C"},
+      "ports": ["A", "B"], "role": "measurement"
+    },
+    {
+      "logical_id": "p_rect_b_import", "definition": "master:main_signal_import",
+      "location": {"x": 1044, "y": 756}, "orientation": 0,
+      "parameters": {"Name": "LCC_P_RECT_B"}, "ports": ["OUT"], "role": "measurement"
+    },
+    {
+      "logical_id": "p_rect_c_import", "definition": "master:main_signal_import",
+      "location": {"x": 1044, "y": 810}, "orientation": 0,
+      "parameters": {"Name": "LCC_P_RECT_C"}, "ports": ["OUT"], "role": "measurement"
+    },
+    {
+      "logical_id": "p_inv_b_import", "definition": "master:main_signal_import",
+      "location": {"x": 1044, "y": 918}, "orientation": 0,
+      "parameters": {"Name": "LCC_P_INV_B"}, "ports": ["OUT"], "role": "measurement"
+    },
+    {
+      "logical_id": "p_inv_c_import", "definition": "master:main_signal_import",
+      "location": {"x": 1044, "y": 972}, "orientation": 0,
+      "parameters": {"Name": "LCC_P_INV_C"}, "ports": ["OUT"], "role": "measurement"
     }
   ],
   "nets": [
@@ -916,7 +963,7 @@
       "kind": "electrical",
       "endpoints": [
         {
-          "component": "rectifier_source",
+          "component": "rectifier_ac_meter_b",
           "port": "B"
         },
         {"component": "rectifier_filter", "port": "OUT_B"},
@@ -925,15 +972,15 @@
           "port": "IN_B"
         }
       ],
-      "route": {"vertices": [[100, 210], [306, 210], [306, 288], [342, 288]], "policy": "orthogonal"}
+      "route": {"vertices": [[235, 210], [306, 210], [306, 288], [342, 288]], "policy": "orthogonal"}
     },
     {
       "logical_id": "rectifier_source_filter_c",
       "kind": "electrical",
       "endpoints": [
         {
-          "component": "rectifier_source",
-          "port": "C"
+          "component": "rectifier_ac_meter_c",
+          "port": "B"
         },
         {"component": "rectifier_filter", "port": "OUT_C"},
         {
@@ -941,7 +988,7 @@
           "port": "IN_C"
         }
       ],
-      "route": {"vertices": [[100, 220], [288, 220], [288, 432], [342, 432]], "policy": "orthogonal"}
+      "route": {"vertices": [[235, 270], [288, 270], [288, 432], [342, 432]], "policy": "orthogonal"}
     },
     {
       "logical_id": "inverter_source_a_meter",
@@ -995,29 +1042,21 @@
       "kind": "electrical",
       "endpoints": [
         {
-          "component": "inverter_source",
+          "component": "inverter_ac_meter_b",
           "port": "B"
         },
         {"component": "inverter_filter", "port": "OUT_B"},
         {
           "component": "inverter_filter",
           "port": "IN_B"
-        },
-        {
-          "component": "inverter_fault_breaker_b",
-          "port": "A"
         }
       ],
       "route": {
         "vertices": [
-          [2650, 210],
+          [2485, 210],
           [2448, 210],
           [2448, 288],
-          [2358, 288],
-          [2430, 288],
-          [2430, 180],
-          [2744, 180],
-          [2744, 200]
+          [2358, 288]
         ],
         "policy": "orthogonal"
       }
@@ -1027,28 +1066,21 @@
       "kind": "electrical",
       "endpoints": [
         {
-          "component": "inverter_source",
-          "port": "C"
+          "component": "inverter_ac_meter_c",
+          "port": "B"
         },
         {"component": "inverter_filter", "port": "OUT_C"},
         {
           "component": "inverter_filter",
           "port": "IN_C"
-        },
-        {
-          "component": "inverter_fault_breaker_c",
-          "port": "A"
         }
       ],
       "route": {
         "vertices": [
-          [2650, 220],
-          [2466, 220],
+          [2485, 270],
+          [2466, 270],
           [2466, 432],
-          [2358, 432],
-          [2484, 432],
-          [2484, 280],
-          [2744, 280]
+          [2358, 432]
         ],
         "policy": "orthogonal"
       }
@@ -2364,33 +2396,105 @@
       "logical_id": "p_rect_telemetry",
       "kind": "data",
       "endpoints": [
-        {"component": "p_rect_import", "port": "OUT"},
+        {"component": "signal_interface", "port": "P_RECT"},
         {"component": "p_rect_output", "port": "INPUT"}
       ],
-      "label": null
+      "label": null,
+      "route": {"vertices": [[1422, 576], [1494, 576], [1494, 972], [1800, 972]], "policy": "orthogonal"}
     },
     {
       "logical_id": "p_inv_telemetry",
       "kind": "data",
       "endpoints": [
-        {"component": "p_inv_import", "port": "OUT"},
+        {"component": "signal_interface", "port": "P_INV"},
         {"component": "p_inv_output", "port": "INPUT"}
       ],
-      "label": null
+      "label": null,
+      "route": {"vertices": [[1422, 594], [1476, 594], [1476, 1026], [1800, 1026]], "policy": "orthogonal"}
     },
     {
       "logical_id": "alpha_rect_telemetry",
       "kind": "data",
       "endpoints": [
-        {"component": "rectifier_control", "port": "ALPHA"},
-        {"component": "alpha_rect_output", "port": "INPUT"},
-        {"component": "mu_rect_output", "port": "INPUT"}
+        {"component": "signal_interface", "port": "ALPHA_RECT"},
+        {"component": "alpha_rect_output", "port": "INPUT"}
       ],
-      "label": "ALPHA",
-      "route": {
-        "vertices": [[872, 641], [960, 641], [960, 810], [1180, 810], [1180, 864]],
-        "policy": "orthogonal"
-      }
+      "label": null,
+      "route": {"vertices": [[1422, 540], [1530, 540], [1530, 864], [1800, 864]], "policy": "orthogonal"}
+    },
+    {
+      "logical_id": "mu_rect_telemetry", "kind": "data",
+      "endpoints": [{"component": "signal_interface", "port": "MU_RECT"}, {"component": "mu_rect_output", "port": "INPUT"}],
+      "route": {"vertices": [[1422, 558], [1512, 558], [1512, 918], [1800, 918]], "policy": "orthogonal"}
+    },
+    {
+      "logical_id": "rectifier_source_b_meter", "kind": "electrical",
+      "endpoints": [{"component": "rectifier_source", "port": "B"}, {"component": "rectifier_ac_meter_b", "port": "A"}]
+    },
+    {
+      "logical_id": "rectifier_source_c_meter", "kind": "electrical",
+      "endpoints": [{"component": "rectifier_source", "port": "C"}, {"component": "rectifier_ac_meter_c", "port": "A"}],
+      "route": {"vertices": [[100, 220], [180, 220], [180, 270], [205, 270]], "policy": "orthogonal"}
+    },
+    {
+      "logical_id": "inverter_source_b_meter", "kind": "electrical",
+      "endpoints": [{"component": "inverter_source", "port": "B"}, {"component": "inverter_ac_meter_b", "port": "A"}, {"component": "inverter_fault_breaker_b", "port": "A"}],
+      "route": {"vertices": [[2650, 210], [2515, 210], [2515, 180], [2744, 180], [2744, 200]], "policy": "orthogonal"}
+    },
+    {
+      "logical_id": "inverter_source_c_meter", "kind": "electrical",
+      "endpoints": [{"component": "inverter_source", "port": "C"}, {"component": "inverter_ac_meter_c", "port": "A"}, {"component": "inverter_fault_breaker_c", "port": "A"}],
+      "route": {"vertices": [[2650, 220], [2634, 220], [2634, 270], [2515, 270], [2515, 306], [2744, 306], [2744, 280]], "policy": "orthogonal"}
+    },
+    {
+      "logical_id": "am_rect_y_measurement", "kind": "data",
+      "endpoints": [{"component": "rectifier_bridge", "port": "AM_Y"}, {"component": "signal_interface", "port": "AM_Y"}],
+      "route": {"vertices": [[872, 246], [1206, 246], [1206, 396], [1242, 396]], "policy": "orthogonal"}
+    },
+    {
+      "logical_id": "am_rect_d_measurement", "kind": "data",
+      "endpoints": [{"component": "rectifier_bridge", "port": "AM_D"}, {"component": "signal_interface", "port": "AM_D"}],
+      "route": {"vertices": [[872, 255], [1188, 255], [1188, 414], [1242, 414]], "policy": "orthogonal"}
+    },
+    {
+      "logical_id": "gm_rect_y_measurement", "kind": "data",
+      "endpoints": [{"component": "rectifier_bridge", "port": "GM_Y"}, {"component": "signal_interface", "port": "GM_Y"}],
+      "route": {"vertices": [[872, 264], [1170, 264], [1170, 432], [1242, 432]], "policy": "orthogonal"}
+    },
+    {
+      "logical_id": "gm_rect_d_measurement", "kind": "data",
+      "endpoints": [{"component": "rectifier_bridge", "port": "GM_D"}, {"component": "signal_interface", "port": "GM_D"}],
+      "route": {"vertices": [[872, 273], [1152, 273], [1152, 450], [1242, 450]], "policy": "orthogonal"}
+    },
+    {
+      "logical_id": "p_rect_a_measurement", "kind": "data",
+      "endpoints": [{"component": "p_rect_import", "port": "OUT"}, {"component": "signal_interface", "port": "P_RECT_A"}],
+      "route": {"vertices": [[1044, 702], [1134, 702], [1134, 540], [1242, 540]], "policy": "orthogonal"}
+    },
+    {
+      "logical_id": "p_rect_b_measurement", "kind": "data",
+      "endpoints": [{"component": "p_rect_b_import", "port": "OUT"}, {"component": "signal_interface", "port": "P_RECT_B"}],
+      "route": {"vertices": [[1044, 756], [1152, 756], [1152, 558], [1242, 558]], "policy": "orthogonal"}
+    },
+    {
+      "logical_id": "p_rect_c_measurement", "kind": "data",
+      "endpoints": [{"component": "p_rect_c_import", "port": "OUT"}, {"component": "signal_interface", "port": "P_RECT_C"}],
+      "route": {"vertices": [[1044, 810], [1170, 810], [1170, 576], [1242, 576]], "policy": "orthogonal"}
+    },
+    {
+      "logical_id": "p_inv_a_measurement", "kind": "data",
+      "endpoints": [{"component": "p_inv_import", "port": "OUT"}, {"component": "signal_interface", "port": "P_INV_A"}],
+      "route": {"vertices": [[1044, 864], [1188, 864], [1188, 594], [1242, 594]], "policy": "orthogonal"}
+    },
+    {
+      "logical_id": "p_inv_b_measurement", "kind": "data",
+      "endpoints": [{"component": "p_inv_b_import", "port": "OUT"}, {"component": "signal_interface", "port": "P_INV_B"}],
+      "route": {"vertices": [[1044, 918], [1260, 918], [1260, 612]], "policy": "orthogonal"}
+    },
+    {
+      "logical_id": "p_inv_c_measurement", "kind": "data",
+      "endpoints": [{"component": "p_inv_c_import", "port": "OUT"}, {"component": "signal_interface", "port": "P_INV_C"}],
+      "route": {"vertices": [[1044, 972], [1206, 972], [1206, 630], [1242, 630]], "policy": "orthogonal"}
     }
   ],
   "measurements": [
@@ -2423,9 +2527,9 @@
     },
     {
       "logical_id": "p_rect_measurement",
-      "kind": "electrical",
-      "component": "rectifier_ac_meter",
-      "port": "A",
+      "kind": "data",
+      "component": "signal_interface",
+      "port": "P_RECT",
       "channels": [
         "Main/P_RECT"
       ]
@@ -2441,9 +2545,9 @@
     },
     {
       "logical_id": "p_inv_measurement",
-      "kind": "electrical",
-      "component": "inverter_ac_meter",
-      "port": "A",
+      "kind": "data",
+      "component": "signal_interface",
+      "port": "P_INV",
       "channels": [
         "Main/P_INV"
       ]
@@ -2460,8 +2564,8 @@
     {
       "logical_id": "alpha_measurement",
       "kind": "data",
-      "component": "rectifier_control",
-      "port": "ALPHA",
+      "component": "signal_interface",
+      "port": "ALPHA_RECT",
       "channels": [
         "Main/ALPHA_RECT"
       ]
@@ -2478,12 +2582,11 @@
     {
       "logical_id": "mu_measurement",
       "kind": "data",
-      "component": "rectifier_control",
-      "port": "ALPHA",
+      "component": "signal_interface",
+      "port": "MU_RECT",
       "channels": [
         "Main/MU_RECT"
-      ],
-      "derived_from": "alpha_measurement"
+      ]
     },
     {
       "logical_id": "vac_rect_measurement",

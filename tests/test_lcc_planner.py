@@ -131,10 +131,10 @@ def test_packaged_physical_supply_routes_keep_phase_buses_separate(station):
         ProjectTopology("physical_supply", "4.6.2", conductors=conductors)
     ).topology
     groups = [set(net.conductor_keys) for net in topology.nets]
-    # The meter separates its source-side conductor from the three phase buses.
-    assert {f"{station}_source_a_meter"} in groups
-    assert len(groups) == 4
+    # Each phase meter separates its source-side conductor from the filtered bus.
+    assert len(groups) == 6
     for phase in "abc":
+        assert {f"{station}_source_{phase}_meter"} in groups
         supply = (
             f"{station}_meter_filter_a"
             if phase == "a"
@@ -272,12 +272,12 @@ def complete_live_inventory(
 
 LEGACY_PLAN_SNAPSHOTS = {
     "full_acceptance": {
-        "plan_hash": "f07890a2bb02cab1134fb7d3ac732a891402fbdde6f663ab5e6eae36da62c680",
-        "operations_hash": "a291591fb5baf9118985f6c0a5414212c381a4a849544056da33f172d6a78264",
+        "plan_hash": "bf5e1a263b6caef248e876519e6e9f5fb9bfe35d5722bdccb8dcc9ea715509b1",
+        "operations_hash": "330ba23b36edf9d15136e8c3b9af077cb80bb2065324a7229adf268c5199fd4a",
     },
     "wp1b_smoke": {
-        "plan_hash": "bdb7b53c7f6ed0006a41aca3db112ece5a482fd380291d1b64d3af175888a401",
-        "operations_hash": "025eaef562eed7c8349e4560cd8264a404cd540bf04052ad200427079a6db08f",
+        "plan_hash": "ed68d5be58cb2fe7eda8784ced1c76808fb85c23f390973652257a2ecb61655d",
+        "operations_hash": "62e872990c21e6b0407d48ce00998b5cc85ead7c8b397630b949020b98b13a02",
     },
 }
 
@@ -752,7 +752,7 @@ def test_packaged_main_signal_imports_are_pscad_grid_aligned():
         if component.definition == "master:main_signal_import"
     ]
 
-    assert len(imports) == 6
+    assert len(imports) == 10
     assert all(
         coordinate % 18 == 0
         for component in imports
@@ -785,9 +785,9 @@ def test_packaged_fixed_data_nets_do_not_create_main_canvas_labels():
     assert all(
         label is None
         for logical_id, label in labels.items()
-        if logical_id not in {"inverter_fault_active_integer", "inverter_fault_open_integer", "alpha_rect_telemetry"}
+        if logical_id not in {"inverter_fault_active_integer", "inverter_fault_open_integer"}
     )
-    assert labels["alpha_rect_telemetry"] == "ALPHA"
+    assert labels["alpha_rect_telemetry"] is None
 
 
 def test_wp1b_labels_consolidate_shared_ports_and_reuse_raw_signal_names():
@@ -807,7 +807,7 @@ def test_wp1b_labels_consolidate_shared_ports_and_reuse_raw_signal_names():
     assert labels["idc_raw"] == "LCC_IDC_RAW"
     assert labels["rectifier_return"] is None
     assert labels["inverter_return"] is None
-    assert len({label for label in labels.values() if label is not None}) == 42
+    assert len({label for label in labels.values() if label is not None}) == 56
 
 
 def test_wp1b_smoke_plan_uses_smoke_gate_and_hashes_profile(tmp_path):
