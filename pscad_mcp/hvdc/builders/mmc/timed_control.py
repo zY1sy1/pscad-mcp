@@ -525,6 +525,18 @@ def materialize_embedded_control(
     plan: Mapping[str, Any], destination: str | Path
 ) -> dict[str, Any]:
     _verify_plan(plan)
+    validated = plan_embedded_control(
+        plan["scenario_source"]["path"],
+        plan["events"],
+        master_path=plan["source_hashes"]["master"]["path"],
+        time_step_s=plan["time_step_s"],
+        output_step_s=plan["output_step_s"],
+        duration_s=plan["duration_s"],
+        max_timing_error_s=plan["max_timing_error_s"],
+        source_hashes=plan["source_hashes"],
+    )
+    if validated["schedule_sha256"] != plan["schedule_sha256"]:
+        raise _error("The serialized schedule contains unplanned target or output bindings.")
     path = Path(destination).expanduser()
     if (
         path.exists()

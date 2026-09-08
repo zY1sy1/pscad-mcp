@@ -248,6 +248,16 @@ def test_planning_does_not_replace_a_callers_stale_master_identity(tmp_path):
         )
 
 
+def test_rehashed_invalid_serialized_plan_is_revalidated_before_mutation(tmp_path):
+    _source, _master, plan = _plan(tmp_path)
+    plan["events"][0]["time_s"] = -0.02
+    plan["schedule_sha256"] = _module().schedule_sha256(plan)
+    destination = tmp_path / "derived.pscx"
+    with pytest.raises(BackendError):
+        _module().materialize_embedded_control(plan, destination)
+    assert not destination.exists()
+
+
 def _samples(plan, *, rise=0.02, fall=0.03):
     times = [index * 1e-5 for index in range(5001)]
     return {
