@@ -43,7 +43,7 @@ def save_clipboard(path):
 
 
 async def main():
-    name = 'five_sa_sequential'
+    name = os.environ.get('ARRESTER_PREVIEW_CASE', 'five_sa_sequential')
     src = SOURCE / (name + '.pscx')
     path = OUTPUT / src.name
     shutil.copy2(src, path)
