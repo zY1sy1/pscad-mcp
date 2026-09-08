@@ -2536,7 +2536,7 @@ class LegacyBackend:
         await self._record_orientation_transform(
             project_name,
             component_id,
-            {"horizontal": 6, "vertical": 4}[axis],
+            {"horizontal": 4, "vertical": 6}[axis],
         )
 
     async def _record_orientation_transform(
@@ -3523,7 +3523,7 @@ class LegacyBackend:
         command = getattr(component, "_generic", None)
         if command is not None:
             if orientation >= 4:
-                await self.executor.run_safe(command, "IDM_FLIP")
+                await self.executor.run_safe(command, "IDM_MIRROR")
             rotations = orientation - 4 if orientation >= 4 else orientation
             for _ in range(rotations):
                 await self.executor.run_safe(command, "IDM_ROTATERIGHT")
@@ -3751,7 +3751,7 @@ class LegacyBackend:
             command = getattr(physical, "_generic", None)
             if command is not None:
                 if orientation >= 4:
-                    await self.executor.run_safe(command, "IDM_FLIP")
+                    await self.executor.run_safe(command, "IDM_MIRROR")
                 for _ in range(orientation - 4 if orientation >= 4 else orientation):
                     await self.executor.run_safe(command, "IDM_ROTATERIGHT")
             physical_info = await self._component_info(physical)
