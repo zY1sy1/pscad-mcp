@@ -111,7 +111,7 @@
         <port model="Natural" name="REF_A" x="-108" y="-198" dim="1" mode="Electrical" type="NonRemovable">true</port>
         <port model="Natural" name="REF_B" x="-108" y="-180" dim="1" mode="Electrical" type="NonRemovable">true</port>
         <port model="Natural" name="REF_C" x="-108" y="-162" dim="1" mode="Electrical" type="NonRemovable">true</port>
-        <port model="Transfer" name="P_AC" x="72" y="99" dim="1" mode="Output" type="Real">true</port>
+        <port model="Transfer" name="P_AC" x="72" y="108" dim="1" mode="Output" type="Real">true</port>
       </svg>
       <schematic classid="UserCanvas">
         <paramlist>

@@ -2515,12 +2515,12 @@
     {
       "logical_id": "p_conv_rect_telemetry", "kind": "data",
       "endpoints": [{"component": "rectifier_bridge", "port": "P_AC"}, {"component": "p_conv_rect_output", "port": "INPUT"}],
-      "route": {"vertices": [[872, 309], [972, 309], [972, 1080], [1800, 1080]], "policy": "orthogonal"}
+      "route": {"vertices": [[872, 318], [972, 318], [972, 1080], [1800, 1080]], "policy": "orthogonal"}
     },
     {
       "logical_id": "p_conv_inv_telemetry", "kind": "data",
       "endpoints": [{"component": "inverter_bridge", "port": "P_AC"}, {"component": "p_conv_inv_output", "port": "INPUT"}],
-      "route": {"vertices": [[1972, 309], [2052, 309], [2052, 1134], [1800, 1134]], "policy": "orthogonal"}
+      "route": {"vertices": [[1972, 318], [2052, 318], [2052, 1134], [1800, 1134]], "policy": "orthogonal"}
     }
   ],
   "measurements": [

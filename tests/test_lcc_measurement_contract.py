@@ -69,6 +69,9 @@ def test_converter_power_uses_independent_ac_measurements_and_module_export():
         assert parameters["S"] == "1.0 [MVA]"
     assert bridge.find("svg/port[@name='P_AC'][@mode='Output']") is not None
     assert bridge.find("schematic/User[@defn='master:export']/paramlist/param[@name='Name'][@value='P_AC']") is not None
+    port = bridge.find("svg/port[@name='P_AC']")
+    assert int(port.get("x")) % 18 == 0
+    assert int(port.get("y")) % 18 == 0
 
 
 def test_power_product_and_grid_balance_keep_distinct_physical_boundaries():

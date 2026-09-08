@@ -149,6 +149,8 @@ def _svg(
         y = -63 + index * 9
         if name in {"REF_A", "REF_B", "REF_C"}:
             x, y = -108, -198 + 18 * "ABC".index(name[-1])
+        if name == "P_AC":
+            y = 108
         if name in {"ALPHA_RECT", "MU_RECT", "P_RECT", "P_INV"}:
             y = 18 * ("ALPHA_RECT", "MU_RECT", "P_RECT", "P_INV").index(name)
         if definition.get("name") == "SignalInterface":
