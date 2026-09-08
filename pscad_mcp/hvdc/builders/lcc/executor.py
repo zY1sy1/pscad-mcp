@@ -30,6 +30,7 @@ from .dynamic_acceptance import evaluate_fixed_lcc_dynamic_physical
 from .dynamic_evidence import derive_fixed_lcc_dynamic_evidence
 from .journal import AtomicJournal
 from .models import LccBuildPlan, LccBuildRecord, LccBuildState, LccPlanOperation
+from .output_channels import logical_output_payload
 from .output_dataset import legacy_output_stem, output_dataset_parts
 from .project_graph import (
     GraphComponent,
@@ -2249,76 +2250,7 @@ class LccExecutor:
         self.journal.write(self._journal_payload())
 
     def _logical_output_payload(self, value: Any) -> Any:
-        if not isinstance(value, Mapping):
-            return value
-        raw_channels = value.get("channels")
-        if not isinstance(raw_channels, Sequence) or isinstance(
-            raw_channels,
-            (str, bytes, bytearray),
-        ):
-            return value
-        components = {
-            component.logical_id: component
-            for component in self.plan.blueprint.components
-        }
-        measurements = {
-            measurement.get("logical_id"): measurement
-            for measurement in self.plan.blueprint.measurements
-            if isinstance(measurement, Mapping)
-            and isinstance(measurement.get("logical_id"), str)
-        }
-        physical_to_logical = {}
-        for output in self.plan.blueprint.outputs:
-            measurement = measurements.get(output.measurement)
-            component_id = (
-                measurement.get("component")
-                if isinstance(measurement, Mapping)
-                else None
-            )
-            component = components.get(component_id)
-            if component is None:
-                continue
-            physical_path = (
-                component.definition.rsplit(":", 1)[-1]
-                + "/"
-                + output.path.rsplit("/", 1)[-1]
-            )
-            previous = physical_to_logical.setdefault(
-                physical_path,
-                output.path,
-            )
-            if previous != output.path:
-                raise _error(
-                    "LCC_OUTPUT_INCOMPLETE",
-                    "Physical output selectors are ambiguous.",
-                    "read_lcc_output",
-                    physical_path=physical_path,
-                )
-        normalized_channels = []
-        observed_paths = set()
-        for raw_channel in raw_channels:
-            if not isinstance(raw_channel, Mapping):
-                normalized_channels.append(raw_channel)
-                continue
-            channel = dict(raw_channel)
-            raw_path = channel.get("path")
-            if isinstance(raw_path, str) and raw_path in physical_to_logical:
-                channel["path"] = physical_to_logical[raw_path]
-            normalized_path = channel.get("path")
-            if (
-                isinstance(normalized_path, str)
-                and normalized_path in observed_paths
-            ):
-                raise _error(
-                    "LCC_OUTPUT_INCOMPLETE",
-                    "Logical output selectors are duplicated.",
-                    "read_lcc_output",
-                    path=normalized_path,
-                )
-            if isinstance(normalized_path, str):
-                observed_paths.add(normalized_path)
-            normalized_channels.append(channel)
-        return {**value, "channels": normalized_channels}
+        return logical_output_payload(value, self.plan.blueprint.to_dict())
 
     def _snapshot_dynamic_output(self) -> dict[str, str]:
         paths = [Path(part) for part in self.output_parts]

@@ -197,6 +197,48 @@ def test_runner_rediscovers_outputs_from_the_actual_staging_project(tmp_path):
     assert Path(report["artifacts"]["selected_output"]["path"]) == generated / "run_01.out"
 
 
+@pytest.mark.parametrize("duplicate", [False, True])
+def test_runner_maps_native_output_names_from_the_build_blueprint(tmp_path, duplicate):
+    request, staging = valid_request(tmp_path)
+    blueprint_path = Path(__file__).parents[1] / "pscad_mcp/assets/lcc/cigre_lcc_monopole_v1/blueprint.json"
+    blueprint = json.loads(blueprint_path.read_text(encoding="utf-8"))
+
+    class BlueprintBuilder(PassingDynamicBuilder):
+        def plan_model(self, **kwargs):
+            return {**super().plan_model(**kwargs), "blueprint": blueprint}
+
+    class NativeNameService(PassingDynamicService):
+        async def get_project_output(self, *args, **kwargs):
+            output = await super().get_project_output(*args, **kwargs)
+            native_names = {
+                "Main/IDC": "SignalInterface/IDC",
+                "Main/VDC_RECT": "SignalInterface/VDC_RECT",
+                "Main/VDC_INV": "SignalInterface/VDC_INV",
+                "Main/GAMMA_INV": "InverterControl/GAMMA_INV",
+            }
+            channels = output["channels"]["channels"]
+            for channel in channels:
+                channel["path"] = native_names.get(channel["path"], channel["path"])
+            if duplicate:
+                current = next(channel for channel in channels if channel["path"] == "SignalInterface/IDC")
+                channels.append({**current, "path": "Main/IDC"})
+            return output
+
+    report = asyncio.run(run_fixed_lcc_dynamic_acceptance(
+        request, service=NativeNameService(staging), builder=BlueprintBuilder(staging),
+        process_reader=list, poll_interval_s=0,
+    ))
+    if duplicate:
+        assert report["status"] == "FAIL"
+        assert report["failure"]["code"] == "LCC_OUTPUT_INCOMPLETE"
+        assert "duplicated" in report["failure"]["message"]
+    else:
+        assert report["engineering_verdict"] == "PASS", report["failure"]
+        from tests.lcc_dynamic_fakes import passing_raw_channels
+        normalized = json.loads(Path(report["artifacts"]["normalized_samples"]["path"]).read_text())
+        assert normalized == passing_raw_channels()
+
+
 @pytest.mark.parametrize("artifact_case", ["valid", "valid_two_parts", "hash_drift", "outside_workspace", "stale", "pass_only", "metadata_drift", "new_part"])
 def test_runner_preserves_failed_engineering_checks_with_verified_output(
     tmp_path: Path, artifact_case: str,

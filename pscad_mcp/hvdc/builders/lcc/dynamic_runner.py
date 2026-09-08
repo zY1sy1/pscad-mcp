@@ -33,6 +33,7 @@ from .dynamic_acceptance import (
     validate_dynamic_lcc_acceptance_report,
 )
 from .dynamic_evidence import derive_fixed_lcc_dynamic_evidence
+from .output_channels import logical_output_payload
 from .output_dataset import legacy_output_stem, output_dataset_parts
 
 
@@ -568,6 +569,9 @@ async def run_fixed_lcc_dynamic_acceptance(
             raw_channels = {"channels": raw_channels}
         if not isinstance(raw_channels, Mapping):
             raise _error(stage, "raw PSCAD channels are missing")
+        blueprint = next((item["blueprint"] for item in artifact_sources if isinstance(item.get("blueprint"), Mapping)), None)
+        if blueprint is not None:
+            raw_channels = logical_output_payload(raw_channels, blueprint)
         contract = {}
         try:
             packaged_dynamic = sources["dynamic"]
