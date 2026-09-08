@@ -150,3 +150,11 @@ fault-channel/template-native tests. Ruff reports no remaining findings. These
 are software and synthetic protocol checks, not licensed electrical acceptance.
 No licensed integration run has occurred. B's current model remains physically
 unaccepted; joint execution must wait for its accepted final inputs.
+
+B's stable `c5ed2e2` was merged after the public execution checkpoint. The
+public plan now declares the verified Main/606940312 charging-delay correction
+from `Tcharging1` to `Tcharging2` in `model_corrections`; every recipe records
+that exact derived stage before instrumentation. `raw` still applies no
+headroom, filter, carrier or damping tuning and remains physically unverified.
+The affected public service/tool/replay software gate reports 64 passed,
+1 skipped after this integration.
