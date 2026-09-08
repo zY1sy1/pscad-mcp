@@ -13,6 +13,7 @@ import shutil
 import sys
 import time
 import traceback
+from collections.abc import Mapping
 from pathlib import Path
 from xml.etree import ElementTree as ET
 
@@ -128,7 +129,7 @@ async def _finalize_python_worker(process, communication, root, result):
         result["finalization_errors"] = errors
 
 
-async def verify_native_fault_replay(*, project, bundle, channel_contract, checks_contract, settings, source_identities, dependency_files, workspace):
+async def verify_native_fault_replay(*, project, bundle, channel_contract, checks_contract, settings, source_identities, dependency_files, workspace, verification_context=None, worker_module=None):
     """Launch one fresh worker; request JSON never supplies an alternate verifier."""
     root = Path(workspace).resolve()
     if root.exists():
@@ -149,6 +150,13 @@ async def verify_native_fault_replay(*, project, bundle, channel_contract, check
         "bundle": {"path": str(bundle), "files": dict(dependency_files), "source_snapshot": source_bundle_files}, "channel_contract": channel_contract,
         "channel_contract_sha256": _json_hash(channel_contract), "checks_contract": checks_contract,
         "checks_sha256": _json_hash(checks_contract), "settings": settings, "source_identities": source_identities}
+    if verification_context is not None:
+        if not isinstance(verification_context, Mapping) or not worker_module:
+            raise ValueError("Supplemental verification requires a context and a trusted Python worker entry point")
+        request["verification_context"] = copy.deepcopy(dict(verification_context))
+        request["verification_context_sha256"] = _json_hash(verification_context)
+    elif worker_module is not None:
+        raise ValueError("A supplemental worker requires its frozen verification context")
     request_path = root / "request.json"
     _write(request_path, request)
     request_hash = _hash(request_path)
@@ -157,7 +165,7 @@ async def verify_native_fault_replay(*, project, bundle, channel_contract, check
     communication = None
     try:
         result.update({"launch_attempted": True, "owned_process_cleaned": False, "cleanup_pending": True})
-        process = await asyncio.create_subprocess_exec(sys.executable, "-m", __name__, "--request", str(request_path), "--request-sha256", request_hash,
+        process = await asyncio.create_subprocess_exec(sys.executable, "-m", worker_module or __name__, "--request", str(request_path), "--request-sha256", request_hash,
             cwd=Path(__file__).resolve().parents[4], env=environment, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
             **({"creationflags": 0x08000000} if os.name == "nt" else {}))
         result.update({"worker_launched": True, "python_pid": process.pid, "owned_process_cleaned": False, "cleanup_pending": True})
@@ -185,6 +193,10 @@ async def verify_native_fault_replay(*, project, bundle, channel_contract, check
             raise ValueError("Independent worker did not satisfy the frozen physical checks")
         if report.get("replay_saved_model_verified") is not True:
             raise ValueError("The independently saved model identity was not verified")
+        if verification_context is not None:
+            supplemental = report.get("supplemental_evidence", {})
+            if report.get("verification_context_sha256") != request["verification_context_sha256"] or report.get("supplemental_saved_validation", {}).get("verdict") != "PASS" or supplemental.get("verdict") != "PASS" or supplemental.get("output_identity") != report["output_identity"]:
+                raise ValueError("Supplemental replay checks did not pass on the same frozen child dataset")
         verify_output_dataset(report["output_identity"])
         verify_fault_instrumentation(root / "worker" / project.name, report["replay_channel_contract"])
         result.update({"status": "PASS", "project_sha256": request["project"]["sha256"]})
@@ -242,7 +254,7 @@ def _capture_ownership(service, request_hash):
     return {"pid": pid, "created_at": process.create_time(), "executable": executable, "request_sha256": request_hash}
 
 
-async def _worker(request_path: Path, expected_hash: str):
+async def _worker(request_path: Path, expected_hash: str, *, saved_verifier=None, dataset_verifier=None):
     from .blank_service import (
         _bundle_file,
         _copy_frozen,
@@ -276,10 +288,21 @@ async def _worker(request_path: Path, expected_hash: str):
         if stage == "saved_and_bound":
             saved_contract = json.loads(Path(report["result"]["channel_contract_path"]).read_text(encoding="utf-8"))
             report["replay_saved_model_verified"] = _verify_replay_saved_model(original, project, saved_contract)
+            if context is not None:
+                report["supplemental_saved_validation"] = saved_verifier(context, project, saved_contract)
+                if report["supplemental_saved_validation"].get("verdict") != "PASS":
+                    raise ValueError("Supplemental saved-case verification did not pass")
         report["history"].append({"stage": stage, "at": time.time()})
         _write(report_path, report)
 
     try:
+        context = request.get("verification_context")
+        if context is not None:
+            if not isinstance(context, Mapping) or _json_hash(context) != request.get("verification_context_sha256") or not callable(saved_verifier) or not callable(dataset_verifier):
+                raise ValueError("A supplemental contract requires matching fixed worker verifiers")
+            report["verification_context_sha256"] = request["verification_context_sha256"]
+        elif saved_verifier is not None or dataset_verifier is not None:
+            raise ValueError("Worker verifiers require a frozen supplemental context")
         if request["checks_contract"] != default_fault_checks() or _json_hash(request["checks_contract"]) != request["checks_sha256"] or _json_hash(request["channel_contract"]) != request["channel_contract_sha256"]:
             raise ValueError("Replay contracts are not the fixed requested contracts")
         original = Path(request["project"]["path"])
@@ -319,6 +342,10 @@ async def _worker(request_path: Path, expected_hash: str):
         report["output_identity"] = samples["identity"]
         report["readback"] = contract["readback"]
         report["replay_channel_contract"] = contract
+        if context is not None:
+            report["supplemental_evidence"] = dataset_verifier(context, project, contract, samples)
+            if report["supplemental_evidence"].get("verdict") != "PASS" or report["supplemental_evidence"].get("output_identity") != samples["identity"]:
+                raise ValueError("Supplemental verification did not pass on the same child dataset")
         report["status"] = "PASS" if acceptance.get("verdict") == "PASS" else "FAIL"
         if _hash(original) != request["project"]["sha256"] or _files(original_bundle) != request["bundle"]["source_snapshot"]:
             raise ValueError("The first tested inputs changed during replay")
