@@ -113,7 +113,47 @@ def _mmc_v2_profile(project: str, fidelity: str) -> dict[str, Any]:
     }
 
 
+def _mmc_fault_evidence_profile() -> dict[str, Any]:
+    rows = [
+        ("DC_T2_PN", "fault_active", "1", "physical_fault_branch_closed"),
+        ("DC_T2_PN", "i_dc_fault", "kA", "fault_branch_current"),
+    ]
+    for terminal in ("T1", "T2"):
+        rows.extend((terminal, role, units, quantity) for role, units, quantity in (
+            ("v_dc", "kV", "dc_pole_to_pole_voltage"),
+            ("p_active", "MW", "three_phase_active_power"),
+            ("recovery_enable", "1", "deblocking_enable_not_electrical_recovery"),
+        ))
+        for phase in ("A", "B", "C"):
+            for arm in ("upper", "lower"):
+                rows.extend((f"{terminal}/{phase}/{arm}", role, units, quantity) for role, units, quantity in (
+                    ("v_inserted", "kV", "cell_group_terminal_voltage"),
+                    ("blocking_state", "1", "firing_based_cell_group_blocked"),
+                    ("i_arm", "kA", "arm_inductor_current"),
+                    ("v_cap", "kV", "sum_of_submodule_capacitor_voltages"),
+                ))
+    mappings, results, roles = [], [], {}
+    for scope, role, units, quantity in rows:
+        canonical = role + "_" + scope.replace("/", "_").lower()
+        description = "MFE_" + scope.replace("/", "_") + "_" + role
+        family = {"1": "boolean", "kV": "voltage", "kA": "current", "MW": "power"}[units]
+        mappings.append({"canonical": canonical, "aliases": [description], "source_kinds": ["measurement"], "unit_family": family, "direction": "measurement", "units": units})
+        results.append({"canonical": canonical, "path": "MMC_FAULT_EVIDENCE/" + description, "units": units, "location": scope, "quantity": quantity})
+        roles.setdefault(role, []).append(canonical)
+    return {
+        "profile_version": 2, "required_assets": [],
+        "topology_constraints": {"family": "mmc", "polarity": "symmetrical_monopole"},
+        "project_fingerprints": [{"pscad_version": "4.6.2"}],
+        "mappings": mappings, "result_channels": results,
+        "metric_roles": {item["canonical"]: item["canonical"] for item in results},
+        "fault_evidence_roles": roles, "command_bindings": [], "sequences": [],
+        "requires_frozen_channel_contract": True,
+        "capabilities": {"intrinsic_dc_fault_blocking": False},
+    }
+
+
 _BUILTIN_PROFILES: dict[str, dict[str, Any]] = {
+    "mmc_native_fault_evidence_v1": _mmc_fault_evidence_profile(),
     "mmc_detailed_pwm_v2": _mmc_v2_profile("MMC_CASE_pwm", "detailed_pwm"),
     "mmc_average_value_v2": _mmc_v2_profile("MMC_CASE_avm", "average_value"),
     "cigre_lcc_monopole_v1": {

@@ -95,6 +95,16 @@ _TABLE: dict[str, tuple[str, bool, str]] = {
         False,
         "Inspect the failed acceptance evidence without weakening thresholds.",
     ),
+    "MMC_ACCEPTANCE_INCOMPLETE": (
+        "binding_repair",
+        False,
+        "Bind every physical channel and verify its units, polarity, time domain, and frozen dataset identity.",
+    ),
+    "MMC_OUTPUT_IDENTITY_CHANGED": (
+        "containment",
+        False,
+        "Preserve the changed dataset; re-establish complete immutable outputs before evaluating or publishing.",
+    ),
     "MMC_PROTECTION_INADEQUATE": (
         "acceptance",
         False,

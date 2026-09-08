@@ -11,6 +11,8 @@ from tests.mmc_parametric_fakes import error_with_code
         ("MMC_NUMERICAL_UNSTABLE", "numerical_stability", True),
         ("MMC_CONTROL_UNSTABLE", "control_stability", True),
         ("MMC_ACCEPTANCE_FAILED", "acceptance", False),
+        ("MMC_ACCEPTANCE_INCOMPLETE", "binding_repair", False),
+        ("MMC_OUTPUT_IDENTITY_CHANGED", "containment", False),
         ("LICENSE_UNAVAILABLE", "environment", False),
         ("EXECUTOR_UNHEALTHY", "environment", False),
     ],
