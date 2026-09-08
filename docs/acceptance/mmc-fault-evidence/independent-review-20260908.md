@@ -77,10 +77,28 @@ GFortran 4.2.1 `nm.exe` and `objdump.exe` identifies these control-flow facts:
 Auditable offsets are `_e_sorter_` `0x185..0x2e4` and `0x3d2..0x4b5`, and
 `_hbridge_ctrl1_` `0x5555..0x5601` followed by its indexed selection loop.
 The generated calls use an unsigned insertion count for the sorter. This
-does not satisfy the suffix-order assumption used by the firing controller
-in the opposite-sign cases. The waveform consequence still needs direct
-measurement; these branches alone do not prove the entire model's failure
-cause or justify changing measured current polarity.
+can violate the firing controller's required highest-value selected set in
+opposite-sign cases with fewer than half the cells requested. The waveform
+consequence still needs direct measurement; these branches alone do not
+prove the entire model's failure cause or justify changing measured current
+polarity.
+
+A second independent reviewer confirmed that `Fclk=1` resets the firing
+selection to bypass on each step, then selects exactly `abs(Ncells)` indices.
+The selected extreme set matters; its internal order need not be complete.
+When `k >= Dim/2`, sorting the lowest `k` positions already makes the last
+`k` positions the highest-value set, even if that suffix contains inversions.
+For `k < Dim/2`, this is not guaranteed. For example, ascending partial
+sorting of `[1, 2, 6, 3, 4, 5]` with `NS=2` leaves a correct lowest pair, but
+the last pair is `{4, 5}` instead of the highest pair `{5, 6}`.
+
+Generated `Enab` also includes signed-count edges and deblocking recovery,
+not only unsigned-count changes. Current reversal alone does not trigger a
+sort. Full sorting with `NS=Dim` is a sufficient local call change to supply
+both extreme sets on refresh steps; it does not prove that a held order
+remains exact as capacitor voltages evolve. The component's original `NS`
+input must remain distinguishable from the algorithm's sorting extent if
+that candidate is tested.
 
 The next diagnostic must compare the exact delayed voltage array supplied
 to the sorter with its returned indices in the same calculation step, and
@@ -88,6 +106,67 @@ record count, enable, current direction and actual capacitor-current energy
 moments. It must retain the original physical checks and preserve this
 failed evidence. No vendor routine body or disassembly is copied into the
 repository.
+
+## First Sorting Measurement
+
+The finalized measurement-only run at
+`D:/PSCAD-Workspace/mmc-fault-evidence/fault-evidence-20260908T091449749308Z`
+identifies `b65310287c1f3fad881b7c5e02bf8138a60ab130`, scope
+`steady_only_diagnostic`, status `FAIL`, and verified owned cleanup. The
+root reviewer checked all 45 OUT/INF/INFX identities and the saved contract,
+index and sample hashes; all matched. These outputs predate the next
+cell-set boundary diagnostic and cannot establish its results.
+
+The producer observed frequent same-step ordering inversions on enabled
+sorts, with valid one-based index bounds. That confirms partial ordering,
+but does not alone establish a wrong selected set. The next analysis must
+stratify actual sorting enable, the sign of `Ncells*Iarm`, and counts below
+versus at least 38. For high-end selection compare the smallest selected
+voltage with the largest unselected voltage; reverse the comparison for
+low-end selection. Missing or inapplicable boundaries must not count as
+zero-error observations.
+
+## Selected-Set Evidence
+
+The finalized boundary-only run at
+`D:/PSCAD-Workspace/mmc-fault-evidence/fault-evidence-20260908T092347227867Z`
+identifies `e70bed77c8e51e1b2a4338b95341d1914fb2b209`. Its original physical
+verdict remains `FAIL` and owned cleanup is complete. The root reviewer
+verified all 49 OUT/INF/INFX identities plus the contract, index and sample
+hashes, then independently reran the frozen sorting analysis.
+
+All rows below use actual enabled-sort samples in `[4.6, 5.0)`, valid
+one-based indices, and applicable nonempty selected and unselected sets.
+Positive separation gap above `1e-9` kV indicates a wrong extreme set.
+
+| Terminal | Consumed Side | Requested Count | Wrong / Observed Sets | Maximum Gap, kV |
+| --- | --- | --- | ---: | ---: |
+| T1 | Low prefix | Below 38 | 0 / 367 | -3.286e-7 |
+| T1 | Low prefix | At least 38 | 0 / 1106 | -1.444e-7 |
+| T1 | High suffix | Below 38 | 2117 / 2117 | 11.821522 |
+| T1 | High suffix | At least 38 | 0 / 998 | -8.826e-8 |
+| T2 | Low prefix | Below 38 | 0 / 1854 | -2.415e-9 |
+| T2 | Low prefix | At least 38 | 0 / 1012 | -1.019e-8 |
+| T2 | High suffix | Below 38 | 627 / 627 | 0.395613 |
+| T2 | High suffix | At least 38 | 0 / 819 | -1.323e-9 |
+
+The generated `MFE_Pole_T1_A.f` reads `IaTop` from STOF at line 186;
+the current PGB at line 404 and firing call at line 679 use that same
+unchanged value. The new physical current is read only in the later Out
+subroutine at line 1098. Thus this side classification does not introduce
+an extra integration-step mismatch between its observed current and the
+current supplied to the firing call.
+
+These data establish the selected-set defect and support the bounded
+full-sort candidate. They do not establish that repairing it will close
+all DC voltage, power, modulation, fault or recovery requirements.
+
+Reproduction requires this worktree on the child process's import path:
+
+```powershell
+$env:PYTHONPATH = 'D:/pscad-mcp/.worktrees/mmc-fault-evidence'
+& 'D:/pscad-mcp/.venv/Scripts/python.exe' 'docs/acceptance/mmc-fault-evidence/diagnose_sorter.py' 'D:/PSCAD-Workspace/mmc-fault-evidence/fault-evidence-20260908T092347227867Z'
+```
 
 ## Software Verification
 
