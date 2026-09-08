@@ -1,0 +1,77 @@
+MMC Master offline pre-audit verification
+Date: 2026-09-08
+Baseline commit: d226c2d2259c73d867c147259d14abe8d23e3228
+Worktree: D:/pscad-mcp/.worktrees/mmc-master-offline-audit
+
+1. Existing focused offline suite
+
+Command:
+  D:/pscad-mcp/.venv/Scripts/python.exe -m pytest -q --tb=short
+  tests/test_definition_metadata.py tests/test_master_binding_registry.py
+  tests/test_mmc_asset_audit.py tests/test_mmc_assets_loader.py
+  tests/test_mmc_template_audit.py tests/test_mmc_avm_engine.py
+  tests/test_mmc_pwm_engine.py
+
+Observed: 83 passed, 1 skipped in 2.13s. Exit 0.
+No production code was changed after this run.
+
+2. Recollection of the saved evidence
+
+Command:
+  D:/pscad-mcp/.venv/Scripts/python.exe
+  docs/audits/2026-09-08-mmc-master-offline/collect_evidence.py --verify
+
+Observed: MATCH. Exit 0.
+Sources: 47.
+Packaged Master references: 5.
+Native Master references across all definitions: 77.
+Native Master references reachable from Main: 73.
+Missing reachable native Master definitions: none.
+Missing or ambiguous reachable local/library dependencies: none.
+
+3. Independent PowerShell XML and hash checks
+
+Parsed the installed Master with System.Xml, independently of the repository
+Python metadata parser. Compared every saved exact definition count, each
+port name and condition in source order, and all source hashes.
+
+Observed:
+  source_hashes_checked = 47
+  definition_names_checked = 88
+  port_occurrences_checked = 604
+  source_drift = 0
+  independent_xml_check = PASS
+  nodelabel normalized kind/dimension = electrical/1
+Exit 0.
+
+4. Existing packaged planner blocker reproduced
+
+Loaded the unchanged hash-verified packaged assets and called create_plan
+with MmcPlanRequest(project_name="MMC_OFFLINE_INVENTORY_PROBE"), the packaged
+catalog, and the worktree as the path-policy root. The call stopped before
+creating a project:
+
+  code = MMC_DEFINITION_MISSING
+  operation = require_mmc_definition
+  definition = master:source3
+  message = Definition 'master:source3' is not in the exact catalog.
+
+The diagnostic harness asserted this exact error and that the target PSCX
+does not exist. Exit 0. An initial harness import from models.py was corrected
+to import MmcPlanRequest from planner.py; no repository source change was made.
+
+5. Collector static checks
+
+Command:
+  D:/pscad-mcp/.venv/Scripts/python.exe -m ruff check
+  docs/audits/2026-09-08-mmc-master-offline/collect_evidence.py
+  --select E9,F63,F7,F82
+
+Observed: All checks passed. Exit 0.
+
+6. Scope
+
+Only this audit directory was created in its isolated worktree. No change was
+made to the main checkout or the active LCC worktree by this pre-audit.
+No PSCAD, compiler, simulation, licensed acceptance, merge, push, publication
+or installation was performed. No runtime binding is marked verified.

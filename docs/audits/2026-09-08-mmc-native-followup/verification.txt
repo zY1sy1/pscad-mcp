@@ -1,0 +1,30 @@
+Offline verification, 2026-09-08
+Worktree: D:/pscad-mcp/.worktrees/mmc-master-offline-audit
+Collection commit: a759a468933109af2169bcc2d67ad4e977a3deb2
+
+python docs/audits/2026-09-08-mmc-native-followup/collect_signal_audit.py
+Exit 0 on two consecutive runs after final collector edits.
+Both runs: 177 scalar channels; 18 parts; 5201 samples; sources_immutable=true.
+Both runs: acceptance_verdict=INCOMPLETE_ANALYSIS.
+Both runs signal-manifest.json SHA-256:
+9a802f617bdd032e03140ebf7ac9ec143e5051325832293273b3dcd8bbdfbc5c
+All 177 channels resolved to unique full owner/vector identities and compiled PGB assignments.
+All proposed sites in both historical and installed profiles had matching project wire endpoints.
+Historical archived source hashes matched the journal; staged historical library matched the archive.
+
+python docs/audits/2026-09-08-mmc-native-followup/collect_acceptance_matrix.py
+Exit 0 on two consecutive runs after final collector edits.
+Both runs: 3 feasible requests; 6 infeasible guards; 2 engines; 11 scenarios per engine; 66 rows.
+Both runs: feasible_plans=3; infeasible_guards_passed=6; full_bridge_rejected=true.
+Both runs: sources_immutable=true; no planned target directory was materialized.
+Both runs acceptance-matrix.json SHA-256:
+66dcdad8e65535b72ad32b9bf29b1d92bd751f38a5e337a11794fe6f46d64dd0
+
+python -m ruff check docs/audits/2026-09-08-mmc-native-followup/collect_signal_audit.py docs/audits/2026-09-08-mmc-native-followup/collect_acceptance_matrix.py
+Exit 0: All checks passed!
+
+git diff --check -- docs/audits/2026-09-08-mmc-native-followup
+Exit 0. The audit files were untracked; this is not a substitute for the collector and lint checks above.
+
+No PSCAD connection, compiler, simulation, source mutation, branch/index operation or commit was performed by this subtask.
+No licensed runtime/physical acceptance or independent-reference review is claimed.
