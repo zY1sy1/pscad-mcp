@@ -181,6 +181,21 @@ def synthetic_master(path):
     form = ET.SubElement(definition, "form")
     ET.SubElement(form, "parameter", name="Name", type="Text")
     ET.SubElement(form, "parameter", name="Value", type="Real")
+    definition = ET.SubElement(definitions, "Definition", name="resistor")
+    svg = ET.SubElement(definition, "svg")
+    for name, x in (("A", 0), ("B", 36)):
+        ET.SubElement(
+            svg,
+            "port",
+            name=name,
+            x=str(x),
+            y="0",
+            dim="0",
+            model="Natural",
+            type="Removable",
+        ).text = "true"
+    form = ET.SubElement(definition, "form")
+    ET.SubElement(form, "parameter", name="R", type="Real", unit="ohm", min="0")
     path.parent.mkdir(parents=True)
     ET.ElementTree(root).write(path, encoding="utf-8", xml_declaration=True)
     return path
@@ -292,7 +307,10 @@ class Session:
             "resolved": resolved,
         }
         self.calls.append(("add", logical, dict(parameters)))
-        return {"id": component_id}
+        return {
+            "id": component_id,
+            "definition": self.components[component_id]["definition"],
+        }
 
     async def get_master_binding_evidence(self, project, component_id):
         assert not self.reloaded, "Reload clears vendor binding state"
@@ -511,7 +529,7 @@ def test_registry_complete_fixture_preserves_normalized_rx_and_scoped_evidence(
     assert physical["Es"] == physical["Vm"] == 400.0
     assert physical["F0"] == physical["F"] == 50.0
     assert any(call[:2] == ("add", "master:const") for call in session.calls)
-    assert len([call for call in session.calls if call[0] == "wire"]) >= 3
+    assert len([call for call in session.calls if call[0] == "wire"]) == 5
     assert "source_neutral" in report["support"]
     assert report["persistence"]["mode"] == "save_live_readback"
     assert (
@@ -698,7 +716,15 @@ def test_build_success_without_an_executable_is_not_acceptance(tmp_path, monkeyp
 
 
 @pytest.mark.parametrize(
-    "wire_index", [0, 1, 2], ids=["pi_input", "transformer_neutral", "source_neutral"]
+    "wire_index",
+    [0, 1, 2, 3, 4],
+    ids=[
+        "pi_input",
+        "transformer_neutral",
+        "source_neutral",
+        "dc_shunt",
+        "dc_shunt_ground",
+    ],
 )
 @pytest.mark.parametrize(
     "mutation", ["missing", "drift", "wrong_id", "duplicate", "wrong_canvas"]
@@ -709,6 +735,7 @@ def test_saved_wire_must_match_returned_id_and_geometry_despite_success_ack(
     _, report, session = attempt(
         tmp_path, monkeypatch, wire_mutation=mutation, wire_index=wire_index
     )
+    assert len(report["support"]) > wire_index, "The fixture is missing a required wire"
     support = list(report["support"].values())[wire_index]
     assert support["wire"]["endpoints"] == [
         support["vertices"][0],
@@ -740,6 +767,94 @@ def test_report_validator_requires_saved_wire_readback(tmp_path, monkeypatch, mu
     else:
         saved["project_sha256"] = "b" * 64
     with pytest.raises(ValueError, match="[Ww]ire|[Ss]aved"):
+        module.validate_mmc_master_binding_report(report)
+
+
+def test_dc_node_has_a_verified_ten_ohm_shunt_with_two_saved_leads(
+    tmp_path, monkeypatch
+):
+    _, report, session = attempt(tmp_path, monkeypatch)
+    assert report["status"] == "PASS", report.get("error")
+    assert "dc_shunt" in report["support"], "The adaptive DC node has no scalar circuit"
+    shunt = report["support"]["dc_shunt"]
+    assert shunt["component"]["definition"] == "master:resistor"
+    assert shunt["parameters"] == {"R": 10.0}
+    assert shunt["metadata"]["parameters"]["R"]["unit"] == "ohm"
+    assert {
+        port["name"]: (port["dim"], port["model"])
+        for port in shunt["metadata"]["ports"]
+    } == {"A": (0, "Natural"), "B": (0, "Natural")}
+    bindings = {item["logical_name"]: item for item in report["bindings"]}
+    dc = bindings["master:dc_bus"]["ports"]["DC"]
+    ground = bindings["master:ground"]["ports"]["GND"]
+    assert ground["dim"] == 1
+
+    def endpoints(port):
+        return [port["x"], port["y"]]
+
+    assert shunt["wire"]["endpoints"] == [endpoints(dc), endpoints(shunt["ports"]["A"])]
+    assert report["support"]["dc_shunt_ground"]["wire"]["endpoints"] == [
+        endpoints(shunt["ports"]["B"]),
+        endpoints(ground),
+    ]
+    assert len(report["wire_readback"]["wires"]) == 5
+    assert report["wire_readback"]["project_sha256"] == report["project"]["sha256"]
+    assert any(
+        call[:2] == ("add", "master:resistor") and call[2] == {"R": 10.0}
+        for call in session.calls
+    )
+    assert not any(
+        set(map(tuple, item["wire"]["endpoints"]))
+        == {tuple(endpoints(dc)), tuple(endpoints(ground))}
+        for item in report["support"].values()
+    )
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "missing_resistor",
+        "shorted_resistor",
+        "resistance_drift",
+        "wrong_definition",
+        "wrong_unit",
+        "vector_port",
+        "data_port",
+        "missing_ground_lead",
+        "direct_short",
+    ],
+)
+def test_dc_shunt_evidence_cannot_be_missing_or_substituted(
+    tmp_path, monkeypatch, mutation
+):
+    module, report, _ = attempt(tmp_path, monkeypatch)
+    assert report["status"] == "PASS", report.get("error")
+    assert "dc_shunt" in report["support"], "The adaptive DC node has no scalar circuit"
+    support = report["support"]
+    shunt = support["dc_shunt"]
+    if mutation == "missing_resistor":
+        del support["dc_shunt"]
+    elif mutation in {"shorted_resistor", "resistance_drift"}:
+        shunt["parameters"]["R"] = 0 if mutation == "shorted_resistor" else 11
+    elif mutation == "wrong_definition":
+        shunt["component"]["definition"] = "master:inductor"
+    elif mutation == "wrong_unit":
+        shunt["metadata"]["parameters"]["R"]["unit"] = "H"
+    elif mutation == "vector_port":
+        shunt["ports"]["A"]["dim"] = 3
+    elif mutation == "data_port":
+        shunt["metadata"]["ports"][0]["model"] = "Transfer"
+    elif mutation == "missing_ground_lead":
+        del support["dc_shunt_ground"]
+    else:
+        dc = next(
+            item
+            for item in report["bindings"]
+            if item["logical_name"] == "master:dc_bus"
+        )["ports"]["DC"]
+        support["dc_shunt_ground"]["vertices"][0] = [dc["x"], dc["y"]]
+        support["dc_shunt_ground"]["wire"]["endpoints"][0] = [dc["x"], dc["y"]]
+    with pytest.raises(ValueError):
         module.validate_mmc_master_binding_report(report)
 
 

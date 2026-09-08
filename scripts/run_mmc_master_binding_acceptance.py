@@ -224,10 +224,74 @@ def _validate_binding(item: Mapping[str, Any], audited: AuditedMasterRegistry) -
         )
 
 
+def _resistor_ports(metadata) -> dict[str, Any]:
+    resistance = metadata.get("parameters", {}).get("R", {})
+    ports = metadata.get("ports", [])
+    _check(
+        metadata.get("name") == "resistor"
+        and _contains({"type": "Real", "unit": "ohm", "readonly": False}, resistance)
+        and (resistance.get("minimum") is None or resistance["minimum"] <= 10.0)
+        and (resistance.get("maximum") is None or resistance["maximum"] >= 10.0)
+        and len(ports) == 2
+        and {port.get("name") for port in ports} == {"A", "B"}
+        and all(
+            port.get("model") == "Natural"
+            and port.get("type") == "Removable"
+            and type(port.get("dim")) is int
+            and port["dim"] in (0, 1)
+            and port.get("condition") == "true"
+            for port in ports
+        ),
+        "The DC shunt requires native resistor metadata for 10 ohm and scalar/adaptive electrical A/B ports",
+    )
+    return {port["name"]: port for port in ports}
+
+
+def _validate_dc_shunt(shunt) -> None:
+    metadata_ports = _resistor_ports(shunt.get("metadata", {}))
+    component = shunt.get("component", {})
+    _check(
+        component.get("definition") == "master:resistor"
+        and type(component.get("id")) is int
+        and component["id"] > 0
+        and _values_match({"R": 10.0}, shunt.get("parameters")),
+        "The DC shunt must read back as a native 10-ohm resistor",
+    )
+    location, ports = shunt.get("location", {}), shunt.get("ports", {})
+    _check(
+        set(ports) == {"A", "B"}
+        and all(type(location.get(axis)) is int for axis in ("x", "y")),
+        "The DC shunt requires both physical port locations",
+    )
+    for name, metadata in metadata_ports.items():
+        expected = {
+            "name": name,
+            "dim": metadata["dim"],
+            "type": metadata["type"],
+            "x": location["x"] + metadata["x"],
+            "y": location["y"] + metadata["y"],
+        }
+        _check(
+            _contains(expected, ports[name]),
+            f"DC shunt port {name} differs from native metadata",
+        )
+    _check(
+        (ports["A"]["x"], ports["A"]["y"]) != (ports["B"]["x"], ports["B"]["y"]),
+        "The DC shunt terminals must remain distinct",
+    )
+
+
 def _validate_support(support, bindings) -> None:
     _check(
         isinstance(support, dict)
-        and set(support) == {"pi_input", "transformer_neutral", "source_neutral"},
+        and set(support)
+        == {
+            "pi_input",
+            "transformer_neutral",
+            "source_neutral",
+            "dc_shunt",
+            "dc_shunt_ground",
+        },
         "Every fixture input and neutral connection is required",
     )
     by_name = {item["logical_name"]: item for item in bindings}
@@ -254,6 +318,13 @@ def _validate_support(support, bindings) -> None:
         "Native constant metadata evidence is required",
     )
     ground = by_name["master:ground"]["ports"]["GND"]
+    shunt = support["dc_shunt"]
+    _validate_dc_shunt(shunt)
+    _check(
+        ground["dim"] == 1
+        and shunt["component"]["id"] not in {item["component_id"] for item in bindings},
+        "The DC shunt must be a distinct component connected to scalar ground",
+    )
     endpoints = {
         "pi_input": (output, by_name["master:pi_controller"]["ports"]["IN"]),
         "source_neutral": (by_name["master:source3"]["ports"]["NEUTRAL"], ground),
@@ -261,6 +332,8 @@ def _validate_support(support, bindings) -> None:
             by_name["master:transformer"]["ports"]["NEUTRAL"],
             ground,
         ),
+        "dc_shunt": (by_name["master:dc_bus"]["ports"]["DC"], shunt["ports"]["A"]),
+        "dc_shunt_ground": (shunt["ports"]["B"], ground),
     }
     wire_ids = []
     for name, (start, end) in endpoints.items():
@@ -645,6 +718,39 @@ async def _support_fixture(service, project, bindings, context, bounded):
         [source["x"] - 72, ground["y"]],
         [ground["x"], ground["y"]],
     ]
+    definitions = context.metadata.get("resistor", ())
+    _check(len(definitions) == 1, "Exactly one native resistor definition is required")
+    resistor_metadata = asdict(definitions[0])
+    resistor_ports = _resistor_ports(resistor_metadata)
+    dc = by_name["master:dc_bus"]["ports"]["DC"]
+    resistor_location = (
+        dc["x"] + 108 - resistor_ports["A"]["x"],
+        dc["y"] - resistor_ports["A"]["y"],
+    )
+    resistor = await bounded(
+        service.add_canvas_component(
+            project, "master", "resistor", *resistor_location, 0, {"R": 10.0}
+        )
+    )
+    resistor_id = int(resistor["id"])
+    shunt = {
+        "component": resistor,
+        "metadata": resistor_metadata,
+        "parameters": await bounded(
+            service.get_component_parameters(project, resistor_id)
+        ),
+        "location": await bounded(service.get_component_location(project, resistor_id)),
+        "ports": await bounded(service.get_component_ports(project, resistor_id)),
+    }
+    _validate_dc_shunt(shunt)
+    a, b = shunt["ports"]["A"], shunt["ports"]["B"]
+    dc_vertices = [[dc["x"], dc["y"]], [a["x"], a["y"]]]
+    ground_vertices = [
+        [b["x"], b["y"]],
+        [b["x"], ground["y"] + 72],
+        [ground["x"], ground["y"] + 72],
+        [ground["x"], ground["y"]],
+    ]
     return {
         "pi_input": {
             "component": created,
@@ -661,6 +767,15 @@ async def _support_fixture(service, project, bindings, context, bounded):
         "source_neutral": {
             "vertices": source_vertices,
             "wire": await bounded(service.create_wire(project, source_vertices)),
+        },
+        "dc_shunt": {
+            **shunt,
+            "vertices": dc_vertices,
+            "wire": await bounded(service.create_wire(project, dc_vertices)),
+        },
+        "dc_shunt_ground": {
+            "vertices": ground_vertices,
+            "wire": await bounded(service.create_wire(project, ground_vertices)),
         },
     }
 
