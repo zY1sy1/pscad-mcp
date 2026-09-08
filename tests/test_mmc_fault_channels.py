@@ -290,7 +290,7 @@ def test_sorter_diagnostics_observe_same_step_permutation_and_input(tmp_path, in
     project, library, master = installed_sources
     derived = tmp_path / "observed.pscx"
     contract = fault_channels.instrument_fault_channels(project, derived, library=library, master=master)
-    for role in ("sort_index_invalid", "sort_index_inversions", "sort_requested_count", "sort_enable", "capacitor_charge_power", "capacitor_current_sum"):
+    for role in ("sort_index_invalid", "sort_index_inversions", "sort_requested_count", "sort_enable", "sort_prefix_gap", "sort_suffix_gap", "sort_boundary_applicable", "capacitor_charge_power", "capacitor_current_sum"):
         bindings = [item for item in contract["diagnostic_channels"] if item["role"] == role]
         assert len(bindings) == 12
     tree = ET.parse(derived)

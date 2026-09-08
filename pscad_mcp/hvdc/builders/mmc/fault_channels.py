@@ -298,6 +298,14 @@ def instrument_fault_channels(source: str | Path, destination: str | Path, *, li
 #LOCAL INTEGER MFERANGE
 #LOCAL INTEGER MFEI
 #LOCAL INTEGER MFEJ
+#LOCAL INTEGER MFEK
+#LOCAL INTEGER MFEAPPLIC
+#LOCAL REAL MFEPGAP
+#LOCAL REAL MFESGAP
+#LOCAL REAL MFESMIN
+#LOCAL REAL MFEOMAX
+#LOCAL REAL MFESMAX
+#LOCAL REAL MFEOMIN
       MFEINV = 0
       MFERANGE = 0
       DO MFEI=1,$Dim
@@ -311,11 +319,39 @@ def instrument_fault_channels(source: str | Path, destination: str | Path, *, li
           ENDIF
         ENDIF
       ENDDO
+      MFEPGAP = 0.0
+      MFESGAP = 0.0
+      MFEAPPLIC = 0
+      MFEK = MIN($Dim,ABS($NS))
+      IF ((MFERANGE.EQ.0).AND.(MFEK.GT.0).AND.(MFEK.LT.$Dim)) THEN
+        MFEAPPLIC = 1
+        MFESMAX = $IN($OUT(1))
+        MFEOMIN = $IN($OUT(MFEK+1))
+        MFESMIN = $IN($OUT($Dim-MFEK+1))
+        MFEOMAX = $IN($OUT(1))
+        DO MFEI=1,$Dim
+          IF (MFEI.LE.MFEK) THEN
+            MFESMAX = MAX(MFESMAX,$IN($OUT(MFEI)))
+          ELSE
+            MFEOMIN = MIN(MFEOMIN,$IN($OUT(MFEI)))
+          ENDIF
+          IF (MFEI.GT.($Dim-MFEK)) THEN
+            MFESMIN = MIN(MFESMIN,$IN($OUT(MFEI)))
+          ELSE
+            MFEOMAX = MAX(MFEOMAX,$IN($OUT(MFEI)))
+          ENDIF
+        ENDDO
+        MFEPGAP = MFESMAX - MFEOMIN
+        MFESGAP = MFEOMAX - MFESMIN
+      ENDIF
 """
     expose(observed_sorter, "MmcSortInvalid", "Fortran", "MFERANGE", "INTEGER")
     expose(observed_sorter, "MmcSortInversions", "Fortran", "MFEINV", "INTEGER")
     expose(observed_sorter, "MmcSortCount", "Fortran", "$NS", "INTEGER")
     expose(observed_sorter, "MmcSortEnable", "Fortran", "$Enab", "INTEGER")
+    expose(observed_sorter, "MmcSortPrefixGap", "Fortran", "MFEPGAP", "REAL")
+    expose(observed_sorter, "MmcSortSuffixGap", "Fortran", "MFESGAP", "REAL")
+    expose(observed_sorter, "MmcSortApplicable", "Fortran", "MFEAPPLIC", "INTEGER")
     channels: list[dict[str, Any]] = []
     probes: list[dict[str, Any]] = []
     wires: list[dict[str, Any]] = []
@@ -401,10 +437,10 @@ def instrument_fault_channels(source: str | Path, destination: str | Path, *, li
                     raise _error("MMC_ACCEPTANCE_INCOMPLETE", "The audited ascending arm sorter differs.", owner=owner)
                 sorter = sorters[0]
                 sorter.set("defn", namespace + ":MmcObservedSorter")
-                for parameter, role, quantity in (("MmcSortInvalid", "sort_index_invalid", "indices_outside_one_based_voltage_array_bounds"), ("MmcSortInversions", "sort_index_inversions", "adjacent_ascending_inversions_in_same_step_sort_input"), ("MmcSortCount", "sort_requested_count", "actual_NS_argument"), ("MmcSortEnable", "sort_enable", "actual_Enab_argument")):
+                for parameter, role, quantity in (("MmcSortInvalid", "sort_index_invalid", "indices_outside_one_based_voltage_array_bounds"), ("MmcSortInversions", "sort_index_inversions", "adjacent_ascending_inversions_in_same_step_sort_input"), ("MmcSortCount", "sort_requested_count", "actual_NS_argument"), ("MmcSortEnable", "sort_enable", "actual_Enab_argument"), ("MmcSortPrefixGap", "sort_prefix_gap", "max_selected_prefix_minus_min_unselected"), ("MmcSortSuffixGap", "sort_suffix_gap", "max_unselected_minus_min_selected_suffix"), ("MmcSortApplicable", "sort_boundary_applicable", "valid_indices_and_nontrivial_requested_subset")):
                     signal = parameter + ("Top" if arm == "upper" else "Btm")
                     set_param(sorter, parameter, signal)
-                    add_probe(pole_definition, role, f"{terminal}/{phase}/{arm}", signal, sorter, kind="control_quantity", source_parameter=parameter, extra={"quantity": quantity, "index_base": 1, "timing": "immediately_after_E_SORTER_before_HBridge_Ctrl1", "voltage_array": "actual_one_step_delayed_VcT_or_VcB", "full_order_not_assumed": True})
+                    add_probe(pole_definition, role, f"{terminal}/{phase}/{arm}", signal, sorter, kind="control_quantity", source_parameter=parameter, units_override="kV" if role.endswith("_gap") else "1", extra={"quantity": quantity, "index_base": 1, "timing": "immediately_after_E_SORTER_before_HBridge_Ctrl1", "voltage_array": "actual_one_step_delayed_VcT_or_VcB", "full_order_not_assumed": True, "gap_valid_when": "indices_in_1_to_Dim_and_0_lt_abs_NS_lt_Dim", "positive_gap_means_wrong_extreme_set": role.endswith("_gap")})
             if any(dict(_parameters(item)).get("Name") == "MmcVzEffective" for item in _components(pole_definition)):
                 for wire in pole_definition.findall("./schematic/Wire"):
                     wires.append({"definition_name": pole_name, "owner_id": wire.get("id"), "attributes": {key: wire.get(key) for key in ("classid", "x", "y", "orient")}, "vertices": [dict(item.attrib) for item in wire.findall("vertex")]})
