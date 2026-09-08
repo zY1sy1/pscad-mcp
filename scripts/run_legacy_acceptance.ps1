@@ -7,6 +7,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+. (Join-Path $PSScriptRoot 'acceptance_test_command.ps1')
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $virtualEnvironment = Join-Path $repoRoot ".venv"
 $python = Join-Path $virtualEnvironment "Scripts\python.exe"
@@ -34,10 +35,12 @@ if (-not (Test-Path -LiteralPath $Source -PathType Leaf)) {
 
 $existing = @(Get-Process -ErrorAction SilentlyContinue |
     Where-Object { $_.ProcessName -like 'PSCAD*' })
-if ($existing.Count -gt 0) {
+if ($existing.Count -gt 0 -and $env:PSCAD_MCP_ACCEPTANCE_CONCURRENT -ne '1') {
     $summary = ($existing | ForEach-Object { "$($_.Id):$($_.ProcessName)" }) -join ', '
     throw "Close existing PSCAD processes before acceptance. Found: $summary"
 }
+
+$Workspace = Join-Path $Workspace ("worker-" + [guid]::NewGuid().ToString('N'))
 
 function New-AcceptanceProject([string]$Label) {
     $line = & $prepare -Source $Source -Destination $Workspace -Label $Label |
@@ -73,6 +76,7 @@ $environmentNames = @(
 )
 
 $acceptanceFailure = $null
+$capturedOutput = @()
 try {
     $env:PSCAD_MCP_ACCEPTANCE = "1"
     $env:PSCAD_MCP_ACCEPTANCE_VERSION = $Version
@@ -95,10 +99,13 @@ try {
 
     Push-Location $repoRoot
     try {
-        & $python -m unittest tests.test_legacy_acceptance `
-            tests.test_legacy_reliability_acceptance -v
-        if ($LASTEXITCODE -ne 0) {
-            $acceptanceFailure = "Legacy acceptance failed with exit code $LASTEXITCODE."
+        $testResult = Invoke-AcceptanceTestCommand -Executable $python -ArgumentList @(
+            '-m', 'unittest', 'tests.test_legacy_acceptance',
+            'tests.test_legacy_reliability_acceptance', '-v'
+        )
+        $capturedOutput = $testResult.Output
+        if ($testResult.ExitCode -ne 0) {
+            $acceptanceFailure = "Legacy acceptance failed with exit code $($testResult.ExitCode)."
         }
     } finally {
         Pop-Location
@@ -111,11 +118,26 @@ try {
 
 $remaining = @(Get-Process -ErrorAction SilentlyContinue |
     Where-Object { $_.ProcessName -like 'PSCAD*' })
+if ($env:PSCAD_MCP_ACCEPTANCE_CONCURRENT -eq '1') {
+    $ownedPids = [System.Collections.Generic.HashSet[int]]::new()
+    foreach ($line in $capturedOutput) {
+        if ([string]$line -match 'ACCEPTANCE_PID=(\d+)') {
+            [void]$ownedPids.Add([int]$Matches[1])
+        }
+    }
+    if ($ownedPids.Count -eq 0) {
+        throw 'Concurrent acceptance did not record any owned PSCAD PID.'
+    }
+    $remaining = @($remaining | Where-Object { $ownedPids.Contains($_.Id) })
+}
 if ($remaining.Count -gt 0) {
     $summary = ($remaining | ForEach-Object { "$($_.Id):$($_.ProcessName):$($_.Path)" }) -join ', '
     throw "Acceptance left PSCAD processes running; they were not terminated automatically: $summary"
 }
-Write-Output "ACCEPTANCE_FINAL_PROCESS_COUNT=0"
+Write-Output "ACCEPTANCE_OWNED_PROCESS_COUNT=0"
+if ($env:PSCAD_MCP_ACCEPTANCE_CONCURRENT -ne '1') {
+    Write-Output "ACCEPTANCE_FINAL_PROCESS_COUNT=0"
+}
 
 if ($null -ne $acceptanceFailure) {
     throw $acceptanceFailure

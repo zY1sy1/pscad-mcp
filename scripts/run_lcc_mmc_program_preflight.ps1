@@ -61,7 +61,7 @@ $processes = @(
     Get-Process -ErrorAction SilentlyContinue |
         Where-Object ProcessName -Like 'PSCAD*'
 )
-if ($processes.Count -gt 0) {
+if ($processes.Count -gt 0 -and $env:PSCAD_MCP_ACCEPTANCE_CONCURRENT -ne '1') {
     throw 'Close existing PSCAD processes before preflight.'
 }
 
@@ -76,14 +76,14 @@ $previousProgramPreflight = $env:PSCAD_MCP_PROGRAM_PREFLIGHT
 $hadWorkspace = Test-Path Env:PSCAD_MCP_WORKSPACE
 $previousWorkspace = $env:PSCAD_MCP_WORKSPACE
 $env:PSCAD_MCP_PROGRAM_PREFLIGHT = '1'
-$env:PSCAD_MCP_WORKSPACE = $Workspace
+$env:PSCAD_MCP_WORKSPACE = $runRoot
 try {
     Push-Location $repoRoot
     try {
         $preflightArguments = @(
             '-m', 'pscad_mcp.acceptance.preflight_cli',
             '--repository-root', $repoRoot,
-            '--workspace-root', $Workspace,
+            '--workspace-root', $runRoot,
             '--master-path', $MasterLibrary,
             '--compiler-configuration', $CompilerConfiguration,
             '--compiler-executable', $CompilerExecutable,
@@ -127,6 +127,13 @@ $remaining = @(
     Get-Process -ErrorAction SilentlyContinue |
         Where-Object ProcessName -Like 'PSCAD*'
 )
+if ($env:PSCAD_MCP_ACCEPTANCE_CONCURRENT -eq '1') {
+    $managedPid = $payload.licensed_session.runtime.session.managed_pid
+    if (-not ($managedPid -gt 0)) {
+        throw 'Concurrent preflight did not record its managed PSCAD PID.'
+    }
+    $remaining = @($remaining | Where-Object { $_.Id -eq $managedPid })
+}
 if ($remaining.Count -ne 0) {
     throw 'Licensed program preflight left PSCAD processes running.'
 }

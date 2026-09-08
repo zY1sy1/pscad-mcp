@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from ....acceptance.preflight import PreflightRequest, run_static_preflight
+from ....acceptance.process_scope import acceptance_launch_policy
 from ....core.backend.legacy import LegacyBackend
 from ....core.executor import robust_executor
 from ....core.path_policy import PathPolicy
@@ -118,6 +119,7 @@ def _service_factory(request: FixedLccAcceptanceRequest) -> tuple[Any, Any]:
         x64=True,
         definition_paths={"master": request.master_path},
         process_probe=list_pscad_processes,
+        legacy_existing_policy=acceptance_launch_policy(),
     )
     service = PscadService(
         lambda: backend,

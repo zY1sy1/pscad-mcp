@@ -24,6 +24,10 @@ from ....acceptance.promotion import promote_program_report
 from ....core.backend.base import BackendError
 from ....core.master_bindings import parse_master_binding_registry
 from ....core.process_inventory import list_pscad_processes
+from ....acceptance.process_scope import (
+    remaining_acceptance_processes,
+    require_acceptance_ownership,
+)
 from .journal import AtomicJournal
 
 NATIVE_SCOPE = "lcc.blank_native"
@@ -1305,6 +1309,7 @@ async def run_native_lcc_acceptance(
                 "run_native_lcc_acceptance",
             )
         runtime_session = runtime_status.get("session")
+        require_acceptance_ownership(runtime_status)
         report["runtime"].update(
             {
                 "backend": str(runtime_status.get("backend")),
@@ -1411,9 +1416,13 @@ async def run_native_lcc_acceptance(
         master_after, master_error = _cleanup_hash(master_path)
         report["sources"]["template"]["after"] = template_after
         report["sources"]["master"]["after"] = master_after
-        report["runtime"]["remaining_processes"] = [
-            dict(value) for value in process_reader()
-        ]
+        try:
+            report["runtime"]["remaining_processes"] = remaining_acceptance_processes(
+                report["runtime"], process_reader,
+            )
+        except Exception as error:  # noqa: BLE001 - missing process evidence fails
+            report["runtime"]["quit_error"] = str(error)[:1024]
+            report = _fail_report(request, report, "cleanup", error)
         compiler_error: BaseException | None = None
         compiler_changed = False
         for path, expected in compiler_inputs:

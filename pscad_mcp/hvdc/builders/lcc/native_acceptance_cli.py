@@ -17,6 +17,7 @@ from ....core.executor import robust_executor
 from ....core.master_bindings import audit_master_bindings
 from ....core.path_policy import PathPolicy
 from ....core.process_inventory import list_pscad_processes
+from ....acceptance.process_scope import acceptance_launch_policy
 from ....core.service import PscadService
 from .assets import load_packaged_asset_set, sha256_file
 from .blank_service import BlankLccBuilderService
@@ -102,6 +103,7 @@ def _service_factory(
         x64=True,
         definition_paths={"master": request.master_path},
         process_probe=list_pscad_processes,
+        legacy_existing_policy=acceptance_launch_policy(),
     )
     service = PscadService(
         lambda: backend,

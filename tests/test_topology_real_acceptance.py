@@ -13,6 +13,7 @@ from typing import Any
 import xml.etree.ElementTree as ET
 
 from pscad_mcp.core.backend.legacy import LegacyBackend
+from pscad_mcp.acceptance.process_scope import acceptance_launch_policy
 from pscad_mcp.core.executor import robust_executor
 from pscad_mcp.topology.acceptance import write_acceptance_report
 from pscad_mcp.topology.hashing import canonical_sha256, topology_sha256
@@ -182,6 +183,7 @@ class TestTopologyRealAcceptance(LegacyAcceptanceCase):
                 "PSCAD_MCP_TOPOLOGY_ACCEPTANCE_X64", "true"
             ).casefold()
             in {"1", "true", "yes", "on"},
+            legacy_existing_policy=acceptance_launch_policy(),
         )
 
     async def _load_path(self, path: Path) -> str:

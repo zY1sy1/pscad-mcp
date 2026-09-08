@@ -751,8 +751,14 @@ Licensed PSCAD 4.6.2 acceptance is opt-in and works only on timestamped copies:
   -Version '4.6.2' -X64
 ```
 
-The runner refuses to start while another PSCAD process is open and never
-broadly terminates PSCAD processes. It runs the six original acceptance tests
+By default the runner refuses to start while another PSCAD process is open.
+For independent workers, set `PSCAD_MCP_ACCEPTANCE_CONCURRENT=1` in each worker's
+process environment and use separate workspaces. Updated legacy, topology,
+LCC native/fixed and program-preflight runners then launch independent managed
+instances and check only their owned PSCAD PIDs. They never broadly terminate
+PSCAD processes. See [acceptance criteria](docs/acceptance-criteria.md) for the
+required diagnosis, repair and rerun workflow after an unsuccessful attempt.
+The legacy runner runs the six original acceptance tests
 plus nine reliability tests, records owned PIDs and evidence directories, and
 requires all owned processes to exit. PSCAD 4.6.2 has been exercised on a real
 licensed installation; PSCAD 5.x remains contract-tested only until a real 5.x

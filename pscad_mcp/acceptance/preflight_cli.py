@@ -18,6 +18,7 @@ from .preflight import (
     run_program_preflight,
     write_preflight_report,
 )
+from .process_scope import acceptance_launch_policy
 
 
 def _service(workspace: Path) -> PscadService:
@@ -26,6 +27,7 @@ def _service(workspace: Path) -> PscadService:
         version="4.6.2",
         x64=True,
         process_probe=list_pscad_processes,
+        legacy_existing_policy=acceptance_launch_policy(),
     )
     return PscadService(
         lambda: backend,

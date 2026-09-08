@@ -28,7 +28,7 @@ if ($LASTEXITCODE -ne 0 -or -not $Branch) {
 }
 $Existing = @(Get-Process -ErrorAction SilentlyContinue |
     Where-Object { $_.ProcessName -like 'PSCAD*' })
-if ($Existing.Count -ne 0) {
+if ($Existing.Count -ne 0 -and $env:PSCAD_MCP_ACCEPTANCE_CONCURRENT -ne '1') {
     throw 'Close external PSCAD processes before the WP1B run.'
 }
 $Stamp = [DateTime]::UtcNow.ToString('yyyyMMdd-HHmmss-fff')
@@ -61,6 +61,13 @@ if ($LASTEXITCODE -ne 0) {
 }
 $Remaining = @(Get-Process -ErrorAction SilentlyContinue |
     Where-Object { $_.ProcessName -like 'PSCAD*' })
+if ($env:PSCAD_MCP_ACCEPTANCE_CONCURRENT -eq '1') {
+    $Payload = Get-Content -LiteralPath $Report -Raw | ConvertFrom-Json
+    if (-not ($Payload.runtime.managed_pid -gt 0)) {
+        throw 'Concurrent acceptance did not record its managed PSCAD PID.'
+    }
+    $Remaining = @($Remaining | Where-Object { $_.Id -eq $Payload.runtime.managed_pid })
+}
 if ($Remaining.Count -ne 0) {
     throw 'WP1B report cannot pass with remaining PSCAD processes.'
 }

@@ -37,9 +37,6 @@ try {
         throw "Requested commit '$Commit' does not match checkout HEAD '$ActualCommit'."
     }
     $Commit = $ActualCommit
-    if (@(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -like 'PSCAD*' }).Count -ne 0) {
-        throw 'Close PSCAD processes before evaluating dynamic evidence.'
-    }
     $Python = Join-Path $RepositoryRoot '.venv\Scripts\python.exe'
     if (-not (Test-Path -LiteralPath $Python -PathType Leaf)) {
         throw 'The repository Python environment is unavailable.'

@@ -28,6 +28,10 @@ from ....core.master_bindings import (
     parse_master_binding_registry,
 )
 from ....core.process_inventory import list_pscad_processes
+from ....acceptance.process_scope import (
+    remaining_acceptance_processes,
+    require_acceptance_ownership,
+)
 from .assets import LccAssetSet, load_packaged_asset_set
 from .companion import audit_companion_library
 from .companion_gate import FIXTURES, run_companion_component_gate
@@ -1738,7 +1742,7 @@ async def _cleanup_and_finalize(
     except BaseException as error:  # noqa: BLE001 - cleanup controls verdict
         cleanup_error = cleanup_error or error
     try:
-        remaining = [dict(value) for value in process_reader()]
+        remaining = remaining_acceptance_processes(result["runtime"], process_reader)
     except BaseException as error:  # noqa: BLE001 - process evidence controls verdict
         remaining = []
         cleanup_error = cleanup_error or error
@@ -1824,6 +1828,7 @@ async def run_fixed_lcc_acceptance(
         await service.attach_local()
         runtime = _runtime_from_status(await service.status())
         report["runtime"] = copy.deepcopy(runtime)
+        require_acceptance_ownership(runtime)
         _require_licensed_462_runtime(runtime)
         audited = master_audit_action(request.master_path, assets.master_bindings)
         if audited.master_sha256 != source_hashes["master"]:
