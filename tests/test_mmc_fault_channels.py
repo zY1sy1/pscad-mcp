@@ -322,6 +322,26 @@ def test_audit_preserves_reachable_roles_after_instrumentation(tmp_path, install
     assert all("Main[" in item["instance_path"] for item in stations)
 
 
+def test_terminal_two_charging_delay_uses_its_own_setting(tmp_path, installed_sources):
+    from xml.etree import ElementTree as ET
+
+    from pscad_mcp.hvdc.builders.mmc.template_audit import _parameters
+    project, _, _ = installed_sources
+    original_hash = hashlib.sha256(project.read_bytes()).hexdigest()
+    derived = tmp_path / "charging.pscx"
+    result = fault_channels.materialize_terminal_two_charging(project, derived)
+    root = ET.parse(derived)
+    owners = {item.get("id"): item for item in root.findall("./definitions/Definition[@name='Main']/schematic/User")}
+    assert dict(_parameters(owners["606940312"]))["T"] == "Tcharging2"
+    assert dict(_parameters(owners["584272924"]))["T"] == "Tcharging1"
+    assert result["owner"] == "606940312"
+    assert result["source_sha256"] == hashlib.sha256(project.read_bytes()).hexdigest() == original_hash
+    before = ET.parse(project)
+    target = next(item for item in before.findall("./definitions/Definition[@name='Main']/schematic/User") if item.get("id") == "606940312")
+    next(item for item in target.findall("./paramlist/param") if item.get("name") == "T").set("value", "Tcharging2")
+    assert ET.tostring(before.getroot()) == ET.tostring(root.getroot())
+
+
 def test_readback_detects_changed_source_parameter(tmp_path, installed_sources):
     from xml.etree import ElementTree as ET
     project, library, master = installed_sources

@@ -31,6 +31,7 @@ from pscad_mcp.hvdc.builders.mmc.fault_channels import (
     materialize_arm_virtual_resistance,
     materialize_dc_feedback_filter,
     materialize_terminal_two_carrier,
+    materialize_terminal_two_charging,
     materialize_voltage_control_headroom,
     read_fault_output_dataset,
     snapshot_output_dataset,
@@ -170,8 +171,10 @@ async def _run_case(service, root, source, library, master, name, fault):
         stage("materializing")
         native = case_root / "native.pscx"
         binding = materialize_template_native_scenario(source, native, dc_fault_time_s=2.5 if fault else 10.0, fault_duration_s=0.2)
+        charging = case_root / "charging.pscx"
+        record["charging_delay_repair"] = materialize_terminal_two_charging(native, charging)
         repaired = case_root / "operating_point.pscx"
-        record["operating_point_repair"] = materialize_voltage_control_headroom(native, repaired, current_limit_pu=1.1)
+        record["operating_point_repair"] = materialize_voltage_control_headroom(charging, repaired, current_limit_pu=1.1)
         filtered = case_root / "dc_feedback.pscx"
         record["feedback_filter"] = materialize_dc_feedback_filter(repaired, filtered, master=master)
         carrier = case_root / "carrier.pscx"
@@ -204,6 +207,14 @@ async def _run_case(service, root, source, library, master, name, fault):
             record["compiled_controls"].append({"path": str(compiled), "sha256": _hash(compiled), "freeze_tracks_imax": matched})
         if len(record["compiled_controls"]) != 2 or not all(item["freeze_tracks_imax"] for item in record["compiled_controls"]):
             raise RuntimeError("Generated antiwindup does not track actual Imax")
+        mains = list(project.parent.glob(project.stem + ".*/Main.f"))
+        if len(mains) != 1:
+            raise RuntimeError("Generated Main charging scope is not unique")
+        compiled_main = mains[0].read_text(encoding="utf-8")
+        charging_counts = {terminal: len(re.findall(r"CALL\s+EMTDC_XTTRANS\(0,Tcharging" + terminal + r",0\.0,", compiled_main, re.IGNORECASE)) for terminal in ("1", "2")}
+        record["compiled_charging"] = {"path": str(mains[0]), "sha256": _hash(mains[0]), "independent_delay_counts": charging_counts}
+        if charging_counts != {"1": 1, "2": 1}:
+            raise RuntimeError("Generated charging delays do not use the independent terminal settings")
         stage("running")
         started = time.time()
         record["started_after"] = started

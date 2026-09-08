@@ -667,6 +667,29 @@ def materialize_voltage_control_headroom(source: str | Path, destination: str | 
     return {"source": str(original), "source_sha256": before_hash, "destination": str(target), "destination_sha256": _sha256(target), "voltage_controller_owner": voltage_converter.get("id"), "parameter": "Imax", "before_pu": 1.0, "after_pu": current_limit_pu, "freeze_reference": "0.99999 * Imax", "freeze_reference_owner": threshold.get("id"), "phase_current_base_rms_ka": base, "phase_current_rms_ka": base * current_limit_pu, "phase_current_peak_ka": base * math.sqrt(2) * current_limit_pu, "arm_protection_limit_ka": 3.0}
 
 
+def materialize_terminal_two_charging(source: str | Path, destination: str | Path) -> dict[str, Any]:
+    """Bind the T2 charging transition to its existing independent setting."""
+
+    original = _regular(source)
+    target = _new_target(destination, (original,))
+    source_hash = _sha256(original)
+    root = ET.parse(original).getroot()
+    main = root.find("./definitions/Definition[@name='Main']")
+    if main is None:
+        raise _error("MMC_ACCEPTANCE_INCOMPLETE", "The original Main charging scope is missing.")
+    owners = {item.get("id"): item for item in _components(main)}
+    for owner, definition, parameter, value in (("584272924", "master:bin_delay", "T", "Tcharging1"), ("606940312", "master:bin_delay", "T", "Tcharging1"), ("2129272491", "master:datalabel", "Name", "Tcharging2")):
+        component = owners.get(owner)
+        if component is None or component.get("defn") != definition or dict(_parameters(component)).get(parameter) != value:
+            raise _error("MMC_ACCEPTANCE_INCOMPLETE", "The audited charging-delay source differs.", owner=owner)
+    delay = owners["606940312"]
+    next(item for item in delay.findall("./paramlist/param") if item.get("name") == "T").set("value", "Tcharging2")
+    _write_new_xml(root, target)
+    if _sha256(original) != source_hash:
+        raise _error("MMC_TEMPLATE_SOURCE_CHANGED", "The charging-delay source changed.")
+    return {"source": str(original), "source_sha256": source_hash, "destination": str(target), "destination_sha256": _sha256(target), "definition": "Main", "owner": "606940312", "parameter": "T", "before": "Tcharging1", "after": "Tcharging2", "terminal_one_unchanged": True}
+
+
 def materialize_dc_feedback_filter(source: str | Path, destination: str | Path, *, master: str | Path, time_constant_s: float = 0.005) -> dict[str, Any]:
     """Filter only the DC outer-loop error input; raw voltage remains available."""
 
@@ -930,6 +953,7 @@ __all__ = [
     "materialize_dc_feedback_filter",
     "materialize_dc_port_damping",
     "materialize_terminal_two_carrier",
+    "materialize_terminal_two_charging",
     "materialize_voltage_control_headroom",
     "reachable_instances",
     "read_fault_output_dataset",
