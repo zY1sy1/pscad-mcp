@@ -60,7 +60,7 @@ _MASTER_BINDINGS: dict[str, MasterDefinitionBinding] = {
         "master:three_phase_source",
         "source3",
         {"A": "A", "B": "B", "C": "C"},
-        {"Amplitude_kV": "Vm", "Frequency_Hz": "F", "Phase_deg": "Ph"},
+        {"Amplitude_kV": "Es", "Frequency_Hz": "F0", "Phase_deg": "Ph"},
     ),
     "master:converter_transformer": MasterDefinitionBinding(
         "master:converter_transformer",

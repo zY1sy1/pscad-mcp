@@ -26,6 +26,7 @@ from ....topology.models import (
 from .acceptance import evaluate_acceptance
 from .assets import LccAssetSet, materialize_library, sha256_file
 from .catalog import parse_catalog, require_definition, require_port
+from .dynamic_acceptance import evaluate_fixed_lcc_dynamic_physical
 from .dynamic_evidence import derive_fixed_lcc_dynamic_evidence
 from .journal import AtomicJournal
 from .models import LccBuildPlan, LccBuildRecord, LccBuildState, LccPlanOperation
@@ -2545,14 +2546,9 @@ class LccExecutor:
             self.asset_set.dynamic,
             output_step_s=float(self.plan.blueprint.settings["output_step_s"]),
         )
-        physical_contract = dict(self.asset_set.acceptance)
-        physical_contract["golden"] = {"channels": []}
-        physical_contract["checks"] = [
-            item
-            for item in self.asset_set.acceptance.get("checks", ())
-            if isinstance(item, Mapping) and item.get("kind") == "physical"
-        ]
-        physical = evaluate_acceptance(output, {}, physical_contract)
+        physical = evaluate_fixed_lcc_dynamic_physical(
+            output, self.asset_set.acceptance, self.asset_set.dynamic,
+        )
         if self._output_read_hashes and self._output_read_hashes != self._snapshot_dynamic_output():
             raise _error("LCC_OUTPUT_INCOMPLETE", "The dynamic output dataset changed during evaluation.", "read_lcc_output")
         verdicts = {dynamic["engineering_verdict"], physical["verdict"]}

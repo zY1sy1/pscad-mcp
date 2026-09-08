@@ -16,6 +16,10 @@
     {"path": "Main/VDC_INV", "units": "kV"},
     {"path": "Main/GAMMA_INV", "units": "rad"}
   ],
+  "physical_evaluation": {
+    "window_s": [0.7, 0.8],
+    "end_inclusive": false
+  },
   "disturbance": {
     "inactive_max": 0.1,
     "active_min": 0.9,

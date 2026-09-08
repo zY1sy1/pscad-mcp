@@ -244,10 +244,14 @@ def _master_fixture_xml(
 <pslx>
   <Definition name='source3'>
     <form><category>
-      <parameter name='Vm' type='Real' unit='kV' intent='Input'><value>230</value></parameter>
-      <parameter name='F' type='Real' unit='Hz' intent='Input'><value>50</value></parameter>
+      <parameter name='Vm' desc='Base Voltage (L-L, RMS)' type='Real' unit='kV' intent='Input'><value>230</value></parameter>
+      <parameter name='F' desc='Base Frequency' type='Real' unit='Hz' intent='Input'><value>60</value></parameter>
+      <parameter name='Es' desc='Voltage Magnitude (L-L, RMS)' type='Real' unit='kV' intent='Input'><value>230</value></parameter>
+      <parameter name='F0' desc='Frequency' type='Real' unit='Hz' intent='Input'><value>60</value></parameter>
       <parameter name='Ph' type='Real' unit='deg' intent='Input'><value>0</value></parameter>
       <parameter name='View' type='Choice'><value>1</value><choice>0 = 3 phase</choice><choice>1 = single</choice></parameter>
+      <parameter name='Ctrl' type='Choice'><value>0</value><choice>0 = Fixed</choice><choice>2 = External</choice><choice>3 = Auto</choice></parameter>
+      <parameter name='Term' type='Choice'><value>0</value><choice>0 = Behind the Source Impedance</choice><choice>1 = At the Terminal</choice></parameter>
     </category></form>
     <svg>
       <port model='{source_a_model}' name='A' x='36' y='-36' dim='1' type='NonRemovable'/>
@@ -875,6 +879,27 @@ def test_audit_rejects_fixed_or_lookup_values_outside_live_contract(
 
     assert failure.value.code == "MASTER_PARAMETER_MISMATCH"
     assert failure.value.details["physical_parameter"] == physical_parameter
+
+
+def test_resolver_uses_active_source_values_and_fixed_bases(tmp_path):
+    module = _subject()
+    audited = module.audit_master_bindings(
+        _write_master_fixture(tmp_path), _packaged_registry(module)
+    )
+    requested = {"Amplitude_kV": 345.0, "Frequency_Hz": 47.5, "Phase_deg": 12.0}
+    resolved = audited.resolve_component("master:three_phase_source", requested)
+
+    assert resolved.physical_parameters == {
+        "Es": 345.0,
+        "F0": 47.5,
+        "Ph": 12.0,
+        "Vm": 230.0,
+        "F": 50.0,
+        "View": 0,
+        "Ctrl": 0,
+        "Term": 0,
+    }
+    assert resolved.logical_parameters(resolved.physical_parameters) == requested
 
 
 def test_resolver_round_trips_reactor_transform(tmp_path):

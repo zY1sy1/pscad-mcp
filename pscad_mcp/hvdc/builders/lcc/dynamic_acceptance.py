@@ -404,6 +404,51 @@ def _channel_names(samples: Mapping[str, Any]) -> set[str]:
     return {str(name) for name in channels}
 
 
+def evaluate_fixed_lcc_dynamic_physical(
+    samples: Mapping[str, Any],
+    contract: Mapping[str, Any],
+    dynamic_contract: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Apply the hashed WP1C prefault window without changing physical limits."""
+    try:
+        declaration = dynamic_contract["physical_evaluation"]
+        window = declaration["window_s"]
+        event_time = dynamic_contract["event"]["time_s"]
+        duration = dynamic_contract["bounded_dc_response"]["prefault_window_s"]
+        if set(declaration) != {"window_s", "end_inclusive"} or declaration["end_inclusive"] is not False:
+            raise ValueError("window fields")
+        if not isinstance(window, (list, tuple)) or len(window) != 2:
+            raise ValueError("window shape")
+        if any(isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) for value in (*window, event_time, duration)):
+            raise ValueError("window values")
+        start, end = map(float, window)
+        if not 0 <= start < end or end != event_time or duration <= 0 or not math.isclose(start, event_time - duration, rel_tol=0, abs_tol=1e-12):
+            raise ValueError("prefault alignment")
+    except (KeyError, TypeError, ValueError, OverflowError) as error:
+        raise BackendError(
+            "LCC_DYNAMIC_CONTRACT_INVALID",
+            "WP1C physical evaluation requires the declared exclusive prefault window.",
+            "hvdc", "evaluate_fixed_lcc_dynamic_physical",
+        ) from error
+    # The shared evaluator uses inclusive windows; the preceding float excludes the event sample.
+    physical_contract = {
+        **contract,
+        "golden": {"channels": []},
+        "checks": [check for check in contract.get("checks", ()) if check.get("kind") == "physical"],
+        "physical_checks": [
+            {**check, "window": [start, math.nextafter(end, -math.inf)]}
+            for check in contract.get("physical_checks", ())
+        ],
+    }
+    result = evaluate_acceptance(samples, {}, physical_contract)
+    for check in result["physical_checks"]:
+        check["comparison_policy"] = {
+            **check.get("comparison_policy", {}),
+            "window_s": [start, end], "end_inclusive": False,
+        }
+    return result
+
+
 def evaluate_fixed_lcc_dynamic_samples(
     samples: Mapping[str, Any],
     golden: Mapping[str, Any],

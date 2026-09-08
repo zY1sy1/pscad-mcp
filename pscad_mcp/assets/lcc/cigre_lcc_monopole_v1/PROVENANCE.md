@@ -150,3 +150,18 @@ CIGRE example grounds G1, and the installed 4.6.2 help page
 `Master_Library_Models/HVDC_and_FACTS/6_Pulse_Bridge/Choosing_a_Converter_Transformer.htm`
 requires grounded primary neutrals and ungrounded valve-side neutrals. The
 native component has no parameter that substitutes for this ground connection.
+
+The 2026-09-08 continuation approves a WP1C-only physical evaluation window of
+0.7 <= t < 0.8 s. This is the declared prefault interval and excludes the first
+fault-active sample. Physical limits and the full-acceptance/golden windows
+remain unchanged. The former WP1C physical evaluation reused 0 to 0.03 s,
+entirely before the native 0.04 s valve-unblocking time. Every WP1C physical
+check now records the declared window and its exclusive upper boundary.
+
+Installed source3 help distinguishes nominal bases Vm/F from actual fixed
+source controls Es/F0. The logical amplitude and frequency bind to Es and F0;
+nominal Vm=230 kV and F=50 Hz, fixed control Ctrl=0, and source-voltage location
+Term=0 (behind the source impedance) are
+explicit. The prior Frequency_Hz->F binding left actual F0 at its 60 Hz default
+while the PLO, transformers and filters were configured for 50 Hz. This fix
+changes the active source setting, not controller gains or acceptance limits.

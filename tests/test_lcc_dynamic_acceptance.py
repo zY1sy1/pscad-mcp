@@ -9,6 +9,7 @@ import pytest
 
 from pscad_mcp.core.backend.base import BackendError
 from pscad_mcp.hvdc.builders.lcc.dynamic_acceptance import (
+    evaluate_fixed_lcc_dynamic_physical,
     evaluate_fixed_lcc_dynamic_samples,
     validate_dynamic_lcc_acceptance_report,
 )
@@ -17,6 +18,25 @@ from tests.lcc_dynamic_fakes import valid_wp1c_report
 
 def _wave(values: list[float], units: str) -> dict[str, object]:
     return {"units": units, "time": [0.0, 0.01, 0.02, 0.03], "values": values}
+
+
+@pytest.mark.parametrize("window", [
+    None,
+    {"window_s": [True, 0.8], "end_inclusive": False},
+    {"window_s": [0.7, float("nan")], "end_inclusive": False},
+    {"window_s": [0.8, 0.7], "end_inclusive": False},
+    {"window_s": [0.7, 0.8], "end_inclusive": True},
+    {"window_s": [0.7, 0.9], "end_inclusive": False},
+    {"window_s": [0.6, 0.8], "end_inclusive": False},
+])
+def test_wp1c_physical_window_rejects_missing_or_invalid_contract(window):
+    from tests.lcc_dynamic_fakes import dynamic_contract as wp1c_contract
+
+    contract = wp1c_contract()
+    contract["physical_evaluation"] = window
+    with pytest.raises(BackendError) as raised:
+        evaluate_fixed_lcc_dynamic_physical({}, {}, contract)
+    assert raised.value.code == "LCC_DYNAMIC_CONTRACT_INVALID"
 
 
 def dynamic_contract() -> dict[str, object]:

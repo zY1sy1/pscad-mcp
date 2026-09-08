@@ -24,7 +24,8 @@ def test_master_binding_uses_installed_pscad_names_and_explicit_port_mapping():
     binding = master_definition_binding("master:three_phase_source")
     assert binding.definition == "source3"
     assert binding.port_map == {"A": "A", "B": "B", "C": "C"}
-    assert binding.parameter_map["Amplitude_kV"] == "Vm"
+    assert binding.parameter_map["Amplitude_kV"] == "Es"
+    assert binding.parameter_map["Frequency_Hz"] == "F0"
 
 
 def test_master_binding_marks_three_phase_filter_as_expansion():
@@ -95,9 +96,10 @@ async def _runtime_backend(tmp_path, *, snap_wires: bool = False):
     [
         (
             "three_phase_source",
-            {"Amplitude_kV": 230.0, "Frequency_Hz": 50.0, "Phase_deg": 0.0},
+            {"Amplitude_kV": 345.0, "Frequency_Hz": 47.5, "Phase_deg": 12.0},
             "source3",
-            {"Vm": 230.0, "F": 50.0, "Ph": 0.0, "View": 0},
+            {"Es": 345.0, "F0": 47.5, "Ph": 12.0, "Vm": 230.0, "F": 50.0,
+             "View": 0, "Ctrl": 0, "Term": 0},
         ),
         (
             "converter_transformer",
