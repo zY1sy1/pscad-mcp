@@ -9,6 +9,7 @@ from tests.backend_fakes import ImmediateExecutor
 
 
 class TimingProject:
+    timed_control_contract = {"time_basis": "EMTDC", "time_units": "s", "verified": True}
     def __init__(self):
         self.scheduled = []
         self.simulation_time = 0.0
@@ -56,8 +57,30 @@ def test_backends_reject_missing_explicit_timing_provider(backend_factory):
     assert asyncio.run(backend.get_timed_control_capabilities("case")) == {
         "native_schedule": False,
         "simulation_clock": False,
-        "time_basis": "EMTDC",
+        "time_basis": None,
+        "time_units": None,
+        "verified": False,
     }
     with pytest.raises(BackendError) as raised:
         asyncio.run(backend.schedule_timed_controls("case", []))
     assert raised.value.code == "CAPABILITY_UNAVAILABLE"
+
+
+@pytest.mark.parametrize("backend_factory", [
+    lambda: LegacyBackend(ImmediateExecutor(), version="4.6.2", x64=True, automation_module=False),
+    lambda: ModernBackend(ImmediateExecutor(), version="5.0.2", x64=True, pscad_module=False, psout_module=False),
+])
+def test_method_names_alone_do_not_prove_emtdc_clock(backend_factory):
+    backend = backend_factory()
+    project = TimingProject()
+    project.timed_control_contract = {"time_basis": "wall_clock", "time_units": "s"}
+
+    async def project_for(_name):
+        return project
+
+    backend._project = project_for
+    capabilities = asyncio.run(backend.get_timed_control_capabilities("case"))
+    assert capabilities["native_schedule"] is False
+    assert capabilities["simulation_clock"] is False
+    with pytest.raises(BackendError):
+        asyncio.run(backend.schedule_timed_controls("case", []))

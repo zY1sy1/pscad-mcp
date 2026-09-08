@@ -23,6 +23,12 @@ def _timing_error(message: str, **details: Any) -> BackendError:
 
 async def select_timing_mode(backend: Any, project_name: str) -> str:
     capabilities = await backend.get_timed_control_capabilities(project_name)
+    if (
+        capabilities.get("time_basis") != "EMTDC"
+        or capabilities.get("time_units") != "s"
+        or capabilities.get("verified") is not True
+    ):
+        raise _timing_error("The backend timing provider has no verified EMTDC seconds contract.", capabilities=dict(capabilities))
     if capabilities.get("native_schedule") is True:
         return "native"
     if capabilities.get("simulation_clock") is True:
@@ -32,6 +38,61 @@ async def select_timing_mode(backend: Any, project_name: str) -> str:
         project_name=project_name,
         capabilities=dict(capabilities),
     )
+
+
+def normalize_timed_events(events: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """Validate point/interval events before any scheduler or project mutation."""
+    result = []
+    for index, item in enumerate(events):
+        event = dict(item)
+        event["event_id"] = str(event.get("event_id") or f"event-{index:06d}")
+        for field in ("time_s", "end_time_s", "value", "before_value", "after_value"):
+            if field not in event:
+                continue
+            raw = event[field]
+            if isinstance(raw, bool) or not isinstance(raw, (int, float)) or not math.isfinite(float(raw)):
+                raise _timing_error("Event numeric fields must be finite numbers.", event_id=event["event_id"], field=field)
+            event[field] = float(raw)
+        if "time_s" not in event or event["time_s"] < 0:
+            raise _timing_error("Event times must be non-negative.", event_id=event["event_id"])
+        if "end_time_s" in event and event["end_time_s"] <= event["time_s"]:
+            raise _timing_error("Event intervals must have a positive duration.", event_id=event["event_id"])
+        result.append(event)
+    result.sort(key=lambda event: (event["time_s"], event["event_id"]))
+    identifiers = [event["event_id"] for event in result]
+    if len(identifiers) != len(set(identifiers)):
+        raise _timing_error("Timed events must have unique event IDs.")
+    previous: dict[tuple[str, ...], dict[str, Any]] = {}
+    for event in result:
+        target = event.get("target")
+        if isinstance(target, Mapping):
+            key = tuple(str(target.get(field, "")) for field in ("instance_path", "owner", "parameter"))
+        else:
+            key = (str(event.get("instance_path", "")), str(event.get("component_id", target)), str(event.get("parameter_name", "")))
+        earlier = previous.get(key)
+        if earlier and (event["time_s"] < earlier.get("end_time_s", earlier["time_s"]) or event["time_s"] == earlier["time_s"]):
+            raise _timing_error("Events conflict on the same target.", events=[earlier["event_id"], event["event_id"]])
+        previous[key] = event
+    return result
+
+
+def validate_native_acknowledgements(events: Sequence[Mapping[str, Any]], acknowledgements: Any) -> list[dict[str, Any]]:
+    if not isinstance(acknowledgements, (list, tuple)) or len(acknowledgements) != len(events):
+        raise _timing_error("Native scheduler did not acknowledge every event.")
+    by_id = {str(ack.get("event_id")): dict(ack) for ack in acknowledgements if isinstance(ack, Mapping)}
+    if len(by_id) != len(events):
+        raise _timing_error("Native acknowledgements must identify each event exactly once.")
+    result = []
+    for event in events:
+        ack = by_id.get(str(event["event_id"]))
+        fields = ("event_id", "target", "component_id", "parameter_name", "value", "end_time_s", "before_value", "after_value")
+        if ack is None or any(field in event and ack.get(field) != event[field] for field in fields):
+            raise _timing_error("Native acknowledgement differs from the scheduled event.", expected=dict(event), observed=ack)
+        requested = ack.get("time_s", ack.get("requested_time_s"))
+        if requested != event["time_s"]:
+            raise _timing_error("Native acknowledgement changed the requested time.", expected=dict(event), observed=ack)
+        result.append({**ack, "requested_time_s": float(event["time_s"]), "mode": "native"})
+    return result
 
 
 async def dispatch_timed_events(
@@ -52,36 +113,20 @@ async def dispatch_timed_events(
         raise _timing_error("Polling interval must be a finite positive number.", poll_interval_s=poll_interval_s)
     if max_stalled_polls < 1:
         raise _timing_error("max_stalled_polls must be at least one.", max_stalled_polls=max_stalled_polls)
-    normalized = sorted((dict(event) for event in events), key=lambda item: float(item["time_s"]))
-    if any(not math.isfinite(float(event["time_s"])) for event in normalized):
-        raise _timing_error("Timed event thresholds must be finite.", project_name=project_name)
-    event_ids = [str(event["event_id"]) for event in normalized if event.get("event_id") is not None]
-    if len(event_ids) != len(set(event_ids)):
-        raise _timing_error(
-            "Timed events must have unique event IDs.",
-            project_name=project_name,
-            duplicate_event_ids=sorted({item for item in event_ids if event_ids.count(item) > 1}),
-        )
+    normalized = normalize_timed_events(events)
     if mode == "native":
         acknowledgements = await backend.schedule_timed_controls(project_name, normalized)
-        if len(acknowledgements) != len(normalized):
-            raise _timing_error(
-                "Native scheduler did not acknowledge every event.",
-                project_name=project_name,
-                expected=len(normalized),
-                observed=len(acknowledgements),
-            )
-        return [
-            {
-                **dict(ack),
-                **({"event_id": event["event_id"]} if "event_id" in event else {}),
-                "requested_time_s": float(event["time_s"]),
-                "mode": "native",
-            }
-            for event, ack in zip(normalized, acknowledgements)
-        ]
+        return validate_native_acknowledgements(normalized, acknowledgements)
     if mode != "simulation_clock_polling":
         raise _timing_error("Unknown timed-control mode.", mode=mode)
+    if any("end_time_s" in event for event in normalized):
+        raise _timing_error("Clock polling accepts point events only; explicitly schedule both interval edges.")
+    if await select_timing_mode(backend, project_name) not in {"native", "simulation_clock_polling"}:
+        raise _timing_error("Clock polling requires a verified provider.")
+    capabilities = await backend.get_timed_control_capabilities(project_name)
+    bound = capabilities.get("max_timing_error_s")
+    if isinstance(bound, bool) or not isinstance(bound, (int, float)) or not math.isfinite(bound) or bound < 0 or capabilities.get("simulation_clock") is not True:
+        raise _timing_error("Clock polling requires a finite predeclared timing error bound.")
     pending = list(normalized)
     applied: list[dict[str, Any]] = []
     previous_time: float | None = None
@@ -91,7 +136,7 @@ async def dispatch_timed_events(
         if liveness_deadline_s is not None and time.monotonic() - started > liveness_deadline_s:
             raise _timing_error("Simulation clock polling exceeded its liveness deadline.", project_name=project_name)
         observed = float(await backend.get_simulation_time(project_name))
-        if not math.isfinite(observed) or (previous_time is not None and observed < previous_time):
+        if not math.isfinite(observed) or observed < 0 or (previous_time is not None and observed < previous_time):
             raise _timing_error("Reported simulation time must be finite and monotonic.", project_name=project_name, observed_time_s=observed)
         if previous_time is not None and observed == previous_time:
             stalled_polls += 1
@@ -107,18 +152,29 @@ async def dispatch_timed_events(
         previous_time = observed
         while pending and observed >= float(pending[0]["time_s"]):
             event = pending.pop(0)
+            requested = float(event["time_s"])
+            if observed - requested > bound:
+                raise _timing_error("The event timing error exceeded its bound before writing.", requested_time_s=requested, observed_time_s=observed, max_timing_error_s=bound)
             component_id = int(event["component_id"])
             if write_event is None:
                 await backend.set_component_parameters(project_name, component_id, {str(event["parameter_name"]): event["value"]})
+                readback = await backend.get_component_parameters(project_name, component_id)
+                if readback.get(str(event["parameter_name"])) != event["value"]:
+                    raise _timing_error("The polled event did not read back correctly.", event_id=event["event_id"])
             else:
                 await write_event(event)
-            requested = float(event["time_s"])
+            completed = float(await backend.get_simulation_time(project_name))
+            if not math.isfinite(completed) or completed < observed or completed - requested > bound:
+                raise _timing_error("The event timing error exceeded its bound or the clock regressed during writing.", requested_time_s=requested, observed_time_s=completed, max_timing_error_s=bound)
+            observed = completed
+            previous_time = completed
             applied.append({
                 **{key: event[key] for key in ("target", "canonical", "component_id", "parameter_name", "value") if key in event},
                 **({"event_id": event["event_id"]} if "event_id" in event else {}),
                 "requested_time_s": requested,
                 "observed_time_s": observed,
                 "timing_error_s": observed - requested,
+                "max_timing_error_s": bound,
                 "mode": mode,
             })
         if pending:

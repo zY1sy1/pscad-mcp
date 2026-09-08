@@ -63,6 +63,7 @@ from .base import (
     RunState,
     SimulationSetInfo,
     SimulationTaskInfo,
+    timed_control_provider_capabilities,
 )
 from .run_control import (
     STOPPED_RUN_STATUSES,
@@ -748,20 +749,14 @@ class LegacyBackend:
 
     async def get_timed_control_capabilities(self, project_name: str) -> dict[str, Any]:
         project = await self._project(project_name)
-        return {
-            "native_schedule": callable(
-                getattr(project, "schedule_timed_controls", None)
-            ),
-            "simulation_clock": callable(getattr(project, "get_simulation_time", None)),
-            "time_basis": "EMTDC",
-        }
+        return timed_control_provider_capabilities(project)
 
     async def schedule_timed_controls(
         self, project_name: str, events: Sequence[Mapping[str, Any]]
     ) -> list[dict[str, Any]]:
         project = await self._project(project_name)
         provider = getattr(project, "schedule_timed_controls", None)
-        if callable(provider):
+        if timed_control_provider_capabilities(project)["native_schedule"]:
             values = await self.executor.run_safe(
                 provider, [dict(event) for event in events]
             )
@@ -778,7 +773,7 @@ class LegacyBackend:
     async def get_simulation_time(self, project_name: str) -> float:
         project = await self._project(project_name)
         provider = getattr(project, "get_simulation_time", None)
-        if callable(provider):
+        if timed_control_provider_capabilities(project)["simulation_clock"]:
             return float(await self.executor.run_safe(provider))
         raise BackendError(
             "CAPABILITY_UNAVAILABLE",

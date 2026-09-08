@@ -24,7 +24,7 @@ class StrictBackend:
         self.parameters = {17: {"Value": 0}}
         self.forced_readback = forced_readback
         self.settings = {"PlotType": "OUT"}
-        self.times = iter([0.0, 0.5, 1.02])
+        self.times = iter([0.0, 0.5, 1.02, 1.02])
         self.calls = []
         self.status = "idle"
 
@@ -41,6 +41,8 @@ class StrictBackend:
         return {
             "native_schedule": self.mode == "native",
             "simulation_clock": self.mode == "polling",
+            "time_basis": "EMTDC", "time_units": "s", "verified": True,
+            "max_timing_error_s": 0.025,
         }
 
     async def schedule_timed_controls(self, project_name, events):
