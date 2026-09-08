@@ -23,6 +23,7 @@ import uuid
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
+from xml.etree import ElementTree as ET
 
 from ....core.backend.base import BackendError
 from ....core.path_policy import PathPolicy
@@ -30,7 +31,9 @@ from ....core.service import ConfirmationRequired
 from ....runtime import PendingCleanupError
 from ..lcc.executor import _select_output_dataset
 from .blank import BlankMmcRequest
+from .fault_channels import default_fault_checks
 from .journal import AtomicJournal, WorkspaceBuildLease
+from .line_constants import extract_tline_segments, render_tli
 from .models import SubmoduleTopology
 from .template_audit import (
     audit_mmc_template,
@@ -43,6 +46,15 @@ from .template_native import (
 
 _TERMINAL_SUCCESS = {"completed", "complete", "finished", "done", "idle", "stopped"}
 _TERMINAL_FAILURE = {"failed", "error", "aborted", "cancelled", "canceled"}
+_MODEL_RECIPES = {
+    "raw": {},
+    "headroom_1p1": {"current_limit_pu": 1.1},
+    "headroom_1p1_dc_filter_5ms": {"current_limit_pu": 1.1, "dc_feedback_time_constant_s": 0.005},
+}
+
+
+def _default_master_path() -> Path:
+    return Path("C:/Program Files (x86)/PSCAD46/master.pslx")
 
 
 def _error(code: str, message: str, operation: str, **details: Any) -> BackendError:
@@ -120,6 +132,61 @@ def _regular(value: str | Path, suffix: str, operation: str) -> Path:
     return path
 
 
+def _identity(path: Path) -> dict[str, str]:
+    if path.is_symlink() or not path.is_file():
+        raise _error("MMC_PLAN_STALE", "An immutable input must be a regular file.", "plan_blank_mmc_model", path=str(path))
+    return {"path": str(path.resolve()), "sha256": _sha256(path)}
+
+
+def _support_contract(library: Path, audit: Mapping[str, Any]) -> dict[str, Any]:
+    support = copy.deepcopy(dict(audit.get("compiler_support", {})))
+    linked = support.get("link_libraries", {})
+    if (support.get("required") and not support.get("present")) or (linked.get("required") and not linked.get("present")):
+        raise _error("MMC_COMPILER_SUPPORT_MISSING", "Required compiler support is unavailable.", "plan_blank_mmc_model")
+    files = support.get("files", [])
+    if not isinstance(files, (list, tuple)) or ((support.get("required") or linked.get("required")) and not files):
+        raise _error("MMC_COMPILER_SUPPORT_MISSING", "Compiler support requires a complete audited file list.", "plan_blank_mmc_model")
+    paths = set()
+    for item in files:
+        if not isinstance(item, Mapping) or not isinstance(item.get("relative_path"), str):
+            raise _error("MMC_PLAN_STALE", "A compiler-support identity is invalid.", "plan_blank_mmc_model")
+        relative = Path(item["relative_path"])
+        expected = library.parent / relative
+        if relative.is_absolute() or ".." in relative.parts or not expected.resolve().is_relative_to(library.parent.resolve()) or str(expected.resolve()) != item.get("path"):
+            raise _error("MMC_PLAN_STALE", "Compiler support must stay in its audited source directory.", "plan_blank_mmc_model", file=dict(item))
+        identity = _identity(expected)
+        if identity["sha256"] != item.get("sha256") or str(expected.resolve()).casefold() in paths:
+            raise _error("MMC_PLAN_STALE", "Compiler support changed or is duplicated in its audit.", "plan_blank_mmc_model", file=dict(item))
+        paths.add(str(expected.resolve()).casefold())
+    support["files"] = sorted((dict(item) for item in files), key=lambda item: item["relative_path"].casefold())
+    return support
+
+
+def _line_contract(source: Path, master: Path, audit: Mapping[str, Any]) -> dict[str, Any]:
+    try:
+        root = ET.parse(source).getroot()
+    except (OSError, ET.ParseError) as error:
+        raise _error("MMC_TEMPLATE_INVALID", "The native source XML is invalid.", "plan_blank_mmc_model", path=str(source)) from error
+    dependencies = copy.deepcopy(list(audit.get("absolute_paths", [])))
+    has_lines = any(item.get("classid", "").casefold() == "tline" for item in root.iter())
+    if not has_lines:
+        unresolved = [item for item in dependencies if item.get("kind") in {"line_constants", "line_database"}]
+        if unresolved:
+            raise _error("MMC_ABSOLUTE_PATH_UNRESOLVED", "The source has external line dependencies without a declared DCTL generation contract.", "plan_blank_mmc_model", dependencies=unresolved)
+        return {"mode": "none", "inputs": [], "source_dependencies": dependencies}
+    executable = master.parent / "bin" / "win" / "tline.exe"
+    executable_identity = _identity(executable)
+    try:
+        segments = extract_tline_segments(source)
+        names = [item.name for item in segments]
+        if len(names) != len(set(names)) or any(re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", name) is None for name in names):
+            raise ValueError("Line names must be unique native identities")
+        inputs = [{"name": segment.name, "input_sha256": hashlib.sha256(render_tli(segment).encode("utf-8")).hexdigest()} for segment in segments]
+    except (TypeError, ValueError, OverflowError) as error:
+        raise _error("MMC_TEMPLATE_INVALID", "The native line-generation inputs are invalid.", "plan_blank_mmc_model", reason=str(error)) from error
+    return {"mode": "generate_public_from_source_dctl", "executable": executable_identity, "inputs": inputs, "source_dependencies": dependencies}
+
+
 class BlankMmcBuilderService:
     """Plan and (when supported) execute an official-template blank MMC case."""
 
@@ -153,7 +220,21 @@ class BlankMmcBuilderService:
     ) -> dict[str, Any]:
         if blueprint != "cigre_b4_p2p_avm_v1":
             raise _error("MMC_BLUEPRINT_NOT_FOUND", "Only the fixed blank MMC profile is supported.", "plan_blank_mmc_model", blueprint=blueprint)
+        if simulation_duration_s is None and isinstance(request, Mapping):
+            simulation_duration_s = request.get("simulation_duration_s")
         parsed = request if isinstance(request, BlankMmcRequest) else BlankMmcRequest.from_dict(request) if isinstance(request, Mapping) else BlankMmcRequest(project_name=request, folder=folder)
+        parameters = dict(parsed.parameterization)
+        unknown = sorted(set(parameters) - {"model_recipe", "master_path"})
+        recipe = parameters.get("model_recipe", "raw")
+        if unknown or not isinstance(recipe, str) or recipe not in _MODEL_RECIPES:
+            raise _error("MMC_BLUEPRINT_INVALID", "Native MMC model recipe or parameterization is unsupported.", "plan_blank_mmc_model", unknown=unknown, model_recipe=recipe)
+        checks = default_fault_checks()
+        duration = checks["simulation_duration_s"] if simulation_duration_s is None else simulation_duration_s
+        if isinstance(duration, bool) or not isinstance(duration, (int, float)) or not math.isfinite(float(duration)) or duration <= 0:
+            raise _error("MMC_BLUEPRINT_INVALID", "simulation_duration_s must be finite and positive.", "plan_blank_mmc_model")
+        required_end = max(checks[name][1] for name in ("fault_window_s", "prefault_window_s", "recovery_window_s"))
+        if duration < required_end:
+            raise _error("MMC_BLUEPRINT_INVALID", "The requested duration cannot cover the production acceptance windows.", "plan_blank_mmc_model", requested_duration_s=duration, required_end_s=required_end)
         name = _project_name(parsed.project_name)
         template_path = template_path or parsed.template_path
         library_path = library_path or parsed.library_path
@@ -186,17 +267,13 @@ class BlankMmcBuilderService:
         target = self.path_policy.resolve_child(str(parent), f"{name}.pscx", suffixes={".pscx"})
         if target.exists() or target.is_symlink():
             raise _error("MMC_BUILD_CONFLICT", "The blank MMC destination already exists.", "plan_blank_mmc_model", target_path=str(target))
-        duration = 1.3 if simulation_duration_s is None else simulation_duration_s
-        if (
-            isinstance(duration, bool)
-            or not isinstance(duration, (int, float))
-            or not math.isfinite(float(duration))
-            or duration <= 0
-        ):
-            raise _error("MMC_BLUEPRINT_INVALID", "simulation_duration_s must be finite and positive.", "plan_blank_mmc_model")
+        master = _regular(parameters.get("master_path", _default_master_path()), ".pslx", "plan_blank_mmc_model")
+        identities = {"project": _identity(template), "library": _identity(library), "master": _identity(master)}
         source_hashes = dict(audit.get("source_hashes", {}))
-        if set(source_hashes) != {"project", "library"}:
-            source_hashes = {"project": hashlib.sha256(template.read_bytes()).hexdigest(), "library": hashlib.sha256(library.read_bytes()).hexdigest()}
+        if set(source_hashes) != {"project", "library"} or any(source_hashes[key] != identities[key]["sha256"] for key in source_hashes):
+            raise _error("MMC_PLAN_STALE", "The audit source identities do not match the immutable files.", "plan_blank_mmc_model")
+        support = _support_contract(library, audit)
+        lines = _line_contract(template, master, audit)
         payload = {
             "schema_version": 1,
             "kind": "blank_mmc_native",
@@ -205,11 +282,18 @@ class BlankMmcBuilderService:
             "workspace": str(self.workspace_root),
             "target_path": str(target),
             "staging_path": str(self.workspace_root / ".pscad-mcp" / "blank-mmc-builds" / f"{name}-{source_hashes['project'][:12]}.staging"),
-            "settings": {"simulation_duration_s": float(duration), "time_step_s": 50e-6, "output_step_s": 250e-6, "output_enabled": True},
-            "fault": {"kind": "dc_pole_to_pole", "time_s": 0.3, "removal_time_s": 0.5},
+            "settings": {"simulation_duration_s": float(duration), "time_step_s": checks["time_step_s"], "output_step_s": checks["output_step_s"], "output_enabled": True},
+            "fault": {"kind": "dc_pole_to_pole", "time_s": checks["fault_window_s"][0], "removal_time_s": checks["fault_window_s"][1]},
+            "checks_contract": checks,
+            "checks_sha256": hashlib.sha256(json_bytes(checks)).hexdigest(),
+            "model_recipe": {"schema_version": 1, "name": recipe, "parameters": copy.deepcopy(_MODEL_RECIPES[recipe]), "physical_acceptance_verified": False},
+            "source_identities": identities,
+            "runtime_requirements": {"backend": "legacy", "pscad_version": "4.6.2", "master_source_must_match": identities["master"], "new_case_namespace": True},
+            "compiler_support": support,
+            "line_constants": lines,
             "template_native": {"source_paths": {"project": str(template), "library": str(library)}, "source_hashes": source_hashes, "submodule_topology": dict(observed_topology) if isinstance(observed_topology, Mapping) else {}, "controls": dict(audit.get("template_native_controls", {})) if isinstance(audit.get("template_native_controls", {}), Mapping) else {}},
             "capabilities": {**SubmoduleTopology.capabilities(parsed.submodule_topology), "template_submodule_topology": observed_name, "native_schedule": False, "template_native_timing": bool(isinstance(audit.get("template_native_controls"), Mapping) and audit["template_native_controls"].get("available") is True)},
-            "operations": ["audit_source", "stage_template_pair", "compile", "simulate_template_native_fault", "validate_fault_evidence", "publish"],
+            "operations": ["audit_source", "verify_runtime_master", "stage_frozen_dependencies", "materialize_model_recipe", "materialize_template_fault", "instrument_fault_channels", "save_and_finalize_readback", "compile", "simulate_template_native_fault", "freeze_output_dataset", "validate_production_fault_evidence", "publish_tested_case"],
         }
         plan = {**payload, "plan_hash": hashlib.sha256(json_bytes(payload)).hexdigest(), "status": "planned"}
         self._plans[plan["plan_hash"]] = copy.deepcopy(plan)
@@ -234,6 +318,8 @@ class BlankMmcBuilderService:
         )
         folder = kwargs.get("folder", parsed.folder)
         duration = kwargs.get("simulation_duration_s")
+        if duration is None and isinstance(request, Mapping):
+            duration = request.get("simulation_duration_s")
         if duration is None and args:
             duration = args[0]
         blueprint = kwargs.get("blueprint", "cigre_b4_p2p_avm_v1")
