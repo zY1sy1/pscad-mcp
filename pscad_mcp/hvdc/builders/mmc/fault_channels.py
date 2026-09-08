@@ -282,9 +282,89 @@ def instrument_fault_channels(source: str | Path, destination: str | Path, *, li
         raise _error("MMC_ACCEPTANCE_INCOMPLETE", "The actual cell capacitance unit must be audited before computing energy.")
     expose(observed_cell, "MmcCapEnergy", "Dsout", "0.5e-6*$C*SUM($Vc**2)", "REAL")
     expose(observed_cell, "MmcEquivalentSource", "Dsdyn", "RVD1_5", "REAL")
+    expose(observed_cell, "MmcChargePower", "Dsdyn", "SUM($Vc*$Ic)", "REAL")
+    expose(observed_cell, "MmcChargeCurrent", "Dsdyn", "SUM($Ic)", "REAL")
+    expose(observed_cell, "MmcBalanceDrive", "Dsdyn", "SUM($Vc*$Ic)-SUM($Vc)*SUM($Ic)/REAL($DimC)", "REAL")
     expose(observed_cell, "MmcBlocked", "Dsdyn", "IVD1_1", "INTEGER")
     observed_fault = clone_definition(masters["fault_sw"], "MmcObservedFaultSwitch")
     expose(observed_fault, "MmcClosed", "Dsout", "1-E_BtoI(OPENBR($NBR,$SS))", "INTEGER")
+    if "sorter" not in vendor:
+        raise _error("MMC_ACCEPTANCE_INCOMPLETE", "The installed cell-index sorter is missing.")
+    actual_sorters = [item for item in _components(definitions["MMC_Hb_Pole_PWM"]) if item.get("id") in {"607330449", "1348249230"}]
+    actual_sort_definitions = {item.get("defn") for item in actual_sorters}
+    if len(actual_sorters) != 2 or len(actual_sort_definitions) != 1:
+        raise _error("MMC_ACCEPTANCE_INCOMPLETE", "The actual arm sorting recipe is missing, ambiguous or mixed.")
+    actual_sort_definition = next(iter(actual_sort_definitions))
+    if actual_sort_definition == "intermediate:sorter":
+        sorter_source, sort_extent = vendor["sorter"], "NS"
+    elif actual_sort_definition == namespace + ":MmcCompleteArmSorter" and "MmcCompleteArmSorter" in definitions:
+        sorter_source, sort_extent = definitions["MmcCompleteArmSorter"], "Dim"
+    else:
+        raise _error("MMC_ACCEPTANCE_INCOMPLETE", "The actual arm sorter definition is not audited.", definition=actual_sort_definition)
+    observed_sorter = clone_definition(sorter_source, "MmcObservedSorter")
+    sorting = next(item for item in observed_sorter.findall("./script/segment") if item.get("name") == "Fortran")
+    if f"CALL E_SORTER($Dim,${sort_extent},$Enab,$order2,$IN,$OUT)" not in (sorting.text or ""):
+        raise _error("MMC_ACCEPTANCE_INCOMPLETE", "The installed sorter call contract differs.")
+    sorting.text = (sorting.text or "").rstrip() + """
+#LOCAL INTEGER MFEINV
+#LOCAL INTEGER MFERANGE
+#LOCAL INTEGER MFEI
+#LOCAL INTEGER MFEJ
+#LOCAL INTEGER MFEK
+#LOCAL INTEGER MFEAPPLIC
+#LOCAL REAL MFEPGAP
+#LOCAL REAL MFESGAP
+#LOCAL REAL MFESMIN
+#LOCAL REAL MFEOMAX
+#LOCAL REAL MFESMAX
+#LOCAL REAL MFEOMIN
+      MFEINV = 0
+      MFERANGE = 0
+      DO MFEI=1,$Dim
+        MFEJ = $OUT(MFEI)
+        IF ((MFEJ.LT.1).OR.(MFEJ.GT.$Dim)) THEN
+          MFERANGE = MFERANGE + 1
+        ELSEIF (MFEI.GT.1) THEN
+          MFEJ = $OUT(MFEI-1)
+          IF ((MFEJ.GE.1).AND.(MFEJ.LE.$Dim)) THEN
+            IF ($IN($OUT(MFEI)).LT.$IN(MFEJ)) MFEINV=MFEINV+1
+          ENDIF
+        ENDIF
+      ENDDO
+      MFEPGAP = 0.0
+      MFESGAP = 0.0
+      MFEAPPLIC = 0
+      MFEK = MIN($Dim,ABS($NS))
+      IF ((MFERANGE.EQ.0).AND.(MFEK.GT.0).AND.(MFEK.LT.$Dim)) THEN
+        MFEAPPLIC = 1
+        MFESMAX = $IN($OUT(1))
+        MFEOMIN = $IN($OUT(MFEK+1))
+        MFESMIN = $IN($OUT($Dim-MFEK+1))
+        MFEOMAX = $IN($OUT(1))
+        DO MFEI=1,$Dim
+          IF (MFEI.LE.MFEK) THEN
+            MFESMAX = MAX(MFESMAX,$IN($OUT(MFEI)))
+          ELSE
+            MFEOMIN = MIN(MFEOMIN,$IN($OUT(MFEI)))
+          ENDIF
+          IF (MFEI.GT.($Dim-MFEK)) THEN
+            MFESMIN = MIN(MFESMIN,$IN($OUT(MFEI)))
+          ELSE
+            MFEOMAX = MAX(MFEOMAX,$IN($OUT(MFEI)))
+          ENDIF
+        ENDDO
+        MFEPGAP = MFESMAX - MFEOMIN
+        MFESGAP = MFEOMAX - MFESMIN
+      ENDIF
+"""
+    expose(observed_sorter, "MmcSortInvalid", "Fortran", "MFERANGE", "INTEGER")
+    expose(observed_sorter, "MmcSortInversions", "Fortran", "MFEINV", "INTEGER")
+    expose(observed_sorter, "MmcSortCount", "Fortran", "$NS", "INTEGER")
+    expose(observed_sorter, "MmcSortExtent", "Fortran", "$" + sort_extent, "INTEGER")
+    expose(observed_sorter, "MmcSortEnable", "Fortran", "$Enab", "INTEGER")
+    expose(observed_sorter, "MmcSortPrefixGap", "Fortran", "MFEPGAP", "REAL")
+    expose(observed_sorter, "MmcSortSuffixGap", "Fortran", "MFESGAP", "REAL")
+    expose(observed_sorter, "MmcSortApplicable", "Fortran", "MFEAPPLIC", "INTEGER")
     channels: list[dict[str, Any]] = []
     probes: list[dict[str, Any]] = []
     wires: list[dict[str, Any]] = []
@@ -364,6 +444,16 @@ def instrument_fault_channels(source: str | Path, destination: str | Path, *, li
                     raise _error("MMC_ACCEPTANCE_INCOMPLETE", "A phase-voltage diagnostic source is missing.", signal=signal)
                 add_probe(pole_definition, role, f"{terminal}/{phase}", signal, sources[0], kind="control_quantity", units_override="pu", extra={"quantity": quantity})
             add_node_probe(pole_definition, "arm_deblocking_ramp", f"{terminal}/{phase}", "MmcDeblockingRamp", "263038724", 2304, 468, "pu", "deblocking_ramp_before_arm_voltage_sum")
+            for arm, owner in (("upper", "607330449"), ("lower", "1348249230")):
+                sorters = [item for item in _components(pole_definition) if item.get("id") == owner and item.get("defn") == actual_sort_definition]
+                if len(sorters) != 1 or dict(_parameters(sorters[0])).get("order") != "0":
+                    raise _error("MMC_ACCEPTANCE_INCOMPLETE", "The audited ascending arm sorter differs.", owner=owner)
+                sorter = sorters[0]
+                sorter.set("defn", namespace + ":MmcObservedSorter")
+                for parameter, role, quantity in (("MmcSortInvalid", "sort_index_invalid", "indices_outside_one_based_voltage_array_bounds"), ("MmcSortInversions", "sort_index_inversions", "adjacent_ascending_inversions_in_same_step_sort_input"), ("MmcSortCount", "sort_requested_count", "component_requested_count"), ("MmcSortExtent", "sort_extent", "actual_E_SORTER_NS_argument"), ("MmcSortEnable", "sort_enable", "actual_Enab_argument"), ("MmcSortPrefixGap", "sort_prefix_gap", "max_selected_prefix_minus_min_unselected"), ("MmcSortSuffixGap", "sort_suffix_gap", "max_unselected_minus_min_selected_suffix"), ("MmcSortApplicable", "sort_boundary_applicable", "valid_indices_and_nontrivial_requested_subset")):
+                    signal = parameter + ("Top" if arm == "upper" else "Btm")
+                    set_param(sorter, parameter, signal)
+                    add_probe(pole_definition, role, f"{terminal}/{phase}/{arm}", signal, sorter, kind="control_quantity", source_parameter=parameter, units_override="kV" if role.endswith("_gap") else "1", extra={"quantity": quantity, "sort_extent": sort_extent, "index_base": 1, "timing": "immediately_after_E_SORTER_before_HBridge_Ctrl1", "voltage_array": "actual_one_step_delayed_VcT_or_VcB", "full_order_not_assumed": True, "gap_valid_when": "indices_in_1_to_Dim_and_0_lt_requested_count_lt_Dim", "positive_gap_means_wrong_extreme_set": role.endswith("_gap")})
             if any(dict(_parameters(item)).get("Name") == "MmcVzEffective" for item in _components(pole_definition)):
                 for wire in pole_definition.findall("./schematic/Wire"):
                     wires.append({"definition_name": pole_name, "owner_id": wire.get("id"), "attributes": {key: wire.get(key) for key in ("classid", "x", "y", "orient")}, "vertices": [dict(item.attrib) for item in wire.findall("vertex")]})
@@ -390,7 +480,7 @@ def instrument_fault_channels(source: str | Path, destination: str | Path, *, li
                 instance.set("defn", namespace + ":MmcObservedFullCell")
                 arm_suffix = "Top" if arm == "upper" else "Btm"
                 scope = f"{terminal}/{phase}/{arm}"
-                for parameter, signal in (("MmcInserted", f"MmcV{arm_suffix}"), ("MmcCapSum", f"MmcVc{arm_suffix}"), ("MmcCapMin", f"MmcVcMin{arm_suffix}"), ("MmcCapMax", f"MmcVcMax{arm_suffix}"), ("MmcCapEnergy", f"MmcEnergy{arm_suffix}"), ("MmcEquivalentSource", f"MmcEquivalent{arm_suffix}"), ("MmcBlocked", f"MmcBlock{arm_suffix}")):
+                for parameter, signal in (("MmcInserted", f"MmcV{arm_suffix}"), ("MmcCapSum", f"MmcVc{arm_suffix}"), ("MmcCapMin", f"MmcVcMin{arm_suffix}"), ("MmcCapMax", f"MmcVcMax{arm_suffix}"), ("MmcCapEnergy", f"MmcEnergy{arm_suffix}"), ("MmcEquivalentSource", f"MmcEquivalent{arm_suffix}"), ("MmcChargePower", f"MmcChargePower{arm_suffix}"), ("MmcChargeCurrent", f"MmcChargeCurrent{arm_suffix}"), ("MmcBalanceDrive", f"MmcBalanceDrive{arm_suffix}"), ("MmcBlocked", f"MmcBlock{arm_suffix}")):
                     set_param(instance, parameter, signal)
                 add_probe(pole_definition, "v_inserted", scope, f"MmcV{arm_suffix}", instance, source_parameter="MmcInserted", extra={"quantity": "cell_group_terminal_voltage", "positive_port": "Ntop", "negative_port": "Nbtm", "condition": {"DTBP": "0"}})
                 add_probe(pole_definition, "v_cap", scope, f"MmcVc{arm_suffix}", instance, source_parameter="MmcCapSum", nominal=640.0, extra={"quantity": "sum_of_submodule_capacitor_voltages", "expression": "SUM(Vc)", "cell_count_expression": dict(_parameters(instance))["DimC"]})
@@ -398,6 +488,9 @@ def instrument_fault_channels(source: str | Path, destination: str | Path, *, li
                 add_probe(pole_definition, "v_cap_maximum", scope, f"MmcVcMax{arm_suffix}", instance, source_parameter="MmcCapMax", units_override="kV", extra={"quantity": "single_submodule_voltage_extremum", "expression": "MAXVAL(Vc)", "cell_count_expression": dict(_parameters(instance))["DimC"]})
                 add_probe(pole_definition, "arm_capacitor_energy", scope, f"MmcEnergy{arm_suffix}", instance, source_parameter="MmcCapEnergy", units_override="MJ", extra={"quantity": "sum_of_actual_submodule_capacitor_energies", "expression": "0.5*C_uF*1e-6*SUM(Vc_kV**2)", "capacitance_expression": dict(_parameters(instance))["C"], "capacitance_unit": "uF", "unit_derivation": "F*kV**2=MJ"})
                 add_probe(pole_definition, "cell_equivalent_source_voltage", scope, f"MmcEquivalent{arm_suffix}", instance, source_parameter="MmcEquivalentSource", units_override="kV", extra={"quantity": "vendor_cell_group_equivalent_source_voltage", "expression": "FULLCELL1_EXE RVD1_5", "branch_equation": "EBRD(BRx)=-RVD1_5", "not_a_direct_selected_cell_sum": True})
+                add_probe(pole_definition, "capacitor_charge_power", scope, f"MmcChargePower{arm_suffix}", instance, source_parameter="MmcChargePower", units_override="MW", extra={"quantity": "sum_of_same_step_capacitor_voltage_current_products", "expression": "SUM(Vc*Ic)", "timing": "immediately_after_FULLCELL1_EXE", "unit_derivation": "kV*kA=MW"})
+                add_probe(pole_definition, "capacitor_current_sum", scope, f"MmcChargeCurrent{arm_suffix}", instance, source_parameter="MmcChargeCurrent", units_override="kA", extra={"quantity": "sum_of_same_step_capacitor_currents", "expression": "SUM(Ic)", "timing": "immediately_after_FULLCELL1_EXE"})
+                add_probe(pole_definition, "capacitor_balance_drive", scope, f"MmcBalanceDrive{arm_suffix}", instance, source_parameter="MmcBalanceDrive", units_override="MW", extra={"quantity": "same_step_capacitor_voltage_current_covariance_sum", "expression": "SUM(Vc*Ic)-SUM(Vc)*SUM(Ic)/DimC", "timing": "immediately_after_FULLCELL1_EXE", "positive_increases_within_arm_voltage_variance": True})
                 add_probe(pole_definition, "blocking_state", scope, f"MmcBlock{arm_suffix}", instance, kind="physical_state", source_parameter="MmcBlocked", polarity={"inactive": 0, "active": 1}, extra={"quantity": "firing_based_cell_group_blocked", "expression": "Block_Finder_H result"})
                 current_signal = "IaTop" if arm == "upper" else "IaBtm"
                 current_sources = [item for item in _components(pole_definition) if item.get("defn") == "master:varrlc" and dict(_parameters(item)).get("I") == current_signal]
@@ -482,7 +575,7 @@ def instrument_fault_channels(source: str | Path, destination: str | Path, *, li
         channel["selector"].update({"owner_id": channel["owner_id"], "instance_path": channel["instance_path"]})
         channel["signal_source"]["instance_path"] = channel["instance_path"] + "/" + channel["signal_source"]["definition"].rsplit(":", 1)[-1] + "[" + channel["signal_source"]["owner_id"] + "]"
     _write_new_xml(root, target)
-    contract = {"schema_version": 1, "source_hashes": {name: {"path": str(paths[name]), "sha256": hashes[name]} for name in paths}, "project_path": str(target), "channels": channels, "readback_components": probes, "readback_wires": wires, "readback_ports": {name: _ports(definition) for name, definition in definitions.items() if name.startswith(("MFE_", "MmcObserved"))}, "readback_scripts": {item.get("name"): _script_hash(item) for item in (observed_cell, observed_fault)}, "instrumented_project_sha256": _sha256(target), "reachable_instances": reachable}
+    contract = {"schema_version": 1, "source_hashes": {name: {"path": str(paths[name]), "sha256": hashes[name]} for name in paths}, "project_path": str(target), "channels": channels, "readback_components": probes, "readback_wires": wires, "readback_ports": {name: _ports(definition) for name, definition in definitions.items() if name.startswith(("MFE_", "MmcObserved"))}, "readback_scripts": {item.get("name"): _script_hash(item) for item in (observed_cell, observed_fault, observed_sorter)}, "instrumented_project_sha256": _sha256(target), "reachable_instances": reachable}
     contract["diagnostic_channels"] = [item for item in channels if item["role"] not in REQUIRED_ROLES]
     contract["channels"] = [item for item in channels if item["role"] in REQUIRED_ROLES]
     contract["readback"] = verify_fault_instrumentation(target, contract)
@@ -665,6 +758,45 @@ def materialize_voltage_control_headroom(source: str | Path, destination: str | 
         raise _error("MMC_TEMPLATE_SOURCE_CHANGED", "The control repair source changed while reading.")
     base = 1000 / (math.sqrt(3) * 370)
     return {"source": str(original), "source_sha256": before_hash, "destination": str(target), "destination_sha256": _sha256(target), "voltage_controller_owner": voltage_converter.get("id"), "parameter": "Imax", "before_pu": 1.0, "after_pu": current_limit_pu, "freeze_reference": "0.99999 * Imax", "freeze_reference_owner": threshold.get("id"), "phase_current_base_rms_ka": base, "phase_current_rms_ka": base * current_limit_pu, "phase_current_peak_ka": base * math.sqrt(2) * current_limit_pu, "arm_protection_limit_ka": 3.0}
+
+
+def materialize_complete_arm_sorting(source: str | Path, destination: str | Path, *, library: str | Path) -> dict[str, Any]:
+    """Order both selectable extremes when the existing sort event refreshes."""
+
+    original, library_path = _regular(source), _regular(library)
+    target = _new_target(destination, (original, library_path))
+    source_hash, library_hash = _sha256(original), _sha256(library_path)
+    root = ET.parse(original).getroot()
+    vendor = ET.parse(library_path).getroot()
+    pole = root.find("./definitions/Definition[@name='MMC_Hb_Pole_PWM']")
+    sorter = vendor.find("./definitions/Definition[@name='sorter']")
+    definitions = root.find("definitions")
+    if pole is None or sorter is None or definitions is None or definitions.find("Definition[@name='MmcCompleteArmSorter']") is not None:
+        raise _error("MMC_ACCEPTANCE_INCOMPLETE", "The original arm sorter scope is absent or already specialized.")
+    calls = [item for item in _components(pole) if item.get("defn") == "intermediate:sorter"]
+    if len(calls) != 2 or {item.get("id") for item in calls} != {"607330449", "1348249230"} or any(dict(_parameters(item)).get("order") != "0" for item in calls):
+        raise _error("MMC_ACCEPTANCE_INCOMPLETE", "The audited ascending sorter instances differ.")
+    clone = copy.deepcopy(sorter)
+    clone.set("name", "MmcCompleteArmSorter")
+    clone.set("instances", "0")
+    used = {item.get("id") for item in root.iter()}
+    owner = 2026000001
+    while str(owner) in used:
+        owner += 1
+    clone.set("id", str(owner))
+    segment = next(item for item in clone.findall("./script/segment") if item.get("name") == "Fortran")
+    old_call = "CALL E_SORTER($Dim,$NS,$Enab,$order2,$IN,$OUT)"
+    new_call = "CALL E_SORTER($Dim,$Dim,$Enab,$order2,$IN,$OUT)"
+    if (segment.text or "").count(old_call) != 1:
+        raise _error("MMC_ACCEPTANCE_INCOMPLETE", "The installed sorting routine call is not the audited source.")
+    segment.text = segment.text.replace(old_call, new_call)
+    definitions.append(clone)
+    for instance in calls:
+        instance.set("defn", root.get("name") + ":MmcCompleteArmSorter")
+    _write_new_xml(root, target)
+    if _sha256(original) != source_hash or _sha256(library_path) != library_hash:
+        raise _error("MMC_TEMPLATE_SOURCE_CHANGED", "A complete-sorting input changed.")
+    return {"source": str(original), "source_sha256": source_hash, "library": str(library_path), "library_sha256": library_hash, "destination": str(target), "destination_sha256": _sha256(target), "definition": "MmcCompleteArmSorter", "sort_extent": "Dim", "requested_count_unchanged": True, "enable_unchanged": True, "current_and_firing_unchanged": True, "before_call": old_call, "after_call": new_call, "held_steps_not_resorted": True}
 
 
 def materialize_terminal_two_charging(source: str | Path, destination: str | Path) -> dict[str, Any]:
@@ -950,6 +1082,7 @@ __all__ = [
     "finalize_fault_instrumentation",
     "instrument_fault_channels",
     "materialize_arm_virtual_resistance",
+    "materialize_complete_arm_sorting",
     "materialize_dc_feedback_filter",
     "materialize_dc_port_damping",
     "materialize_terminal_two_carrier",

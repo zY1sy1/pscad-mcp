@@ -240,3 +240,91 @@ The existing comparator still limits the number of selected cells to the
 physical count. Additionally, any steady request with absolute modulation
 above 2 pu fails the diagnostic gate; implicit clipping cannot manufacture a
 passing working point. All original nominal, recovery and current bounds remain.
+
+The ninth physical attempt (`fault-evidence-20260908T075010061627Z`, f441438)
+reduced the 303 Hz voltage component to roughly 6.25/7.90 kV at T1/T2, but
+retained physical FAIL. Raw DC means were 547.38/533.43 kV with 4.94%/5.33%
+relative RMS ripple. T2 power remained -900.06 MW, while arm requests reached
+2.3-2.56 pu and T1's current request stayed at 1.1 pu with FrzI continuously
+active. This is an unaccepted diagnostic, not grounds to raise damping or
+accept modulation clipping. The official transformer has no active tap and
+its compiled ratio is 230/370 kV; measured current-ratio evidence confirms
+that ratio. Apparent power inferred only from P/Q omits waveform distortion.
+
+Revision f108bac adds exact-node measurements of the physical AC command
+magnitude before DC normalization (VSCControl2 multiplier 736319288, output
+3204/2034) and the normalized magnitude before the 1.5 clamp (divider
+235800143, output 3204/1944). It also observes local converter-side Edc,
+each phase's Vref/Vz and deblocking ramp. These distinguish the existing
+line-side voltage base from local DC and actual arm capacitor sums.
+
+Per-arm energy is measured from the full 76-cell vector. The installed cell
+form declares C in uF, and compiled Main forwards 2800.0 without SI conversion.
+The diagnostic therefore uses `0.5e-6*C*SUM(Vc**2)` in MJ when Vc is kV.
+`FULLCELL1_EXE` return RVD1_5 is also exposed as the vendor aggregate equivalent
+source voltage; it is not asserted to be the selected-cell voltage sum.
+The energy formula and the original cell unit declaration are checked before
+instrumentation, and their generated-code form is retained with the run.
+
+Revision c5ed2e2 repairs an independently verified source binding: Main T2
+charging-delay owner 606940312 previously used Tcharging1 even though the
+terminal has its own Tcharging2 signal (label owner 2129272491). The derived
+copy now uses Tcharging2; T1 delay owner 584272924 retains Tcharging1. A
+regression proves that this is the only source-XML change, and the runner
+requires one generated EMTDC_XTTRANS call for each terminal setting. Original
+settings are 0.02 s for T1 and 0.0 s for T2, so the correction also removes
+the unintended 20 ms delay at T2.
+
+The c5ed2e2 diagnostic (`fault-evidence-20260908T085929376555Z`) showed T1
+has excess total capacitor energy (51.934 MJ against 45.272 MJ nominal) but
+severe unequal cell voltages (mean within-arm standard deviation 4.793 kV).
+T2 has 31.791 MJ and remains nearly balanced (0.0156 kV within-arm standard
+deviation). The stored source, support and output hashes remained unchanged;
+owned cleanup completed. The result remains physical FAIL.
+
+Read-only linked-routine investigation, independently reviewed in
+`independent-review-20260908.md`, found that positive sorter NS only orders
+the requested low-voltage prefix. The firing controller selects the opposite
+high-voltage suffix when signed insertion times arm current is negative.
+For k >= Dim/2 the suffix set is nevertheless correct by complement; an
+unordered suffix alone therefore does not establish wrong selection.
+
+The b653102 run (`fault-evidence-20260908T091449749308Z`) added same-control-step
+index bounds/inversions, actual NS/Enab and capacitor-current moments. Its
+inversions established incomplete ordering but did not establish wrong sets.
+The e70bed7 run (`fault-evidence-20260908T092347227867Z`) added direct selected
+set boundary gaps and an explicit applicability flag. On Enab-active samples
+in [4.6, 5.0), the actually consumed suffix with 0 < k < 38 was wrong in all
+2117 T1 samples and all 627 T2 samples, with maximum gaps 11.8215/0.3956 kV.
+All refreshed consumed-prefix cases and suffix cases with k >= 38 were correct.
+Both runs retained physical FAIL and completed owned cleanup with unchanged
+sources/support. Their finalized outputs and diagnostics remain separate.
+
+The resulting candidate changes only E_SORTER's sort extent to Dim in a
+runtime-cloned sorter Definition. Component NS remains the actual requested
+cell count and is distinguished from the algorithm sort extent in diagnostics.
+The existing Enab includes count changes, signed-count edges and deblocking;
+it is retained, as are the original current and firing inputs. Full sorting
+provides both extreme subsets at refresh events, but does not promise new
+sorting during held steps. Raw electrical gates and the 2 pu arm modulation
+limit remain fixed, and the next run records actual EMT elapsed time.
+
+Capacitor balance drive is now measured directly after FULLCELL1_EXE as
+`SUM(Vc*Ic)-SUM(Vc)*SUM(Ic)/DimC`, keeping all terms in one control step.
+Earlier externally reconstructed drive used the output-stage capacitor sum
+and is directional diagnostic evidence only, with possible stage/sampling
+error. Vc is kV and Ic is kA; startup energy/current integration crosschecks
+support MW/kA scaling. Later distorted T1 data sampled at 250 us is not an
+exact energy-derivative measurement.
+
+Reproduce the sorting boundary diagnostic from this worktree with process-local
+imports, passing a finalized run directory (never a live output directory):
+
+```powershell
+$env:PYTHONPATH = (Get-Location).Path
+& 'D:/pscad-mcp/.venv/Scripts/python.exe' -m docs.acceptance.mmc-fault-evidence.diagnose_sorter 'D:/PSCAD-Workspace/mmc-fault-evidence/fault-evidence-20260908T092347227867Z'
+```
+
+The command validates original contract/sample/output-index hashes and the
+complete output dataset before reporting refreshed/held subset coverage. It
+does not generate a physical acceptance verdict.

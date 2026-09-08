@@ -29,6 +29,7 @@ from pscad_mcp.hvdc.builders.mmc.fault_channels import (
     finalize_fault_instrumentation,
     instrument_fault_channels,
     materialize_arm_virtual_resistance,
+    materialize_complete_arm_sorting,
     materialize_dc_feedback_filter,
     materialize_terminal_two_carrier,
     materialize_terminal_two_charging,
@@ -181,8 +182,10 @@ async def _run_case(service, root, source, library, master, name, fault):
         record["carrier_diagnostic"] = materialize_terminal_two_carrier(filtered, carrier)
         damped = case_root / "arm_virtual_resistance.pscx"
         record["arm_virtual_resistance"] = materialize_arm_virtual_resistance(carrier, damped, master=master)
+        sorted_project = case_root / "complete_sorting.pscx"
+        record["complete_sorting"] = materialize_complete_arm_sorting(damped, sorted_project, library=library)
         project = case_root / f"MMC_{name}.pscx"
-        contract = instrument_fault_channels(damped, project, library=library, master=master)
+        contract = instrument_fault_channels(sorted_project, project, library=library, master=master)
         contract["required_checks"] = _checks()
         _write(case_root / "channels.json", contract)
         record.update({"native_binding": binding, "channel_contract_path": str(case_root / "channels.json"), "channel_contract_sha256": _hash(case_root / "channels.json"), "project": str(project), "project_instrumented_sha256": _hash(project)})
@@ -215,8 +218,15 @@ async def _run_case(service, root, source, library, master, name, fault):
         record["compiled_charging"] = {"path": str(mains[0]), "sha256": _hash(mains[0]), "independent_delay_counts": charging_counts}
         if charging_counts != {"1": 1, "2": 1}:
             raise RuntimeError("Generated charging delays do not use the independent terminal settings")
+        record["compiled_sorting"] = []
+        for compiled in sorted(project.parent.glob(project.stem + ".*/MFE_Pole_*.f")):
+            count = len(re.findall(r"CALL\s+E_SORTER\(\s*76,\s*76,", compiled.read_text(encoding="utf-8"), re.IGNORECASE))
+            record["compiled_sorting"].append({"path": str(compiled), "sha256": _hash(compiled), "full_extent_calls": count})
+        if len(record["compiled_sorting"]) != 6 or any(item["full_extent_calls"] != 2 for item in record["compiled_sorting"]):
+            raise RuntimeError("Generated sorting does not cover both arms of all six running poles")
         stage("running")
         started = time.time()
+        run_clock = time.monotonic()
         record["started_after"] = started
         await service.run_project(project.stem)
         deadline = time.monotonic() + 900
@@ -229,6 +239,7 @@ async def _run_case(service, root, source, library, master, name, fault):
                 raise RuntimeError(f"Simulation did not complete: {state}")
             await asyncio.sleep(0.25)
         record["run_status"] = state
+        record["emtdc_elapsed_s"] = time.monotonic() - run_clock
         stage("reading")
         outputs = await service.discover_output_files(str(project), started_after=started, max_files=1000)
         record["discovered_outputs"] = outputs

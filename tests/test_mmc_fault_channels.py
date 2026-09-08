@@ -285,6 +285,24 @@ def test_capacitor_energy_and_aggregate_source_keep_actual_cell_outputs(tmp_path
     assert "0.5e-6*$C*SUM($Vc**2)" in next(item.text for item in definition.findall("./script/segment") if item.get("name") == "Dsout")
 
 
+def test_sorter_diagnostics_observe_same_step_permutation_and_input(tmp_path, installed_sources):
+    from xml.etree import ElementTree as ET
+    project, library, master = installed_sources
+    derived = tmp_path / "observed.pscx"
+    contract = fault_channels.instrument_fault_channels(project, derived, library=library, master=master)
+    for role in ("sort_index_invalid", "sort_index_inversions", "sort_requested_count", "sort_enable", "sort_prefix_gap", "sort_suffix_gap", "sort_boundary_applicable", "capacitor_charge_power", "capacitor_current_sum", "capacitor_balance_drive"):
+        bindings = [item for item in contract["diagnostic_channels"] if item["role"] == role]
+        assert len(bindings) == 12
+    tree = ET.parse(derived)
+    sorter = next(item for item in tree.findall("./definitions/Definition") if item.get("name") == "MmcObservedSorter")
+    script = next(item.text for item in sorter.findall("./script/segment") if item.get("name") == "Fortran")
+    assert script.index("CALL E_SORTER") < script.index("MFEINV")
+    assert "$IN($OUT" in script
+    assert "MmcObservedSorter" in contract["readback_scripts"]
+    calls = [item for definition in tree.findall("./definitions/Definition") if definition.get("name", "").startswith("MFE_Pole_") for item in definition.findall("./schematic/User") if item.get("defn", "").endswith(":MmcObservedSorter")]
+    assert len(calls) == 12
+
+
 def test_voltage_base_diagnostics_bind_physical_and_preclamp_nodes(tmp_path, installed_sources):
     from xml.etree import ElementTree as ET
     project, library, master = installed_sources
@@ -340,6 +358,58 @@ def test_terminal_two_charging_delay_uses_its_own_setting(tmp_path, installed_so
     target = next(item for item in before.findall("./definitions/Definition[@name='Main']/schematic/User") if item.get("id") == "606940312")
     next(item for item in target.findall("./paramlist/param") if item.get("name") == "T").set("value", "Tcharging2")
     assert ET.tostring(before.getroot()) == ET.tostring(root.getroot())
+
+
+def test_complete_arm_sorting_preserves_requested_count_and_firing_chain(tmp_path, installed_sources):
+    from xml.etree import ElementTree as ET
+    project, library, master = installed_sources
+    derived = tmp_path / "complete-sorting.pscx"
+    result = fault_channels.materialize_complete_arm_sorting(project, derived, library=library)
+    assert result["sort_extent"] == "Dim"
+    assert result["requested_count_unchanged"] is True
+    before = ET.parse(project)
+    after = ET.parse(derived)
+    old_pole = before.find("./definitions/Definition[@name='MMC_Hb_Pole_PWM']")
+    new_pole = after.find("./definitions/Definition[@name='MMC_Hb_Pole_PWM']")
+    for component in old_pole.findall("./schematic/User"):
+        if component.get("defn") == "intermediate:sorter":
+            component.set("defn", after.getroot().get("name") + ":MmcCompleteArmSorter")
+    assert ET.tostring(old_pole) == ET.tostring(new_pole)
+    observed = tmp_path / "observed.pscx"
+    contract = fault_channels.instrument_fault_channels(derived, observed, library=library, master=master)
+    counts = [item for item in contract["diagnostic_channels"] if item["role"] == "sort_requested_count"]
+    extents = [item for item in contract["diagnostic_channels"] if item["role"] == "sort_extent"]
+    assert len(counts) == len(extents) == 12
+    assert all(item["signal_source"]["quantity"] == "component_requested_count" for item in counts)
+    assert all(item["signal_source"]["sort_extent"] == "Dim" for item in extents)
+    sorter = ET.parse(observed).find("./definitions/Definition[@name='MmcObservedSorter']")
+    script = next(item.text for item in sorter.findall("./script/segment") if item.get("name") == "Fortran")
+    assert "CALL E_SORTER($Dim,$Dim,$Enab,$order2,$IN,$OUT)" in script
+    assert "MFEK = MIN($Dim,ABS($NS))" in script
+
+
+@pytest.mark.parametrize("binding", ["unused", "mixed"])
+def test_instrumentation_selects_sort_recipe_only_from_actual_instances(tmp_path, installed_sources, binding):
+    from xml.etree import ElementTree as ET
+    project, library, master = installed_sources
+    derived = tmp_path / "sorting.pscx"
+    fault_channels.materialize_complete_arm_sorting(project, derived, library=library)
+    tree = ET.parse(derived)
+    calls = [item for item in tree.findall("./definitions/Definition[@name='MMC_Hb_Pole_PWM']/schematic/User") if item.get("defn", "").endswith(":MmcCompleteArmSorter")]
+    for call in calls if binding == "unused" else calls[:1]:
+        call.set("defn", "intermediate:sorter")
+    tree.write(derived, encoding="utf-8")
+    observed = tmp_path / "observed.pscx"
+    if binding == "mixed":
+        with pytest.raises(BackendError):
+            fault_channels.instrument_fault_channels(derived, observed, library=library, master=master)
+    else:
+        contract = fault_channels.instrument_fault_channels(derived, observed, library=library, master=master)
+        extents = [item for item in contract["diagnostic_channels"] if item["role"] == "sort_extent"]
+        assert all(item["signal_source"]["sort_extent"] == "NS" for item in extents)
+        sorter = ET.parse(observed).find("./definitions/Definition[@name='MmcObservedSorter']")
+        script = next(item.text for item in sorter.findall("./script/segment") if item.get("name") == "Fortran")
+        assert "CALL E_SORTER($Dim,$NS,$Enab,$order2,$IN,$OUT)" in script
 
 
 def test_readback_detects_changed_source_parameter(tmp_path, installed_sources):
