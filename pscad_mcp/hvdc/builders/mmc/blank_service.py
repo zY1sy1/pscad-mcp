@@ -283,7 +283,7 @@ class BlankMmcBuilderService:
             "schema_version": 1,
             "kind": "blank_mmc_native",
             "request": parsed.to_dict(),
-            "request_implementation": {"ratings": {"binding": "descriptive_only", "requested": dict(parsed.ratings)}, "control_profile": "audited_existing_native_controls", "fault_profile": "materialized_native_dc_fault", "native_model_basis": {"dc_pole_to_pole_voltage_kv": 640.0, "controlled_terminal_active_power_mw": -900.0, "rated_converter_mva": 1000.0}},
+            "request_implementation": {"ratings": {"binding": "descriptive_only", "requested": dict(parsed.ratings)}, "control_profile": "audited_existing_native_controls", "fault_profile": "materialized_native_dc_fault", "supported_native_contract": {"observed": False, "dc_pole_to_pole_voltage_kv": 640.0, "controlled_terminal_active_power_mw": -900.0, "rated_converter_mva": 1000.0}, "template_ratings_observed": None},
             "project_name": name,
             "workspace": str(self.workspace_root),
             "target_path": str(target),
