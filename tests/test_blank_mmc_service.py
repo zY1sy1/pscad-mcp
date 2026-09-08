@@ -7,16 +7,19 @@ from pathlib import Path
 import pytest
 
 from pscad_mcp.core.backend.base import BackendError
+from pscad_mcp.hvdc.builders.mmc import blank_service
 from pscad_mcp.hvdc.builders.mmc.blank import BlankMmcRequest
 from pscad_mcp.hvdc.builders.mmc.blank_service import BlankMmcBuilderService
+from pscad_mcp.hvdc.builders.mmc.fault_channels import default_fault_checks
 from tests.test_mmc_template_native import _template as _native_template
 
 
-def _audit(topology: str) -> dict[str, object]:
+def _audit(topology: str, template_path=None, library_path=None) -> dict[str, object]:
     return {
         "compatible": True,
         "pscad_version": "4.6.2",
-        "source_hashes": {"project": "a" * 64, "library": "b" * 64},
+        "source_hashes": {"project": hashlib.sha256(Path(template_path).read_bytes()).hexdigest() if template_path else "a" * 64,
+                          "library": hashlib.sha256(Path(library_path).read_bytes()).hexdigest() if library_path else "b" * 64},
         "definitions": ["project:Main", "intermediate:FullCellR_n"],
         "absolute_paths": [],
         "compiler_support": {"required": False, "present": True, "hashes": {}},
@@ -25,15 +28,95 @@ def _audit(topology: str) -> dict[str, object]:
     }
 
 
+@pytest.fixture(autouse=True)
+def synthetic_master(tmp_path, monkeypatch):
+    master = tmp_path / "master.pslx"
+    master.write_text('<project name="master" Target="Library" synthetic="true"><definitions /></project>', encoding="ascii")
+    monkeypatch.setattr(blank_service, "_default_master_path", lambda: master, raising=False)
+    return master
+
+
+def _plan_case(tmp_path, *, parameterization=None, audit_change=None):
+    source = tmp_path / "source.pscx"
+    library = tmp_path / "intermediate.pslx"
+    source.write_text('<project name="source" Target="EMTDC" version="4.6.2"><definitions /></project>')
+    library.write_text('<project name="intermediate" Target="Library"><definitions /></project>')
+
+    def audit(*paths):
+        result = _audit("full_bridge", *paths)
+        if audit_change:
+            audit_change(result)
+        return result
+
+    builder = BlankMmcBuilderService(None, workspace_root=tmp_path / "workspace", audit_loader=audit)
+    request = BlankMmcRequest(project_name="MMC_CASE", template_path=str(source), library_path=str(library), parameterization=parameterization)
+    return builder, request, source, library
+
+
+def test_public_plan_uses_frozen_production_windows_and_raw_recipe(tmp_path, synthetic_master):
+    service, request, source, library = _plan_case(tmp_path)
+    plan = service.plan_model(request)
+    assert plan["settings"] == {"simulation_duration_s": 5.0, "time_step_s": 25e-6, "output_step_s": 250e-6, "output_enabled": True}
+    assert plan["fault"] == {"kind": "dc_pole_to_pole", "time_s": 2.5, "removal_time_s": 2.7}
+    assert plan["checks_contract"] == default_fault_checks()
+    assert plan["model_recipe"]["name"] == "raw"
+    assert plan["model_recipe"]["physical_acceptance_verified"] is False
+    assert plan["source_identities"]["master"]["sha256"] == hashlib.sha256(synthetic_master.read_bytes()).hexdigest()
+    assert not (tmp_path / "workspace").exists()
+
+
+@pytest.mark.parametrize("duration", [1.3, 4.99])
+def test_public_plan_rejects_explicit_duration_that_misses_recovery(tmp_path, duration):
+    service, request, *_ = _plan_case(tmp_path)
+    with pytest.raises(BackendError, match="window"):
+        service.plan_model(request, simulation_duration_s=duration)
+    with pytest.raises(BackendError, match="window"):
+        service.plan_model({**request.to_dict(), "simulation_duration_s": duration})
+    assert not (tmp_path / "workspace").exists()
+
+
+def test_public_plan_preserves_explicit_long_duration_without_changing_checks(tmp_path):
+    service, request, *_ = _plan_case(tmp_path)
+    plan = service.plan_model(request, simulation_duration_s=5.5)
+    assert plan["settings"]["simulation_duration_s"] == 5.5
+    assert plan["checks_contract"] == default_fault_checks()
+
+
+@pytest.mark.parametrize("parameters", [{"model_recipe": "unknown"}, {"fault_current_limit_ka": 9999}, {"model_recipe": {"current_limit_pu": 3}}])
+def test_public_plan_rejects_unrecognized_recipe_or_threshold_override(tmp_path, parameters):
+    service, request, *_ = _plan_case(tmp_path, parameterization=parameters)
+    with pytest.raises(BackendError):
+        service.plan_model(request)
+
+
+def test_public_plan_pins_compiler_support_before_any_copy(tmp_path):
+    support = tmp_path / "lib" / "gf42" / "intermediate.lib"
+    support.parent.mkdir(parents=True)
+    support.write_bytes(b"synthetic compiler library")
+    item = {"path": str(support.resolve()), "relative_path": "lib/gf42/intermediate.lib", "sha256": hashlib.sha256(support.read_bytes()).hexdigest()}
+    service, request, *_ = _plan_case(tmp_path, audit_change=lambda audit: audit["compiler_support"].update(files=[item]))
+    plan = service.plan_model(request)
+    assert plan["compiler_support"]["files"] == [item]
+    support.write_bytes(b"changed")
+    with pytest.raises(BackendError):
+        service.plan_model(request)
+
+
+def test_public_plan_rejects_a_stale_audit_source_hash(tmp_path):
+    service, request, *_ = _plan_case(tmp_path, audit_change=lambda audit: audit["source_hashes"].update(project="0" * 64))
+    with pytest.raises(BackendError):
+        service.plan_model(request)
+
+
 def test_blank_mmc_plan_records_audited_topology_and_source_hashes(tmp_path: Path) -> None:
     template = tmp_path / "template.pscx"
     library = tmp_path / "library.pslx"
-    template.write_text("template", encoding="ascii")
-    library.write_text("library", encoding="ascii")
+    template.write_text('<project name="template" version="4.6.2" Target="EMTDC"><definitions /></project>', encoding="ascii")
+    library.write_text('<project name="library" Target="Library"><definitions /></project>', encoding="ascii")
     service = BlankMmcBuilderService(
         None,
         workspace_root=tmp_path / "workspace",
-        audit_loader=lambda *_args: _audit("full_bridge"),
+        audit_loader=lambda *_args: _audit("full_bridge", *_args),
     )
     request = BlankMmcRequest.from_dict(
         {
@@ -48,8 +131,28 @@ def test_blank_mmc_plan_records_audited_topology_and_source_hashes(tmp_path: Pat
 
     assert plan["status"] == "planned"
     assert plan["capabilities"]["intrinsic_dc_fault_blocking"] is True
-    assert plan["template_native"]["source_hashes"]["project"] == "a" * 64
-    assert plan["template_native"]["source_hashes"]["library"] == "b" * 64
+    assert plan["template_native"]["source_hashes"]["project"] == hashlib.sha256(template.read_bytes()).hexdigest()
+    assert plan["template_native"]["source_hashes"]["library"] == hashlib.sha256(library.read_bytes()).hexdigest()
+
+
+def test_public_plan_freezes_installed_line_generation_inputs_without_writing(tmp_path):
+    from pscad_mcp.hvdc.builders.mmc.template_audit import (
+        discover_official_mmc_template,
+    )
+
+    master = Path("C:/Program Files (x86)/PSCAD46/master.pslx")
+    if not master.is_file():
+        pytest.skip("Installed read-only Master is unavailable")
+    project, library = discover_official_mmc_template()
+    workspace = tmp_path / "workspace"
+    service = BlankMmcBuilderService(None, workspace_root=workspace)
+    request = BlankMmcRequest(project_name="CheckedLines", template_path=str(project), library_path=str(library), parameterization={"master_path": str(master)})
+    plan = service.plan_model(request)
+    lines = plan["line_constants"]
+    assert lines["mode"] == "generate_public_from_source_dctl"
+    assert lines["inputs"] and all(len(item["input_sha256"]) == 64 for item in lines["inputs"])
+    assert lines["executable"]["sha256"] == hashlib.sha256(Path(lines["executable"]["path"]).read_bytes()).hexdigest()
+    assert not workspace.exists()
 
 
 def test_blank_mmc_plan_rejects_topology_mismatch(tmp_path: Path) -> None:

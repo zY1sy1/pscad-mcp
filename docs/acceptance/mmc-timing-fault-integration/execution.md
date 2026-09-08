@@ -62,10 +62,10 @@ not silently change it or the physical criteria using observed samples.
 
 - [x] Create isolated integration worktree and merge committed foundations.
 - [x] Verify cross-module baseline without licensed runs.
-- [ ] Review current public request, planning, execution and publication flow.
-- [ ] Bind source XML, Master, all compiler support files, settings, actual fault
+- [x] Review current public request, planning, execution and publication flow.
+- [x] Bind source XML, Master, all compiler support files, settings, actual fault
   window, check contract and selected model recipe before mutation.
-- [ ] Reject requests that cannot cover required windows before building.
+- [x] Reject requests that cannot cover required windows before building.
 - [ ] Connect production instrumentation and contract evaluation to the actual
   `BlankMmcBuilderService` flow, with focused failing regressions first.
 - [ ] Preserve original sources and use exclusive derived files. Keep file
@@ -97,3 +97,24 @@ Every worker owns its Python process, PSCAD connection and managed PID.
 Cleanup must retain pending-owned handles after attach failures, must not
 create a session to discover ownership, and must never stop another task's
 instance. Follow the acceptance criteria when a run is unsuccessful.
+
+## Public Planning Batch
+
+Focused baseline: 83 passed, 1 skipped in 11.73 s. The first new planning
+regressions failed in 9 cases, demonstrating the old 1.3 s/50 us defaults,
+unbounded recipe/threshold fields, missing checks contracts and trusted stale
+audit hashes. After the planning change, blank-service/tool tests report
+26 passed, 1 skipped in 1.10 s.
+
+The existing request `parameterization` carries only `master_path` and a named
+`model_recipe`. Supported initial recipes are `raw`, `headroom_1p1`, and
+`headroom_1p1_dc_filter_5ms`; every recipe is explicitly physically unverified.
+Default raw does not apply diagnostic tuning. Production checks are copied
+from `fault_channels.default_fault_checks()` and hashed independently.
+
+The plan pins Master/project/library identities, audited compiler-support
+files, and public TLine generator/input hashes when DCTL lines are present.
+An explicit longer run retains its duration without changing the fixed
+physical check windows; an explicit run shorter than 5 s is rejected before
+mutation. Runtime Master verification and the complete execution/publication
+flow are the next batch, so this batch alone is not physical acceptance.
