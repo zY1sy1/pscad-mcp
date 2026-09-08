@@ -474,6 +474,21 @@ def evaluate_template_native_dc_fault(
                 members = [item for item in files if item.get("path") == channel.get(path_key) and item.get("sha256") == channel.get(hash_key)]
                 if len(members) != 1:
                     invalid.append(f"dataset_membership:{channel_id}:{path_key}")
+            call_id = channel.get("call_id")
+            if type(call_id) is not int or call_id < 1 or Path(str(channel.get("output_part", ""))).name.casefold() != f"{identity.get('base')}_{(call_id - 1) // 10 + 1:02d}.out".casefold():
+                invalid.append(f"dataset_part_mapping:{channel_id}")
+            if samples.get("evidence_kind") != "synthetic":
+                metadata_members = [item for item in files if item.get("path") == channel.get("compiler_metadata_file") and item.get("sha256") == channel.get("compiler_metadata_sha256")]
+                compiled = channel.get("compiled_identity", {})
+                actual_compiled = []
+                if len(metadata_members) == 1:
+                    try:
+                        metadata_root = ET.parse(metadata_members[0]["path"]).getroot()
+                        actual_compiled = [dict(item.attrib) for item in metadata_root.iter("Analog") if item.get("index") == str(call_id - 1)] if type(call_id) is int else []
+                    except (OSError, ET.ParseError):
+                        invalid.append(f"compiled_metadata_invalid:{channel_id}")
+                if len(actual_compiled) != 1 or actual_compiled[0] != compiled or compiled.get("id") != str(binding["owner_id"]) + ":0" or compiled.get("index") != str(call_id - 1) or compiled.get("unit") != channel.get("units") or compiled.get("dim") != str(binding["dimension"]):
+                    invalid.append(f"compiled_metadata_binding:{channel_id}")
         source_units, target_units = channel.get("units"), units[role]
         factor = 1.0 if source_units == target_units else factors.get((source_units, target_units))
         if factor is None or binding.get("units") != target_units:
@@ -498,11 +513,15 @@ def evaluate_template_native_dc_fault(
     for role, values in selected.items():
         if not values:
             missing.append(role)
+    balance_inputs = [item for item in selected["p_active"] if item["binding"].get("nominal_role") == "power_balance_input"]
+    balance_outputs = [item for item in selected["p_active"] if item["binding"].get("nominal_role") == "controlled_active_power"]
+    if balance_inputs and not balance_outputs:
+        invalid.append("power_balance_source_missing")
 
     windows: dict[str, tuple[float, float]] = {}
     numbers: dict[str, float] = {}
     try:
-        for key in ("output_step_s", "max_timing_error_s", "frequency_hz", "nominal_target_relative_tolerance", "arm_rms_stability_relative_tolerance", "arm_peak_limit_ka", "negative_voltage_max_kv", "fault_current_limit_ka", "voltage_recovery_relative_tolerance", "power_recovery_relative_tolerance", "arm_rms_recovery_relative_tolerance", "capacitor_recovery_relative_tolerance", "steady_relative_rms_tolerance", "minimum_operating_fraction", "arm_rms_floor_ka"):
+        for key in ("output_step_s", "max_timing_error_s", "frequency_hz", "nominal_target_relative_tolerance", "maximum_power_loss_fraction", "arm_rms_stability_relative_tolerance", "arm_peak_limit_ka", "negative_voltage_max_kv", "fault_current_limit_ka", "voltage_recovery_relative_tolerance", "power_recovery_relative_tolerance", "arm_rms_recovery_relative_tolerance", "capacitor_recovery_relative_tolerance", "steady_relative_rms_tolerance", "minimum_operating_fraction", "arm_rms_floor_ka"):
             value = checks_contract[key]
             if isinstance(value, bool) or not math.isfinite(float(value)):
                 raise ValueError(key)
@@ -579,6 +598,15 @@ def evaluate_template_native_dc_fault(
             recovery_ok.append(recovered)
             add("unblocked_after_fault", recovered, {"active": 0}, {"blocked_samples": sum(channel["values"][index] for index in indices["recovery"])}, windows["recovery"], channel["source"])
         checks["blocked"] = all(blocked_ok)
+        if balance_inputs:
+            for window_name in ("prefault", "recovery"):
+                means = [math.fsum(item["values"][index] for index in indices[window_name]) / len(indices[window_name]) for item in balance_inputs + balance_outputs]
+                input_mw = math.fsum(means[:len(balance_inputs)])
+                output_mw = -math.fsum(means[len(balance_inputs):])
+                loss = input_mw - output_mw
+                passed = input_mw > 0 and output_mw > 0 and 0 <= loss <= output_mw * numbers["maximum_power_loss_fraction"]
+                recovery_ok.append(passed)
+                add("active_power_balance_" + window_name, passed, {"maximum_loss_fraction": numbers["maximum_power_loss_fraction"], "controlled_terminal": "T2", "input_terminal": "T1"}, {"input_mw": input_mw, "output_mw": output_mw, "loss_mw": loss}, windows[window_name], [item["source"] for item in balance_inputs + balance_outputs])
         for channel in selected["recovery_enable"]:
             passed = all(channel["values"][index] == 1 for index in indices["recovery"])
             recovery_ok.append(passed)
@@ -592,7 +620,8 @@ def evaluate_template_native_dc_fault(
                 pre = rms(before) if role == "i_arm" else math.fsum(before) / len(before)
                 post = rms(after) if role == "i_arm" else math.fsum(after) / len(after)
                 nominal = channel["binding"].get("nominal")
-                reference_ok = abs(pre) >= numbers["arm_rms_floor_ka"] if role == "i_arm" else isinstance(nominal, (int, float)) and not isinstance(nominal, bool) and math.isfinite(nominal) and nominal != 0 and pre * nominal > 0 and abs(pre) >= abs(nominal) * numbers["minimum_operating_fraction"] and abs(pre - nominal) <= abs(nominal) * numbers["nominal_target_relative_tolerance"]
+                input_power = role == "p_active" and channel["binding"].get("nominal_role") == "power_balance_input"
+                reference_ok = abs(pre) >= numbers["arm_rms_floor_ka"] if role == "i_arm" else isinstance(nominal, (int, float)) and not isinstance(nominal, bool) and math.isfinite(nominal) and nominal != 0 and pre * nominal > 0 and abs(pre) >= abs(nominal) * numbers["minimum_operating_fraction"] and (input_power or abs(pre - nominal) <= abs(nominal) * numbers["nominal_target_relative_tolerance"])
                 def cycle_variation(window_name: str, reference: float, channel=channel, rms=rms) -> float | None:
                     window_start, window_end = windows[window_name]
                     cycle_count = round((window_end - window_start) * numbers["frequency_hz"])
@@ -617,6 +646,8 @@ def evaluate_template_native_dc_fault(
                 post_stable = post_ripple is not None and post_ripple <= stability_limit
                 if role == "i_arm":
                     post_stable = post_stable and max(abs(value) for value in after) <= numbers["arm_peak_limit_ka"]
+                elif not input_power:
+                    post_stable = post_stable and isinstance(nominal, (int, float)) and not isinstance(nominal, bool) and math.isfinite(nominal) and post * nominal > 0 and abs(post - nominal) <= abs(nominal) * numbers["nominal_target_relative_tolerance"]
                 recovered = bool(reference_ok and error is not None and error <= tolerance and post_stable)
                 recovery_ok.append(recovered)
                 add(f"{role}_operating_point", reference_ok, {"nominal": nominal, "nominal_target_relative_tolerance": numbers["nominal_target_relative_tolerance"], "minimum_operating_fraction": numbers["minimum_operating_fraction"], "arm_rms_floor_ka": numbers["arm_rms_floor_ka"], "arm_peak_limit_ka": numbers["arm_peak_limit_ka"], "maximum_relative_rms_ripple": stability_limit}, {"value": pre, "peak_absolute": max(abs(value) for value in before), "relative_rms_ripple": ripple}, windows["prefault"], channel["source"])

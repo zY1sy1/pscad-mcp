@@ -51,6 +51,7 @@ def fault_fixture() -> tuple[dict, dict, dict]:
         "frequency_hz": 60.0, "arm_rms_stability_relative_tolerance": 0.05,
         "nominal_target_relative_tolerance": 0.05,
         "arm_peak_limit_ka": 3.0,
+        "maximum_power_loss_fraction": 0.1,
         "max_timing_error_s": 0.011, "fault_window_s": [0.4, 0.6],
         "prefault_window_s": [0.1, 0.3], "recovery_window_s": [0.8, 1.0],
         "negative_voltage_max_kv": -1.0, "fault_current_limit_ka": 20.0,
@@ -327,6 +328,21 @@ def test_channel_file_hash_must_belong_to_frozen_dataset(tmp_path):
     assert any("dataset_membership" in item for item in report["invalid_evidence"])
 
 
+def test_valid_dataset_member_cannot_impersonate_another_numbered_part(tmp_path):
+    samples, contract, checks = fault_fixture()
+    part = output_fixture(tmp_path)
+    part.with_name("case_02.out").write_text("0.0 0.0\n0.1 1.0\n", encoding="ascii")
+    manifest = fault_channels.snapshot_output_dataset(part)
+    for channel in samples["channels"]:
+        channel.update(output_part=str(part), metadata_file=str(part.with_name("case.inf")), hash=manifest["files"][part.name]["sha256"], metadata_sha256=manifest["files"]["case.inf"]["sha256"], call_id=1)
+    samples["identity"] = manifest
+    samples["channels"][0]["call_id"] = 11
+    samples["channels"][0]["compiled_identity"] = {"index": "10", "id": "1:0"}
+    report = evaluate(samples, contract, checks)
+    assert report["verdict"] == "INCOMPLETE_ANALYSIS"
+    assert any("dataset_part_mapping" in item for item in report["invalid_evidence"])
+
+
 @pytest.mark.parametrize("defect", ["unequal", "partial_cycle", "frequency_missing"])
 def test_arm_comparison_requires_equal_complete_cycle_windows(defect):
     samples, contract, checks = fault_fixture()
@@ -377,6 +393,13 @@ def test_stable_recovery_at_wrong_dc_reference_fails():
     assert evaluate(samples, contract, checks)["verdict"] == "FAIL"
 
 
+def test_recovery_must_still_meet_nominal_voltage_band():
+    samples, contract, checks = fault_fixture()
+    channel = next(item for item in samples["channels"] if item["description"] == "v_dc")
+    channel["values"] = [600.0 if t >= 0.6 else 616.0 if v == 640 else v for t, v in zip(channel["domain"], channel["values"])]
+    assert evaluate(samples, contract, checks)["verdict"] == "FAIL"
+
+
 def test_compiler_metadata_must_match_measured_owner(tmp_path, installed_sources):
     import asyncio
     from xml.etree import ElementTree as ET
@@ -398,6 +421,38 @@ def test_compiler_metadata_must_match_measured_owner(tmp_path, installed_sources
     with pytest.raises(BackendError) as error:
         asyncio.run(fault_channels.read_fault_output_dataset(reader, part, contract))
     assert error.value.code == "MMC_OUTPUT_IDENTITY_CHANGED"
+
+
+@pytest.mark.parametrize("channel_id,compiled_scope", [
+    ("MFE_T1_A_upper_v_inserted", "Main(0)\\MFE_PWM_T1(0)\\MFE_Pole_T1_A(0)"),
+    ("MFE_T1_controller_freeze", "Main(0)\\MFE_VSC_T1(VSC T1)\\MFE_Control_T1(0)"),
+])
+def test_compiler_metadata_keeps_full_instance_hierarchy(tmp_path, installed_sources, channel_id, compiled_scope):
+    import asyncio
+    from xml.etree import ElementTree as ET
+    project, library, master = installed_sources
+    derived = tmp_path / "observed.pscx"
+    contract = fault_channels.instrument_fault_channels(project, derived, library=library, master=master)
+    binding = next(item for item in contract["channels"] + contract["diagnostic_channels"] if item["channel_id"] == channel_id)
+    contract["channels"] = [binding]
+    contract["diagnostic_channels"] = []
+    description = binding["selector"]["description"]
+    units = binding["units"]
+    (tmp_path / "case.inf").write_text(f'PGB(1) Output Desc="{description}" Group="{fault_channels.OUTPUT_GROUP}" Max=1 Min=0 Units="{units}"\n', encoding="ascii")
+    part = tmp_path / "case_01.out"
+    part.write_text("0.0 0.0\n0.1 1.0\n", encoding="ascii")
+    metadata = ET.Element("Output", {"device": "EMTDC"})
+    ET.SubElement(metadata, "Domain", {"name": "Time", "unit": "s"})
+    ET.SubElement(metadata, "Analog", {"name": compiled_scope + ":" + description, "id": binding["owner_id"] + ":0", "index": "0", "label": fault_channels.OUTPUT_GROUP, "dim": "1", "unit": units})
+    ET.ElementTree(metadata).write(tmp_path / "case.infx", encoding="utf-8")
+    async def reader(*args, **kwargs):
+        return {"channels": [{"description": description, "group": fault_channels.OUTPUT_GROUP, "units": units, "domain": [0.0, 0.1], "values": [0.0, 1.0]}]}
+    samples = asyncio.run(fault_channels.read_fault_output_dataset(reader, part, contract))
+    assert samples["channels"][0]["compiled_identity"]["name"] == compiled_scope + ":" + description
+    metadata.find("Analog").set("name", compiled_scope.replace("Main(0)", "OtherMain(0)") + ":" + description)
+    ET.ElementTree(metadata).write(tmp_path / "case.infx", encoding="utf-8")
+    with pytest.raises(BackendError):
+        asyncio.run(fault_channels.read_fault_output_dataset(reader, part, contract))
 
 
 def test_derived_voltage_controller_has_bounded_current_headroom_and_matching_freeze(tmp_path, installed_sources):
@@ -423,3 +478,35 @@ def test_steady_arm_current_must_respect_existing_hard_peak_limit():
     channel = next(item for item in samples["channels"] if item["description"] == "i_arm")
     channel["values"] = [3.1 for _ in channel["values"]]
     assert evaluate(samples, contract, checks)["verdict"] == "FAIL"
+
+
+@pytest.mark.parametrize("owner,parameter,value", [
+    ("976600655", "Vtr_2", "370 [V]"),
+    ("976600655", "Sbase", "1000 [kVA]"),
+    ("1167847391", "IvlMax", "3 [A]"),
+])
+def test_headroom_repair_rejects_incorrect_physical_unit_scale(tmp_path, installed_sources, owner, parameter, value):
+    from xml.etree import ElementTree as ET
+    project, _, _ = installed_sources
+    tree = ET.parse(project)
+    component = next(item for item in tree.findall(".//User") if item.get("id") == owner)
+    next(item for item in component.findall("./paramlist/param") if item.get("name") == parameter).set("value", value)
+    changed = tmp_path / "source.pscx"
+    tree.write(changed, encoding="utf-8")
+    with pytest.raises(BackendError):
+        fault_channels.materialize_voltage_control_headroom(changed, tmp_path / "derived.pscx")
+
+
+def test_headroom_repair_converts_explicit_equivalent_units(tmp_path, installed_sources):
+    from xml.etree import ElementTree as ET
+    project, _, _ = installed_sources
+    tree = ET.parse(project)
+    replacements = {("976600655", "Vtr_2"): "370000 [V]", ("976600655", "Sbase"): "1000000 [kVA]", ("1167847391", "IvlMax"): "3000 [A]"}
+    for component in tree.findall(".//User"):
+        for param in component.findall("./paramlist/param"):
+            if (key := (component.get("id"), param.get("name"))) in replacements:
+                param.set("value", replacements[key])
+    changed = tmp_path / "source.pscx"
+    tree.write(changed, encoding="utf-8")
+    report = fault_channels.materialize_voltage_control_headroom(changed, tmp_path / "derived.pscx")
+    assert report["arm_protection_limit_ka"] == 3.0

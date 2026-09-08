@@ -77,10 +77,36 @@ def _metadata(path: Path) -> list[dict[str, Any]]:
     return records
 
 
+def _compiled_scope_path(project_root: ET.Element, instance_path: str) -> str:
+    definitions = {item.get("name"): item for item in project_root.findall("./definitions/Definition")}
+    previous: ET.Element | None = None
+    result = []
+    for index, segment in enumerate(instance_path.split("/")):
+        match = re.fullmatch(r"([^\[]+)(?:\[(\d+)\])?", segment)
+        if match is None:
+            raise _error("MMC_OUTPUT_IDENTITY_CHANGED", "A measured instance path is invalid.", instance_path=instance_path)
+        name, owner = match.groups()
+        instance_name = "0"
+        if index == 0 and name == "Station":
+            previous = definitions.get(name)
+            continue
+        if previous is not None:
+            matches = [item for item in _components(previous) if item.get("id") == owner and item.get("defn", "").rsplit(":", 1)[-1] == name]
+            if len(matches) != 1:
+                raise _error("MMC_OUTPUT_IDENTITY_CHANGED", "The compiler path has no unique saved instance owner.", instance_path=instance_path, owner=owner)
+            instance_name = dict(_parameters(matches[0])).get("Name") or "0"
+        result.append(name + "(" + instance_name + ")")
+        previous = definitions.get(name)
+        if previous is None:
+            raise _error("MMC_OUTPUT_IDENTITY_CHANGED", "The measured hierarchy refers to an unknown definition.", definition=name)
+    return "\\".join(result)
+
+
 async def read_fault_output_dataset(reader: Any, primary: str | Path, channel_contract: Mapping[str, Any], *, started_after: float | None = None) -> dict[str, Any]:
     """Use the existing output reader per exact selector, retaining file identity."""
 
     project_readback = verify_fault_instrumentation(channel_contract["project_path"], channel_contract)
+    project_root = ET.parse(channel_contract["project_path"]).getroot()
     if project_readback["project_sha256"] != channel_contract["readback"]["project_sha256"]:
         raise _error("MMC_OUTPUT_IDENTITY_CHANGED", "The frozen measured project changed after its last readback.")
     manifest = snapshot_output_dataset(primary, started_after=started_after)
@@ -111,7 +137,7 @@ async def read_fault_output_dataset(reader: Any, primary: str | Path, channel_co
             continue
         selected = candidates[0]
         compiled = [item for item in infx.iter("Analog") if item.get("name", "").endswith(":" + selected["description"]) and item.get("label") == selected["group"]]
-        expected_instance = binding["definition_name"] + "(0):" + selected["description"]
+        expected_instance = _compiled_scope_path(project_root, binding["instance_path"]) + ":" + selected["description"]
         if len(compiled) != 1 or compiled[0].get("name") != expected_instance or compiled[0].get("id") != binding["owner_id"] + ":0" or compiled[0].get("index") != str(selected["call_id"] - 1) or compiled[0].get("dim") != str(binding["dimension"]) or compiled[0].get("unit") != selected["units"]:
             raise _error("MMC_OUTPUT_IDENTITY_CHANGED", "Compiled channel owner, scope, index or units disagree with the measured project.", channel_id=binding["channel_id"], observed=[dict(item.attrib) for item in compiled])
         traces = [item for item in bulk_channels if item.get("description") == selected["description"] and item.get("group") == selected["group"]]
@@ -289,6 +315,7 @@ def instrument_fault_channels(source: str | Path, destination: str | Path, *, li
         if len(meters) != 1:
             raise _error("MMC_ACCEPTANCE_INCOMPLETE", "The terminal power meter is missing.", terminal=terminal)
         add_probe(main, "p_active", terminal, "P" + number, meters[0], source_parameter="P", nominal=900.0 if terminal == "T1" else -900.0, extra={"quantity": "three_phase_active_power", "direction": "meter_arrow", "base_mva": dict(_parameters(meters[0]))["S"]})
+        channels[-1]["nominal_role"] = "power_balance_input" if terminal == "T1" else "controlled_active_power"
         voltage_sources = [item for item in _components(main) if item.get("defn") == "master:voltmeter" and dict(_parameters(item)).get("Name") == "Edc" + number]
         if len(voltage_sources) != 1:
             raise _error("MMC_ACCEPTANCE_INCOMPLETE", "The pole-to-pole terminal voltage meter is missing.", terminal=terminal)
@@ -459,11 +486,23 @@ def materialize_voltage_control_headroom(source: str | Path, destination: str | 
         raise _error("MMC_ACCEPTANCE_INCOMPLETE", "There must be exactly one DC-voltage controller.")
     voltage_converter = voltage_converters[0]
     values = dict(_parameters(voltage_converter))
-    scalar = lambda value: float(re.match(r"[+-]?[\d.]+", value.strip()).group())
-    if scalar(values.get("Sbase", "0")) != 1000 or scalar(values.get("Vtr_2", "0")) != 370 or scalar(values.get("Imax", "0")) != 1:
+    def quantity(raw: str, definition_name: str, parameter: str, target_unit: str) -> float:
+        form = definitions.get(definition_name)
+        declarations = [item for item in form.findall("./form/category/parameter") if item.get("name") == parameter] if form is not None else []
+        if len(declarations) != 1 or declarations[0].get("unit") != target_unit:
+            raise _error("MMC_ACCEPTANCE_INCOMPLETE", "The current-base form unit differs from the audited contract.", definition=definition_name, parameter=parameter)
+        match = re.fullmatch(r"\s*([+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[Ee][+-]?\d+)?)\s*(?:\[([A-Za-z0-9]+)\])?\s*", raw)
+        conversions = {"kV": {"kV": 1.0, "V": 0.001}, "MVA": {"MVA": 1.0, "kVA": 0.001, "VA": 1e-6}, "kA": {"kA": 1.0, "A": 0.001}, "pu": {"pu": 1.0, "1": 1.0}}
+        if match is None or (unit := match.group(2) or target_unit) not in conversions[target_unit]:
+            raise _error("MMC_ACCEPTANCE_INCOMPLETE", "The current-base value is not an unambiguous unit-qualified literal.", parameter=parameter, value=raw)
+        result = float(match.group(1)) * conversions[target_unit][unit]
+        if not math.isfinite(result):
+            raise _error("MMC_ACCEPTANCE_INCOMPLETE", "The current-base value must be finite.", parameter=parameter)
+        return result
+    if quantity(values.get("Sbase", ""), "VSCConverter", "Sbase", "MVA") != 1000 or quantity(values.get("Vtr_2", ""), "VSCConverter", "Vtr_2", "kV") != 370 or quantity(values.get("Imax", ""), "VSCConverter", "Imax", "pu") != 1:
         raise _error("MMC_ACCEPTANCE_INCOMPLETE", "The headroom repair requires the audited original current base and limit.")
     for instance in _components(main):
-        if instance.get("defn", "").endswith(":MMC_Hb_PWM") and scalar(dict(_parameters(instance)).get("IvlMax", "0")) != 3:
+        if instance.get("defn", "").endswith(":MMC_Hb_PWM") and quantity(dict(_parameters(instance)).get("IvlMax", ""), "MMC_Hb_PWM", "IvlMax", "kA") != 3:
             raise _error("MMC_ACCEPTANCE_INCOMPLETE", "The original 3 kA arm protection must remain present.")
     limit = next(item for item in voltage_converter.findall("./paramlist/param") if item.get("name") == "Imax")
     limit.set("value", format(current_limit_pu, ".15g"))

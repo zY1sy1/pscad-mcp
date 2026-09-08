@@ -111,3 +111,24 @@ fault at the programmed EMT time. This is explicitly different from a model
 of a current-zero-only breaker; its OPENBR output still proves actual removal.
 Fault window remains 2.5-2.7 s; pre-fault 2.0-2.4 s and recovery 4.6-5.0 s each
 cover 24 complete cycles at the template's declared 60 Hz frequency.
+
+The third attempt (`fault-evidence-20260908T042042762152Z`) completed both EMT
+runs from c687a4a. INFX validation initially stopped on nested and named
+compiler instance paths. Those reader-only defects were reproduced with
+fixtures and corrected, then the completed immutable outputs were re-read in
+`reanalysis-20260908T043843906835Z`. Sixty channels, including actual FrzI and
+Imag, were recovered. T1 still spent 99.94% of the final window in freeze,
+with Imag averaging 1.04994 pu. Final-window voltages remained about
+475.97/458.53 kV. T2 power reached -898.56 MW but had 10.13% relative RMS ripple.
+Full-run no-fault arm peaks were 2.79109/2.80114 kA, both below the unchanged
+3 kA protection. The nominal and recovery criteria therefore remained FAIL.
+
+The next single-variable diagnostic raises only T1 Imax from 1.05 to 1.1 pu,
+with the same relative antiwindup threshold. The phase-peak increase is
+0.11034 kA and its arm AC contribution increases by 0.05517 kA. T2, carrier
+ratios, timestep, 640 kV/900 MW targets and physical limits remain fixed.
+T1 measured input power is explicitly distinguished from T2's controlled
+-900 MW setpoint: its target is supplying T2 plus nonnegative measured losses,
+bounded by a predeclared 10% of delivered power. It is not a second 900 MW
+control target. Both pre-fault and recovered DC voltage and T2 power must
+independently meet the 5% nominal band as well as the pre/post recovery band.

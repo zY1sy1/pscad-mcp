@@ -56,6 +56,7 @@ def _checks():
         "frequency_hz": 60.0, "arm_rms_stability_relative_tolerance": 0.05,
         "nominal_target_relative_tolerance": 0.05,
         "arm_peak_limit_ka": 3.0,
+        "maximum_power_loss_fraction": 0.1,
         "fault_window_s": [2.5, 2.7], "prefault_window_s": [2.0, 2.4], "recovery_window_s": [4.6, 5.0],
         "negative_voltage_max_kv": -1.0, "fault_current_limit_ka": 20.0,
         "voltage_recovery_relative_tolerance": 0.05, "power_recovery_relative_tolerance": 0.05,
@@ -88,7 +89,8 @@ def _steady(samples, contract):
         elif role in ("v_dc", "v_cap", "p_active"):
             nominal = binding["nominal"]
             ripple = math.sqrt(math.fsum((value - mean) ** 2 for value in values) / len(values))
-            passed = abs(mean - nominal) <= abs(nominal) * 0.05 and ripple <= abs(mean) * 0.05
+            nominal_ok = abs(mean - nominal) <= abs(nominal) * 0.05 if binding.get("nominal_role") != "power_balance_input" else mean >= nominal
+            passed = nominal_ok and ripple <= abs(mean) * 0.05
         elif role == "i_arm":
             passed = 0.05 <= rms and max(abs(value) for value in values) < 3.0
         elif role == "i_dc_fault":
@@ -111,7 +113,7 @@ async def _run_case(service, root, source, library, master, name, fault):
         native = case_root / "native.pscx"
         binding = materialize_template_native_scenario(source, native, dc_fault_time_s=2.5 if fault else 10.0, fault_duration_s=0.2)
         repaired = case_root / "operating_point.pscx"
-        record["operating_point_repair"] = materialize_voltage_control_headroom(native, repaired, current_limit_pu=1.05)
+        record["operating_point_repair"] = materialize_voltage_control_headroom(native, repaired, current_limit_pu=1.1)
         project = case_root / f"MMC_{name}.pscx"
         contract = instrument_fault_channels(repaired, project, library=library, master=master)
         contract["required_checks"] = _checks()
@@ -140,6 +142,7 @@ async def _run_case(service, root, source, library, master, name, fault):
             raise RuntimeError("Generated antiwindup does not track actual Imax")
         stage("running")
         started = time.time()
+        record["started_after"] = started
         await service.run_project(project.stem)
         deadline = time.monotonic() + 900
         while True:
