@@ -59,6 +59,43 @@ def physical_signature(path):
     return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
 
 
+def external_data_files(source, model_paths):
+    """Return validated relative external files referenced by arrester instances."""
+    source = source.resolve()
+    discovered = set()
+    for model_path in model_paths:
+        root = ET.parse(model_path).getroot()
+        for component in root.findall('.//User[@defn="master:arrester"]'):
+            params = {p.get('name'): p.get('value') for p in component.findall('./paramlist/param')}
+            if params.get('Cnfg') != '2':
+                continue
+            if params.get('path', '0') != '0':
+                raise ValueError(f'Absolute external arrester data is not relocatable: {model_path}')
+            filename = params.get('File', '').strip()
+            if not filename:
+                raise ValueError(f'External arrester data file is missing: {model_path}')
+            candidate = (source / filename).resolve()
+            try:
+                candidate.relative_to(source)
+            except ValueError as error:
+                raise ValueError(f'External arrester data escapes the source directory: {filename}') from error
+            if not candidate.is_file():
+                raise FileNotFoundError(candidate)
+            discovered.add(candidate)
+    return sorted(discovered)
+
+
+def copy_external_data_files(source, destination, paths):
+    source = source.resolve()
+    copied = []
+    for path in paths:
+        target = destination / path.relative_to(source)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(path, target)
+        copied.append(target)
+    return copied
+
+
 def write_report(directory, report):
     (directory / 'acceptance.json').write_text(json.dumps(report, indent=2) + '\n', encoding='utf-8')
 
@@ -82,6 +119,11 @@ async def accept(source, destination, report):
             p.set('value', '0')
         tree.write(dst, encoding='utf-8', xml_declaration=True)
         assert physical_signature(src) == physical_signature(dst)
+    data_files = external_data_files(source, [source / (name + '.pscx') for name in CASES])
+    copied_data_files = copy_external_data_files(source, destination, data_files)
+    report['external_data_files'] = {
+        str(path.relative_to(destination)): sha(path) for path in copied_data_files
+    }
     try:
         print(await service.attach_local(), flush=True)
         runtime = await service.status()
@@ -192,7 +234,9 @@ def main():
     os.environ.update(PSCAD_MCP_BACKEND='legacy', PSCAD_MCP_VERSION='4.6.2', PSCAD_MCP_X64='true',
         PSCAD_MCP_WORKSPACE=str(destination), PSCAD_MCP_LEGACY_MINIMIZE='true',
         PSCAD_MCP_LEGACY_EXISTING_POLICY=acceptance_launch_policy())
-    immutable = [MASTER, COMPILER, *[source / (name + '.pscx') for name in CASES], source / 'analyze_results.py']
+    model_sources = [source / (name + '.pscx') for name in CASES]
+    immutable = [MASTER, COMPILER, *model_sources, source / 'analyze_results.py',
+                 *external_data_files(source, model_sources)]
     if (source / 'FiveArresters.pswx').is_file():
         immutable.append(source / 'FiveArresters.pswx')
     report = {'status': 'RUNNING', 'repository': str(REPOSITORY),

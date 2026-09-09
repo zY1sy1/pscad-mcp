@@ -81,6 +81,31 @@ def test_changed_time_setting_changes_physical_signature(runner, tmp_path):
     assert runner.physical_signature(before) != runner.physical_signature(after)
 
 
+def test_external_arrester_data_files_are_discovered_and_copied(runner, tmp_path):
+    source, destination = tmp_path / "source", tmp_path / "output"
+    source.mkdir()
+    destination.mkdir()
+    curve = source / "YH10WL_33_50_IV.dat"
+    curve.write_text("0.001 1.0 /\nENDFILE:\n", encoding="ascii")
+    model = source / "five_sa_sequential.pscx"
+    model.write_text(
+        '<project><definitions><Definition name="Main"><schematic>'
+        '<User defn="master:arrester"><paramlist>'
+        '<param name="Cnfg" value="2"/>'
+        '<param name="File" value="YH10WL_33_50_IV.dat"/>'
+        '<param name="path" value="0"/>'
+        '</paramlist></User></schematic></Definition></definitions></project>',
+        encoding="utf-8",
+    )
+
+    discovered = runner.external_data_files(source, [model])
+    assert discovered == [curve.resolve()]
+
+    copied = runner.copy_external_data_files(source, destination, discovered)
+    assert copied == [destination / curve.name]
+    assert copied[0].read_bytes() == curve.read_bytes()
+
+
 def _run_cleanup_failure(
     runner, monkeypatch, tmp_path, failure_at, *, shutdown_fails=False,
 ):
