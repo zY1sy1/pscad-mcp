@@ -30,6 +30,7 @@ from pscad_mcp.acceptance.process_scope import (
 )
 from pscad_mcp.core.connection_manager import pscad_manager
 from pscad_mcp.core.process_inventory import list_pscad_processes
+from scripts.accept_five_arresters import copy_external_data_files, external_data_files
 
 
 def save_clipboard(path):
@@ -47,7 +48,13 @@ async def main():
     src = SOURCE / (name + '.pscx')
     path = OUTPUT / src.name
     shutil.copy2(src, path)
-    report = {'status': 'RUNNING', 'source_sha256': hashlib.sha256(src.read_bytes()).hexdigest()}
+    data_files = external_data_files(SOURCE, [src])
+    copied_data_files = copy_external_data_files(SOURCE, OUTPUT, data_files)
+    report = {'status': 'RUNNING', 'source_sha256': hashlib.sha256(src.read_bytes()).hexdigest(),
+              'external_data_files': {
+                  str(item.relative_to(OUTPUT)): hashlib.sha256(item.read_bytes()).hexdigest()
+                  for item in copied_data_files
+              }}
     service = pscad_manager.service
     runtime = None
     active = False
