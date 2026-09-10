@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import subprocess
 from pathlib import Path
 
@@ -52,12 +53,18 @@ def test_ci_covers_declared_python_range_and_catalog_parity():
     workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(
         encoding="utf-8"
     )
+    inventory_step = workflow.split(
+        "- name: Verify exact MCP tool inventory", maxsplit=1
+    )[1]
 
     for version in ("3.10", "3.11", "3.12", "3.13", "3.14"):
         assert f'"{version}"' in workflow
     for required_text in (
         r"scripts\verify_package.ps1",
         "ruff check",
+        "from pscad_mcp.tools.catalog import FULL_TOOL_NAMES",
+        "registered == FULL_TOOL_NAMES",
+        "len(FULL_TOOL_NAMES)",
         "git ls-files",
         "*.pyc",
         "*__pycache__*",
@@ -69,7 +76,10 @@ def test_ci_covers_declared_python_range_and_catalog_parity():
         "docs/md/*",
     ):
         assert required_text in workflow
-    assert "== 83" not in workflow
+    assert not re.search(
+        r"(?:assert\s+)?len\([^\n]+\)\s*==\s*\d+",
+        inventory_step,
+    )
 
 
 def test_generated_documentation_directories_are_ignored():
