@@ -60,6 +60,8 @@ def test_ci_covers_declared_python_range_and_catalog_parity():
     for version in ("3.10", "3.11", "3.12", "3.13", "3.14"):
         assert f'"{version}"' in workflow
     for required_text in (
+        'pip install ".[dev,windows]"',
+        "import mhi.pscad; import mhi.psout",
         r"scripts\verify_package.ps1",
         "ruff check",
         "from pscad_mcp.tools.catalog import FULL_TOOL_NAMES",
