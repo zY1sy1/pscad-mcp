@@ -130,9 +130,8 @@ _MASTER_PORTS = {
         "B": (36, 0, "Natural", 0),
         "Mag": (0, 36, "Transfer", 0),
     },
-    "capacitor": {"A": (0, 0, "Natural", 0), "B": (36, 0, "Natural", 0)},
-    "resistor": {"A": (0, 0, "Natural", 0), "B": (36, 0, "Natural", 0)},
-    "inductor": {"A": (0, 0, "Natural", 0), "B": (36, 0, "Natural", 0)},
+    "varrlc": {"A": (0, 0, "Natural", 0), "B": (36, 0, "Natural", 0)},
+    "gain": {"IN:Dim": (-36, 0, "Transfer", 0), "OUT:Dim": (36, 0, "Transfer", 0)},
     "ammeter": {"N1": (0, 0, "Natural", 0), "N2": (36, 0, "Natural", 0)},
     "voltmeter": {"N1": (0, 0, "Natural", 0), "N2": (0, 36, "Natural", 0)},
     "breaker1": {"A": (36, 0, "Natural", 0), "B": (-36, 0, "Natural", 0)},
@@ -160,9 +159,9 @@ _DIODE_PARAMETERS = {
     "Type": "0",
     "SNUB": "0",
     "INTR": "0",
-    "RON": "$(R_on_ohm) [ohm]",
-    "ROFF": "$(R_off_ohm) [ohm]",
-    "EFVD": "$(V_diode_kV) [kV]",
+    "RON": "R_on_ohm",
+    "ROFF": "R_off_ohm",
+    "EFVD": "V_diode_kV",
     "EBO": "1.0e5 [kV]",
     "Erw": "1.0e5 [kV]",
     "TEXT": "0.0 [us]",
@@ -187,7 +186,7 @@ def _sha(payload: bytes) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
-def _audit_master(path: Path) -> tuple[dict, str]:
+def _audit_master(path: Path) -> tuple[dict, str, dict]:
     if path.is_symlink() or not path.is_file():
         raise ValueError("Master must be an immutable regular library file")
     payload = path.read_bytes()
@@ -233,9 +232,9 @@ def _audit_master(path: Path) -> tuple[dict, str]:
             if contract[2] == "Transfer" and records[0].type != "Real":
                 raise ValueError(f"Master scalar type changed: {name}:{port_name}")
     for name, parameter, unit in (
-        ("capacitor", "C", "uF"),
-        ("resistor", "R", "ohm"),
-        ("inductor", "L", "H"),
+        ("varrlc", "C", "uF"),
+        ("varrlc", "R", "ohm"),
+        ("varrlc", "L", "H"),
         ("source_1", "Tc", "s"),
         ("peswitch", "EFVD", "kV"),
         ("peswitch", "RON", "ohm"),
@@ -251,7 +250,9 @@ def _audit_master(path: Path) -> tuple[dict, str]:
         ("source_1", "Dsdyn", "RVD1_1 = $Mag"),
         ("src_ccin_1", "Branch", "BR = $B $A BREAKER"),
         ("src_ccin_1", "Dsdyn", "CCBR($BR,$SS) = $Mag"),
-        ("capacitor", "Branch", "$A $B 0 0 $C"),
+        ("varrlc", "Branch", "BR = $A $B BREAKER"),
+        ("varrlc", "Dsdyn", "CALL E_VARRLC1_EXE"),
+        ("gain", "Fortran", "$OUT = $G * $IN"),
         ("ammeter", "Branch", "BN = $N1 $N2 AMMETER"),
         ("ammeter", "Dsout", "$CBR:BN"),
         ("voltmeter", "Dsout", "$VDC:N1:N2"),
@@ -265,7 +266,16 @@ def _audit_master(path: Path) -> tuple[dict, str]:
             raise ValueError(f"Master electrical directive changed: {name}:{segment}")
     if _sha(path.read_bytes()) != _sha(payload):
         raise ValueError("Master changed during native arm audit")
-    return metadata, _sha(payload)
+    defaults = {
+        name: {
+            parameter.get("name"): (parameter.findtext("value") or "").strip()
+            for parameter in root.findall(
+                f"./definitions/Definition[@name='{name}']/form//parameter"
+            )
+        }
+        for name in _MASTER_PORTS
+    }
+    return metadata, _sha(payload), defaults
 
 
 def _project(name: str, *, library: bool) -> ET.Element:
@@ -277,6 +287,10 @@ def _project(name: str, *, library: bool) -> ET.Element:
     previous = root.get("name")
     root.set("name", name)
     root.set("Target", "Library" if library else "EMTDC")
+    for size in root.findall(
+        "./definitions/Definition/schematic[@classid='UserCanvas']/paramlist/param[@name='size']"
+    ):
+        size.set("value", "4")
     for element in root.iter():
         for key, value in tuple(element.attrib.items()):
             if value.startswith(previous + ":"):
@@ -311,6 +325,8 @@ def _form(parent: ET.Element, parameters: dict[str, float]) -> None:
                 "name": name,
                 "desc": name,
                 "content_type": "Constant",
+                "intent": "Input",
+                "dim": "1",
                 "unit": _PARAMETER_UNITS[name],
                 "min": "0",
             },
@@ -377,8 +393,15 @@ def _script(definition: ET.Element, segment: str, text: str) -> None:
 
 
 class _Writer:
-    def __init__(self, root: ET.Element, master: dict, additional: dict | None = None):
+    def __init__(
+        self,
+        root: ET.Element,
+        master: dict,
+        master_defaults: dict,
+        additional: dict | None = None,
+    ):
         self.root, self.master = root, master
+        self.master_defaults = master_defaults
         self.local = read_definition_metadata_document(ET.tostring(root))
         self.additional = additional or {}
         self.sequence = 1_800_000_000
@@ -426,7 +449,7 @@ class _Writer:
                 canvas,
                 {
                     "show_grid": 0,
-                    "size": 0,
+                    "size": 4,
                     "orient": 1,
                     "show_border": 0,
                     "monitor_bus_voltage": 0,
@@ -454,7 +477,11 @@ class _Writer:
                 "q": "4",
             },
         )
-        _paramlist(element, parameters, name="", link="-1")
+        values = dict(parameters)
+        if scoped.startswith("master:"):
+            for name, value in self.master_defaults[scoped.split(":", 1)[1]].items():
+                values.setdefault(name, value)
+        _paramlist(element, values, name="", link="-1")
         return element
 
     def add(
@@ -468,7 +495,7 @@ class _Writer:
         name = definition.get("name")
         index = self.counts[name]
         self.counts[name] += 1
-        point = (180 + (index % 4) * 432, 270 + (index // 4) * 504)
+        point = (180 + (index % 6) * 432, 270 + (index // 6) * 432)
         component = self.component(definition, role, scoped, parameters, point)
         native = self.metadata(scoped)
         for port_name, signal in bindings.items():
@@ -552,7 +579,7 @@ class _Writer:
                     )
 
 
-def _make_library(master: dict) -> tuple[ET.Element, _Writer]:
+def _make_library(master: dict, master_defaults: dict) -> tuple[ET.Element, _Writer]:
     root = _project(LIBRARY_SCOPE, library=True)
     defaults = asdict(AverageArmParameters())
     arm_ports = {
@@ -568,7 +595,6 @@ def _make_library(master: dict) -> tuple[ET.Element, _Writer]:
         }
     )
     arm = _definition(root, "MMCAverageArm", arm_ports, defaults)
-    _script(arm, "Computations", "REAL C_PHYS_UF = C_eq_F * 250000.0\n")
     _script(
         arm,
         "Checks",
@@ -611,28 +637,28 @@ def _make_library(master: dict) -> tuple[ET.Element, _Writer]:
       IF ($BLOCK .GE. 0.5) $OPEN = 1.0
 """,
     )
-    writer = _Writer(root, master)
+    writer = _Writer(root, master, master_defaults)
     add = lambda role, name, parameters, bindings: writer.add(
         arm, role, "master:" + name, parameters, bindings
     )
-    add("arm_in", "xnode", {"Name": "IN"}, {"N": "ARM_IN"})
-    add("arm_out", "xnode", {"Name": "OUT"}, {"N": "ARM_OUT"})
+    add("arm_in", "xnode", {"Name": "IN"}, {"N": "IN"})
+    add("arm_out", "xnode", {"Name": "OUT"}, {"N": "OUT"})
     add(
         "arm_current_meter",
         "ammeter",
         {"Name": "ARM_I"},
-        {"N1": "ARM_IN", "N2": "ARM_R_IN"},
+        {"N1": "IN", "N2": "ARM_R_IN"},
     )
     add(
         "arm_resistance",
-        "resistor",
-        {"R": "$(R_arm_ohm) [ohm]"},
+        "varrlc",
+        {"RLC": "0", "R": "R_arm_ohm", "E": "0.0 [kV]", "dLdC": "0", "I": ""},
         {"A": "ARM_R_IN", "B": "ARM_L_IN"},
     )
     add(
         "arm_inductance",
-        "inductor",
-        {"L": "$(L_arm_H) [H]"},
+        "varrlc",
+        {"RLC": "1", "L": "L_arm_H", "E": "0.0 [kV]", "dLdC": "0", "I": ""},
         {"A": "ARM_L_IN", "B": "STACK_IN"},
     )
     add(
@@ -655,14 +681,14 @@ def _make_library(master: dict) -> tuple[ET.Element, _Writer]:
             "OPCUR": "1",
             "ENAB": "0",
             "ViewB": "0",
-            "RON": "$(R_on_ohm) [ohm]",
-            "ROFF": "$(R_off_ohm) [ohm]",
+            "RON": "R_on_ohm",
+            "ROFF": "R_off_ohm",
             "CLVL": "0.0 [kA]",
             "IBR": "",
             "SBR": "",
             "VBR": "",
         },
-        {"B": "NORMAL_NEG", "A": "ARM_OUT"},
+        {"B": "NORMAL_NEG", "A": "OUT"},
     )
     add(
         "clamp_current_meter",
@@ -680,19 +706,19 @@ def _make_library(master: dict) -> tuple[ET.Element, _Writer]:
         "clamp_voltage",
         "source_1",
         _SOURCE_PARAMETERS,
-        {"NA": "CLAMP_POS", "NB": "ARM_OUT", "Mag": "CAP_V"},
+        {"NA": "CLAMP_POS", "NB": "OUT", "Mag": "CAP_V"},
     )
     add(
         "negative_bypass",
         "peswitch",
         {**_DIODE_PARAMETERS, "I": "BYPASS_I"},
-        {"DP": "ARM_OUT", "DN": "STACK_IN"},
+        {"DP": "OUT", "DN": "STACK_IN"},
     )
     add(
         "storage_current",
         "src_ccin_1",
         {"Name": "", "Cntrl": "1"},
-        {"A": "CAP_POS", "B": "CAP_GND", "Mag": "STORE_I"},
+        {"A": "CAP_POS", "B": "GND", "Mag": "STORE_I"},
     )
     add(
         "capacitor_current_meter",
@@ -702,42 +728,48 @@ def _make_library(master: dict) -> tuple[ET.Element, _Writer]:
     )
     add(
         "storage_capacitor",
-        "capacitor",
-        {"C": "$(C_PHYS_UF) [uF]"},
-        {"A": "CAP_MEASURE", "B": "CAP_GND"},
+        "varrlc",
+        {"RLC": "2", "C": "CAP_C_UF", "E": "0.0 [kV]", "dLdC": "0", "I": ""},
+        {"A": "CAP_MEASURE", "B": "GND"},
     )
     add(
         "capacitor_reverse_clamp",
         "peswitch",
         {**_DIODE_PARAMETERS, "EFVD": "0.0 [kV]"},
-        {"DP": "CAP_GND", "DN": "CAP_POS"},
+        {"DP": "GND", "DN": "CAP_POS"},
     )
-    add("storage_ground", "ground", {}, {"A": "CAP_GND"})
+    add("storage_ground", "ground", {}, {"A": "GND"})
     add(
         "capacitor_voltage_meter",
         "voltmeter",
         {"Name": "CAP_V"},
-        {"N1": "CAP_MEASURE", "N2": "CAP_GND"},
+        {"N1": "CAP_MEASURE", "N2": "GND"},
     )
     add(
         "inserted_voltage_meter",
         "voltmeter",
         {"Name": "INSERTED_V"},
-        {"N1": "STACK_IN", "N2": "ARM_OUT"},
+        {"N1": "STACK_IN", "N2": "OUT"},
     )
     add(
         "terminal_voltage_meter",
         "voltmeter",
         {"Name": "ARM_V"},
-        {"N1": "ARM_IN", "N2": "ARM_OUT"},
+        {"N1": "IN", "N2": "OUT"},
     )
-    for name in ("M", "BLOCK"):
+    for name in ("M", "BLOCK", *defaults):
         add("input_" + name, "import", {"Name": name}, {"N": name})
+    add(
+        "capacitance_conversion",
+        "gain",
+        {"G": "250000.0", "Dim": "1", "COM": "Cphysical_uF = Ceq_F / 4 * 1e6"},
+        {"IN:Dim": "C_eq_F", "OUT:Dim": "CAP_C_UF"},
+    )
     writer.add(
         arm,
         "signed_power_coupling",
         LIBRARY_SCOPE + ":MMCAverageCoupling",
-        {name: f"$({name})" for name in ("C_eq_F", "P_nonohmic_MW", "V_loss_floor_kV")},
+        {name: name for name in ("C_eq_F", "P_nonohmic_MW", "V_loss_floor_kV")},
         {
             "M": "M",
             "BLOCK": "BLOCK",
@@ -788,8 +820,8 @@ def materialize_average_arm_library(
     target, source = Path(destination), Path(master_path)
     if target.exists() or target.is_symlink() or target.resolve() == source.resolve():
         raise FileExistsError("Native arm output must be new and distinct from Master")
-    master, before = _audit_master(source)
-    root, writer = _make_library(master)
+    master, before, defaults = _audit_master(source)
+    root, writer = _make_library(master, defaults)
     after = _sha(source.read_bytes())
     if before != after:
         raise ValueError("Master changed while authoring the native arm")
@@ -823,8 +855,8 @@ def materialize_average_arm_fixture(
     if folder.exists() or folder.is_symlink():
         raise FileExistsError("Native arm fixture directory must be new")
     parameters = parameters or AverageArmParameters()
-    master, before = _audit_master(source)
-    library, library_writer = _make_library(master)
+    master, before, defaults = _audit_master(source)
+    library, library_writer = _make_library(master, defaults)
     library_metadata = read_definition_metadata_document(ET.tostring(library))
     project_name = "average_arm_fixture"
     root = _project(project_name, library=False)
@@ -876,7 +908,7 @@ def materialize_average_arm_fixture(
       ENDIF
 """,
     )
-    writer = _Writer(root, master, {LIBRARY_SCOPE: library_metadata})
+    writer = _Writer(root, master, defaults, {LIBRARY_SCOPE: library_metadata})
     main = root.find("./definitions/Definition[@name='Main']")
     writer.add(
         main,
@@ -885,10 +917,22 @@ def materialize_average_arm_fixture(
         asdict(parameters),
         {
             "IN": "TEST_IN",
-            "OUT": "TEST_GND",
+            "OUT": "GND",
             "M": "M",
             "BLOCK": "BLOCK",
             **{name: name for name in OUTPUT_UNITS},
+        },
+    )
+    instance = main.find("./schematic/User[@name='arm_under_test']")
+    ET.SubElement(
+        root.find("./hierarchy/call/call"),
+        "call",
+        {
+            "link": instance.get("id"),
+            "name": instance.get("defn"),
+            "z": "0",
+            "view": "false",
+            "instance": "0",
         },
     )
     writer.add(
@@ -903,9 +947,9 @@ def materialize_average_arm_fixture(
         "test_current",
         "master:src_ccin_1",
         {"Name": "", "Cntrl": "1"},
-        {"A": "TEST_IN", "B": "TEST_GND", "Mag": "CURRENT_COMMAND"},
+        {"A": "TEST_IN", "B": "GND", "Mag": "CURRENT_COMMAND"},
     )
-    writer.add(main, "test_ground", "master:ground", {}, {"A": "TEST_GND"})
+    writer.add(main, "test_ground", "master:ground", {}, {"A": "GND"})
     channels = {**OUTPUT_UNITS, "M": "1", "BLOCK": "1", "CURRENT_COMMAND": "kA"}
     for name, unit in channels.items():
         writer.add(

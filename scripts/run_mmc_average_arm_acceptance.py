@@ -23,6 +23,7 @@ sys.path.insert(0, str(REPOSITORY))
 
 from pscad_mcp.acceptance.process_scope import concurrent_acceptance_enabled
 from pscad_mcp.acceptance.project_finalization import (
+    GENERATED_MODULE_POLICY,
     compare_project_finalization,
     snapshot_project_semantics,
 )
@@ -101,12 +102,17 @@ def _probe_owners(project: Path) -> dict[str, str]:
 
 
 def snapshot_model_inputs(paths) -> dict:
-    return {str(path): snapshot_project_semantics(path) for path in paths}
+    return {
+        str(path): snapshot_project_semantics(path, policy=GENERATED_MODULE_POLICY)
+        for path in paths
+    }
 
 
 def verify_model_normalization(authored: dict) -> dict:
     return {
-        path: compare_project_finalization(before, snapshot_project_semantics(path))
+        path: compare_project_finalization(
+            before, snapshot_project_semantics(path, policy=GENERATED_MODULE_POLICY)
+        )
         for path, before in authored.items()
     }
 
@@ -123,9 +129,21 @@ def fresh_project_executable(project: Path, started_after: float) -> dict:
     if len(candidates) != 1:
         raise ValueError("A unique fresh native project executable is required")
     path = candidates[0]
-    if path.is_symlink() or not path.is_file() or not path.resolve().is_relative_to(project.parent.resolve()) or path.stat().st_size == 0 or path.stat().st_mtime < started_after:
+    if (
+        path.is_symlink()
+        or not path.is_file()
+        or not path.resolve().is_relative_to(project.parent.resolve())
+        or path.stat().st_size == 0
+        or path.stat().st_mtime < started_after
+    ):
         raise ValueError("A fresh nonempty owned native executable is required")
-    return {"path": str(path.resolve()), "sha256": _sha256(path), "bytes": path.stat().st_size, "modified_at": path.stat().st_mtime, "build_started_after": started_after}
+    return {
+        "path": str(path.resolve()),
+        "sha256": _sha256(path),
+        "bytes": path.stat().st_size,
+        "modified_at": path.stat().st_mtime,
+        "build_started_after": started_after,
+    }
 
 
 def read_arm_trace(files: dict, owners: dict[str, str]) -> dict:
@@ -573,11 +591,20 @@ async def run_attempt(args, run_dir: Path, *, service_factory=_service) -> dict:
         shutil.copy2(initial_executable["path"], evidence_binary)
         if _sha256(evidence_binary) != initial_executable["sha256"]:
             raise ValueError("Canonicalization executable preservation failed")
-        report["canonicalization_executable"] = {**initial_executable, "preserved_path": str(evidence_binary)}
+        report["canonicalization_executable"] = {
+            **initial_executable,
+            "preserved_path": str(evidence_binary),
+        }
         begin("clean_owned_build")
         native_project = await bounded(service.backend._project(project_name))
-        await bounded(service.backend.executor.run_safe(native_project.clean, timeout=args.operation_timeout))
-        report["executables_before_fresh_build"] = [str(path) for path in project.parent.rglob(project.stem + ".exe")]
+        await bounded(
+            service.backend.executor.run_safe(
+                native_project.clean, timeout=args.operation_timeout
+            )
+        )
+        report["executables_before_fresh_build"] = [
+            str(path) for path in project.parent.rglob(project.stem + ".exe")
+        ]
         if report["executables_before_fresh_build"]:
             raise ValueError("Native project clean retained a project executable")
         require_finalized_hashes(finalized_inputs)
@@ -592,7 +619,9 @@ async def run_attempt(args, run_dir: Path, *, service_factory=_service) -> dict:
         _require_no_errors(report["compile_messages"])
         report["fresh_executable"] = fresh_project_executable(project, compile_started)
         require_finalized_hashes(finalized_inputs)
-        finalized_inputs[report["fresh_executable"]["path"]] = report["fresh_executable"]["sha256"]
+        finalized_inputs[report["fresh_executable"]["path"]] = report[
+            "fresh_executable"
+        ]["sha256"]
         report["finalized_hashes_before_run"] = dict(finalized_inputs)
         begin("run")
         started = time.time()
@@ -637,7 +666,9 @@ async def run_attempt(args, run_dir: Path, *, service_factory=_service) -> dict:
         }
         if report["output_hashes_before_read"] != report["output_hashes_after_read"]:
             raise ValueError("Native output evidence changed while being read")
-        report["finalized_hashes_after_run"] = require_finalized_hashes(finalized_inputs)
+        report["finalized_hashes_after_run"] = require_finalized_hashes(
+            finalized_inputs
+        )
         report["status"] = report["analysis"]["status"]
         if report["status"] == "FAIL":
             report["failure_category"] = (
@@ -687,7 +718,9 @@ async def run_attempt(args, run_dir: Path, *, service_factory=_service) -> dict:
             report.update(status="FAIL", cleanup_error=_error(error))
         try:
             if finalized_inputs:
-                report["finalized_hashes_after_cleanup"] = require_finalized_hashes(finalized_inputs)
+                report["finalized_hashes_after_cleanup"] = require_finalized_hashes(
+                    finalized_inputs
+                )
             report["source_hashes_after"] = {
                 path: _sha256(Path(path)) for path in source_hashes
             }

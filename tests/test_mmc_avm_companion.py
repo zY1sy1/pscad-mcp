@@ -93,15 +93,16 @@ def test_native_branches_preserve_signed_storage_and_blocked_diode_paths(library
     arm = root.find("./definitions/Definition[@name='MMCAverageArm']")
     components = {item.get("name"): item for item in arm.findall("./schematic/User")}
     expected_types = {
-        "arm_resistance": "master:resistor",
-        "arm_inductance": "master:inductor",
+        "arm_resistance": "master:varrlc",
+        "arm_inductance": "master:varrlc",
         "normal_voltage": "master:source_1",
         "normal_disconnect": "master:breaker1",
         "positive_clamp": "master:peswitch",
         "clamp_voltage": "master:source_1",
         "negative_bypass": "master:peswitch",
         "storage_current": "master:src_ccin_1",
-        "storage_capacitor": "master:capacitor",
+        "storage_capacitor": "master:varrlc",
+        "capacitance_conversion": "master:gain",
         "arm_current_meter": "master:ammeter",
         "normal_current_meter": "master:ammeter",
         "clamp_current_meter": "master:ammeter",
@@ -121,9 +122,23 @@ def test_native_branches_preserve_signed_storage_and_blocked_diode_paths(library
             "AC": "0",
             "Tc": "0.0 [s]",
         }
-    assert _parameters(components["storage_capacitor"])["C"] == "$(C_PHYS_UF) [uF]"
-    assert _parameters(components["arm_resistance"])["R"] == "$(R_arm_ohm) [ohm]"
-    assert _parameters(components["arm_inductance"])["L"] == "$(L_arm_H) [H]"
+    assert _parameters(components["storage_capacitor"])["C"] == "CAP_C_UF"
+    assert _parameters(components["arm_resistance"])["R"] == "R_arm_ohm"
+    assert _parameters(components["arm_inductance"])["L"] == "L_arm_H"
+    assert _parameters(components["capacitance_conversion"])["G"] == "250000.0"
+    for role, kind in (
+        ("arm_resistance", "0"),
+        ("arm_inductance", "1"),
+        ("storage_capacitor", "2"),
+    ):
+        assert _parameters(components[role])["RLC"] == kind
+        assert _parameters(components[role])["dLdC"] == "0"
+    imports = {
+        _parameters(item).get("Name")
+        for item in components.values()
+        if item.get("defn") == "master:import"
+    }
+    assert {p.get("name") for p in arm.findall("./form/category/parameter")} <= imports
     assert _parameters(components["normal_disconnect"])["NAME"] == "ARM_OPEN"
     for role in ("positive_clamp", "negative_bypass"):
         assert _parameters(components[role])["Type"] == "0"
@@ -133,10 +148,10 @@ def test_native_branches_preserve_signed_storage_and_blocked_diode_paths(library
     assert {"normal_voltage:NB", "normal_disconnect:B"} <= set(nets["NORMAL_NEG"])
     assert {"positive_clamp:DP", "clamp_current_meter:N2"} <= set(nets["CLAMP_IN"])
     assert {"positive_clamp:DN", "clamp_voltage:NA"} <= set(nets["CLAMP_POS"])
-    assert {"negative_bypass:DP", "clamp_voltage:NB"} <= set(nets["ARM_OUT"])
+    assert {"negative_bypass:DP", "clamp_voltage:NB"} <= set(nets["OUT"])
     assert {"negative_bypass:DN", "arm_inductance:B"} <= set(nets["STACK_IN"])
     assert "storage_current:A" in nets["CAP_POS"]
-    assert "storage_current:B" in nets["CAP_GND"]
+    assert "storage_current:B" in nets["GND"]
     assert report["blocked_state_path"] == "half_bridge_diode_equivalent"
     assert report["intrinsic_dc_fault_blocking"] is False
 
@@ -175,6 +190,15 @@ def test_every_authored_wire_uses_checked_physical_endpoints(library, master):
                 "kind"
             ]
     assert report["route_contacts_verified"] is True
+
+
+def test_all_master_defaults_are_authored_before_native_normalization(library, master):
+    root, _ = library
+    metadata = read_definition_metadata_document(master.read_bytes())
+    for component in root.findall("./definitions/Definition/schematic/User"):
+        scope, name = component.get("defn").split(":", 1)
+        if scope == "master":
+            assert set(_parameters(component)) == set(metadata[name][0].parameters)
 
 
 def test_generator_rejects_changed_master_contract_and_existing_outputs(
@@ -216,7 +240,7 @@ def test_master_active_scalar_and_unit_contract_is_fail_closed(
         ).set("dim", "3")
     else:
         root.find(
-            "./definitions/Definition[@name='capacitor']/form/category/parameter[@name='C']"
+            "./definitions/Definition[@name='varrlc']/form/category/parameter[@name='C']"
         ).set("unit", "F")
     modified = tmp_path / "modified_master.pslx"
     modified.write_bytes(ET.tostring(root))
@@ -239,6 +263,15 @@ def test_fixture_has_actual_arm_and_all_four_operating_windows(
         "./definitions/Definition[@name='Main']/schematic/User[@name='arm_under_test']"
     )
     assert arm is not None and arm.get("defn").endswith(":MMCAverageArm")
+    module_call = root.find("./hierarchy/call/call/call")
+    assert module_call is not None
+    assert module_call.attrib == {
+        "link": arm.get("id"),
+        "name": arm.get("defn"),
+        "z": "0",
+        "view": "false",
+        "instance": "0",
+    }
     assert set(report["operating_windows"]) == {
         "charge",
         "discharge",
