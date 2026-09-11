@@ -25,6 +25,7 @@ from pscad_mcp.acceptance.process_scope import (
     managed_acceptance_pid,
 )
 from pscad_mcp.acceptance.project_finalization import (
+    POLICY,
     compare_project_finalization,
     snapshot_project_semantics,
 )
@@ -489,6 +490,10 @@ def _validate_fresh_executables(compilation) -> None:
 def _validate_finalization(finalization, project) -> None:
     _check(isinstance(finalization, dict), "Project finalization evidence is required")
     comparison = finalization.get("semantic_comparison", {})
+    _check(
+        comparison.get("policy") == POLICY,
+        "The direct Master report requires the default finalization policy",
+    )
     expected = compare_project_finalization(
         comparison.get("authored"), comparison.get("finalized")
     )

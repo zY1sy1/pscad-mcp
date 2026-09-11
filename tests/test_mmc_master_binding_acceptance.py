@@ -733,6 +733,19 @@ def test_pass_report_requires_finalization_evidence(tmp_path, monkeypatch, mutat
         module.validate_mmc_master_binding_report(report)
 
 
+def test_master_report_cannot_substitute_generated_module_policy(tmp_path, monkeypatch):
+    from pscad_mcp.acceptance.project_finalization import GENERATED_MODULE_POLICY
+
+    module, report, _ = attempt(tmp_path, monkeypatch)
+    assert report["status"] == "PASS", report.get("error")
+    comparison = report["finalization"]["semantic_comparison"]
+    comparison["policy"] = GENERATED_MODULE_POLICY
+    comparison["authored"]["policy"] = GENERATED_MODULE_POLICY
+    comparison["finalized"]["policy"] = GENERATED_MODULE_POLICY
+    with pytest.raises(ValueError, match="policy"):
+        module.validate_mmc_master_binding_report(report)
+
+
 @pytest.mark.parametrize("failure", ["clean_changes_project", "clean_error"])
 def test_owned_clean_must_succeed_without_changing_finalized_input(
     tmp_path, monkeypatch, failure

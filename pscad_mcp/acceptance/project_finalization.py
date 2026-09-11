@@ -4,6 +4,12 @@ Only project Settings/revisor's value, Definition date/crc, automatic-sequence
 User/Wire z, and schematic Wire w/h are compiler metadata. Parameter values,
 IDs, ports, coordinates, orientation, vertices, code and child order remain
 semantic. Outside this stage, callers must compare exact file hashes.
+
+The generated-module opt-in also permits User display bounds, direct instance
+parameter-list crc, and the top Station hierarchy call's vendor-assigned link.
+These were observed in the authored/model pair from average-arm acceptance
+attempt-20260908-174633-918404c6. Nested hierarchy calls and all parameter children
+remain semantic; the generator must author defaults and child calls explicitly.
 """
 
 from __future__ import annotations
@@ -17,10 +23,16 @@ from xml.etree import ElementTree as ET
 from pscad_mcp.topology.hashing import canonical_sha256
 
 POLICY = "pscad_compiler_metadata_v1"
+GENERATED_MODULE_POLICY = "pscad_generated_module_metadata_v1"
+_POLICIES = {POLICY, GENERATED_MODULE_POLICY}
 
 
-def snapshot_project_semantics(path: str | Path) -> dict[str, Any]:
+def snapshot_project_semantics(
+    path: str | Path, *, policy: str = POLICY
+) -> dict[str, Any]:
     """Capture exact bytes and structured semantics without changing the file."""
+    if not isinstance(policy, str) or policy not in _POLICIES:
+        raise ValueError(f"Unknown project finalization policy: {policy}")
     source = Path(path)
     if source.is_symlink() or not source.is_file():
         raise ValueError(f"A regular PSCAD project file is required: {source}")
@@ -60,6 +72,25 @@ def snapshot_project_semantics(path: str | Path) -> dict[str, Any]:
             excluded.add("z")
         if in_schematic and tag == "Wire":
             excluded.update(("w", "h"))
+        if policy == GENERATED_MODULE_POLICY:
+            if in_schematic and tag == "User" and element.get("classid") == "UserCmp":
+                excluded.update(("w", "h"))
+            if (
+                in_schematic
+                and tag == "paramlist"
+                and ancestors[-1].tag == "User"
+                and ancestors[-1].get("classid") == "UserCmp"
+                and element.get("name") == ""
+                and element.get("link") == "-1"
+            ):
+                excluded.add("crc")
+            if (
+                tag == "call"
+                and parents == ("project", "hierarchy")
+                and root.get("name")
+                and element.get("name") == f"{root.get('name')}:Station"
+            ):
+                excluded.add("link")
         attributes = {}
         for name, value in element.attrib.items():
             if name in excluded:
@@ -95,7 +126,7 @@ def snapshot_project_semantics(path: str | Path) -> dict[str, Any]:
     if hashlib.sha256(source.read_bytes()).hexdigest() != digest:
         raise ValueError("PSCAD project changed during semantic snapshot")
     return {
-        "policy": POLICY,
+        "policy": policy,
         "path": str(source),
         "sha256": digest,
         "semantics_sha256": canonical_sha256(semantics),
@@ -111,8 +142,12 @@ def compare_project_finalization(
     for snapshot in (authored, finalized):
         if (
             not isinstance(snapshot, dict)
-            or snapshot.get("policy") != POLICY
-            or not isinstance(snapshot.get("semantics"), dict)
+            or not isinstance(snapshot.get("policy"), str)
+            or snapshot["policy"] not in _POLICIES
+        ):
+            raise ValueError("Invalid project finalization policy")
+        if (
+            not isinstance(snapshot.get("semantics"), dict)
             or not isinstance(snapshot.get("compiler_metadata"), dict)
             or not isinstance(snapshot.get("path"), str)
             or re.fullmatch(r"[0-9a-f]{64}", str(snapshot.get("sha256", ""))) is None
@@ -120,11 +155,13 @@ def compare_project_finalization(
             != canonical_sha256(snapshot["semantics"])
         ):
             raise ValueError("Invalid project semantic snapshot or hash")
+    if authored["policy"] != finalized["policy"]:
+        raise ValueError("Project finalization policies must match")
     if authored["semantics"] != finalized["semantics"]:
         raise ValueError("Compiler finalization changed authored project semantics")
     before, after = authored["compiler_metadata"], finalized["compiler_metadata"]
     return {
-        "policy": POLICY,
+        "policy": authored["policy"],
         "semantic_structure_unchanged": True,
         "authored": authored,
         "finalized": finalized,
