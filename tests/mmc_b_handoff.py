@@ -14,7 +14,6 @@ from collections.abc import Mapping
 from pathlib import Path, PureWindowsPath
 
 from pscad_mcp.acceptance.evidence import _is_reparse_point
-from pscad_mcp.acceptance.process_scope import require_acceptance_ownership
 from pscad_mcp.core.pscad_adapter import PscadAdapter
 from pscad_mcp.hvdc.builders.mmc.fault_channels import (
     default_fault_checks,
@@ -85,6 +84,25 @@ def require_recipe_match(b_recipe, public_recipe):
     ):
         raise ValueError("B and public execution use different model recipes")
     return True
+
+
+def _verify_owned_runtime(report):
+    identities = []
+    for key in ("launch_ownership", "runtime"):
+        record = report.get(key, {})
+        session = record.get("session", {})
+        pid = session.get("managed_pid")
+        executable = Path(str(session.get("managed_executable", "")))
+        if (
+            record.get("owns_process") is not True
+            or type(pid) is not int or pid <= 0
+            or session.get("mode") != "managed-launch"
+            or not executable.is_absolute() or executable.name.casefold() != "pscad.exe"
+        ):
+            raise ValueError("B has no consistent owned PSCAD launch and runtime")
+        identities.append((pid, executable.resolve()))
+    if identities[0] != identities[1]:
+        raise ValueError("B owned PSCAD launch and runtime identities disagree")
 
 
 def _verify_producers(recipe, report):
@@ -173,8 +191,9 @@ def _verify_channel_handoff(rows, contract, samples):
     ids = [item["channel_id"] for item in rows]
     if len(ids) != len(set(ids)) or not {item["channel_id"] for item in contract["channels"]} <= set(ids) <= set(bindings):
         raise ValueError("The handoff channel matrix is incomplete or ambiguous")
-    static = ("role", "model_scope", "instance_path", "owner_id", "definition", "signal_source", "selector", "units", "dimension", "polarity")
-    observed = ("output_part", "metadata_file", "sample_count", "time_bounds_s", "hash")
+    static = ("role", "model_scope", "instance_path", "owner_id", "definition", "definition_name", "signal_source", "selector", "units", "dimension", "polarity", "nominal", "nominal_role")
+    observed = ("output_part", "metadata_file", "sample_count", "time_bounds_s", "hash", "metadata_sha256",
+                "compiler_metadata_file", "compiler_metadata_sha256", "call_id", "compiled_identity")
     for row in rows:
         binding, trace = bindings[row["channel_id"]], traces[row["channel_id"]]
         if any(row.get(key) != binding.get(key) for key in static):
@@ -199,7 +218,7 @@ async def validate_b_handoff(path, reader=None):
         raise ValueError("B has not completed native steady and fault acceptance")
     if report.get("error") or not re.fullmatch(r"[0-9a-f]{40}", str(report.get("commit", ""))) or handoff.get("producer_revision") != report["commit"]:
         raise ValueError("B has no consistent completed producer revision")
-    require_acceptance_ownership(report["launch_ownership"])
+    _verify_owned_runtime(report)
     if report["runtime"].get("licensed") is not True:
         raise ValueError("B has no licensed runtime evidence")
     root = Path(report_ref["path"]).parent
