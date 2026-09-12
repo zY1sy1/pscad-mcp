@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+import hashlib
 import math
 import xml.etree.ElementTree as ET
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
 from ....core.backend.base import BackendError
+from ....topology.connectivity import build_connectivity
+from ....topology.providers.pscx import PscxSnapshotProvider
+from ....topology.reconcile import reconcile_snapshots
 from ..common.records import JsonRecord, freeze
 
 
@@ -166,7 +170,74 @@ def _parse_output(element: ET.Element, index: int) -> GraphOutput:
     return GraphOutput(_text(element.attrib.get("logical_id") or element.attrib.get("id") or element.attrib.get("name"), f"output[{index}].logical_id"), _text(element.attrib.get("path"), f"output[{index}].path"), _text(element.attrib.get("units", "1"), f"output[{index}].units"), _text(element.attrib.get("role", "unknown"), f"output[{index}].role"), element.attrib.get("measurement"), {"element": "output", "index": index})
 
 
-def read_project_graph(path: str | Path) -> MmcProjectGraph:
+def _read_native_graph(path, *, definition_ports=None, logical_ids=None):
+    snapshot = PscxSnapshotProvider(definition_ports).read(path, "Main")
+    logical_ids = logical_ids or {}
+    original_ports = {port.key: port for component in snapshot.components for port in component.ports}
+    original_labels = {label.key: label for label in snapshot.labels}
+    # First discover physical contact without merging same-name label aliases.
+    # Native WireOrthogonal objects do not encode electrical/data namespaces.
+    physical = replace(
+        snapshot,
+        components=tuple(replace(component, ports=tuple(replace(port, kind="electrical") for port in component.ports)) for component in snapshot.components),
+        conductors=tuple(replace(wire, namespace="electrical") for wire in snapshot.conductors),
+        labels=tuple(replace(label, namespace="electrical", name=label.key) for label in snapshot.labels),
+        boundary_links=tuple(replace(link, namespace="electrical") for link in snapshot.boundary_links),
+    )
+    physical_nets = build_connectivity(reconcile_snapshots(None, physical))
+    wire_kinds = {}
+    for net in physical_nets.topology.nets:
+        kinds = {original_ports[key].kind for key in net.port_keys if key in original_ports and original_ports[key].kind != "unknown"}
+        kinds.update(original_labels[key].namespace for key in net.label_keys if original_labels[key].namespace != "unknown")
+        if len(kinds) > 1:
+            raise _error("Native wire joins electrical and data terminals.", net=net.key)
+        kind = next(iter(kinds), "unknown")
+        wire_kinds.update((key, kind) for key in net.conductor_keys)
+    typed = replace(snapshot, conductors=tuple(replace(wire, namespace=wire_kinds.get(wire.key, "unknown")) for wire in snapshot.conductors))
+    connected = build_connectivity(reconcile_snapshots(None, typed))
+    topology = connected.topology
+    ids = {component.key: logical_ids.get(component.key, component.key) for component in snapshot.components}
+    components = tuple(GraphComponent(
+        ids[component.key], component.definition, component.location or (0, 0),
+        component.orientation or 0,
+        tuple(GraphPort(port.name, "signal" if port.kind == "data" else port.kind, port.dimension or 0,
+                        source={"native_port_key": port.key, "absolute": port.absolute}) for port in component.ports),
+        parameters=dict(component.parameters), canvas=component.canvas_key,
+        source={"element": "User", "native_id": component.object_id, "source_sha256": snapshot.source_fingerprint},
+    ) for component in snapshot.components)
+    port_endpoints = {port.key: f"{ids[component.key]}:{port.name}" for component in snapshot.components for port in component.ports}
+    wires = {wire.key: wire for wire in topology.conductors}
+    nets = tuple(GraphNet(
+        net.key, net.namespace,
+        tuple(port_endpoints[key] for key in net.port_keys if key in port_endpoints),
+        vertices=wires[net.conductor_keys[0]].vertices if len(net.conductor_keys) == 1 else (),
+        label=original_labels[net.label_keys[0]].name if len(net.label_keys) == 1 else None,
+        source={"element": "Wire", "conductor_keys": net.conductor_keys, "label_keys": net.label_keys,
+                "source_sha256": snapshot.source_fingerprint},
+    ) for net in topology.nets)
+    outputs = []
+    for component in snapshot.components:
+        if component.definition != "master:pgb":
+            continue
+        parameters = dict(component.parameters)
+        name, group = parameters.get("Name", ""), parameters.get("Group", "")
+        outputs.append(GraphOutput(ids[component.key], "/".join(filter(None, (component.canvas_key, group, name))),
+                                   parameters.get("Units", "1"), "unknown", source={"native_id": component.object_id}))
+    unresolved = set(topology.unresolved)
+    unresolved.update("missing_port_contract:" + component.key for component in snapshot.components if not component.ports)
+    if hashlib.sha256(Path(path).read_bytes()).hexdigest() != snapshot.source_fingerprint:
+        raise _error("Native PSCX changed while its topology was read.")
+    return MmcProjectGraph(snapshot.project_name, components, nets, tuple(outputs), str(path), {
+        "format": "native_pscx", "source_sha256": snapshot.source_fingerprint,
+        "unresolved": tuple(sorted(unresolved)),
+        "ambiguous_crossings": connected.ambiguous_crossings,
+        "malformed_conductors": connected.malformed_conductors,
+        "native_component_count": len(snapshot.components),
+        "native_wire_count": len(snapshot.conductors), "native_label_count": len(snapshot.labels),
+    })
+
+
+def read_project_graph(path: str | Path, *, definition_ports=None, logical_ids=None) -> MmcProjectGraph:
     """Read only structured PSCX graph fields; no regular-expression parsing."""
 
     source_path = Path(path).expanduser().resolve()
@@ -176,6 +247,8 @@ def read_project_graph(path: str | Path) -> MmcProjectGraph:
         root = ET.parse(source_path).getroot()
     except (OSError, ET.ParseError) as error:
         raise _error("PSCX XML could not be parsed.", path=str(source_path), parse_error=str(error)) from error
+    if any(_local(element.tag) == "user" for element in root.iter()):
+        return _read_native_graph(source_path, definition_ports=definition_ports, logical_ids=logical_ids)
     project_elements = [element for element in root.iter() if _local(element.tag) == "project"]
     project_name = (project_elements[0].attrib.get("name") if project_elements else None) or root.attrib.get("name") or source_path.stem
     components: list[GraphComponent] = []
