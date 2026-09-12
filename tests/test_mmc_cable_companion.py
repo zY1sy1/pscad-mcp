@@ -112,6 +112,7 @@ def test_materialization_binds_exact_local_constants_and_keeps_source_receipts(a
     values = _parameters(configuration)
     assert float(values["Length"].split()[0]) == native["length_km"]
     assert values["Dim"] == "2"
+    assert values["gen_cnst"] == "0"
     assert values["const_path"] == receipt["constants_path"]
     assert Path(values["const_path"]).suffix == ".clo"
     assert hashlib.sha256(Path(values["const_path"]).read_bytes()).hexdigest() == native["constants_sha256"]

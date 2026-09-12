@@ -257,8 +257,7 @@ def _materialize(destination, *, constants_evidence, source_project, master_path
     wrapper.attrib.update(name=project_name + ":Cable2", defn=project_name + ":Cable2")
     for name, value in {"Name": constants["segment"], "Length": f"{constants['length_km']:.15g} [km]", "const_path": str(local_constants)}.items():
         _set_parameter(wrapper, name, value)
-    if _parameters(wrapper).get("gen_cnst") != "1":
-        raise ValueError("Donor cable must use its external constants-file selection")
+    _set_parameter(wrapper, "gen_cnst", "0")
     module.find("schematic").append(line)
     sending_negative = "GND" if fixture else "SEND_NEG"
     writer.add(main, "cable_link", project_name + ":MMCCableLink", {}, {
@@ -392,7 +391,7 @@ def audit_cable_assembly(project_path, receipt: Mapping) -> dict:
     if len(configurations) != 1 or configurations[0].get("defn") != receipt["project_name"] + ":Cable2":
         raise ValueError("Exactly one native cable configuration is required")
     values = _parameters(configurations[0].find("User"))
-    if (any(values.get(key) != value for key, value in {"Name": receipt["cable_name"], "Dim": "2", "gen_cnst": "1", "const_path": receipt["constants_path"]}.items())
+    if (any(values.get(key) != value for key, value in {"Name": receipt["cable_name"], "Dim": "2", "gen_cnst": "0", "const_path": receipt["constants_path"]}.items())
             or float(values["Length"].split()[0]) != receipt["length_km"] or _sha(Path(values["const_path"])) != receipt["constants_sha256"]):
         raise ValueError("Native cable configuration or constants binding changed")
     users = main.findall("./schematic/User")
