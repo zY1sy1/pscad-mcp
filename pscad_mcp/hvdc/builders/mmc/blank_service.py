@@ -37,7 +37,10 @@ from .fault_channels import (
     default_fault_checks,
     finalize_fault_instrumentation,
     instrument_fault_channels,
+    materialize_arm_virtual_resistance,
+    materialize_complete_arm_sorting,
     materialize_dc_feedback_filter,
+    materialize_terminal_two_carrier,
     materialize_terminal_two_charging,
     materialize_voltage_control_headroom,
     read_fault_output_dataset,
@@ -68,12 +71,32 @@ _MODEL_RECIPES = {
     "raw": {},
     "headroom_1p1": {"current_limit_pu": 1.1},
     "headroom_1p1_dc_filter_5ms": {"current_limit_pu": 1.1, "dc_feedback_time_constant_s": 0.005},
+    "native_full_sort_v1": {"current_limit_pu": 1.1, "dc_feedback_time_constant_s": 0.005, "terminal_two_carrier_ratio": 23.0, "arm_virtual_resistance_ohm": 30.0, "sort_extent": "Dim", "sort_enable": "existing_Enab"},
 }
 _WINDOWS_DEVICE = re.compile(r"(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])", re.IGNORECASE)
 
 
 def _default_master_path() -> Path:
     return Path("C:/Program Files (x86)/PSCAD46/master.pslx")
+
+
+def _recipe_contract(name: str) -> dict[str, Any]:
+    parameters = copy.deepcopy(_MODEL_RECIPES[name])
+    steps = [{"name": "terminal_two_charging", "parameters": {}}]
+    if "current_limit_pu" in parameters:
+        steps.append({"name": "voltage_control_headroom", "parameters": {"current_limit_pu": parameters["current_limit_pu"]}})
+    if "dc_feedback_time_constant_s" in parameters:
+        steps.append({"name": "dc_feedback_filter", "parameters": {"time_constant_s": parameters["dc_feedback_time_constant_s"]}})
+    if name == "native_full_sort_v1":
+        steps.extend([
+            {"name": "terminal_two_carrier", "parameters": {"ratio": 23.0}},
+            {"name": "arm_virtual_resistance", "parameters": {"resistance_per_arm_ohm": 30.0}},
+            {"name": "complete_arm_sorting", "parameters": {"sort_extent": "Dim", "enable": "existing_Enab"}},
+        ])
+    steps.append({"name": "fault_instrumentation", "parameters": {}})
+    return {"schema_version": 1, "name": name, "parameters": parameters, "steps": steps,
+            "physical_acceptance_verified": False, "fault_recovery_status": "pending",
+            "producer_code_hashes": {module: _identity(Path(__file__).with_name(module + ".py")) for module in ("fault_channels", "template_native")}}
 
 
 def _error(code: str, message: str, operation: str, **details: Any) -> BackendError:
@@ -315,7 +338,7 @@ class BlankMmcBuilderService:
             "fault": {"kind": "dc_pole_to_pole", "time_s": checks["fault_window_s"][0], "removal_time_s": checks["fault_window_s"][1]},
             "checks_contract": checks,
             "checks_sha256": hashlib.sha256(json_bytes(checks)).hexdigest(),
-            "model_recipe": {"schema_version": 1, "name": recipe, "parameters": copy.deepcopy(_MODEL_RECIPES[recipe]), "physical_acceptance_verified": False},
+            "model_recipe": _recipe_contract(recipe),
             "model_corrections": [{"name": "terminal_two_charging", "definition": "Main", "owner": "606940312", "parameter": "T", "before": "Tcharging1", "after": "Tcharging2", "classification": "verified_template_binding_defect"}],
             "source_identities": identities,
             "runtime_requirements": {"backend": "legacy", "pscad_version": "4.6.2", "master_source_must_match": identities["master"], "new_case_namespace": True},
@@ -694,6 +717,9 @@ def _verify_frozen_plan(plan: Mapping[str, Any]) -> None:
 
 def _verify_plan_inputs(plan: Mapping[str, Any], audit_loader: Callable[..., Any]) -> None:
     _verify_frozen_plan(plan)
+    for identity in plan["model_recipe"]["producer_code_hashes"].values():
+        if _identity(Path(identity["path"])) != identity:
+            raise _error("MMC_PLAN_STALE", "A model-recipe producer changed after planning.", "build_blank_mmc_model", expected=identity)
     for identity in plan["source_identities"].values():
         if _identity(Path(identity["path"])) != identity:
             raise _error("MMC_PLAN_STALE", "An immutable source changed.", "build_blank_mmc_model", expected=identity)
@@ -891,6 +917,36 @@ async def _contain_native_failure(service: Any, record: dict[str, Any], pending:
     return pending
 
 
+def _materialize_native_mmc_case(plan: Mapping[str, Any], source: Path, library: Path, staging: Path, project: Path, record: dict[str, Any]) -> dict[str, Any]:
+    """Apply the declared recipe identically for public and joint preparation."""
+    master = Path(plan["source_identities"]["master"]["path"])
+    lineage = record.setdefault("lineage", [])
+    fault = staging / "native_fault_source.pscx"
+    binding = materialize_template_native_scenario(source, fault, dc_fault_time_s=plan["fault"]["time_s"], fault_duration_s=plan["fault"]["removal_time_s"] - plan["fault"]["time_s"])
+    lineage.append({"stage": "native_fault", **binding})
+    selected = staging / "charging_source.pscx"
+    lineage.append({"stage": "terminal_two_charging", **materialize_terminal_two_charging(fault, selected)})
+    recipe = plan["model_recipe"]
+    if recipe["name"] != "raw":
+        headroom = staging / "headroom_source.pscx"
+        lineage.append({"stage": "headroom", **materialize_voltage_control_headroom(selected, headroom, current_limit_pu=recipe["parameters"]["current_limit_pu"])})
+        selected = headroom
+    if "dc_feedback_time_constant_s" in recipe["parameters"]:
+        filtered = staging / "filtered_source.pscx"
+        lineage.append({"stage": "dc_feedback_filter", **materialize_dc_feedback_filter(selected, filtered, master=master, time_constant_s=recipe["parameters"]["dc_feedback_time_constant_s"])})
+        selected = filtered
+    if recipe["name"] == "native_full_sort_v1":
+        carrier = staging / "carrier_source.pscx"
+        lineage.append({"stage": "terminal_two_carrier", **materialize_terminal_two_carrier(selected, carrier)})
+        damped = staging / "arm_virtual_resistance_source.pscx"
+        lineage.append({"stage": "arm_virtual_resistance", **materialize_arm_virtual_resistance(carrier, damped, master=master)})
+        selected = staging / "complete_arm_sorting_source.pscx"
+        lineage.append({"stage": "complete_arm_sorting", **materialize_complete_arm_sorting(damped, selected, library=library)})
+    contract = instrument_fault_channels(selected, project, library=library, master=master,
+        expected_source_hashes={"project": _sha256(selected), "library": plan["source_identities"]["library"]["sha256"], "master": plan["source_identities"]["master"]["sha256"]})
+    return contract
+
+
 async def _execute_native_mmc_plan(
     plan: Mapping[str, Any], service: Any, workspace: Path, *,
     build_id: str, journal: AtomicJournal, record: dict[str, Any],
@@ -909,25 +965,9 @@ async def _execute_native_mmc_plan(
     bundle.mkdir()
     checkpoint("staging_created")
     source, library = await _stage_dependencies(plan, staging, bundle, record)
-    master = Path(plan["source_identities"]["master"]["path"])
-    lineage = record.setdefault("lineage", [])
-    fault = staging / "native_fault_source.pscx"
-    binding = materialize_template_native_scenario(source, fault, dc_fault_time_s=plan["fault"]["time_s"], fault_duration_s=plan["fault"]["removal_time_s"] - plan["fault"]["time_s"])
-    lineage.append({"stage": "native_fault", **binding})
-    selected = staging / "charging_source.pscx"
-    lineage.append({"stage": "terminal_two_charging", **materialize_terminal_two_charging(fault, selected)})
-    recipe = plan["model_recipe"]
-    if recipe["name"] != "raw":
-        headroom = staging / "headroom_source.pscx"
-        lineage.append({"stage": "headroom", **materialize_voltage_control_headroom(selected, headroom, current_limit_pu=recipe["parameters"]["current_limit_pu"])})
-        selected = headroom
-    if recipe["name"] == "headroom_1p1_dc_filter_5ms":
-        filtered = staging / "filtered_source.pscx"
-        lineage.append({"stage": "dc_feedback_filter", **materialize_dc_feedback_filter(selected, filtered, master=master, time_constant_s=recipe["parameters"]["dc_feedback_time_constant_s"])})
-        selected = filtered
     project = staging / target.name
-    contract = instrument_fault_channels(selected, project, library=library, master=master,
-        expected_source_hashes={"project": _sha256(selected), "library": plan["source_identities"]["library"]["sha256"], "master": plan["source_identities"]["master"]["sha256"]})
+    contract = _materialize_native_mmc_case(plan, source, library, staging, project, record)
+    recipe = plan["model_recipe"]
     evidence = bundle / "evidence"
     _write_evidence(evidence / "plan.json", plan)
     _write_evidence(evidence / "checks.json", plan["checks_contract"])

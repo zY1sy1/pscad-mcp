@@ -172,3 +172,106 @@ publication. Reparse rejection uses the repository's compatible `lstat`
 pattern. The focused public/replay/tool/Master gate reports 77 passed,
 1 skipped, with Ruff clean after these fixes. Licensed acceptance remains
 pending and is not inferred from these software results.
+
+## Joint Software Harness
+
+This joint-only history belongs to A's integration worktree. B's public-service
+intake does not include the joint harness modules referenced in this section.
+
+`tests/mmc_timing_fault_case.py` prepares a derived-only offline case using the
+production public plan, compiler dependencies and line generation, actual
+fault binding, explicit T2 charging repair, production fault instrumentation,
+then A's embedded control adapter. It consumes the formal A
+`docs/acceptance/emt-timed-control/schedule-handoff.json`, freezes the file hash
+and canonical parent schedule hash, and requires the original Master, project,
+library and compiler-support identities to agree. The parent's target, values
+and units are preserved. Its old timing tolerance is not inherited.
+
+The joint schedule declares a T2 active-power command at 1.0-1.2 s, separate
+from the physical 2.5-2.7 s fault. It fixes 25 us integration, 250 us output,
+5 s duration and 500 us maximum timing error. The combined fault contract is
+derived from A's deterministic expected rendering and B's original contract;
+it cannot authorize extra physical changes or relabel a fault channel as a
+control command. Both adapters require the identical complete OUT/INF/INFX
+dataset, and static analysis failures retain a unique JSON report.
+
+Run the offline preparation with a new absolute directory:
+
+```powershell
+D:/pscad-mcp/.venv/Scripts/python.exe -m tests.mmc_timing_fault_case --workspace D:/PSCAD-Workspace/mmc-timing-fault-integration/joint-software-<revision>
+```
+
+The output scope is `offline_joint_contract`, with
+`physical_acceptance_verified: false`. The harness has no licensed-run entry
+point. B's accepted `channels-handoff.json`, exact passing model recipe and
+fresh original/replay evidence remain mandatory inputs to the future licensed
+joint gate. Its current raw offline model does not stand in for B's full
+charging/headroom/filter/carrier/virtual-resistance diagnostic chain.
+
+Joint regression coverage reports 16 passed after formal handoff binding.
+The preceding affected A/B/public software gate reported 257 passed, 1 skipped;
+that gate also has no licensed meaning. Ruff is clean for the joint harness
+and tests. Independent review closed all three public replay findings at
+`80e9f8706ad0219dc7199b5a44cd653789f0d0ee` with Spec/Quality PASS.
+
+## Durable Offline Case
+
+The joint harness was committed as
+`61fd11b0810a3aeb7455dcfaa38a7d7a04c67be2`. Running its preparation CLI produced
+`D:/PSCAD-Workspace/mmc-timing-fault-integration/joint-software-61fd11b/preparation.json`.
+The scope is `offline_joint_contract`, the static status is `PASS`, and
+`physical_acceptance_verified` remains `false`. No PSCAD instance or simulation
+was launched. The exact identities are:
+
+- Preparation canonical hash:
+  `1bc47f9bfc59e439a8a00717bbbf348b79baeed458fd28bcb5682114bfe87c5d`.
+- Derived `JointFaultCase.pscx`:
+  `2f71fbc231c1fbb370aa79ab6c802a07335c7130ef69a59a682c7ef5d9e65b8d`.
+- Formal A handoff file:
+  `e91b009b2a8224e23d4043d0802011d55769436f6d4218bbfa50083bcb1380bb`.
+- Formal A canonical schedule:
+  `5f799315640b6760c86f345b3ce791d77301ab2b6cc832a96ca25ad036f5e917`.
+- New joint canonical schedule:
+  `b6b5841a2668e5465ce254cc6de7274bededbd49d91bc0999fcba9abba341d8e`.
+- Production fault checks:
+  `b7bfa3900a410af5c98f65501e5d3f6e5bad4ff809277156d04e3276c25e0ce1`.
+
+The case has 56 physical/recovery channels, 94 diagnostic channels, one separate
+scheduled command channel, and 16 frozen dependency/evidence copies. B's
+accepted handoff is explicitly pending. The final affected software command
+(joint, timing, public service/tools, replay and production fault contracts)
+reports 262 passed, 1 skipped in 51.34 s; Ruff is clean.
+
+For B's public-service intake, the cherry-pick order is `b38a40f`, `64ac799`,
+`daee2b1`, `03b5406`, `1e79aed`, `71014e3`, `6e965ef`, `80e9f87`.
+The first commit supplies the documentation file edited by later commits.
+`6e965ef` requires B's `c5ed2e2` charging helper. Do not cherry-pick integration
+merge commits or the joint harness when taking only the public fault service.
+B confirmed intake will occur at a safe boundary of its sorting-repair run.
+
+## September 12 Resume
+
+The interrupted work resumed at `f13346b` without reverting its pending edits.
+Review found that supplemental replay callbacks could share mutable native
+evidence. `598e166` isolates callback inputs, preserves independent native
+acceptance/readback/contract copies, and binds both worker and supervisor to
+the child worker's actual `evidence/output-index.json` and its original hash.
+Post-callback checks revalidate the original model and complete dataset.
+Thirty-six replay tests pass, including in-place identity replacement and
+contract/context/sample/model/output mutation. Independent Spec/Quality review
+closed the finding; no licensed acceptance was inferred.
+
+The explicit `native_full_sort_v1` recipe fixes T2 charging, current headroom
+1.1 with freeze tracking, 5 ms DC feedback, T2 carrier ratio 23, 30 ohm common
+arm virtual resistance, complete `Dim` sorting under the existing `Enab`, and
+instrumentation. Its ordered steps, fixed parameters and model-producer file
+hashes are part of the public plan. Public and joint preparation now share one
+materialization routine. The default remains `raw`; every recipe still has
+`physical_acceptance_verified: false` and fault/recovery pending.
+
+This recipe retains the original T1 Ti=.08. B's subsequent Ti=.04 candidate
+must receive a separate explicit recipe after its stable implementation is
+provided; it cannot silently change `native_full_sort_v1`. Public/joint
+licensed execution remains gated on B's accepted full handoff and exact
+recipe. The affected public/joint preparation software gate reports 62 passed,
+1 skipped, with Ruff clean.
