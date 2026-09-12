@@ -61,6 +61,16 @@ def _dependency_hashes(bundle, expected):
     return {relative: _hash(_bundle_file(bundle, relative)) for relative in expected}
 
 
+def _frozen_output_index(root, report):
+    from .blank_service import _bundle_file, _read_hashed_json
+
+    path = _bundle_file(root, "evidence/output-index.json")
+    result = report["result"]
+    if Path(result["output_index_path"]).resolve() != path:
+        raise ValueError("The replay output index does not belong to this child")
+    return _read_hashed_json(path, result["output_index_sha256"])
+
+
 async def _terminate_owned_pscad(ownership):
     """Terminate only a recorded PID with matching birth time and executable."""
     result = {"owned_process_cleaned": False, "cleanup_pending": True}
@@ -193,11 +203,14 @@ async def verify_native_fault_replay(*, project, bundle, channel_contract, check
             raise ValueError("Independent worker did not satisfy the frozen physical checks")
         if report.get("replay_saved_model_verified") is not True:
             raise ValueError("The independently saved model identity was not verified")
+        frozen_identity = _frozen_output_index(root / "worker", report)
+        if report.get("output_identity") != frozen_identity or report.get("frozen_output_identity_sha256") != _json_hash(frozen_identity):
+            raise ValueError("The replay evidence differs from this child's frozen output index")
         if verification_context is not None:
             supplemental = report.get("supplemental_evidence", {})
-            if report.get("verification_context_sha256") != request["verification_context_sha256"] or report.get("supplemental_saved_validation", {}).get("verdict") != "PASS" or supplemental.get("verdict") != "PASS" or supplemental.get("output_identity") != report["output_identity"]:
+            if report.get("verification_context_sha256") != request["verification_context_sha256"] or report.get("supplemental_saved_validation", {}).get("verdict") != "PASS" or supplemental.get("verdict") != "PASS" or supplemental.get("output_identity") != frozen_identity:
                 raise ValueError("Supplemental replay checks did not pass on the same frozen child dataset")
-        verify_output_dataset(report["output_identity"])
+        verify_output_dataset(frozen_identity)
         verify_fault_instrumentation(root / "worker" / project.name, report["replay_channel_contract"])
         result.update({"status": "PASS", "project_sha256": request["project"]["sha256"]})
     except BaseException as error:  # noqa: BLE001 - retain worker/cancellation evidence through cleanup
@@ -289,7 +302,12 @@ async def _worker(request_path: Path, expected_hash: str, *, saved_verifier=None
             saved_contract = json.loads(Path(report["result"]["channel_contract_path"]).read_text(encoding="utf-8"))
             report["replay_saved_model_verified"] = _verify_replay_saved_model(original, project, saved_contract)
             if context is not None:
-                report["supplemental_saved_validation"] = saved_verifier(context, project, saved_contract)
+                saved_hash = _hash(project)
+                hook_context, hook_contract = copy.deepcopy(context), copy.deepcopy(saved_contract)
+                report["supplemental_saved_validation"] = copy.deepcopy(saved_verifier(hook_context, project, hook_contract))
+                if hook_context != context or hook_contract != saved_contract or _hash(project) != saved_hash:
+                    raise ValueError("Supplemental saved-case verification mutated its frozen inputs")
+                verify_fault_instrumentation(project, saved_contract)
                 if report["supplemental_saved_validation"].get("verdict") != "PASS":
                     raise ValueError("Supplemental saved-case verification did not pass")
         report["history"].append({"stage": stage, "at": time.time()})
@@ -337,15 +355,30 @@ async def _worker(request_path: Path, expected_hash: str, *, saved_verifier=None
         library = bundle / Path(request["source_identities"]["library"]["path"]).name
         contract, samples = await _run_native_fault_case(service, project, library, contract, request["checks_contract"], request["settings"], root / "evidence", report, checkpoint)
         verify_dependencies("after_run")
-        acceptance = evaluate_template_native_dc_fault(samples, channel_contract=contract, checks_contract=request["checks_contract"], fault_current_limit_ka=request["checks_contract"]["fault_current_limit_ka"])
-        report["acceptance"] = acceptance
-        report["output_identity"] = samples["identity"]
-        report["readback"] = contract["readback"]
-        report["replay_channel_contract"] = contract
+        frozen_identity = _frozen_output_index(root, report)
+        if samples["identity"] != frozen_identity:
+            raise ValueError("Native samples differ from this child's frozen output index")
+        frozen_contract = copy.deepcopy(contract)
+        frozen_project_hash = _hash(project)
+        acceptance = evaluate_template_native_dc_fault(samples, channel_contract=frozen_contract, checks_contract=request["checks_contract"], fault_current_limit_ka=request["checks_contract"]["fault_current_limit_ka"])
+        report["acceptance"] = copy.deepcopy(acceptance)
+        report["output_identity"] = copy.deepcopy(frozen_identity)
+        report["frozen_output_identity_sha256"] = _json_hash(frozen_identity)
+        report["readback"] = copy.deepcopy(frozen_contract["readback"])
+        report["replay_channel_contract"] = copy.deepcopy(frozen_contract)
         if context is not None:
-            report["supplemental_evidence"] = dataset_verifier(context, project, contract, samples)
-            if report["supplemental_evidence"].get("verdict") != "PASS" or report["supplemental_evidence"].get("output_identity") != samples["identity"]:
+            hook_context = copy.deepcopy(context)
+            hook_contract = copy.deepcopy(frozen_contract)
+            hook_samples = copy.deepcopy(samples)
+            report["supplemental_evidence"] = copy.deepcopy(dataset_verifier(hook_context, project, hook_contract, hook_samples))
+            if hook_context != context or hook_contract != frozen_contract or hook_samples != samples or samples["identity"] != frozen_identity:
+                raise ValueError("Supplemental verification mutated its frozen inputs")
+            if report["supplemental_evidence"].get("verdict") != "PASS" or report["supplemental_evidence"].get("output_identity") != frozen_identity:
                 raise ValueError("Supplemental verification did not pass on the same child dataset")
+        if _hash(project) != frozen_project_hash or _frozen_output_index(root, report) != frozen_identity:
+            raise ValueError("Supplemental verification changed the native model or output index")
+        verify_fault_instrumentation(project, frozen_contract)
+        verify_output_dataset(frozen_identity)
         report["status"] = "PASS" if acceptance.get("verdict") == "PASS" else "FAIL"
         if _hash(original) != request["project"]["sha256"] or _files(original_bundle) != request["bundle"]["source_snapshot"]:
             raise ValueError("The first tested inputs changed during replay")
