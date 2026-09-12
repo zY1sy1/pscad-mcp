@@ -161,7 +161,27 @@ def test_full_sort_recipe_is_explicit_ordered_and_still_requires_fault_acceptanc
     assert recipe["fault_recovery_status"] == "pending"
     assert [step["name"] for step in recipe["steps"]] == ["terminal_two_charging", "voltage_control_headroom", "dc_feedback_filter", "terminal_two_carrier", "arm_virtual_resistance", "complete_arm_sorting", "fault_instrumentation"]
     assert recipe["parameters"] == {"current_limit_pu": 1.1, "dc_feedback_time_constant_s": 0.005, "terminal_two_carrier_ratio": 23.0, "arm_virtual_resistance_ohm": 30.0, "sort_extent": "Dim", "sort_enable": "existing_Enab"}
-    assert set(recipe["producer_code_hashes"]) == {"fault_channels", "template_native"}
+    assert set(recipe["producer_code_hashes"]) == {"fault_channels", "template_native", "blank_service"}
+
+
+@pytest.mark.parametrize("drift", ["changed_producer", "missing_producer"])
+def test_recipe_execution_requires_the_frozen_materializer_producer(tmp_path, monkeypatch, drift):
+    service, request, *_ = _plan_case(tmp_path)
+    plan = service.plan_model(request)
+    if drift == "changed_producer":
+        original_identity = blank_service._identity
+
+        def observed_identity(path):
+            identity = original_identity(path)
+            return {**identity, "sha256": "0" * 64} if Path(path).name == "blank_service.py" else identity
+
+        monkeypatch.setattr(blank_service, "_identity", observed_identity)
+    else:
+        plan["model_recipe"]["producer_code_hashes"].pop("blank_service", None)
+        plan["plan_hash"] = hashlib.sha256(blank_service.json_bytes({key: value for key, value in plan.items() if key not in {"plan_hash", "status"}})).hexdigest()
+    with pytest.raises(BackendError) as raised:
+        blank_service._verify_plan_inputs(plan, service.audit_loader)
+    assert raised.value.code == "MMC_PLAN_STALE"
 
 
 def _protocol_case(tmp_path, monkeypatch, *, verdict="FAIL", bad_master=False, read_error=False):
