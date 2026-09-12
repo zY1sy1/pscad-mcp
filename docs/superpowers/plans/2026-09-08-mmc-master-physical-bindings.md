@@ -22,14 +22,14 @@ survive planning, placement, save and reload.
   validate physical values against installed metadata before placement.
 - [x] Build and verify every direct binding in an independently owned PSCAD
   instance; keep a source-hashed report and test cleanup separately.
-- [ ] Feed audited binding evidence through the actual MMC planning/execution
+- [x] Feed audited binding evidence through the actual MMC planning/execution
   path; preserve injected test inventories while requiring real metadata for
   production use. Correct missing Master catalog entries and neutral wiring.
 - [ ] Replace the false scalar `master:dc_cable` reference with an explicitly
   modeled line assembly and split sending/receiving conductor nets. Line L/C
   and coupling must come from a declared physical profile or explicit input;
   the existing length/resistance-only request cannot imply arbitrary dynamics.
-- [ ] Implement the native average-arm companion with consistent capacitor
+- [x] Implement the native average-arm companion with consistent capacitor
   voltage normalization, signed energy flow, actual R/L/current measurements
   and a real blocked diode path. Do not use an open circuit as half-bridge
   blocking and do not label PWM as AVM.
@@ -54,9 +54,12 @@ must be explicit in the immutable normalized plan.
 - Cable constants: fresh native 100/300 km generation at `807502e`, with complete
   finite coefficient bodies and final fit records. Evidence directory:
   `D:/PSCAD-Workspace/mmc-cable-constants-20260908/verified-strict-frozen`.
-  Native cable assembly and electrical loop acceptance remain pending.
+  The original uncorrected fit failed long-duration DC-loop checks. A declared
+  DC-corrected profile and native 100/300 km loops passed on 2026-09-12; see
+  `docs/acceptance/mmc-component-closure-20260912.md` for reports and hashes.
 - Average arm: first native attempt at `807502e` exposed module parameter import
   and fixed-node naming defects. Its owned PID exited and evidence was retained
   at `D:/PSCAD-Workspace/mmc-average-arm-acceptance-20260908/attempt-20260908-174633-918404c6/report.json`.
-  Generator repairs and affected acceptance continue; this is not a physical
-  PASS or a complete-converter verdict.
+  Generator repairs and strict affected physical acceptance passed at `8054c69`.
+  This is component acceptance, not a complete-converter verdict. The updated
+  evidence document records the native graph reader and remaining integration.
