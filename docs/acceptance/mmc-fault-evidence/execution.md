@@ -384,3 +384,61 @@ now freezes the source Kp/Ti settings before first vendor save and records the
 actual controller Kp/Ti arguments at both terminals; the runner requires T1
 12/0.04 and T2 0.2/0.2 throughout the existing operating/fault/recovery span.
 The prior 0.08 recipe and its failed evidence remain separate.
+
+## Native Acceptance Closure
+
+The `86adfe0227e5914d01ff07fcad3f742c2aba8e21` Ti=.04 candidate first passed
+both steady windows in `fault-evidence-20260912T051237275810Z`. The complete
+run `fault-evidence-20260912T052440515065Z` then regenerated both steady and
+fault cases and passed all original checks. Its scope is
+`steady_and_dc_fault_recovery`; all four actual Kp/Ti checks passed in each
+case. Original source/support identities and owned-process cleanup passed.
+
+| Fault-case quantity | Before fault | Recovery |
+| --- | ---: | ---: |
+| T1 raw DC voltage, kV | 634.348761 | 638.801446 |
+| T2 raw DC voltage, kV | 622.491542 | 626.613476 |
+| T1 active input power, MW | 946.485243 | 947.992679 |
+| T2 active output power, MW, meter sign | -896.576339 | -899.982010 |
+
+The actual fault interval was 2.50025-2.70025 s. Fault current peaked at
+8.255083 kA against the fixed 20 kA bound. All twelve arms showed actual
+negative insertion; their individual minima ranged from -847.100822 to
+-324.844336 kV. Every blocking, fault application, current-bound and electrical
+recovery check passed; no failed check row was omitted. The two EMT runs
+took 191.109 and 190.578 s; total test time was 1005.33 s including build,
+full output reads, verification and cleanup.
+
+Static closure rechecked the original report and case records, both channel
+contracts, sample and output-index hashes, all 102 OUT/INF/INFX files, and
+both finalized project hashes after cleanup. Each case contains 312 bound
+channels. The accepted handoff lists the 56 mandatory physical/recovery
+bindings with observed metadata and sampling fields; the complete diagnostic
+bindings remain in the referenced frozen case contracts and samples.
+
+`channels-handoff.json` identifies the actual native producer revision above
+and the explicit `native_full_sort_dc_integral_004_v1` recipe. It includes the
+exact shared eight-step descriptor, original sources, unmodified physical
+checks, and steady/fault report, contract, output-index, samples and finalized
+project references. It uses the finalized contract/readback project hash,
+not the case's earlier pre-save `project_instrumented_sha256` field.
+The actual producer code bytes are preserved in the accepted run's
+`producer-code/` directory and match the original report's code hashes.
+
+`write_handoff.py` revalidates those identities and recomputes both verdicts
+before creating a handoff. It also rejects the earlier failed native report.
+The handoff scope is native template fault acceptance; it does not claim
+that separate public replay or A's strict timed-control joint run has passed.
+
+Public-service intake completed through A's 6748d0d (B's dfb6110) without
+importing the joint harness/timing code. A documentation-only conflict was
+resolved by identifying the retained joint history as A-worktree history.
+The focused post-intake suite passed 243 tests with 2 environment-dependent
+skips. The accepted native physics remains bound to 86adfe0 and its frozen
+producer files; the public intake is a separate software integration result.
+
+The full post-intake offline command `python -m pytest -q --tb=short`, with
+licensed opt-ins disabled, passed 2610 tests with 49 skips in 102.13 s.
+Handoff regeneration exactly matched the saved JSON. Negative publication
+checks rejected both the earlier failed full report and the steady-only PASS
+report before creating a handoff.
