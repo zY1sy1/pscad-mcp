@@ -122,7 +122,9 @@ def test_materialization_binds_exact_local_constants_and_keeps_source_receipts(a
     assert not root.findall(".//User[@defn='master:dc_cable']")
     assert not root.findall(".//User[@defn='master:resistor']")
     hierarchy = root.find("./hierarchy/call/call")
-    assert {item.get("name").rsplit(":", 1)[-1] for item in hierarchy} == {"Cable2", "MMCCableLink"}
+    assert {item.get("name").rsplit(":", 1)[-1] for item in hierarchy} == {"MMCCableLink"}
+    assert hierarchy.find("./call/call").get("name").endswith(":Cable2")
+    assert not root.findall("./definitions/Definition[@name='Main']/schematic/Wire[@classid='Cable']")
 
 
 @pytest.mark.parametrize("mutation", ["bypass", "swapped_poles", "extra_component"])

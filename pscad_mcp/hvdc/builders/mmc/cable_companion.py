@@ -259,7 +259,7 @@ def _materialize(destination, *, constants_evidence, source_project, master_path
         _set_parameter(wrapper, name, value)
     if _parameters(wrapper).get("gen_cnst") != "1":
         raise ValueError("Donor cable must use its external constants-file selection")
-    main.find("schematic").append(line)
+    module.find("schematic").append(line)
     sending_negative = "GND" if fixture else "SEND_NEG"
     writer.add(main, "cable_link", project_name + ":MMCCableLink", {}, {
         name: sending_negative if name == "SEND_NEG" else name for name in PORT_OFFSETS
@@ -297,9 +297,14 @@ def _materialize(destination, *, constants_evidence, source_project, master_path
                      "steady_window_s": [4.0, 5.0], "tolerances": TOLERANCES}
     writer.verify()
     hierarchy = root.find("./hierarchy/call/call")
-    for component, definition in ((line, "Cable2"), (link, "MMCCableLink")):
-        ET.SubElement(hierarchy, "call", {"link": component.get("id"), "name": project_name + ":" + definition,
-                                          "z": "10" if fixture and definition == "MMCCableLink" else "-1", "view": "false", "instance": "0"})
+    module_call = ET.SubElement(hierarchy, "call", {
+        "link": link.get("id"), "name": project_name + ":MMCCableLink",
+        "z": "10" if fixture else "-1", "view": "false", "instance": "0",
+    })
+    ET.SubElement(module_call, "call", {
+        "link": line.get("id"), "name": project_name + ":Cable2",
+        "z": "-1", "view": "false", "instance": "0",
+    })
     receipt = {
         "schema_version": 1, "scope": "native_two_conductor_cable_assembly", "project_name": project_name,
         "project_path": str(folder / (project_name + ".pscx")), "cable_name": constants["segment"],
@@ -366,7 +371,7 @@ def audit_cable_assembly(project_path, receipt: Mapping) -> dict:
     if Counter(item.get("defn") for item in components) != {"master:cable_interface": 2, "master:xnode": 4}:
         raise ValueError("Cable module contains unexpected native components")
     by_id = {item.get("id"): item for item in components}
-    wires = module.findall("./schematic/Wire")
+    wires = module.findall("./schematic/Wire[@classid='WireOrthogonal']")
     if len(wires) != 4 or {item.get("id") for item in wires} != {item["wire_id"] for item in receipt["module_wires"]}:
         raise ValueError("Cable module has a missing wire or an electrical bypass")
     for expected in receipt["module_wires"]:
@@ -383,7 +388,7 @@ def audit_cable_assembly(project_path, receipt: Mapping) -> dict:
                 or [int(interface.get("x")) - 18, int(interface.get("y")) + (54 if expected["native_port"] == "C2" else 0)] != vertices[1]
                 or any(values.get(key) != value for key, value in {"Name": receipt["cable_name"], "NCAB": "2", "C1T": "1", "C2T": "1", "send_recv": end_value, "dim_s": "0", "dim_r": "0", "pipe": "0"}.items())):
             raise ValueError("Cable end, phase ordering, or endpoint connection changed")
-    configurations = main.findall("./schematic/Wire[@classid='Cable']")
+    configurations = module.findall("./schematic/Wire[@classid='Cable']")
     if len(configurations) != 1 or configurations[0].get("defn") != receipt["project_name"] + ":Cable2":
         raise ValueError("Exactly one native cable configuration is required")
     values = _parameters(configurations[0].find("User"))
