@@ -125,6 +125,26 @@ def _module():
     return importlib.import_module("pscad_mcp.hvdc.builders.mmc.cable_constants")
 
 
+def test_dc_correction_final_record_supersedes_uncorrected_attempt():
+    tail = """Applying DC Correction
+Final Fit: Maximum Maximum Number Adjusted
+Fitting Error RMS Error of Poles Time Delays
+0.23840 % 0.08361 % 1 0.688799 ms
+Maximum Residue/Pole Ratio: 0.4929747E+00
+"""
+    log = _NATIVE_LOG.replace(" Line Constants Ending!", tail + " Line Constants Ending!")
+    fit = _module()._fit_errors(log)
+    assert fit["dc_correction_applied"] is True
+    assert fit["propagation_max_error_percent"] == pytest.approx(0.2384)
+    assert fit["attempts"][-1]["propagation_max_error_percent"] == pytest.approx(0.2369)
+    assert fit["max_residue_pole_ratio"] == pytest.approx(0.4929747)
+    for text in ("0.08361", "0.4929747E+00", "0.688799"):
+        with pytest.raises(RuntimeError):
+            _module()._fit_errors(log.replace(text, "NaN"))
+    with pytest.raises(RuntimeError):
+        _module()._fit_errors(log.replace("Maximum Residue/Pole Ratio: 0.4929747E+00", ""))
+
+
 def _component(parent, definition, parameters):
     component = ET.SubElement(parent, "User", {"defn": f"master:{definition}"})
     values = ET.SubElement(component, "paramlist")

@@ -216,6 +216,48 @@ def test_analyzer_accepts_a_complete_passive_dc_loop_and_rejects_a_short_cable()
     assert "dc_current" in failed["failed_checks"]
 
 
+def test_dc_corrected_reference_agrees_with_independent_resistive_ladder():
+    import numpy as np
+
+    count = 101
+    nodes = count * 2
+    matrix = np.zeros((nodes + 1, nodes + 1))
+    rhs = np.zeros(nodes + 1)
+    resistance, length_m, shunt, load = 49.7947787928, 300000.0, 1e-10, 100.0
+
+    def branch(a, b, conductance):
+        matrix[a, a] += conductance
+        matrix[b, b] += conductance
+        matrix[a, b] -= conductance
+        matrix[b, a] -= conductance
+
+    for pole in (0, count):
+        for index in range(count - 1):
+            branch(pole + index, pole + index + 1, 2 * (count - 1) / resistance)
+        for index in range(count):
+            weight = 0.5 if index in (0, count - 1) else 1.0
+            matrix[pole + index, pole + index] += shunt * length_m / (count - 1) * weight
+    branch(count - 1, nodes - 1, 1 / load)
+    matrix[count, count] += 1 / 0.01
+    matrix[0, nodes] = matrix[nodes, 0] = 1
+    matrix[count, nodes] = matrix[nodes, count] = -1
+    rhs[nodes] = 10
+    voltage = np.linalg.solve(matrix, rhs)
+    sending = -float(voltage[nodes])
+    receiving_v = float(voltage[count - 1] - voltage[nodes - 1])
+    trace = {"time": [i * 0.01 for i in range(501)], "I_SEND": [sending] * 501,
+             "I_RETURN": [receiving_v / load] * 501, "V_SEND": [10.0] * 501,
+             "V_RECV": [receiving_v] * 501}
+    reference = {"source_voltage_kv": 10, "load_resistance_ohm": load,
+                 "loop_dc_resistance_ohm": resistance, "length_km": 300,
+                 "shunt_conductance_s_per_m": shunt, "ground_reference_ohm": 0.01,
+                 "duration_s": 5, "output_step_s": 0.01, "steady_window_s": [4, 5]}
+    result = _module().analyze_cable_loop(trace, reference)
+    assert result["status"] == "PASS"
+    assert result["expected_dc_current_ka"] == pytest.approx(sending, rel=1e-5)
+    assert result["expected_return_current_ka"] == pytest.approx(receiving_v / load, rel=1e-5)
+
+
 @pytest.mark.parametrize("mutation", ["missing", "nonfinite", "time", "return"])
 def test_analyzer_rejects_incomplete_or_nonphysical_trace(mutation):
     module = _module()

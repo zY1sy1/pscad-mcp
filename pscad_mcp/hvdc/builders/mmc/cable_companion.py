@@ -20,6 +20,7 @@ from .avm_companion import _paramlist, _project, _write_new, _Writer
 from .cable_constants import (
     _coefficient_structure,
     _fit_errors,
+    apply_cable_fitting_profile,
     extract_cable_configuration,
     parse_cable_phase_output,
     render_cable_cli,
@@ -91,6 +92,7 @@ def _verified_constants(evidence: Path, source: Path, master: Path):
     if report.get("status") != "PASS" or report.get("returncode") != 0 or report.get("scope") != "native_cable_line_constants_only":
         raise ValueError("A passing native cable-constants receipt is required")
     model = extract_cable_configuration(source, master_path=master)
+    model = apply_cable_fitting_profile(model, report.get("fitting_profile", "source"))
     if _canonical(report.get("configuration")) != _canonical(model.to_dict()):
         raise ValueError("Cable receipt does not describe the supplied immutable source geometry")
     source_hashes = report.get("source_hashes_before", {})
@@ -125,6 +127,8 @@ def _verified_constants(evidence: Path, source: Path, master: Path):
         raise ValueError("Native cable input does not match the source geometry, length, or frequency")
     coefficients = _coefficient_structure(files["constants"].read_text(encoding="ascii"), conductors=2, options=model.options)
     fit = _fit_errors(files["log"].read_text(encoding="utf-8"))
+    if bool(fit.get("dc_correction_applied")) != bool(model.options["DCenab"]):
+        raise ValueError("Cable DC correction differs from the declared profile")
     phase = parse_cable_phase_output(files["output"].read_text(encoding="ascii"), conductors=2, reference_frequency_hz=frequency)
     for key, observed in (("coefficient_structure", coefficients), ("fit_record", fit), ("phase_data", phase.to_dict())):
         if _canonical(report.get(key)) != _canonical(observed):
@@ -245,6 +249,16 @@ def _materialize(destination, *, constants_evidence, source_project, master_path
     configuration = source_root.find(f".//Wire[@classid='Cable'][@defn='{source_root.get('name')}:Cable2']")
     if row is None or configuration is None or row.findall(".//script"):
         raise ValueError("The donor lacks the supported native cable geometry/configuration")
+    original_row_hash = _xml_sha(row)
+    row = copy.deepcopy(row)
+    options = row.find(".//User[@defn='master:Line_FrePhase_Options']")
+    for name in ("DCenab", "DCCOR", "ECLS", "shntcab"):
+        if name in model.options:
+            parameter = options.find(f"./paramlist/param[@name='{name}']")
+            if parameter is None:
+                ET.SubElement(options.find("paramlist"), "param", {"name": name, "value": str(model.options[name])})
+            else:
+                parameter.set("value", str(model.options[name]))
     root = _project(project_name, library=False)
     root.find("definitions").append(copy.deepcopy(row))
     module, interface_receipts, module_wires = _module_definition(root, source_root, constants["segment"])
@@ -293,6 +307,8 @@ def _materialize(destination, *, constants_evidence, source_project, master_path
                             "PlotType": "1", "StartType": "0", "output_filename": project_name + ".out"}.items():
             settings.find(f"param[@name='{name}']").set("value", value)
         reference = {"source_voltage_kv": 10.0, "load_resistance_ohm": 100.0,
+                     "shunt_conductance_s_per_m": model.options.get("shntcab", 0.0),
+                     "length_km": constants["length_km"], "ground_reference_ohm": 0.01,
                      "loop_dc_resistance_ohm": constants["loop_dc_resistance_ohm"],
                      "dc_current_ka": 10.0 / (100.0 + constants["loop_dc_resistance_ohm"]),
                      "duration_s": 300.0, "output_step_s": 4000e-6, "time_step_s": 20e-6,
@@ -314,7 +330,8 @@ def _materialize(destination, *, constants_evidence, source_project, master_path
         "constants_sha256": constants["constants_sha256"], "constants_receipt_path": str(evidence),
         "constants_receipt_sha256": _sha(evidence), "loop_dc_resistance_ohm": constants["loop_dc_resistance_ohm"],
         "source_hashes_before": input_hashes, "terminals": terminals, "module_wires": module_wires,
-        "source_definition_receipts": {"Cable2": _xml_sha(row), "configuration": _xml_sha(configuration), "interfaces": interface_receipts},
+        "source_definition_receipts": {"Cable2": original_row_hash, "configuration": _xml_sha(configuration), "interfaces": interface_receipts},
+        "fitting_profile": constants.get("fitting_profile", "source"),
         "geometry_semantics_sha256": _geometry_sha(row),
         "shell_sha256": hashlib.sha256(resources.files("pscad_mcp").joinpath("assets/templates/empty_case.pscx").read_bytes()).hexdigest(),
         "electrical_nets": {name: dict(nets) for name, nets in writer.nets.items()}, "routes": writer.routes,
@@ -444,20 +461,39 @@ def analyze_cable_loop(trace: Mapping, reference: Mapping) -> dict:
         load = _positive(reference["load_resistance_ohm"], "load_resistance_ohm")
         resistance = _positive(reference["loop_dc_resistance_ohm"], "loop_dc_resistance_ohm")
         expected_current = voltage / (load + resistance)
+        expected_return = expected_current
+        expected_receiving_voltage = load * expected_return
+        shunt = reference.get("shunt_conductance_s_per_m", 0.0)
+        if isinstance(shunt, bool) or not math.isfinite(shunt) or shunt < 0:
+            raise ValueError("Cable shunt conductance must be finite and nonnegative")
+        if shunt:
+            length_m = _positive(reference["length_km"], "length_km") * 1000
+            r = resistance / (2 * length_m)
+            theta = math.sqrt(r * shunt) * length_m
+            z = math.sqrt(r / shunt)
+            a, b, c = math.cosh(theta), 2 * z * math.sinh(theta), math.sinh(theta) / (2 * z)
+            expected_receiving_voltage = voltage / (a + b / load)
+            expected_return = expected_receiving_voltage / load
+            common_admittance = math.tanh(theta) / z
+            grounding = _positive(reference["ground_reference_ohm"], "ground_reference_ohm")
+            common_voltage = voltage / (2 * (1 + 2 * grounding * common_admittance))
+            expected_current = c * expected_receiving_voltage + a * expected_return + common_admittance * common_voltage
+        expected_loss = voltage * expected_current - expected_receiving_voltage * expected_return
         samples = {name: [trace[name][index] for index in indexes] for name in CHANNEL_UNITS}
         means = {name: fmean(values) for name, values in samples.items()}
         relative = {
             "dc_current": max(abs(value - expected_current) for value in samples["I_SEND"]) / expected_current,
             "source_voltage": max(abs(value - voltage) for value in samples["V_SEND"]) / voltage,
-            "kcl": max(abs(left - right) for left, right in zip(samples["I_SEND"], samples["I_RETURN"])) / expected_current,
+            "kcl": max(abs(left - right - (expected_current - expected_return)) for left, right in zip(samples["I_SEND"], samples["I_RETURN"])) / expected_current,
             "load_ohm": max(abs(v - load * i) for v, i in zip(samples["V_RECV"], samples["I_RETURN"])) / voltage,
-            "dc_loss": max(abs(vs * ins - vr * ir - ins**2 * resistance) for vs, ins, vr, ir in
+            "dc_loss": max(abs(vs * ins - vr * ir - expected_loss) for vs, ins, vr, ir in
                            zip(samples["V_SEND"], samples["I_SEND"], samples["V_RECV"], samples["I_RETURN"])) / (voltage * expected_current),
             "steady_ripple": (max(samples["I_SEND"]) - min(samples["I_SEND"])) / expected_current,
         }
         result["checks"] = {name: {"passed": value <= TOLERANCES[name], "observed_relative": value, "limit": TOLERANCES[name]} for name, value in relative.items()}
         result["failed_checks"] = [name for name, value in result["checks"].items() if not value["passed"]]
         result.update(measurement_complete=True, means=means, expected_dc_current_ka=expected_current,
+                      expected_return_current_ka=expected_return, expected_loss_mw=expected_loss,
                       observed_loop_resistance_ohm=(means["V_SEND"] - means["V_RECV"]) / means["I_SEND"] if means["I_SEND"] != 0 else None)
         result["status"] = "FAIL" if result["failed_checks"] else "PASS"
     except (KeyError, TypeError, ValueError) as error:

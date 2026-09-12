@@ -14,7 +14,7 @@ import os
 import re
 import subprocess
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from itertools import pairwise
 from pathlib import Path
@@ -39,6 +39,24 @@ _OPTION_FIELDS = (
     "AMaxP", "AMaxE", "MaxRPtol", "W1", "W2", "W3", "CPASS", "DCenab",
 )
 _DISPLAY_FIELDS = ("DataF", "Zero_Tol", "Vbase", "MVAbase", "picomp")
+
+
+def apply_cable_fitting_profile(configuration, profile="source"):
+    """Keep donor geometry immutable while recording explicit DC fit settings."""
+    if profile == "source":
+        return configuration
+    if profile != "dc_corrected_v1":
+        raise ValueError(f"Unknown cable fitting profile: {profile}")
+    root = ET.parse(configuration.master_path)
+    definition = root.find("./definitions/Definition[@name='Line_FrePhase_Options']")
+    segment = definition.find("./script/segment[@name='Model-Data']")
+    for token in ("DC Correction Type = $DCCOR", "Eliminate Error at High Frequency = $ECLS", "Cable Shunt Conductance = $shntcab"):
+        if token not in (segment.text or ""):
+            raise ValueError("Master DC correction directive changed")
+    return replace(configuration, options=MappingProxyType({
+        **configuration.options, "DCenab": 1, "DCCOR": 1, "ECLS": 1,
+        "shntcab": 1e-10,
+    }))
 
 
 def _sha256(path: Path) -> str:
@@ -307,9 +325,13 @@ def render_cable_cli(
         ("Weighting Factor 1", "W1"), ("Weighting Factor 2", "W2"),
         ("Weighting Factor 3", "W3"), ("Write Detailed Output Files", "Output"),
     )
-    lines.extend(_section("Frequency Dep. (Phase) Model Options", [
-        (label, _format(configuration.options[key])) for label, key in option_labels
-    ]))
+    option_values = [(label, _format(configuration.options[key])) for label, key in option_labels]
+    if configuration.options["DCenab"]:
+        option_values.extend((label, _format(configuration.options[key])) for label, key in (
+            ("DC Correction Type", "DCCOR"), ("Eliminate Error at High Frequency", "ECLS"),
+            ("Cable Shunt Conductance", "shntcab"),
+        ))
+    lines.extend(_section("Frequency Dep. (Phase) Model Options", option_values))
     ground_labels = (
         ("Ground Resistivity Type", "GrRho"), ("GroundResistivity", "GRRES"),
         ("GroundPermeability", "GPERM"), ("EarthImpedanceFormula", "EarthForm2"),
@@ -504,6 +526,25 @@ def _fit_errors(log: str) -> dict[str, object]:
     yc_row = match(rf"({_NUMBER}) % (\d+)", yc[4], "admittance fit row")
     yc_error, yc_poles = number(yc_row[1], "admittance error"), int(yc_row[2])
     h = lines[h_start + 1:]
+    correction = None
+    if "Applying DC Correction" in h:
+        correction_start = h.index("Applying DC Correction")
+        corrected = h[correction_start:]
+        h = h[:correction_start]
+        if len(corrected) != 5 or corrected[1:3] != [
+            "Final Fit: Maximum Maximum Number Adjusted",
+            "Fitting Error RMS Error of Poles Time Delays",
+        ]:
+            fail("has an incomplete DC-corrected final fit")
+        row = match(rf"({_NUMBER}) % ({_NUMBER}) % (\d+) ({_NUMBER}) ms", corrected[3], "DC-corrected row")
+        ratio = match(rf"Maximum Residue/Pole Ratio: ({_NUMBER})", corrected[4], "DC-corrected residue/pole ratio")
+        correction = {
+            "propagation_max_error_percent": number(row[1], "corrected maximum error"),
+            "propagation_rms_error_percent": number(row[2], "corrected RMS error"),
+            "max_residue_pole_ratio": number(ratio[1], "corrected residue/pole ratio"),
+            "delay_groups": [{"group": 1, "max_error_percent": number(row[1], "corrected group error"),
+                              "poles": int(row[3]), "time_delay_s": number(row[4], "corrected delay", positive=True) * 0.001}],
+        }
     if len(h) < 3:
         fail("has no complete propagation attempt")
     h_limit = number(match(rf"Maximum Fitting Error Requested: ({_NUMBER}) %", h[0], "propagation limit")[1], "propagation limit", positive=True)
@@ -544,11 +585,14 @@ def _fit_errors(log: str) -> dict[str, object]:
             "propagation_max_error_percent": maximum, "propagation_rms_error_percent": rms,
             "max_residue_pole_ratio": ratio,
         })
+    if correction is not None and not 1 <= correction["delay_groups"][0]["poles"] <= h_pole_limit:
+        fail("has invalid corrected pole counts")
     return {
         "admittance_max_error_percent": yc_error, "admittance_poles": yc_poles,
         "admittance_requested_error_percent": yc_limit, "admittance_pole_limit": yc_pole_limit,
         "propagation_requested_error_percent": h_limit, "propagation_pole_limit": h_pole_limit,
         **attempts[-1], "attempt_count": len(attempts), "attempts": attempts,
+        **({"dc_correction_applied": True, **correction} if correction is not None else {}),
     }
 
 
@@ -589,10 +633,12 @@ def generate_public_cable_constants(
     lengths_km: Sequence[float] = (100.0,),
     reference_frequency_hz: float = 50.0,
     timeout_s: float = 300.0,
+    fitting_profile: str = "source",
 ) -> tuple[CableConstantsArtifact, ...]:
     """Run fresh, isolated .cli/.clo cases and preserve success or failure evidence."""
 
     model = extract_cable_configuration(project_path, master_path=master_path, definition_name=definition_name)
+    model = apply_cable_fitting_profile(model, fitting_profile)
     lengths = tuple(_positive(length, "length_km") for length in lengths_km)
     if not lengths or len(set(lengths)) != len(lengths):
         raise ValueError("Cable target lengths must be non-empty and unique")
@@ -623,6 +669,7 @@ def generate_public_cable_constants(
             "status": "FAIL", "scope": "native_cable_line_constants_only",
             "created_at": datetime.now(timezone.utc).isoformat(),
             "implementation_sha256": _sha256(Path(__file__)),
+            "fitting_profile": fitting_profile,
             "configuration": model.to_dict(), "length_km": length,
             "reference_frequency_hz": frequency, "command": list(command),
             "source_hashes_before": source_hashes,
@@ -644,6 +691,8 @@ def generate_public_cable_constants(
             if "Unknown Data Line Ignored" in log_text:
                 raise RuntimeError("Native cable input contains ignored data")
             fit = _fit_errors(log_text)
+            if bool(fit.get("dc_correction_applied")) != bool(model.options["DCenab"]):
+                raise RuntimeError("Cable DC-correction evidence differs from the requested profile")
             for field, source in (("admittance_requested_error_percent", "YMaxE"),
                                   ("propagation_requested_error_percent", "AMaxE"),
                                   ("admittance_pole_limit", "YMaxP"), ("propagation_pole_limit", "AMaxP")):
