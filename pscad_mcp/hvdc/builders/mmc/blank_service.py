@@ -96,7 +96,7 @@ def _recipe_contract(name: str) -> dict[str, Any]:
     steps.append({"name": "fault_instrumentation", "parameters": {}})
     return {"schema_version": 1, "name": name, "parameters": parameters, "steps": steps,
             "physical_acceptance_verified": False, "fault_recovery_status": "pending",
-            "producer_code_hashes": {module: _identity(Path(__file__).with_name(module + ".py")) for module in ("fault_channels", "template_native")}}
+            "producer_code_hashes": {module: _identity(Path(__file__).with_name(module + ".py")) for module in ("fault_channels", "template_native", "blank_service")}}
 
 
 def _error(code: str, message: str, operation: str, **details: Any) -> BackendError:
@@ -717,6 +717,8 @@ def _verify_frozen_plan(plan: Mapping[str, Any]) -> None:
 
 def _verify_plan_inputs(plan: Mapping[str, Any], audit_loader: Callable[..., Any]) -> None:
     _verify_frozen_plan(plan)
+    if set(plan["model_recipe"].get("producer_code_hashes", {})) != {"fault_channels", "template_native", "blank_service"}:
+        raise _error("MMC_PLAN_STALE", "The plan does not freeze every model-recipe producer.", "build_blank_mmc_model")
     for identity in plan["model_recipe"]["producer_code_hashes"].values():
         if _identity(Path(identity["path"])) != identity:
             raise _error("MMC_PLAN_STALE", "A model-recipe producer changed after planning.", "build_blank_mmc_model", expected=identity)
