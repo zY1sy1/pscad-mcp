@@ -287,14 +287,14 @@ def _materialize(destination, *, constants_evidence, source_project, master_path
                 "Display": "1", "Scale": "1.0", "mrun": "0", "Pol": "0", "Max": "20.0", "Min": "-20.0",
             }, {"Signl": name})
         settings = root.find("./paramlist[@name='Settings']")
-        for name, value in {"time_duration": "5", "time_step": "20", "sample_step": "100",
+        for name, value in {"time_duration": "20", "time_step": "20", "sample_step": "250",
                             "PlotType": "1", "StartType": "0", "output_filename": project_name + ".out"}.items():
             settings.find(f"param[@name='{name}']").set("value", value)
         reference = {"source_voltage_kv": 10.0, "load_resistance_ohm": 100.0,
                      "loop_dc_resistance_ohm": constants["loop_dc_resistance_ohm"],
                      "dc_current_ka": 10.0 / (100.0 + constants["loop_dc_resistance_ohm"]),
-                     "duration_s": 5.0, "output_step_s": 100e-6, "time_step_s": 20e-6,
-                     "steady_window_s": [4.0, 5.0], "tolerances": TOLERANCES}
+                     "duration_s": 20.0, "output_step_s": 250e-6, "time_step_s": 20e-6,
+                     "steady_window_s": [19.0, 20.0], "tolerances": TOLERANCES}
     writer.verify()
     hierarchy = root.find("./hierarchy/call/call")
     module_call = ET.SubElement(hierarchy, "call", {
