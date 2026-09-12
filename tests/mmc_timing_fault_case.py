@@ -26,6 +26,7 @@ from pscad_mcp.hvdc.builders.mmc.blank_service import (
     BlankMmcBuilderService,
     _copy_frozen,
     _identity,
+    _materialize_native_mmc_case,
     _stage_dependencies,
     _verify_copies,
     _verify_plan_inputs,
@@ -35,8 +36,6 @@ from pscad_mcp.hvdc.builders.mmc.blank_service import (
 from pscad_mcp.hvdc.builders.mmc.fault_channels import (
     default_fault_checks,
     finalize_fault_instrumentation,
-    instrument_fault_channels,
-    materialize_terminal_two_charging,
     reachable_instances,
     read_fault_output_dataset,
     verify_fault_instrumentation,
@@ -49,7 +48,6 @@ from pscad_mcp.hvdc.builders.mmc.template_audit import (
 )
 from pscad_mcp.hvdc.builders.mmc.template_native import (
     evaluate_template_native_dc_fault,
-    materialize_template_native_scenario,
 )
 
 
@@ -148,7 +146,7 @@ def _rebind_fault_contract(contract, schedule, project):
 
 
 async def prepare_joint_case(
-    workspace, *, source=None, library=None, master=None, a_handoff=None
+    workspace, *, source=None, library=None, master=None, a_handoff=None, model_recipe="raw"
 ):
     root = Path(workspace).resolve()
     if root.exists():
@@ -164,7 +162,7 @@ async def prepare_joint_case(
             "project_name": "JointFaultCase",
             "template_path": str(source),
             "library_path": str(library),
-            "parameterization": {"master_path": str(master), "model_recipe": "raw"},
+            "parameterization": {"master_path": str(master), "model_recipe": model_recipe},
         }
     )
     a_handoff = (
@@ -202,39 +200,14 @@ async def prepare_joint_case(
         staged, staged_library = await _stage_dependencies(
             public_plan, root, bundle, preparation
         )
-        native = root / "NativeFault.pscx"
-        preparation["lineage"].append(
-            {
-                "stage": "native_fault",
-                **materialize_template_native_scenario(
-                    staged, native, dc_fault_time_s=2.5, fault_duration_s=0.2
-                ),
-            }
-        )
-        corrected = root / "CorrectedFault.pscx"
-        preparation["lineage"].append(
-            {
-                "stage": "terminal_two_charging",
-                **materialize_terminal_two_charging(native, corrected),
-            }
-        )
         instrumented = root / "FaultInstrumented.pscx"
-        parent = instrument_fault_channels(
-            corrected,
-            instrumented,
-            library=staged_library,
-            master=master,
-            expected_source_hashes={
-                "project": _identity(corrected)["sha256"],
-                "library": public_plan["source_identities"]["library"]["sha256"],
-                "master": public_plan["source_identities"]["master"]["sha256"],
-            },
-        )
+        parent = _materialize_native_mmc_case(public_plan, staged, staged_library, root, instrumented, preparation)
+        recipe_source = Path(parent["source_hashes"]["project"]["path"])
         preparation["lineage"].append(
             {
                 "stage": "fault_instrumentation",
-                "source": str(corrected),
-                "source_sha256": _identity(corrected)["sha256"],
+                "source": str(recipe_source),
+                "source_sha256": _identity(recipe_source)["sha256"],
                 "destination": str(instrumented),
                 "destination_sha256": _identity(instrumented)["sha256"],
                 "channel_contract_sha256": _digest(parent),
@@ -253,7 +226,7 @@ async def prepare_joint_case(
         sources = {
             **public_plan["source_identities"],
             "fault_instrumented": _identity(instrumented),
-            "corrected_fault": _identity(corrected),
+            "fault_recipe_source": _identity(recipe_source),
             "a_schedule_handoff": parent_a["file"],
         }
         schedule = timed_control.plan_embedded_control(
@@ -509,8 +482,9 @@ async def evaluate_joint_dataset(
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--workspace", type=Path, required=True)
+    parser.add_argument("--model-recipe", choices=tuple(blank_service._MODEL_RECIPES), default="raw")
     args = parser.parse_args()
-    result = asyncio.run(prepare_joint_case(args.workspace))
+    result = asyncio.run(prepare_joint_case(args.workspace, model_recipe=args.model_recipe))
     print(
         json.dumps(
             {

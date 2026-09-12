@@ -37,7 +37,7 @@ def joint_case(tmp_path_factory):
     root = tmp_path_factory.mktemp("joint_contract") / "case"
     return asyncio.run(
         _harness().prepare_joint_case(
-            root, source=source, library=library, master=master
+            root, source=source, library=library, master=master, model_recipe="native_full_sort_v1"
         )
     )
 
@@ -49,6 +49,8 @@ def test_joint_preparation_preserves_originals_and_separates_command_from_fault(
     harness.verify_joint_preparation(joint_case)
     assert joint_case["scope"] == "offline_joint_contract"
     assert joint_case["physical_acceptance_verified"] is False
+    assert joint_case["public_plan"]["model_recipe"]["name"] == "native_full_sort_v1"
+    assert any(item["stage"] == "complete_arm_sorting" for item in joint_case["lineage"])
     assert joint_case["checks"] == default_fault_checks()
     schedule = joint_case["schedule"]
     assert (
