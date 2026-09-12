@@ -63,6 +63,24 @@ def _code():
     return snapshot
 
 
+def runtime_constants_receipt(executable, fixture):
+    folder = Path(executable["path"]).parent
+    references = []
+    for data in folder.glob("*.dta"):
+        for line in data.read_text(encoding="utf-8").splitlines():
+            fields = line.split()
+            if fields and fields[0] == "TLINE-OUTPUT-DATA":
+                if len(fields) != 2 or fields[1] != Path(fixture["constants_path"]).name:
+                    raise ValueError("Native runtime references unexpected cable constants")
+                references.append((data, folder / fields[1]))
+    if len(references) != 1:
+        raise ValueError("Exactly one native runtime cable-constants binding is required")
+    data, constants = references[0]
+    if constants.is_symlink() or not constants.is_file() or _sha256(constants) != fixture["constants_sha256"]:
+        raise ValueError("Native runtime cable constants differ from verified evidence")
+    return {str(data): _sha256(data), str(constants): _sha256(constants)}
+
+
 async def run_attempt(args, run_dir, *, service_factory=_service):
     _optins()
     report_path = run_dir / "report.json"
@@ -156,6 +174,9 @@ async def run_attempt(args, run_dir, *, service_factory=_service):
         _require_no_errors(report["compile_messages"])
         executable = fresh_project_executable(project, started)
         report["fresh_executable"] = executable
+        runtime_constants = runtime_constants_receipt(executable, receipt)
+        report["runtime_constants"] = runtime_constants
+        finalized.update(runtime_constants)
         before_run = run_dir / "before-run.exe"
         shutil.copy2(executable["path"], before_run)
         if _sha256(before_run) != executable["sha256"]:
