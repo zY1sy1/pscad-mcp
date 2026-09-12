@@ -164,6 +164,18 @@ def test_full_sort_recipe_is_explicit_ordered_and_still_requires_fault_acceptanc
     assert set(recipe["producer_code_hashes"]) == {"fault_channels", "template_native", "blank_service"}
 
 
+def test_integral_candidate_has_a_new_recipe_identity_without_changing_full_sort_v1(tmp_path):
+    service, request, *_ = _plan_case(tmp_path)
+    old = service.plan_model({**request.to_dict(), "parameterization": {"model_recipe": "native_full_sort_v1"}})
+    candidate = service.plan_model({**request.to_dict(), "parameterization": {"model_recipe": "native_full_sort_dc_integral_004_v1"}})
+    assert "t1_dc_integral_time_s" not in old["model_recipe"]["parameters"]
+    assert candidate["model_recipe"]["parameters"]["t1_dc_integral_time_s"] == 0.04
+    assert candidate["model_recipe"]["steps"][-2] == {"name": "voltage_control_integral_time", "parameters": {"time_constant_s": 0.04}}
+    assert candidate["model_recipe"]["physical_acceptance_verified"] is False
+    assert candidate["checks_contract"] == old["checks_contract"] == default_fault_checks()
+    assert candidate["plan_hash"] != old["plan_hash"]
+
+
 @pytest.mark.parametrize("drift", ["changed_producer", "missing_producer"])
 def test_recipe_execution_requires_the_frozen_materializer_producer(tmp_path, monkeypatch, drift):
     service, request, *_ = _plan_case(tmp_path)
@@ -347,7 +359,8 @@ def test_public_runtime_master_must_match_planned_identity_before_staging(tmp_pa
     assert not Path(plan["staging_path"]).exists()
 
 
-def test_public_full_sort_recipe_materializes_every_declared_step(tmp_path, monkeypatch):
+@pytest.mark.parametrize("recipe", ["native_full_sort_v1", "native_full_sort_dc_integral_004_v1"])
+def test_public_full_sort_recipe_materializes_every_declared_step(tmp_path, monkeypatch, recipe):
     service, request, calls, *_ = _protocol_case(tmp_path, monkeypatch)
 
     def callback(name):
@@ -357,9 +370,9 @@ def test_public_full_sort_recipe_materializes_every_declared_step(tmp_path, monk
             return {"source": str(origin), "source_sha256": blank_service._sha256(Path(origin)), "destination": str(destination), "destination_sha256": blank_service._sha256(Path(destination)), "parameters": kwargs and {key: str(value) for key, value in kwargs.items()}}
         return materialize
 
-    for name in ("materialize_voltage_control_headroom", "materialize_dc_feedback_filter", "materialize_terminal_two_carrier", "materialize_arm_virtual_resistance", "materialize_complete_arm_sorting"):
+    for name in ("materialize_voltage_control_headroom", "materialize_dc_feedback_filter", "materialize_terminal_two_carrier", "materialize_arm_virtual_resistance", "materialize_complete_arm_sorting", "materialize_voltage_control_integral_time"):
         monkeypatch.setattr(blank_service, name, callback(name), raising=False)
-    request = {**request.to_dict(), "parameterization": {"model_recipe": "native_full_sort_v1"}}
+    request = {**request.to_dict(), "parameterization": {"model_recipe": recipe}}
     plan = service.plan_model(request)
 
     async def exercise():
@@ -370,7 +383,10 @@ def test_public_full_sort_recipe_materializes_every_declared_step(tmp_path, monk
     record = asyncio.run(exercise())
     assert record["state"] == "failed"
     assert record["error"]["code"] == "MMC_ACCEPTANCE_FAILED"
-    assert [item["stage"] for item in record["lineage"]] == ["native_fault", "terminal_two_charging", "headroom", "dc_feedback_filter", "terminal_two_carrier", "arm_virtual_resistance", "complete_arm_sorting"]
+    expected = ["native_fault", "terminal_two_charging", "headroom", "dc_feedback_filter", "terminal_two_carrier", "arm_virtual_resistance", "complete_arm_sorting"]
+    if recipe == "native_full_sort_dc_integral_004_v1":
+        expected.append("voltage_control_integral_time")
+    assert [item["stage"] for item in record["lineage"]] == expected
     assert calls.index("materialize_complete_arm_sorting") < calls.index("instrument")
 
 
