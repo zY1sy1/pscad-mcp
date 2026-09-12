@@ -93,9 +93,19 @@ def _checks():
 
 def _steady(samples, contract, checks=None):
     checks = checks or contract.get("required_checks", {})
-    if not checks:
+    if not checks or any(key not in checks for key in ("prefault_window_s", "recovery_window_s")):
         return {"verdict": "INCOMPLETE_ANALYSIS", "checks": [], "reason": "frozen steady checks are missing"}
-    window = checks["recovery_window_s"]
+    rows = []
+    windows = []
+    for name, key in (("prefault_readiness", "prefault_window_s"), ("settled", "recovery_window_s")):
+        result = _steady_window(samples, contract, checks, checks[key])
+        rows.extend({**row, "window_name": name, "window_s": checks[key]} for row in result["checks"])
+        windows.append({"name": name, "window_s": checks[key], "verdict": result["verdict"], **({"reason": result["reason"]} if "reason" in result else {})})
+    verdict = "INCOMPLETE_ANALYSIS" if any(item["verdict"] == "INCOMPLETE_ANALYSIS" for item in windows) else "PASS" if all(item["verdict"] == "PASS" for item in windows) else "FAIL"
+    return {"verdict": verdict, "checks": rows, "windows": windows}
+
+
+def _steady_window(samples, contract, checks, window):
     frequency = checks["frequency_hz"]
     cycle_count = round((window[1] - window[0]) * frequency)
     modulation = [item for item in contract.get("diagnostic_channels", []) if item["role"] == "modulation_request"]

@@ -912,6 +912,29 @@ def test_steady_requires_all_twelve_modulation_bindings_and_samples(missing):
     assert result["verdict"] == "INCOMPLETE_ANALYSIS"
 
 
+@pytest.mark.parametrize("ready", [True, False])
+def test_steady_gate_checks_existing_prefault_readiness_window(ready):
+    from tests.test_mmc_fault_evidence_real import _steady
+    samples, contract, checks = fault_fixture()
+    frozen_checks = copy.deepcopy(checks)
+    for channel in samples["channels"]:
+        channel["channel_id"] = channel["description"]
+        if channel["channel_id"] == "v_cap" and not ready:
+            lo, hi = checks["prefault_window_s"]
+            channel["values"] = [607.8 if lo <= instant <= hi else value for instant, value in zip(channel["domain"], channel["values"])]
+    result = _steady(samples, contract, checks)
+    assert result["verdict"] == ("PASS" if ready else "FAIL")
+    cap_rows = [row for row in result["checks"] if row["channel_id"] == "v_cap"]
+    assert len(cap_rows) == 2
+    before = next(row for row in cap_rows if row["window_name"] == "prefault_readiness")
+    after = next(row for row in cap_rows if row["window_name"] == "settled")
+    assert before["window_s"] == checks["prefault_window_s"]
+    assert before["passed"] is ready
+    assert after["window_s"] == checks["recovery_window_s"]
+    assert after["passed"] is True
+    assert checks == frozen_checks
+
+
 def test_fault_evaluation_requires_requested_modulation_coverage():
     samples, contract, checks = fault_fixture()
     checks.update(require_modulation_evidence=True, modulation_abs_limit=2.0)
