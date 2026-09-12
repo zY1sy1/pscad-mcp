@@ -225,7 +225,7 @@ async def run_attempt(args, run_dir, *, service_factory=_service):
                 )
                 native = await bounded(service.backend._project(project_name))
                 report["native_output"] = await bounded(
-                    service.backend.executor.run_safe(native.output, timeout=args.timeout)
+                    service.backend.executor.run_safe(native.get_output_text, timeout=args.timeout)
                 )
             except BaseException as error:
                 report["diagnostic_error"] = _error(error)
