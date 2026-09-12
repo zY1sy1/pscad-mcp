@@ -127,7 +127,7 @@ def test_replay_save_allows_only_verified_virtual_root_rebinding(tmp_path, chang
         assert replay._verify_replay_saved_model(original, saved, contract) is True
 
 
-@pytest.mark.parametrize("changed", [None, "python_pid", "checks_sha256", "copied_bundle_hashes", "parent_channel_contract_sha256", "replay_saved_model_verified", "copied_dependency", "supplemental_missing", "supplemental_other_dataset", "supplemental_valid"])
+@pytest.mark.parametrize("changed", [None, "python_pid", "checks_sha256", "copied_bundle_hashes", "parent_channel_contract_sha256", "replay_saved_model_verified", "copied_dependency", "supplemental_missing", "supplemental_other_dataset", "supplemental_alias", "supplemental_valid"])
 def test_replay_supervisor_requires_complete_matching_worker_evidence(tmp_path, monkeypatch, changed):
     monkeypatch.setenv("PSCAD_MCP_MMC_ACCEPTANCE", "1")
     arguments = _request(tmp_path, monkeypatch)
@@ -160,12 +160,24 @@ def test_replay_supervisor_requires_complete_matching_worker_evidence(tmp_path, 
                   "checks_sha256": request["checks_sha256"], "replay_saved_model_verified": True,
                   "acceptance": {"verdict": "PASS"}, "output_identity": snapshot_output_dataset(output),
                   "replay_channel_contract": {"project_path": str(worker / "SavedCase.pscx")}}
+        index_path = worker / "evidence" / "output-index.json"
+        replay._write(index_path, report["output_identity"])
+        report["result"] = {"output_index_path": str(index_path), "output_index_sha256": replay._hash(index_path)}
+        report["frozen_output_identity_sha256"] = replay._json_hash(report["output_identity"])
         if supplemental and changed != "supplemental_missing":
             report.update({"verification_context_sha256": request["verification_context_sha256"],
                            "supplemental_saved_validation": {"verdict": "PASS"},
                            "supplemental_evidence": {"verdict": "PASS", "output_identity": json.loads(json.dumps(report["output_identity"]))}})
             if changed == "supplemental_other_dataset":
                 report["supplemental_evidence"]["output_identity"]["primary"] = "different-run.out"
+            if changed == "supplemental_alias":
+                other = worker / "other_dataset"
+                other.mkdir()
+                (other / "Other_01.out").write_text("0 1\n5 1\n")
+                (other / "Other.inf").write_text("other metadata")
+                replacement = snapshot_output_dataset(other / "Other_01.out")
+                report["output_identity"] = replacement
+                report["supplemental_evidence"]["output_identity"] = replacement
         elif changed == "copied_dependency":
             (copied_bundle / "library.pslx").write_text("CHANGED dependency")
         elif changed and not supplemental:
@@ -183,7 +195,7 @@ def test_replay_supervisor_requires_complete_matching_worker_evidence(tmp_path, 
         assert result["artifacts"]["supervisor-report.json"]["sha256"]
 
 
-@pytest.mark.parametrize(("verdict", "changed_dependency", "supplemental_verdict"), [("PASS", False, None), ("FAIL", False, None), ("PASS", True, None), ("PASS", False, "PASS"), ("PASS", False, "FAIL"), ("PASS", False, "MISSING"), ("PASS", False, "OTHER_DATASET")])
+@pytest.mark.parametrize(("verdict", "changed_dependency", "supplemental_verdict"), [("PASS", False, None), ("FAIL", False, None), ("PASS", True, None), ("PASS", False, "PASS"), ("PASS", False, "FAIL"), ("PASS", False, "MISSING"), ("PASS", False, "OTHER_DATASET"), ("PASS", False, "INPLACE_OTHER_DATASET"), ("PASS", False, "CONTRACT_MUTATION"), ("PASS", False, "CONTEXT_MUTATION"), ("PASS", False, "SAMPLE_MUTATION"), ("PASS", False, "MODEL_FILE_MUTATION"), ("PASS", False, "OUTPUT_FILE_MUTATION")])
 def test_independent_worker_uses_frozen_dependencies_and_cleans_its_own_session(tmp_path, monkeypatch, verdict, changed_dependency, supplemental_verdict):
     from pscad_mcp.hvdc.builders.mmc import blank_service
 
@@ -197,7 +209,7 @@ def test_independent_worker_uses_frozen_dependencies_and_cleans_its_own_session(
     request_path = tmp_path / "replay" / "request.json"
     request = {"project": {"path": str(arguments["project"]), "sha256": replay._hash(arguments["project"])},
                "bundle": {"path": str(source_bundle), "files": arguments["dependency_files"], "source_snapshot": replay._files(source_bundle)},
-               "channel_contract": {"project_path": str(arguments["project"]), "readback": {}},
+               "channel_contract": {"project_path": str(arguments["project"]), "readback": {}, "channels": [{"signal_source": {"kind": "physical_measurement"}}]},
                "checks_contract": default_fault_checks(), "settings": {}, "source_identities": {"master": {}, "library": {"path": str(source_bundle / "library.pslx")}}}
     request["channel_contract_sha256"] = replay._json_hash(request["channel_contract"])
     request["checks_sha256"] = replay._json_hash(request["checks_contract"])
@@ -253,13 +265,17 @@ def test_independent_worker_uses_frozen_dependencies_and_cleans_its_own_session(
         output = project.parent / "SavedCase_01.out"
         output.write_text("0 0\n5 0\n")
         (output.parent / "SavedCase.inf").write_text("metadata")
-        return contract, {"identity": snapshot_output_dataset(output)}
+        identity = snapshot_output_dataset(output)
+        index_path = evidence / "output-index.json"
+        replay._write(index_path, identity)
+        record["result"].update({"output_index_path": str(index_path), "output_index_sha256": replay._hash(index_path)})
+        return contract, {"identity": identity, "channels": [{"values": [1.0]}]}
 
     monkeypatch.setattr(replay, "_service", lambda _: Service())
     monkeypatch.setattr(replay.psutil, "Process", lambda _: Process())
     monkeypatch.setattr(blank_service, "_verify_runtime_master", runtime_master)
     monkeypatch.setattr(blank_service, "_run_native_fault_case", run)
-    monkeypatch.setattr(replay, "evaluate_template_native_dc_fault", lambda *args, **kwargs: {"verdict": verdict})
+    monkeypatch.setattr(replay, "evaluate_template_native_dc_fault", lambda *args, **kwargs: {"verdict": verdict, "evidence": kwargs["channel_contract"]["channels"][0]["signal_source"]})
     verifiers = {}
     if supplemental_verdict and supplemental_verdict != "MISSING":
         def saved_verifier(context, project, contract):
@@ -273,7 +289,22 @@ def test_independent_worker_uses_frozen_dependencies_and_cleans_its_own_session(
             identity = json.loads(json.dumps(samples["identity"]))
             if supplemental_verdict == "OTHER_DATASET":
                 identity["primary"] = "different-run.out"
-            return {"verdict": "PASS" if supplemental_verdict == "OTHER_DATASET" else supplemental_verdict, "output_identity": identity}
+            if supplemental_verdict == "INPLACE_OTHER_DATASET":
+                identity["primary"] = "different-run.out"
+                samples["identity"].clear()
+                samples["identity"].update(identity)
+                identity = samples["identity"]
+            if supplemental_verdict == "CONTRACT_MUTATION":
+                contract["channels"][0]["signal_source"]["kind"] = "control_command"
+            if supplemental_verdict == "CONTEXT_MUTATION":
+                context["scope"] = "different"
+            if supplemental_verdict == "SAMPLE_MUTATION":
+                samples["channels"][0]["values"][0] = 100.0
+            if supplemental_verdict == "MODEL_FILE_MUTATION":
+                project.write_text("<project name='changed'/>")
+            if supplemental_verdict == "OUTPUT_FILE_MUTATION":
+                Path(samples["identity"]["primary"]).write_text("0 99\n5 99\n")
+            return {"verdict": "FAIL" if supplemental_verdict == "FAIL" else "PASS", "output_identity": identity}
 
         verifiers = {"saved_verifier": saved_verifier, "dataset_verifier": dataset_verifier}
     result = asyncio.run(replay._worker(request_path, replay._hash(request_path), **verifiers))
@@ -283,6 +314,8 @@ def test_independent_worker_uses_frozen_dependencies_and_cleans_its_own_session(
         assert calls == []
         return
     assert result["replay_saved_model_verified"] is True
+    if not changed_dependency:
+        assert result["acceptance"]["evidence"]["kind"] == "physical_measurement"
     assert calls == (["attach", "supplemental_saved", "supplemental_dataset", "quit", "wait_owned"] if supplemental_verdict else ["attach", "quit", "wait_owned"])
 
 
