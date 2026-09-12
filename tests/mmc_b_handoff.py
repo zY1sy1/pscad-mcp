@@ -11,7 +11,7 @@ import math
 import re
 import stat
 from collections.abc import Mapping
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 from pscad_mcp.acceptance.evidence import _is_reparse_point
 from pscad_mcp.acceptance.process_scope import require_acceptance_ownership
@@ -92,7 +92,10 @@ def _verify_producers(recipe, report):
     required = {"fault_channels", "template_native"}
     if not isinstance(refs, Mapping) or not required <= set(refs):
         raise ValueError("The B physics producers are not frozen")
-    recorded = report.get("code_hashes", {})
+    raw = report.get("code_hashes", {})
+    recorded = {PureWindowsPath(key).as_posix(): digest for key, digest in raw.items()}
+    if len(recorded) != len(raw):
+        raise ValueError("B producer paths are ambiguous after normalization")
     for name, ref in refs.items():
         identity = _check_ref(ref)
         if name in required:

@@ -4,6 +4,7 @@ import asyncio
 import copy
 import hashlib
 import json
+from pathlib import PureWindowsPath
 
 import pytest
 
@@ -67,12 +68,16 @@ def test_file_reference_rejects_content_drift_and_foreign_case(tmp_path):
         gate._check_ref(ref)
 
 
-def test_producer_must_be_the_code_recorded_by_the_native_run(tmp_path):
+@pytest.mark.parametrize("windows_paths", [False, True])
+def test_producer_must_be_the_code_recorded_by_the_native_run(tmp_path, windows_paths):
     refs = {name: reference(tmp_path / (name + ".py"), name) for name in ("fault_channels", "template_native")}
     recipe = {"producer_code_hashes": refs}
     report = {"code_hashes": {f"pscad_mcp/hvdc/builders/mmc/{name}.py": ref["sha256"] for name, ref in refs.items()}}
+    if windows_paths:
+        report["code_hashes"] = {str(PureWindowsPath(key)): digest for key, digest in report["code_hashes"].items()}
     gate._verify_producers(recipe, report)
-    report["code_hashes"]["pscad_mcp/hvdc/builders/mmc/fault_channels.py"] = "0" * 64
+    key = next(key for key in report["code_hashes"] if key.endswith("fault_channels.py"))
+    report["code_hashes"][key] = "0" * 64
     with pytest.raises(ValueError, match="producer differs"):
         gate._verify_producers(recipe, report)
 
