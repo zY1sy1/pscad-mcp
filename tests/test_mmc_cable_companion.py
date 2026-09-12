@@ -91,6 +91,19 @@ def test_interfaces_preserve_phase_order_and_explicit_end_selection(assembly):
     }
 
 
+def test_geometry_audit_ignores_definition_date_but_rejects_geometry_changes(assembly):
+    receipt, root = assembly
+    geometry = root.find("./definitions/Definition[@name='Cable2']")
+    geometry.set("date", "1789188040")
+    ET.ElementTree(root).write(receipt["project_path"], encoding="utf-8")
+    assert _module().audit_cable_assembly(receipt["project_path"], receipt)["terminals_separate"]
+    parameter = geometry.find(".//param")
+    parameter.set("value", "changed")
+    ET.ElementTree(root).write(receipt["project_path"], encoding="utf-8")
+    with pytest.raises(ValueError, match="geometry"):
+        _module().audit_cable_assembly(receipt["project_path"], receipt)
+
+
 def test_materialization_binds_exact_local_constants_and_keeps_source_receipts(assembly, constants_receipt, installed_sources):
     receipt, root = assembly
     native = json.loads(constants_receipt.read_text(encoding="utf-8"))

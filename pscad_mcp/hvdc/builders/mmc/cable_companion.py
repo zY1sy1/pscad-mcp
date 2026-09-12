@@ -47,6 +47,14 @@ def _xml_sha(element: ET.Element) -> str:
     return hashlib.sha256(ET.tostring(element)).hexdigest()
 
 
+def _geometry_sha(element: ET.Element) -> str:
+    value = copy.deepcopy(element)
+    for key in ("date", "crc"):
+        value.attrib.pop(key, None)
+    canonical = ET.canonicalize(ET.tostring(value, encoding="unicode"), strip_text=True)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
 def _canonical(value):
     return json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False)
 
@@ -279,7 +287,7 @@ def _materialize(destination, *, constants_evidence, source_project, master_path
                 "Display": "1", "Scale": "1.0", "mrun": "0", "Pol": "0", "Max": "20.0", "Min": "-20.0",
             }, {"Signl": name})
         settings = root.find("./paramlist[@name='Settings']")
-        for name, value in {"time_duration": "5.0", "time_step": "20", "sample_step": "100",
+        for name, value in {"time_duration": "5", "time_step": "20", "sample_step": "100",
                             "PlotType": "1", "StartType": "0", "output_filename": project_name + ".out"}.items():
             settings.find(f"param[@name='{name}']").set("value", value)
         reference = {"source_voltage_kv": 10.0, "load_resistance_ohm": 100.0,
@@ -291,7 +299,7 @@ def _materialize(destination, *, constants_evidence, source_project, master_path
     hierarchy = root.find("./hierarchy/call/call")
     for component, definition in ((line, "Cable2"), (link, "MMCCableLink")):
         ET.SubElement(hierarchy, "call", {"link": component.get("id"), "name": project_name + ":" + definition,
-                                          "z": "-1", "view": "false", "instance": "0"})
+                                          "z": "10" if fixture and definition == "MMCCableLink" else "-1", "view": "false", "instance": "0"})
     receipt = {
         "schema_version": 1, "scope": "native_two_conductor_cable_assembly", "project_name": project_name,
         "project_path": str(folder / (project_name + ".pscx")), "cable_name": constants["segment"],
@@ -300,6 +308,7 @@ def _materialize(destination, *, constants_evidence, source_project, master_path
         "constants_receipt_sha256": _sha(evidence), "loop_dc_resistance_ohm": constants["loop_dc_resistance_ohm"],
         "source_hashes_before": input_hashes, "terminals": terminals, "module_wires": module_wires,
         "source_definition_receipts": {"Cable2": _xml_sha(row), "configuration": _xml_sha(configuration), "interfaces": interface_receipts},
+        "geometry_semantics_sha256": _geometry_sha(row),
         "shell_sha256": hashlib.sha256(resources.files("pscad_mcp").joinpath("assets/templates/empty_case.pscx").read_bytes()).hexdigest(),
         "electrical_nets": {name: dict(nets) for name, nets in writer.nets.items()}, "routes": writer.routes,
         "channels": dict(CHANNEL_UNITS) if fixture else {}, "physical_reference": reference,
@@ -343,7 +352,7 @@ def audit_cable_assembly(project_path, receipt: Mapping) -> dict:
     if (len(root.findall("./definitions/Definition")) != 4 or set(definitions) != {"Station", "Main", "Cable2", "MMCCableLink"}
             or root.findall(".//script") or root.get("name") != receipt["project_name"]):
         raise ValueError("Cable assembly contains unexpected active definitions or scripts")
-    if _xml_sha(definitions["Cable2"]) != receipt["source_definition_receipts"]["Cable2"]:
+    if _geometry_sha(definitions["Cable2"]) != receipt["geometry_semantics_sha256"]:
         raise ValueError("Copied native cable geometry changed")
     module, main = definitions["MMCCableLink"], definitions["Main"]
     ports = module.findall("./svg/port")
