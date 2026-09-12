@@ -4,6 +4,8 @@ import json
 import shutil
 from pathlib import Path
 
+import pytest
+
 from pscad_mcp.hvdc.builders.mmc.schema import parse_blueprint
 from scripts.audit_mmc_assets import audit_asset_root
 
@@ -99,3 +101,24 @@ def test_manifest_fails_closed_for_added_removed_and_changed_children(tmp_path):
     (copy / "unexpected.json").unlink()
     (copy / "blueprint.json").write_text("{}", encoding="utf-8")
     assert audit_asset_root(copy)["valid"] is False
+
+
+def test_packaged_cable_terminals_do_not_share_a_conductor_net():
+    blueprint = parse_blueprint(json.loads((ASSET_ROOT / "blueprint.json").read_text(encoding="utf-8")))
+    for component in blueprint.components:
+        if component.definition != "master:dc_cable":
+            continue
+        sending = {net.logical_id for net in blueprint.nets if f"{component.logical_id}:IN" in net.endpoints}
+        receiving = {net.logical_id for net in blueprint.nets if f"{component.logical_id}:OUT" in net.endpoints}
+        assert sending and receiving
+        assert sending.isdisjoint(receiving)
+
+
+def test_fixed_arm_capacitance_matches_declared_nominal_energy():
+    blueprint = parse_blueprint(json.loads((ASSET_ROOT / "blueprint.json").read_text(encoding="utf-8")))
+    arms = [component for component in blueprint.components if component.definition.endswith(":MMCAverageArm")]
+    energy_mj = sum(0.5 * arm.parameters["C_eq_F"] * (blueprint.nominal_vdc_kv / 2) ** 2 for arm in arms)
+    assert energy_mj == pytest.approx(40.0)
+    assert energy_mj == pytest.approx(blueprint.provenance["nominal_total_energy_mj"])
+    declarations = {arm.logical_id: arm for station in blueprint.stations for arm in station.arms}
+    assert all(arm.parameters["C_eq_F"] == declarations[arm.logical_id].parameters["C_eq_F"] for arm in arms)

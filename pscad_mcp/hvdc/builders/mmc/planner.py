@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections import defaultdict
+from collections import defaultdict, deque
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -257,6 +257,39 @@ def _check_structure(blueprint: MmcBlueprint, components: Mapping[str, MmcCompon
                 raise _error("MMC_LAYOUT_INVALID", "blueprint components overlap.", left=left_id, right=right_id)
 
 
+def _check_cable_bypasses(blueprint: MmcBlueprint) -> None:
+    adjacency: dict[tuple[str, str], set[tuple[str, str]]] = defaultdict(set)
+    for net in blueprint.nets:
+        if net.kind != "electrical":
+            continue
+        nodes = [("endpoint", endpoint) for endpoint in net.endpoints]
+        if net.label is not None:
+            nodes.append(("label", net.label))
+        for node in nodes[1:]:
+            adjacency[nodes[0]].add(node)
+            adjacency[node].add(nodes[0])
+    for component in blueprint.components:
+        if component.definition == "master:dc_cable":
+            pairs = (("IN", "OUT"),)
+        elif component.definition.endswith(":MMCCableLink"):
+            pairs = (("SEND_POS", "RECV_POS"), ("SEND_NEG", "RECV_NEG"))
+        else:
+            continue
+        for sending, receiving in pairs:
+            start = ("endpoint", f"{component.logical_id}:{sending}")
+            end = ("endpoint", f"{component.logical_id}:{receiving}")
+            if start not in adjacency or end not in adjacency:
+                raise _error("MMC_STRUCTURE_INVALID", "Both ends of each cable conductor require an electrical connection.", component=component.logical_id)
+            pending, visited = deque([start]), {start}
+            while pending:
+                node = pending.popleft()
+                if node == end:
+                    raise _error("MMC_STRUCTURE_INVALID", "An electrical net bypasses a cable conductor.", component=component.logical_id, sending=sending, receiving=receiving)
+                for neighbor in adjacency[node] - visited:
+                    visited.add(neighbor)
+                    pending.append(neighbor)
+
+
 def _check_net_semantics(net: MmcNetSpec, components: Mapping[str, MmcComponentSpec]) -> None:
     lowered = " ".join((net.logical_id, *net.endpoints)).casefold()
     terminals = [_endpoint(endpoint, "net endpoint") for endpoint in net.endpoints]
@@ -369,6 +402,7 @@ def create_plan(request: MmcPlanRequest, asset_set: MmcAssetSet, inventory: Any,
             if "NEUTRAL" not in component.ports or not grounded:
                 raise _error("MMC_STRUCTURE_INVALID", "A native source or transformer neutral requires an explicit ground reference.", component=component.logical_id)
     _check_structure(normalized_blueprint, component_map, catalog)
+    _check_cable_bypasses(normalized_blueprint)
     for net in normalized_blueprint.nets:
         _check_net_semantics(net, component_map)
         route = _net_route(net, component_map, catalog)

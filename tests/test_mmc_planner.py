@@ -123,3 +123,17 @@ def test_planner_rejects_overlap_and_ac_dc_short_path(tmp_path):
     nets.append(MmcNetSpec(logical_id="ac_dc_short", kind="electrical", endpoints=("STATION_P.ac:AC", "dc_positive_line:IN")))
     short = replace(BLUEPRINT, nets=tuple(nets))
     _assert_code(lambda: create_plan(_request(), _asset(short), INVENTORY, tmp_path), "MMC_STRUCTURE_INVALID")
+
+
+@pytest.mark.parametrize("transitive", [False, True])
+def test_planner_rejects_wired_bypass_of_cable(transitive, tmp_path):
+    terminals = ("dc_positive_line:IN", "dc_positive_line:OUT")
+    if transitive:
+        extra = (
+            MmcNetSpec("bypass_in", "electrical", (terminals[0], "STATION_P.positive_bus:DC")),
+            MmcNetSpec("bypass_out", "electrical", ("STATION_P.positive_bus:DC", terminals[1])),
+        )
+    else:
+        extra = (MmcNetSpec("bypass", "electrical", terminals),)
+    blueprint = replace(BLUEPRINT, nets=(*BLUEPRINT.nets, *extra))
+    _assert_code(lambda: create_plan(_request(), _asset(blueprint), INVENTORY, tmp_path), "MMC_STRUCTURE_INVALID")

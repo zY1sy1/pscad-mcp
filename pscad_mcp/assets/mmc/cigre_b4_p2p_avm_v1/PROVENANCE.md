@@ -6,6 +6,13 @@ contract. The fixed nominal values are an engineering derivation for the
 Stage A acceptance case: 640 kV pole-to-pole and approximately 1000 MW. They
 are not a reproduction of restricted CIGRE project files. The phrase original derivation identifies values created for this repository.
 
+The fixed case uses the normalized 40 MJ total stored energy across twelve
+arms. Its equivalent capacitor voltage is 320 kV, so each arm has
+`C_eq_F = 2 * (40 / 12) / 320^2 = 0.00006510416666666667 F`.
+The native half-bridge stack uses twice that voltage and one quarter of the
+equivalent capacitance, preserving the same energy. These are model ratings;
+the physical capacitor must still charge through the native electrical model.
+
 The arm-current decomposition and stored-energy equations are transcribed from
 the approved design document and are labeled as original engineering
 derivations for this asset. The equivalent conduction and switching-loss
