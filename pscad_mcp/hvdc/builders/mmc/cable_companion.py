@@ -252,7 +252,10 @@ def _materialize(destination, *, constants_evidence, source_project, master_path
     if _parameters(wrapper).get("gen_cnst") != "1":
         raise ValueError("Donor cable must use its external constants-file selection")
     main.find("schematic").append(line)
-    writer.add(main, "cable_link", project_name + ":MMCCableLink", {}, {name: name for name in PORT_OFFSETS})
+    sending_negative = "GND" if fixture else "SEND_NEG"
+    writer.add(main, "cable_link", project_name + ":MMCCableLink", {}, {
+        name: sending_negative if name == "SEND_NEG" else name for name in PORT_OFFSETS
+    })
     link = main.find(f"./schematic/User[@defn='{project_name}:MMCCableLink']")
     terminals = {name: {"component_id": link.get("id"), "port": name,
                         "x": int(link.get("x")) + offset[0], "y": int(link.get("y")) + offset[1]}
@@ -263,13 +266,13 @@ def _materialize(destination, *, constants_evidence, source_project, master_path
             raise ValueError("The fixture time step exceeds the native cable recommendation")
         source_values = {"Name": "CABLE_DC_SOURCE", "Type": "6", "Grnd": "0", "Spec": "0", "Cntrl": "0",
                          "AC": "0", "Vm": "10.0 [kV]", "Tc": "0.005 [s]", "CUR": ""}
-        writer.add(main, "dc_source", "master:source_1", source_values, {"NA": "SOURCE_POS", "NB": "SEND_NEG"})
+        writer.add(main, "dc_source", "master:source_1", source_values, {"NA": "SOURCE_POS", "NB": sending_negative})
         writer.add(main, "sending_current", "master:ammeter", {"Name": "I_SEND"}, {"N1": "SOURCE_POS", "N2": "SEND_POS"})
         writer.add(main, "load", "master:resistor", {"R": "100.0 [ohm]"}, {"A": "RECV_POS", "B": "LOAD_RETURN"})
         writer.add(main, "receiving_current", "master:ammeter", {"Name": "I_RETURN"}, {"N1": "LOAD_RETURN", "N2": "RECV_NEG"})
-        writer.add(main, "sending_voltage", "master:voltmeter", {"Name": "V_SEND"}, {"N1": "SEND_POS", "N2": "SEND_NEG"})
+        writer.add(main, "sending_voltage", "master:voltmeter", {"Name": "V_SEND"}, {"N1": "SEND_POS", "N2": sending_negative})
         writer.add(main, "receiving_voltage", "master:voltmeter", {"Name": "V_RECV"}, {"N1": "RECV_POS", "N2": "RECV_NEG"})
-        writer.add(main, "test_ground", "master:ground", {}, {"A": "SEND_NEG"})
+        writer.add(main, "test_ground", "master:ground", {}, {"A": sending_negative})
         for name, unit in CHANNEL_UNITS.items():
             writer.add(main, "probe_" + name, "master:pgb", {
                 "Name": name, "Units": unit, "Group": "CABLE", "UseSignalName": "0", "enab": "1",
