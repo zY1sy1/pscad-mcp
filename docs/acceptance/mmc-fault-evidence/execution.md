@@ -374,3 +374,13 @@ the estimated slow pole -2.1525 per second, while Kp and the fast reduced-model
 pole pair remain essentially unchanged. A several-MW increase in tail
 recharging is small relative to the observed current-reference margin;
 the licensed double-window steady gate must still verify actual limits.
+
+The explicit candidate ID is `native_full_sort_dc_integral_004_v1`.
+`materialize_voltage_control_integral_time` changes only Main slider
+TiDCRec owner 1520814881 from 0.08 to 0.04 after verifying its actual T1
+DC-mode binding, Kp=12, the unchanged T2 setting, and the seconds unit.
+An XML equality regression preserves every other source node. Instrumentation
+now freezes the source Kp/Ti settings before first vendor save and records the
+actual controller Kp/Ti arguments at both terminals; the runner requires T1
+12/0.04 and T2 0.2/0.2 throughout the existing operating/fault/recovery span.
+The prior 0.08 recipe and its failed evidence remain separate.

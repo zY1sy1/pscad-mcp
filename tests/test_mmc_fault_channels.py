@@ -360,6 +360,41 @@ def test_terminal_two_charging_delay_uses_its_own_setting(tmp_path, installed_so
     assert ET.tostring(before.getroot()) == ET.tostring(root.getroot())
 
 
+def test_dc_integral_repair_changes_only_active_terminal_one_setting(tmp_path, installed_sources):
+    from xml.etree import ElementTree as ET
+
+    from pscad_mcp.hvdc.builders.mmc.template_audit import _parameters
+    project, _, _ = installed_sources
+    digest = hashlib.sha256(project.read_bytes()).hexdigest()
+    destination = tmp_path / "dc-integral.pscx"
+    result = fault_channels.materialize_voltage_control_integral_time(project, destination)
+    assert result["owner"] == "1520814881"
+    assert result["before_s"] == 0.08
+    assert result["after_s"] == 0.04
+    assert result["parallel_integral_gain_before_per_s"] == 12.5
+    assert result["parallel_integral_gain_after_per_s"] == 25.0
+    before = ET.parse(project)
+    original = before.find("./definitions/Definition[@name='Main']/schematic/User[@id='1520814881']")
+    next(item for item in original.findall("./paramlist/param") if item.get("name") == "Value").set("value", "0.04")
+    after = ET.parse(destination)
+    assert ET.tostring(before.getroot()) == ET.tostring(after.getroot())
+    t2 = after.find("./definitions/Definition[@name='Main']/schematic/User[@id='800413106']")
+    assert dict(_parameters(t2))["Ti_dc"] == "0.2"
+    assert hashlib.sha256(project.read_bytes()).hexdigest() == digest
+
+
+def test_dc_pi_runtime_parameters_have_exact_scope_and_units(tmp_path, installed_sources):
+    project, library, master = installed_sources
+    contract = fault_channels.instrument_fault_channels(project, tmp_path / "observed.pscx", library=library, master=master)
+    kp = [item for item in contract["diagnostic_channels"] if item["role"] == "controller_dc_proportional_gain"]
+    ti = [item for item in contract["diagnostic_channels"] if item["role"] == "controller_dc_integral_time"]
+    assert len(kp) == len(ti) == 2
+    assert {item["model_scope"] for item in ti} == {"T1", "T2"}
+    assert all(item["units"] == "s" and item["signal_source"]["owner_id"] == "2018099622" for item in ti)
+    assert all(item["units"] == "1" and item["signal_source"]["owner_id"] == "1142066271" for item in kp)
+    assert any(item["definition_name"] == "Main" and item["owner_id"] == "1520814881" for item in contract["readback_components"])
+
+
 def test_complete_arm_sorting_preserves_requested_count_and_firing_chain(tmp_path, installed_sources):
     from xml.etree import ElementTree as ET
     project, library, master = installed_sources
