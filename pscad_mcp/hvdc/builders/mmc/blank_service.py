@@ -43,6 +43,7 @@ from .fault_channels import (
     materialize_terminal_two_carrier,
     materialize_terminal_two_charging,
     materialize_voltage_control_headroom,
+    materialize_voltage_control_integral_time,
     read_fault_output_dataset,
     snapshot_output_dataset,
     verify_fault_instrumentation,
@@ -73,6 +74,7 @@ _MODEL_RECIPES = {
     "headroom_1p1_dc_filter_5ms": {"current_limit_pu": 1.1, "dc_feedback_time_constant_s": 0.005},
     "native_full_sort_v1": {"current_limit_pu": 1.1, "dc_feedback_time_constant_s": 0.005, "terminal_two_carrier_ratio": 23.0, "arm_virtual_resistance_ohm": 30.0, "sort_extent": "Dim", "sort_enable": "existing_Enab"},
 }
+_MODEL_RECIPES["native_full_sort_dc_integral_004_v1"] = {**_MODEL_RECIPES["native_full_sort_v1"], "t1_dc_integral_time_s": 0.04}
 _WINDOWS_DEVICE = re.compile(r"(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])", re.IGNORECASE)
 
 
@@ -87,12 +89,14 @@ def _recipe_contract(name: str) -> dict[str, Any]:
         steps.append({"name": "voltage_control_headroom", "parameters": {"current_limit_pu": parameters["current_limit_pu"]}})
     if "dc_feedback_time_constant_s" in parameters:
         steps.append({"name": "dc_feedback_filter", "parameters": {"time_constant_s": parameters["dc_feedback_time_constant_s"]}})
-    if name == "native_full_sort_v1":
+    if "sort_extent" in parameters:
         steps.extend([
             {"name": "terminal_two_carrier", "parameters": {"ratio": 23.0}},
             {"name": "arm_virtual_resistance", "parameters": {"resistance_per_arm_ohm": 30.0}},
             {"name": "complete_arm_sorting", "parameters": {"sort_extent": "Dim", "enable": "existing_Enab"}},
         ])
+    if "t1_dc_integral_time_s" in parameters:
+        steps.append({"name": "voltage_control_integral_time", "parameters": {"time_constant_s": parameters["t1_dc_integral_time_s"]}})
     steps.append({"name": "fault_instrumentation", "parameters": {}})
     return {"schema_version": 1, "name": name, "parameters": parameters, "steps": steps,
             "physical_acceptance_verified": False, "fault_recovery_status": "pending",
@@ -937,13 +941,17 @@ def _materialize_native_mmc_case(plan: Mapping[str, Any], source: Path, library:
         filtered = staging / "filtered_source.pscx"
         lineage.append({"stage": "dc_feedback_filter", **materialize_dc_feedback_filter(selected, filtered, master=master, time_constant_s=recipe["parameters"]["dc_feedback_time_constant_s"])})
         selected = filtered
-    if recipe["name"] == "native_full_sort_v1":
+    if "sort_extent" in recipe["parameters"]:
         carrier = staging / "carrier_source.pscx"
         lineage.append({"stage": "terminal_two_carrier", **materialize_terminal_two_carrier(selected, carrier)})
         damped = staging / "arm_virtual_resistance_source.pscx"
         lineage.append({"stage": "arm_virtual_resistance", **materialize_arm_virtual_resistance(carrier, damped, master=master)})
         selected = staging / "complete_arm_sorting_source.pscx"
         lineage.append({"stage": "complete_arm_sorting", **materialize_complete_arm_sorting(damped, selected, library=library)})
+    if "t1_dc_integral_time_s" in recipe["parameters"]:
+        integral = staging / "dc_integral_source.pscx"
+        lineage.append({"stage": "voltage_control_integral_time", **materialize_voltage_control_integral_time(selected, integral)})
+        selected = integral
     contract = instrument_fault_channels(selected, project, library=library, master=master,
         expected_source_hashes={"project": _sha256(selected), "library": plan["source_identities"]["library"]["sha256"], "master": plan["source_identities"]["master"]["sha256"]})
     return contract
