@@ -930,7 +930,9 @@ def materialize_average_arm_fixture(
         {
             "link": instance.get("id"),
             "name": instance.get("defn"),
-            "z": "0",
+            # PSCAD assigns nested hierarchy calls an explicit display order;
+            # author the value so finalization remains a semantic check.
+            "z": "60",
             "view": "false",
             "instance": "0",
         },

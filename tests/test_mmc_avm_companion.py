@@ -268,7 +268,7 @@ def test_fixture_has_actual_arm_and_all_four_operating_windows(
     assert module_call.attrib == {
         "link": arm.get("id"),
         "name": arm.get("defn"),
-        "z": "0",
+        "z": "60",
         "view": "false",
         "instance": "0",
     }
