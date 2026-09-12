@@ -287,14 +287,16 @@ def _materialize(destination, *, constants_evidence, source_project, master_path
                 "Display": "1", "Scale": "1.0", "mrun": "0", "Pol": "0", "Max": "20.0", "Min": "-20.0",
             }, {"Signl": name})
         settings = root.find("./paramlist[@name='Settings']")
-        for name, value in {"time_duration": "20", "time_step": "20", "sample_step": "250",
+        # The audited admittance fit contains a -0.0300 /s pole. Nine time
+        # constants separate the DC check from its startup transient.
+        for name, value in {"time_duration": "300", "time_step": "20", "sample_step": "4000",
                             "PlotType": "1", "StartType": "0", "output_filename": project_name + ".out"}.items():
             settings.find(f"param[@name='{name}']").set("value", value)
         reference = {"source_voltage_kv": 10.0, "load_resistance_ohm": 100.0,
                      "loop_dc_resistance_ohm": constants["loop_dc_resistance_ohm"],
                      "dc_current_ka": 10.0 / (100.0 + constants["loop_dc_resistance_ohm"]),
-                     "duration_s": 20.0, "output_step_s": 250e-6, "time_step_s": 20e-6,
-                     "steady_window_s": [19.0, 20.0], "tolerances": TOLERANCES}
+                     "duration_s": 300.0, "output_step_s": 4000e-6, "time_step_s": 20e-6,
+                     "steady_window_s": [290.0, 300.0], "tolerances": TOLERANCES}
     writer.verify()
     hierarchy = root.find("./hierarchy/call/call")
     module_call = ET.SubElement(hierarchy, "call", {
