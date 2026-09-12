@@ -259,7 +259,7 @@ def _materialize(destination, *, constants_evidence, source_project, master_path
         _set_parameter(wrapper, name, value)
     _set_parameter(wrapper, "gen_cnst", "0")
     module.find("schematic").append(line)
-    sending_negative = "GND" if fixture else "SEND_NEG"
+    sending_negative = "SEND_NEG"
     writer.add(main, "cable_link", project_name + ":MMCCableLink", {}, {
         name: sending_negative if name == "SEND_NEG" else name for name in PORT_OFFSETS
     })
@@ -279,7 +279,8 @@ def _materialize(destination, *, constants_evidence, source_project, master_path
         writer.add(main, "receiving_current", "master:ammeter", {"Name": "I_RETURN"}, {"N1": "LOAD_RETURN", "N2": "RECV_NEG"})
         writer.add(main, "sending_voltage", "master:voltmeter", {"Name": "V_SEND"}, {"N1": "SEND_POS", "N2": sending_negative})
         writer.add(main, "receiving_voltage", "master:voltmeter", {"Name": "V_RECV"}, {"N1": "RECV_POS", "N2": "RECV_NEG"})
-        writer.add(main, "test_ground", "master:ground", {}, {"A": sending_negative})
+        writer.add(main, "ground_reference", "master:resistor", {"R": "0.01 [ohm]"}, {"A": sending_negative, "B": "GND"})
+        writer.add(main, "test_ground", "master:ground", {}, {"A": "GND"})
         for name, unit in CHANNEL_UNITS.items():
             writer.add(main, "probe_" + name, "master:pgb", {
                 "Name": name, "Units": unit, "Group": "CABLE", "UseSignalName": "0", "enab": "1",
@@ -397,9 +398,9 @@ def audit_cable_assembly(project_path, receipt: Mapping) -> dict:
     users = main.findall("./schematic/User")
     expected_counts = Counter({receipt["project_name"] + ":MMCCableLink": 1, "master:nodelabel": 4})
     if receipt["fixture"]:
-        expected_counts.update({"master:source_1": 1, "master:ammeter": 2, "master:resistor": 1,
+        expected_counts.update({"master:source_1": 1, "master:ammeter": 2, "master:resistor": 2,
                                 "master:voltmeter": 2, "master:ground": 1, "master:pgb": 4,
-                                "master:nodelabel": 13, "master:datalabel": 4})
+                                "master:nodelabel": 15, "master:datalabel": 4})
     if Counter(item.get("defn") for item in users) != expected_counts:
         raise ValueError("Main canvas contains unexpected active components")
     user_ids = {item.get("id"): item for item in users}

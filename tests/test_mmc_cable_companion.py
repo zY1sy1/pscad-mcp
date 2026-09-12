@@ -180,12 +180,15 @@ def test_dc_fixture_has_one_ground_and_a_load_returning_through_negative_conduct
     main = root.find("./definitions/Definition[@name='Main']")
     assert len(main.findall("./schematic/User[@defn='master:ground']")) == 1
     assert len(main.findall("./schematic/User[@defn='master:source_1']")) == 1
-    assert len(main.findall("./schematic/User[@defn='master:resistor']")) == 1
+    assert len(main.findall("./schematic/User[@defn='master:resistor']")) == 2
     assert len(main.findall("./schematic/User[@defn='master:pgb']")) == 4
     nets = receipt["electrical_nets"]["Main"]
     assert "sending_current:N2" in nets["SEND_POS"]
     assert "test_ground:A" in nets["GND"]
-    assert "cable_link:SEND_NEG" in nets["GND"]
+    assert "ground_reference:B" in nets["GND"]
+    assert "cable_link:SEND_NEG" in nets["SEND_NEG"]
+    assert "ground_reference:A" in nets["SEND_NEG"]
+    assert "test_ground:A" not in nets["SEND_NEG"]
     assert "load:A" in nets["RECV_POS"]
     assert "receiving_current:N2" in nets["RECV_NEG"]
     assert "load:B" in nets["LOAD_RETURN"]
