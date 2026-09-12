@@ -22,6 +22,7 @@ REPOSITORY = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPOSITORY))
 
 from pscad_mcp.acceptance.process_scope import concurrent_acceptance_enabled
+from pscad_mcp.acceptance.executable_finalization import verify_executable_relink
 from pscad_mcp.acceptance.project_finalization import (
     GENERATED_MODULE_POLICY,
     compare_project_finalization,
@@ -117,20 +118,9 @@ def verify_model_normalization(authored: dict) -> dict:
     }
 
 
-def require_finalized_hashes(
-    expected: dict[str, str], *, allow_owned_executable_rewrite: bool = False
-) -> dict[str, str]:
+def require_finalized_hashes(expected: dict[str, str]) -> dict[str, str]:
     observed = {path: _sha256(Path(path)) for path in expected}
-    mismatches = {
-        path
-        for path, digest in observed.items()
-        if digest != expected.get(path)
-    }
-    if allow_owned_executable_rewrite:
-        mismatches = {
-            path for path in mismatches if Path(path).suffix.casefold() != ".exe"
-        }
-    if not expected or mismatches:
+    if not expected or observed != expected:
         raise ValueError("A finalized native input or executable changed")
     return observed
 
@@ -630,9 +620,12 @@ async def run_attempt(args, run_dir: Path, *, service_factory=_service) -> dict:
         _require_no_errors(report["compile_messages"])
         report["fresh_executable"] = fresh_project_executable(project, compile_started)
         require_finalized_hashes(finalized_inputs)
-        finalized_inputs[report["fresh_executable"]["path"]] = report[
-            "fresh_executable"
-        ]["sha256"]
+        executable_path = report["fresh_executable"]["path"]
+        preserved_executable = run_dir / "before-run.exe"
+        shutil.copy2(executable_path, preserved_executable)
+        if _sha256(preserved_executable) != report["fresh_executable"]["sha256"]:
+            raise ValueError("Pre-run executable preservation failed")
+        report["preserved_executable"] = str(preserved_executable)
         report["finalized_hashes_before_run"] = dict(finalized_inputs)
         begin("run")
         started = time.time()
@@ -656,6 +649,13 @@ async def run_attempt(args, run_dir: Path, *, service_factory=_service) -> dict:
             service.get_project_output(project_name, structured=True)
         )
         _require_no_errors(report["run_messages"])
+        report["executable_relink"] = verify_executable_relink(
+            preserved_executable, executable_path
+        )
+        if report["executable_relink"]["before_sha256"] != report["fresh_executable"]["sha256"]:
+            raise ValueError("Preserved pre-run executable changed")
+        finalized_inputs[executable_path] = report["executable_relink"]["after_sha256"]
+        finalized_inputs[str(preserved_executable)] = report["fresh_executable"]["sha256"]
         begin("read_and_analyze")
         files = discover_run_outputs(
             project, started, metadata_started_after=compile_started
@@ -678,19 +678,8 @@ async def run_attempt(args, run_dir: Path, *, service_factory=_service) -> dict:
         if report["output_hashes_before_read"] != report["output_hashes_after_read"]:
             raise ValueError("Native output evidence changed while being read")
         report["finalized_hashes_after_run"] = require_finalized_hashes(
-            finalized_inputs, allow_owned_executable_rewrite=True
+            finalized_inputs
         )
-        executable_paths = [
-            path
-            for path in finalized_inputs
-            if Path(path).suffix.casefold() == ".exe"
-        ]
-        if executable_paths:
-            executable_path = executable_paths[0]
-            report["executable_changed_during_run"] = (
-                report["finalized_hashes_before_run"][executable_path]
-                != report["finalized_hashes_after_run"][executable_path]
-            )
         report["status"] = report["analysis"]["status"]
         if report["status"] == "FAIL":
             report["failure_category"] = (
@@ -743,7 +732,7 @@ async def run_attempt(args, run_dir: Path, *, service_factory=_service) -> dict:
                 report[
                     "finalized_hashes_after_cleanup"
                 ] = require_finalized_hashes(
-                    finalized_inputs, allow_owned_executable_rewrite=True
+                    finalized_inputs
                 )
             report["source_hashes_after"] = {
                 path: _sha256(Path(path)) for path in source_hashes
