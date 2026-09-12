@@ -245,3 +245,30 @@ The first commit supplies the documentation file edited by later commits.
 `6e965ef` requires B's `c5ed2e2` charging helper. Do not cherry-pick integration
 merge commits or the joint harness when taking only the public fault service.
 B confirmed intake will occur at a safe boundary of its sorting-repair run.
+
+## September 12 Resume
+
+The interrupted work resumed at `f13346b` without reverting its pending edits.
+Review found that supplemental replay callbacks could share mutable native
+evidence. `598e166` isolates callback inputs, preserves independent native
+acceptance/readback/contract copies, and binds both worker and supervisor to
+the child worker's actual `evidence/output-index.json` and its original hash.
+Post-callback checks revalidate the original model and complete dataset.
+Thirty-six replay tests pass, including in-place identity replacement and
+contract/context/sample/model/output mutation. Independent Spec/Quality review
+closed the finding; no licensed acceptance was inferred.
+
+The explicit `native_full_sort_v1` recipe fixes T2 charging, current headroom
+1.1 with freeze tracking, 5 ms DC feedback, T2 carrier ratio 23, 30 ohm common
+arm virtual resistance, complete `Dim` sorting under the existing `Enab`, and
+instrumentation. Its ordered steps, fixed parameters and model-producer file
+hashes are part of the public plan. Public and joint preparation now share one
+materialization routine. The default remains `raw`; every recipe still has
+`physical_acceptance_verified: false` and fault/recovery pending.
+
+This recipe retains the original T1 Ti=.08. B's subsequent Ti=.04 candidate
+must receive a separate explicit recipe after its stable implementation is
+provided; it cannot silently change `native_full_sort_v1`. Public/joint
+licensed execution remains gated on B's accepted full handoff and exact
+recipe. The affected public/joint preparation software gate reports 62 passed,
+1 skipped, with Ruff clean.

@@ -153,6 +153,17 @@ def test_raw_plan_declares_the_verified_t2_binding_correction_separately_from_tu
     assert plan["model_corrections"] == [{"name": "terminal_two_charging", "definition": "Main", "owner": "606940312", "parameter": "T", "before": "Tcharging1", "after": "Tcharging2", "classification": "verified_template_binding_defect"}]
 
 
+def test_full_sort_recipe_is_explicit_ordered_and_still_requires_fault_acceptance(tmp_path):
+    service, request, *_ = _plan_case(tmp_path)
+    plan = service.plan_model({**request.to_dict(), "parameterization": {"model_recipe": "native_full_sort_v1"}})
+    recipe = plan["model_recipe"]
+    assert recipe["physical_acceptance_verified"] is False
+    assert recipe["fault_recovery_status"] == "pending"
+    assert [step["name"] for step in recipe["steps"]] == ["terminal_two_charging", "voltage_control_headroom", "dc_feedback_filter", "terminal_two_carrier", "arm_virtual_resistance", "complete_arm_sorting", "fault_instrumentation"]
+    assert recipe["parameters"] == {"current_limit_pu": 1.1, "dc_feedback_time_constant_s": 0.005, "terminal_two_carrier_ratio": 23.0, "arm_virtual_resistance_ohm": 30.0, "sort_extent": "Dim", "sort_enable": "existing_Enab"}
+    assert set(recipe["producer_code_hashes"]) == {"fault_channels", "template_native"}
+
+
 def _protocol_case(tmp_path, monkeypatch, *, verdict="FAIL", bad_master=False, read_error=False):
     """Synthetic protocol fixture; no licensed model acceptance is claimed."""
     service, request, source, library = _plan_case(tmp_path)
@@ -314,6 +325,33 @@ def test_public_runtime_master_must_match_planned_identity_before_staging(tmp_pa
     assert record["state"] == "failed"
     assert "load" not in calls and "materialize_fault" not in calls
     assert not Path(plan["staging_path"]).exists()
+
+
+def test_public_full_sort_recipe_materializes_every_declared_step(tmp_path, monkeypatch):
+    service, request, calls, *_ = _protocol_case(tmp_path, monkeypatch)
+
+    def callback(name):
+        def materialize(origin, destination, **kwargs):
+            calls.append(name)
+            Path(destination).write_bytes(Path(origin).read_bytes())
+            return {"source": str(origin), "source_sha256": blank_service._sha256(Path(origin)), "destination": str(destination), "destination_sha256": blank_service._sha256(Path(destination)), "parameters": kwargs and {key: str(value) for key, value in kwargs.items()}}
+        return materialize
+
+    for name in ("materialize_voltage_control_headroom", "materialize_dc_feedback_filter", "materialize_terminal_two_carrier", "materialize_arm_virtual_resistance", "materialize_complete_arm_sorting"):
+        monkeypatch.setattr(blank_service, name, callback(name), raising=False)
+    request = {**request.to_dict(), "parameterization": {"model_recipe": "native_full_sort_v1"}}
+    plan = service.plan_model(request)
+
+    async def exercise():
+        started = await service.build_model(request, plan["plan_hash"], confirm=True)
+        await service._tasks[started["build_id"]]
+        return service.get_build_status(started["build_id"])
+
+    record = asyncio.run(exercise())
+    assert record["state"] == "failed"
+    assert record["error"]["code"] == "MMC_ACCEPTANCE_FAILED"
+    assert [item["stage"] for item in record["lineage"]] == ["native_fault", "terminal_two_charging", "headroom", "dc_feedback_filter", "terminal_two_carrier", "arm_virtual_resistance", "complete_arm_sorting"]
+    assert calls.index("materialize_complete_arm_sorting") < calls.index("instrument")
 
 
 def test_public_publication_uses_tested_instrumented_fault_case(tmp_path, monkeypatch):
