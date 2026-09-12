@@ -21,8 +21,8 @@ from typing import Any
 REPOSITORY = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPOSITORY))
 
-from pscad_mcp.acceptance.process_scope import concurrent_acceptance_enabled
 from pscad_mcp.acceptance.executable_finalization import verify_executable_relink
+from pscad_mcp.acceptance.process_scope import concurrent_acceptance_enabled
 from pscad_mcp.acceptance.project_finalization import (
     GENERATED_MODULE_POLICY,
     compare_project_finalization,
@@ -80,7 +80,8 @@ def _code_snapshot() -> dict:
     return snapshot
 
 
-def _probe_owners(project: Path) -> dict[str, str]:
+def _probe_owners(project: Path, *, channel_units=None) -> dict[str, str]:
+    channel_units = CHANNEL_UNITS if channel_units is None else channel_units
     owners = {}
     for component in ET.parse(project).findall(
         "./definitions/Definition[@name='Main']/schematic/User[@defn='master:pgb']"
@@ -92,12 +93,12 @@ def _probe_owners(project: Path) -> dict[str, str]:
         name = values.get("Name")
         if (
             name in owners
-            or name not in CHANNEL_UNITS
-            or values.get("Units") != CHANNEL_UNITS[name]
+            or name not in channel_units
+            or values.get("Units") != channel_units[name]
         ):
             raise ValueError("Saved native channel ownership or units changed")
         owners[name] = component.attrib["id"]
-    if set(owners) != set(CHANNEL_UNITS):
+    if set(owners) != set(channel_units):
         raise ValueError("Saved fixture has missing physical output probes")
     return owners
 
@@ -147,8 +148,9 @@ def fresh_project_executable(project: Path, started_after: float) -> dict:
     }
 
 
-def read_arm_trace(files: dict, owners: dict[str, str]) -> dict:
+def read_arm_trace(files: dict, owners: dict[str, str], *, channel_units=None) -> dict:
     """Read every numeric column and bind it to a saved native PGB owner."""
+    channel_units = CHANNEL_UNITS if channel_units is None else channel_units
     infx = read_infx(Path(files["infx"]))
     pattern = re.compile(
         r'^PGB\((\d+)\).*?Desc="([^"]+)"\s+Group="([^"]*)".*?\bUnits="([^"]*)"'
@@ -164,8 +166,8 @@ def read_arm_trace(files: dict, owners: dict[str, str]) -> dict:
         source = infx.get(call_id, {})
         if (
             call_id in records
-            or name not in CHANNEL_UNITS
-            or units != CHANNEL_UNITS[name]
+            or name not in channel_units
+            or units != channel_units[name]
             or source.get("unit") != units
             or source.get("owner") != owners.get(name)
             or source.get("dimension") != 1
@@ -182,13 +184,13 @@ def read_arm_trace(files: dict, owners: dict[str, str]) -> dict:
             "source_column": (call_id - 1) % 10 + 1,
         }
     if (
-        set(records) != set(range(1, len(CHANNEL_UNITS) + 1))
+        set(records) != set(range(1, len(channel_units) + 1))
         or set(records) != set(infx)
-        or {item["name"] for item in records.values()} != set(CHANNEL_UNITS)
+        or {item["name"] for item in records.values()} != set(channel_units)
         or len(files["parts"]) != (len(records) + 9) // 10
     ):
         raise ValueError("INF, INFX and OUT coverage must match every physical probe")
-    trace = {name: [] for name in ("time", *CHANNEL_UNITS)}
+    trace = {name: [] for name in ("time", *channel_units)}
     for part_index, part in enumerate(files["parts"]):
         width = min(10, len(records) - part_index * 10)
         row_index = 0
@@ -652,10 +654,15 @@ async def run_attempt(args, run_dir: Path, *, service_factory=_service) -> dict:
         report["executable_relink"] = verify_executable_relink(
             preserved_executable, executable_path
         )
-        if report["executable_relink"]["before_sha256"] != report["fresh_executable"]["sha256"]:
+        if (
+            report["executable_relink"]["before_sha256"]
+            != report["fresh_executable"]["sha256"]
+        ):
             raise ValueError("Preserved pre-run executable changed")
         finalized_inputs[executable_path] = report["executable_relink"]["after_sha256"]
-        finalized_inputs[str(preserved_executable)] = report["fresh_executable"]["sha256"]
+        finalized_inputs[str(preserved_executable)] = report["fresh_executable"][
+            "sha256"
+        ]
         begin("read_and_analyze")
         files = discover_run_outputs(
             project, started, metadata_started_after=compile_started
@@ -729,9 +736,7 @@ async def run_attempt(args, run_dir: Path, *, service_factory=_service) -> dict:
             report.update(status="FAIL", cleanup_error=_error(error))
         try:
             if finalized_inputs:
-                report[
-                    "finalized_hashes_after_cleanup"
-                ] = require_finalized_hashes(
+                report["finalized_hashes_after_cleanup"] = require_finalized_hashes(
                     finalized_inputs
                 )
             report["source_hashes_after"] = {
