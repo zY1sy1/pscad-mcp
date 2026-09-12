@@ -34,6 +34,7 @@ from pscad_mcp.hvdc.builders.mmc.fault_channels import (
     materialize_terminal_two_carrier,
     materialize_terminal_two_charging,
     materialize_voltage_control_headroom,
+    materialize_voltage_control_integral_time,
     read_fault_output_dataset,
     snapshot_output_dataset,
 )
@@ -93,9 +94,19 @@ def _checks():
 
 def _steady(samples, contract, checks=None):
     checks = checks or contract.get("required_checks", {})
-    if not checks:
+    if not checks or any(key not in checks for key in ("prefault_window_s", "recovery_window_s")):
         return {"verdict": "INCOMPLETE_ANALYSIS", "checks": [], "reason": "frozen steady checks are missing"}
-    window = checks["recovery_window_s"]
+    rows = []
+    windows = []
+    for name, key in (("prefault_readiness", "prefault_window_s"), ("settled", "recovery_window_s")):
+        result = _steady_window(samples, contract, checks, checks[key])
+        rows.extend({**row, "window_name": name, "window_s": checks[key]} for row in result["checks"])
+        windows.append({"name": name, "window_s": checks[key], "verdict": result["verdict"], **({"reason": result["reason"]} if "reason" in result else {})})
+    verdict = "INCOMPLETE_ANALYSIS" if any(item["verdict"] == "INCOMPLETE_ANALYSIS" for item in windows) else "PASS" if all(item["verdict"] == "PASS" for item in windows) else "FAIL"
+    return {"verdict": verdict, "checks": rows, "windows": windows}
+
+
+def _steady_window(samples, contract, checks, window):
     frequency = checks["frequency_hz"]
     cycle_count = round((window[1] - window[0]) * frequency)
     modulation = [item for item in contract.get("diagnostic_channels", []) if item["role"] == "modulation_request"]
@@ -162,7 +173,7 @@ def _steady(samples, contract, checks=None):
 async def _run_case(service, root, source, library, master, name, fault):
     case_root = root / name
     case_root.mkdir()
-    record = {"case": name, "status": "FAIL", "history": [], "fault": fault}
+    record = {"case": name, "status": "FAIL", "history": [], "fault": fault, "recipe_id": "native_full_sort_dc_integral_004_v1"}
     report_path = case_root / "report.json"
     def stage(value):
         record["history"].append(value)
@@ -184,8 +195,10 @@ async def _run_case(service, root, source, library, master, name, fault):
         record["arm_virtual_resistance"] = materialize_arm_virtual_resistance(carrier, damped, master=master)
         sorted_project = case_root / "complete_sorting.pscx"
         record["complete_sorting"] = materialize_complete_arm_sorting(damped, sorted_project, library=library)
+        integral_project = case_root / "dc_integral.pscx"
+        record["dc_integral_repair"] = materialize_voltage_control_integral_time(sorted_project, integral_project)
         project = case_root / f"MMC_{name}.pscx"
-        contract = instrument_fault_channels(sorted_project, project, library=library, master=master)
+        contract = instrument_fault_channels(integral_project, project, library=library, master=master)
         contract["required_checks"] = _checks()
         _write(case_root / "channels.json", contract)
         record.update({"native_binding": binding, "channel_contract_path": str(case_root / "channels.json"), "channel_contract_sha256": _hash(case_root / "channels.json"), "project": str(project), "project_instrumented_sha256": _hash(project)})
@@ -256,6 +269,16 @@ async def _run_case(service, root, source, library, master, name, fault):
         record["samples_path"] = str(case_root / "samples.json")
         record["samples_sha256"] = _hash(case_root / "samples.json")
         record["output_index_path"] = str(case_root / "output-index.json")
+        record["dc_pi_parameter_checks"] = []
+        parameter_window = [contract["required_checks"]["prefault_window_s"][0], contract["required_checks"]["recovery_window_s"][1]]
+        for terminal, role, expected in (("T1", "controller_dc_proportional_gain", 12.0), ("T1", "controller_dc_integral_time", 0.04), ("T2", "controller_dc_proportional_gain", 0.2), ("T2", "controller_dc_integral_time", 0.2)):
+            channel_id = f"MFE_{terminal}_{role}"
+            observed_parameters = [channel for channel in samples["channels"] if channel["channel_id"] == channel_id]
+            values = [value for channel in observed_parameters for instant, value in zip(channel["domain"], channel["values"]) if parameter_window[0] <= instant <= parameter_window[1]]
+            matched = len(observed_parameters) == 1 and bool(values) and all(math.isclose(value, expected, rel_tol=0, abs_tol=1e-12) for value in values)
+            record["dc_pi_parameter_checks"].append({"channel_id": channel_id, "expected": expected, "matched": matched, "window_s": parameter_window})
+            if not matched:
+                raise RuntimeError("The actual DC PI parameters disagree with the frozen recipe")
         stage("evaluating")
         acceptance = evaluate_template_native_dc_fault(samples, fault_current_limit_ka=20.0, channel_contract=contract, checks_contract=_checks()) if fault else _steady(samples, contract)
         record["acceptance"] = acceptance

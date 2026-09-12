@@ -155,9 +155,9 @@ filter only in VSCControl2's DC outer-loop error feedback branch. Owner
 labels, raw physical voltage outputs, PWM normalization and fast protection
 remain unchanged. The Master realpole uses unit gain, no output limiting,
 and TIMEZERO reset to the actual raw Edc_Pu input, so snapshot or nonzero initial
-voltage is not replaced by an artificial zero. Its 31.8 Hz corner is above the
-DC-loop scale (roughly 4.6-6.5 Hz from the installed capacitor energy and PI
-gains) and attenuates 303 Hz by about 19.6 dB. This is a controller feedback
+voltage is not replaced by an artificial zero. Its 31.8 Hz corner attenuates
+303 Hz by about 19.6 dB. The original 4.6-6.5 Hz DC-loop estimate assumed a
+series PI; the source-backed parallel-PI correction is recorded below. This is a controller feedback
 change; acceptance uses only raw physical DC voltage. Only the five-second
 no-fault case runs until the unchanged nominal/stability gate closes.
 
@@ -328,3 +328,59 @@ $env:PYTHONPATH = (Get-Location).Path
 The command validates original contract/sample/output-index hashes and the
 complete output dataset before reporting refreshed/held subset coverage. It
 does not generate a physical acceptance verdict.
+
+## September 12 Readiness Resume
+
+The fixed 78204a0 late-window steady attempt
+`fault-evidence-20260908T094200138111Z` passed its then-implemented checks,
+with verified owned cleanup and unchanged source/support hashes. T1/T2 DC
+means were 638.989/626.654 kV, ripple 0.245%/0.252%, and maximum arm request
+1.88721 pu. T1 within-arm cell standard deviation fell to 0.01738 kV.
+The complete steady/fault attempt `fault-evidence-20260908T095525138020Z`
+remained FAIL: four T2 arm-capacitor means in [2.0, 2.4] were
+607.745-607.941 kV, below the unchanged 608 kV nominal lower bound. Their
+four recovery rows inherited the invalid prefault operating point. Actual
+fault application, negative insertion, blocking and the fault-current bound
+passed. Owned cleanup and source/support immutability were verified.
+
+The steady and fault cases have identical trajectories before the fault.
+The previous `_steady` helper checked only [4.6, 5.0], so its PASS did not
+prove readiness in the already-required [2.0, 2.4] window. The resumed gate
+now checks both existing windows, reports each separately, and preserves
+all thresholds and the original frozen checks object. A regression reproduces
+the misleading late-window PASS using a 607.8 kV prefault capacitor sum.
+Focused validation: 93 fault-channel tests passed; lint passed. The root's
+independent full offline suite at fixed 78204a0 had 2525 passed and 49 skipped;
+that result does not replace the still-pending physical readiness closure.
+
+The generated `PIwithFreeze` implements parallel PI:
+`u=Kp*e+integral(e/Ti)`. T1 uses KpDCRec=12 and TiDCRec=0.08, giving
+Ki=12.5 per second. The reference is nominal 640 kV with a 10 ms reference
+filter, zero DC droop and no FrzI activation in the readiness window.
+Using the two terminals' nominal capacitor energy 90.543 MJ gives the
+common-energy approximation `dv_pu/dt=5.522*di_pu` and a slow closed-loop
+pole of -1.0585 per second when the existing 5 ms feedback filter is included.
+The observed T1 DC error in 2.0-5.0 s has a 0.9396 s exponential decay time,
+consistent with that scale. This is a reduced-model explanation of the tail,
+not a closed-loop stability proof for every MMC/line mode.
+
+In [2.0, 2.4], T1/T2 capacitor-energy slopes are 2.206/2.134 MW while the
+AC power balance is 51.703 MW. Subtracting those slopes leaves 47.363 MW,
+including losses and other stored-energy changes; the late-window residual
+is 47.458 MW. T1's readiness-window current-reference peak is 0.96354 pu,
+with its existing 1.1 pu limit retained. The next candidate changes only
+the actual T1 DC integral parameter from 0.08 to 0.04: Ki becomes 25 and
+the estimated slow pole -2.1525 per second, while Kp and the fast reduced-model
+pole pair remain essentially unchanged. A several-MW increase in tail
+recharging is small relative to the observed current-reference margin;
+the licensed double-window steady gate must still verify actual limits.
+
+The explicit candidate ID is `native_full_sort_dc_integral_004_v1`.
+`materialize_voltage_control_integral_time` changes only Main slider
+TiDCRec owner 1520814881 from 0.08 to 0.04 after verifying its actual T1
+DC-mode binding, Kp=12, the unchanged T2 setting, and the seconds unit.
+An XML equality regression preserves every other source node. Instrumentation
+now freezes the source Kp/Ti settings before first vendor save and records the
+actual controller Kp/Ti arguments at both terminals; the runner requires T1
+12/0.04 and T2 0.2/0.2 throughout the existing operating/fault/recovery span.
+The prior 0.08 recipe and its failed evidence remain separate.

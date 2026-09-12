@@ -531,6 +531,17 @@ def instrument_fault_channels(source: str | Path, destination: str | Path, *, li
         magnitude_source = next(item for item in _components(control_definition) if item.get("id") == "1359229547")
         add_probe(control_definition, "controller_freeze", terminal, "FrzI", freeze_source, kind="physical_state", polarity={"inactive": 0, "active": 1}, extra={"quantity": "actual_current_limit_antiwindup_freeze"})
         add_probe(control_definition, "controller_current_magnitude", terminal, "Imag", magnitude_source, units_override="pu", extra={"quantity": "dq_current_reference_magnitude", "base": "sqrt(2)*Sbase/(sqrt(3)*Vtr_2)"})
+        for owner, signal, role, units in (("1142066271", "Kp_dc", "controller_dc_proportional_gain", "1"), ("2018099622", "Ti_dc", "controller_dc_integral_time", "s")):
+            imports = [item for item in _components(control_definition) if item.get("id") == owner and item.get("defn") == "master:import" and dict(_parameters(item)).get("Name") == signal]
+            if len(imports) != 1:
+                raise _error("MMC_ACCEPTANCE_INCOMPLETE", "The actual DC PI parameter import differs.", terminal=terminal, parameter=signal)
+            add_probe(control_definition, role, terminal, signal, imports[0], kind="controller_parameter", source_parameter="Name", units_override=units, extra={"quantity": "actual_parallel_dc_pi_parameter", "equation": "Kp_dc*e+integral(e/Ti_dc)", "active_in_dc_voltage_mode_only": True})
+        if terminal == "T1":
+            for owner, name in (("1520814881", "TiDCRec"), ("933003103", "kpDCRec")):
+                variables = [item for item in _components(main) if item.get("id") == owner and item.get("defn") == "master:var" and dict(_parameters(item)).get("Name") == name]
+                if len(variables) != 1:
+                    raise _error("MMC_ACCEPTANCE_INCOMPLETE", "The actual T1 DC PI setting is missing or ambiguous.", parameter=name)
+                probes.append(component_record(main, variables[0]))
         filters = [item for item in _components(control_definition) if item.get("defn") == "master:realpole" and dict(_parameters(item)).get("COM") == "MMC DC feedback only"]
         if filters:
             if len(filters) != 1:
@@ -822,6 +833,36 @@ def materialize_terminal_two_charging(source: str | Path, destination: str | Pat
     return {"source": str(original), "source_sha256": source_hash, "destination": str(target), "destination_sha256": _sha256(target), "definition": "Main", "owner": "606940312", "parameter": "T", "before": "Tcharging1", "after": "Tcharging2", "terminal_one_unchanged": True}
 
 
+def materialize_voltage_control_integral_time(source: str | Path, destination: str | Path) -> dict[str, Any]:
+    """Set the active T1 parallel-PI integral time for the fixed readiness case."""
+
+    original = _regular(source)
+    target = _new_target(destination, (original,))
+    source_hash = _sha256(original)
+    root = ET.parse(original).getroot()
+    main = root.find("./definitions/Definition[@name='Main']")
+    controller = root.find("./definitions/Definition[@name='VSCControl2']")
+    if main is None or controller is None:
+        raise _error("MMC_ACCEPTANCE_INCOMPLETE", "The native T1 DC controller scope is missing.")
+    owners: dict[str, list[ET.Element]] = {}
+    for component in _components(main):
+        owners.setdefault(component.get("id", ""), []).append(component)
+    expected = (("976600655", "VSCConverter", {"dmode": "0", "Ti_dc": "TiDCRec", "Kp_dc": "KpDCRec"}), ("800413106", "VSCConverter", {"dmode": "1", "Ti_dc": "0.2"}), ("1520814881", "var", {"Name": "TiDCRec", "Value": "0.08"}), ("933003103", "var", {"Name": "kpDCRec", "Value": "12.0"}))
+    for owner, definition, parameters in expected:
+        matches = owners.get(owner, [])
+        if len(matches) != 1 or matches[0].get("defn", "").rsplit(":", 1)[-1] != definition or any(dict(_parameters(matches[0])).get(key) != value for key, value in parameters.items()):
+            raise _error("MMC_ACCEPTANCE_INCOMPLETE", "The audited active DC PI binding or setting differs.", owner=owner)
+    time_parameter = [item for item in controller.findall("./form/category/parameter") if item.get("name") == "Ti_dc"]
+    if len(time_parameter) != 1 or time_parameter[0].get("unit") != "s":
+        raise _error("MMC_ACCEPTANCE_INCOMPLETE", "The native DC integral time is not declared in seconds.")
+    setting = owners["1520814881"][0]
+    next(item for item in setting.findall("./paramlist/param") if item.get("name") == "Value").set("value", "0.04")
+    _write_new_xml(root, target)
+    if _sha256(original) != source_hash:
+        raise _error("MMC_TEMPLATE_SOURCE_CHANGED", "The DC integral source changed.")
+    return {"source": str(original), "source_sha256": source_hash, "destination": str(target), "destination_sha256": _sha256(target), "owner": "1520814881", "definition": "Main", "parameter": "Value", "signal": "TiDCRec", "active_converter_owner": "976600655", "before_s": 0.08, "after_s": 0.04, "proportional_gain_unchanged": 12.0, "parallel_integral_gain_before_per_s": 12.5, "parallel_integral_gain_after_per_s": 25.0, "terminal_two_unchanged": True, "nominal_and_limits_unchanged": True}
+
+
 def materialize_dc_feedback_filter(source: str | Path, destination: str | Path, *, master: str | Path, time_constant_s: float = 0.005) -> dict[str, Any]:
     """Filter only the DC outer-loop error input; raw voltage remains available."""
 
@@ -1088,6 +1129,7 @@ __all__ = [
     "materialize_terminal_two_carrier",
     "materialize_terminal_two_charging",
     "materialize_voltage_control_headroom",
+    "materialize_voltage_control_integral_time",
     "reachable_instances",
     "read_fault_output_dataset",
     "snapshot_output_dataset",
