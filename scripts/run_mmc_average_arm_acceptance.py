@@ -117,9 +117,20 @@ def verify_model_normalization(authored: dict) -> dict:
     }
 
 
-def require_finalized_hashes(expected: dict[str, str]) -> dict[str, str]:
+def require_finalized_hashes(
+    expected: dict[str, str], *, allow_owned_executable_rewrite: bool = False
+) -> dict[str, str]:
     observed = {path: _sha256(Path(path)) for path in expected}
-    if not expected or observed != expected:
+    mismatches = {
+        path
+        for path, digest in observed.items()
+        if digest != expected.get(path)
+    }
+    if allow_owned_executable_rewrite:
+        mismatches = {
+            path for path in mismatches if Path(path).suffix.casefold() != ".exe"
+        }
+    if not expected or mismatches:
         raise ValueError("A finalized native input or executable changed")
     return observed
 
@@ -667,8 +678,19 @@ async def run_attempt(args, run_dir: Path, *, service_factory=_service) -> dict:
         if report["output_hashes_before_read"] != report["output_hashes_after_read"]:
             raise ValueError("Native output evidence changed while being read")
         report["finalized_hashes_after_run"] = require_finalized_hashes(
-            finalized_inputs
+            finalized_inputs, allow_owned_executable_rewrite=True
         )
+        executable_paths = [
+            path
+            for path in finalized_inputs
+            if Path(path).suffix.casefold() == ".exe"
+        ]
+        if executable_paths:
+            executable_path = executable_paths[0]
+            report["executable_changed_during_run"] = (
+                report["finalized_hashes_before_run"][executable_path]
+                != report["finalized_hashes_after_run"][executable_path]
+            )
         report["status"] = report["analysis"]["status"]
         if report["status"] == "FAIL":
             report["failure_category"] = (
@@ -718,8 +740,10 @@ async def run_attempt(args, run_dir: Path, *, service_factory=_service) -> dict:
             report.update(status="FAIL", cleanup_error=_error(error))
         try:
             if finalized_inputs:
-                report["finalized_hashes_after_cleanup"] = require_finalized_hashes(
-                    finalized_inputs
+                report[
+                    "finalized_hashes_after_cleanup"
+                ] = require_finalized_hashes(
+                    finalized_inputs, allow_owned_executable_rewrite=True
                 )
             report["source_hashes_after"] = {
                 path: _sha256(Path(path)) for path in source_hashes

@@ -428,7 +428,10 @@ class MmcExecutor:
             self._raise_postcondition("A planned MMC net requires at least two vertices.", net=operation.target)
         kind = str(arguments.get("kind", "electrical"))
         label = arguments.get("label")
-        if label is not None or len(vertices) == 2:
+        # An unlabeled route is a real PSCAD wire even when it has only two
+        # vertices.  Calling create_connection for that case loses the wire
+        # receipt in LegacyBackend and can leave the saved project unconnected.
+        if label is not None:
             created = await self.service.create_connection(self.project_name, vertices[0], vertices[-1], label, kind == "electrical", canvas_name="Main")
         else:
             created = await self.service.create_wire(self.project_name, vertices, canvas_name="Main")
@@ -440,7 +443,12 @@ class MmcExecutor:
         returned_vertices = created.get("vertices")
         if returned_vertices is not None and [list(point) for point in returned_vertices] != vertices:
             self._raise_postcondition("MMC wire vertex read-back did not match the plan.", net=operation.target, expected_vertices=vertices, observed_vertices=returned_vertices)
-        self._operation_completed(kind=kind, vertices=vertices)
+        receipt_id = created.get("wire_id", created.get("id"))
+        self._operation_completed(
+            kind=kind,
+            vertices=vertices,
+            **({"wire_id": receipt_id} if receipt_id is not None else {}),
+        )
 
     async def _create_output(self, operation: MmcPlanOperation) -> None:
         self._operation_started(operation)

@@ -131,6 +131,9 @@ _MASTER_PORTS = {
         "Mag": (0, 36, "Transfer", 0),
     },
     "varrlc": {"A": (0, 0, "Natural", 0), "B": (36, 0, "Natural", 0)},
+    # Retained for the cable-loop fixture and existing LCC companion users;
+    # the average arm itself uses the audited variable R/L/C primitive.
+    "resistor": {"A": (0, 0, "Natural", 0), "B": (36, 0, "Natural", 0)},
     "gain": {"IN:Dim": (-36, 0, "Transfer", 0), "OUT:Dim": (36, 0, "Transfer", 0)},
     "ammeter": {"N1": (0, 0, "Natural", 0), "N2": (36, 0, "Natural", 0)},
     "voltmeter": {"N1": (0, 0, "Natural", 0), "N2": (0, 36, "Natural", 0)},
