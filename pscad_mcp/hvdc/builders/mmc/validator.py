@@ -8,6 +8,7 @@ from typing import Any
 
 from ....core.backend.base import BackendError
 from ..common.routing import validate_orthogonal_route
+from .electrical_contracts import cable_path_issues, is_neutral_reference
 from .models import MmcBlueprint
 from .project_graph import GraphComponent, GraphNet, MmcProjectGraph
 
@@ -37,7 +38,12 @@ def validate_project_graph(graph: MmcProjectGraph, blueprint: MmcBlueprint) -> d
     """Return bounded observed findings for a saved graph; never trust planner state."""
 
     findings: list[dict[str, Any]] = []
+    for field in ("unresolved", "ambiguous_crossings", "malformed_conductors"):
+        if graph.source.get(field):
+            _add(findings, "MMC_STRUCTURE_INVALID", "Native topology has " + field + ".", observed=graph.source[field])
     component_map = {component.logical_id: component for component in graph.components}
+    for issue in cable_path_issues(graph.components, graph.nets):
+        _add(findings, "MMC_STRUCTURE_INVALID", "Saved cable conductor is " + issue["reason"] + ".", component=issue["component"])
     endpoint_nets: defaultdict[tuple[str, str], list[GraphNet]] = defaultdict(list)
     for net in graph.nets:
         for endpoint in net.endpoints:
@@ -90,7 +96,9 @@ def validate_project_graph(graph: MmcProjectGraph, blueprint: MmcBlueprint) -> d
         lowered = " ".join((net.logical_id, *net.endpoints)).casefold()
         if "positive" in lowered and "negative" in lowered:
             _add(findings, "MMC_STRUCTURE_INVALID", "positive and negative poles are crossed.", net=net.logical_id, source=net.source)
-        if net.kind == "electrical" and "ground" in lowered:
+        terminals = [parsed for endpoint in net.endpoints if (parsed := _endpoint(endpoint)) is not None]
+        grounded = any(owner in component_map and component_map[owner].definition == "master:ground" for owner, _ in terminals)
+        if net.kind == "electrical" and (grounded or "ground" in lowered) and not is_neutral_reference(terminals, component_map):
             _add(findings, "MMC_STRUCTURE_INVALID", "ground is used as a normal return conductor.", net=net.logical_id, source=net.source)
         has_ac = any(token in lowered for token in (".ac", ":ac", "transformer"))
         has_dc = any(token in lowered for token in ("dc_", "dc:", "positive_bus", "negative_bus", "_line"))

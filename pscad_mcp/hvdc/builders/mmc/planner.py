@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections import defaultdict, deque
+from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -26,6 +26,7 @@ from .catalog import (
     require_port,
     validate_parameters,
 )
+from .electrical_contracts import cable_path_issues, is_neutral_reference
 from .master_bindings import context_from_inventory, normalize_mmc_master_parameters
 from .models import (
     MmcAcceptanceCheck,
@@ -258,36 +259,11 @@ def _check_structure(blueprint: MmcBlueprint, components: Mapping[str, MmcCompon
 
 
 def _check_cable_bypasses(blueprint: MmcBlueprint) -> None:
-    adjacency: dict[tuple[str, str], set[tuple[str, str]]] = defaultdict(set)
-    for net in blueprint.nets:
-        if net.kind != "electrical":
-            continue
-        nodes = [("endpoint", endpoint) for endpoint in net.endpoints]
-        if net.label is not None:
-            nodes.append(("label", net.label))
-        for node in nodes[1:]:
-            adjacency[nodes[0]].add(node)
-            adjacency[node].add(nodes[0])
-    for component in blueprint.components:
-        if component.definition == "master:dc_cable":
-            pairs = (("IN", "OUT"),)
-        elif component.definition.endswith(":MMCCableLink"):
-            pairs = (("SEND_POS", "RECV_POS"), ("SEND_NEG", "RECV_NEG"))
-        else:
-            continue
-        for sending, receiving in pairs:
-            start = ("endpoint", f"{component.logical_id}:{sending}")
-            end = ("endpoint", f"{component.logical_id}:{receiving}")
-            if start not in adjacency or end not in adjacency:
-                raise _error("MMC_STRUCTURE_INVALID", "Both ends of each cable conductor require an electrical connection.", component=component.logical_id)
-            pending, visited = deque([start]), {start}
-            while pending:
-                node = pending.popleft()
-                if node == end:
-                    raise _error("MMC_STRUCTURE_INVALID", "An electrical net bypasses a cable conductor.", component=component.logical_id, sending=sending, receiving=receiving)
-                for neighbor in adjacency[node] - visited:
-                    visited.add(neighbor)
-                    pending.append(neighbor)
+    issues = cable_path_issues(blueprint.components, blueprint.nets)
+    if issues:
+        issue = issues[0]
+        message = "An electrical net bypasses a cable conductor." if issue["reason"] == "bypassed" else "Both ends of each cable conductor require an electrical connection."
+        raise _error("MMC_STRUCTURE_INVALID", message, component=issue["component"])
 
 
 def _check_net_semantics(net: MmcNetSpec, components: Mapping[str, MmcComponentSpec]) -> None:
@@ -295,11 +271,7 @@ def _check_net_semantics(net: MmcNetSpec, components: Mapping[str, MmcComponentS
     terminals = [_endpoint(endpoint, "net endpoint") for endpoint in net.endpoints]
     if any(owner not in components for owner, _ in terminals):
         raise _error("MMC_BLUEPRINT_INVALID", "net references an unknown component.", net=net.logical_id)
-    neutral_reference = any(port == "NEUTRAL" for _, port in terminals) and all(
-        (port == "NEUTRAL" and components[owner].definition in {"master:source3", "master:transformer"})
-        or (port == "GND" and components[owner].definition == "master:ground")
-        for owner, port in terminals
-    )
+    neutral_reference = is_neutral_reference(terminals, components)
     has_ground_terminal = any(components[owner].definition == "master:ground" and port == "GND" for owner, port in terminals)
     if net.kind == "electrical" and (has_ground_terminal or "ground" in lowered) and not neutral_reference:
         raise _error("MMC_STRUCTURE_INVALID", "ground must not be a normal electrical return conductor.", net=net.logical_id)
