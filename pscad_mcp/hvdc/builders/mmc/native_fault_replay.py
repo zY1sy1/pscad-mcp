@@ -71,6 +71,20 @@ def _frozen_output_index(root, report):
     return _read_hashed_json(path, result["output_index_sha256"])
 
 
+def _pending_owned_calls(service, *owners):
+    getter = getattr(getattr(service, "executor", None), "pending_settlements_for", None)
+    if not callable(getter):
+        return []
+    pending = {}
+    for owner in owners:
+        if owner is None:
+            continue
+        for token in getter(owner):
+            if not token.settled:
+                pending[id(token)] = {"operation_id": getattr(token, "operation_id", None), "generation": getattr(token, "generation", None), "operation": str(getattr(token, "operation", "unknown"))}
+    return list(pending.values())
+
+
 async def _terminate_owned_pscad(ownership):
     """Terminate only a recorded PID with matching birth time and executable."""
     result = {"owned_process_cleaned": False, "cleanup_pending": True}
@@ -292,6 +306,7 @@ async def _worker(request_path: Path, expected_hash: str, *, saved_verifier=None
     service = _service(root)
     ownership = None
     bundle = None
+    quit_task = None
 
     def verify_dependencies(stage):
         observed = _dependency_hashes(bundle, request["bundle"]["files"])
@@ -349,7 +364,9 @@ async def _worker(request_path: Path, expected_hash: str, *, saved_verifier=None
         contract.pop("virtual_root_rebinding", None)
         contract["replay_parent_contract_sha256"] = request["channel_contract_sha256"]
         checkpoint("frozen_copy_verified")
+        report["attach_started"] = True
         await service.attach_local()
+        report["attach_completed"] = True
         ownership = _capture_ownership(service, expected_hash)
         if ownership is None:
             raise RuntimeError("The replay worker has no owned connection")
@@ -394,12 +411,15 @@ async def _worker(request_path: Path, expected_hash: str, *, saved_verifier=None
         try:
             ownership = ownership or _capture_ownership(service, expected_hash)
             if ownership is None:
-                report.update({"owned_process_cleaned": True, "cleanup_pending": False, "ownership_status": "no_retained_owned_backend"})
+                uncertain = report.get("attach_started") is True
+                report.update({"owned_process_cleaned": not uncertain, "cleanup_pending": uncertain,
+                               "attach_outcome_uncertain": uncertain, "ownership_status": "launch_identity_unconfirmed" if uncertain else "no_launch_attempted"})
             else:
                 _write(root / "ownership.json", ownership)
                 report["cleanup_ownership"] = ownership
                 try:
-                    await asyncio.wait_for(service.quit_pscad(confirm=True), timeout=30)
+                    quit_task = asyncio.create_task(service.quit_pscad(confirm=True))
+                    await asyncio.wait_for(quit_task, timeout=30)
                     await asyncio.to_thread(psutil.Process(ownership["pid"]).wait, 10)
                     report.update({"owned_process_cleaned": True, "cleanup_pending": False})
                 except psutil.NoSuchProcess:
@@ -409,6 +429,12 @@ async def _worker(request_path: Path, expected_hash: str, *, saved_verifier=None
                     report.update(await _terminate_owned_pscad(ownership))
         except BaseException as error:  # noqa: BLE001 - preserve unknown ownership, never infer a foreign PID
             report.update({"cleanup_error": str(error), "owned_process_cleaned": False, "cleanup_pending": True})
+        try:
+            report["pending_vendor_calls"] = _pending_owned_calls(service, asyncio.current_task(), quit_task)
+            if report["pending_vendor_calls"]:
+                report.update({"owned_process_cleaned": False, "cleanup_pending": True})
+        except BaseException as error:  # noqa: BLE001 - unreadable settlement state cannot prove cleanup
+            report.update({"settlement_error": str(error), "owned_process_cleaned": False, "cleanup_pending": True})
         if bundle is not None and bundle.is_dir():
             try:
                 verify_dependencies("after_cleanup")

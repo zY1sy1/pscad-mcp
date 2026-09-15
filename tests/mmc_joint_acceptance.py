@@ -7,6 +7,7 @@ import asyncio
 import copy
 import json
 import os
+from collections.abc import Mapping
 from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
@@ -77,22 +78,28 @@ def _check_ref(reference):
 
 
 async def _close_owned_service(service, ownership, record):
+    quit_task = None
     try:
         ownership = ownership or native_fault_replay._capture_ownership(
             service, record["request_sha256"]
         )
         if ownership is None:
+            uncertain = record.get("attach_started") is True
             record.update(
                 {
-                    "owned_process_cleaned": True,
-                    "cleanup_pending": False,
-                    "ownership_status": "no_retained_owned_backend",
+                    "owned_process_cleaned": not uncertain,
+                    "cleanup_pending": uncertain,
+                    "attach_outcome_uncertain": uncertain,
+                    "ownership_status": "launch_identity_unconfirmed"
+                    if uncertain
+                    else "no_launch_attempted",
                 }
             )
             return
         record["ownership"] = ownership
         try:
-            await asyncio.wait_for(service.quit_pscad(confirm=True), timeout=30)
+            quit_task = asyncio.create_task(service.quit_pscad(confirm=True))
+            await asyncio.wait_for(quit_task, timeout=30)
             process = psutil.Process(ownership["pid"])
             if process.create_time() == ownership["created_at"]:
                 await asyncio.to_thread(process.wait, 10)
@@ -110,6 +117,21 @@ async def _close_owned_service(service, ownership, record):
                 "cleanup_error": str(error),
             }
         )
+    finally:
+        try:
+            record["pending_vendor_calls"] = native_fault_replay._pending_owned_calls(
+                service, asyncio.current_task(), quit_task
+            )
+            if record["pending_vendor_calls"]:
+                record.update({"owned_process_cleaned": False, "cleanup_pending": True})
+        except BaseException as error:  # noqa: BLE001 - settlement uncertainty survives a missing backend handle
+            record.update(
+                {
+                    "owned_process_cleaned": False,
+                    "cleanup_pending": True,
+                    "settlement_error": str(error),
+                }
+            )
 
 
 async def _owned_phase(
@@ -127,7 +149,9 @@ async def _owned_phase(
     checkpoint(name + "_starting")
     try:
         service = service_factory(root)
+        phase["attach_started"] = True
         await service.attach_local()
+        phase["attach_completed"] = True
         ownership = native_fault_replay._capture_ownership(service, request_hash)
         if ownership is None:
             raise RuntimeError(
@@ -153,8 +177,24 @@ async def _owned_phase(
             await _close_owned_service(service, ownership, phase)
         else:
             phase.update({"owned_process_cleaned": True, "cleanup_pending": False})
-        if phase.get("reload", {}).get("cleanup_pending"):
-            phase["cleanup_pending"] = True
+        phase["service_cleanup"] = {
+            "owned_process_cleaned": phase["owned_process_cleaned"],
+            "cleanup_pending": phase["cleanup_pending"],
+        }
+        replay_pending = "reload" in phase and (
+            not isinstance(phase["reload"], Mapping)
+            or phase["reload"].get("owned_process_cleaned") is not True
+            or bool(phase["reload"].get("cleanup_pending"))
+        )
+        phase["cleanup_pending"] = bool(
+            phase["cleanup_pending"]
+            or phase.get("builder_cleanup_pending")
+            or replay_pending
+        )
+        phase["owned_process_cleaned"] = (
+            phase["service_cleanup"]["owned_process_cleaned"] is True
+            and not phase["cleanup_pending"]
+        )
         if phase["cleanup_pending"]:
             phase["status"] = "FAIL"
         checkpoint(name + "_closed")
@@ -286,8 +326,66 @@ async def run_joint_replay(preparation, saved_contract, b_ref, workspace):
     return result
 
 
+def _capture_builder_cleanup(builder, phase, stage):
+    snapshot = {"stage": stage}
+    try:
+        build_id = phase.get("build_id")
+        statuses = getattr(builder, "_statuses", None)
+        if build_id is None and isinstance(statuses, Mapping) and len(statuses) == 1:
+            build_id = next(iter(statuses))
+            phase["build_id"] = build_id
+        pending = bool(getattr(builder, "_leases", {})) or any(
+            not item.done()
+            for name in ("_cleanup_waiters", "_cleanup_tasks", "_tasks")
+            for item in getattr(builder, name, {}).values()
+        )
+        if build_id is None:
+            if not isinstance(statuses, Mapping) or statuses:
+                raise RuntimeError("The builder's admitted work cannot be identified")
+            snapshot["no_build_admitted"] = True
+        else:
+            build = builder.get_build_status(build_id)
+            phase["build"] = copy.deepcopy(build)
+            snapshot["build"] = copy.deepcopy(build)
+            result = build.get("result")
+            result = result if isinstance(result, Mapping) else {}
+            reload = result.get("reload")
+            if isinstance(reload, Mapping):
+                phase["reload"] = copy.deepcopy(dict(reload))
+                pending = (
+                    pending
+                    or reload.get("cleanup_pending") is True
+                    or reload.get("owned_process_cleaned") is not True
+                )
+            containment = build.get("containment", {})
+            pending = (
+                pending
+                or build.get("lease_retained") is True
+                or bool(build.get("pending_vendor_calls"))
+                or containment.get("confirmed") is False
+            )
+            if (
+                build.get("run_started")
+                and not build.get("run_completed")
+                and containment.get("confirmed") is not True
+            ):
+                pending = True
+        snapshot["cleanup_pending"] = pending
+    except BaseException as error:  # noqa: BLE001 - unreadable builder state cannot prove cleanup
+        pending = True
+        snapshot.update(
+            {
+                "cleanup_pending": True,
+                "error": {"type": type(error).__name__, "message": str(error)},
+            }
+        )
+    phase.setdefault("builder_cleanup_snapshots", []).append(snapshot)
+    return pending
+
+
 async def _run_public(service, phase, accepted, public_root, request, plan, checkpoint):
     builder = BlankMmcBuilderService(service, workspace_root=public_root)
+    failure = None
     try:
         ticket = await builder.build_model(request, plan["plan_hash"], confirm=True)
         phase["build_id"] = ticket["build_id"]
@@ -309,8 +407,26 @@ async def _run_public(service, phase, accepted, public_root, request, plan, chec
             )
         _check_ref(accepted["file"])
         checkpoint("public_validated")
+    except BaseException as error:  # noqa: BLE001 - preserve the original failure while settling the builder
+        failure = error
     finally:
-        await builder.shutdown(timeout_s=15)
+        _capture_builder_cleanup(builder, phase, "before_shutdown")
+        shutdown_failed = False
+        try:
+            await builder.shutdown(timeout_s=15)
+        except BaseException as error:  # noqa: BLE001 - independent builder/replay cleanup remains authoritative
+            shutdown_failed = True
+            phase["builder_cleanup_error"] = {
+                "type": type(error).__name__,
+                "message": str(error),
+            }
+            failure = failure or error
+        pending = _capture_builder_cleanup(builder, phase, "after_shutdown")
+        phase["builder_cleanup_pending"] = shutdown_failed or pending
+    if failure is not None:
+        raise failure
+    if phase["builder_cleanup_pending"]:
+        raise RuntimeError("The public builder did not confirm all internal cleanup")
 
 
 async def _run_joint(service, phase, accepted, preparation, checkpoint):
@@ -367,8 +483,10 @@ async def _run_joint(service, phase, accepted, preparation, checkpoint):
     phase["reload"] = await run_joint_replay(
         preparation, contract, accepted["file"], project.parent / "reload"
     )
-    if phase["reload"].get("status") != "PASS" or phase["reload"].get(
-        "cleanup_pending"
+    if (
+        phase["reload"].get("status") != "PASS"
+        or phase["reload"].get("owned_process_cleaned") is not True
+        or phase["reload"].get("cleanup_pending")
     ):
         raise _error(
             "MMC_JOINT_ACCEPTANCE_FAILED",
@@ -514,23 +632,73 @@ async def run_public_joint_acceptance(
             }
         )
     finally:
+        _finalize_run(report, lease, journal, previous_concurrent)
+    return report
+
+
+def _finalize_run(report, lease, journal, previous_concurrent):
+    requested_pass = report.get("status") == "PASS"
+    report.update(
+        {
+            "status": "FAIL",
+            "physical_acceptance_verified": False,
+            "lease_retained": lease is not None,
+        }
+    )
+    errors = report.setdefault("finalization_errors", [])
+
+    def failed(stage, error):
+        errors.append(
+            {"stage": stage, "type": type(error).__name__, "message": str(error)}
+        )
+        if "error" not in report:
+            report["error"] = {"code": "MMC_FINALIZATION_FAILED", "message": str(error)}
+
+    try:
         phases = [report[key] for key in ("public", "joint") if key in report]
         report["cleanup_pending"] = any(item.get("cleanup_pending") for item in phases)
         report["owned_process_cleaned"] = (
             all(item.get("owned_process_cleaned") is True for item in phases)
             and not report["cleanup_pending"]
         )
-        if report["cleanup_pending"]:
-            report.update({"status": "FAIL", "physical_acceptance_verified": False})
-        report["lease_retained"] = bool(lease and report["cleanup_pending"])
-        checkpoint("finished")
+        report["history"].append("finalizing")
+        try:
+            journal.write(report)
+        except BaseException as error:  # noqa: BLE001 - retain a non-PASS checkpoint before resource release
+            failed("finalizing_journal", error)
         if lease is not None and not report["cleanup_pending"]:
-            lease.release(lease.token)
-        if previous_concurrent is None:
-            os.environ.pop("PSCAD_MCP_ACCEPTANCE_CONCURRENT", None)
-        else:
-            os.environ["PSCAD_MCP_ACCEPTANCE_CONCURRENT"] = previous_concurrent
-    return report
+            try:
+                lease.release(lease.token)
+                report["lease_retained"] = False
+            except BaseException as error:  # noqa: BLE001 - I/O failure does not imply a running process
+                failed("lease_release", error)
+    except BaseException as error:  # noqa: BLE001 - restoration is unconditional even for malformed cleanup state
+        failed("cleanup_state", error)
+    finally:
+        try:
+            if previous_concurrent is None:
+                os.environ.pop("PSCAD_MCP_ACCEPTANCE_CONCURRENT", None)
+            else:
+                os.environ["PSCAD_MCP_ACCEPTANCE_CONCURRENT"] = previous_concurrent
+        except BaseException as error:  # noqa: BLE001 - never persist PASS when process-local state was not restored
+            failed("environment_restore", error)
+    if (
+        requested_pass
+        and not errors
+        and not report.get("cleanup_pending")
+        and not report["lease_retained"]
+    ):
+        report.update({"status": "PASS", "physical_acceptance_verified": True})
+    report["history"].append("finished")
+    try:
+        journal.write(report)
+    except BaseException as error:  # noqa: BLE001 - the last durable checkpoint remains non-PASS
+        failed("final_journal", error)
+        report.update({"status": "FAIL", "physical_acceptance_verified": False})
+        try:
+            journal.write(report)
+        except BaseException as retry_error:  # noqa: BLE001 - return the accurate in-memory failure without hiding the primary cause
+            failed("failure_journal", retry_error)
 
 
 async def _joint_worker(request_path, expected_hash):

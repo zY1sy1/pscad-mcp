@@ -408,3 +408,34 @@ def test_failed_supervisor_report_write_does_not_erase_cleanup_state(tmp_path, m
     assert result["cleanup_pending"] is True
     assert result["owned_process_cleaned"] is False
     assert result["report_write_error"] == "report device unavailable"
+
+
+def test_replay_attach_timeout_without_backend_retains_unknown_launch(tmp_path, monkeypatch):
+    monkeypatch.setenv("PSCAD_MCP_MMC_ACCEPTANCE", "1")
+    monkeypatch.setenv("PSCAD_MCP_ACCEPTANCE_CONCURRENT", "1")
+    arguments = _request(tmp_path, monkeypatch)
+    request = {"project": {"path": str(arguments["project"]), "sha256": replay._hash(arguments["project"])},
+               "bundle": {"path": str(arguments["bundle"]), "files": arguments["dependency_files"], "source_snapshot": replay._files(arguments["bundle"])},
+               "channel_contract": {"project_path": str(arguments["project"]), "readback": {}},
+               "checks_contract": default_fault_checks(), "settings": {}, "source_identities": {}}
+    request["channel_contract_sha256"] = replay._json_hash(request["channel_contract"])
+    request["checks_sha256"] = replay._json_hash(request["checks_contract"])
+    request_path = tmp_path / "worker-input" / "request.json"
+    replay._write(request_path, request)
+    token = SimpleNamespace(settled=False, operation_id=1, generation=0, operation="launch")
+
+    class Service:
+        _backend = _pending_cleanup_backend = None
+
+        def __init__(self):
+            self.executor = SimpleNamespace(pending_settlements_for=lambda owner: (token,))
+
+        async def attach_local(self):
+            raise RuntimeError("EXECUTOR_TIMEOUT before ownership was recorded")
+
+    monkeypatch.setattr(replay, "_service", lambda _: Service())
+    report = asyncio.run(replay._worker(request_path, replay._hash(request_path)))
+    assert report["status"] == "FAIL"
+    assert report["owned_process_cleaned"] is False
+    assert report["cleanup_pending"] is True
+    assert report["attach_outcome_uncertain"] is True

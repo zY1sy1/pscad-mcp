@@ -306,3 +306,16 @@ The existing B native evidence at
 and its final handoff remain distinct from this pending integration acceptance.
 The parent task owns `tests/mmc_b_handoff.py` and has independently re-read the
 B evidence; this lifecycle consumes that validator's verified context.
+
+Independent review of the first lifecycle revision found cleanup propagation
+and finalizer ordering defects. The runner now captures builder status before
+and after shutdown even when its task raises or is cancelled, and combines
+builder, replay and owned-service cleanup without allowing one to clear the
+others. Attach attempts without a returned ownership handle remain uncertain;
+unsettled executor calls are retained in both primary and replay workers.
+The finalizer first persists a non-PASS checkpoint, releases its lease, restores
+the process-local environment, and only then permits a final PASS. Release or
+journal I/O failures report FAIL while retaining the actual process-cleanup
+facts and any original failure. The focused combined gate reports 203 passed,
+1 skipped after these review fixes; actual integration execution is still
+pending review closure and licensed opt-in.

@@ -17,6 +17,7 @@ from pscad_mcp.hvdc.builders.mmc.fault_channels import (
     finalize_fault_instrumentation,
     snapshot_output_dataset,
 )
+from pscad_mcp.hvdc.builders.mmc.journal import AtomicJournal
 from pscad_mcp.hvdc.builders.mmc.template_audit import discover_official_mmc_template
 from tests.mmc_timing_fault_case import (
     _digest,
@@ -211,10 +212,17 @@ def test_first_joint_save_allows_numeric_formatting_but_not_changed_values(
         "public_attach",
         "public_run",
         "public_cleanup",
+        "public_task_journal",
+        "public_task_cancelled",
+        "public_shutdown_io",
+        "public_status_unreadable",
+        "public_retained_lease",
+        "public_task_clean",
         "public_close_drift",
         "joint_run",
         "joint_replay",
         "joint_replay_exception",
+        "joint_replay_false_clean",
         "joint_cleanup",
         "joint_model_close_drift",
         "joint_output_close_drift",
@@ -250,6 +258,9 @@ def test_owned_lifecycle_orders_phases_and_retains_uncertain_cleanup(
     class Builder:
         def __init__(self, service, *, workspace_root):
             self.service, self.root, self._tasks = service, Path(workspace_root), {}
+            self._leases = (
+                {"test": object()} if failure == "public_retained_lease" else {}
+            )
 
         def plan_model(self, request):
             return {
@@ -267,13 +278,36 @@ def test_owned_lifecycle_orders_phases_and_retains_uncertain_cleanup(
         async def build_model(self, request, plan_hash, *, confirm):
             assert confirm is True and plan_hash == "a" * 64
             calls.append("public_build")
-            self._tasks["test"] = asyncio.create_task(asyncio.sleep(0))
+
+            async def task():
+                if failure == "public_task_cancelled":
+                    raise asyncio.CancelledError("cancelled after replay launch")
+                if failure in {
+                    "public_task_journal",
+                    "public_status_unreadable",
+                    "public_retained_lease",
+                    "public_task_clean",
+                }:
+                    raise OSError("journal failure after replay launch")
+                await asyncio.sleep(0)
+
+            self._tasks["test"] = asyncio.create_task(task())
             return {"build_id": "test"}
 
         def get_build_status(self, build_id):
+            calls.append("builder_status")
+            if failure == "public_status_unreadable":
+                raise OSError("builder status journal is unreadable")
+            replay_pending = failure in {"public_task_journal", "public_task_cancelled"}
             return {
                 "state": "failed" if failure == "public_run" else "published",
-                "result": {"reload": {"status": "PASS", "cleanup_pending": False}},
+                "result": {
+                    "reload": {
+                        "status": "PASS",
+                        "cleanup_pending": replay_pending,
+                        "owned_process_cleaned": not replay_pending,
+                    }
+                },
             }
 
         def validate_model(self, path):
@@ -287,6 +321,12 @@ def test_owned_lifecycle_orders_phases_and_retains_uncertain_cleanup(
 
         async def shutdown(self, timeout_s):
             calls.append("builder_shutdown")
+            if failure in {"public_task_journal", "public_task_cancelled"}:
+                from pscad_mcp.runtime import PendingCleanupError
+
+                raise PendingCleanupError((asyncio.get_running_loop().create_future(),))
+            if failure == "public_shutdown_io":
+                raise OSError("builder shutdown journal failed")
 
     async def prepare(root, **kwargs):
         root = Path(root)
@@ -396,7 +436,7 @@ def test_owned_lifecycle_orders_phases_and_retains_uncertain_cleanup(
             raise OSError("synthetic replay exception")
         return {
             "status": "FAIL" if failure == "joint_replay" else "PASS",
-            "owned_process_cleaned": True,
+            "owned_process_cleaned": failure != "joint_replay_false_clean",
             "cleanup_pending": False,
         }
 
@@ -429,14 +469,130 @@ def test_owned_lifecycle_orders_phases_and_retains_uncertain_cleanup(
     else:
         assert calls.index("quit:public") < calls.index("create:joint")
         assert "quit:joint" in calls
-    pending = failure in {"public_cleanup", "joint_cleanup", "joint_replay_exception"}
+    pending = failure in {
+        "public_cleanup",
+        "public_task_journal",
+        "public_task_cancelled",
+        "public_shutdown_io",
+        "public_status_unreadable",
+        "public_retained_lease",
+        "joint_cleanup",
+        "joint_replay_exception",
+        "joint_replay_false_clean",
+    }
     assert result["cleanup_pending"] is pending
     assert result["lease_retained"] is pending
+    if failure == "public_task_journal":
+        assert "builder_status" in calls
+        assert result["public"]["builder_cleanup_pending"] is True
+        assert result["public"]["reload"]["cleanup_pending"] is True
+        assert result["public"]["service_cleanup"]["owned_process_cleaned"] is True
+    if failure in {
+        "public_task_cancelled",
+        "public_shutdown_io",
+        "public_status_unreadable",
+        "public_retained_lease",
+    }:
+        assert result["public"]["builder_cleanup_pending"] is True
+        assert result["public"]["service_cleanup"]["owned_process_cleaned"] is True
+    if failure == "public_task_clean":
+        assert result["public"]["builder_cleanup_pending"] is False
     assert (
         json.loads(Path(result["report_path"]).read_text())["status"]
         == result["status"]
     )
     assert "PSCAD_MCP_ACCEPTANCE_CONCURRENT" not in module.os.environ
+
+
+@pytest.mark.parametrize("failure", ["release", "journal", "primary_and_journal"])
+def test_finalizer_restores_environment_and_never_leaves_unconfirmed_pass(
+    tmp_path, monkeypatch, failure
+):
+    module = _module()
+    monkeypatch.setenv("PSCAD_MCP_ACCEPTANCE_CONCURRENT", "1")
+    journal = AtomicJournal(tmp_path, "finalizer-test")
+    write = journal.write
+
+    def fail_final_write(payload):
+        if failure.endswith("journal") and payload["history"][-1] == "finished":
+            raise OSError("final journal denied")
+        return write(payload)
+
+    monkeypatch.setattr(journal, "write", fail_final_write)
+    report = {
+        "status": "PASS",
+        "physical_acceptance_verified": True,
+        "history": [],
+        "public": {"cleanup_pending": False, "owned_process_cleaned": True},
+        "joint": {"cleanup_pending": False, "owned_process_cleaned": True},
+    }
+    if failure == "primary_and_journal":
+        report.update(
+            {
+                "status": "FAIL",
+                "physical_acceptance_verified": False,
+                "error": {"message": "primary failure"},
+            }
+        )
+
+    class Lease:
+        token = "test"
+
+        def release(self, token):
+            if failure == "release":
+                raise OSError("lease unlink denied")
+
+    assert callable(getattr(module, "_finalize_run", None))
+    module._finalize_run(report, Lease(), journal, None)
+    assert report["status"] == "FAIL"
+    assert report["physical_acceptance_verified"] is False
+    assert report["owned_process_cleaned"] is True
+    assert report["cleanup_pending"] is False
+    assert report["lease_retained"] is (failure == "release")
+    assert "PSCAD_MCP_ACCEPTANCE_CONCURRENT" not in module.os.environ
+    assert json.loads(journal.path.read_text())["status"] == "FAIL"
+    assert report["finalization_errors"]
+    if failure == "primary_and_journal":
+        assert report["error"]["message"] == "primary failure"
+
+
+@pytest.mark.parametrize("settled", [False, True])
+def test_attach_without_a_handle_cannot_confirm_owned_cleanup(tmp_path, settled):
+    module = _module()
+    token = SimpleNamespace(
+        settled=settled, operation_id=1, generation=0, operation="launch"
+    )
+
+    class Service:
+        _backend = _pending_cleanup_backend = None
+
+        def __init__(self):
+            self.executor = SimpleNamespace(
+                pending_settlements_for=lambda owner: () if token.settled else (token,)
+            )
+
+        async def attach_local(self):
+            raise RuntimeError("EXECUTOR_TIMEOUT before launch ownership returned")
+
+    report = {}
+
+    async def exercise():
+        with pytest.raises(RuntimeError, match="EXECUTOR_TIMEOUT"):
+            await module._owned_phase(
+                tmp_path,
+                "public",
+                "a" * 64,
+                {},
+                None,
+                report,
+                lambda stage: None,
+                lambda _: Service(),
+            )
+
+    asyncio.run(exercise())
+    assert report["public"]["cleanup_pending"] is True
+    assert report["public"]["owned_process_cleaned"] is False
+    assert report["public"]["attach_outcome_uncertain"] is True
 
 
 def test_joint_child_rejects_preflight_without_calling_native_worker(
