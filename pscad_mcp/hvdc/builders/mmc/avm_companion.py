@@ -135,6 +135,12 @@ _MASTER_PORTS = {
     # the average arm itself uses the audited variable R/L/C primitive.
     "resistor": {"A": (0, 0, "Natural", 0), "B": (36, 0, "Natural", 0)},
     "gain": {"IN:Dim": (-36, 0, "Transfer", 0), "OUT:Dim": (36, 0, "Transfer", 0)},
+    "breakout": {
+        "N": (0, 0, "Natural", 0),
+        "N1": (36, -36, "Natural", 0),
+        "N2": (36, 0, "Natural", 0),
+        "N3": (36, 36, "Natural", 0),
+    },
     "ammeter": {"N1": (0, 0, "Natural", 0), "N2": (36, 0, "Natural", 0)},
     "voltmeter": {"N1": (0, 0, "Natural", 0), "N2": (0, 36, "Natural", 0)},
     "breaker1": {"A": (36, 0, "Natural", 0), "B": (-36, 0, "Natural", 0)},
@@ -146,6 +152,18 @@ _MASTER_PORTS = {
     "import": {"N": (36, 0, "Transfer", 0)},
     "export": {"N": (36, 0, "Transfer", 0)},
     "pgb": {"Signl": (0, 0, "Transfer", 0)},
+}
+_MASTER_WRITER_PORTS = {
+    **_MASTER_PORTS,
+    "source3": {
+        "N3": (36, 0, "Natural", 0),
+        "N": (-36, 0, "Natural", 1),
+    },
+    "xfmr-3p2w": {
+        "N1": (-54, 0, "Natural", 0),
+        "N2": (36, 0, "Natural", 0),
+        "G1": (-18, 36, "Natural", 0),
+    },
 }
 _SOURCE_PARAMETERS = {
     "Name": "",
@@ -182,6 +200,11 @@ _PARAMETER_UNITS = {
     "R_on_ohm": "ohm",
     "R_off_ohm": "ohm",
     "V_diode_kV": "kV",
+    "Frequency_Hz": "Hz",
+    "Modulation_Index": "1",
+    "Phase_Offset_Deg": "deg",
+    "Deblock_Time_s": "s",
+    "Reversal_Time_s": "s",
 }
 
 
@@ -216,10 +239,16 @@ def _audit_master(path: Path) -> tuple[dict, str, dict]:
                 != contract
             ):
                 raise ValueError(f"Master port contract changed: {name}:{port_name}")
-            expected_dimension = (
+            expected_dimension = {
+                ("breakout", "N"): 3,
+                ("breakout", "N1"): 1,
+                ("breakout", "N2"): 1,
+                ("breakout", "N3"): 1,
+            }.get(
+                (name, port_name),
                 1
                 if name in {"source_1", "src_ccin_1", "breaker1", "peswitch", "ground"}
-                else 0
+                else 0,
             )
             if records[0].dim != expected_dimension:
                 raise ValueError(f"Master scalar dimension changed: {name}:{port_name}")
@@ -227,6 +256,8 @@ def _audit_master(path: Path) -> tuple[dict, str, dict]:
                 ("source_1", "NB"): "Grnd==0",
                 ("source_1", "Mag"): "(Cntrl==1)&&(Spec==0)",
                 ("src_ccin_1", "Mag"): "(Cntrl)",
+                ("breakout", "N1"): "Com==0",
+                ("breakout", "N3"): "Com==0",
             }.get((name, port_name), "true")
             if re.sub(r"\s+", "", records[0].condition or "") != expected_condition:
                 raise ValueError(
@@ -276,7 +307,7 @@ def _audit_master(path: Path) -> tuple[dict, str, dict]:
                 f"./definitions/Definition[@name='{name}']/form//parameter"
             )
         }
-        for name in _MASTER_PORTS
+        for name in _MASTER_WRITER_PORTS
     }
     return metadata, _sha(payload), defaults
 
@@ -494,7 +525,7 @@ class _Writer:
         scoped: str,
         parameters: dict,
         bindings: dict[str, str],
-    ) -> None:
+    ) -> ET.Element:
         name = definition.get("name")
         index = self.counts[name]
         self.counts[name] += 1
@@ -503,7 +534,7 @@ class _Writer:
         native = self.metadata(scoped)
         for port_name, signal in bindings.items():
             occurrence = (
-                _MASTER_PORTS[scoped.split(":", 1)[1]][port_name][3]
+                _MASTER_WRITER_PORTS[scoped.split(":", 1)[1]][port_name][3]
                 if scoped.startswith("master:")
                 else 0
             )
@@ -566,6 +597,7 @@ class _Writer:
             )
             if kind == "electrical":
                 self.nets[name][signal].append(f"{role}:{port_name}")
+        return component
 
     def verify(self) -> None:
         for route in self.routes:
@@ -582,8 +614,10 @@ class _Writer:
                     )
 
 
-def _make_library(master: dict, master_defaults: dict) -> tuple[ET.Element, _Writer]:
-    root = _project(LIBRARY_SCOPE, library=True)
+def _make_library(
+    master: dict, master_defaults: dict, *, scope: str = LIBRARY_SCOPE
+) -> tuple[ET.Element, _Writer]:
+    root = _project(scope, library=True)
     defaults = asdict(AverageArmParameters())
     arm_ports = {
         "IN": (-90, 0, "Natural", "Electrical"),
@@ -771,7 +805,7 @@ def _make_library(master: dict, master_defaults: dict) -> tuple[ET.Element, _Wri
     writer.add(
         arm,
         "signed_power_coupling",
-        LIBRARY_SCOPE + ":MMCAverageCoupling",
+        scope + ":MMCAverageCoupling",
         {name: name for name in ("C_eq_F", "P_nonohmic_MW", "V_loss_floor_kV")},
         {
             "M": "M",
