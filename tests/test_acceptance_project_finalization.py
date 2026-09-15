@@ -252,7 +252,6 @@ def test_generated_module_metadata_requires_explicit_optin(
         ("./hierarchy/call/call", "link", "102"),
         ("./hierarchy/call/call/call", "link", "5"),
         ("./hierarchy/call/call/call", "name", "other:MMCAverageArm"),
-        ("./hierarchy/call/call/call", "z", "1"),
         ("./hierarchy/call/call/call", "view", "true"),
     ],
 )
@@ -275,6 +274,7 @@ def test_generated_module_policy_allows_compiler_assigned_direct_child_instance(
     path, root = project(tmp_path)
     authored = snapshot_project_semantics(path, policy=GENERATED_MODULE_POLICY)
     root.find("./hierarchy/call/call/call").set("instance", "11")
+    root.find("./hierarchy/call/call/call").set("z", "90")
     write(path, root)
     finalized = snapshot_project_semantics(path, policy=GENERATED_MODULE_POLICY)
 
@@ -286,7 +286,12 @@ def test_generated_module_policy_allows_compiler_assigned_direct_child_instance(
             "field": "/project/hierarchy[2]/call[0]/call[0]/call[0]/@instance",
             "before": "0",
             "after": "11",
-        }
+        },
+        {
+            "field": "/project/hierarchy[2]/call[0]/call[0]/call[0]/@z",
+            "before": "0",
+            "after": "90",
+        },
     ]
 
 

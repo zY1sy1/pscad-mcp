@@ -7,9 +7,10 @@ semantic. Outside this stage, callers must compare exact file hashes.
 
 The generated-module opt-in also permits User display bounds, direct instance
 parameter-list crc, and the top Station hierarchy call's vendor-assigned link.
-It permits the compiler-assigned ``instance`` index only on direct children of
-the Main hierarchy call; component links, names, execution order and nested
-child calls remain semantic.
+It permits compiler-assigned ``instance`` and automatic execution-order ``z``
+only on direct children of the Main hierarchy call; component links, names and
+nested child calls remain semantic. Schematic User/Wire ``z`` already follows
+the same automatic-sequence rule.
 These were observed in the authored/model pair from average-arm acceptance
 attempt-20260908-174633-918404c6. Nested hierarchy calls and all parameter children
 remain semantic; the generator must author defaults and child calls explicitly.
@@ -100,7 +101,7 @@ def snapshot_project_semantics(
                 "call",
                 "call",
             ):
-                excluded.add("instance")
+                excluded.update(("instance", "z"))
         attributes = {}
         for name, value in element.attrib.items():
             if name in excluded:
