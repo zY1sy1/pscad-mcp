@@ -164,6 +164,10 @@ _MASTER_WRITER_PORTS = {
         "N2": (36, 0, "Natural", 0),
         "G1": (-18, 36, "Natural", 0),
     },
+    "multimeter": {
+        "A": (-18, 0, "Natural", 0),
+        "B": (18, 0, "Natural", 1),
+    },
 }
 _SOURCE_PARAMETERS = {
     "Name": "",

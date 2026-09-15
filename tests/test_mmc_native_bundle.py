@@ -111,6 +111,7 @@ def test_full_fixture_wires_twelve_two_terminal_arms_to_two_three_phase_stations
     )
     assert len([item for item in users if item.get("defn") == "master:breakout"]) == 2
     assert len([item for item in users if item.get("defn") == "master:ground"]) == 1
+    assert len([item for item in users if item.get("defn") == "master:multimeter"]) == 2
     transformers = [item for item in users if item.get("defn") == "master:xfmr-3p2w"]
     for transformer in transformers:
         values = {
@@ -158,6 +159,15 @@ def test_full_fixture_wires_twelve_two_terminal_arms_to_two_three_phase_stations
         "V_transformer:G1",
         "neutral_ground:A",
     } <= set(report["electrical_nets"]["Main"]["GND"])
+    for prefix in ("P", "V"):
+        assert {
+            f"{prefix}_source:N3",
+            f"{prefix}_grid_meter:A",
+        } <= set(report["electrical_nets"]["Main"][prefix + "_SOURCE_VECTOR"])
+        assert {
+            f"{prefix}_grid_meter:B",
+            f"{prefix}_transformer:N1",
+        } <= set(report["electrical_nets"]["Main"][prefix + "_GRID"])
     hierarchy = root.findall("./hierarchy/call/call/call")
     assert len(hierarchy) == 13
     assert not any(item.get("name", "").endswith(CONTROL_NAME) for item in hierarchy)

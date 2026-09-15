@@ -318,7 +318,25 @@ def materialize_native_avm_fixture(
             prefix + "_source",
             "master:source3",
             _source_parameters(prefix + "_SOURCE", ac_voltage_kv, frequency_hz),
-            {"N3": prefix + "_GRID", "N": "GND"},
+            {"N3": prefix + "_SOURCE_VECTOR", "N": "GND"},
+        )
+        writer.add(
+            main,
+            prefix + "_grid_meter",
+            "master:multimeter",
+            {
+                "MeasV": "0",
+                "MeasI": "1",
+                "MeasP": "0",
+                "MeasQ": "0",
+                "RMS": "0",
+                "IRMS": "0",
+                "MeasPh": "0",
+                "Name": prefix + "_GRID_METER",
+                "CurI": prefix + "_GRID_CURRENT",
+                "Dis": "0",
+            },
+            {"A": prefix + "_SOURCE_VECTOR", "B": prefix + "_GRID"},
         )
         transformer = writer.add(
             main,
@@ -523,6 +541,7 @@ def audit_native_avm_fixture(
         f"{NATIVE_SCOPE}:MMCCableLink": 1,
         "master:source3": 2,
         "master:xfmr-3p2w": 2,
+        "master:multimeter": 2,
         "master:breakout": 2,
         "master:ground": 1,
         "master:voltmeter": 2,
@@ -539,6 +558,15 @@ def audit_native_avm_fixture(
         "neutral_ground:A",
     } - set(nets["GND"]):
         raise ValueError("Native AVM source and transformer neutrals are not grounded")
+    for prefix in ("P", "V"):
+        if {
+            f"{prefix}_source:N3",
+            f"{prefix}_grid_meter:A",
+        } - set(nets[prefix + "_SOURCE_VECTOR"]) or {
+            f"{prefix}_grid_meter:B",
+            f"{prefix}_transformer:N1",
+        } - set(nets[prefix + "_GRID"]):
+            raise ValueError("Native AVM grid meter does not separate source and transformer")
     for prefix in ("P", "V"):
         for phase in "ABC":
             if {
