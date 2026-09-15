@@ -238,7 +238,9 @@ def _transformer_parameters(name: str, voltage_kv: float, frequency_hz: float) -
     }
 
 
-def _hierarchy_call(parent: ET.Element, component: ET.Element, *, z: int) -> ET.Element:
+def _hierarchy_call(
+    parent: ET.Element, component: ET.Element, *, z: int, instance: int
+) -> ET.Element:
     return ET.SubElement(
         parent,
         "call",
@@ -247,7 +249,7 @@ def _hierarchy_call(parent: ET.Element, component: ET.Element, *, z: int) -> ET.
             "name": component.get("defn"),
             "z": str(z),
             "view": "false",
-            "instance": "0",
+            "instance": str(instance),
         },
     )
 
@@ -434,8 +436,29 @@ def materialize_native_avm_fixture(
             {"Signl": signal},
         )
     writer.verify()
+    arm_instances = {
+        "P_A_UPPER": 0,
+        "P_A_LOWER": 1,
+        "P_B_UPPER": 2,
+        "P_B_LOWER": 3,
+        "P_C_UPPER": 5,
+        "P_C_LOWER": 4,
+        "V_A_UPPER": 6,
+        "V_A_LOWER": 11,
+        "V_B_UPPER": 9,
+        "V_B_LOWER": 7,
+        "V_C_UPPER": 10,
+        "V_C_LOWER": 8,
+    }
     for index, (component, definition) in enumerate(custom, start=1):
-        call = _hierarchy_call(hierarchy, component, z=index * 10)
+        if definition == CONTROL_NAME:
+            continue
+        call = _hierarchy_call(
+            hierarchy,
+            component,
+            z=index * 10,
+            instance=(arm_instances[component.get("name")] if definition == "MMCAverageArm" else 0),
+        )
         if definition == "MMCCableLink":
             ET.SubElement(
                 call,

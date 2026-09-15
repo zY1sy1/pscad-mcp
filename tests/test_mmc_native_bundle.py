@@ -149,6 +149,38 @@ def test_full_fixture_wires_twelve_two_terminal_arms_to_two_three_phase_stations
         "V_transformer:G1",
         "neutral_ground:A",
     } <= set(report["electrical_nets"]["Main"]["GND"])
+    hierarchy = root.findall("./hierarchy/call/call/call")
+    assert len(hierarchy) == 13
+    assert not any(item.get("name", "").endswith(CONTROL_NAME) for item in hierarchy)
+    assert [int(item.get("z")) for item in hierarchy] == [
+        20,
+        30,
+        40,
+        50,
+        60,
+        70,
+        90,
+        100,
+        110,
+        120,
+        130,
+        140,
+        150,
+    ]
+    assert [int(item.get("instance")) for item in hierarchy[:-1]] == [
+        0,
+        1,
+        2,
+        3,
+        5,
+        4,
+        6,
+        11,
+        9,
+        7,
+        10,
+        8,
+    ]
 
 
 @pytest.mark.parametrize("mutation", ["arm", "cable", "source_hash"])
