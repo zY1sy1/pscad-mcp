@@ -112,15 +112,13 @@ def test_full_fixture_wires_twelve_two_terminal_arms_to_two_three_phase_stations
     assert len([item for item in users if item.get("defn") == "master:breakout"]) == 2
     assert len([item for item in users if item.get("defn") == "master:ground"]) == 1
     transformers = [item for item in users if item.get("defn") == "master:xfmr-3p2w"]
-    assert all(
-        next(
-            parameter.get("value")
+    for transformer in transformers:
+        values = {
+            parameter.get("name"): parameter.get("value")
             for parameter in transformer.findall("./paramlist/param")
-            if parameter.get("name") == "CuL"
-        )
-        == "0.005 [pu]"
-        for transformer in transformers
-    )
+        }
+        assert values["CuL"] == "0.005 [pu]"
+        assert values["NLL"] == "0.005 [pu]"
     assert (
         len(
             [
