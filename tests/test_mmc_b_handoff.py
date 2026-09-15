@@ -36,6 +36,69 @@ def test_recipe_comparison_does_not_conflate_independent_producers(change):
         assert gate.require_recipe_match(b, public)
 
 
+@pytest.mark.parametrize("change", [None, "parameter", "step", "headroom", "filter", "carrier", "resistance", "sorting", "integral", "master", "library", "fault_start", "fault_duration", "fault_location"])
+def test_declared_recipe_is_bound_to_actual_native_stages(tmp_path, change):
+    master = reference(tmp_path / "master.pslx", "master")
+    library = reference(tmp_path / "library.pslx", "library")
+    parameters = {"current_limit_pu": 1.1, "dc_feedback_time_constant_s": 0.005,
+                  "terminal_two_carrier_ratio": 23.0, "arm_virtual_resistance_ohm": 30.0,
+                  "sort_extent": "Dim", "sort_enable": "existing_Enab", "t1_dc_integral_time_s": 0.04}
+    recipe = {"id": "native_full_sort_dc_integral_004_v1", "parameters": parameters,
+              "steps": gate._expected_recipe_steps(parameters)}
+    case = {"recipe_id": recipe["id"], "fault": True,
+            "native_binding": {"timing_basis": "template_embedded_emt", "bindings": [
+                {"owner": "208155720", "name": "Fault Time", "parameter": "Value", "value": "2.5"},
+                {"owner": "152486038", "name": "TFlt", "parameter": "TFlt", "value": "2.5"},
+                {"owner": "152486038", "name": "FltDur", "parameter": "FltDur", "value": "0.2"},
+                {"owner": "1067520513", "name": "DC fault timer", "parameter": "DF", "value": "0.2"},
+                {"owner": "1311596185", "name": "Flt Location", "parameter": "Value", "value": "3"},
+                {"owner": "983117456", "name": "DC_flt_2_PN", "parameter": "OpCur", "value": "1"}],
+                "fault_execution": {"timer_duration_s": 0.2, "timer_owner": "1067520513", "timer_start_signal": "Flt_time",
+                                    "fault_location": 3, "fault_switch_owner": "983117456", "fault_switch_signal": "DC_flt_2_PN",
+                                    "clearing_policy": "imposed_fault_removed_at_scheduled_time", "actual_state_required": "OPENBR"}},
+            "charging_delay_repair": {"before": "Tcharging1", "after": "Tcharging2", "terminal_one_unchanged": True},
+            "operating_point_repair": {"parameter": "Imax", "after_pu": 1.1, "freeze_reference": "0.99999 * Imax", "arm_protection_limit_ka": 3.0},
+            "feedback_filter": {"time_constant_s": 0.005, "master_sha256": master["sha256"], "raw_voltage_acceptance": True},
+            "carrier_diagnostic": {"after_ratio": 23.0, "fundamental_frequency_hz": 60.0},
+            "arm_virtual_resistance": {"resistance_per_arm_ohm": 30.0, "master_sha256": master["sha256"], "dc_gain": 0.0,
+                                       "command_difference_unchanged": True, "existing_cell_count_saturation_retained": True},
+            "complete_sorting": {"sort_extent": "Dim", "library_sha256": library["sha256"], "requested_count_unchanged": True,
+                                 "enable_unchanged": True, "current_and_firing_unchanged": True},
+            "dc_integral_repair": {"after_s": 0.04, "proportional_gain_unchanged": 12.0,
+                                   "terminal_two_unchanged": True, "nominal_and_limits_unchanged": True}}
+    if change == "parameter":
+        recipe["parameters"]["arm_virtual_resistance_ohm"] = 25.0
+    elif change == "step":
+        recipe["steps"][4]["parameters"]["resistance_per_arm_ohm"] = 25.0
+    elif change == "headroom":
+        case["operating_point_repair"]["after_pu"] = 1.05
+    elif change == "filter":
+        case["feedback_filter"]["time_constant_s"] = 0.01
+    elif change == "carrier":
+        case["carrier_diagnostic"]["after_ratio"] = 3.0
+    elif change == "resistance":
+        case["arm_virtual_resistance"]["resistance_per_arm_ohm"] = 25.0
+    elif change == "sorting":
+        case["complete_sorting"]["sort_extent"] = "NS"
+    elif change == "integral":
+        case["dc_integral_repair"]["after_s"] = 0.08
+    elif change == "master":
+        case["feedback_filter"]["master_sha256"] = "0" * 64
+    elif change == "library":
+        case["complete_sorting"]["library_sha256"] = "0" * 64
+    elif change == "fault_start":
+        case["native_binding"]["bindings"][0]["value"] = "2.4"
+    elif change == "fault_duration":
+        case["native_binding"]["fault_execution"]["timer_duration_s"] = 0.1
+    elif change == "fault_location":
+        case["native_binding"]["fault_execution"]["fault_location"] = 2
+    if change:
+        with pytest.raises(ValueError, match="recipe|fault"):
+            gate._verify_recipe_evidence(recipe, case, {"master": master, "library": library}, gate.default_fault_checks())
+    else:
+        gate._verify_recipe_evidence(recipe, case, {"master": master, "library": library}, gate.default_fault_checks())
+
+
 @pytest.mark.parametrize(("status", "scope", "cleaned"), [
     ("FAIL", "steady_and_dc_fault_recovery", True),
     ("PASS", "steady_only_diagnostic", True),

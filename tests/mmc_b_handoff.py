@@ -32,6 +32,16 @@ _STAGES = (
     "feedback_filter", "carrier_diagnostic", "arm_virtual_resistance",
     "complete_sorting", "dc_integral_repair",
 )
+_ACCEPTED_RECIPE_ID = "native_full_sort_dc_integral_004_v1"
+_ACCEPTED_RECIPE_PARAMETERS = {
+    "current_limit_pu": 1.1,
+    "dc_feedback_time_constant_s": 0.005,
+    "terminal_two_carrier_ratio": 23.0,
+    "arm_virtual_resistance_ohm": 30.0,
+    "sort_extent": "Dim",
+    "sort_enable": "existing_Enab",
+    "t1_dc_integral_time_s": 0.04,
+}
 
 
 def _file_identity(path):
@@ -84,6 +94,94 @@ def require_recipe_match(b_recipe, public_recipe):
     ):
         raise ValueError("B and public execution use different model recipes")
     return True
+
+
+def _expected_recipe_steps(parameters):
+    return [
+        {"name": "terminal_two_charging", "parameters": {}},
+        {"name": "voltage_control_headroom", "parameters": {"current_limit_pu": parameters["current_limit_pu"]}},
+        {"name": "dc_feedback_filter", "parameters": {"time_constant_s": parameters["dc_feedback_time_constant_s"]}},
+        {"name": "terminal_two_carrier", "parameters": {"ratio": parameters["terminal_two_carrier_ratio"]}},
+        {"name": "arm_virtual_resistance", "parameters": {"resistance_per_arm_ohm": parameters["arm_virtual_resistance_ohm"]}},
+        {"name": "complete_arm_sorting", "parameters": {"sort_extent": parameters["sort_extent"], "enable": parameters["sort_enable"]}},
+        {"name": "voltage_control_integral_time", "parameters": {"time_constant_s": parameters["t1_dc_integral_time_s"]}},
+        {"name": "fault_instrumentation", "parameters": {}},
+    ]
+
+
+def _verify_native_fault_binding(case, checks):
+    native = case.get("native_binding", {})
+    entries = native.get("bindings", [])
+    observed = {(item.get("owner"), item.get("name"), item.get("parameter")): item.get("value") for item in entries}
+    start = checks["fault_window_s"][0] if case.get("fault") is True else 2 * checks["simulation_duration_s"]
+    duration = checks["fault_window_s"][1] - checks["fault_window_s"][0]
+    expected = {
+        ("208155720", "Fault Time", "Value"): start,
+        ("152486038", "TFlt", "TFlt"): start,
+        ("152486038", "FltDur", "FltDur"): duration,
+        ("1067520513", "DC fault timer", "DF"): duration,
+        ("1311596185", "Flt Location", "Value"): 3.0,
+        ("983117456", "DC_flt_2_PN", "OpCur"): 1.0,
+    }
+    try:
+        values_match = len(entries) == len(observed) == len(expected) and set(observed) == set(expected) and all(
+            math.isfinite(float(observed[key])) and math.isclose(float(observed[key]), value, rel_tol=0, abs_tol=1e-12)
+            for key, value in expected.items()
+        )
+    except (TypeError, ValueError):
+        values_match = False
+    execution = native.get("fault_execution", {})
+    try:
+        duration_match = math.isfinite(float(execution.get("timer_duration_s"))) and math.isclose(
+            float(execution["timer_duration_s"]), duration, rel_tol=0, abs_tol=1e-12
+        )
+    except (KeyError, TypeError, ValueError):
+        duration_match = False
+    if (
+        native.get("timing_basis") != "template_embedded_emt"
+        or not values_match
+        or not duration_match
+        or execution.get("timer_owner") != "1067520513"
+        or execution.get("timer_start_signal") != "Flt_time"
+        or execution.get("fault_location") != 3
+        or execution.get("fault_switch_owner") != "983117456"
+        or execution.get("fault_switch_signal") != "DC_flt_2_PN"
+        or execution.get("clearing_policy") != "imposed_fault_removed_at_scheduled_time"
+        or execution.get("actual_state_required") != "OPENBR"
+    ):
+        raise ValueError("The native fault binding differs from the frozen fault contract")
+
+
+def _verify_recipe_evidence(recipe, case, sources, checks):
+    parameters = recipe.get("parameters")
+    if (
+        recipe.get("id") != _ACCEPTED_RECIPE_ID
+        or parameters != _ACCEPTED_RECIPE_PARAMETERS
+        or recipe.get("steps") != _expected_recipe_steps(parameters)
+        or case.get("recipe_id") != recipe["id"]
+    ):
+        raise ValueError("The declared B recipe is not the accepted native recipe")
+    expected = {
+        "charging_delay_repair": {"before": "Tcharging1", "after": "Tcharging2", "terminal_one_unchanged": True},
+        "operating_point_repair": {"parameter": "Imax", "after_pu": parameters["current_limit_pu"],
+                                   "freeze_reference": "0.99999 * Imax", "arm_protection_limit_ka": 3.0},
+        "feedback_filter": {"time_constant_s": parameters["dc_feedback_time_constant_s"],
+                            "master_sha256": sources["master"]["sha256"], "raw_voltage_acceptance": True},
+        "carrier_diagnostic": {"after_ratio": parameters["terminal_two_carrier_ratio"], "fundamental_frequency_hz": 60.0},
+        "arm_virtual_resistance": {"resistance_per_arm_ohm": parameters["arm_virtual_resistance_ohm"],
+                                   "master_sha256": sources["master"]["sha256"], "dc_gain": 0.0,
+                                   "command_difference_unchanged": True, "existing_cell_count_saturation_retained": True},
+        "complete_sorting": {"sort_extent": parameters["sort_extent"], "library_sha256": sources["library"]["sha256"],
+                             "requested_count_unchanged": True, "enable_unchanged": True,
+                             "current_and_firing_unchanged": True},
+        "dc_integral_repair": {"after_s": parameters["t1_dc_integral_time_s"], "proportional_gain_unchanged": 12.0,
+                               "terminal_two_unchanged": True, "nominal_and_limits_unchanged": True},
+    }
+    for stage, fields in expected.items():
+        observed = case.get(stage)
+        if not isinstance(observed, Mapping) or any(observed.get(key) != value for key, value in fields.items()):
+            raise ValueError("Actual native stage differs from the declared recipe: " + stage)
+    _verify_native_fault_binding(case, checks)
 
 
 def _verify_owned_runtime(report):
@@ -265,6 +363,7 @@ async def validate_b_handoff(path, reader=None):
         if library["sha256"] != sources["library"]["sha256"]:
             raise ValueError("Native instrumentation used another library")
         _verify_lineage(case, contract, root)
+        _verify_recipe_evidence(recipe, case, sources, checks)
         verify_fault_instrumentation(project["path"], contract)
         verify_output_dataset(index)
         case_root = Path(project["path"]).parent
