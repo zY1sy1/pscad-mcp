@@ -185,6 +185,7 @@ def test_transformer_binding_keeps_finite_winding_and_no_load_resistance() -> No
     assert resolved.physical_parameters["CuL"] > 0
     assert resolved.physical_parameters["NLL"] == pytest.approx(0.005)
     assert resolved.physical_parameters["NLL"] > 0
+    assert resolved.physical_parameters["Ideal"] == 1
 
 
 @pytest.mark.skipif(

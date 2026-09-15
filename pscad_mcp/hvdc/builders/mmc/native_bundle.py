@@ -228,7 +228,7 @@ def _transformer_parameters(name: str, voltage_kv: float, frequency_hz: float) -
         "YD2": "1",
         "Lead": "1",
         "Xl": "0.15 [pu]",
-        "Ideal": "0",
+        "Ideal": "1",
         "NLL": "0.005 [pu]",
         "CuL": "0.005 [pu]",
         "View": "1",

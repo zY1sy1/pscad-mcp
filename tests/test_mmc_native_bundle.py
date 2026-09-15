@@ -119,6 +119,7 @@ def test_full_fixture_wires_twelve_two_terminal_arms_to_two_three_phase_stations
         }
         assert values["CuL"] == "0.005 [pu]"
         assert values["NLL"] == "0.005 [pu]"
+        assert values["Ideal"] == "1"
     assert (
         len(
             [
