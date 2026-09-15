@@ -212,6 +212,28 @@ def test_native_fixture_audit_rejects_missing_components_and_changed_inputs(
         audit_native_avm_fixture(report["project_path"], report)
 
 
+def test_runtime_audit_requires_an_explicit_finalized_library_hash(
+    constants_evidence, installed_sources, tmp_path
+):
+    donor, master = installed_sources
+    report = materialize_native_avm_fixture(
+        tmp_path / "fixture",
+        constants_evidence=constants_evidence,
+        source_project=donor,
+        master_path=master,
+    )
+    library = Path(report["library"]["library_path"])
+    library.write_bytes(library.read_bytes() + b"\n")
+    finalized = hashlib.sha256(library.read_bytes()).hexdigest()
+    with pytest.raises(ValueError, match="library changed"):
+        audit_native_avm_fixture(report["project_path"], report)
+    assert audit_native_avm_fixture(
+        report["project_path"],
+        report,
+        finalized_library_sha256=finalized,
+    )["arm_count"] == 12
+
+
 def test_native_modulator_stays_bounded_and_reverses_only_phase_offset():
     import math
 

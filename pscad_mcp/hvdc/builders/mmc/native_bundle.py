@@ -506,7 +506,12 @@ def materialize_native_avm_fixture(
     return receipt
 
 
-def audit_native_avm_fixture(project_path: str | Path, receipt: dict) -> dict:
+def audit_native_avm_fixture(
+    project_path: str | Path,
+    receipt: dict,
+    *,
+    finalized_library_sha256: str | None = None,
+) -> dict:
     root = ET.parse(project_path).getroot()
     if root.get("name") != receipt["project_name"] or root.get("version") != "4.6.2":
         raise ValueError("Native AVM project identity changed")
@@ -553,7 +558,12 @@ def audit_native_avm_fixture(project_path: str | Path, receipt: dict) -> dict:
     ):
         raise ValueError("Native AVM DC poles are crossed")
     library = Path(receipt["library"]["library_path"])
-    if _hash(library) != receipt["library"]["library_sha256"]:
+    expected_library_sha256 = (
+        receipt["library"]["library_sha256"]
+        if finalized_library_sha256 is None
+        else finalized_library_sha256
+    )
+    if _hash(library) != expected_library_sha256:
         raise ValueError("Native AVM companion library changed")
     definitions = {
         definition.get("name")

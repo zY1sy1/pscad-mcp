@@ -264,7 +264,13 @@ async def run_attempt(args, run_dir: Path, *, service_factory=_service) -> dict:
         await bounded(service.save_project(library.stem, confirm=True))
         await bounded(service.save_project(project_name, confirm=True))
         report["model_finalization"] = verify_model_finalization(authored)
-        report["saved_topology"] = audit_native_avm_fixture(project, receipt)
+        report["saved_topology"] = audit_native_avm_fixture(
+            project,
+            receipt,
+            finalized_library_sha256=report["model_finalization"][str(library)][
+                "finalized"
+            ]["sha256"],
+        )
         report["probe_owners"] = _probe_owners(
             project, channel_units=FIXTURE_CHANNELS
         )
