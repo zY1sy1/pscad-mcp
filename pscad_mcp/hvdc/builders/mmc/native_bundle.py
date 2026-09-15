@@ -468,13 +468,32 @@ def materialize_native_avm_fixture(
         "V_C_UPPER": 8,
         "V_C_LOWER": 9,
     }
-    for index, (component, definition) in enumerate(custom, start=1):
+    hierarchy_order = {
+        **{
+            f"P_{phase}_{position}": 30 + index * 10
+            for index, (phase, position) in enumerate(
+                (phase, position)
+                for phase in "ABC"
+                for position in ("UPPER", "LOWER")
+            )
+        },
+        **{
+            f"V_{phase}_{position}": 110 + index * 10
+            for index, (phase, position) in enumerate(
+                (phase, position)
+                for phase in "ABC"
+                for position in ("UPPER", "LOWER")
+            )
+        },
+        "DC_CABLE": 170,
+    }
+    for component, definition in custom:
         if definition == CONTROL_NAME:
             continue
         call = _hierarchy_call(
             hierarchy,
             component,
-            z=index * 10,
+            z=hierarchy_order[component.get("name")],
             instance=(arm_instances[component.get("name")] if definition == "MMCAverageArm" else 0),
         )
         if definition == "MMCCableLink":

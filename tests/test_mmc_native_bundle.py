@@ -172,19 +172,19 @@ def test_full_fixture_wires_twelve_two_terminal_arms_to_two_three_phase_stations
     assert len(hierarchy) == 13
     assert not any(item.get("name", "").endswith(CONTROL_NAME) for item in hierarchy)
     assert [int(item.get("z")) for item in hierarchy] == [
-        20,
         30,
         40,
         50,
         60,
         70,
-        90,
-        100,
+        80,
         110,
         120,
         130,
         140,
         150,
+        160,
+        170,
     ]
     assert [int(item.get("instance")) for item in hierarchy[:-1]] == [
         0,
