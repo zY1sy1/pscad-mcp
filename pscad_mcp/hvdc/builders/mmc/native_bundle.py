@@ -441,14 +441,14 @@ def materialize_native_avm_fixture(
         "P_A_LOWER": 1,
         "P_B_UPPER": 2,
         "P_B_LOWER": 3,
-        "P_C_UPPER": 5,
-        "P_C_LOWER": 4,
-        "V_A_UPPER": 6,
-        "V_A_LOWER": 11,
-        "V_B_UPPER": 9,
+        "P_C_UPPER": 11,
+        "P_C_LOWER": 5,
+        "V_A_UPPER": 4,
+        "V_A_LOWER": 10,
+        "V_B_UPPER": 6,
         "V_B_LOWER": 7,
-        "V_C_UPPER": 10,
-        "V_C_LOWER": 8,
+        "V_C_UPPER": 8,
+        "V_C_LOWER": 9,
     }
     for index, (component, definition) in enumerate(custom, start=1):
         if definition == CONTROL_NAME:

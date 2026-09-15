@@ -172,14 +172,14 @@ def test_full_fixture_wires_twelve_two_terminal_arms_to_two_three_phase_stations
         1,
         2,
         3,
+        11,
         5,
         4,
-        6,
-        11,
-        9,
-        7,
         10,
+        6,
+        7,
         8,
+        9,
     ]
 
 
