@@ -36,7 +36,7 @@ def test_recipe_comparison_does_not_conflate_independent_producers(change):
         assert gate.require_recipe_match(b, public)
 
 
-@pytest.mark.parametrize("change", [None, "parameter", "step", "headroom", "filter", "carrier", "resistance", "sorting", "integral", "master", "library", "fault_start", "fault_duration", "fault_location", "case_mode"])
+@pytest.mark.parametrize("change", [None, "parameter", "step", "headroom", "filter", "carrier", "resistance", "sorting", "integral", "master", "library", "fault_start", "fault_duration", "fault_location", "case_mode", "integer_mode"])
 def test_declared_recipe_is_bound_to_actual_native_stages(tmp_path, change):
     master = reference(tmp_path / "master.pslx", "master")
     library = reference(tmp_path / "library.pslx", "library")
@@ -94,6 +94,10 @@ def test_declared_recipe_is_bound_to_actual_native_stages(tmp_path, change):
         case["native_binding"]["fault_execution"]["fault_location"] = 2
     elif change == "case_mode":
         case["fault"] = False
+        case["native_binding"]["bindings"][0]["value"] = "10"
+        case["native_binding"]["bindings"][1]["value"] = "10"
+    elif change == "integer_mode":
+        case["fault"] = 1
         case["native_binding"]["bindings"][0]["value"] = "10"
         case["native_binding"]["bindings"][1]["value"] = "10"
     if change:

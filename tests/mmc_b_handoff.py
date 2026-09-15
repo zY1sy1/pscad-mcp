@@ -110,12 +110,13 @@ def _expected_recipe_steps(parameters):
 
 
 def _verify_native_fault_binding(case, checks):
-    if (case.get("case"), case.get("fault")) not in {("steady", False), ("fault", True)}:
+    name, enabled = case.get("case"), case.get("fault")
+    if not ((name == "steady" and enabled is False) or (name == "fault" and enabled is True)):
         raise ValueError("The native case name and fault mode disagree")
     native = case.get("native_binding", {})
     entries = native.get("bindings", [])
     observed = {(item.get("owner"), item.get("name"), item.get("parameter")): item.get("value") for item in entries}
-    start = checks["fault_window_s"][0] if case.get("fault") is True else 2 * checks["simulation_duration_s"]
+    start = checks["fault_window_s"][0] if enabled is True else 2 * checks["simulation_duration_s"]
     duration = checks["fault_window_s"][1] - checks["fault_window_s"][0]
     expected = {
         ("208155720", "Fault Time", "Value"): start,
