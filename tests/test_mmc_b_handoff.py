@@ -36,7 +36,7 @@ def test_recipe_comparison_does_not_conflate_independent_producers(change):
         assert gate.require_recipe_match(b, public)
 
 
-@pytest.mark.parametrize("change", [None, "parameter", "step", "headroom", "filter", "carrier", "resistance", "sorting", "integral", "master", "library", "fault_start", "fault_duration", "fault_location"])
+@pytest.mark.parametrize("change", [None, "parameter", "step", "headroom", "filter", "carrier", "resistance", "sorting", "integral", "master", "library", "fault_start", "fault_duration", "fault_location", "case_mode"])
 def test_declared_recipe_is_bound_to_actual_native_stages(tmp_path, change):
     master = reference(tmp_path / "master.pslx", "master")
     library = reference(tmp_path / "library.pslx", "library")
@@ -45,7 +45,7 @@ def test_declared_recipe_is_bound_to_actual_native_stages(tmp_path, change):
                   "sort_extent": "Dim", "sort_enable": "existing_Enab", "t1_dc_integral_time_s": 0.04}
     recipe = {"id": "native_full_sort_dc_integral_004_v1", "parameters": parameters,
               "steps": gate._expected_recipe_steps(parameters)}
-    case = {"recipe_id": recipe["id"], "fault": True,
+    case = {"recipe_id": recipe["id"], "case": "fault", "fault": True,
             "native_binding": {"timing_basis": "template_embedded_emt", "bindings": [
                 {"owner": "208155720", "name": "Fault Time", "parameter": "Value", "value": "2.5"},
                 {"owner": "152486038", "name": "TFlt", "parameter": "TFlt", "value": "2.5"},
@@ -92,6 +92,10 @@ def test_declared_recipe_is_bound_to_actual_native_stages(tmp_path, change):
         case["native_binding"]["fault_execution"]["timer_duration_s"] = 0.1
     elif change == "fault_location":
         case["native_binding"]["fault_execution"]["fault_location"] = 2
+    elif change == "case_mode":
+        case["fault"] = False
+        case["native_binding"]["bindings"][0]["value"] = "10"
+        case["native_binding"]["bindings"][1]["value"] = "10"
     if change:
         with pytest.raises(ValueError, match="recipe|fault"):
             gate._verify_recipe_evidence(recipe, case, {"master": master, "library": library}, gate.default_fault_checks())

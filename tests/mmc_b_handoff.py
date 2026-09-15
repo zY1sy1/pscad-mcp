@@ -110,6 +110,8 @@ def _expected_recipe_steps(parameters):
 
 
 def _verify_native_fault_binding(case, checks):
+    if (case.get("case"), case.get("fault")) not in {("steady", False), ("fault", True)}:
+        raise ValueError("The native case name and fault mode disagree")
     native = case.get("native_binding", {})
     entries = native.get("bindings", [])
     observed = {(item.get("owner"), item.get("name"), item.get("parameter")): item.get("value") for item in entries}
