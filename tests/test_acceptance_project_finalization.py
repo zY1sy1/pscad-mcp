@@ -252,7 +252,6 @@ def test_generated_module_metadata_requires_explicit_optin(
         ("./hierarchy/call/call", "link", "102"),
         ("./hierarchy/call/call/call", "link", "5"),
         ("./hierarchy/call/call/call", "name", "other:MMCAverageArm"),
-        ("./hierarchy/call/call/call", "instance", "1"),
         ("./hierarchy/call/call/call", "z", "1"),
         ("./hierarchy/call/call/call", "view", "true"),
     ],
@@ -268,6 +267,27 @@ def test_generated_module_policy_preserves_physical_and_nested_hierarchy_fields(
         compare_project_finalization(
             authored, snapshot_project_semantics(path, policy=GENERATED_MODULE_POLICY)
         )
+
+
+def test_generated_module_policy_allows_compiler_assigned_direct_child_instance(
+    tmp_path,
+):
+    path, root = project(tmp_path)
+    authored = snapshot_project_semantics(path, policy=GENERATED_MODULE_POLICY)
+    root.find("./hierarchy/call/call/call").set("instance", "11")
+    write(path, root)
+    finalized = snapshot_project_semantics(path, policy=GENERATED_MODULE_POLICY)
+
+    result = compare_project_finalization(authored, finalized)
+
+    assert result["semantic_structure_unchanged"] is True
+    assert result["metadata_changes"] == [
+        {
+            "field": "/project/hierarchy[2]/call[0]/call[0]/call[0]/@instance",
+            "before": "0",
+            "after": "11",
+        }
+    ]
 
 
 @pytest.mark.parametrize("mutation", ["remove_child", "add_child", "order", "script"])

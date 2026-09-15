@@ -85,6 +85,7 @@ FIXTURE_PARAMETERS = {
         "Upper": 10.0,
         "Initial": 0.0,
     },
+    "master:phase_breakout": {},
     "master:ground": {},
 }
 
