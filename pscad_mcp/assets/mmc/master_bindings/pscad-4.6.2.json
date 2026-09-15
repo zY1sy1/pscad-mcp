@@ -65,7 +65,7 @@
         {"physical": "Ideal", "value": 0, "contract": {"type": "Choice", "unit": null, "choices": ["0", "1"]}},
         {"physical": "Sat", "value": 0, "contract": {"type": "Choice", "unit": null, "choices": ["0", "1", "2"]}},
         {"physical": "NLL", "value": 0, "contract": {"type": "Real", "unit": "pu"}},
-        {"physical": "CuL", "value": 0, "contract": {"type": "Real", "unit": "pu"}}
+        {"physical": "CuL", "value": 0.005, "contract": {"type": "Real", "unit": "pu"}}
       ],
       "evidence_parameters": []
     },

@@ -168,6 +168,26 @@ def test_installed_parameter_minimum_is_checked_before_placement() -> None:
 @pytest.mark.skipif(
     not _MASTER.is_file(), reason="Requires installed static PSCAD 4.6.2 Master XML"
 )
+def test_transformer_binding_keeps_finite_winding_resistance() -> None:
+    resolved = audit_mmc_master_bindings(_MASTER).resolve_component(
+        "master:transformer",
+        {
+            "Name": "MMC_XFMR",
+            "RatedPower_MVA": 1200.0,
+            "Primary_kV": 230.0,
+            "Secondary_kV": 230.0,
+            "Frequency": 60.0,
+            "Leakage_pu": 0.15,
+        },
+    )
+
+    assert resolved.physical_parameters["CuL"] == pytest.approx(0.005)
+    assert resolved.physical_parameters["CuL"] > 0
+
+
+@pytest.mark.skipif(
+    not _MASTER.is_file(), reason="Requires installed static PSCAD 4.6.2 Master XML"
+)
 def test_nondefault_source_request_sets_operating_values_and_neutral() -> None:
     resolved = audit_mmc_master_bindings(_MASTER).resolve_component(
         "master:source3",
