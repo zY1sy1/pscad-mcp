@@ -110,6 +110,7 @@ def test_full_fixture_wires_twelve_two_terminal_arms_to_two_three_phase_stations
         == 12
     )
     assert len([item for item in users if item.get("defn") == "master:breakout"]) == 2
+    assert len([item for item in users if item.get("defn") == "master:ground"]) == 1
     assert (
         len(
             [
@@ -141,6 +142,13 @@ def test_full_fixture_wires_twelve_two_terminal_arms_to_two_three_phase_stations
     assert report["channels"] == FIXTURE_CHANNELS
     assert report["model_accepted"] is False
     assert report["licensed_acceptance"] == "NOT_RUN"
+    assert {
+        "P_source:N",
+        "P_transformer:G1",
+        "V_source:N",
+        "V_transformer:G1",
+        "neutral_ground:A",
+    } <= set(report["electrical_nets"]["Main"]["GND"])
 
 
 @pytest.mark.parametrize("mutation", ["arm", "cable", "source_hash"])

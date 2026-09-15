@@ -316,7 +316,7 @@ def materialize_native_avm_fixture(
             prefix + "_source",
             "master:source3",
             _source_parameters(prefix + "_SOURCE", ac_voltage_kv, frequency_hz),
-            {"N3": prefix + "_GRID", "N": prefix + "_NEUTRAL"},
+            {"N3": prefix + "_GRID", "N": "GND"},
         )
         transformer = writer.add(
             main,
@@ -326,7 +326,7 @@ def materialize_native_avm_fixture(
             {
                 "N1": prefix + "_GRID",
                 "N2": prefix + "_VALVE_VECTOR",
-                "G1": prefix + "_NEUTRAL",
+                "G1": "GND",
             },
         )
         writer.add(
@@ -340,13 +340,6 @@ def materialize_native_avm_fixture(
                 "N2": prefix + "_PHASE_B",
                 "N3": prefix + "_PHASE_C",
             },
-        )
-        writer.add(
-            main,
-            prefix + "_neutral_ground",
-            "master:ground",
-            {},
-            {"A": prefix + "_NEUTRAL"},
         )
         control = writer.add(
             main,
@@ -401,6 +394,7 @@ def materialize_native_avm_fixture(
         },
     )
     custom.append((cable, "MMCCableLink"))
+    writer.add(main, "neutral_ground", "master:ground", {}, {"A": "GND"})
     for prefix in ("P", "V"):
         writer.add(
             main,
@@ -502,13 +496,21 @@ def audit_native_avm_fixture(project_path: str | Path, receipt: dict) -> dict:
         "master:source3": 2,
         "master:xfmr-3p2w": 2,
         "master:breakout": 2,
-        "master:ground": 2,
+        "master:ground": 1,
         "master:voltmeter": 2,
         "master:pgb": len(FIXTURE_CHANNELS),
     }
     if any(counts[name] != count for name, count in required.items()):
         raise ValueError("Native AVM fixture is missing a required physical component")
     nets = receipt["electrical_nets"]["Main"]
+    if {
+        "P_source:N",
+        "P_transformer:G1",
+        "V_source:N",
+        "V_transformer:G1",
+        "neutral_ground:A",
+    } - set(nets["GND"]):
+        raise ValueError("Native AVM source and transformer neutrals are not grounded")
     for prefix in ("P", "V"):
         for phase in "ABC":
             if {
