@@ -10,6 +10,9 @@ from pscad_mcp.hvdc.builders.mmc.master_bindings import (
 )
 
 
+_MASTER = Path("C:/Program Files (x86)/PSCAD46/master.pslx")
+
+
 def test_mmc_direct_registry_uses_real_names_and_exact_ports() -> None:
     registry = load_mmc_master_registry()
     records = registry.by_logical_name
@@ -25,6 +28,17 @@ def test_mmc_direct_registry_uses_real_names_and_exact_ports() -> None:
         "AC",
         "VALVE",
         "NEUTRAL",
+    }
+    phase_breakout = records["master:phase_breakout"]
+    assert phase_breakout.physical_definition == "breakout"
+    assert {
+        port.logical: (port.physical, port.dimension, port.occurrence)
+        for port in phase_breakout.ports
+    } == {
+        "AC": ("N", 3, 0),
+        "A": ("N1", 1, 0),
+        "B": ("N2", 1, 0),
+        "C": ("N3", 1, 0),
     }
     assert "master:dc_cable" not in records
 
@@ -88,7 +102,24 @@ def test_registry_data_is_a_packaged_resource() -> None:
     assert Path("pscad_mcp/assets/mmc/master_bindings/pscad-4.6.2.json").is_file()
 
 
-_MASTER = Path("C:/Program Files (x86)/PSCAD46/master.pslx")
+@pytest.mark.skipif(
+    not _MASTER.is_file(), reason="Requires installed static PSCAD 4.6.2 Master XML"
+)
+def test_installed_phase_breakout_has_exact_scalar_phase_contract() -> None:
+    resolved = audit_mmc_master_bindings(_MASTER).resolve_component(
+        "master:phase_breakout", {}
+    )
+
+    assert resolved.physical_parameters == {"Com": 0, "Dis": 0}
+    assert {
+        name: (port["model"], port["dimension"], port["occurrence"])
+        for name, port in resolved.selected_ports.items()
+    } == {
+        "AC": ("Natural", 3, 0),
+        "A": ("Natural", 1, 0),
+        "B": ("Natural", 1, 0),
+        "C": ("Natural", 1, 0),
+    }
 
 
 @pytest.mark.skipif(

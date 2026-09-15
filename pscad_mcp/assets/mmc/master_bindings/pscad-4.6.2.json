@@ -94,6 +94,22 @@
       "shape": {"kind": "direct"},
       "ports": [{"logical": "GND", "physical": "A", "kind": "electrical", "dimension": 1, "occurrence": 0}],
       "parameters": [], "fixed_parameters": [], "evidence_parameters": []
+    },
+    {
+      "logical_name": "master:phase_breakout", "physical_definition": "breakout",
+      "shape": {"kind": "direct"},
+      "ports": [
+        {"logical": "AC", "physical": "N", "kind": "electrical", "dimension": 3, "occurrence": 0},
+        {"logical": "A", "physical": "N1", "kind": "electrical", "dimension": 1, "occurrence": 0},
+        {"logical": "B", "physical": "N2", "kind": "electrical", "dimension": 1, "occurrence": 0},
+        {"logical": "C", "physical": "N3", "kind": "electrical", "dimension": 1, "occurrence": 0}
+      ],
+      "parameters": [],
+      "fixed_parameters": [
+        {"physical": "Com", "value": 0, "contract": {"type": "Choice", "unit": null, "choices": ["0", "1"]}},
+        {"physical": "Dis", "value": 0, "contract": {"type": "Choice", "unit": null, "choices": ["0", "1"]}}
+      ],
+      "evidence_parameters": []
     }
   ]
 }
