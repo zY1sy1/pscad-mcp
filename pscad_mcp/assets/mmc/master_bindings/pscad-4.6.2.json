@@ -29,7 +29,7 @@
       ],
       "fixed_parameters": [
         {"physical": "View", "value": 1, "contract": {"type": "Choice", "unit": null, "choices": ["0", "1"]}},
-        {"physical": "Type", "value": 3, "contract": {"type": "Choice", "unit": null, "choices": ["1", "2", "3", "4"]}},
+        {"physical": "Type", "value": 4, "contract": {"type": "Choice", "unit": null, "choices": ["1", "2", "3", "4"]}},
         {"physical": "Imp", "value": 1, "contract": {"type": "Choice", "unit": null, "choices": ["0", "1"]}},
         {"physical": "Ctrl", "value": 0, "contract": {"type": "Choice", "unit": null, "choices": ["0", "2", "3"]}},
         {"physical": "Term", "value": 0, "contract": {"type": "Choice", "unit": null, "choices": ["0", "1"]}},

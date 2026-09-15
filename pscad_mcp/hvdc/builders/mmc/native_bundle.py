@@ -202,7 +202,7 @@ def _source_parameters(name: str, voltage_kv: float, frequency_hz: float) -> dic
     return {
         "Name": name,
         "View": "1",
-        "Type": "3",
+        "Type": "4",
         "Ctrl": "0",
         "MVA": "1000.0 [MVA]",
         "Vm": f"{voltage_kv} [kV]",

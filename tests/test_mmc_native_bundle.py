@@ -121,6 +121,16 @@ def test_full_fixture_wires_twelve_two_terminal_arms_to_two_three_phase_stations
         assert values["CuL"] == "0.005 [pu]"
         assert values["NLL"] == "0.005 [pu]"
         assert values["Ideal"] == "1"
+    sources = [item for item in users if item.get("defn") == "master:source3"]
+    assert all(
+        next(
+            parameter.get("value")
+            for parameter in source.findall("./paramlist/param")
+            if parameter.get("name") == "Type"
+        )
+        == "4"
+        for source in sources
+    )
     assert (
         len(
             [

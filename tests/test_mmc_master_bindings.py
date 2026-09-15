@@ -63,6 +63,25 @@ def test_source_impedance_normalization_preserves_requested_rx() -> None:
     assert parameters["OperatingFrequency_Hz"] == 60.0
 
 
+@pytest.mark.skipif(
+    not _MASTER.is_file(), reason="Requires installed static PSCAD 4.6.2 Master XML"
+)
+def test_source_binding_keeps_a_series_resistance_ahead_of_parallel_rl() -> None:
+    resolved = audit_mmc_master_bindings(_MASTER).resolve_component(
+        "master:source3",
+        {
+            "Name": "SOURCE",
+            "Amplitude": 230.0,
+            "Frequency": 60.0,
+            "GridR": 2.0,
+            "GridX": 19.8997487421,
+        },
+    )
+
+    assert resolved.physical_parameters["Type"] == 4
+    assert resolved.physical_parameters["Imp"] == 1
+
+
 @pytest.mark.parametrize(
     "change",
     [
