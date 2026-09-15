@@ -121,6 +121,8 @@ def test_full_fixture_wires_twelve_two_terminal_arms_to_two_three_phase_stations
         assert values["CuL"] == "0.005 [pu]"
         assert values["NLL"] == "0.005 [pu]"
         assert values["Ideal"] == "1"
+        assert values["YD1"] == "1"
+        assert values["YD2"] == "0"
     sources = [item for item in users if item.get("defn") == "master:source3"]
     assert all(
         next(
@@ -164,9 +166,9 @@ def test_full_fixture_wires_twelve_two_terminal_arms_to_two_three_phase_stations
     assert report["licensed_acceptance"] == "NOT_RUN"
     assert {
         "P_source:N",
-        "P_transformer:G1",
+        "P_transformer:G2",
         "V_source:N",
-        "V_transformer:G1",
+        "V_transformer:G2",
         "neutral_ground:A",
     } <= set(report["electrical_nets"]["Main"]["GND"])
     for prefix in ("P", "V"):

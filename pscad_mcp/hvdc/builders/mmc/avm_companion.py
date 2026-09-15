@@ -162,7 +162,7 @@ _MASTER_WRITER_PORTS = {
     "xfmr-3p2w": {
         "N1": (-54, 0, "Natural", 0),
         "N2": (36, 0, "Natural", 0),
-        "G1": (-18, 36, "Natural", 0),
+        "G2": (0, 36, "Natural", 0),
     },
 }
 _SOURCE_PARAMETERS = {

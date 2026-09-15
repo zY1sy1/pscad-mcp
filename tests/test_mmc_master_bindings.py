@@ -29,6 +29,11 @@ def test_mmc_direct_registry_uses_real_names_and_exact_ports() -> None:
         "VALVE",
         "NEUTRAL",
     }
+    assert next(
+        port.physical
+        for port in records["master:transformer"].ports
+        if port.logical == "NEUTRAL"
+    ) == "G2"
     phase_breakout = records["master:phase_breakout"]
     assert phase_breakout.physical_definition == "breakout"
     assert {
@@ -205,6 +210,9 @@ def test_transformer_binding_keeps_finite_winding_and_no_load_resistance() -> No
     assert resolved.physical_parameters["NLL"] == pytest.approx(0.005)
     assert resolved.physical_parameters["NLL"] > 0
     assert resolved.physical_parameters["Ideal"] == 1
+    assert resolved.physical_parameters["YD1"] == 1
+    assert resolved.physical_parameters["YD2"] == 0
+    assert resolved.selected_ports["NEUTRAL"]["physical"] == "G2"
 
 
 @pytest.mark.skipif(
