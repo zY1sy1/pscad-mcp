@@ -272,3 +272,37 @@ provided; it cannot silently change `native_full_sort_v1`. Public/joint
 licensed execution remains gated on B's accepted full handoff and exact
 recipe. The affected public/joint preparation software gate reports 62 passed,
 1 skipped, with Ruff clean.
+
+## Gated Licensed Lifecycle
+
+`tests/mmc_joint_acceptance.py` now provides the separate opt-in lifecycle:
+validated B handoff, public builder execution and independent native replay,
+public instance cleanup, joint execution in a fresh owned instance, and an
+independent joint worker. The fixed joint worker rechecks B's handoff before
+launch and evaluates A timing and B fault evidence from the same child
+OUT/INF/INFX dataset. B producer provenance and the current public execution
+producer are verified separately; B PASS never substitutes for a fresh public
+or joint physical result.
+
+The joint context preserves both virtual-root transitions: raw preparation to
+the first saved model, then first saved model to the child saved model. Hooks
+remain read-only and compare the complete child contract. The first-save
+comparison permits only equivalent numeric serialization of the five explicit
+simulation settings; different numeric values and controller changes remain
+rejected. Native replay still uses the strict saved-model comparison.
+
+Failures before B admission or without `PSCAD_MCP_MMC_ACCEPTANCE=1` construct no
+PSCAD service. Public failure prevents joint startup. Unknown replay ownership
+or incomplete owned cleanup retains the lease. After closing each owned
+instance, the lifecycle revalidates published public evidence and the first
+joint model/output identities; quit-time changes cannot produce PASS. An
+immutable copy of the first saved joint model is retained as evidence.
+
+The software gate on September 15 reports 174 passed, 1 skipped across the
+new lifecycle, joint preparation, native replay, public builder and root-owned
+B handoff validation tests. No licensed public/joint run has occurred yet.
+The existing B native evidence at
+`D:/PSCAD-Workspace/mmc-fault-evidence/fault-evidence-20260912T052440515065Z/acceptance-report.json`
+and its final handoff remain distinct from this pending integration acceptance.
+The parent task owns `tests/mmc_b_handoff.py` and has independently re-read the
+B evidence; this lifecycle consumes that validator's verified context.

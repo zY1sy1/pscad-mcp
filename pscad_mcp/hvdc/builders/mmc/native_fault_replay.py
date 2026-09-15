@@ -236,6 +236,10 @@ async def verify_native_fault_replay(*, project, bundle, channel_contract, check
 
 def _verify_replay_saved_model(original: Path, saved: Path, contract) -> bool:
     before, after = ET.parse(original).getroot(), ET.parse(saved).getroot()
+    return _verify_saved_model_roots(before, after, contract)
+
+
+def _verify_saved_model_roots(before, after, contract) -> bool:
     binding = contract.get("virtual_root_rebinding")
     if binding:
         ids = [re.fullmatch(r"Station\[(\d+)\]", binding.get(key, "")) for key in ("before", "after")]

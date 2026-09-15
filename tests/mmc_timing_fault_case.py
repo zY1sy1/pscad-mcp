@@ -11,6 +11,7 @@ import asyncio
 import copy
 import hashlib
 import json
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from uuid import uuid4
 from xml.etree import ElementTree as ET
@@ -19,6 +20,7 @@ from pscad_mcp.hvdc.builders.mmc import (
     blank_service,
     fault_channels,
     line_constants,
+    native_fault_replay,
     template_native,
     timed_control,
 )
@@ -41,7 +43,6 @@ from pscad_mcp.hvdc.builders.mmc.fault_channels import (
     verify_fault_instrumentation,
     verify_output_dataset,
 )
-from pscad_mcp.hvdc.builders.mmc.native_fault_replay import _verify_replay_saved_model
 from pscad_mcp.hvdc.builders.mmc.template_audit import (
     audit_mmc_template,
     discover_official_mmc_template,
@@ -53,6 +54,27 @@ from pscad_mcp.hvdc.builders.mmc.template_native import (
 
 def _digest(value):
     return hashlib.sha256(json_bytes(value)).hexdigest()
+
+
+def _verify_first_saved_model(original, saved, contract):
+    before, after = ET.parse(original).getroot(), ET.parse(saved).getroot()
+    for key in ("time_duration", "time_step", "sample_step", "PlotType", "StartType"):
+        query = "./paramlist[@name='Settings']/param[@name='" + key + "']"
+        left, right = before.findall(query), after.findall(query)
+        if len(left) != 1 or len(right) != 1:
+            raise ValueError(
+                "A joint simulation setting is missing or duplicated: " + key
+            )
+        try:
+            a, b = Decimal(left[0].get("value", "")), Decimal(right[0].get("value", ""))
+        except InvalidOperation as error:
+            raise ValueError(
+                "A joint simulation setting is not numeric: " + key
+            ) from error
+        if not a.is_finite() or not b.is_finite() or a != b:
+            raise ValueError("A joint simulation setting changed: " + key)
+        right[0].set("value", left[0].get("value"))
+    return native_fault_replay._verify_saved_model_roots(before, after, contract)
 
 
 def read_a_handoff(path, public_plan):
@@ -146,7 +168,13 @@ def _rebind_fault_contract(contract, schedule, project):
 
 
 async def prepare_joint_case(
-    workspace, *, source=None, library=None, master=None, a_handoff=None, model_recipe="raw"
+    workspace,
+    *,
+    source=None,
+    library=None,
+    master=None,
+    a_handoff=None,
+    model_recipe="raw",
 ):
     root = Path(workspace).resolve()
     if root.exists():
@@ -162,7 +190,10 @@ async def prepare_joint_case(
             "project_name": "JointFaultCase",
             "template_path": str(source),
             "library_path": str(library),
-            "parameterization": {"master_path": str(master), "model_recipe": model_recipe},
+            "parameterization": {
+                "master_path": str(master),
+                "model_recipe": model_recipe,
+            },
         }
     )
     a_handoff = (
@@ -201,7 +232,9 @@ async def prepare_joint_case(
             public_plan, root, bundle, preparation
         )
         instrumented = root / "FaultInstrumented.pscx"
-        parent = _materialize_native_mmc_case(public_plan, staged, staged_library, root, instrumented, preparation)
+        parent = _materialize_native_mmc_case(
+            public_plan, staged, staged_library, root, instrumented, preparation
+        )
         recipe_source = Path(parent["source_hashes"]["project"]["path"])
         preparation["lineage"].append(
             {
@@ -299,6 +332,7 @@ async def prepare_joint_case(
                         blank_service,
                         fault_channels,
                         line_constants,
+                        native_fault_replay,
                         template_native,
                         timed_control,
                     )
@@ -363,7 +397,7 @@ def verify_joint_preparation(preparation, *, saved_fault_contract=None):
             != preparation["schedule"]["schedule_sha256"]
         ):
             raise ValueError("Joint run has no finalized saved model contract")
-        _verify_replay_saved_model(
+        _verify_first_saved_model(
             Path(preparation["prepared_snapshot"]["path"]), project, contract
         )
         if (
@@ -482,9 +516,13 @@ async def evaluate_joint_dataset(
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--workspace", type=Path, required=True)
-    parser.add_argument("--model-recipe", choices=tuple(blank_service._MODEL_RECIPES), default="raw")
+    parser.add_argument(
+        "--model-recipe", choices=tuple(blank_service._MODEL_RECIPES), default="raw"
+    )
     args = parser.parse_args()
-    result = asyncio.run(prepare_joint_case(args.workspace, model_recipe=args.model_recipe))
+    result = asyncio.run(
+        prepare_joint_case(args.workspace, model_recipe=args.model_recipe)
+    )
     print(
         json.dumps(
             {
