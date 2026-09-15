@@ -322,29 +322,11 @@ def materialize_native_avm_fixture(
         )
         writer.add(
             main,
-            prefix + "_grid_meter",
-            "master:multimeter",
-            {
-                "MeasV": "0",
-                "MeasI": "1",
-                "MeasP": "0",
-                "MeasQ": "0",
-                "RMS": "0",
-                "IRMS": "0",
-                "MeasPh": "0",
-                "Name": prefix + "_GRID_METER",
-                "CurI": prefix + "_GRID_CURRENT",
-                "Dis": "0",
-            },
-            {"A": prefix + "_SOURCE_VECTOR", "B": prefix + "_METER_VECTOR"},
-        )
-        writer.add(
-            main,
             prefix + "_source_breakout",
             "master:breakout",
             {"Com": "0", "Dis": "0"},
             {
-                "N": prefix + "_METER_VECTOR",
+                "N": prefix + "_SOURCE_VECTOR",
                 "N1": prefix + "_SOURCE_A",
                 "N2": prefix + "_SOURCE_B",
                 "N3": prefix + "_SOURCE_C",
@@ -595,7 +577,6 @@ def audit_native_avm_fixture(
         f"{NATIVE_SCOPE}:MMCCableLink": 1,
         "master:source3": 2,
         "master:xfmr-3p2w": 2,
-        "master:multimeter": 2,
         "master:breakout": 6,
         "master:resistor": 6,
         "master:ground": 1,
@@ -616,12 +597,9 @@ def audit_native_avm_fixture(
     for prefix in ("P", "V"):
         if {
             f"{prefix}_source:N3",
-            f"{prefix}_grid_meter:A",
-        } - set(nets[prefix + "_SOURCE_VECTOR"]) or {
-            f"{prefix}_grid_meter:B",
             f"{prefix}_source_breakout:N",
-        } - set(nets[prefix + "_METER_VECTOR"]):
-            raise ValueError("Native AVM grid meter does not feed the source breakout")
+        } - set(nets[prefix + "_SOURCE_VECTOR"]):
+            raise ValueError("Native AVM source does not feed the source breakout")
         if {
             f"{prefix}_grid_merger:N",
             f"{prefix}_transformer:N1",

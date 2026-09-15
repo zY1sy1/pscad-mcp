@@ -112,7 +112,6 @@ def test_full_fixture_wires_twelve_two_terminal_arms_to_two_three_phase_stations
     assert len([item for item in users if item.get("defn") == "master:breakout"]) == 6
     assert len([item for item in users if item.get("defn") == "master:resistor"]) == 6
     assert len([item for item in users if item.get("defn") == "master:ground"]) == 1
-    assert len([item for item in users if item.get("defn") == "master:multimeter"]) == 2
     transformers = [item for item in users if item.get("defn") == "master:xfmr-3p2w"]
     for transformer in transformers:
         values = {
@@ -173,12 +172,8 @@ def test_full_fixture_wires_twelve_two_terminal_arms_to_two_three_phase_stations
     for prefix in ("P", "V"):
         assert {
             f"{prefix}_source:N3",
-            f"{prefix}_grid_meter:A",
-        } <= set(report["electrical_nets"]["Main"][prefix + "_SOURCE_VECTOR"])
-        assert {
-            f"{prefix}_grid_meter:B",
             f"{prefix}_source_breakout:N",
-        } <= set(report["electrical_nets"]["Main"][prefix + "_METER_VECTOR"])
+        } <= set(report["electrical_nets"]["Main"][prefix + "_SOURCE_VECTOR"])
         assert {
             f"{prefix}_grid_merger:N",
             f"{prefix}_transformer:N1",
