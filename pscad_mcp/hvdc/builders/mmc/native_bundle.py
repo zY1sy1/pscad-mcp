@@ -336,7 +336,42 @@ def materialize_native_avm_fixture(
                 "CurI": prefix + "_GRID_CURRENT",
                 "Dis": "0",
             },
-            {"A": prefix + "_SOURCE_VECTOR", "B": prefix + "_GRID"},
+            {"A": prefix + "_SOURCE_VECTOR", "B": prefix + "_METER_VECTOR"},
+        )
+        writer.add(
+            main,
+            prefix + "_source_breakout",
+            "master:breakout",
+            {"Com": "0", "Dis": "0"},
+            {
+                "N": prefix + "_METER_VECTOR",
+                "N1": prefix + "_SOURCE_A",
+                "N2": prefix + "_SOURCE_B",
+                "N3": prefix + "_SOURCE_C",
+            },
+        )
+        for phase in "ABC":
+            writer.add(
+                main,
+                prefix + "_grid_resistor_" + phase,
+                "master:resistor",
+                {"R": "0.1 [ohm]"},
+                {
+                    "A": prefix + "_SOURCE_" + phase,
+                    "B": prefix + "_GRID_" + phase,
+                },
+            )
+        writer.add(
+            main,
+            prefix + "_grid_merger",
+            "master:breakout",
+            {"Com": "0", "Dis": "0"},
+            {
+                "N": prefix + "_GRID",
+                "N1": prefix + "_GRID_A",
+                "N2": prefix + "_GRID_B",
+                "N3": prefix + "_GRID_C",
+            },
         )
         transformer = writer.add(
             main,
@@ -561,7 +596,8 @@ def audit_native_avm_fixture(
         "master:source3": 2,
         "master:xfmr-3p2w": 2,
         "master:multimeter": 2,
-        "master:breakout": 2,
+        "master:breakout": 6,
+        "master:resistor": 6,
         "master:ground": 1,
         "master:voltmeter": 2,
         "master:pgb": len(FIXTURE_CHANNELS),
@@ -583,9 +619,23 @@ def audit_native_avm_fixture(
             f"{prefix}_grid_meter:A",
         } - set(nets[prefix + "_SOURCE_VECTOR"]) or {
             f"{prefix}_grid_meter:B",
+            f"{prefix}_source_breakout:N",
+        } - set(nets[prefix + "_METER_VECTOR"]):
+            raise ValueError("Native AVM grid meter does not feed the source breakout")
+        if {
+            f"{prefix}_grid_merger:N",
             f"{prefix}_transformer:N1",
         } - set(nets[prefix + "_GRID"]):
-            raise ValueError("Native AVM grid meter does not separate source and transformer")
+            raise ValueError("Native AVM grid merger does not feed the transformer")
+        for phase_index, phase in enumerate("ABC", start=1):
+            if {
+                f"{prefix}_source_breakout:N{phase_index}",
+                f"{prefix}_grid_resistor_{phase}:A",
+            } - set(nets[prefix + "_SOURCE_" + phase]) or {
+                f"{prefix}_grid_resistor_{phase}:B",
+                f"{prefix}_grid_merger:N{phase_index}",
+            } - set(nets[prefix + "_GRID_" + phase]):
+                raise ValueError("Native AVM explicit grid impedance is incomplete")
     for prefix in ("P", "V"):
         for phase in "ABC":
             if {
