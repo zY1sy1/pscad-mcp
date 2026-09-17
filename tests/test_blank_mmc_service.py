@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import shutil
 from pathlib import Path
 from types import SimpleNamespace
 from xml.etree import ElementTree as ET
@@ -419,6 +420,138 @@ def test_public_publication_uses_tested_instrumented_fault_case(tmp_path, monkey
     assert manifest["bundle_files"]["reload/worker/report.json"]
 
 
+def test_public_replay_uses_short_owned_workspace_and_publishes_its_evidence(tmp_path, monkeypatch):
+    service, request, calls, *_ = _protocol_case(tmp_path, monkeypatch, verdict="PASS")
+    name = "PublicFault_12345678"
+    suffix = Path(".pscad-mcp/blank-mmc-builds") / (name + "-" + "a" * 12 + ".staging") / (name + ".gf42") / "TL12a.tli"
+    workspace = tmp_path.parent / ("replay_" + hashlib.sha256(tmp_path.name.encode()).hexdigest()[:6])
+    padding = 190 - len(str(workspace / suffix))
+    assert padding >= 0, "The temporary root must allow the reproduced 190-character parent path"
+    workspace = workspace.with_name(workspace.name + "w" * padding)
+    verifier = service._replay_verifier
+    received = []
+
+    async def short_replay(**kwargs):
+        replay_root = Path(kwargs["workspace"])
+        received.append(replay_root)
+        assert replay_root.parent == workspace / ".pscad-mcp" / "mmc-replays"
+        assert not replay_root.is_relative_to(Path(kwargs["project"]).parent)
+        assert len(str(replay_root / "worker" / (name + ".gf42") / "TL12a.tli")) < 190
+        return await verifier(**kwargs)
+
+    service = BlankMmcBuilderService(service.pscad_service, workspace_root=workspace, audit_loader=service.audit_loader, replay_verifier=short_replay)
+    request = {**request.to_dict(), "project_name": name}
+    plan = service.plan_model(request)
+    old_nested_tli = Path(plan["staging_path"]) / "reload-verification/worker" / (name + ".gf42") / "TL12a.tli"
+    assert len(str(old_nested_tli)) == 217
+    stale = workspace / ".pscad-mcp/blank-mmc-builds/previous.staging/reload-verification/worker/report.json"
+    blank_service._write_evidence(stale, {"status": "FAIL", "error": "retained historical attempt"})
+    old_hash = blank_service._sha256(stale)
+
+    async def exercise():
+        started = await service.build_model(request, plan["plan_hash"], confirm=True)
+        await service._tasks[started["build_id"]]
+        assert started["build_id"] not in service._leases
+        return service.get_build_status(started["build_id"])
+
+    record = asyncio.run(exercise())
+    assert record["state"] == "published", record.get("error")
+    expected = workspace / ".pscad-mcp/mmc-replays" / record["build_id"]
+    assert received == [expected]
+    assert record["result"]["reload"]["workspace"] == str(expected)
+    assert Path(record["result"]["reload"]["report_path"]).is_relative_to(expected)
+    assert blank_service._sha256(stale) == old_hash
+    assert not (Path(plan["staging_path"]) / "reload-verification").exists()
+    target = Path(plan["target_path"])
+    relocated = workspace / "relocated" / target.name
+    relocated.parent.mkdir()
+    shutil.copy2(target, relocated)
+    shutil.copytree(target.with_suffix(".bundle"), relocated.with_suffix(".bundle"))
+    assert service.validate_model(str(relocated))["accepted"] is True
+    assert "replay" in calls
+
+
+def test_public_replay_rejects_long_tline_path_before_runtime_operations(tmp_path, monkeypatch):
+    service, request, calls, *_ = _protocol_case(tmp_path, monkeypatch, verdict="PASS")
+    monkeypatch.setattr(blank_service, "_line_contract", lambda *_: {"mode": "generate_public_from_source_dctl", "inputs": [{"name": "TL12a", "input_sha256": "a" * 64}]})
+    request = {**request.to_dict(), "project_name": "LongCase" + "x" * 112}
+    plan = service.plan_model(request)
+
+    async def exercise():
+        started = await service.build_model(request, plan["plan_hash"], confirm=True)
+        await service._tasks[started["build_id"]]
+        assert started["build_id"] not in service._leases
+        return service.get_build_status(started["build_id"])
+
+    record = asyncio.run(exercise())
+    assert record["error"]["code"] == "MMC_LAYOUT_INVALID"
+    assert record["error"]["details"]["max_path_chars"] == 199
+    assert len(record["error"]["details"]["path"]) > 199
+    assert not Path(plan["staging_path"]).exists()
+    assert calls == []
+
+
+@pytest.mark.parametrize("path_length", [199, 200])
+def test_replay_tline_limit_includes_longest_supported_compiler_directory(tmp_path, path_length):
+    service, request, *_ = _plan_case(tmp_path)
+    plan = service.plan_model(request)
+    plan["compiler_support"]["files"] = [{"relative_path": "lib/if15_x86/intermediate.lib"}]
+    build_id = "a" * 32
+    generated = service.workspace_root / ".pscad-mcp/mmc-replays" / build_id / "worker" / (Path(plan["target_path"]).stem + ".if15_x86")
+    line_name = "T" * (path_length - len(str(generated / "X.tli")) + 1)
+    assert len(str(generated / (line_name + ".tli"))) == path_length
+    plan["line_constants"]["inputs"] = [{"name": line_name}]
+    if path_length == 199:
+        assert blank_service._native_replay_workspace(plan, service.workspace_root, build_id).parent.name == "mmc-replays"
+    else:
+        with pytest.raises(BackendError, match="solver limit") as raised:
+            blank_service._native_replay_workspace(plan, service.workspace_root, build_id)
+        assert raised.value.details["path"].endswith(".tli")
+        assert ".if15_x86" in raised.value.details["path"]
+
+
+def test_public_replay_rejects_linked_directory_before_runtime_operations(tmp_path, monkeypatch):
+    service, request, calls, *_ = _protocol_case(tmp_path, monkeypatch, verdict="PASS")
+    directory = service.workspace_root / ".pscad-mcp/mmc-replays"
+    directory.mkdir(parents=True)
+    inode = directory.lstat().st_ino
+    real_check = blank_service._is_reparse_point
+    monkeypatch.setattr(blank_service, "_is_reparse_point", lambda stat: stat.st_ino == inode or real_check(stat))
+    plan = service.plan_model(request)
+
+    async def exercise():
+        started = await service.build_model(request, plan["plan_hash"], confirm=True)
+        await service._tasks[started["build_id"]]
+        return service.get_build_status(started["build_id"])
+
+    record = asyncio.run(exercise())
+    assert record["error"]["code"] == "MMC_LAYOUT_INVALID"
+    assert "links" in record["error"]["message"]
+    assert not Path(plan["staging_path"]).exists()
+    assert calls == []
+
+
+def test_public_replay_preserves_existing_attempt_before_runtime_operations(tmp_path, monkeypatch):
+    service, request, calls, *_ = _protocol_case(tmp_path, monkeypatch, verdict="PASS")
+    build_id = "a" * 32
+    monkeypatch.setattr(blank_service.uuid, "uuid4", lambda: SimpleNamespace(hex=build_id))
+    report = service.workspace_root / ".pscad-mcp/mmc-replays" / build_id / "worker/report.json"
+    blank_service._write_evidence(report, {"status": "FAIL", "error": "historical attempt"})
+    original_hash = blank_service._sha256(report)
+    plan = service.plan_model(request)
+
+    async def exercise():
+        started = await service.build_model(request, plan["plan_hash"], confirm=True)
+        await service._tasks[started["build_id"]]
+        return service.get_build_status(started["build_id"])
+
+    record = asyncio.run(exercise())
+    assert record["error"]["code"] == "MMC_BUILD_CONFLICT"
+    assert blank_service._sha256(report) == original_hash
+    assert not Path(plan["staging_path"]).exists()
+    assert calls == []
+
+
 @pytest.mark.parametrize("changed", ["worker_exit_code", "parent_channel_contract_sha256", "report_sha256", "artifacts"])
 def test_public_publication_requires_completed_replay_report_and_lineage(tmp_path, monkeypatch, changed):
     service, request, *_ = _protocol_case(tmp_path, monkeypatch, verdict="PASS")
@@ -565,6 +698,7 @@ def test_raised_replay_failure_cannot_erase_pending_ownership_or_release_lease(t
         record = service.get_build_status(started["build_id"])
         assert record["state"] == "failed"
         assert record["result"]["reload"]["cleanup_pending"] is True
+        assert Path(record["result"]["reload"]["workspace"]) == service.workspace_root / ".pscad-mcp/mmc-replays" / started["build_id"]
         assert started["build_id"] in service._leases
         assert record["containment"]["confirmed"] is False
         # This synthetic verifier created no process; clear only its fixture state.
