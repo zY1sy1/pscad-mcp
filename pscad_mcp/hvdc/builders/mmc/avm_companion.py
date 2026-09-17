@@ -138,6 +138,10 @@ _MASTER_PORTS = {
     "resistor": {"A": (0, 0, "Natural", 0), "B": (36, 0, "Natural", 0)},
     "gain": {"IN:Dim": (-36, 0, "Transfer", 0), "OUT:Dim": (36, 0, "Transfer", 0)},
     "pi_ctlr": {"IN": (-36, 0, "Transfer", 0), "OUT": (36, 0, "Transfer", 0)},
+    "realpole": {
+        "I:Dim": (-36, 0, "Transfer", 0),
+        "O:Dim": (36, 0, "Transfer", 0),
+    },
     "breakout": {
         "N": (0, 0, "Natural", 0),
         "N1": (36, -36, "Natural", 0),

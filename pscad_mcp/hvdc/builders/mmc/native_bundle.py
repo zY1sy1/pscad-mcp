@@ -58,10 +58,10 @@ CLOSED_LOOP_DEFAULTS = {
     "Q_Order_MVAr": 0.0,
     "Vdc_Order_kV": 640.0,
     "Control_Mode": 0.0,
-    "Kp_Active": 0.01,
-    "Ti_Active_s": 0.20,
-    "Kp_Reactive": 0.0002,
-    "Ti_Reactive_s": 0.20,
+    "Kp_Active": 0.003,
+    "Ti_Active_s": 0.50,
+    "Kp_Reactive": 0.00005,
+    "Ti_Reactive_s": 0.50,
     "Base_Modulation": 0.90,
 }
 FIXTURE_CHANNELS = {
@@ -312,15 +312,36 @@ def _closed_loop_control(root: ET.Element, master: dict, defaults: dict) -> dict
             )
         },
         {
-            "P_MEAS": "P_MEAS",
-            "Q_MEAS": "Q_MEAS",
-            "VDC_MEAS": "VDC_MEAS",
+            "P_MEAS": "P_FILTERED",
+            "Q_MEAS": "Q_FILTERED",
+            "VDC_MEAS": "VDC_FILTERED",
             "ACTIVE_ERROR": "ACTIVE_ERROR",
             "Q_ERROR": "Q_ERROR",
             "BLOCK": "CTRL_BLOCK",
             "SEQUENCE": "CTRL_SEQUENCE",
         },
     )
+    for role, source, output, limit in (
+        ("p_filter", "P_MEAS", "P_FILTERED", 10000.0),
+        ("q_filter", "Q_MEAS", "Q_FILTERED", 10000.0),
+        ("vdc_filter", "VDC_MEAS", "VDC_FILTERED", 2000.0),
+    ):
+        add(
+            role,
+            "master:realpole",
+            {
+                "Limit": "0",
+                "COM": role,
+                "Reset": "0",
+                "YO": "0.0",
+                "Dim": "1",
+                "G": "1.0",
+                "T": "0.02 [s]",
+                "Max": str(limit),
+                "Min": str(-limit),
+            },
+            {"I:Dim": source, "O:Dim": output},
+        )
     add(
         "active_pi",
         "master:pi_ctlr",
@@ -561,11 +582,11 @@ def materialize_native_avm_fixture(
     reactive_power_order_mvar: float = 0.0,
     vdc_order_kv: float = 640.0,
     ramp_time_s: float = 0.20,
-    p_control_kp: float = 0.01,
-    vdc_control_kp: float = 0.05,
-    active_control_ti_s: float = 0.20,
-    reactive_control_kp: float = 0.0002,
-    reactive_control_ti_s: float = 0.20,
+    p_control_kp: float = 0.003,
+    vdc_control_kp: float = 0.01,
+    active_control_ti_s: float = 0.50,
+    reactive_control_kp: float = 0.00005,
+    reactive_control_ti_s: float = 0.50,
     deblock_time_s: float = 0.10,
     reversal_time_s: float = 0.30,
     simulation_duration_s: float = 0.5,

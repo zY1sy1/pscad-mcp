@@ -103,6 +103,7 @@ def test_native_bundle_contains_physical_arm_control_and_coupled_cable(
     assert all(measurement_ports[name] == ("Output", "Real") for name in ("P", "Q"))
     controller = definitions[CLOSED_LOOP_CONTROL_NAME]
     assert len(controller.findall("./schematic/User[@defn='master:pi_ctlr']")) == 2
+    assert len(controller.findall("./schematic/User[@defn='master:realpole']")) == 3
     assert (
         controller.find(
             f"./schematic/User[@defn='{NATIVE_SCOPE}:MMCControlErrors']"
