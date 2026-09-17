@@ -724,7 +724,13 @@ class ParametricMmcBuilderService:
                         existing_library_backups.append((library_target, library_backup))
                     record["final_library_path"] = str(library_target)
                     load_paths.insert(0, str(library_target))
-                await self.pscad_service.load_projects(load_paths)
+                reload_projects = getattr(
+                    self.pscad_service, "reload_projects", None
+                )
+                if callable(reload_projects):
+                    await reload_projects(load_paths)
+                else:
+                    await self.pscad_service.load_projects(load_paths)
                 await self.pscad_service.build_project(target.stem)
                 if library_target is not None and expected_library_hash is not None:
                     observed_library_hash = _sha256(library_target)

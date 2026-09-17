@@ -258,6 +258,12 @@ class RecordingMmcService:
             assert Path(filename).resolve().is_relative_to(self.workspace)
         return "loaded"
 
+    async def reload_projects(self, filenames: list[str]) -> str:
+        self._record("reload_projects", filenames)
+        for filename in filenames:
+            assert Path(filename).resolve().is_relative_to(self.workspace)
+        return "reloaded"
+
     async def set_component_parameters(
         self, project_name: str, component_id: str, parameters: dict[str, Any]
     ) -> str:

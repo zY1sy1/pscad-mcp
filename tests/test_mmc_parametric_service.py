@@ -67,6 +67,15 @@ def test_both_engines_publish_only_after_independent_acceptance(tmp_path: Path) 
         ("detailed_pwm", "pwm-0"),
         ("average_value", "avm-0"),
     ]
+    reloads = [
+        call[1][0]
+        for call in service.pscad_service.calls
+        if call[0] == "reload_projects"
+    ]
+    assert reloads == [
+        [str(tmp_path / "intermediate.pslx"), str(tmp_path / "MMC_CASE_pwm.pscx")],
+        [str(tmp_path / "MMC_CASE_avm.pscx")],
+    ]
 
 
 def test_one_engine_failure_keeps_parent_unpublished_but_runs_other_child(
@@ -266,17 +275,17 @@ def test_parent_rechecks_published_pwm_library_after_final_compile(
     tmp_path: Path,
 ) -> None:
     service = make_parametric_service(tmp_path)
-    original_load = service.pscad_service.load_projects
+    original_reload = service.pscad_service.reload_projects
 
-    async def mutating_load(filenames: list[str]) -> str:
-        result = await original_load(filenames)
+    async def mutating_reload(filenames: list[str]) -> str:
+        result = await original_reload(filenames)
         for filename in filenames:
             path = Path(filename)
             if path.name.casefold() == "intermediate.pslx" and path.parent == tmp_path:
                 path.write_text("mutated during final reload", encoding="utf-8")
         return result
 
-    service.pscad_service.load_projects = mutating_load
+    service.pscad_service.reload_projects = mutating_reload
 
     _, terminal = _build(
         service, tmp_path, valid_request(model_fidelity="detailed_pwm")
@@ -298,17 +307,17 @@ def test_parent_restores_preexisting_pwm_library_when_final_compile_mutates(
     target = tmp_path / "intermediate.pslx"
     original_contents = source_library.read_bytes()
     target.write_bytes(original_contents)
-    original_load = service.pscad_service.load_projects
+    original_reload = service.pscad_service.reload_projects
 
-    async def mutating_load(filenames: list[str]) -> str:
-        result = await original_load(filenames)
+    async def mutating_reload(filenames: list[str]) -> str:
+        result = await original_reload(filenames)
         for filename in filenames:
             path = Path(filename)
             if path.name.casefold() == "intermediate.pslx" and path.parent == tmp_path:
                 path.write_text("mutated pre-existing library", encoding="utf-8")
         return result
 
-    service.pscad_service.load_projects = mutating_load
+    service.pscad_service.reload_projects = mutating_reload
 
     started = asyncio.run(
         service.build_model(

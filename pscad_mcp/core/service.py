@@ -580,6 +580,62 @@ class PscadService:
         await self.backend.load_projects(resolved)
         return f"Loaded: {', '.join(resolved)}"
 
+    async def reload_projects(self, filenames: list[str]) -> str:
+        """Rebind same-name libraries and cases to a new ordered file set."""
+        if not filenames:
+            raise ValueError("filenames must contain at least one project.")
+        resolved = [
+            self._resolve_path(
+                filename,
+                suffixes={".pscx", ".pslx"},
+                must_exist=True,
+                operation="reload_projects",
+            )
+            for filename in filenames
+        ]
+        names = [path.stem for path in resolved]
+        if len({name.casefold() for name in names}) != len(names):
+            raise BackendError(
+                "INVALID_ARGUMENT",
+                "Reloaded project and library names must be unique.",
+                getattr(self.backend, "name", "backend"),
+                "reload_projects",
+                {"names": names},
+            )
+        unloader = getattr(self.backend, "unload_project", None)
+        if not callable(unloader):
+            raise BackendError(
+                "BLUEPRINT_RELOAD_UNAVAILABLE",
+                "The backend cannot unload projects before rebinding them.",
+                getattr(self.backend, "name", "backend"),
+                "reload_projects",
+                {"names": names},
+            )
+        for name in reversed(names):
+            await unloader(name)
+        await self.backend.load_projects([str(path) for path in resolved])
+        projects = await self.backend.list_projects()
+        observed = [
+            str(
+                project.get("name")
+                if isinstance(project, Mapping)
+                else getattr(project, "name", "")
+            ).casefold()
+            for project in projects
+        ]
+        missing_or_ambiguous = [
+            name for name in names if observed.count(name.casefold()) != 1
+        ]
+        if missing_or_ambiguous:
+            raise BackendError(
+                "BLUEPRINT_RELOAD_FAILED",
+                "A rebound project or library is missing or ambiguous.",
+                getattr(self.backend, "name", "backend"),
+                "reload_projects",
+                {"names": names, "invalid": missing_or_ambiguous},
+            )
+        return f"Reloaded: {', '.join(names)}"
+
     async def reload_project(self, project_name: str, filename: str) -> str:
         resolved = self._resolve_path(
             filename,
