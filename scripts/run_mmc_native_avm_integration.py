@@ -96,7 +96,12 @@ def verify_model_finalization(authored: dict) -> dict:
     }
 
 
-def analyze_integration_trace(trace: dict) -> dict:
+def analyze_integration_trace(
+    trace: dict,
+    *,
+    sequence_windows: tuple[tuple[float, float, float], ...] | None = None,
+    minimum_end_s: float = 0.4998,
+) -> dict:
     result = {
         "status": "FAIL",
         "measurement_complete": False,
@@ -126,10 +131,10 @@ def analyze_integration_trace(trace: dict) -> dict:
     checks = result["checks"]
     checks["time_coverage"] = (
         time_domain[0] <= 1.1e-4
-        and time_domain[-1] >= 0.4998
+        and time_domain[-1] >= minimum_end_s
         and max(right - left for left, right in pairwise(time_domain)) <= 1.1e-4
     )
-    windows = (
+    windows = sequence_windows or (
         (0.02, 0.09, 1.0),
         (0.12, 0.29, 2.0),
         (0.32, 0.49, 3.0),

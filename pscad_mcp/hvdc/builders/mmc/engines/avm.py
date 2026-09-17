@@ -420,7 +420,7 @@ class AvmBlueprintEngine:
             / (2.0 * math.sqrt(2.0))
         )
         reversal_time = max(0.31, float(values["power_reversal_time_s"]))
-        duration = max(0.50, reversal_time + 0.20)
+        duration = max(2.0, reversal_time + 1.0)
         candidate_project_name = (
             "AVM_"
             + plan.plan_hash[:12]

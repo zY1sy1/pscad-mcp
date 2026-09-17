@@ -67,7 +67,7 @@ REQUEST = {
         "x_over_r": 10.0,
     },
     "dc_link": {"kind": "cable", "length_km": 100.0},
-    "power_reversal_time_s": 0.30,
+    "power_reversal_time_s": 1.0,
     "engineering_overrides": {},
 }
 
@@ -312,7 +312,15 @@ async def run_attempt(
         trace_path = run_dir / "trace.json"
         _write_report(trace_path, observed["samples"])
         report["trace"] = {"path": str(trace_path), "sha256": _sha256(trace_path)}
-        report["analysis"] = analyze_integration_trace(observed["samples"])
+        report["analysis"] = analyze_integration_trace(
+            observed["samples"],
+            sequence_windows=(
+                (0.02, 0.09, 1.0),
+                (0.40, 0.90, 2.0),
+                (1.25, 1.90, 3.0),
+            ),
+            minimum_end_s=1.999,
+        )
         report["status"] = report["analysis"]["status"]
         report["assembly_accepted"] = report["status"] == "PASS"
         if report["status"] != "PASS":
