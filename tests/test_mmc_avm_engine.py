@@ -177,11 +177,10 @@ def test_native_avm_engine_freezes_sources_and_materializes_candidate_values(
     assert result["model_accepted"] is False
     assert result["validation"]["scope"] == "native_physical_assembly_compile"
     assert result["source_hashes"] == dict(plan.source_hashes)
-    assert (
-        "build",
-        "PUBLIC_NATIVE_avm_candidate_avm_0",
-    ) in service.calls
-    assert result["publication_project_name"] == "PUBLIC_NATIVE_avm_candidate_avm_0"
+    candidate_name = "AVM_" + plan.plan_hash[:12] + "_avm_0"
+    assert ("build", candidate_name) in service.calls
+    assert result["publication_project_name"] == candidate_name
+    assert len(candidate_name) <= 30
     root = ET.parse(result["project_path"]).getroot()
     users = root.findall("./definitions/Definition[@name='Main']/schematic/User")
     assert len(

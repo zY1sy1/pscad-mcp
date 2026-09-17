@@ -422,13 +422,16 @@ class AvmBlueprintEngine:
         reversal_time = max(0.30, float(values["power_reversal_time_s"]))
         duration = max(0.50, reversal_time + 0.20)
         candidate_project_name = (
-            f"{plan.target_name}_candidate_{selected.candidate_id.replace('-', '_')}"
+            "AVM_"
+            + plan.plan_hash[:12]
+            + "_"
+            + selected.candidate_id.replace("-", "_")
         )
-        if len(candidate_project_name) > 64:
-            candidate_project_name = (
-                plan.target_name[:47]
-                + "_candidate_"
-                + selected.candidate_id.replace("-", "_")
+        if len(candidate_project_name) > 30:
+            raise _error(
+                "MMC_LAYOUT_INVALID",
+                "The deterministic native AVM candidate identity exceeds the EMTDC limit.",
+                candidate_project_name=candidate_project_name,
             )
         receipt = await asyncio.to_thread(
             self.fixture_builder,
