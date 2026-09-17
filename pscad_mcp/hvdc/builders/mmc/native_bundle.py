@@ -32,6 +32,7 @@ from .cable_companion import (
 
 NATIVE_SCOPE = "cigre_mmc_avm_v1"
 CONTROL_NAME = "MMCStationModulator"
+CLOSED_LOOP_CONTROL_NAME = "MMCStationController"
 MEASUREMENT_NAME = "MMCStationMeasurements"
 CONTROL_OUTPUTS = (
     "M_A_UPPER",
@@ -49,6 +50,19 @@ CONTROL_DEFAULTS = {
     "Phase_Offset_Deg": 0.0,
     "Deblock_Time_s": 0.10,
     "Reversal_Time_s": 0.30,
+}
+CLOSED_LOOP_DEFAULTS = {
+    **CONTROL_DEFAULTS,
+    "Ramp_Time_s": 0.20,
+    "P_Order_MW": 1000.0,
+    "Q_Order_MVAr": 0.0,
+    "Vdc_Order_kV": 640.0,
+    "Control_Mode": 0.0,
+    "Kp_Active": 0.01,
+    "Ti_Active_s": 0.20,
+    "Kp_Reactive": 0.0002,
+    "Ti_Reactive_s": 0.20,
+    "Base_Modulation": 0.90,
 }
 FIXTURE_CHANNELS = {
     "P_VDC": "kV",
@@ -164,6 +178,193 @@ def _station_measurements(root: ET.Element) -> ET.Element:
     return measurements
 
 
+def _closed_loop_control(root: ET.Element, master: dict, defaults: dict) -> dict:
+    errors = _definition(
+        root,
+        "MMCControlErrors",
+        {
+            "P_MEAS": (-72, -72, "Transfer", "Input"),
+            "Q_MEAS": (-72, -36, "Transfer", "Input"),
+            "VDC_MEAS": (-72, 0, "Transfer", "Input"),
+            "ACTIVE_ERROR": (72, -72, "Transfer", "Output"),
+            "Q_ERROR": (72, -36, "Transfer", "Output"),
+            "BLOCK": (72, 0, "Transfer", "Output"),
+            "SEQUENCE": (72, 36, "Transfer", "Output"),
+        },
+        {
+            name: CLOSED_LOOP_DEFAULTS[name]
+            for name in (
+                "P_Order_MW",
+                "Q_Order_MVAr",
+                "Vdc_Order_kV",
+                "Control_Mode",
+                "Deblock_Time_s",
+                "Reversal_Time_s",
+                "Ramp_Time_s",
+            )
+        },
+    )
+    _script(
+        errors,
+        "Fortran",
+        """#LOCAL REAL SCALE
+#LOCAL REAL REVERSE_SCALE
+#LOCAL REAL PREF
+      SCALE = 0.0
+      IF (TIME .GE. $Deblock_Time_s) SCALE = MIN(1.0, MAX(0.0, (TIME - $Deblock_Time_s) / $Ramp_Time_s))
+      PREF = SCALE * $P_Order_MW
+      $SEQUENCE = 1.0
+      IF (TIME .GE. $Deblock_Time_s) $SEQUENCE = 2.0
+      IF (TIME .GE. $Reversal_Time_s) THEN
+        REVERSE_SCALE = MIN(1.0, MAX(0.0, (TIME - $Reversal_Time_s) / $Ramp_Time_s))
+        PREF = $P_Order_MW * (1.0 - 2.0 * REVERSE_SCALE)
+        $SEQUENCE = 3.0
+      ENDIF
+      $ACTIVE_ERROR = $P_MEAS - PREF
+      IF ($Control_Mode .GE. 0.5) $ACTIVE_ERROR = $Vdc_Order_kV - $VDC_MEAS
+      $Q_ERROR = SCALE * $Q_Order_MVAr - $Q_MEAS
+      $BLOCK = 0.0
+      IF (TIME .LT. $Deblock_Time_s) THEN
+        $ACTIVE_ERROR = 0.0
+        $Q_ERROR = 0.0
+        $BLOCK = 1.0
+      ENDIF
+""",
+    )
+    synthesis = _definition(
+        root,
+        "MMCModulationSynthesis",
+        {
+            "ANGLE_COMMAND": (-72, -36, "Transfer", "Input"),
+            "MODULATION_COMMAND": (-72, 0, "Transfer", "Input"),
+            **{
+                name: (72, -126 + index * 36, "Transfer", "Output")
+                for index, name in enumerate(CONTROL_OUTPUTS[:6])
+            },
+        },
+        {"Frequency_Hz": CLOSED_LOOP_DEFAULTS["Frequency_Hz"]},
+    )
+    _script(
+        synthesis,
+        "Fortran",
+        """#LOCAL REAL ANGLE
+#LOCAL REAL MODULATION
+#LOCAL REAL MA
+#LOCAL REAL MB
+#LOCAL REAL MC
+      ANGLE = 6.28318530717959 * $Frequency_Hz * TIME + $ANGLE_COMMAND * 0.0174532925199433
+      MODULATION = MIN(0.98, MAX(0.10, $MODULATION_COMMAND))
+      MA = MODULATION * SIN(ANGLE)
+      MB = MODULATION * SIN(ANGLE - 2.09439510239320)
+      MC = MODULATION * SIN(ANGLE + 2.09439510239320)
+      $M_A_UPPER = 0.5 * (1.0 - MA)
+      $M_A_LOWER = 0.5 * (1.0 + MA)
+      $M_B_UPPER = 0.5 * (1.0 - MB)
+      $M_B_LOWER = 0.5 * (1.0 + MB)
+      $M_C_UPPER = 0.5 * (1.0 - MC)
+      $M_C_LOWER = 0.5 * (1.0 + MC)
+""",
+    )
+    ports = {
+        "P_MEAS": (-90, -180, "Transfer", "Input"),
+        "Q_MEAS": (-90, -144, "Transfer", "Input"),
+        "VDC_MEAS": (-90, -108, "Transfer", "Input"),
+        **{
+            name: (90, -180 + index * 36, "Transfer", "Output")
+            for index, name in enumerate(CONTROL_OUTPUTS)
+        },
+    }
+    controller = _definition(root, CLOSED_LOOP_CONTROL_NAME, ports, CLOSED_LOOP_DEFAULTS)
+    controller.find("./paramlist/param[@name='Description']").set(
+        "value", "Native P/Q or Vdc/Q closed-loop six-arm modulation"
+    )
+    _script(
+        controller,
+        "Checks",
+        "ERROR Frequency must be positive : Frequency_Hz > 0\n"
+        "ERROR Deblock ramp must be positive : Ramp_Time_s > 0\n"
+        "ERROR Reversal must follow the initial ramp : Reversal_Time_s > Deblock_Time_s + Ramp_Time_s\n"
+        "ERROR Active PI time constant must be positive : Ti_Active_s > 0\n"
+        "ERROR Reactive PI time constant must be positive : Ti_Reactive_s > 0\n"
+        "ERROR Base modulation must be bounded : Base_Modulation > 0.1 && Base_Modulation < 0.98\n",
+    )
+    writer = _Writer(root, master, defaults)
+    add = lambda role, scoped, parameters, bindings: writer.add(
+        controller, role, scoped, parameters, bindings
+    )
+    for name in ("P_MEAS", "Q_MEAS", "VDC_MEAS"):
+        add("input_" + name, "master:import", {"Name": name}, {"N": name})
+    for name in CLOSED_LOOP_DEFAULTS:
+        add("parameter_" + name, "master:import", {"Name": name}, {"N": name})
+    add(
+        "errors",
+        f"{NATIVE_SCOPE}:MMCControlErrors",
+        {
+            name: name
+            for name in (
+                "P_Order_MW",
+                "Q_Order_MVAr",
+                "Vdc_Order_kV",
+                "Control_Mode",
+                "Deblock_Time_s",
+                "Reversal_Time_s",
+                "Ramp_Time_s",
+            )
+        },
+        {
+            "P_MEAS": "P_MEAS",
+            "Q_MEAS": "Q_MEAS",
+            "VDC_MEAS": "VDC_MEAS",
+            "ACTIVE_ERROR": "ACTIVE_ERROR",
+            "Q_ERROR": "Q_ERROR",
+            "BLOCK": "BLOCK",
+            "SEQUENCE": "SEQUENCE",
+        },
+    )
+    add(
+        "active_pi",
+        "master:pi_ctlr",
+        {
+            "GP": "Kp_Active",
+            "TI": "Ti_Active_s",
+            "YHI": "30.0",
+            "YLO": "-30.0",
+            "YINIT": "0.0",
+            "Mthd": "0",
+            "INTR": "0",
+        },
+        {"IN": "ACTIVE_ERROR", "OUT": "ANGLE_COMMAND"},
+    )
+    add(
+        "reactive_pi",
+        "master:pi_ctlr",
+        {
+            "GP": "Kp_Reactive",
+            "TI": "Ti_Reactive_s",
+            "YHI": "0.98",
+            "YLO": "0.10",
+            "YINIT": "Base_Modulation",
+            "Mthd": "0",
+            "INTR": "0",
+        },
+        {"IN": "Q_ERROR", "OUT": "MODULATION_COMMAND"},
+    )
+    add(
+        "synthesis",
+        f"{NATIVE_SCOPE}:MMCModulationSynthesis",
+        {"Frequency_Hz": "Frequency_Hz"},
+        {
+            "ANGLE_COMMAND": "ANGLE_COMMAND",
+            "MODULATION_COMMAND": "MODULATION_COMMAND",
+            **{name: name for name in CONTROL_OUTPUTS[:6]},
+        },
+    )
+    for name in CONTROL_OUTPUTS:
+        add("output_" + name, "master:export", {"Name": name}, {"N": name})
+    writer.verify()
+    return {"routes": writer.routes, "electrical_nets": dict(writer.nets)}
+
+
 def _copy_constants(added: dict, destination: Path) -> dict[str, str]:
     destination.mkdir(parents=True, exist_ok=False)
     hashes = {}
@@ -198,6 +399,7 @@ def materialize_native_avm_library(
     root, arm_writer = _make_library(metadata, defaults, scope=NATIVE_SCOPE)
     _station_control(root)
     _station_measurements(root)
+    closed_loop = _closed_loop_control(root, metadata, defaults)
     evidence = Path(constants_evidence).resolve()
     constants_name = Path(
         json.loads(evidence.read_text(encoding="utf-8"))["constants_path"]
@@ -250,6 +452,11 @@ def materialize_native_avm_library(
             "definition": f"{NATIVE_SCOPE}:{MEASUREMENT_NAME}",
             "inputs": ["VA", "VB", "VC", "IA", "IB", "IC", "VDC", "IDC"],
             "outputs": ["P", "Q"],
+        },
+        "closed_loop_control": {
+            "definition": f"{NATIVE_SCOPE}:{CLOSED_LOOP_CONTROL_NAME}",
+            "kind": "p_q_and_vdc_q_feedback",
+            "routes": closed_loop["routes"],
         },
         "model_accepted": False,
     }
@@ -344,6 +551,16 @@ def materialize_native_avm_fixture(
     station_vdc_grid_x_ohm: float = 19.8997487421,
     transformer_rating_mva: float = 1200.0,
     modulation_index: float = 0.82,
+    control_kind: str = "scheduled_open_loop",
+    active_power_order_mw: float = 1000.0,
+    reactive_power_order_mvar: float = 0.0,
+    vdc_order_kv: float = 640.0,
+    ramp_time_s: float = 0.20,
+    p_control_kp: float = 0.01,
+    vdc_control_kp: float = 0.05,
+    active_control_ti_s: float = 0.20,
+    reactive_control_kp: float = 0.0002,
+    reactive_control_ti_s: float = 0.20,
     deblock_time_s: float = 0.10,
     reversal_time_s: float = 0.30,
     simulation_duration_s: float = 0.5,
@@ -390,6 +607,27 @@ def materialize_native_avm_fixture(
     transformer_rating_mva = _number(
         transformer_rating_mva, "transformer_rating_mva", positive=True
     )
+    if control_kind not in {"scheduled_open_loop", "closed_loop"}:
+        raise ValueError("control_kind must be scheduled_open_loop or closed_loop")
+    active_power_order_mw = _number(
+        active_power_order_mw, "active_power_order_mw", positive=True
+    )
+    reactive_power_order_mvar = _number(
+        reactive_power_order_mvar, "reactive_power_order_mvar"
+    )
+    vdc_order_kv = _number(vdc_order_kv, "vdc_order_kv", positive=True)
+    ramp_time_s = _number(ramp_time_s, "ramp_time_s", positive=True)
+    p_control_kp = _number(p_control_kp, "p_control_kp", positive=True)
+    vdc_control_kp = _number(vdc_control_kp, "vdc_control_kp", positive=True)
+    active_control_ti_s = _number(
+        active_control_ti_s, "active_control_ti_s", positive=True
+    )
+    reactive_control_kp = _number(
+        reactive_control_kp, "reactive_control_kp", positive=True
+    )
+    reactive_control_ti_s = _number(
+        reactive_control_ti_s, "reactive_control_ti_s", positive=True
+    )
     station_p_grid_r_ohm = _number(
         station_p_grid_r_ohm, "station_p_grid_r_ohm", positive=True
     )
@@ -415,6 +653,10 @@ def materialize_native_avm_fixture(
     if (
         not 0 <= modulation_index < 1
         or reversal_time_s <= deblock_time_s
+        or (
+            control_kind == "closed_loop"
+            and reversal_time_s <= deblock_time_s + ramp_time_s
+        )
         or simulation_duration_s <= reversal_time_s
         or output_step_s < time_step_s
     ):
@@ -560,21 +802,53 @@ def materialize_native_avm_fixture(
                 "N3": prefix + "_PHASE_C",
             },
         )
-        control = writer.add(
-            main,
-            prefix + "_modulator",
-            f"{NATIVE_SCOPE}:{CONTROL_NAME}",
-            {
-                **CONTROL_DEFAULTS,
-                "Frequency_Hz": frequency_hz,
-                "Modulation_Index": modulation_index,
-                "Phase_Offset_Deg": phase_offset,
-                "Deblock_Time_s": deblock_time_s,
-                "Reversal_Time_s": reversal_time_s,
-            },
-            {name: prefix + "_" + name for name in CONTROL_OUTPUTS},
-        )
-        custom.append((control, CONTROL_NAME))
+        if control_kind == "scheduled_open_loop":
+            control = writer.add(
+                main,
+                prefix + "_modulator",
+                f"{NATIVE_SCOPE}:{CONTROL_NAME}",
+                {
+                    **CONTROL_DEFAULTS,
+                    "Frequency_Hz": frequency_hz,
+                    "Modulation_Index": modulation_index,
+                    "Phase_Offset_Deg": phase_offset,
+                    "Deblock_Time_s": deblock_time_s,
+                    "Reversal_Time_s": reversal_time_s,
+                },
+                {name: prefix + "_" + name for name in CONTROL_OUTPUTS},
+            )
+            custom.append((control, CONTROL_NAME))
+        else:
+            control = writer.add(
+                main,
+                prefix + "_controller",
+                f"{NATIVE_SCOPE}:{CLOSED_LOOP_CONTROL_NAME}",
+                {
+                    **CLOSED_LOOP_DEFAULTS,
+                    "Frequency_Hz": frequency_hz,
+                    "P_Order_MW": active_power_order_mw,
+                    "Q_Order_MVAr": reactive_power_order_mvar,
+                    "Vdc_Order_kV": vdc_order_kv,
+                    "Control_Mode": 0.0 if station == "P" else 1.0,
+                    "Kp_Active": (
+                        p_control_kp if station == "P" else vdc_control_kp
+                    ),
+                    "Ti_Active_s": active_control_ti_s,
+                    "Kp_Reactive": reactive_control_kp,
+                    "Ti_Reactive_s": reactive_control_ti_s,
+                    "Base_Modulation": modulation_index,
+                    "Deblock_Time_s": deblock_time_s,
+                    "Reversal_Time_s": reversal_time_s,
+                    "Ramp_Time_s": ramp_time_s,
+                },
+                {
+                    "P_MEAS": prefix + "_P",
+                    "Q_MEAS": prefix + "_Q",
+                    "VDC_MEAS": prefix + "_VDC",
+                    **{name: prefix + "_" + name for name in CONTROL_OUTPUTS},
+                },
+            )
+            custom.append((control, CLOSED_LOOP_CONTROL_NAME))
         for phase in "ABC":
             for position in ("UPPER", "LOWER"):
                 role = f"{prefix}_{phase}_{position}"
@@ -729,7 +1003,7 @@ def materialize_native_avm_fixture(
         "DC_CABLE": 170,
     }
     for component, definition in custom:
-        if definition == CONTROL_NAME:
+        if definition in {CONTROL_NAME, CLOSED_LOOP_CONTROL_NAME}:
             continue
         call = _hierarchy_call(
             hierarchy,
@@ -771,6 +1045,16 @@ def materialize_native_avm_fixture(
             "station_vdc_grid_x_ohm": station_vdc_grid_x_ohm,
             "transformer_rating_mva": transformer_rating_mva,
             "modulation_index": modulation_index,
+            "control_kind": control_kind,
+            "active_power_order_mw": active_power_order_mw,
+            "reactive_power_order_mvar": reactive_power_order_mvar,
+            "vdc_order_kv": vdc_order_kv,
+            "ramp_time_s": ramp_time_s,
+            "p_control_kp": p_control_kp,
+            "vdc_control_kp": vdc_control_kp,
+            "active_control_ti_s": active_control_ti_s,
+            "reactive_control_kp": reactive_control_kp,
+            "reactive_control_ti_s": reactive_control_ti_s,
             "deblock_time_s": deblock_time_s,
             "reversal_time_s": reversal_time_s,
             "simulation_duration_s": simulation_duration_s,
@@ -782,7 +1066,7 @@ def materialize_native_avm_fixture(
         "electrical_nets": {name: dict(nets) for name, nets in writer.nets.items()},
         "routes": writer.routes,
         "channels": FIXTURE_CHANNELS,
-        "control_kind": "scheduled_open_loop",
+        "control_kind": control_kind,
         "model_accepted": False,
         "licensed_acceptance": "NOT_RUN",
     }
@@ -810,9 +1094,14 @@ def audit_native_avm_fixture(
         raise ValueError("Native AVM project identity changed")
     main = root.find("./definitions/Definition[@name='Main']")
     counts = Counter(user.get("defn") for user in main.findall("./schematic/User"))
+    control_definition = (
+        CLOSED_LOOP_CONTROL_NAME
+        if receipt["control_kind"] == "closed_loop"
+        else CONTROL_NAME
+    )
     required = {
         f"{NATIVE_SCOPE}:MMCAverageArm": 12,
-        f"{NATIVE_SCOPE}:{CONTROL_NAME}": 2,
+        f"{NATIVE_SCOPE}:{control_definition}": 2,
         f"{NATIVE_SCOPE}:{MEASUREMENT_NAME}": 2,
         f"{NATIVE_SCOPE}:MMCCableLink": 1,
         "master:source3": 2,
@@ -898,6 +1187,9 @@ def audit_native_avm_fixture(
             "MMCAverageArm",
             "MMCAverageCoupling",
             CONTROL_NAME,
+            CLOSED_LOOP_CONTROL_NAME,
+            "MMCControlErrors",
+            "MMCModulationSynthesis",
             MEASUREMENT_NAME,
             "MMCCableLink",
             "Cable2",
@@ -911,7 +1203,7 @@ def audit_native_avm_fixture(
         "phase_breakout_count": 2,
         "coupled_cable_count": 1,
         "control_kind": receipt["control_kind"],
-        "physical_power_control_closed": False,
+        "physical_power_control_closed": receipt["control_kind"] == "closed_loop",
     }
 
 
@@ -919,6 +1211,8 @@ __all__ = [
     "CONTROL_DEFAULTS",
     "CONTROL_NAME",
     "CONTROL_OUTPUTS",
+    "CLOSED_LOOP_CONTROL_NAME",
+    "CLOSED_LOOP_DEFAULTS",
     "FIXTURE_CHANNELS",
     "MEASUREMENT_NAME",
     "NATIVE_SCOPE",

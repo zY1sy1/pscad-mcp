@@ -9,6 +9,7 @@ import pytest
 from pscad_mcp.hvdc.builders.mmc import cable_constants
 from pscad_mcp.hvdc.builders.mmc.avm_companion import AverageArmParameters
 from pscad_mcp.hvdc.builders.mmc.native_bundle import (
+    CLOSED_LOOP_CONTROL_NAME,
     CONTROL_NAME,
     FIXTURE_CHANNELS,
     MEASUREMENT_NAME,
@@ -65,7 +66,10 @@ def test_native_bundle_contains_physical_arm_control_and_coupled_cable(
         "MMCAverageArm",
         "MMCAverageCoupling",
         CONTROL_NAME,
+        CLOSED_LOOP_CONTROL_NAME,
         MEASUREMENT_NAME,
+        "MMCControlErrors",
+        "MMCModulationSynthesis",
         "MMCCableLink",
         "Cable2",
     } <= set(definitions)
@@ -97,6 +101,20 @@ def test_native_bundle_contains_physical_arm_control_and_coupled_cable(
     }
     assert all(measurement_ports[name] == ("Input", "Real") for name in ("VA", "VB", "VC", "IA", "IB", "IC", "VDC", "IDC"))
     assert all(measurement_ports[name] == ("Output", "Real") for name in ("P", "Q"))
+    controller = definitions[CLOSED_LOOP_CONTROL_NAME]
+    assert len(controller.findall("./schematic/User[@defn='master:pi_ctlr']")) == 2
+    assert (
+        controller.find(
+            f"./schematic/User[@defn='{NATIVE_SCOPE}:MMCControlErrors']"
+        )
+        is not None
+    )
+    assert (
+        controller.find(
+            f"./schematic/User[@defn='{NATIVE_SCOPE}:MMCModulationSynthesis']"
+        )
+        is not None
+    )
     cable = definitions["MMCCableLink"]
     assert len(cable.findall("./schematic/User[@defn='master:cable_interface']")) == 2
     assert len(cable.findall("./schematic/Wire[@classid='Cable']")) == 1
@@ -308,6 +326,10 @@ def test_full_fixture_materializes_parametric_electrical_and_runtime_values(
         station_p_valve_voltage_kv=250.0,
         station_vdc_valve_voltage_kv=260.0,
         modulation_index=0.8,
+        control_kind="closed_loop",
+        active_power_order_mw=750.0,
+        reactive_power_order_mvar=25.0,
+        vdc_order_kv=500.0,
         deblock_time_s=0.2,
         reversal_time_s=0.7,
         simulation_duration_s=1.0,
@@ -355,12 +377,16 @@ def test_full_fixture_materializes_parametric_electrical_and_runtime_values(
         assert transformer["V2"] == f"{secondary:g} [kV]"
         control = {
             item.get("name"): item.get("value")
-            for item in users[prefix + "_modulator"].findall("./paramlist/param")
+            for item in users[prefix + "_controller"].findall("./paramlist/param")
         }
         assert float(control["Frequency_Hz"]) == 50.0
-        assert float(control["Modulation_Index"]) == 0.8
+        assert float(control["Base_Modulation"]) == 0.8
         assert float(control["Deblock_Time_s"]) == 0.2
         assert float(control["Reversal_Time_s"]) == 0.7
+        assert float(control["P_Order_MW"]) == 750.0
+        assert float(control["Q_Order_MVAr"]) == 25.0
+        assert float(control["Vdc_Order_kV"]) == 500.0
+        assert float(control["Control_Mode"]) == (0.0 if prefix == "P" else 1.0)
 
     for name, component in users.items():
         if not name.endswith(("_UPPER", "_LOWER")):
@@ -375,6 +401,8 @@ def test_full_fixture_materializes_parametric_electrical_and_runtime_values(
         assert float(values["P_nonohmic_MW"]) == arms.P_nonohmic_MW
     assert report["parameters"]["transformer_rating_mva"] == 825.0
     assert report["parameters"]["cable_length_km"] == 300.0
+    assert report["topology"]["control_kind"] == "closed_loop"
+    assert report["topology"]["physical_power_control_closed"] is True
 
 
 @pytest.mark.parametrize("mutation", ["arm", "cable", "source_hash"])

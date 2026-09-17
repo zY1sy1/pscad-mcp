@@ -80,7 +80,7 @@ def _native_input_record(paths: Mapping[str, str]) -> dict[str, object]:
         "capabilities": {
             "native_physical_assembly": True,
             "native_cable_constants": True,
-            "control_kind": "scheduled_open_loop",
+            "control_kind": "closed_loop",
             "model_accepted": False,
         },
     }
@@ -419,7 +419,7 @@ class AvmBlueprintEngine:
             * math.sqrt(3.0)
             / (2.0 * math.sqrt(2.0))
         )
-        reversal_time = max(0.30, float(values["power_reversal_time_s"]))
+        reversal_time = max(0.31, float(values["power_reversal_time_s"]))
         duration = max(0.50, reversal_time + 0.20)
         candidate_project_name = (
             "AVM_"
@@ -451,6 +451,11 @@ class AvmBlueprintEngine:
             station_vdc_grid_x_ohm=float(values["station_vdc_grid_x_ohm"]),
             transformer_rating_mva=float(values["transformer_rating_mva"]),
             modulation_index=modulation_index,
+            control_kind="closed_loop",
+            active_power_order_mw=float(values["rated_power_mw"]),
+            reactive_power_order_mvar=float(values["reactive_power_mvar"]),
+            vdc_order_kv=float(values["rated_dc_voltage_kv"]),
+            ramp_time_s=0.20,
             deblock_time_s=0.10,
             reversal_time_s=reversal_time,
             simulation_duration_s=duration,

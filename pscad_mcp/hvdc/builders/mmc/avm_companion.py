@@ -137,6 +137,7 @@ _MASTER_PORTS = {
     # the average arm itself uses the audited variable R/L/C primitive.
     "resistor": {"A": (0, 0, "Natural", 0), "B": (36, 0, "Natural", 0)},
     "gain": {"IN:Dim": (-36, 0, "Transfer", 0), "OUT:Dim": (36, 0, "Transfer", 0)},
+    "pi_ctlr": {"IN": (-36, 0, "Transfer", 0), "OUT": (36, 0, "Transfer", 0)},
     "breakout": {
         "N": (0, 0, "Natural", 0),
         "N1": (36, -36, "Natural", 0),
@@ -207,6 +208,16 @@ _PARAMETER_UNITS = {
     "Phase_Offset_Deg": "deg",
     "Deblock_Time_s": "s",
     "Reversal_Time_s": "s",
+    "Ramp_Time_s": "s",
+    "P_Order_MW": "MW",
+    "Q_Order_MVAr": "MVAr",
+    "Vdc_Order_kV": "kV",
+    "Control_Mode": "1",
+    "Kp_Active": "1",
+    "Ti_Active_s": "s",
+    "Kp_Reactive": "1",
+    "Ti_Reactive_s": "s",
+    "Base_Modulation": "1",
 }
 
 
@@ -249,7 +260,15 @@ def _audit_master(path: Path) -> tuple[dict, str, dict]:
             }.get(
                 (name, port_name),
                 1
-                if name in {"source_1", "src_ccin_1", "breaker1", "peswitch", "ground"}
+                if name
+                in {
+                    "source_1",
+                    "src_ccin_1",
+                    "breaker1",
+                    "peswitch",
+                    "ground",
+                    "pi_ctlr",
+                }
                 else 0,
             )
             if records[0].dim != expected_dimension:
@@ -260,6 +279,7 @@ def _audit_master(path: Path) -> tuple[dict, str, dict]:
                 ("src_ccin_1", "Mag"): "(Cntrl)",
                 ("breakout", "N1"): "Com==0",
                 ("breakout", "N3"): "Com==0",
+                ("pi_ctlr", "IN"): "Mthd==0||INTR==0",
             }.get((name, port_name), "true")
             if re.sub(r"\s+", "", records[0].condition or "") != expected_condition:
                 raise ValueError(
