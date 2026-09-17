@@ -115,7 +115,7 @@ def test_native_bundle_contains_physical_arm_control_and_coupled_cable(
     ).text
     assert "$P_MEAS - PREF" in error_script
     assert "$VDC_MEAS - $Vdc_Order_kV" in error_script
-    assert "$Q_Order_MVAr - $Q_MEAS" in error_script
+    assert "$Q_MEAS - SCALE * $Q_Order_MVAr" in error_script
     assert (
         controller.find(
             f"./schematic/User[@defn='{NATIVE_SCOPE}:MMCModulationSynthesis']"
