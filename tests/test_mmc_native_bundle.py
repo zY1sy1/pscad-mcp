@@ -109,6 +109,12 @@ def test_native_bundle_contains_physical_arm_control_and_coupled_cable(
         )
         is not None
     )
+    error_script = definitions["MMCControlErrors"].find(
+        "./script/segment[@name='Fortran']"
+    ).text
+    assert "$P_MEAS - PREF" in error_script
+    assert "$VDC_MEAS - $Vdc_Order_kV" in error_script
+    assert "$Q_Order_MVAr - $Q_MEAS" in error_script
     assert (
         controller.find(
             f"./schematic/User[@defn='{NATIVE_SCOPE}:MMCModulationSynthesis']"

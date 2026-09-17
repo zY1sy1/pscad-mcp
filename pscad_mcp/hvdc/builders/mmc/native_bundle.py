@@ -221,7 +221,7 @@ def _closed_loop_control(root: ET.Element, master: dict, defaults: dict) -> dict
         $SEQUENCE = 3.0
       ENDIF
       $ACTIVE_ERROR = $P_MEAS - PREF
-      IF ($Control_Mode .GE. 0.5) $ACTIVE_ERROR = $Vdc_Order_kV - $VDC_MEAS
+      IF ($Control_Mode .GE. 0.5) $ACTIVE_ERROR = $VDC_MEAS - $Vdc_Order_kV
       $Q_ERROR = SCALE * $Q_Order_MVAr - $Q_MEAS
       $BLOCK = 0.0
       IF (TIME .LT. $Deblock_Time_s) THEN
