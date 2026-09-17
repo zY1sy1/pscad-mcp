@@ -21,6 +21,10 @@ from pscad_mcp.acceptance.executable_finalization import verify_executable_relin
 from pscad_mcp.acceptance.process_scope import concurrent_acceptance_enabled
 from pscad_mcp.core.process_inventory import list_pscad_processes
 from pscad_mcp.hvdc.builders.mmc.cable_companion import DEFAULT_DONOR, DEFAULT_MASTER
+from pscad_mcp.hvdc.builders.mmc.engines.avm import (
+    AvmBlueprintEngine,
+    discover_native_avm_sources,
+)
 from pscad_mcp.hvdc.builders.mmc.native_bundle import FIXTURE_CHANNELS, NATIVE_SCOPE
 from pscad_mcp.hvdc.builders.mmc.parametric_service import ParametricMmcBuilderService
 from scripts.run_mmc_average_arm_acceptance import (
@@ -94,7 +98,12 @@ def _code_snapshot() -> dict[str, Any]:
     return snapshot
 
 
-def _require_public_plan(plan: dict[str, Any], sources: dict[str, str]) -> dict[str, Any]:
+def _require_public_plan(
+    plan: dict[str, Any],
+    sources: dict[str, str],
+    *,
+    control_kind: str = "closed_loop",
+) -> dict[str, Any]:
     children = plan.get("engine_plans", ())
     if len(children) != 1 or children[0].get("engine") != "average_value":
         raise ValueError("Public plan did not produce exactly one AVM child")
@@ -105,6 +114,7 @@ def _require_public_plan(plan: dict[str, Any], sources: dict[str, str]) -> dict[
     if (
         capabilities.get("native_physical_assembly") is not True
         or capabilities.get("native_cable_constants") is not True
+        or capabilities.get("control_kind") != control_kind
         or capabilities.get("model_accepted") is not False
     ):
         raise ValueError("Public AVM plan overstates or omits native capabilities")
@@ -184,7 +194,24 @@ async def run_attempt(
         require_runtime(runtime)
 
         begin("plan")
-        builder = builder_factory(service, workspace_root=workspace)
+        control_kind = getattr(args, "control_kind", "closed_loop")
+        if control_kind == "closed_loop":
+            builder = builder_factory(service, workspace_root=workspace)
+        else:
+            native_sources = discover_native_avm_sources(
+                master_path=args.master,
+                source_project=args.source_project,
+                executable=args.tline,
+            )
+            builder = builder_factory(
+                service,
+                workspace_root=workspace,
+                avm_engine=AvmBlueprintEngine(
+                    native_sources=native_sources,
+                    native_required=True,
+                    native_control_kind=control_kind,
+                ),
+            )
         plan = builder.plan_model(
             REQUEST,
             project_name="MMC_PUBLIC_NATIVE",
@@ -194,7 +221,9 @@ async def run_attempt(
         child = _require_public_plan(
             plan,
             {name: source_hashes[name] for name in ("master", "cable_donor", "tline")},
+            control_kind=control_kind,
         )
+        report["diagnostic_control_kind"] = control_kind
 
         begin("build_and_publish")
         started = await builder.build_model(
@@ -423,6 +452,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--workspace-root", type=Path, required=True)
     parser.add_argument("--master", type=Path, default=DEFAULT_MASTER)
     parser.add_argument("--source-project", type=Path, default=DEFAULT_DONOR)
+    parser.add_argument(
+        "--control-kind",
+        choices=("scheduled_open_loop", "closed_loop"),
+        default="closed_loop",
+    )
     parser.add_argument(
         "--tline",
         type=Path,

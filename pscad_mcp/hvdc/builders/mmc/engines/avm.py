@@ -57,7 +57,9 @@ def discover_native_avm_sources(
     return {name: str(path) for name, path in paths.items()}
 
 
-def _native_input_record(paths: Mapping[str, str]) -> dict[str, object]:
+def _native_input_record(
+    paths: Mapping[str, str], *, control_kind: str = "closed_loop"
+) -> dict[str, object]:
     if set(paths) != _NATIVE_SOURCE_KEYS:
         raise _error(
             "MMC_AVM_NATIVE_INPUT_MISSING",
@@ -80,7 +82,7 @@ def _native_input_record(paths: Mapping[str, str]) -> dict[str, object]:
         "capabilities": {
             "native_physical_assembly": True,
             "native_cable_constants": True,
-            "control_kind": "closed_loop",
+            "control_kind": control_kind,
             "model_accepted": False,
         },
     }
@@ -314,6 +316,7 @@ class AvmBlueprintEngine:
         fixture_builder: Any = materialize_native_avm_fixture,
         fixture_auditor: Any = audit_native_avm_fixture,
         operation_timeout_s: float = 600.0,
+        native_control_kind: str = "closed_loop",
     ) -> None:
         self.asset_set = load_packaged_asset_set() if asset_set is None else asset_set
         self.inventory = inventory
@@ -326,8 +329,11 @@ class AvmBlueprintEngine:
         self.fixture_builder = fixture_builder
         self.fixture_auditor = fixture_auditor
         self.operation_timeout_s = float(operation_timeout_s)
+        self.native_control_kind = native_control_kind
         if not math.isfinite(self.operation_timeout_s) or self.operation_timeout_s <= 0:
             raise ValueError("operation_timeout_s must be finite and positive")
+        if self.native_control_kind not in {"scheduled_open_loop", "closed_loop"}:
+            raise ValueError("native_control_kind is unsupported")
 
     def planning_inputs(self, request: object) -> dict[str, object] | None:
         link = getattr(request, "dc_link", None)
@@ -345,7 +351,9 @@ class AvmBlueprintEngine:
                 "The native average-value path currently requires a cable DC link.",
                 dc_link_kind=kind,
             )
-        return _native_input_record(self.native_sources)
+        return _native_input_record(
+            self.native_sources, control_kind=self.native_control_kind
+        )
 
     @staticmethod
     def _native_arm_parameters(values: Mapping[str, Any]) -> AverageArmParameters:
@@ -373,7 +381,9 @@ class AvmBlueprintEngine:
         candidate_id: str | None,
     ) -> dict[str, object]:
         selected = _candidate(plan, candidate_id)
-        inputs = _native_input_record(plan.source_paths)
+        inputs = _native_input_record(
+            plan.source_paths, control_kind=self.native_control_kind
+        )
         if dict(plan.source_hashes) != inputs["source_hashes"]:
             raise _error(
                 "MMC_SOURCE_CHANGED",
@@ -451,7 +461,7 @@ class AvmBlueprintEngine:
             station_vdc_grid_x_ohm=float(values["station_vdc_grid_x_ohm"]),
             transformer_rating_mva=float(values["transformer_rating_mva"]),
             modulation_index=modulation_index,
-            control_kind="closed_loop",
+            control_kind=self.native_control_kind,
             active_power_order_mw=float(values["rated_power_mw"]),
             reactive_power_order_mvar=float(values["reactive_power_mvar"]),
             vdc_order_kv=float(values["rated_dc_voltage_kv"]),

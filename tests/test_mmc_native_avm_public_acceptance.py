@@ -35,6 +35,7 @@ def test_public_plan_gate_requires_native_hashes_and_conservative_capabilities(r
         "capabilities": {
             "native_physical_assembly": True,
             "native_cable_constants": True,
+            "control_kind": "closed_loop",
             "model_accepted": False,
         },
     }
