@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import re
 import shutil
 from collections import Counter
 from dataclasses import asdict
@@ -62,6 +63,23 @@ FIXTURE_CHANNELS = {
 
 def _hash(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _number(value: object, name: str, *, positive: bool = False) -> float:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or not math.isfinite(value)
+    ):
+        raise ValueError(f"{name} must be finite and real")
+    result = float(value)
+    if positive and result <= 0:
+        raise ValueError(f"{name} must be positive")
+    return result
+
+
+def _format(value: float) -> str:
+    return format(value, ".15g")
 
 
 def _station_control(root: ET.Element) -> ET.Element:
@@ -198,32 +216,46 @@ def materialize_native_avm_library(
     }
 
 
-def _source_parameters(name: str, voltage_kv: float, frequency_hz: float) -> dict:
+def _source_parameters(
+    name: str,
+    voltage_kv: float,
+    frequency_hz: float,
+    grid_r_ohm: float,
+    grid_x_ohm: float,
+) -> dict:
+    impedance = math.hypot(grid_r_ohm, grid_x_ohm)
+    angle = math.degrees(math.atan2(grid_x_ohm, grid_r_ohm))
     return {
         "Name": name,
         "View": "1",
         "Type": "3",
         "Ctrl": "0",
         "MVA": "1000.0 [MVA]",
-        "Vm": f"{voltage_kv} [kV]",
-        "F": f"{frequency_hz} [Hz]",
+        "Vm": f"{_format(voltage_kv)} [kV]",
+        "F": f"{_format(frequency_hz)} [Hz]",
         "Tc": "0.05 [s]",
         "ZSeq": "0",
         "Imp": "1",
         "Term": "0",
-        "Z1": "20.0 [ohm]",
-        "Phi1": "84.2894068625 [deg]",
-        "Es": f"{voltage_kv} [kV]",
-        "F0": f"{frequency_hz} [Hz]",
+        "Z1": f"{_format(impedance)} [ohm]",
+        "Phi1": f"{_format(angle)} [deg]",
+        "Es": f"{_format(voltage_kv)} [kV]",
+        "F0": f"{_format(frequency_hz)} [Hz]",
         "Ph": "0.0 [deg]",
     }
 
 
-def _transformer_parameters(name: str, voltage_kv: float, frequency_hz: float) -> dict:
+def _transformer_parameters(
+    name: str,
+    primary_voltage_kv: float,
+    secondary_voltage_kv: float,
+    frequency_hz: float,
+    rating_mva: float,
+) -> dict:
     return {
         "Name": name,
-        "Tmva": "1200.0 [MVA]",
-        "f": f"{frequency_hz} [Hz]",
+        "Tmva": f"{_format(rating_mva)} [MVA]",
+        "f": f"{_format(frequency_hz)} [Hz]",
         "YD1": "0",
         "YD2": "1",
         "Lead": "1",
@@ -232,8 +264,8 @@ def _transformer_parameters(name: str, voltage_kv: float, frequency_hz: float) -
         "NLL": "0.0 [pu]",
         "CuL": "0.0 [pu]",
         "View": "1",
-        "V1": f"{voltage_kv} [kV]",
-        "V2": f"{voltage_kv} [kV]",
+        "V1": f"{_format(primary_voltage_kv)} [kV]",
+        "V2": f"{_format(secondary_voltage_kv)} [kV]",
         "Sat": "0",
     }
 
@@ -260,20 +292,94 @@ def materialize_native_avm_fixture(
     constants_evidence: str | Path,
     master_path: str | Path = DEFAULT_MASTER,
     source_project: str | Path = DEFAULT_DONOR,
+    project_name: str = "mmc_native_avm_fixture",
     frequency_hz: float = 60.0,
-    ac_voltage_kv: float = 230.0,
+    ac_voltage_kv: float | None = None,
+    station_p_ac_voltage_kv: float | None = None,
+    station_vdc_ac_voltage_kv: float | None = None,
+    station_p_valve_voltage_kv: float | None = None,
+    station_vdc_valve_voltage_kv: float | None = None,
+    station_p_grid_r_ohm: float = 2.0,
+    station_p_grid_x_ohm: float = 19.8997487421,
+    station_vdc_grid_r_ohm: float = 2.0,
+    station_vdc_grid_x_ohm: float = 19.8997487421,
+    transformer_rating_mva: float = 1200.0,
+    modulation_index: float = 0.82,
+    deblock_time_s: float = 0.10,
+    reversal_time_s: float = 0.30,
+    simulation_duration_s: float = 0.5,
+    time_step_s: float = 20e-6,
+    output_step_s: float = 100e-6,
     arm_parameters: AverageArmParameters | None = None,
 ) -> dict:
     """Create a complete two-station, twelve-arm native integration fixture."""
     folder = Path(destination).resolve()
     if folder.exists() or folder.is_symlink():
         raise FileExistsError("Native AVM fixture directory must be new")
-    for value, name in (
-        (frequency_hz, "frequency_hz"),
-        (ac_voltage_kv, "ac_voltage_kv"),
+    if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,63}", project_name):
+        raise ValueError("project_name must be a PSCAD-safe identifier")
+    common_voltage = 230.0 if ac_voltage_kv is None else _number(
+        ac_voltage_kv, "ac_voltage_kv", positive=True
+    )
+    station_p_ac_voltage_kv = _number(
+        common_voltage if station_p_ac_voltage_kv is None else station_p_ac_voltage_kv,
+        "station_p_ac_voltage_kv",
+        positive=True,
+    )
+    station_vdc_ac_voltage_kv = _number(
+        common_voltage
+        if station_vdc_ac_voltage_kv is None
+        else station_vdc_ac_voltage_kv,
+        "station_vdc_ac_voltage_kv",
+        positive=True,
+    )
+    station_p_valve_voltage_kv = _number(
+        station_p_ac_voltage_kv
+        if station_p_valve_voltage_kv is None
+        else station_p_valve_voltage_kv,
+        "station_p_valve_voltage_kv",
+        positive=True,
+    )
+    station_vdc_valve_voltage_kv = _number(
+        station_vdc_ac_voltage_kv
+        if station_vdc_valve_voltage_kv is None
+        else station_vdc_valve_voltage_kv,
+        "station_vdc_valve_voltage_kv",
+        positive=True,
+    )
+    frequency_hz = _number(frequency_hz, "frequency_hz", positive=True)
+    transformer_rating_mva = _number(
+        transformer_rating_mva, "transformer_rating_mva", positive=True
+    )
+    station_p_grid_r_ohm = _number(
+        station_p_grid_r_ohm, "station_p_grid_r_ohm", positive=True
+    )
+    station_vdc_grid_r_ohm = _number(
+        station_vdc_grid_r_ohm, "station_vdc_grid_r_ohm", positive=True
+    )
+    station_p_grid_x_ohm = _number(
+        station_p_grid_x_ohm, "station_p_grid_x_ohm"
+    )
+    station_vdc_grid_x_ohm = _number(
+        station_vdc_grid_x_ohm, "station_vdc_grid_x_ohm"
+    )
+    deblock_time_s = _number(deblock_time_s, "deblock_time_s")
+    if min(station_p_grid_x_ohm, station_vdc_grid_x_ohm, deblock_time_s) < 0:
+        raise ValueError("Grid reactance and deblock time must be nonnegative")
+    modulation_index = _number(modulation_index, "modulation_index")
+    reversal_time_s = _number(reversal_time_s, "reversal_time_s", positive=True)
+    simulation_duration_s = _number(
+        simulation_duration_s, "simulation_duration_s", positive=True
+    )
+    time_step_s = _number(time_step_s, "time_step_s", positive=True)
+    output_step_s = _number(output_step_s, "output_step_s", positive=True)
+    if (
+        not 0 <= modulation_index < 1
+        or reversal_time_s <= deblock_time_s
+        or simulation_duration_s <= reversal_time_s
+        or output_step_s < time_step_s
     ):
-        if isinstance(value, bool) or not math.isfinite(value) or value <= 0:
-            raise ValueError(f"{name} must be finite and positive")
+        raise ValueError("Native AVM timing or modulation parameters are inconsistent")
     folder.mkdir(parents=True)
     library = folder / f"{NATIVE_SCOPE}.pslx"
     library_receipt = materialize_native_avm_library(
@@ -286,13 +392,12 @@ def materialize_native_avm_fixture(
         Path(master_path).resolve()
     )
     library_metadata = read_definition_metadata_document(library.read_bytes())
-    project_name = "mmc_native_avm_fixture"
     root = _project(project_name, library=False)
     settings = root.find("./paramlist[@name='Settings']")
     for name, value in {
-        "time_duration": "0.5",
-        "time_step": "20",
-        "sample_step": "100",
+        "time_duration": _format(simulation_duration_s),
+        "time_step": _format(time_step_s * 1e6),
+        "sample_step": _format(output_step_s * 1e6),
         "PlotType": "1",
         "StartType": "0",
         "output_filename": project_name + ".out",
@@ -309,15 +414,37 @@ def materialize_native_avm_fixture(
     custom: list[tuple[ET.Element, str]] = []
     arm_values = asdict(arm_parameters or AverageArmParameters(L_arm_H=0.1))
 
-    for station, prefix, phase_offset in (
-        ("P", "P", 5.0),
-        ("VDC", "V", 0.0),
+    for station, prefix, phase_offset, station_voltage, valve_voltage, grid_r, grid_x in (
+        (
+            "P",
+            "P",
+            5.0,
+            station_p_ac_voltage_kv,
+            station_p_valve_voltage_kv,
+            station_p_grid_r_ohm,
+            station_p_grid_x_ohm,
+        ),
+        (
+            "VDC",
+            "V",
+            0.0,
+            station_vdc_ac_voltage_kv,
+            station_vdc_valve_voltage_kv,
+            station_vdc_grid_r_ohm,
+            station_vdc_grid_x_ohm,
+        ),
     ):
         source = writer.add(
             main,
             prefix + "_source",
             "master:source3",
-            _source_parameters(prefix + "_SOURCE", ac_voltage_kv, frequency_hz),
+            _source_parameters(
+                prefix + "_SOURCE",
+                station_voltage,
+                frequency_hz,
+                grid_r,
+                grid_x,
+            ),
             {"N3": prefix + "_SOURCE_VECTOR", "N": "GND"},
         )
         writer.add(
@@ -359,7 +486,13 @@ def materialize_native_avm_fixture(
             main,
             prefix + "_transformer",
             "master:xfmr-3p2w",
-            _transformer_parameters(prefix + "_XFMR", ac_voltage_kv, frequency_hz),
+            _transformer_parameters(
+                prefix + "_XFMR",
+                station_voltage,
+                valve_voltage,
+                frequency_hz,
+                transformer_rating_mva,
+            ),
             {
                 "N1": prefix + "_GRID",
                 "N2": prefix + "_VALVE_VECTOR",
@@ -385,7 +518,10 @@ def materialize_native_avm_fixture(
             {
                 **CONTROL_DEFAULTS,
                 "Frequency_Hz": frequency_hz,
+                "Modulation_Index": modulation_index,
                 "Phase_Offset_Deg": phase_offset,
+                "Deblock_Time_s": deblock_time_s,
+                "Reversal_Time_s": reversal_time_s,
             },
             {name: prefix + "_" + name for name in CONTROL_OUTPUTS},
         )
@@ -537,7 +673,22 @@ def materialize_native_avm_fixture(
         "master_sha256": master_hash,
         "parameters": {
             "frequency_hz": frequency_hz,
-            "ac_voltage_kv": ac_voltage_kv,
+            "station_p_ac_voltage_kv": station_p_ac_voltage_kv,
+            "station_vdc_ac_voltage_kv": station_vdc_ac_voltage_kv,
+            "station_p_valve_voltage_kv": station_p_valve_voltage_kv,
+            "station_vdc_valve_voltage_kv": station_vdc_valve_voltage_kv,
+            "station_p_grid_r_ohm": station_p_grid_r_ohm,
+            "station_p_grid_x_ohm": station_p_grid_x_ohm,
+            "station_vdc_grid_r_ohm": station_vdc_grid_r_ohm,
+            "station_vdc_grid_x_ohm": station_vdc_grid_x_ohm,
+            "transformer_rating_mva": transformer_rating_mva,
+            "modulation_index": modulation_index,
+            "deblock_time_s": deblock_time_s,
+            "reversal_time_s": reversal_time_s,
+            "simulation_duration_s": simulation_duration_s,
+            "time_step_s": time_step_s,
+            "output_step_s": output_step_s,
+            "cable_length_km": library_receipt["cable_length_km"],
             "arm": arm_values,
         },
         "electrical_nets": {name: dict(nets) for name, nets in writer.nets.items()},

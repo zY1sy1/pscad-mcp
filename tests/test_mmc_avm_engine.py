@@ -1,15 +1,26 @@
+import asyncio
+import hashlib
 from dataclasses import replace
 from pathlib import Path
+from xml.etree import ElementTree as ET
 
 import pytest
 
 from pscad_mcp.core.backend.base import BackendError
 from pscad_mcp.hvdc.builders.mmc.engines.avm import (
+    AvmBlueprintEngine,
     _inventory_catalog,
     create_parametric_avm_plan,
     materialize_parametric_blueprint,
 )
-from tests.mmc_parametric_fakes import avm_parametric_plan
+from pscad_mcp.hvdc.builders.mmc.parametric_models import parse_parametric_request
+from pscad_mcp.hvdc.builders.mmc.parametric_planner import create_parametric_plan
+from tests.mmc_parametric_fakes import (
+    avm_assets,
+    avm_parametric_plan,
+    pwm_audit,
+    valid_request,
+)
 from tests.test_mmc_planner import ASSET, INVENTORY
 
 
@@ -87,3 +98,106 @@ def test_avm_inventory_request_includes_live_master_dependencies() -> None:
     assert "cigre_mmc_avm_v1:MMCAverageArm" in definitions
     assert "master:source3" in definitions
     assert "master:transformer" in definitions
+
+
+def test_native_avm_engine_freezes_sources_and_materializes_candidate_values(
+    tmp_path: Path,
+) -> None:
+    master = Path(r"C:\Program Files (x86)\PSCAD46\master.pslx")
+    donor = Path(
+        r"C:\Users\Public\Documents\PSCAD\4.6\Examples\hvdc_vsc\VSCTrans.pscx"
+    )
+    tline = master.parent / "bin" / "win" / "tline.exe"
+    if not master.is_file() or not donor.is_file() or not tline.is_file():
+        pytest.skip("Installed PSCAD 4.6.2 XML sources are required")
+    engine = AvmBlueprintEngine(
+        native_sources={
+            "master": str(master),
+            "cable_donor": str(donor),
+            "tline": str(tline),
+        }
+    )
+    request = parse_parametric_request(
+        valid_request(
+            model_fidelity="average_value",
+            dc_voltage_kv=500.0,
+            active_power_mw=750.0,
+            station_p={
+                "ac_voltage_kv": 180.0,
+                "short_circuit_ratio": 5.0,
+                "x_over_r": 10.0,
+            },
+            station_vdc={
+                "ac_voltage_kv": 190.0,
+                "short_circuit_ratio": 4.0,
+                "x_over_r": 8.0,
+            },
+            dc_link={"kind": "cable", "length_km": 100.0},
+        )
+    )
+    inputs = engine.planning_inputs(request)
+    assert inputs["capabilities"]["native_physical_assembly"] is True
+    assert inputs["source_hashes"]["master"] == hashlib.sha256(
+        master.read_bytes()
+    ).hexdigest()
+    plan = create_parametric_plan(
+        request,
+        "PUBLIC_NATIVE",
+        tmp_path,
+        pwm_audit(),
+        avm_assets(),
+        avm_native_inputs=inputs,
+    ).engine_plans[0]
+
+    class Service:
+        def __init__(self):
+            self.calls = []
+
+        async def load_projects(self, paths):
+            self.calls.append(("load", tuple(paths)))
+            return "loaded"
+
+        async def save_project(self, name, *, confirm=False):
+            self.calls.append(("save", name, confirm))
+            return "saved"
+
+        async def build_project(self, name):
+            self.calls.append(("build", name))
+            return "built"
+
+        async def get_project_output(self, name, structured=False):
+            self.calls.append(("output", name, structured))
+            return {"messages": []}
+
+    service = Service()
+    result = asyncio.run(engine.execute_candidate(plan, service))
+    assert result["state"] == "accepted"
+    assert result["capability_level"] == "built"
+    assert result["assembly_accepted"] is False
+    assert result["model_accepted"] is False
+    assert result["validation"]["scope"] == "native_physical_assembly_compile"
+    assert result["source_hashes"] == dict(plan.source_hashes)
+    assert ("build", "PUBLIC_NATIVE_avm") in service.calls
+    root = ET.parse(result["project_path"]).getroot()
+    users = root.findall("./definitions/Definition[@name='Main']/schematic/User")
+    assert len(
+        [item for item in users if item.get("defn", "").endswith(":MMCAverageArm")]
+    ) == 12
+    assert result["fixture"]["parameters"]["station_p_ac_voltage_kv"] == 180.0
+    assert result["fixture"]["parameters"]["station_vdc_ac_voltage_kv"] == 190.0
+    assert result["fixture"]["parameters"]["cable_length_km"] == 100.0
+
+
+def test_native_avm_engine_rejects_unmodeled_overhead_link(tmp_path: Path) -> None:
+    paths = {}
+    for name in ("master", "cable_donor", "tline"):
+        path = tmp_path / name
+        path.write_bytes(name.encode("ascii"))
+        paths[name] = str(path)
+    engine = AvmBlueprintEngine(native_sources=paths)
+    request = parse_parametric_request(
+        valid_request(model_fidelity="average_value", dc_link={"kind": "overhead_line", "length_km": 100.0})
+    )
+    with pytest.raises(BackendError) as raised:
+        engine.planning_inputs(request)
+    assert raised.value.code == "MMC_AVM_LINK_UNSUPPORTED"

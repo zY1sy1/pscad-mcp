@@ -7,6 +7,7 @@ from xml.etree import ElementTree as ET
 import pytest
 
 from pscad_mcp.hvdc.builders.mmc import cable_constants
+from pscad_mcp.hvdc.builders.mmc.avm_companion import AverageArmParameters
 from pscad_mcp.hvdc.builders.mmc.native_bundle import (
     CONTROL_NAME,
     FIXTURE_CHANNELS,
@@ -237,6 +238,102 @@ def test_full_fixture_wires_twelve_two_terminal_arms_to_two_three_phase_stations
         8,
         9,
     ]
+
+
+def test_full_fixture_materializes_parametric_electrical_and_runtime_values(
+    constants_evidence, installed_sources, tmp_path
+):
+    donor, master = installed_sources
+    arms = AverageArmParameters(
+        C_eq_F=8e-5,
+        L_arm_H=0.04,
+        R_arm_ohm=0.12,
+        P_nonohmic_MW=0.5,
+    )
+    report = materialize_native_avm_fixture(
+        tmp_path / "parametric-fixture",
+        constants_evidence=constants_evidence,
+        source_project=donor,
+        master_path=master,
+        project_name="MMC_PARAM_AVM",
+        frequency_hz=50.0,
+        station_p_ac_voltage_kv=180.0,
+        station_vdc_ac_voltage_kv=190.0,
+        station_p_grid_r_ohm=0.5,
+        station_p_grid_x_ohm=5.0,
+        station_vdc_grid_r_ohm=0.75,
+        station_vdc_grid_x_ohm=6.0,
+        transformer_rating_mva=825.0,
+        station_p_valve_voltage_kv=250.0,
+        station_vdc_valve_voltage_kv=260.0,
+        modulation_index=0.8,
+        deblock_time_s=0.2,
+        reversal_time_s=0.7,
+        simulation_duration_s=1.0,
+        time_step_s=50e-6,
+        output_step_s=100e-6,
+        arm_parameters=arms,
+    )
+
+    root = ET.parse(report["project_path"]).getroot()
+    assert root.get("name") == "MMC_PARAM_AVM"
+    assert Path(report["project_path"]).name == "MMC_PARAM_AVM.pscx"
+    settings = {
+        item.get("name"): item.get("value")
+        for item in root.findall("./paramlist[@name='Settings']/param")
+    }
+    assert settings["time_duration"] == "1"
+    assert settings["time_step"] == "50"
+    assert settings["sample_step"] == "100"
+    assert settings["output_filename"] == "MMC_PARAM_AVM.out"
+
+    users = {
+        item.get("name"): item
+        for item in root.findall("./definitions/Definition[@name='Main']/schematic/User")
+    }
+    p_source = {
+        item.get("name"): item.get("value")
+        for item in users["P_source"].findall("./paramlist/param")
+    }
+    v_source = {
+        item.get("name"): item.get("value")
+        for item in users["V_source"].findall("./paramlist/param")
+    }
+    assert p_source["Vm"] == p_source["Es"] == "180 [kV]"
+    assert v_source["Vm"] == v_source["Es"] == "190 [kV]"
+    assert float(p_source["Z1"].split()[0]) == pytest.approx((0.5**2 + 5.0**2) ** 0.5)
+    assert float(v_source["Z1"].split()[0]) == pytest.approx((0.75**2 + 6.0**2) ** 0.5)
+
+    for prefix, primary, secondary in (("P", 180.0, 250.0), ("V", 190.0, 260.0)):
+        transformer = {
+            item.get("name"): item.get("value")
+            for item in users[prefix + "_transformer"].findall("./paramlist/param")
+        }
+        assert transformer["Tmva"] == "825 [MVA]"
+        assert transformer["V1"] == f"{primary:g} [kV]"
+        assert transformer["V2"] == f"{secondary:g} [kV]"
+        control = {
+            item.get("name"): item.get("value")
+            for item in users[prefix + "_modulator"].findall("./paramlist/param")
+        }
+        assert float(control["Frequency_Hz"]) == 50.0
+        assert float(control["Modulation_Index"]) == 0.8
+        assert float(control["Deblock_Time_s"]) == 0.2
+        assert float(control["Reversal_Time_s"]) == 0.7
+
+    for name, component in users.items():
+        if not name.endswith(("_UPPER", "_LOWER")):
+            continue
+        values = {
+            item.get("name"): item.get("value")
+            for item in component.findall("./paramlist/param")
+        }
+        assert float(values["C_eq_F"]) == arms.C_eq_F
+        assert float(values["L_arm_H"]) == arms.L_arm_H
+        assert float(values["R_arm_ohm"]) == arms.R_arm_ohm
+        assert float(values["P_nonohmic_MW"]) == arms.P_nonohmic_MW
+    assert report["parameters"]["transformer_rating_mva"] == 825.0
+    assert report["parameters"]["cable_length_km"] == 300.0
 
 
 @pytest.mark.parametrize("mutation", ["arm", "cable", "source_hash"])

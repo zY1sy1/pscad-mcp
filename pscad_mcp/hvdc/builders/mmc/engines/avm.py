@@ -2,18 +2,27 @@
 
 from __future__ import annotations
 
+import asyncio
+import hashlib
+import math
+import time
+from collections.abc import Mapping
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
 from .....core.backend.base import BackendError
 from ..assets import load_packaged_asset_set
+from ..avm_companion import AverageArmParameters
+from ..cable_companion import DEFAULT_DONOR, DEFAULT_MASTER
+from ..cable_constants import generate_public_cable_constants
 from ..master_bindings import (
     context_from_inventory,
     load_mmc_master_registry,
     native_inventory_catalog,
 )
 from ..models import MmcBlueprint, MmcBuildState
+from ..native_bundle import audit_native_avm_fixture, materialize_native_avm_fixture
 from ..parametric_models import MmcCandidate, MmcEnginePlan
 
 _LIMITATIONS = {
@@ -22,6 +31,69 @@ _LIMITATIONS = {
     "switching_harmonics": "not_modeled",
     "thermal": "not_modeled",
 }
+_NATIVE_SOURCE_KEYS = {"master", "cable_donor", "tline"}
+
+
+def _sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def discover_native_avm_sources(
+    *,
+    master_path: str | Path = DEFAULT_MASTER,
+    source_project: str | Path = DEFAULT_DONOR,
+    executable: str | Path | None = None,
+) -> dict[str, str] | None:
+    """Return installed immutable inputs when the native cable AVM is available."""
+
+    master = Path(master_path).expanduser().resolve()
+    donor = Path(source_project).expanduser().resolve()
+    tline = Path(executable).expanduser().resolve() if executable else (
+        master.parent / "bin" / "win" / "tline.exe"
+    ).resolve()
+    paths = {"master": master, "cable_donor": donor, "tline": tline}
+    if any(path.is_symlink() or not path.is_file() for path in paths.values()):
+        return None
+    return {name: str(path) for name, path in paths.items()}
+
+
+def _native_input_record(paths: Mapping[str, str]) -> dict[str, object]:
+    if set(paths) != _NATIVE_SOURCE_KEYS:
+        raise _error(
+            "MMC_AVM_NATIVE_INPUT_MISSING",
+            "The native AVM requires Master, cable donor and tline inputs.",
+            missing=sorted(_NATIVE_SOURCE_KEYS - set(paths)),
+            unexpected=sorted(set(paths) - _NATIVE_SOURCE_KEYS),
+        )
+    resolved = {name: Path(value).expanduser().resolve() for name, value in paths.items()}
+    for name, path in resolved.items():
+        if path.is_symlink() or not path.is_file():
+            raise _error(
+                "MMC_AVM_NATIVE_INPUT_MISSING",
+                "A native AVM source input is unavailable.",
+                source=name,
+                path=str(path),
+            )
+    return {
+        "source_paths": {name: str(path) for name, path in resolved.items()},
+        "source_hashes": {name: _sha256(path) for name, path in resolved.items()},
+        "capabilities": {
+            "native_physical_assembly": True,
+            "native_cable_constants": True,
+            "control_kind": "scheduled_open_loop",
+            "model_accepted": False,
+        },
+    }
+
+
+def _messages_have_errors(value: object) -> bool:
+    if isinstance(value, Mapping):
+        if str(value.get("severity", "")).casefold() in {"error", "fatal"}:
+            return True
+        return any(_messages_have_errors(item) for item in value.values())
+    if isinstance(value, (list, tuple)):
+        return any(_messages_have_errors(item) for item in value)
+    return False
 
 
 def _error(code: str, message: str, **details: object) -> BackendError:
@@ -236,10 +308,220 @@ class AvmBlueprintEngine:
         asset_set: Any | None = None,
         inventory: Any | None = None,
         allow_test_double: bool = False,
+        native_sources: Mapping[str, str] | None = None,
+        native_required: bool = False,
+        constants_generator: Any = generate_public_cable_constants,
+        fixture_builder: Any = materialize_native_avm_fixture,
+        fixture_auditor: Any = audit_native_avm_fixture,
+        operation_timeout_s: float = 600.0,
     ) -> None:
         self.asset_set = load_packaged_asset_set() if asset_set is None else asset_set
         self.inventory = inventory
         self.allow_test_double = allow_test_double
+        self.native_sources = (
+            None if native_sources is None else dict(native_sources)
+        )
+        self.native_required = native_required
+        self.constants_generator = constants_generator
+        self.fixture_builder = fixture_builder
+        self.fixture_auditor = fixture_auditor
+        self.operation_timeout_s = float(operation_timeout_s)
+        if not math.isfinite(self.operation_timeout_s) or self.operation_timeout_s <= 0:
+            raise ValueError("operation_timeout_s must be finite and positive")
+
+    def planning_inputs(self, request: object) -> dict[str, object] | None:
+        link = getattr(request, "dc_link", None)
+        kind = getattr(link, "kind", None)
+        if self.native_sources is None:
+            if self.native_required:
+                raise _error(
+                    "MMC_AVM_NATIVE_INPUT_MISSING",
+                    "Installed native AVM source inputs are required for production builds.",
+                )
+            return None
+        if kind != "cable":
+            raise _error(
+                "MMC_AVM_LINK_UNSUPPORTED",
+                "The native average-value path currently requires a cable DC link.",
+                dc_link_kind=kind,
+            )
+        return _native_input_record(self.native_sources)
+
+    @staticmethod
+    def _native_arm_parameters(values: Mapping[str, Any]) -> AverageArmParameters:
+        dc_current = float(values["rated_power_mw"]) / float(
+            values["rated_dc_voltage_kv"]
+        )
+        phase_current = float(values["rated_power_mw"]) / (
+            math.sqrt(3.0) * float(values["station_p_ac_voltage_kv"])
+        )
+        arm_rms = math.hypot(dc_current / 3.0, phase_current / 2.0)
+        ohmic_loss = float(values["arm_resistance_ohm"]) * arm_rms**2
+        nonohmic_loss = max(0.0, float(values["loss_per_arm_mw"]) - ohmic_loss)
+        return AverageArmParameters(
+            C_eq_F=float(values["equivalent_arm_capacitance_f"]),
+            L_arm_H=float(values["arm_inductance_h"]),
+            R_arm_ohm=float(values["arm_resistance_ohm"]),
+            P_nonohmic_MW=nonohmic_loss,
+        )
+
+    async def _execute_native_candidate(
+        self,
+        plan: MmcEnginePlan,
+        service: object,
+        *,
+        candidate_id: str | None,
+    ) -> dict[str, object]:
+        selected = _candidate(plan, candidate_id)
+        inputs = _native_input_record(plan.source_paths)
+        if dict(plan.source_hashes) != inputs["source_hashes"]:
+            raise _error(
+                "MMC_SOURCE_CHANGED",
+                "Native AVM source hashes differ from the immutable child plan.",
+                expected=dict(plan.source_hashes),
+                observed=inputs["source_hashes"],
+            )
+        values = selected.parameters
+        if values.get("dc_link_kind") != "cable":
+            raise _error(
+                "MMC_AVM_LINK_UNSUPPORTED",
+                "The native average-value candidate requires a cable DC link.",
+                dc_link_kind=values.get("dc_link_kind"),
+            )
+        candidate_root = (
+            Path(plan.workspace).resolve()
+            / ".mmc-candidates"
+            / plan.plan_hash
+            / selected.candidate_id
+        )
+        candidate_root.mkdir(parents=True, exist_ok=False)
+        source_paths = {name: Path(path) for name, path in plan.source_paths.items()}
+        constants = await asyncio.to_thread(
+            self.constants_generator,
+            source_paths["cable_donor"],
+            candidate_root / "line-constants",
+            master_path=source_paths["master"],
+            executable=source_paths["tline"],
+            lengths_km=(float(values["dc_link_length_km"]),),
+            reference_frequency_hz=float(values["frequency_hz"]),
+            fitting_profile="dc_corrected_v1",
+        )
+        if len(constants) != 1:
+            raise _error(
+                "MMC_AVM_CONSTANTS_INVALID",
+                "Native cable generation did not return exactly one artifact.",
+                artifact_count=len(constants),
+            )
+        modulation_index = 0.9
+        valve_voltage = (
+            modulation_index
+            * float(values["rated_dc_voltage_kv"])
+            * math.sqrt(3.0)
+            / (2.0 * math.sqrt(2.0))
+        )
+        reversal_time = max(0.30, float(values["power_reversal_time_s"]))
+        duration = max(0.50, reversal_time + 0.20)
+        receipt = await asyncio.to_thread(
+            self.fixture_builder,
+            candidate_root / "model",
+            constants_evidence=Path(constants[0].evidence_path),
+            master_path=source_paths["master"],
+            source_project=source_paths["cable_donor"],
+            project_name=plan.target_name,
+            frequency_hz=float(values["frequency_hz"]),
+            station_p_ac_voltage_kv=float(values["station_p_ac_voltage_kv"]),
+            station_vdc_ac_voltage_kv=float(values["station_vdc_ac_voltage_kv"]),
+            station_p_valve_voltage_kv=valve_voltage,
+            station_vdc_valve_voltage_kv=valve_voltage,
+            station_p_grid_r_ohm=float(values["station_p_grid_r_ohm"]),
+            station_p_grid_x_ohm=float(values["station_p_grid_x_ohm"]),
+            station_vdc_grid_r_ohm=float(values["station_vdc_grid_r_ohm"]),
+            station_vdc_grid_x_ohm=float(values["station_vdc_grid_x_ohm"]),
+            transformer_rating_mva=float(values["transformer_rating_mva"]),
+            modulation_index=modulation_index,
+            deblock_time_s=0.10,
+            reversal_time_s=reversal_time,
+            simulation_duration_s=duration,
+            time_step_s=float(selected.settings["time_step_s"]),
+            output_step_s=float(selected.settings["output_step_s"]),
+            arm_parameters=self._native_arm_parameters(values),
+        )
+        project = Path(receipt["project_path"])
+        library = Path(receipt["library"]["library_path"])
+
+        async def bounded(awaitable: Any) -> Any:
+            return await asyncio.wait_for(awaitable, self.operation_timeout_s)
+
+        for name in (
+            "load_projects",
+            "save_project",
+            "build_project",
+            "get_project_output",
+        ):
+            if not callable(getattr(service, name, None)):
+                raise _error(
+                    "MMC_ENGINE_SERVICE_INVALID",
+                    "The native AVM engine requires PSCAD load, save, build and output methods.",
+                    missing=name,
+                )
+        await bounded(service.load_projects([str(library), str(project)]))
+        await bounded(service.save_project(library.stem, confirm=True))
+        await bounded(service.save_project(plan.target_name, confirm=True))
+        build_started = time.time()
+        build_result = await bounded(service.build_project(plan.target_name))
+        build_messages = await bounded(
+            service.get_project_output(plan.target_name, structured=True)
+        )
+        if _messages_have_errors(build_messages):
+            raise _error(
+                "MMC_BUILD_FAILED",
+                "The native AVM candidate compile produced error messages.",
+                messages=build_messages,
+            )
+        await bounded(service.save_project(library.stem, confirm=True))
+        await bounded(service.save_project(plan.target_name, confirm=True))
+        library_sha256 = _sha256(library)
+        topology = self.fixture_auditor(
+            project,
+            receipt,
+            finalized_library_sha256=library_sha256,
+        )
+        source_hashes_after = {
+            name: _sha256(path) for name, path in source_paths.items()
+        }
+        if source_hashes_after != dict(plan.source_hashes):
+            raise _error(
+                "MMC_SOURCE_CHANGED",
+                "Native AVM source inputs changed during candidate construction.",
+                expected=dict(plan.source_hashes),
+                observed=source_hashes_after,
+            )
+        written = [project, library]
+        written.extend(Path(path) for path in receipt["library"]["constants_artifacts"])
+        return {
+            "state": "accepted",
+            "engine": self.name,
+            "candidate_id": selected.candidate_id,
+            "candidate_path": str(candidate_root),
+            "project_path": str(project),
+            "library_path": str(library),
+            "library_sha256": library_sha256,
+            "written_paths": tuple(str(path) for path in written),
+            "source_hashes": source_hashes_after,
+            "build_result": build_result,
+            "build_messages": build_messages,
+            "build_started_at": build_started,
+            "topology": topology,
+            "fixture": receipt,
+            "validation": {
+                "verdict": "PASS",
+                "scope": "native_physical_assembly_compile",
+                "model_accepted": False,
+            },
+            "assembly_accepted": False,
+            "model_accepted": False,
+            "capability_level": "built",
+        }
 
     async def execute_candidate(
         self,
@@ -248,6 +530,10 @@ class AvmBlueprintEngine:
         *,
         candidate_id: str | None = None,
     ) -> dict[str, object]:
+        if plan.source_paths:
+            return await self._execute_native_candidate(
+                plan, service, candidate_id=candidate_id
+            )
         from ..executor import execute_build
 
         inventory = self.inventory

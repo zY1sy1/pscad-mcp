@@ -176,6 +176,7 @@ def create_parametric_plan(
     workspace: str | Path,
     pwm_audit: object | None,
     avm_assets: object,
+    avm_native_inputs: Mapping[str, Any] | None = None,
 ) -> MmcParentPlan:
     parsed = parse_parametric_request(request)
     workspace_root = Path(workspace).expanduser().resolve()
@@ -243,8 +244,23 @@ def create_parametric_plan(
         else:
             bindings = ()
             dependencies = ()
-            plan_source_paths, plan_source_hashes, plan_asset_hashes = {}, {}, asset_hashes
-            capabilities = {}
+            native_inputs = dict(avm_native_inputs or {})
+            plan_source_paths = {
+                str(key): str(value)
+                for key, value in dict(native_inputs.get("source_paths", {})).items()
+            }
+            plan_source_hashes = (
+                _hashes(native_inputs.get("source_hashes"), "AVM native source")
+                if plan_source_paths
+                else {}
+            )
+            if set(plan_source_paths) != set(plan_source_hashes):
+                raise _error(
+                    "MMC_SOURCE_HASH_MISSING",
+                    "AVM native source paths and hashes must have identical keys.",
+                )
+            plan_asset_hashes = asset_hashes
+            capabilities = dict(native_inputs.get("capabilities", {}))
         plans.append(
             _engine_plan(
                 engine=engine,

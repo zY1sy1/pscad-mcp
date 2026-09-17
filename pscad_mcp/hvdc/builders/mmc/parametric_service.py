@@ -24,7 +24,7 @@ from ...scanner import scan_project
 from .adjustment import choose_next_candidate
 from .assets import load_packaged_asset_set
 from .derivation import derive_mmc_parameters
-from .engines.avm import AvmBlueprintEngine
+from .engines.avm import AvmBlueprintEngine, discover_native_avm_sources
 from .engines.pwm import PwmTemplateEngine
 from .inspection import inspect_mmc_evidence
 from .journal import AtomicJournal, WorkspaceBuildLease
@@ -116,7 +116,14 @@ class ParametricMmcBuilderService:
         self.audit_loader = audit_loader
         self.asset_loader = asset_loader
         self.pwm_engine = PwmTemplateEngine() if pwm_engine is None else pwm_engine
-        self.avm_engine = AvmBlueprintEngine() if avm_engine is None else avm_engine
+        self.avm_engine = (
+            AvmBlueprintEngine(
+                native_sources=discover_native_avm_sources(),
+                native_required=True,
+            )
+            if avm_engine is None
+            else avm_engine
+        )
         self._plans: dict[str, MmcParentPlan] = {}
         self._statuses: dict[str, dict[str, Any]] = {}
         self._tasks: dict[str, asyncio.Task[Any]] = {}
@@ -206,8 +213,20 @@ class ParametricMmcBuilderService:
         workspace = self._workspace(folder, operation)
         audit = self._audit(parsed, template_path, library_path)
         assets = self.asset_loader()
+        native_planner = getattr(self.avm_engine, "planning_inputs", None)
+        avm_native_inputs = (
+            native_planner(parsed)
+            if parsed.model_fidelity in {"average_value", "both"}
+            and callable(native_planner)
+            else None
+        )
         return create_parametric_plan(
-            parsed, project_name, workspace, audit, assets
+            parsed,
+            project_name,
+            workspace,
+            audit,
+            assets,
+            avm_native_inputs=avm_native_inputs,
         )
 
     def plan_model(
@@ -386,6 +405,9 @@ class ParametricMmcBuilderService:
                         candidate_id=candidate_id,
                     )
                 result_dict = copy.deepcopy(dict(result))
+                capability_level = str(
+                    result_dict.get("capability_level", "accepted")
+                )
                 attempts.append(
                     {
                         "candidate_id": candidate_id,
@@ -400,7 +422,11 @@ class ParametricMmcBuilderService:
                 return {
                     "engine": child.engine,
                     "state": "accepted",
-                    "capability_level": "accepted",
+                    "capability_level": capability_level,
+                    "assembly_accepted": bool(
+                        result_dict.get("assembly_accepted", False)
+                    ),
+                    "model_accepted": bool(result_dict.get("model_accepted", False)),
                     "attempts": attempts,
                     "candidate_result": result_dict,
                     "final_path": child.target_path,
@@ -509,8 +535,6 @@ class ParametricMmcBuilderService:
         engine_record: Mapping[str, Any],
         engine_plan: MmcEnginePlan,
     ) -> tuple[Path, str] | None:
-        if engine_plan.engine != "detailed_pwm":
-            return None
         if engine_record.get("engine") != engine_plan.engine:
             raise _error(
                 "MMC_POSTCONDITION_FAILED",
@@ -521,11 +545,17 @@ class ParametricMmcBuilderService:
             )
         result = engine_record.get("candidate_result")
         value = result.get("library_path") if isinstance(result, Mapping) else None
-        expected_hash = engine_plan.source_hashes.get("library")
+        expected_hash = (
+            engine_plan.source_hashes.get("library")
+            if engine_plan.engine == "detailed_pwm"
+            else result.get("library_sha256") if isinstance(result, Mapping) else None
+        )
+        if engine_plan.engine == "average_value" and value is None:
+            return None
         if not isinstance(value, str) or not isinstance(expected_hash, str):
             raise _error(
                 "MMC_POSTCONDITION_FAILED",
-                "An accepted detailed-PWM candidate has no verified library path.",
+                "An accepted MMC candidate has no verified companion library path.",
                 "build_parametric_mmc_model",
             )
         source = Path(value).expanduser().resolve()
@@ -540,14 +570,14 @@ class ParametricMmcBuilderService:
         except ValueError as error:
             raise _error(
                 "MMC_POSTCONDITION_FAILED",
-                "An accepted detailed-PWM library is outside the workspace.",
+                "An accepted MMC companion library is outside the workspace.",
                 "build_parametric_mmc_model",
                 path=str(source),
             ) from error
         if source.is_symlink() or not source.is_file():
             raise _error(
                 "MMC_POSTCONDITION_FAILED",
-                "An accepted detailed-PWM library is not a regular file.",
+                "An accepted MMC companion library is not a regular file.",
                 "build_parametric_mmc_model",
                 path=str(source),
             )
@@ -555,7 +585,7 @@ class ParametricMmcBuilderService:
         if not hmac.compare_digest(observed_hash, expected_hash):
             raise _error(
                 "MMC_POSTCONDITION_FAILED",
-                "The accepted detailed-PWM library differs from its source hash.",
+                "The accepted MMC companion library differs from its verified hash.",
                 "build_parametric_mmc_model",
                 path=str(source),
                 expected_sha256=expected_hash,
@@ -703,7 +733,7 @@ class ParametricMmcBuilderService:
                     ):
                         raise _error(
                             "MMC_POSTCONDITION_FAILED",
-                            "The detailed-PWM library changed during final reload or compile.",
+                            "The MMC companion library changed during final reload or compile.",
                             "build_parametric_mmc_model",
                             target_path=str(library_target),
                             expected_sha256=expected_library_hash,
@@ -802,7 +832,16 @@ class ParametricMmcBuilderService:
                 record["state"] = "published"
                 record["result"] = {
                     "final_paths": final_paths,
-                    "capability_level": "accepted",
+                    "capability_level": (
+                        "accepted"
+                        if all(
+                            item.get("capability_level") == "accepted"
+                            for item in engines
+                        )
+                        else "built"
+                    ),
+                    "model_accepted": bool(engines)
+                    and all(item.get("model_accepted") is True for item in engines),
                 }
                 record["history"].append({"state": "published"})
         except asyncio.CancelledError:
