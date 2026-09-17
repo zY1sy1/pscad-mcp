@@ -317,8 +317,8 @@ def _closed_loop_control(root: ET.Element, master: dict, defaults: dict) -> dict
             "VDC_MEAS": "VDC_MEAS",
             "ACTIVE_ERROR": "ACTIVE_ERROR",
             "Q_ERROR": "Q_ERROR",
-            "BLOCK": "BLOCK",
-            "SEQUENCE": "SEQUENCE",
+            "BLOCK": "CTRL_BLOCK",
+            "SEQUENCE": "CTRL_SEQUENCE",
         },
     )
     add(
@@ -356,11 +356,16 @@ def _closed_loop_control(root: ET.Element, master: dict, defaults: dict) -> dict
         {
             "ANGLE_COMMAND": "ANGLE_COMMAND",
             "MODULATION_COMMAND": "MODULATION_COMMAND",
-            **{name: name for name in CONTROL_OUTPUTS[:6]},
+            **{name: "CTRL_" + name for name in CONTROL_OUTPUTS[:6]},
         },
     )
     for name in CONTROL_OUTPUTS:
-        add("output_" + name, "master:export", {"Name": name}, {"N": name})
+        add(
+            "output_" + name,
+            "master:export",
+            {"Name": name},
+            {"N": "CTRL_" + name},
+        )
     writer.verify()
     return {"routes": writer.routes, "electrical_nets": dict(writer.nets)}
 
