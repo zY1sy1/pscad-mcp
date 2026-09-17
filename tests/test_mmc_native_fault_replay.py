@@ -1,5 +1,6 @@
 import asyncio
 import json
+import os
 from pathlib import Path
 from types import SimpleNamespace
 from xml.etree import ElementTree as ET
@@ -127,7 +128,120 @@ def test_replay_save_allows_only_verified_virtual_root_rebinding(tmp_path, chang
         assert replay._verify_replay_saved_model(original, saved, contract) is True
 
 
-@pytest.mark.parametrize("changed", [None, "python_pid", "checks_sha256", "copied_bundle_hashes", "parent_channel_contract_sha256", "replay_saved_model_verified", "copied_dependency", "supplemental_missing", "supplemental_other_dataset", "supplemental_alias", "supplemental_valid"])
+_STICKY_STYLE = """<paramlist>
+    <param name="full_font" value="Arial, 12pt" />
+    <param name="align" value="0" />
+    <param name="style" value="1" />
+    <param name="fg_color" value="0" />
+    <param name="bg_color" value="11920639" />
+    <param name="opacity" value="25" />
+</paramlist>"""
+
+
+@pytest.mark.parametrize("changed", [None, "unchanged_existing_style", "text", "attribute", "existing_style", "new_style", "extra_style_parameter", "duplicate_style_parameter", "nested_style_parameter", "unknown_style_attribute", "extra_style", "other_parameter", "settings", "script", "nested_revisor", "component_crc"])
+def test_replay_save_normalizes_only_observed_vendor_metadata(tmp_path, changed):
+    original, saved = tmp_path / "original.pscx", tmp_path / "saved.pscx"
+    before = ET.fromstring('''<project name="case"><paramlist name="Settings">
+        <param name="revisor" value="335, 1789477605"/><param name="time_duration" value="5.0"/>
+        </paramlist><definitions><Definition name="Main" crc="82011076"><schematic>
+        <Sticky classid="Sticky" x="18" y="36" w="108" h="36" colors="10526880, 15792890" id="979670165" layer="">Input parameters
+        </Sticky><User id="10" crc="123"><paramlist><param name="Kp" value="1"/>
+        <param name="revisor" value="unchanged"/></paramlist></User></schematic>
+        <Script>UNCHANGED CODE</Script></Definition></definitions>
+        <hierarchy><call name="Station" link="10"/></hierarchy></project>''')
+    if changed in ("existing_style", "unchanged_existing_style"):
+        before.find(".//Sticky").insert(0, ET.fromstring(_STICKY_STYLE))
+    after = ET.fromstring(ET.tostring(before))
+    after.find("./hierarchy/call").set("link", "20")
+    after.find("./paramlist/param[@name='revisor']").set("value", "335, 1789478102")
+    after.find(".//Definition").set("crc", "6201342")
+    sticky = after.find(".//Sticky")
+    if changed not in ("existing_style", "unchanged_existing_style"):
+        style = ET.fromstring(_STICKY_STYLE)
+        style.tail, sticky.text = sticky.text, "\n          "
+        sticky.insert(0, style)
+    if changed == "text":
+        sticky.find("paramlist").tail = "Different visible annotation"
+    elif changed == "attribute":
+        sticky.set("x", "19")
+    elif changed in ("existing_style", "new_style"):
+        sticky.find("./paramlist/param[@name='opacity']").set("value", "50")
+    elif changed == "extra_style_parameter":
+        ET.SubElement(sticky.find("paramlist"), "param", name="Kp", value="2")
+    elif changed == "duplicate_style_parameter":
+        sticky.find("./paramlist/param[@name='opacity']").set("name", "align")
+    elif changed == "nested_style_parameter":
+        ET.SubElement(sticky.find("./paramlist/param"), "param", name="Kp", value="2")
+    elif changed == "unknown_style_attribute":
+        sticky.find("paramlist").set("unexpected", "value")
+    elif changed == "extra_style":
+        sticky.append(ET.fromstring(_STICKY_STYLE))
+    elif changed == "other_parameter":
+        after.find(".//User/paramlist/param[@name='Kp']").set("value", "2")
+    elif changed == "settings":
+        after.find("./paramlist/param[@name='time_duration']").set("value", "6.0")
+    elif changed == "script":
+        after.find(".//Script").text = "CHANGED CODE"
+    elif changed == "nested_revisor":
+        after.find(".//User/paramlist/param[@name='revisor']").set("value", "changed")
+    elif changed == "component_crc":
+        after.find(".//User").set("crc", "456")
+    ET.ElementTree(before).write(original)
+    ET.ElementTree(after).write(saved)
+    contract = {"virtual_root_rebinding": {"before": "Station[10]", "after": "Station[20]"}}
+    if changed in (None, "unchanged_existing_style"):
+        assert replay._verify_replay_saved_model(original, saved, contract) is True
+    else:
+        with pytest.raises(ValueError, match="model"):
+            replay._verify_replay_saved_model(original, saved, contract)
+
+
+@pytest.mark.parametrize(("worker_pid", "parent_pid", "request_matches", "accepted"), [
+    (731, 600, True, True), (31052, 731, True, True),
+    (31052, 900, True, False), (31052, None, True, False),
+    (0, 731, True, False), (-1, 731, True, False),
+    (True, 731, True, False), ("31052", 731, True, False),
+    (31052.0, 731, True, False), (31052, "731", True, False),
+    (31052, 731.0, True, False), (731, False, True, False),
+    (31052, 731, False, False),
+])
+def test_replay_supervisor_binds_launcher_and_preserves_verified_worker_error(tmp_path, monkeypatch, worker_pid, parent_pid, request_matches, accepted):
+    monkeypatch.setenv("PSCAD_MCP_MMC_ACCEPTANCE", "1")
+    arguments = _request(tmp_path, monkeypatch)
+    worker_error = {"type": "ValueError", "message": "Actual saved model mismatch"}
+
+    class Process:
+        pid = 731
+        returncode = 1
+
+        async def communicate(self):
+            return b"worker diagnosed saved model", None
+
+    async def launch(*args, **kwargs):
+        request_path = Path(args[args.index("--request") + 1])
+        replay._write(request_path.parent / "worker" / "report.json", {
+            "status": "FAIL", "python_pid": worker_pid, "worker_parent_pid": parent_pid,
+            "request_sha256": replay._hash(request_path) if request_matches else "unrelated",
+            "owned_process_cleaned": True, "error": worker_error,
+        })
+        return Process()
+
+    monkeypatch.setattr(replay.asyncio, "create_subprocess_exec", launch)
+    result = asyncio.run(replay.verify_native_fault_replay(**arguments))
+    assert result["status"] == "FAIL"
+    if accepted:
+        assert result["error"] == worker_error
+        assert result["python_pid"] == worker_pid
+        assert result["worker_parent_pid"] == parent_pid
+        assert result["launcher_pid"] == Process.pid
+        assert result["cleanup_pending"] is False
+        assert "Independent worker" in result["supervisor_error"]["message"]
+    else:
+        assert "identity differs" in result["error"]["message"]
+        assert result["cleanup_pending"] is True
+
+
+@pytest.mark.parametrize("changed", [None, "launcher_child", "python_pid", "checks_sha256", "copied_bundle_hashes", "parent_channel_contract_sha256", "replay_saved_model_verified", "copied_dependency", "supplemental_missing", "supplemental_other_dataset", "supplemental_alias", "supplemental_valid"])
 def test_replay_supervisor_requires_complete_matching_worker_evidence(tmp_path, monkeypatch, changed):
     monkeypatch.setenv("PSCAD_MCP_MMC_ACCEPTANCE", "1")
     arguments = _request(tmp_path, monkeypatch)
@@ -178,6 +292,8 @@ def test_replay_supervisor_requires_complete_matching_worker_evidence(tmp_path, 
                 replacement = snapshot_output_dataset(other / "Other_01.out")
                 report["output_identity"] = replacement
                 report["supplemental_evidence"]["output_identity"] = replacement
+        elif changed == "launcher_child":
+            report.update({"python_pid": 31052, "worker_parent_pid": Process.pid})
         elif changed == "copied_dependency":
             (copied_bundle / "library.pslx").write_text("CHANGED dependency")
         elif changed and not supplemental:
@@ -187,7 +303,7 @@ def test_replay_supervisor_requires_complete_matching_worker_evidence(tmp_path, 
 
     monkeypatch.setattr(replay.asyncio, "create_subprocess_exec", launch)
     result = asyncio.run(replay.verify_native_fault_replay(**arguments))
-    assert result["status"] == ("PASS" if changed in (None, "supplemental_valid") else "FAIL")
+    assert result["status"] == ("PASS" if changed in (None, "launcher_child", "supplemental_valid") else "FAIL")
     assert result["worker_exit_code"] == 0
     if changed is None:
         assert result["artifacts"]["request.json"]["sha256"]
@@ -308,6 +424,8 @@ def test_independent_worker_uses_frozen_dependencies_and_cleans_its_own_session(
 
         verifiers = {"saved_verifier": saved_verifier, "dataset_verifier": dataset_verifier}
     result = asyncio.run(replay._worker(request_path, replay._hash(request_path), **verifiers))
+    assert result["python_pid"] == os.getpid()
+    assert result["worker_parent_pid"] == os.getppid()
     assert result["status"] == ("FAIL" if changed_dependency or supplemental_verdict not in (None, "PASS") else verdict), result.get("error")
     assert result["owned_process_cleaned"] is True
     if supplemental_verdict == "MISSING":

@@ -743,6 +743,7 @@ async def _joint_worker(request_path, expected_hash):
             "owned_process_cleaned": True,
             "cleanup_pending": False,
             "python_pid": os.getpid(),
+            "worker_parent_pid": os.getppid(),
             "request_sha256": expected_hash,
             "phase": "preflight",
             "error": error.to_dict()

@@ -624,6 +624,8 @@ def test_joint_child_rejects_preflight_without_calling_native_worker(
     monkeypatch.setattr(module, "_validate_b", unaccepted)
     monkeypatch.setattr(module.native_fault_replay, "_worker", forbidden)
     result = asyncio.run(module._joint_worker(request_path, ref["sha256"]))
+    assert result["python_pid"] == module.os.getpid()
+    assert result["worker_parent_pid"] == module.os.getppid()
     assert result["status"] == "FAIL"
     assert result["phase"] == "preflight"
     assert result["owned_process_cleaned"] is True
