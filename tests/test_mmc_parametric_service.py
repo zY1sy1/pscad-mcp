@@ -208,6 +208,9 @@ def test_native_avm_publication_uses_pscad_save_as_for_distinct_candidate_name(
     assert terminal["state"] == "published"
     engine = terminal["engines"][0]
     assert engine["publication_method"] == "pscad_save_as"
+    assert engine["publication_settings"] == {
+        "output_filename": "MMC_CASE_avm.out"
+    }
     assert engine["capability_level"] == "built"
     final = tmp_path / "MMC_CASE_avm.pscx"
     assert final.is_file()
@@ -218,6 +221,10 @@ def test_native_avm_publication_uses_pscad_save_as_for_distinct_candidate_name(
     ]
     assert len(save_as) == 1
     assert save_as[0][1][0] == "MMC_CASE_avm_candidate_avm_0"
+    assert (
+        "set_project_settings",
+        ("MMC_CASE_avm", {"output_filename": "MMC_CASE_avm.out"}),
+    ) in service.pscad_service.calls
 
 
 def test_project_aware_recommendations_bind_cached_derived_project(

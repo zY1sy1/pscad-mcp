@@ -769,6 +769,39 @@ class ParametricMmcBuilderService:
                 if published_by_save_as:
                     if library_target is not None:
                         await self.pscad_service.load_projects([str(library_target)])
+                    settings_writer = getattr(
+                        self.pscad_service, "set_project_settings", None
+                    )
+                    settings_reader = getattr(
+                        self.pscad_service, "get_project_settings", None
+                    )
+                    saver = getattr(self.pscad_service, "save_project", None)
+                    if not all(
+                        callable(method)
+                        for method in (settings_writer, settings_reader, saver)
+                    ):
+                        raise _error(
+                            "MMC_BUILD_UNAVAILABLE",
+                            "Native AVM publication requires settings readback and save support.",
+                            "build_parametric_mmc_model",
+                        )
+                    expected_output = target.stem + ".out"
+                    await settings_writer(
+                        target.stem, {"output_filename": expected_output}
+                    )
+                    observed_settings = await settings_reader(target.stem)
+                    if observed_settings.get("output_filename") != expected_output:
+                        raise _error(
+                            "MMC_POSTCONDITION_FAILED",
+                            "The published native AVM output filename did not read back.",
+                            "build_parametric_mmc_model",
+                            expected=expected_output,
+                            observed=observed_settings.get("output_filename"),
+                        )
+                    await saver(target.stem, confirm=True)
+                    record["publication_settings"] = {
+                        "output_filename": expected_output
+                    }
                 else:
                     await self.pscad_service.load_projects(load_paths)
                 await self.pscad_service.build_project(target.stem)
