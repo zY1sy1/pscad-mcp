@@ -134,11 +134,11 @@ def test_full_fixture_wires_twelve_two_terminal_arms_to_two_three_phase_stations
             parameter.get("name"): parameter.get("value")
             for parameter in transformer.findall("./paramlist/param")
         }
-        assert values["CuL"] == "0.005 [pu]"
-        assert values["NLL"] == "0.005 [pu]"
+        assert values["CuL"] == "0.0 [pu]"
+        assert values["NLL"] == "0.0 [pu]"
         assert values["Ideal"] == "1"
-        assert values["YD1"] == "1"
-        assert values["YD2"] == "0"
+        assert values["YD1"] == "0"
+        assert values["YD2"] == "1"
     sources = [item for item in users if item.get("defn") == "master:source3"]
     assert all(
         next(
@@ -146,7 +146,7 @@ def test_full_fixture_wires_twelve_two_terminal_arms_to_two_three_phase_stations
             for parameter in source.findall("./paramlist/param")
             if parameter.get("name") == "Type"
         )
-        == "4"
+        == "3"
         for source in sources
     )
     assert (
@@ -182,9 +182,9 @@ def test_full_fixture_wires_twelve_two_terminal_arms_to_two_three_phase_stations
     assert report["licensed_acceptance"] == "NOT_RUN"
     assert {
         "P_source:N",
-        "P_transformer:G2",
+        "P_transformer:G1",
         "V_source:N",
-        "V_transformer:G2",
+        "V_transformer:G1",
         "neutral_ground:A",
     } <= set(report["electrical_nets"]["Main"]["GND"])
     for prefix in ("P", "V"):

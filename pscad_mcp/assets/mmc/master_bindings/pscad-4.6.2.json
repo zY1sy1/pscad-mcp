@@ -29,7 +29,7 @@
       ],
       "fixed_parameters": [
         {"physical": "View", "value": 1, "contract": {"type": "Choice", "unit": null, "choices": ["0", "1"]}},
-        {"physical": "Type", "value": 4, "contract": {"type": "Choice", "unit": null, "choices": ["1", "2", "3", "4"]}},
+        {"physical": "Type", "value": 3, "contract": {"type": "Choice", "unit": null, "choices": ["1", "2", "3", "4"]}},
         {"physical": "Imp", "value": 1, "contract": {"type": "Choice", "unit": null, "choices": ["0", "1"]}},
         {"physical": "Ctrl", "value": 0, "contract": {"type": "Choice", "unit": null, "choices": ["0", "2", "3"]}},
         {"physical": "Term", "value": 0, "contract": {"type": "Choice", "unit": null, "choices": ["0", "1"]}},
@@ -47,7 +47,7 @@
       "ports": [
         {"logical": "AC", "physical": "N1", "kind": "electrical", "dimension": 3, "occurrence": 0},
         {"logical": "VALVE", "physical": "N2", "kind": "electrical", "dimension": 3, "occurrence": 0},
-        {"logical": "NEUTRAL", "physical": "G2", "kind": "electrical", "dimension": 1, "occurrence": 0}
+        {"logical": "NEUTRAL", "physical": "G1", "kind": "electrical", "dimension": 1, "occurrence": 0}
       ],
       "parameters": [
         {"logical": ["Name"], "physical": ["Name"], "transform": {"kind": "identity"}, "physical_contracts": {"Name": {"type": "Text", "unit": null}}},
@@ -59,13 +59,13 @@
       ],
       "fixed_parameters": [
         {"physical": "View", "value": 1, "contract": {"type": "Choice", "unit": null, "choices": ["0", "1", "2"]}},
-        {"physical": "YD1", "value": 1, "contract": {"type": "Choice", "unit": null, "choices": ["0", "1"]}},
-        {"physical": "YD2", "value": 0, "contract": {"type": "Choice", "unit": null, "choices": ["0", "1"]}},
+        {"physical": "YD1", "value": 0, "contract": {"type": "Choice", "unit": null, "choices": ["0", "1"]}},
+        {"physical": "YD2", "value": 1, "contract": {"type": "Choice", "unit": null, "choices": ["0", "1"]}},
         {"physical": "Lead", "value": 1, "contract": {"type": "Choice", "unit": null, "choices": ["1", "2"]}},
         {"physical": "Ideal", "value": 1, "contract": {"type": "Choice", "unit": null, "choices": ["0", "1"]}},
         {"physical": "Sat", "value": 0, "contract": {"type": "Choice", "unit": null, "choices": ["0", "1", "2"]}},
-        {"physical": "NLL", "value": 0.005, "contract": {"type": "Real", "unit": "pu"}},
-        {"physical": "CuL", "value": 0.005, "contract": {"type": "Real", "unit": "pu"}}
+        {"physical": "NLL", "value": 0, "contract": {"type": "Real", "unit": "pu"}},
+        {"physical": "CuL", "value": 0, "contract": {"type": "Real", "unit": "pu"}}
       ],
       "evidence_parameters": []
     },

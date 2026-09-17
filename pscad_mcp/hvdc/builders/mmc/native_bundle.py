@@ -202,7 +202,7 @@ def _source_parameters(name: str, voltage_kv: float, frequency_hz: float) -> dic
     return {
         "Name": name,
         "View": "1",
-        "Type": "4",
+        "Type": "3",
         "Ctrl": "0",
         "MVA": "1000.0 [MVA]",
         "Vm": f"{voltage_kv} [kV]",
@@ -224,13 +224,13 @@ def _transformer_parameters(name: str, voltage_kv: float, frequency_hz: float) -
         "Name": name,
         "Tmva": "1200.0 [MVA]",
         "f": f"{frequency_hz} [Hz]",
-        "YD1": "1",
-        "YD2": "0",
+        "YD1": "0",
+        "YD2": "1",
         "Lead": "1",
         "Xl": "0.15 [pu]",
         "Ideal": "1",
-        "NLL": "0.005 [pu]",
-        "CuL": "0.005 [pu]",
+        "NLL": "0.0 [pu]",
+        "CuL": "0.0 [pu]",
         "View": "1",
         "V1": f"{voltage_kv} [kV]",
         "V2": f"{voltage_kv} [kV]",
@@ -363,7 +363,7 @@ def materialize_native_avm_fixture(
             {
                 "N1": prefix + "_GRID",
                 "N2": prefix + "_VALVE_VECTOR",
-                "G2": "GND",
+                "G1": "GND",
             },
         )
         writer.add(
@@ -588,9 +588,9 @@ def audit_native_avm_fixture(
     nets = receipt["electrical_nets"]["Main"]
     if {
         "P_source:N",
-        "P_transformer:G2",
+        "P_transformer:G1",
         "V_source:N",
-        "V_transformer:G2",
+        "V_transformer:G1",
         "neutral_ground:A",
     } - set(nets["GND"]):
         raise ValueError("Native AVM source and transformer neutrals are not grounded")

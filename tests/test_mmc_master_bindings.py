@@ -33,7 +33,7 @@ def test_mmc_direct_registry_uses_real_names_and_exact_ports() -> None:
         port.physical
         for port in records["master:transformer"].ports
         if port.logical == "NEUTRAL"
-    ) == "G2"
+    ) == "G1"
     phase_breakout = records["master:phase_breakout"]
     assert phase_breakout.physical_definition == "breakout"
     assert {
@@ -71,7 +71,7 @@ def test_source_impedance_normalization_preserves_requested_rx() -> None:
 @pytest.mark.skipif(
     not _MASTER.is_file(), reason="Requires installed static PSCAD 4.6.2 Master XML"
 )
-def test_source_binding_keeps_a_series_resistance_ahead_of_parallel_rl() -> None:
+def test_source_binding_matches_installed_vsc_source_impedance_mode() -> None:
     resolved = audit_mmc_master_bindings(_MASTER).resolve_component(
         "master:source3",
         {
@@ -83,7 +83,7 @@ def test_source_binding_keeps_a_series_resistance_ahead_of_parallel_rl() -> None
         },
     )
 
-    assert resolved.physical_parameters["Type"] == 4
+    assert resolved.physical_parameters["Type"] == 3
     assert resolved.physical_parameters["Imp"] == 1
 
 
@@ -192,7 +192,7 @@ def test_installed_parameter_minimum_is_checked_before_placement() -> None:
 @pytest.mark.skipif(
     not _MASTER.is_file(), reason="Requires installed static PSCAD 4.6.2 Master XML"
 )
-def test_transformer_binding_keeps_finite_winding_and_no_load_resistance() -> None:
+def test_transformer_binding_matches_installed_vsc_transformer_mode() -> None:
     resolved = audit_mmc_master_bindings(_MASTER).resolve_component(
         "master:transformer",
         {
@@ -205,14 +205,12 @@ def test_transformer_binding_keeps_finite_winding_and_no_load_resistance() -> No
         },
     )
 
-    assert resolved.physical_parameters["CuL"] == pytest.approx(0.005)
-    assert resolved.physical_parameters["CuL"] > 0
-    assert resolved.physical_parameters["NLL"] == pytest.approx(0.005)
-    assert resolved.physical_parameters["NLL"] > 0
+    assert resolved.physical_parameters["CuL"] == 0
+    assert resolved.physical_parameters["NLL"] == 0
     assert resolved.physical_parameters["Ideal"] == 1
-    assert resolved.physical_parameters["YD1"] == 1
-    assert resolved.physical_parameters["YD2"] == 0
-    assert resolved.selected_ports["NEUTRAL"]["physical"] == "G2"
+    assert resolved.physical_parameters["YD1"] == 0
+    assert resolved.physical_parameters["YD2"] == 1
+    assert resolved.selected_ports["NEUTRAL"]["physical"] == "G1"
 
 
 @pytest.mark.skipif(
