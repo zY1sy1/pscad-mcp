@@ -156,6 +156,29 @@ def test_native_branches_preserve_signed_storage_and_blocked_diode_paths(library
     assert report["intrinsic_dc_fault_blocking"] is False
 
 
+def test_switch_on_resistance_stays_above_pscad_short_circuit_threshold(
+    companion, library
+):
+    root, _ = library
+    parameters = companion.AverageArmParameters()
+    assert parameters.R_on_ohm == 0.001
+    with pytest.raises(ValueError, match="audited ranges"):
+        companion.AverageArmParameters(R_on_ohm=0.0005)
+
+    arm = root.find("./definitions/Definition[@name='MMCAverageArm']")
+    components = {item.get("name"): item for item in arm.findall("./schematic/User")}
+    for role in (
+        "normal_disconnect",
+        "positive_clamp",
+        "negative_bypass",
+        "capacitor_reverse_clamp",
+    ):
+        assert _parameters(components[role])["RON"] == "R_on_ohm"
+    assert "R_on_ohm >= 0.001" in arm.find(
+        "./script/segment[@name='Checks']"
+    ).text
+
+
 def test_every_authored_wire_uses_checked_physical_endpoints(library, master):
     root, report = library
     native = read_definition_metadata_document(master.read_bytes())

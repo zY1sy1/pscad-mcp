@@ -112,6 +112,22 @@ def test_full_fixture_wires_twelve_two_terminal_arms_to_two_three_phase_stations
     assert len([item for item in users if item.get("defn") == "master:breakout"]) == 6
     assert len([item for item in users if item.get("defn") == "master:resistor"]) == 6
     assert len([item for item in users if item.get("defn") == "master:ground"]) == 1
+    arms = [
+        item
+        for item in users
+        if item.get("defn") == f"{NATIVE_SCOPE}:MMCAverageArm"
+    ]
+    assert all(
+        float(
+            next(
+                parameter.get("value")
+                for parameter in arm.findall("./paramlist/param")
+                if parameter.get("name") == "R_on_ohm"
+            )
+        )
+        >= 0.001
+        for arm in arms
+    )
     transformers = [item for item in users if item.get("defn") == "master:xfmr-3p2w"]
     for transformer in transformers:
         values = {

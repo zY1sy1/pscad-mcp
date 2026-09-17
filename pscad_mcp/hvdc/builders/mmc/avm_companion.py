@@ -41,6 +41,7 @@ OPERATING_WINDOWS = {
     "blocked_charge": (0.11, 0.13),
     "blocked_bypass": (0.16, 0.18),
 }
+MIN_SWITCH_ON_RESISTANCE_OHM = 1e-3
 VOLTAGE_CONVENTION = {
     "equivalent_voltage_target": "rated_dc_voltage_kv / 2",
     "full_stack_voltage": "2 * V_CAP_EQ",
@@ -59,7 +60,7 @@ class AverageArmParameters:
     R_arm_ohm: float = 0.1
     P_nonohmic_MW: float = 0.0
     V_loss_floor_kV: float = 0.01
-    R_on_ohm: float = 1e-5
+    R_on_ohm: float = MIN_SWITCH_ON_RESISTANCE_OHM
     R_off_ohm: float = 1e8
     V_diode_kV: float = 0.0
 
@@ -77,6 +78,7 @@ class AverageArmParameters:
                 raise ValueError(f"{name} is outside its physical range")
         if (
             not 1e-9 <= self.L_arm_H <= 1e6
+            or self.R_on_ohm < MIN_SWITCH_ON_RESISTANCE_OHM
             or self.R_off_ohm < 1
             or self.R_off_ohm <= self.R_on_ohm
         ):
@@ -635,7 +637,7 @@ def _make_library(
     _script(
         arm,
         "Checks",
-        "ERROR Equivalent capacitance must be positive : C_eq_F > 0\nERROR Arm inductance must be positive : L_arm_H >= 1e-9\nERROR Non-ohmic loss must be nonnegative : P_nonohmic_MW >= 0\nERROR Loss voltage floor must be positive : V_loss_floor_kV > 0\nERROR Switch resistances must be ordered : R_off_ohm > R_on_ohm\n",
+        "ERROR Equivalent capacitance must be positive : C_eq_F > 0\nERROR Arm inductance must be positive : L_arm_H >= 1e-9\nERROR Non-ohmic loss must be nonnegative : P_nonohmic_MW >= 0\nERROR Loss voltage floor must be positive : V_loss_floor_kV > 0\nERROR Switch on resistance must avoid short-circuit classification : R_on_ohm >= 0.001\nERROR Switch resistances must be ordered : R_off_ohm > R_on_ohm\n",
     )
     coupling_ports = {
         name: (-72, -72 + index * 36, "Transfer", "Input")
