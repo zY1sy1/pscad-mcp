@@ -421,13 +421,22 @@ class AvmBlueprintEngine:
         )
         reversal_time = max(0.30, float(values["power_reversal_time_s"]))
         duration = max(0.50, reversal_time + 0.20)
+        candidate_project_name = (
+            f"{plan.target_name}_candidate_{selected.candidate_id.replace('-', '_')}"
+        )
+        if len(candidate_project_name) > 64:
+            candidate_project_name = (
+                plan.target_name[:47]
+                + "_candidate_"
+                + selected.candidate_id.replace("-", "_")
+            )
         receipt = await asyncio.to_thread(
             self.fixture_builder,
             candidate_root / "model",
             constants_evidence=Path(constants[0].evidence_path),
             master_path=source_paths["master"],
             source_project=source_paths["cable_donor"],
-            project_name=plan.target_name,
+            project_name=candidate_project_name,
             frequency_hz=float(values["frequency_hz"]),
             station_p_ac_voltage_kv=float(values["station_p_ac_voltage_kv"]),
             station_vdc_ac_voltage_kv=float(values["station_vdc_ac_voltage_kv"]),
@@ -466,11 +475,11 @@ class AvmBlueprintEngine:
                 )
         await bounded(service.load_projects([str(library), str(project)]))
         await bounded(service.save_project(library.stem, confirm=True))
-        await bounded(service.save_project(plan.target_name, confirm=True))
+        await bounded(service.save_project(candidate_project_name, confirm=True))
         build_started = time.time()
-        build_result = await bounded(service.build_project(plan.target_name))
+        build_result = await bounded(service.build_project(candidate_project_name))
         build_messages = await bounded(
-            service.get_project_output(plan.target_name, structured=True)
+            service.get_project_output(candidate_project_name, structured=True)
         )
         if _messages_have_errors(build_messages):
             raise _error(
@@ -479,7 +488,7 @@ class AvmBlueprintEngine:
                 messages=build_messages,
             )
         await bounded(service.save_project(library.stem, confirm=True))
-        await bounded(service.save_project(plan.target_name, confirm=True))
+        await bounded(service.save_project(candidate_project_name, confirm=True))
         library_sha256 = _sha256(library)
         topology = self.fixture_auditor(
             project,
@@ -504,6 +513,7 @@ class AvmBlueprintEngine:
             "candidate_id": selected.candidate_id,
             "candidate_path": str(candidate_root),
             "project_path": str(project),
+            "publication_project_name": candidate_project_name,
             "library_path": str(library),
             "library_sha256": library_sha256,
             "written_paths": tuple(str(path) for path in written),

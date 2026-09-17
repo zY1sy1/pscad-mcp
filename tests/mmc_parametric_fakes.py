@@ -258,12 +258,6 @@ class RecordingMmcService:
             assert Path(filename).resolve().is_relative_to(self.workspace)
         return "loaded"
 
-    async def reload_projects(self, filenames: list[str]) -> str:
-        self._record("reload_projects", filenames)
-        for filename in filenames:
-            assert Path(filename).resolve().is_relative_to(self.workspace)
-        return "reloaded"
-
     async def set_component_parameters(
         self, project_name: str, component_id: str, parameters: dict[str, Any]
     ) -> str:
@@ -293,6 +287,26 @@ class RecordingMmcService:
     async def save_project(self, project_name: str, *, confirm: bool = False) -> str:
         self._record("save_project", project_name, confirm)
         return "saved"
+
+    async def save_project_as(
+        self,
+        project_name: str,
+        filename: str,
+        folder: str,
+        *,
+        confirm: bool = False,
+    ) -> str:
+        self._record("save_project_as", project_name, filename, folder, confirm)
+        matches = list(self.workspace.rglob(project_name + ".pscx"))
+        assert len(matches) == 1
+        target = Path(folder).resolve() / filename
+        target.write_text(
+            matches[0].read_text(encoding="utf-8").replace(
+                f"name='{project_name}'", f"name='{target.stem}'"
+            ),
+            encoding="utf-8",
+        )
+        return "saved as"
 
     async def build_project(self, project_name: str) -> str:
         self._record("build_project", project_name)

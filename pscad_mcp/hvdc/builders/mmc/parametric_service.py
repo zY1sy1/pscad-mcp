@@ -676,6 +676,8 @@ class ParametricMmcBuilderService:
                 "build_parametric_mmc_model",
             )
         moved: list[tuple[Path, Path]] = []
+        created_projects: list[Path] = []
+        published_targets: list[Path] = []
         scenario_sources: list[Path] = []
         created_libraries: list[Path] = []
         existing_library_backups: list[tuple[Path, Path]] = []
@@ -698,17 +700,57 @@ class ParametricMmcBuilderService:
                         path=str(target),
                     ) from error
                 target.parent.mkdir(parents=True, exist_ok=True)
-                try:
-                    os.link(source, target)
-                except FileExistsError as error:
-                    raise _error(
-                        "MMC_BUILD_CONFLICT",
-                        "A final MMC target appeared during publication.",
-                        "build_parametric_mmc_model",
-                        target_path=str(target),
-                    ) from error
-                source.unlink()
-                moved.append((source, target))
+                candidate_result = record.get("candidate_result")
+                publication_name = (
+                    candidate_result.get("publication_project_name")
+                    if isinstance(candidate_result, Mapping)
+                    else None
+                )
+                published_by_save_as = isinstance(publication_name, str)
+                if published_by_save_as:
+                    if target.exists() or target.is_symlink():
+                        raise _error(
+                            "MMC_BUILD_CONFLICT",
+                            "A final MMC target appeared during publication.",
+                            "build_parametric_mmc_model",
+                            target_path=str(target),
+                        )
+                    saver = getattr(self.pscad_service, "save_project_as", None)
+                    if not callable(saver):
+                        raise _error(
+                            "MMC_BUILD_UNAVAILABLE",
+                            "Native AVM publication requires PSCAD save-as support.",
+                            "build_parametric_mmc_model",
+                        )
+                    await saver(
+                        publication_name,
+                        target.name,
+                        str(target.parent),
+                        confirm=False,
+                    )
+                    if target.is_symlink() or not target.is_file():
+                        raise _error(
+                            "MMC_POSTCONDITION_FAILED",
+                            "PSCAD save-as did not create the native AVM target.",
+                            "build_parametric_mmc_model",
+                            target_path=str(target),
+                        )
+                    created_projects.append(target)
+                    record["publication_method"] = "pscad_save_as"
+                else:
+                    try:
+                        os.link(source, target)
+                    except FileExistsError as error:
+                        raise _error(
+                            "MMC_BUILD_CONFLICT",
+                            "A final MMC target appeared during publication.",
+                            "build_parametric_mmc_model",
+                            target_path=str(target),
+                        ) from error
+                    source.unlink()
+                    moved.append((source, target))
+                    record["publication_method"] = "atomic_hardlink_move"
+                published_targets.append(target)
                 load_paths = [str(target)]
                 library_target: Path | None = None
                 expected_library_hash: str | None = None
@@ -724,11 +766,9 @@ class ParametricMmcBuilderService:
                         existing_library_backups.append((library_target, library_backup))
                     record["final_library_path"] = str(library_target)
                     load_paths.insert(0, str(library_target))
-                reload_projects = getattr(
-                    self.pscad_service, "reload_projects", None
-                )
-                if callable(reload_projects):
-                    await reload_projects(load_paths)
+                if published_by_save_as:
+                    if library_target is not None:
+                        await self.pscad_service.load_projects([str(library_target)])
                 else:
                     await self.pscad_service.load_projects(load_paths)
                 await self.pscad_service.build_project(target.stem)
@@ -764,7 +804,7 @@ class ParametricMmcBuilderService:
                 _, backup = existing_library_backups[index]
                 backup.unlink(missing_ok=True)
                 existing_library_backups.pop(index)
-            return [str(target) for _, target in moved]
+            return [str(target) for target in published_targets]
         except BaseException:
             rollback_failures: list[str] = []
             for scenario_source in reversed(scenario_sources):
@@ -772,6 +812,11 @@ class ParametricMmcBuilderService:
                     scenario_source.unlink(missing_ok=True)
                 except OSError:
                     rollback_failures.append(str(scenario_source))
+            for target in reversed(created_projects):
+                try:
+                    target.unlink(missing_ok=True)
+                except OSError:
+                    rollback_failures.append(str(target))
             for source, target in reversed(moved):
                 try:
                     if target.is_file() and not source.exists():

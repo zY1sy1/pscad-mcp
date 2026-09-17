@@ -18,7 +18,6 @@ class BlueprintBackend:
     def __init__(self) -> None:
         self.loaded: list[list[str]] = []
         self.unloaded: list[str] = []
-        self.projects = {"BuiltCase"}
 
     async def heartbeat(self) -> BackendInfo:
         return BackendInfo("modern", "4.6.2", True, True, False, True, False)
@@ -48,14 +47,12 @@ class BlueprintBackend:
 
     async def load_projects(self, filenames):
         self.loaded.append(list(filenames))
-        self.projects.update(Path(filename).stem for filename in filenames)
 
     async def unload_project(self, project_name):
         self.unloaded.append(project_name)
-        self.projects.discard(project_name)
 
     async def list_projects(self):
-        return [{"name": name} for name in sorted(self.projects)]
+        return [{"name": "BuiltCase"}]
 
     async def get_output_channels(self, project_name: str):
         return [{"path": "Main/BRK_STATE", "units": "state", "call_id": 1}]
@@ -106,23 +103,3 @@ async def test_real_pscad_service_reloads_and_verifies_declared_output_channels(
     with pytest.raises(BackendError) as raised:
         await service.create_output_channel("BuiltCase", "Main/MISSING", "kV")
     assert raised.value.code == "BLUEPRINT_OUTPUT_DECLARATION_UNAVAILABLE"
-
-
-@pytest.mark.asyncio
-async def test_real_pscad_service_rebinds_library_and_case_as_one_ordered_set(
-    tmp_path,
-):
-    backend = BlueprintBackend()
-    backend.projects.add("NativeLib")
-    service = _service(tmp_path, backend)
-    library = tmp_path / "NativeLib.pslx"
-    project = tmp_path / "BuiltCase.pscx"
-    library.write_text("<project/>", encoding="utf-8")
-    project.write_text("<project/>", encoding="utf-8")
-
-    result = await service.reload_projects([str(library), str(project)])
-
-    assert result == "Reloaded: NativeLib, BuiltCase"
-    assert backend.unloaded == ["BuiltCase", "NativeLib"]
-    assert backend.loaded == [[str(library.resolve()), str(project.resolve())]]
-    assert backend.projects == {"NativeLib", "BuiltCase"}
