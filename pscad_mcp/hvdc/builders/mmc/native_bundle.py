@@ -43,6 +43,8 @@ CONTROL_OUTPUTS = (
     "M_C_LOWER",
     "BLOCK",
     "SEQUENCE",
+    "ANGLE_COMMAND",
+    "MODULATION_COMMAND",
 )
 CONTROL_DEFAULTS = {
     "Frequency_Hz": 60.0,
@@ -79,6 +81,10 @@ FIXTURE_CHANNELS = {
     "V_P": "MW",
     "V_Q": "MVAr",
     "V_IDC": "kA",
+    "P_ANGLE_COMMAND": "deg",
+    "P_MODULATION_COMMAND": "1",
+    "V_ANGLE_COMMAND": "deg",
+    "V_MODULATION_COMMAND": "1",
 }
 
 
@@ -129,6 +135,8 @@ def _station_control(root: ET.Element) -> ET.Element:
 #LOCAL REAL MC
       OFFSET = $Phase_Offset_Deg * 0.0174532925199433
       IF (TIME .GE. $Reversal_Time_s) OFFSET = -OFFSET
+      $ANGLE_COMMAND = OFFSET / 0.0174532925199433
+      $MODULATION_COMMAND = $Modulation_Index
       ANGLE = 6.28318530717959 * $Frequency_Hz * TIME + OFFSET
       MA = $Modulation_Index * SIN(ANGLE)
       MB = $Modulation_Index * SIN(ANGLE - 2.09439510239320)
@@ -354,7 +362,7 @@ def _closed_loop_control(root: ET.Element, master: dict, defaults: dict) -> dict
             "Mthd": "0",
             "INTR": "0",
         },
-        {"IN": "ACTIVE_ERROR", "OUT": "ANGLE_COMMAND"},
+        {"IN": "ACTIVE_ERROR", "OUT": "CTRL_ANGLE_COMMAND"},
     )
     add(
         "reactive_pi",
@@ -368,15 +376,15 @@ def _closed_loop_control(root: ET.Element, master: dict, defaults: dict) -> dict
             "Mthd": "0",
             "INTR": "0",
         },
-        {"IN": "Q_ERROR", "OUT": "MODULATION_COMMAND"},
+        {"IN": "Q_ERROR", "OUT": "CTRL_MODULATION_COMMAND"},
     )
     add(
         "synthesis",
         f"{NATIVE_SCOPE}:MMCModulationSynthesis",
         {"Frequency_Hz": "Frequency_Hz"},
         {
-            "ANGLE_COMMAND": "ANGLE_COMMAND",
-            "MODULATION_COMMAND": "MODULATION_COMMAND",
+            "ANGLE_COMMAND": "CTRL_ANGLE_COMMAND",
+            "MODULATION_COMMAND": "CTRL_MODULATION_COMMAND",
             **{name: "CTRL_" + name for name in CONTROL_OUTPUTS[:6]},
         },
     )
@@ -973,6 +981,10 @@ def materialize_native_avm_fixture(
         "V_P": "V_P",
         "V_Q": "V_Q",
         "V_IDC": "V_IDC",
+        "P_ANGLE_COMMAND": "P_ANGLE_COMMAND",
+        "P_MODULATION_COMMAND": "P_MODULATION_COMMAND",
+        "V_ANGLE_COMMAND": "V_ANGLE_COMMAND",
+        "V_MODULATION_COMMAND": "V_MODULATION_COMMAND",
     }
     for name, signal in selected_signals.items():
         writer.add(

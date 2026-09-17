@@ -34,6 +34,10 @@ def _trace():
         "V_P": [-790.0] * len(time),
         "V_Q": [-18.0] * len(time),
         "V_IDC": [-1.24] * len(time),
+        "P_ANGLE_COMMAND": [-10.0] * len(time),
+        "P_MODULATION_COMMAND": [0.8] * len(time),
+        "V_ANGLE_COMMAND": [8.0] * len(time),
+        "V_MODULATION_COMMAND": [0.82] * len(time),
     }
     assert set(trace) == {"time", *FIXTURE_CHANNELS}
     return trace

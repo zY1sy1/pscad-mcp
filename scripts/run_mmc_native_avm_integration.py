@@ -158,6 +158,12 @@ def analyze_integration_trace(
         checks[channel + ":bounded"] = max(abs(value) for value in trace[channel]) <= 20.0
     for channel in ("P_P", "P_Q", "V_P", "V_Q"):
         checks[channel + ":bounded"] = max(abs(value) for value in trace[channel]) <= 5000.0
+    for channel in ("P_ANGLE_COMMAND", "V_ANGLE_COMMAND"):
+        checks[channel + ":bounded"] = max(abs(value) for value in trace[channel]) <= 30.0 + 1e-9
+    for channel in ("P_MODULATION_COMMAND", "V_MODULATION_COMMAND"):
+        checks[channel + ":bounded"] = min(trace[channel]) >= 0.10 - 1e-9 and max(
+            trace[channel]
+        ) <= 0.98 + 1e-9
     for channel in ("P_VDC", "V_VDC"):
         checks[channel + ":finite_bipole"] = max(
             abs(value)
@@ -180,6 +186,15 @@ def analyze_integration_trace(
         "power_extrema": {
             channel: {"minimum": min(trace[channel]), "maximum": max(trace[channel])}
             for channel in ("P_P", "P_Q", "V_P", "V_Q")
+        },
+        "control_extrema": {
+            channel: {"minimum": min(trace[channel]), "maximum": max(trace[channel])}
+            for channel in (
+                "P_ANGLE_COMMAND",
+                "P_MODULATION_COMMAND",
+                "V_ANGLE_COMMAND",
+                "V_MODULATION_COMMAND",
+            )
         },
         "max_abs_vdc_kv": {
             channel: max(abs(value) for value in trace[channel])
