@@ -905,7 +905,7 @@ def materialize_native_avm_fixture(
                 prefix + "_phase_voltage_" + phase,
                 "master:voltmeter",
                 {"Name": prefix + "_V_" + phase},
-                {"N1": prefix + "_PHASE_" + phase, "N2": "GND"},
+                {"N1": prefix + "_GRID_" + phase, "N2": "GND"},
             )
         if source is None or transformer is None:
             raise ValueError(f"Native station {station} instances were not authored")
@@ -1171,6 +1171,7 @@ def audit_native_avm_fixture(
             } - set(nets[prefix + "_GRID_R_" + phase]) or {
                 f"{prefix}_grid_current_{phase}:N2",
                 f"{prefix}_grid_merger:N{phase_index}",
+                f"{prefix}_phase_voltage_{phase}:N1",
             } - set(nets[prefix + "_GRID_" + phase]):
                 raise ValueError("Native AVM explicit grid impedance is incomplete")
     for prefix in ("P", "V"):

@@ -267,6 +267,7 @@ def test_full_fixture_wires_twelve_two_terminal_arms_to_two_three_phase_stations
             assert {
                 f"{prefix}_grid_current_{phase}:N2",
                 f"{prefix}_grid_merger:N{phase_index}",
+                f"{prefix}_phase_voltage_{phase}:N1",
             } <= set(report["electrical_nets"]["Main"][prefix + "_GRID_" + phase])
         assert {
             f"{prefix}_dc_current:N2",
