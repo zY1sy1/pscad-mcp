@@ -11,6 +11,7 @@ from pscad_mcp.hvdc.builders.mmc.avm_companion import AverageArmParameters
 from pscad_mcp.hvdc.builders.mmc.native_bundle import (
     CONTROL_NAME,
     FIXTURE_CHANNELS,
+    MEASUREMENT_NAME,
     NATIVE_SCOPE,
     audit_native_avm_fixture,
     materialize_native_avm_fixture,
@@ -64,6 +65,7 @@ def test_native_bundle_contains_physical_arm_control_and_coupled_cable(
         "MMCAverageArm",
         "MMCAverageCoupling",
         CONTROL_NAME,
+        MEASUREMENT_NAME,
         "MMCCableLink",
         "Cable2",
     } <= set(definitions)
@@ -76,6 +78,25 @@ def test_native_bundle_contains_physical_arm_control_and_coupled_cable(
     }
     control = definitions[CONTROL_NAME]
     assert control.find("./script/segment[@name='Fortran']") is not None
+    measurements = definitions[MEASUREMENT_NAME]
+    measurement_ports = {
+        item.get("name"): (item.get("mode"), item.get("type"))
+        for item in measurements.findall("./svg/port")
+    }
+    assert set(measurement_ports) == {
+        "VA",
+        "VB",
+        "VC",
+        "IA",
+        "IB",
+        "IC",
+        "VDC",
+        "IDC",
+        "P",
+        "Q",
+    }
+    assert all(measurement_ports[name] == ("Input", "Real") for name in ("VA", "VB", "VC", "IA", "IB", "IC", "VDC", "IDC"))
+    assert all(measurement_ports[name] == ("Output", "Real") for name in ("P", "Q"))
     cable = definitions["MMCCableLink"]
     assert len(cable.findall("./schematic/User[@defn='master:cable_interface']")) == 2
     assert len(cable.findall("./schematic/Wire[@classid='Cable']")) == 1
@@ -112,6 +133,18 @@ def test_full_fixture_wires_twelve_two_terminal_arms_to_two_three_phase_stations
     )
     assert len([item for item in users if item.get("defn") == "master:breakout"]) == 6
     assert len([item for item in users if item.get("defn") == "master:resistor"]) == 6
+    assert len([item for item in users if item.get("defn") == "master:ammeter"]) == 8
+    assert len([item for item in users if item.get("defn") == "master:voltmeter"]) == 8
+    assert (
+        len(
+            [
+                item
+                for item in users
+                if item.get("defn") == f"{NATIVE_SCOPE}:{MEASUREMENT_NAME}"
+            ]
+        )
+        == 2
+    )
     assert len([item for item in users if item.get("defn") == "master:ground"]) == 1
     arms = [
         item
@@ -204,8 +237,16 @@ def test_full_fixture_wires_twelve_two_terminal_arms_to_two_three_phase_stations
             } <= set(report["electrical_nets"]["Main"][prefix + "_SOURCE_" + phase])
             assert {
                 f"{prefix}_grid_resistor_{phase}:B",
+                f"{prefix}_grid_current_{phase}:N1",
+            } <= set(report["electrical_nets"]["Main"][prefix + "_GRID_R_" + phase])
+            assert {
+                f"{prefix}_grid_current_{phase}:N2",
                 f"{prefix}_grid_merger:N{phase_index}",
             } <= set(report["electrical_nets"]["Main"][prefix + "_GRID_" + phase])
+        assert {
+            f"{prefix}_dc_current:N2",
+            f"DC_CABLE:{'SEND_POS' if prefix == 'P' else 'RECV_POS'}",
+        } <= set(report["electrical_nets"]["Main"][prefix + "_CABLE_POS"])
     hierarchy = root.findall("./hierarchy/call/call/call")
     assert len(hierarchy) == 13
     assert not any(item.get("name", "").endswith(CONTROL_NAME) for item in hierarchy)

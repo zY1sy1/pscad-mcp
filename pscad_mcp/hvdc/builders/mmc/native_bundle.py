@@ -32,6 +32,7 @@ from .cable_companion import (
 
 NATIVE_SCOPE = "cigre_mmc_avm_v1"
 CONTROL_NAME = "MMCStationModulator"
+MEASUREMENT_NAME = "MMCStationMeasurements"
 CONTROL_OUTPUTS = (
     "M_A_UPPER",
     "M_A_LOWER",
@@ -58,6 +59,12 @@ FIXTURE_CHANNELS = {
     "V_A_UPPER_W": "MJ",
     "P_SEQUENCE": "1",
     "V_SEQUENCE": "1",
+    "P_P": "MW",
+    "P_Q": "MVAr",
+    "P_IDC": "kA",
+    "V_P": "MW",
+    "V_Q": "MVAr",
+    "V_IDC": "kA",
 }
 
 
@@ -131,6 +138,32 @@ def _station_control(root: ET.Element) -> ET.Element:
     return control
 
 
+def _station_measurements(root: ET.Element) -> ET.Element:
+    inputs = ("VA", "VB", "VC", "IA", "IB", "IC", "VDC", "IDC")
+    ports = {
+        name: (-72, -126 + index * 36, "Transfer", "Input")
+        for index, name in enumerate(inputs)
+    }
+    ports.update(
+        {
+            name: (72, -18 + index * 36, "Transfer", "Output")
+            for index, name in enumerate(("P", "Q"))
+        }
+    )
+    measurements = _definition(root, MEASUREMENT_NAME, ports, {})
+    measurements.find("./paramlist/param[@name='Description']").set(
+        "value", "Native three-phase instantaneous power measurements"
+    )
+    _script(
+        measurements,
+        "Fortran",
+        """      $P = $VA * $IA + $VB * $IB + $VC * $IC
+      $Q = 0.577350269189626 * (($VB - $VC) * $IA + ($VC - $VA) * $IB + ($VA - $VB) * $IC)
+""",
+    )
+    return measurements
+
+
 def _copy_constants(added: dict, destination: Path) -> dict[str, str]:
     destination.mkdir(parents=True, exist_ok=False)
     hashes = {}
@@ -164,6 +197,7 @@ def materialize_native_avm_library(
     metadata, master_hash, defaults = _audit_master(master)
     root, arm_writer = _make_library(metadata, defaults, scope=NATIVE_SCOPE)
     _station_control(root)
+    _station_measurements(root)
     evidence = Path(constants_evidence).resolve()
     constants_name = Path(
         json.loads(evidence.read_text(encoding="utf-8"))["constants_path"]
@@ -211,6 +245,11 @@ def materialize_native_avm_library(
             "definition": f"{NATIVE_SCOPE}:{CONTROL_NAME}",
             "kind": "scheduled_open_loop",
             "outputs": list(CONTROL_OUTPUTS),
+        },
+        "measurements": {
+            "definition": f"{NATIVE_SCOPE}:{MEASUREMENT_NAME}",
+            "inputs": ["VA", "VB", "VC", "IA", "IB", "IC", "VDC", "IDC"],
+            "outputs": ["P", "Q"],
         },
         "model_accepted": False,
     }
@@ -467,7 +506,17 @@ def materialize_native_avm_fixture(
                 {"R": "0.1 [ohm]"},
                 {
                     "A": prefix + "_SOURCE_" + phase,
-                    "B": prefix + "_GRID_" + phase,
+                    "B": prefix + "_GRID_R_" + phase,
+                },
+            )
+            writer.add(
+                main,
+                prefix + "_grid_current_" + phase,
+                "master:ammeter",
+                {"Name": prefix + "_I_" + phase},
+                {
+                    "N1": prefix + "_GRID_R_" + phase,
+                    "N2": prefix + "_GRID_" + phase,
                 },
             )
         writer.add(
@@ -551,18 +600,33 @@ def materialize_native_avm_fixture(
                     },
                 )
                 custom.append((arm, "MMCAverageArm"))
+            writer.add(
+                main,
+                prefix + "_phase_voltage_" + phase,
+                "master:voltmeter",
+                {"Name": prefix + "_V_" + phase},
+                {"N1": prefix + "_PHASE_" + phase, "N2": "GND"},
+            )
         if source is None or transformer is None:
             raise ValueError(f"Native station {station} instances were not authored")
 
+    for prefix in ("P", "V"):
+        writer.add(
+            main,
+            prefix + "_dc_current",
+            "master:ammeter",
+            {"Name": prefix + "_IDC"},
+            {"N1": prefix + "_DC_POS", "N2": prefix + "_CABLE_POS"},
+        )
     cable = writer.add(
         main,
         "DC_CABLE",
         f"{NATIVE_SCOPE}:MMCCableLink",
         {},
         {
-            "SEND_POS": "P_DC_POS",
+            "SEND_POS": "P_CABLE_POS",
             "SEND_NEG": "P_DC_NEG",
-            "RECV_POS": "V_DC_POS",
+            "RECV_POS": "V_CABLE_POS",
             "RECV_NEG": "V_DC_NEG",
         },
     )
@@ -576,6 +640,24 @@ def materialize_native_avm_fixture(
             {"Name": prefix + "_VDC"},
             {"N1": prefix + "_DC_POS", "N2": prefix + "_DC_NEG"},
         )
+        writer.add(
+            main,
+            prefix + "_measurements",
+            f"{NATIVE_SCOPE}:{MEASUREMENT_NAME}",
+            {},
+            {
+                "VA": prefix + "_V_A",
+                "VB": prefix + "_V_B",
+                "VC": prefix + "_V_C",
+                "IA": prefix + "_I_A",
+                "IB": prefix + "_I_B",
+                "IC": prefix + "_I_C",
+                "VDC": prefix + "_VDC",
+                "IDC": prefix + "_IDC",
+                "P": prefix + "_P",
+                "Q": prefix + "_Q",
+            },
+        )
     selected_signals = {
         "P_VDC": "P_VDC",
         "V_VDC": "V_VDC",
@@ -585,6 +667,12 @@ def materialize_native_avm_fixture(
         "V_A_UPPER_W": "V_A_UPPER_W",
         "P_SEQUENCE": "P_SEQUENCE",
         "V_SEQUENCE": "V_SEQUENCE",
+        "P_P": "P_P",
+        "P_Q": "P_Q",
+        "P_IDC": "P_IDC",
+        "V_P": "V_P",
+        "V_Q": "V_Q",
+        "V_IDC": "V_IDC",
     }
     for name, signal in selected_signals.items():
         writer.add(
@@ -725,13 +813,15 @@ def audit_native_avm_fixture(
     required = {
         f"{NATIVE_SCOPE}:MMCAverageArm": 12,
         f"{NATIVE_SCOPE}:{CONTROL_NAME}": 2,
+        f"{NATIVE_SCOPE}:{MEASUREMENT_NAME}": 2,
         f"{NATIVE_SCOPE}:MMCCableLink": 1,
         "master:source3": 2,
         "master:xfmr-3p2w": 2,
         "master:breakout": 6,
         "master:resistor": 6,
+        "master:ammeter": 8,
         "master:ground": 1,
-        "master:voltmeter": 2,
+        "master:voltmeter": 8,
         "master:pgb": len(FIXTURE_CHANNELS),
     }
     if any(counts[name] != count for name, count in required.items()):
@@ -758,10 +848,13 @@ def audit_native_avm_fixture(
             raise ValueError("Native AVM grid merger does not feed the transformer")
         for phase_index, phase in enumerate("ABC", start=1):
             if {
-                f"{prefix}_source_breakout:N{phase_index}",
-                f"{prefix}_grid_resistor_{phase}:A",
+            f"{prefix}_source_breakout:N{phase_index}",
+            f"{prefix}_grid_resistor_{phase}:A",
             } - set(nets[prefix + "_SOURCE_" + phase]) or {
                 f"{prefix}_grid_resistor_{phase}:B",
+                f"{prefix}_grid_current_{phase}:N1",
+            } - set(nets[prefix + "_GRID_R_" + phase]) or {
+                f"{prefix}_grid_current_{phase}:N2",
                 f"{prefix}_grid_merger:N{phase_index}",
             } - set(nets[prefix + "_GRID_" + phase]):
                 raise ValueError("Native AVM explicit grid impedance is incomplete")
@@ -779,6 +872,11 @@ def audit_native_avm_fixture(
             for phase in "ABC"
         ):
             raise ValueError("Native AVM DC arm polarity is incomplete")
+        if {
+            f"{prefix}_dc_current:N2",
+            f"DC_CABLE:{'SEND_POS' if prefix == 'P' else 'RECV_POS'}",
+        } - set(nets[prefix + "_CABLE_POS"]):
+            raise ValueError("Native AVM DC current measurement path is incomplete")
     if set(nets["P_DC_POS"]) & set(nets["P_DC_NEG"]) or set(nets["V_DC_POS"]) & set(
         nets["V_DC_NEG"]
     ):
@@ -800,6 +898,7 @@ def audit_native_avm_fixture(
             "MMCAverageArm",
             "MMCAverageCoupling",
             CONTROL_NAME,
+            MEASUREMENT_NAME,
             "MMCCableLink",
             "Cable2",
         }
@@ -821,6 +920,7 @@ __all__ = [
     "CONTROL_NAME",
     "CONTROL_OUTPUTS",
     "FIXTURE_CHANNELS",
+    "MEASUREMENT_NAME",
     "NATIVE_SCOPE",
     "audit_native_avm_fixture",
     "materialize_native_avm_fixture",

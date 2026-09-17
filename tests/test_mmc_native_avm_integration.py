@@ -28,6 +28,12 @@ def _trace():
         "V_A_UPPER_W": [3.1 * min(1.0, value / 0.08) for value in time],
         "P_SEQUENCE": sequence,
         "V_SEQUENCE": sequence,
+        "P_P": [800.0] * len(time),
+        "P_Q": [20.0] * len(time),
+        "P_IDC": [1.25] * len(time),
+        "V_P": [-790.0] * len(time),
+        "V_Q": [-18.0] * len(time),
+        "V_IDC": [-1.24] * len(time),
     }
     assert set(trace) == {"time", *FIXTURE_CHANNELS}
     return trace

@@ -149,6 +149,10 @@ def analyze_integration_trace(trace: dict) -> dict:
         checks[channel + ":energized"] = max(trace[channel]) >= 1e-5
     for channel in ("P_A_UPPER_I", "V_A_UPPER_I"):
         checks[channel + ":bounded"] = max(abs(value) for value in trace[channel]) <= 20.0
+    for channel in ("P_IDC", "V_IDC"):
+        checks[channel + ":bounded"] = max(abs(value) for value in trace[channel]) <= 20.0
+    for channel in ("P_P", "P_Q", "V_P", "V_Q"):
+        checks[channel + ":bounded"] = max(abs(value) for value in trace[channel]) <= 5000.0
     for channel in ("P_VDC", "V_VDC"):
         checks[channel + ":finite_bipole"] = max(
             abs(value)
@@ -164,6 +168,14 @@ def analyze_integration_trace(trace: dict) -> dict:
             max(abs(value) for value in trace[channel])
             for channel in ("P_A_UPPER_I", "V_A_UPPER_I")
         ),
+        "max_abs_dc_current_ka": {
+            channel: max(abs(value) for value in trace[channel])
+            for channel in ("P_IDC", "V_IDC")
+        },
+        "power_extrema": {
+            channel: {"minimum": min(trace[channel]), "maximum": max(trace[channel])}
+            for channel in ("P_P", "P_Q", "V_P", "V_Q")
+        },
         "max_abs_vdc_kv": {
             channel: max(abs(value) for value in trace[channel])
             for channel in ("P_VDC", "V_VDC")
