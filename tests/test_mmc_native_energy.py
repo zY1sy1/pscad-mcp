@@ -41,3 +41,19 @@ def test_missing_arm_cannot_be_silently_dropped():
     del trace["V_C_LOWER_W"]
     with pytest.raises(ValueError, match="missing"):
         diagnose_native_arm_energy(trace, parameters)
+
+
+def test_measured_switch_loss_is_included_in_energy_balance():
+    times = [0.0, 0.1, 0.2]
+    trace = {"time": times}
+    for station in ("P", "V"):
+        for phase in "ABC":
+            for position in ("UPPER", "LOWER"):
+                prefix = f"{station}_{phase}_{position}"
+                for suffix, value in {"I": 1.0, "VT": 0.4, "W": 1.0, "VCAP": 2.0,
+                                      "PLOSS": 0.2, "PSWITCH": 0.1}.items():
+                    trace[prefix + "_" + suffix] = [value] * len(times)
+    parameters = dict(R_arm_ohm=0.1, L_arm_H=0.05, P_nonohmic_MW=0.2, V_loss_floor_kV=0.01)
+    for result in diagnose_native_arm_energy(trace, parameters, ((0.0, 0.2),)):
+        assert result["unaccounted_mean_power_mw"] == pytest.approx(0.0, abs=1e-12)
+        assert all(arm["native_switch_loss_measured"] for arm in result["arms"])

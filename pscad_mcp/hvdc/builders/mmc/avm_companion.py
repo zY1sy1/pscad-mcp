@@ -34,6 +34,7 @@ OUTPUT_UNITS = {
     "I_CAP": "kA",
     "V_ARM": "kV",
     "P_NONOHMIC": "MW",
+    "P_SWITCH": "MW",
 }
 OPERATING_WINDOWS = {
     "charge": (0.025, 0.055),
@@ -405,7 +406,7 @@ def _project(name: str, *, library: bool) -> ET.Element:
     for size in root.findall(
         "./definitions/Definition/schematic[@classid='UserCanvas']/paramlist/param[@name='size']"
     ):
-        size.set("value", "4")
+        size.set("value", "5")
     for element in root.iter():
         for key, value in tuple(element.attrib.items()):
             if value.startswith(previous + ":"):
@@ -470,15 +471,17 @@ def _definition(
         element, {"Description": "Repository-authored native averaged half-bridge arm"}
     )
     _form(element, parameters, signed_parameters=signed_parameters)
-    svg = ET.SubElement(element, "svg", {"viewBox": "-240 -240 240 240"})
+    top = min([-198, *(port[1] - 18 for port in ports.values())])
+    bottom = max([198, *(port[1] + 18 for port in ports.values())])
+    svg = ET.SubElement(element, "svg", {"viewBox": f"-240 {top - 36} 240 {bottom + 36}"})
     ET.SubElement(
         svg,
         "rect",
         {
             "x": "-54",
-            "y": "-198",
+            "y": str(top),
             "width": "108",
-            "height": "396",
+            "height": str(bottom - top),
             "stroke": "Black",
             "stroke-width": "0.2",
             "fill-style": "Hollow",
@@ -529,6 +532,7 @@ class _Writer:
             list
         )
         self.counts: dict[str, int] = defaultdict(int)
+        self.rows: dict[str, list[int]] = defaultdict(lambda: [108, 108])
 
     def identifier(self) -> str:
         self.sequence += 1
@@ -565,7 +569,7 @@ class _Writer:
                 canvas,
                 {
                     "show_grid": 0,
-                    "size": 4,
+                    "size": 5,
                     "orient": 1,
                     "show_border": 0,
                     "monitor_bus_voltage": 0,
@@ -611,9 +615,18 @@ class _Writer:
         name = definition.get("name")
         index = self.counts[name]
         self.counts[name] += 1
-        point = (180 + (index % 6) * 432, 270 + (index // 6) * 432)
-        component = self.component(definition, role, scoped, parameters, point)
         native = self.metadata(scoped)
+        extent = 36 if scoped == "master:pgb" else 216
+        top = min([-extent, *(port.y - 36 for port in native.ports)])
+        bottom = max([extent, *(port.y + 36 for port in native.ports)])
+        row = self.rows[name]
+        if index and index % 12 == 0:
+            row[0] = row[1] + 108
+        point = (270 + (index % 12) * 1008, row[0] - top)
+        row[1] = max(row[1], point[1] + bottom)
+        if row[1] >= 14300:
+            raise ValueError("Native schematic exceeds the 100 by 100 inch canvas")
+        component = self.component(definition, role, scoped, parameters, point)
         for port_name, signal in bindings.items():
             occurrence = (
                 _MASTER_WRITER_PORTS[scoped.split(":", 1)[1]][port_name][3]
@@ -721,13 +734,13 @@ def _make_library(
     )
     coupling_ports = {
         name: (-72, -72 + index * 36, "Transfer", "Input")
-        for index, name in enumerate(("M", "BLOCK", "VCAP", "INORMAL", "ICLAMP"))
+        for index, name in enumerate(("M", "BLOCK", "VCAP", "INORMAL", "ICLAMP", "VSTACK", "IBYPASS", "ICAP"))
     }
     coupling_ports.update(
         {
             name: (72, -72 + index * 36, "Transfer", "Output")
             for index, name in enumerate(
-                ("VNORMAL", "ISTORE", "W", "VEQ", "OPEN", "PLOSS", "VCLAMP")
+                ("VNORMAL", "ISTORE", "W", "VEQ", "OPEN", "PLOSS", "VCLAMP", "PSWITCH")
             )
         }
     )
@@ -740,12 +753,24 @@ def _make_library(
     _script(
         coupling,
         "Fortran",
-        f"""#STORAGE REAL:1
+        f"""#STORAGE REAL:5
 #LOCAL REAL NINSERT
 #LOCAL REAL ILOSS
 #LOCAL REAL VPREDICT
       NINSERT = MIN(1.0, MAX(0.0, $M))
-      IF (TIMEZERO) STORF(NSTORF) = NINSERT
+      IF (TIMEZERO) THEN
+        STORF(NSTORF) = NINSERT
+        STORF(NSTORF+1) = 0.0
+        STORF(NSTORF+2) = 0.0
+        STORF(NSTORF+3) = 0.0
+        STORF(NSTORF+4) = 0.0
+      ENDIF
+! Native branch drops and currents come from the same preceding solution.
+! Include the disconnect, positive diode, bypass diode and capacitor clamp.
+      $PSWITCH = ($VSTACK - STORF(NSTORF+1)) * $INORMAL
+      $PSWITCH = $PSWITCH + ($VSTACK - STORF(NSTORF+2)) * $ICLAMP - $VSTACK * $IBYPASS
+      $PSWITCH = $PSWITCH + $VCAP * (STORF(NSTORF+3) - $ICAP)
+      $PLOSS = STORF(NSTORF+4) * $VCAP
       ILOSS = 0.0
       IF ($VCAP .GT. 0.0) THEN
         ILOSS = $P_nonohmic_MW / MAX($VCAP, $V_loss_floor_kV)
@@ -760,11 +785,14 @@ def _make_library(
       $VCLAMP = VPREDICT
       $W = 0.125 * $C_eq_F * $VCAP * $VCAP
       $VEQ = 0.5 * $VCAP
-      $PLOSS = ILOSS * $VCAP
       $OPEN = 0.0
       IF ($BLOCK .GE. 0.5) $OPEN = 1.0
       STORF(NSTORF) = NINSERT
-      NSTORF = NSTORF + 1
+      STORF(NSTORF+1) = $VNORMAL
+      STORF(NSTORF+2) = $VCLAMP
+      STORF(NSTORF+3) = $ISTORE
+      STORF(NSTORF+4) = ILOSS
+      NSTORF = NSTORF + 5
 """,
     )
     writer = _Writer(root, master, master_defaults)
@@ -900,6 +928,9 @@ def _make_library(
             "VCAP": "CAP_V",
             "INORMAL": "NORMAL_I",
             "ICLAMP": "CLAMP_I",
+            "VSTACK": "INSERTED_V",
+            "IBYPASS": "BYPASS_I",
+            "ICAP": "CAP_I",
             "VNORMAL": "NORMAL_V",
             "ISTORE": "STORE_I",
             "W": "CAP_W",
@@ -907,6 +938,7 @@ def _make_library(
             "OPEN": "ARM_OPEN",
             "PLOSS": "NONOHMIC_P",
             "VCLAMP": "CLAMP_V",
+            "PSWITCH": "SWITCH_P",
         },
     )
     signals = {
@@ -921,6 +953,7 @@ def _make_library(
         "I_CAP": "CAP_I",
         "V_ARM": "ARM_V",
         "P_NONOHMIC": "NONOHMIC_P",
+        "P_SWITCH": "SWITCH_P",
     }
     for name, signal in signals.items():
         add("output_" + name, "export", {"Name": name}, {"N": signal})

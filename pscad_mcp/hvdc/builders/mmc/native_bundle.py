@@ -144,6 +144,7 @@ ARM_OBSERVABLES = {
     "VT": ("V_ARM", "kV"),
     "ICAP": ("I_CAP", "kA"),
     "PLOSS": ("P_NONOHMIC", "MW"),
+    "PSWITCH": ("P_SWITCH", "MW"),
 }
 FIXTURE_CHANNELS.update({signal: units for signal, units in STARTUP_OUTPUTS.values()})
 for _prefix in ("P", "V"):
