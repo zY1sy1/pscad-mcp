@@ -246,6 +246,8 @@ _PARAMETER_UNITS = {
     "Kp_Vdc_MW_per_kV": "1",
     "Ti_Vdc_s": "s",
     "Power_Correction_Limit_MW": "MW",
+    "Cable_Loss_MW": "MW",
+    "Converter_Loss_MW": "MW",
 }
 
 

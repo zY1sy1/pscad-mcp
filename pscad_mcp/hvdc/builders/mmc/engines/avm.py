@@ -482,6 +482,10 @@ class AvmBlueprintEngine:
             active_power_order_mw=float(values["rated_power_mw"]),
             reactive_power_order_mvar=float(values["reactive_power_mvar"]),
             vdc_order_kv=float(values["rated_dc_voltage_kv"]),
+            cable_loss_mw=(
+                float(values["rated_power_mw"]) / float(values["rated_dc_voltage_kv"])
+            ) ** 2 * constants[0].loop_dc_resistance_ohm,
+            converter_loss_mw=12 * float(values["loss_per_arm_mw"]),
             ramp_time_s=0.20,
             deblock_time_s=0.10,
             reversal_time_s=reversal_time,

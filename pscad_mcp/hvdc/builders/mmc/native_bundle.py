@@ -71,9 +71,11 @@ CLOSED_LOOP_DEFAULTS = {
     "Energy_Gain_per_s": 10.0,
     "R_arm_ohm": 0.15,
     "P_nonohmic_MW": 0.0,
-    "Kp_Vdc_MW_per_kV": 3.0,
-    "Ti_Vdc_s": 0.30,
+    "Kp_Vdc_MW_per_kV": 0.5,
+    "Ti_Vdc_s": 0.10,
     "Power_Correction_Limit_MW": 1500.0,
+    "Cable_Loss_MW": 0.0,
+    "Converter_Loss_MW": 0.0,
 }
 ARM_FEEDBACK_INPUTS = tuple(
     f"{phase}_{position}_{quantity}"
@@ -250,6 +252,8 @@ def _closed_loop_control(root: ET.Element, master: dict, defaults: dict) -> dict
                 "Deblock_Time_s",
                 "Reversal_Time_s",
                 "Ramp_Time_s",
+                "Cable_Loss_MW",
+                "Converter_Loss_MW",
             )
         },
     )
@@ -270,7 +274,7 @@ def _closed_loop_control(root: ET.Element, master: dict, defaults: dict) -> dict
         $SEQUENCE = 3.0
       ENDIF
       $ACTIVE_ERROR = $P_MEAS - PREF
-      IF ($Control_Mode .GE. 0.5) $ACTIVE_ERROR = $P_MEAS + PREF - $POWER_CORRECTION
+      IF ($Control_Mode .GE. 0.5) $ACTIVE_ERROR = $P_MEAS + PREF - $POWER_CORRECTION - $Converter_Loss_MW - $Cable_Loss_MW * (PREF / $P_Order_MW)**2
       $VDC_ERROR = $VDC_REFERENCE - $VDC_MEAS
       IF ($Control_Mode .LT. 0.5) $VDC_ERROR = 0.0
       $Q_ERROR = $Q_MEAS - SCALE * $Q_Order_MVAr
@@ -425,6 +429,8 @@ def _closed_loop_control(root: ET.Element, master: dict, defaults: dict) -> dict
                 "Deblock_Time_s",
                 "Reversal_Time_s",
                 "Ramp_Time_s",
+                "Cable_Loss_MW",
+                "Converter_Loss_MW",
             )
         },
         {
@@ -755,6 +761,8 @@ def materialize_native_avm_fixture(
     active_control_ti_s: float = 0.10,
     reactive_control_kp: float = 0.00005,
     reactive_control_ti_s: float = 0.05,
+    cable_loss_mw: float = 0.0,
+    converter_loss_mw: float = 0.0,
     deblock_time_s: float = 0.10,
     reversal_time_s: float = 0.30,
     simulation_duration_s: float = 0.5,
@@ -810,6 +818,10 @@ def materialize_native_avm_fixture(
         reactive_power_order_mvar, "reactive_power_order_mvar"
     )
     vdc_order_kv = _number(vdc_order_kv, "vdc_order_kv", positive=True)
+    cable_loss_mw = _number(cable_loss_mw, "cable_loss_mw")
+    converter_loss_mw = _number(converter_loss_mw, "converter_loss_mw")
+    if min(cable_loss_mw, converter_loss_mw) < 0:
+        raise ValueError("Native loss feedforward must be nonnegative")
     ramp_time_s = _number(ramp_time_s, "ramp_time_s", positive=True)
     p_control_kp = _number(p_control_kp, "p_control_kp", positive=True)
     vdc_control_kp = _number(vdc_control_kp, "vdc_control_kp", positive=True)
@@ -1032,6 +1044,8 @@ def materialize_native_avm_fixture(
                     "Ti_Reactive_s": reactive_control_ti_s,
                     "Base_Modulation": modulation_index,
                     "Power_Correction_Limit_MW": 1.5 * active_power_order_mw,
+                    "Cable_Loss_MW": cable_loss_mw,
+                    "Converter_Loss_MW": converter_loss_mw,
                     "C_eq_F": arm_values["C_eq_F"],
                     "R_arm_ohm": arm_values["R_arm_ohm"],
                     "P_nonohmic_MW": arm_values["P_nonohmic_MW"],
@@ -1240,6 +1254,8 @@ def materialize_native_avm_fixture(
             "active_control_ti_s": active_control_ti_s,
             "reactive_control_kp": reactive_control_kp,
             "reactive_control_ti_s": reactive_control_ti_s,
+            "cable_loss_mw": cable_loss_mw,
+            "converter_loss_mw": converter_loss_mw,
             "deblock_time_s": deblock_time_s,
             "reversal_time_s": reversal_time_s,
             "simulation_duration_s": simulation_duration_s,
