@@ -208,6 +208,20 @@ def _dq_script() -> str:
       IQ = IA * COS(THETA) + IB * SIN(THETA)
       PVALVE = 1.5 * (VD * ID + VQ * IQ)
       $VALVE_POWER = PVALVE
+! A controller reset does not empty physical capacitors. Seed observers from
+! their measured states so deblocking cannot request fictitious recharge.
+      IF ($RESTART .GE. 0.5) THEN
+        STORF(NSTORF+1) = $VDC_MEAS
+        STORF(NSTORF+2) = $P_MEAS
+        STORF(NSTORF+3) = $Q_MEAS
+        STORF(NSTORF+22) = VD
+        STORF(NSTORF+8) = 0.5 * $C_eq_F * ($A_UPPER_VCAP**2 + $A_LOWER_VCAP**2)
+        STORF(NSTORF+9) = 0.5 * $C_eq_F * ($B_UPPER_VCAP**2 + $B_LOWER_VCAP**2)
+        STORF(NSTORF+10) = 0.5 * $C_eq_F * ($C_UPPER_VCAP**2 + $C_LOWER_VCAP**2)
+        STORF(NSTORF+11) = 0.5 * $C_eq_F * ($A_UPPER_VCAP**2 - $A_LOWER_VCAP**2)
+        STORF(NSTORF+12) = 0.5 * $C_eq_F * ($B_UPPER_VCAP**2 - $B_LOWER_VCAP**2)
+        STORF(NSTORF+13) = 0.5 * $C_eq_F * ($C_UPPER_VCAP**2 - $C_LOWER_VCAP**2)
+      ENDIF
       A = 1.0 - EXP(-DELT / $Feedback_Filter_s)
 ! Power-to-current normalization must not feed instantaneous PCC voltage
 ! changes back into current demand through the network/interface dynamics.
@@ -330,7 +344,7 @@ def _dq_script() -> str:
       VPHASE_C = -0.5 * VALPHA - 0.866025403784439 * VBETA
       VZERO = -0.5 * (MAX(VPHASE_A, VPHASE_B, VPHASE_C) + MIN(VPHASE_A, VPHASE_B, VPHASE_C))
       $ZERO_SEQUENCE_COMMAND = VZERO
-      $ANGLE_COMMAND = (ATAN2(VQREF, VDREF) + 2.0 * OMEGA * DELT) * 57.2957795130823
+      $ANGLE_COMMAND = MODULO((ATAN2(VQREF, VDREF) + 2.0 * OMEGA * DELT) * 57.2957795130823 + 180.0, 360.0) - 180.0
       $MODULATION_COMMAND = 2.0 * SQRT(VDREF**2 + VQREF**2) / $Vdc_Order_kV
       WREF = 0.25 * $C_eq_F * VCAP_REFERENCE**2
 """

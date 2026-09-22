@@ -208,3 +208,26 @@ dc_energy = 0.0""" + "\n" + arms,
 if (sample == 16000) print *, dc_energy, SIG_DC_CHARGE_POWER_REFERENCE""", steps=16000)
     assert rows[0][0] == pytest.approx(0.5 * 26.47426962004457e-6 * (640.0**2 - 500.0**2), rel=2e-4)
     assert rows[0][1] == 0.0
+
+
+def test_restart_does_not_invent_a_capacitor_energy_deficit(tmp_path):
+    arms = "\n".join(f"SIG_{p}_{q}_VCAP = 320.0" for p in "ABC" for q in ("UPPER", "LOWER"))
+    rows = _run_native_equations(tmp_path, DQ_NAME, declarations="",
+        initialize="SIG_VDC_MEAS = 640.0\nSIG_PLL_LOCKED = 1.0\nSIG_START_TIME = 0.334\nSIG_RECOVERY_MODE = 1.0\n" + arms,
+        loop="""SIG_RESTART = 0.0
+if (TIME >= 0.3 .and. TIME < 0.301) SIG_RESTART = 1.0
+SIG_STARTUP_READY = 0.0
+if (TIME >= 0.334) SIG_STARTUP_READY = 1.0""",
+        observations="if (sample == 6700) print *, SIG_CIRC_REFERENCE_A, SIG_CHARGE_POWER_REFERENCE", steps=6700)
+    assert rows[0] == pytest.approx([2 * 1.1 / 640.0, 0.0], abs=1e-8)
+
+
+def test_diagnostic_angle_is_wrapped_without_clipping_its_direction(tmp_path):
+    rows = _run_native_equations(tmp_path, DQ_NAME, declarations="",
+        initialize="SIG_PLL_ANGLE = 1.571\nSIG_VA = -1.0\nSIG_VB = 0.5\nSIG_VC = 0.5",
+        loop="", observations="print *, SIG_ANGLE_COMMAND, SIG_VD_REFERENCE, SIG_VQ_REFERENCE", steps=1)
+    angle, d, q = rows[0]
+    assert -180 <= angle < 180
+    expected = math.atan2(q, d) + 2 * 2 * math.pi * 60 * 0.00005
+    assert math.sin(math.radians(angle)) == pytest.approx(math.sin(expected), abs=1e-12)
+    assert math.cos(math.radians(angle)) == pytest.approx(math.cos(expected), abs=1e-12)
