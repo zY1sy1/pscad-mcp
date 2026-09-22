@@ -6,16 +6,41 @@ and the installed Master nonlinear ZnO arrester. Arrester energy is in kJ,
 as declared by the installed Master Energy parameter.
 """
 
-from .avm_companion import _definition, _Writer, _PARAMETER_UNITS
+from .avm_companion import _definition, _script, _manual_sequence, _Writer, _PARAMETER_UNITS
 
 AC_ISOLATION = "MMCACIsolationPhase"
 DC_ISOLATION = "MMCDCIsolationPole"
+PREINSERT_LOGIC = "MMCPreinsertContacts"
+CONTACT_STATUS = "MMCContactStatus"
 ISOLATION_OUTPUTS = {"CONTACT_STATE": "1", "MOV_CURRENT": "kA", "MOV_ENERGY": "kJ"}
 
 
 def append_native_isolation(root, master, defaults):
     _PARAMETER_UNITS.update({"Contact_On_ohm": "ohm", "Contact_Off_ohm": "ohm",
         "Arrester_Rating_kV": "kV", "Reactor_H": "H", "Preinsert_ohm": "ohm", "Preinsert_Time_s": "s"})
+    logic = _definition(root, PREINSERT_LOGIC,
+        {"OPEN": (-72, 0, "Transfer", "Input"), "MAIN_OPEN": (72, -18, "Transfer", "Output"),
+         "AUX_OPEN": (72, 18, "Transfer", "Output")}, {"Preinsert_Time_s": 0.02})
+    _script(logic, "Dsdyn", """#STORAGE REAL:1
+      IF (TIMEZERO) STORF(NSTORF) = 0.0
+      $MAIN_OPEN = 1.0
+      $AUX_OPEN = 1.0
+      IF ($OPEN .GE. 0.5) THEN
+        STORF(NSTORF) = 0.0
+      ELSE
+        STORF(NSTORF) = STORF(NSTORF) + DELT
+        IF (STORF(NSTORF) .LT. $Preinsert_Time_s) THEN
+          $AUX_OPEN = 0.0
+        ELSE
+          $MAIN_OPEN = 0.0
+        ENDIF
+      ENDIF
+      NSTORF = NSTORF + 1
+""")
+    status = _definition(root, CONTACT_STATUS,
+        {"MAIN_STATE": (-72, -18, "Transfer", "Input"), "AUX_STATE": (-72, 18, "Transfer", "Input"),
+         "STATE": (72, 0, "Transfer", "Output")}, {})
+    _script(status, "Dsdyn", "      $STATE = MIN($MAIN_STATE, $AUX_STATE)\n")
     definitions = []
     for name, dc in ((AC_ISOLATION, False), (DC_ISOLATION, True)):
         parameters = {"Contact_On_ohm": 0.001 if dc else 0.1, "Contact_Off_ohm": 1e8,
@@ -37,15 +62,22 @@ def append_native_isolation(root, master, defaults):
         if dc:
             add("series_reactor", "varrlc", {"RLC": "1", "L": "Reactor_H", "E": "0.0 [kV]", "dLdC": "0", "I": ""},
                 {"A": "IN", "B": contact_in})
-        values = {"NAME": "OPEN", "OPCUR": "1", "ENAB": "1" if dc else "0", "ViewB": "0",
+        values = {"NAME": "MAIN_OPEN" if dc else "OPEN", "OPCUR": "1", "ENAB": "0", "ViewB": "0",
                   "RON": "Contact_On_ohm", "ROFF": "Contact_Off_ohm", "CLVL": "0.0 [kA]",
-                  "IBR": "", "SBR": "CONTACT_STATE_RAW", "VBR": ""}
+                  "IBR": "", "SBR": "MAIN_STATE_RAW" if dc else "CONTACT_STATE_RAW", "VBR": ""}
         if dc:
-            values.update(PRER="Preinsert_ohm", TDR="Preinsert_Time_s", TD="0.0 [s]", PostIns="0")
+            writer.add(definition, "preinsert_control", root.get("name") + ":" + PREINSERT_LOGIC,
+                       {"Preinsert_Time_s": "Preinsert_Time_s"}, {"OPEN": "OPEN", "MAIN_OPEN": "MAIN_OPEN", "AUX_OPEN": "AUX_OPEN"})
+            add("preinsert_contact", "breaker1", {**values, "NAME": "AUX_OPEN", "RON": "Preinsert_ohm", "SBR": "AUX_STATE_RAW"},
+                {"A": contact_in, "B": "OUT"})
+            writer.add(definition, "contact_feedback", root.get("name") + ":" + CONTACT_STATUS, {},
+                       {"MAIN_STATE": "MAIN_STATE_RAW", "AUX_STATE": "AUX_STATE_RAW", "STATE": "CONTACT_STATE_RAW"})
         add("contact", "breaker1", values, {"A": contact_in, "B": "OUT"})
         add("surge_arrester", "arrester", {"Name": "", "VSCAL": "Arrester_Rating_kV", "ISCAL": "1.0",
             "ENAB": "1", "Cnfg": "0", "Curr": "MOV_I", "Energy": "MOV_W_KJ"}, {"NF": contact_in, "NT": "OUT"})
         for port, signal in {"CONTACT_STATE": "CONTACT_STATE_RAW", "MOV_CURRENT": "MOV_I", "MOV_ENERGY": "MOV_W_KJ"}.items():
             add("output_" + port, "export", {"Name": port}, {"N": signal})
+        if dc:
+            _manual_sequence(definition, ((PREINSERT_LOGIC,), ("breaker1", "arrester", "varrlc"), (CONTACT_STATUS,), ("export",)))
     writer.verify()
     return writer
