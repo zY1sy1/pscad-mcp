@@ -28,6 +28,7 @@ from pscad_mcp.hvdc.builders.mmc.engines.avm import (
 from pscad_mcp.hvdc.builders.mmc.native_bundle import FIXTURE_CHANNELS, NATIVE_SCOPE
 from pscad_mcp.hvdc.builders.mmc.native_energy import diagnose_native_arm_energy
 from pscad_mcp.hvdc.builders.mmc.native_envelope import evaluate_native_steady_envelope
+from pscad_mcp.hvdc.builders.mmc.native_physical import evaluate_native_network_identities
 from pscad_mcp.hvdc.builders.mmc.parametric_service import ParametricMmcBuilderService
 from scripts.run_mmc_average_arm_acceptance import (
     _probe_owners,
@@ -371,6 +372,14 @@ async def run_attempt(
                 voltage_kv=REQUEST["dc_voltage_kv"], reactive_mvar=REQUEST["reactive_power_mvar"],
                 reverse_window_s=reverse_window,
             )
+            report["network_identities"] = evaluate_native_network_identities(
+                observed["samples"],
+                capacitance_f=fixture_parameters["arm"]["C_eq_F"],
+                grounding_resistance_ohm=fixture_parameters["dc_grounding_resistance_ohm"],
+                valve_grounding_resistance_ohm=fixture_parameters["valve_grounding_resistance_ohm"],
+                voltage_kv=REQUEST["dc_voltage_kv"], frequency_hz=REQUEST["frequency_hz"],
+                windows={"forward": (0.6, 0.9), "reverse": reverse_window},
+            )
         report["analysis"] = analyze_integration_trace(
             observed["samples"],
             sequence_windows=(
@@ -382,9 +391,10 @@ async def run_attempt(
         )
         report["assembly_accepted"] = report["analysis"]["status"] == "PASS"
         report["steady_operating_accepted"] = report.get("steady_envelope", {}).get("status") == "PASS"
+        report["network_identities_accepted"] = report.get("network_identities", {}).get("status") == "PASS"
         report["status"] = (
             "PASS" if report["assembly_accepted"]
-            and (control_kind != "closed_loop" or report["steady_operating_accepted"])
+            and (control_kind != "closed_loop" or (report["steady_operating_accepted"] and report["network_identities_accepted"]))
             else "FAIL"
         )
         if report["status"] != "PASS":
