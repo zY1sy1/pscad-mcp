@@ -121,6 +121,7 @@ async def run_joint_after_publication(
             library=sources["library"]["path"],
             master=sources["master"]["path"],
             model_recipe=accepted["recipe"]["id"],
+            publication_seed=published,
         )
         lifecycle.require_recipe_match(accepted["recipe"], preparation["public_plan"]["model_recipe"])
         _require(

@@ -88,7 +88,7 @@ def continuation(tmp_path, monkeypatch):
 
     async def prepare(root, **kwargs):
         calls.append("prepare")
-        assert kwargs == {"source": sources["project"]["path"], "library": sources["library"]["path"], "master": sources["master"]["path"], "model_recipe": recipe["name"]}
+        assert kwargs == {"source": sources["project"]["path"], "library": sources["library"]["path"], "master": sources["master"]["path"], "model_recipe": recipe["name"], "publication_seed": published}
         root = Path(root)
         assert not root.exists()
         project = _write(root / "JointFaultCase.pscx", {"fixture": "fresh current preparation"})

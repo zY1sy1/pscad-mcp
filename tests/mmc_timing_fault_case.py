@@ -56,7 +56,7 @@ def _digest(value):
     return hashlib.sha256(json_bytes(value)).hexdigest()
 
 
-def _verify_first_saved_model(original, saved, contract):
+def _verify_first_saved_model(original, saved, contract, *, schedule=None):
     before, after = ET.parse(original).getroot(), ET.parse(saved).getroot()
     for key in ("time_duration", "time_step", "sample_step", "PlotType", "StartType"):
         query = "./paramlist[@name='Settings']/param[@name='" + key + "']"
@@ -74,6 +74,40 @@ def _verify_first_saved_model(original, saved, contract):
         if not a.is_finite() or not b.is_finite() or a != b:
             raise ValueError("A joint simulation setting changed: " + key)
         right[0].set("value", left[0].get("value"))
+    if schedule is not None:
+        timed_control.verify_embedded_control(schedule, saved)
+        owners = {channel[key] for channel in schedule['event_channels'] for key in ('owner', 'control_owner')}
+        for owner in owners:
+            query = "./definitions/Definition[@name='Main']/schematic/User[@id='" + owner + "']"
+            left, right = before.findall(query), after.findall(query)
+            if len(left) != 1 or len(right) != 1:
+                raise ValueError('A declared timing component is missing or duplicated')
+            for node in (left[0], right[0]):
+                for key in ('w', 'h'):
+                    if not node.get(key, '').isdigit() or int(node.get(key)) <= 0:
+                        raise ValueError('A timing display dimension is invalid')
+                    node.attrib.pop(key)
+                if node.get('q') not in (None, '4'):
+                    raise ValueError('A timing display quality differs from the vendor value')
+                node.attrib.pop('q', None)
+                for params in node.findall('./paramlist'):
+                    crc = params.get('crc')
+                    if crc is not None and not crc.isdigit():
+                        raise ValueError('A timing parameter checksum is malformed')
+                    params.attrib.pop('crc', None)
+        for channel in schedule['event_channels']:
+            owner = channel['control_owner']
+            component = before.find("./definitions/Definition[@name='Main']/schematic/User[@id='" + owner + "']")
+            names = component.findall("./paramlist/param[@name='Name']")
+            query = "./definitions/Definition[@name='Main']/schematic/Frame/Control[@link='" + owner + "']"
+            left, right = before.findall(query), after.findall(query)
+            if len(left) != len(right):
+                raise ValueError('A timing control panel binding changed')
+            for old, new in zip(left, right):
+                if (old.get('classid') == new.get('classid') == 'Slider'
+                        and len(names) == 1 and old.get('name') == names[0].get('value')
+                        and new.get('name') == ''):
+                    new.set('name', old.get('name'))
     return native_fault_replay._verify_saved_model_roots(before, after, contract)
 
 
@@ -175,6 +209,7 @@ async def prepare_joint_case(
     master=None,
     a_handoff=None,
     model_recipe="raw",
+    publication_seed=None,
 ):
     root = Path(workspace).resolve()
     if root.exists():
@@ -228,24 +263,17 @@ async def prepare_joint_case(
         },
     }
     try:
-        staged, staged_library = await _stage_dependencies(
-            public_plan, root, bundle, preparation
-        )
         instrumented = root / "FaultInstrumented.pscx"
-        parent = _materialize_native_mmc_case(
-            public_plan, staged, staged_library, root, instrumented, preparation
-        )
-        recipe_source = Path(parent["source_hashes"]["project"]["path"])
-        preparation["lineage"].append(
-            {
-                "stage": "fault_instrumentation",
-                "source": str(recipe_source),
-                "source_sha256": _identity(recipe_source)["sha256"],
-                "destination": str(instrumented),
-                "destination_sha256": _identity(instrumented)["sha256"],
-                "channel_contract_sha256": _digest(parent),
-            }
-        )
+        if publication_seed is None:
+            staged, staged_library = await _stage_dependencies(public_plan, root, bundle, preparation)
+            parent = _materialize_native_mmc_case(public_plan, staged, staged_library, root, instrumented, preparation)
+            recipe_source = Path(parent["source_hashes"]["project"]["path"])
+            preparation["lineage"].append({"stage": "fault_instrumentation", "source": str(recipe_source),
+                "source_sha256": _identity(recipe_source)["sha256"], "destination": str(instrumented),
+                "destination_sha256": _identity(instrumented)["sha256"], "channel_contract_sha256": _digest(parent)})
+        else:
+            from tests import mmc_joint_seed
+            parent, recipe_source = mmc_joint_seed.prepare_public_seed(public_plan, publication_seed, root, bundle, preparation)
         event = {
             **{
                 key: copy.deepcopy(value)
@@ -340,6 +368,8 @@ async def prepare_joint_case(
                 + [_identity(Path(__file__))],
             }
         )
+        if publication_seed is not None:
+            preparation['code_identities'].append(_identity(Path(mmc_joint_seed.__file__)))
         preparation["preparation_sha256"] = _digest(preparation)
         verify_joint_preparation(preparation)
         _write_evidence(bundle / "evidence" / "joint-fault-channels.json", contract)
@@ -383,6 +413,15 @@ def verify_joint_preparation(preparation, *, saved_fault_contract=None):
             "Joint planning no longer identifies the formal A parent handoff"
         )
     _verify_copies(preparation["dependency_copies"])
+    if 'publication_seed' in preparation:
+        from tests.mmc_joint_seed import verify_public_seed
+        seed = preparation['publication_seed']
+        verify_public_seed(seed, preparation['public_plan'])
+        if preparation['schedule']['scenario_source'] != seed['derived_project']:
+            raise ValueError('The joint schedule replaced its derived public seed')
+        parent_b = preparation['joint_parents']['B']
+        if parent_b.get('accepted') is True and parent_b['handoff'] != seed['b_handoff']:
+            raise ValueError('The joint seed and accepted B handoff disagree')
     for item in [preparation["prepared_snapshot"], *preparation["code_identities"]]:
         if _identity(Path(item["path"])) != item:
             raise ValueError("A frozen joint code or model input changed")
@@ -398,7 +437,8 @@ def verify_joint_preparation(preparation, *, saved_fault_contract=None):
         ):
             raise ValueError("Joint run has no finalized saved model contract")
         _verify_first_saved_model(
-            Path(preparation["prepared_snapshot"]["path"]), project, contract
+            Path(preparation["prepared_snapshot"]["path"]), project, contract,
+            schedule=preparation['schedule'] if 'publication_seed' in preparation else None,
         )
         if (
             finalize_fault_instrumentation(project, preparation["fault_contract"])
