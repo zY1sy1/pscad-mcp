@@ -7,6 +7,54 @@ publication are still pending. The dq path now passes normal-operation startup,
 steady, energy, protection-inactive and reversal checks. Fault isolation,
 recovery, independent reload and final publication still require fresh evidence.
 
+## Fault isolation and recovery work
+
+The current development revision follows the normal-operation closure below
+with native AC/DC isolation and recovery. Publication remains blocked until
+all four fault scenarios, final regression and independent reload pass.
+
+- The first pole-to-pole fault exposed 7.86 pu DC current despite a 50 us valve
+  trip. Its preserved report is
+  `D:/PSCAD-Workspace/mmc-native-faults-20260923/attempt-20260923-024353-3f4a9df7/report.json`.
+- Native AC contacts replace the existing explicit grid resistors. Each DC
+  pole adds a 0.05 H reactor at the reference rating, a contact, a preinsertion
+  path and a native nonlinear ZnO arrester. Measured contact status and MOV
+  current/energy are exported. The installed Master declares MOV energy in
+  **kJ**, which is checked explicitly. These are external isolation devices;
+  half-bridge intrinsic DC fault blocking remains false.
+- At 50 us, the added nonlinear network had 7–9 kW station energy residuals.
+  The 10 us diagnostic retained all limits and reduced them to 0.24–0.29 kW:
+  `D:/PSCAD-Workspace/mmc-native-faults-20260923/attempt-20260923-030754-a37ae7c2/report.json`.
+  Equation version v6 therefore uses at most 10 us (and a stricter bound for
+  short cable propagation), and reports the actual EMTDC controller interval.
+- An explicit fault protocol reconnects through preinsertion, requests a
+  qualified reset, rebuilds measured readiness and ramps back to reverse power.
+  The fault start is latched once so recovery cannot replay the fault. Resets
+  preserve physical capacitor state and seed control observers from measured
+  energy instead of creating a fictitious charging deficit.
+- DC voltage ramps include the cable's independently derived `C * Vref * dVref/dt`
+  power demand at the regulating terminal. Raw DC feedback removes the artificial
+  ramp lag; the separate 20 ms AC power-to-current voltage filter remains.
+- Pole-to-pole fault and 0.5 s recovery passed at `e504b65`:
+  `D:/PSCAD-Workspace/mmc-native-faults-20260923/attempt-20260923-033505-b4c2ac23/report.json`,
+  SHA-256 `c61b866f9a5858ee3140005012034c136d730d6d9b27f67754e6f5d020563eb7`.
+  Peak DC current was 1.137 pu, peak capacitor deviation 9.081%, and recovered
+  power error 0.179%. Owned PID 11876 exited; source/code hashes were unchanged.
+- The vendor combined preinsertion primitive left one path connected during
+  the AC fault when contact voltage was small. A repository-authored sequencer
+  now drives two ordinary native contacts explicitly and opens both on trip.
+  Three-phase AC fault isolation, current/voltage/capacitor bounds and recovery
+  passed at `aa03b73`, but the overall assembly gate correctly rejected an
+  enabled voltage-vector angle above 30 degrees:
+  `D:/PSCAD-Workspace/mmc-native-faults-20260923/attempt-20260923-035736-c6c016ee/report.json`.
+  The controller now enforces that existing limit and exports the unclipped angle.
+- Fault arm/DC current and capacitor extrema are now accumulated on every
+  EMTDC step, survive controller resets, and bound the recorded OUT samples.
+  This prevents a 100 us output interval from hiding a 10 us fault spike.
+
+The earlier fault PASS is not promoted as acceptance of these later changes.
+Fresh scenario runs are still required from the delivered revision.
+
 ## Current normal-operation result
 
 - Revision: `60ff800d5d5e8e948a9c32b050203b8446c978e3`.
