@@ -95,6 +95,7 @@ def append_native_isolation(root, master, defaults):
                    {"RLC": "1", "L": "Neutral_L_H", "E": "0.0 [kV]", "dLdC": "0", "I": "CURRENT_" + phase},
                    {"A": phase, "B": "STAR"})
         writer.add(neutral, "output_" + phase, "master:export", {"Name": "I_" + phase}, {"N": "CURRENT_" + phase})
-    writer.add(neutral, "neutral_resistor", "master:resistor", {"R": "Neutral_R_ohm"}, {"A": "STAR", "B": "G"})
+    writer.add(neutral, "neutral_resistor", "master:varrlc",
+               {"RLC": "0", "R": "Neutral_R_ohm", "E": "0.0 [kV]", "dLdC": "0", "I": ""}, {"A": "STAR", "B": "G"})
     writer.verify()
     return writer
