@@ -12,6 +12,11 @@ from pathlib import Path
 from typing import Any
 
 from .....core.backend.base import BackendError
+from .....acceptance.project_finalization import (
+    GENERATED_MODULE_POLICY,
+    compare_project_finalization,
+    snapshot_project_semantics,
+)
 from ..assets import load_packaged_asset_set
 from ..avm_companion import AverageArmParameters
 from ..cable_companion import DEFAULT_DONOR, DEFAULT_MASTER
@@ -498,6 +503,10 @@ class AvmBlueprintEngine:
         )
         project = Path(receipt["project_path"])
         library = Path(receipt["library"]["library_path"])
+        authored_models = {
+            str(path): snapshot_project_semantics(path, policy=GENERATED_MODULE_POLICY)
+            for path in (project, library)
+        }
 
         async def bounded(awaitable: Any) -> Any:
             return await asyncio.wait_for(awaitable, self.operation_timeout_s)
@@ -531,6 +540,12 @@ class AvmBlueprintEngine:
         await bounded(service.save_project(library.stem, confirm=True))
         await bounded(service.save_project(candidate_project_name, confirm=True))
         library_sha256 = _sha256(library)
+        model_finalization = {
+            path: compare_project_finalization(
+                before, snapshot_project_semantics(path, policy=GENERATED_MODULE_POLICY)
+            )
+            for path, before in authored_models.items()
+        }
         topology = self.fixture_auditor(
             project,
             receipt,
@@ -563,6 +578,7 @@ class AvmBlueprintEngine:
             "build_messages": build_messages,
             "build_started_at": build_started,
             "topology": topology,
+            "model_finalization": model_finalization,
             "fixture": receipt,
             "validation": {
                 "verdict": "PASS",

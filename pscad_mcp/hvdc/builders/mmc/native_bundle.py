@@ -1211,15 +1211,20 @@ def materialize_native_avm_fixture(
             )
         },
         "DC_CABLE": 170,
+        "P_controller": 10,
+        "V_controller": 90,
     }
     for component, definition in custom:
-        if definition in {CONTROL_NAME, CLOSED_LOOP_CONTROL_NAME}:
+        if definition == CONTROL_NAME:
             continue
         call = _hierarchy_call(
             hierarchy,
             component,
             z=hierarchy_order[component.get("name")],
-            instance=(arm_instances[component.get("name")] if definition == "MMCAverageArm" else 0),
+            instance=(
+                arm_instances[component.get("name")] if definition == "MMCAverageArm"
+                else 1 if component.get("name") == "V_controller" else 0
+            ),
         )
         if definition == "MMCCableLink":
             ET.SubElement(
