@@ -91,6 +91,18 @@ def test_native_dc_loop_uses_cable_energy_and_reverse_incremental_loss():
     assert math.sqrt(kp / ti / (cap * 640)) / (2 * math.pi) == pytest.approx(2.0)
 
 
+def test_native_controller_sampling_matches_actual_solver_execution():
+    request = valid_request(model_fidelity="average_value", dc_link={"kind": "cable", "length_km": 100.0})
+    report = derive_mmc_parameters(request, avm_cable_profile=native_cable_profile())
+    for candidate in report.candidates:
+        assert candidate.settings["control_sample_time_s"] == candidate.settings["time_step_s"]
+        assert candidate.settings["time_step_s"] <= 10e-6
+    request["engineering_overrides"] = {"control_sample_time_s": {"value": 0.0001, "unit": "s"}}
+    with pytest.raises(BackendError) as raised:
+        derive_mmc_parameters(request, avm_cable_profile=native_cable_profile())
+    assert raised.value.code == "MMC_CONTROL_INFEASIBLE"
+
+
 @pytest.mark.parametrize("resistances", [[], [0.08], [0.08, float("nan")], [0.08, -1.0], [True, 0.08]])
 def test_native_cable_rejects_invalid_physical_profile(resistances):
     with pytest.raises(BackendError) as error:

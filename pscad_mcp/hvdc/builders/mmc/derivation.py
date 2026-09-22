@@ -258,6 +258,8 @@ def _engine_candidates(
                 base_parameters["dc_voltage_control_kp"] = kp
                 base_parameters["dc_voltage_control_ti_s"] = kp / (capacitance * vdc * natural_frequency**2)
     for name, override in request.engineering_overrides.items():
+        if "native_cable_profile_hash" in common and name == "control_sample_time_s":
+            raise _error("MMC_CONTROL_INFEASIBLE", "Native controls execute on every EMTDC step; a separate controller sampling interval is unsupported.", field="engineering_overrides.control_sample_time_s")
         if name == _CAPACITOR_VOLTAGE_TARGET:
             raise _error(
                 "MMC_REQUEST_INVALID",
@@ -318,6 +320,8 @@ def _engine_candidates(
         parameters = {**base_parameters, **parameter_changes}
         _synchronize_arm_energy(parameters, capacitor_voltage_target_kv)
         settings = {**base_settings, **setting_changes}
+        if "native_cable_profile_hash" in common:
+            settings["control_sample_time_s"] = settings["time_step_s"]
         candidate_constraints = constraints + (_native_sizing_constraints(parameters) if "native_cable_profile_hash" in common else ())
         result.append(_candidate(engine, index, purpose, parameters, settings, candidate_constraints))
     return tuple(result)
