@@ -1,11 +1,59 @@
 # Native MMC AVM implementation evidence, updated 2026-09-23
 
-The public parameterized cable AVM now constructs a native two-station,
-twelve-arm model, preserves the authored XML, checks compiler finalization,
-and leaves unaccepted candidates in staging. Complete MMC acceptance and
-publication are still pending. The dq path now passes normal-operation startup,
-steady, energy, protection-inactive and reversal checks. Fault isolation,
-recovery, independent reload and final publication still require fresh evidence.
+The default parameterized native cable AVM now has complete normal/fault and
+independent-reload acceptance. The public builder defaults to the protected
+dq model. Compile-only candidates remain truthfully staged as `built`; the
+full suite is the boundary that may declare `model_accepted=true`.
+
+## Accepted default model
+
+- Verified revision: `00b36d1`.
+- Full suite: `D:/PSCAD-Workspace/mmc-native-full-20260923/suite-20260923-052516-75fc050a/report.json`.
+- Full-suite SHA-256: `c32496bf1a31996a0cd0589851aa7c5dc4982988c1e835cd11cad5751b39d891`.
+- Verdict: **PASS, model_accepted=true** for the 640 kV / 1000 MW / 60 Hz /
+  Q=0 / 100 km cable request. Normal operation, four electrical fault cases,
+  and independent portable reload all pass from the same frozen revision.
+- Accepted project:
+  `D:/PSCAD-Workspace/mmc-native-full-20260923/suite-20260923-052516-75fc050a/reload/attempt-20260923-053751-d3d9e7a4/model/AVM_a1399bc494f2_avm_0.pscx`.
+- Companion library: `cigre_mmc_avm_v1.pslx` in the same model directory.
+- Chinese usage notes: `D:/PSCAD-Workspace/mmc-native-full-20260923/suite-20260923-052516-75fc050a/README.zh-CN.md`.
+- Complete offline regression at this revision: **3034 passed, 48 skipped**,
+  160.04 s. These are separate from the licensed physical evidence.
+
+| Case | Trip latency | Peak terminal DC current | Peak arm current | Peak capacitor deviation | Recovered power error |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| AC three-phase | 20 us | 1.13971 pu | 1.13766 pu | 7.914% | 0.1759% |
+| AC single-line-ground | 20 us | 1.13961 pu | 1.13758 pu | 7.914% | 0.1760% |
+| DC pole-to-pole | 10 us | 1.13654 pu | 1.13598 pu | 7.905% | 0.1761% |
+| DC pole-to-ground | 10 us | 1.13497 pu | 1.13652 pu | 7.904% | 0.1763% |
+
+Recovery is checked from 0.5 s after fault clearing; PLL/dq and storage checks
+also repeat in the final steady window. Fault current/capacitor extrema are
+latched on every 10 us solver step. All six owned PIDs (9544, 48200, 14068,
+39600, 20528, 45216) exited, and source/code hashes remained unchanged.
+
+Normal-operation maximum DC-voltage deviations are 6.633% / 2.701%, capacitor
+deviations 7.996% / 8.098%, and insertion margins 8.798% / 9.556%. Reversal
+overshoot is 0.0975%; its one-cycle maximum slew ratio is 1.06474. The four
+station energy residuals are 0.174, 0.165, 0.133 and 0.240 kW, below the 1 kW
+tolerance. No physical threshold was relaxed.
+
+The sections below preserve the earlier repairs and failed attempts. Their
+pending statements describe those historical revisions, not this accepted
+default case. Other engineering requests require their own physical evidence.
+
+Two additional parameterized normal-operation gates pass at the same verified
+revision. Both include measured startup, forward/reverse tracking, strict
+network/energy checks, capacitor/modulation limits and reversal dynamics; they
+do not claim a separate full fault suite for those ratings.
+
+- 640 kV / 1000 MW / 60 Hz / **+100 MVAr**:
+  `D:/PSCAD-Workspace/mmc-parametric-20260923/attempt-20260923-054059-4b828cb4/report.json`,
+  SHA-256 `ec045723811643170110c756a86901c548c85ccd6c1f425ba59c00448028b477`.
+  Owned PID 51364 exited.
+- 500 kV / 750 MW / **50 Hz / -75 MVAr**, with 180/190 kV AC grids:
+  `D:/PSCAD-Workspace/mmc-parametric-20260923/attempt-20260923-054453-95b2effd/report.json`.
+  All required normal-operation gates pass and sources/code remain immutable.
 
 ## Fault isolation and recovery work
 
@@ -334,7 +382,7 @@ In particular, the stricter envelope rejected reports where the average DC
 voltage looked correct but individual samples exceeded 10%. No envelope
 threshold was increased to obtain the passing result.
 
-## Work still required
+## Historical pending scope before the current closure
 
 1. Close the complete modulation, PLL/dq, protection, power/loss balance,
    and arm-energy/ripple contracts with fresh licensed evidence. Network
