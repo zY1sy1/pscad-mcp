@@ -27,6 +27,7 @@ from pscad_mcp.hvdc.builders.mmc.engines.avm import (
 )
 from pscad_mcp.hvdc.builders.mmc.native_bundle import FIXTURE_CHANNELS, NATIVE_SCOPE
 from pscad_mcp.hvdc.builders.mmc.native_energy import diagnose_native_arm_energy
+from pscad_mcp.hvdc.builders.mmc.native_envelope import evaluate_native_steady_envelope
 from pscad_mcp.hvdc.builders.mmc.parametric_service import ParametricMmcBuilderService
 from scripts.run_mmc_average_arm_acceptance import (
     _probe_owners,
@@ -359,6 +360,11 @@ async def run_attempt(
             observed["samples"],
             engine["candidate_result"]["fixture"]["parameters"]["arm"],
         )
+        if control_kind == "closed_loop":
+            report["steady_envelope"] = evaluate_native_steady_envelope(
+                observed["samples"], power_mw=REQUEST["active_power_mw"],
+                voltage_kv=REQUEST["dc_voltage_kv"], reactive_mvar=REQUEST["reactive_power_mvar"],
+            )
         report["analysis"] = analyze_integration_trace(
             observed["samples"],
             sequence_windows=(
@@ -368,8 +374,13 @@ async def run_attempt(
             ),
             minimum_end_s=1.999,
         )
-        report["status"] = report["analysis"]["status"]
-        report["assembly_accepted"] = report["status"] == "PASS"
+        report["assembly_accepted"] = report["analysis"]["status"] == "PASS"
+        report["steady_operating_accepted"] = report.get("steady_envelope", {}).get("status") == "PASS"
+        report["status"] = (
+            "PASS" if report["assembly_accepted"]
+            and (control_kind != "closed_loop" or report["steady_operating_accepted"])
+            else "FAIL"
+        )
         if report["status"] != "PASS":
             report["failure_category"] = (
                 "model_physical"
