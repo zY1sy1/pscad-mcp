@@ -10,6 +10,7 @@ from typing import Any
 from ....core.backend.base import BackendError
 from ..common.serialization import content_hash
 from .electrical import arm_energy
+from .native_sizing import periodic_native_envelope
 from .parametric_models import (
     MmcCandidate,
     MmcConstraintResult,
@@ -19,7 +20,7 @@ from .parametric_models import (
 )
 
 
-EQUATION_VERSION = "mmc-parametric-v4"
+EQUATION_VERSION = "mmc-parametric-v5"
 
 _PWM_REFERENCE: dict[str, Any] = {
     "evidence": "audited-template-reference-v1",
@@ -117,12 +118,58 @@ def _native_cable_line_parameters(request: MmcParametricRequest, profile: Mappin
         raise _error("MMC_AVM_CABLE_PROFILE_INVALID", "Native AVM requires a finite two-core DC cable profile.")
     resistance = math.fsum(resistances) * request.dc_link.length_km
     drop = request.active_power_mw / request.dc_voltage_kv * resistance
-    return {
+    result = {
         "line_resistance_ohm": resistance,
         "line_drop_kv": drop,
         "line_drop_pu": drop / request.dc_voltage_kv,
         "native_cable_profile_hash": content_hash(profile),
     }
+    capacitances = profile.get("core_sheath_capacitance_f_per_km")
+    if capacitances is not None:
+        if (not isinstance(capacitances, (list, tuple)) or len(capacitances) != 2
+                or any(isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) or v <= 0 for v in capacitances)):
+            raise _error("MMC_AVM_CABLE_PROFILE_INVALID", "Native cable capacitance must contain two positive physical values.")
+        result["line_differential_capacitance_f"] = request.dc_link.length_km / math.fsum(1 / v for v in capacitances)
+    return result
+
+
+def _size_native_candidate(parameters: dict, request: MmcParametricRequest) -> None:
+    energy_locked = bool({"stored_energy_mj", "equivalent_arm_capacitance_f"} & request.engineering_overrides.keys())
+    modulations = (parameters["base_modulation_index"],) if "base_modulation_index" in request.engineering_overrides else (0.90, 0.85, 0.80, 0.75, 0.70)
+    first = None
+    for modulation in modulations:
+        trial = {**parameters, "base_modulation_index": modulation}
+        try:
+            sizing = periodic_native_envelope(trial)
+            if not energy_locked:
+                quantum = 5 * trial["rated_power_mw"] / 1000
+                trial["stored_energy_mj"] = max(trial["stored_energy_mj"], math.ceil(sizing["required_stored_energy_mj"] / quantum) * quantum)
+                sizing = periodic_native_envelope(trial)
+            trial["native_periodic_sizing"] = sizing
+        except ValueError as error:
+            trial["native_periodic_sizing"] = {"error": str(error), "energy_feasible": False, "modulation_feasible": False}
+        if first is None:
+            first = trial
+        if trial["native_periodic_sizing"]["energy_feasible"] and trial["native_periodic_sizing"]["modulation_feasible"]:
+            parameters.update(trial)
+            return
+    parameters.update(first)
+
+
+def _native_sizing_constraints(parameters: dict) -> tuple[MmcConstraintResult, ...]:
+    try:
+        sizing = periodic_native_envelope(parameters)
+        parameters["native_periodic_sizing"] = sizing
+    except ValueError as error:
+        return (_constraint("native_operating_point", False, 0, "physical AC/DC solution", "1", str(error)),)
+    return (
+        _constraint("native_valve_modulation", sizing["maximum_converter_modulation"] <= 0.98,
+                    sizing["maximum_converter_modulation"], 0.98, "pu", "Valve-side voltage and arm impedance exceed the native controller's voltage range."),
+        _constraint("native_insertion_margin", sizing["minimum_insertion_margin"] >= 0.05,
+                    sizing["minimum_insertion_margin"], 0.05, "pu", "Native SVM insertion lacks the required margin after capacitor ripple and energy reserve."),
+        _constraint("native_arm_energy", sizing["energy_feasible"], parameters["stored_energy_mj"],
+                    sizing["required_stored_energy_mj"], "MJ", "Native arm energy is below the periodic power integral including mean-energy reserve."),
+    )
 
 
 def _candidate(
@@ -195,6 +242,20 @@ def _engine_candidates(
         base_parameters["maximum_precharge_time_s"] = 1.0
         base_parameters["startup_charge_time_s"] = 0.5
         base_parameters["maximum_conditioning_time_s"] = 1.5
+        if "line_differential_capacitance_f" in common:
+            capacitance = float(common["line_differential_capacitance_f"])
+            base_parameters["line_differential_capacitance_f"] = capacitance
+            vdc = request.dc_voltage_kv
+            line_r = common["line_resistance_ohm"]
+            received = request.active_power_mw + common["loss_budget_mw"] / 2
+            disc = vdc**2 - 4 * line_r * received
+            if disc > 0:
+                current = 2 * received / (vdc + math.sqrt(disc))
+                negative_conductance = 2 * line_r * current**2 / (vdc - 2 * line_r * current)
+                natural_frequency = 2 * math.pi * 2.0
+                kp = 2 * 0.85 * natural_frequency * capacitance * vdc + negative_conductance
+                base_parameters["dc_voltage_control_kp"] = kp
+                base_parameters["dc_voltage_control_ti_s"] = kp / (capacitance * vdc * natural_frequency**2)
     for name, override in request.engineering_overrides.items():
         if name == _CAPACITOR_VOLTAGE_TARGET:
             raise _error(
@@ -217,10 +278,6 @@ def _engine_candidates(
             )
         base_parameters[name] = override["value"] * unit_factors[unit]
     # Preserve the existing half-normalized capacitor-voltage convention.
-    if "native_cable_profile_hash" in common:
-        valve_voltage = float(base_parameters["base_modulation_index"]) * request.dc_voltage_kv * math.sqrt(3.0) / (2 * math.sqrt(2.0))
-        ac_peak = math.sqrt(2.0) * math.hypot(request.active_power_mw, request.reactive_power_mvar) / (math.sqrt(3.0) * valve_voltage)
-        base_parameters["precharge_current_limit_ka"] = 1.25 * (common["dc_current_ka"] / 3.0 + ac_peak / 2.0)
     capacitor_voltage_target_kv = request.dc_voltage_kv / 2.0
     _synchronize_arm_energy(
         base_parameters,
@@ -228,6 +285,12 @@ def _engine_candidates(
         capacitance_supplied="equivalent_arm_capacitance_f" in request.engineering_overrides,
         energy_supplied="stored_energy_mj" in request.engineering_overrides,
     )
+    if "native_cable_profile_hash" in common:
+        _size_native_candidate(base_parameters, request)
+        _synchronize_arm_energy(base_parameters, capacitor_voltage_target_kv)
+        valve_voltage = float(base_parameters["base_modulation_index"]) * request.dc_voltage_kv * math.sqrt(3.0 / 8.0)
+        ac_peak = math.sqrt(2.0) * math.hypot(request.active_power_mw, request.reactive_power_mvar) / (math.sqrt(3.0) * valve_voltage)
+        base_parameters["precharge_current_limit_ka"] = 1.25 * (common["dc_current_ka"] / 3.0 + ac_peak / 2.0)
     switching_frequency = float(reference.get("switching_frequency_hz", 0.0))
     control_sample = float(reference["control_sample_time_s"])
     nominal_step = min(control_sample / 5.0, 1.0 / switching_frequency / 40.0) if switching_frequency else control_sample / 2.0
@@ -245,10 +308,13 @@ def _engine_candidates(
     )
     result: list[MmcCandidate] = []
     for index, (purpose, parameter_changes, setting_changes) in enumerate(variants):
+        if "native_cable_profile_hash" in common and purpose == "energy_balance" and {"stored_energy_mj", "equivalent_arm_capacitance_f"} & request.engineering_overrides.keys():
+            parameter_changes = {}  # An explicit storage value is a constraint.
         parameters = {**base_parameters, **parameter_changes}
         _synchronize_arm_energy(parameters, capacitor_voltage_target_kv)
         settings = {**base_settings, **setting_changes}
-        result.append(_candidate(engine, index, purpose, parameters, settings, constraints))
+        candidate_constraints = constraints + (_native_sizing_constraints(parameters) if "native_cable_profile_hash" in common else ())
+        result.append(_candidate(engine, index, purpose, parameters, settings, candidate_constraints))
     return tuple(result)
 
 
@@ -320,12 +386,14 @@ def derive_mmc_parameters(
             drop = engine_common["line_drop_pu"]
             engine_constraints = tuple(
                 _constraint("line_drop", drop <= 0.15, drop, 0.15, "pu", "Physical native cable DC line drop exceeds the bound.")
-                if item.name == "line_drop" else item for item in constraints
+                if item.name == "line_drop" else item for item in constraints if item.name not in {"modulation_margin", "energy_ripple"}
             )
         engine_line_parameters[engine] = {
             name: engine_common[name] for name in ("line_resistance_ohm", "line_drop_kv", "line_drop_pu")
         }
-        candidates.extend(_engine_candidates(engine, parsed, reference, engine_common, engine_constraints))
+        engine_candidates = _engine_candidates(engine, parsed, reference, engine_common, engine_constraints)
+        candidates.extend(engine_candidates)
+        engine_constraints = engine_candidates[0].constraints
         for item in engine_constraints:
             if item.name == "line_drop" and len(requested_engines) > 1 and avm_cable_profile is not None:
                 all_constraints.append(replace(item, name=f"{engine}:line_drop"))
@@ -334,6 +402,8 @@ def derive_mmc_parameters(
     if avm_cable_profile is not None and "average_value" in requested_engines:
         if len(requested_engines) == 1:
             common.update(engine_line_parameters["average_value"])
+            common.pop("modulation_index", None)
+            common["native_periodic_sizing"] = candidates[0].parameters["native_periodic_sizing"]
         else:
             for name in ("line_resistance_ohm", "line_drop_kv", "line_drop_pu"):
                 common.pop(name)

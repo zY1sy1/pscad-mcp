@@ -137,12 +137,17 @@ class CoaxCableGeometry:
     def core_dc_resistance_ohm_per_km(self) -> float:
         return self.parameters["RHOC"] * 1000.0 / self.core_area_m2
 
+    @property
+    def core_sheath_capacitance_f_per_km(self) -> float:
+        return 2 * math.pi * 8.8541878128e-12 * self.parameters["EPS1"] * 1000 / math.log(self.parameters["R3"] / self.parameters["R2"])
+
     def to_dict(self) -> dict[str, object]:
         return {
             "number": self.number,
             "parameters_in_master_units": dict(self.parameters),
             "core_area_m2": self.core_area_m2,
             "core_dc_resistance_ohm_per_km": self.core_dc_resistance_ohm_per_km,
+            "core_sheath_capacitance_f_per_km": self.core_sheath_capacitance_f_per_km,
             "resistance_equation": "rho * 1000 / (pi * (outer_radius^2 - inner_radius^2))",
         }
 
@@ -172,6 +177,9 @@ class CableConfiguration:
             "cables": [cable.to_dict() for cable in self.cables],
             "core_dc_resistance_ohm_per_km": [
                 cable.core_dc_resistance_ohm_per_km for cable in self.cables
+            ],
+            "core_sheath_capacitance_f_per_km": [
+                cable.core_sheath_capacitance_f_per_km for cable in self.cables
             ],
             "project_sha256": self.project_sha256,
             "master_sha256": self.master_sha256,

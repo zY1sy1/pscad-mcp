@@ -51,6 +51,46 @@ def test_native_cable_profile_changes_only_avm_candidates_in_dual_plan():
     assert "line_resistance_ohm" not in native.common
 
 
+def test_native_storage_override_is_a_constraint_and_cannot_be_silently_increased():
+    request = valid_request(model_fidelity="average_value", dc_link={"kind": "cable", "length_km": 100.0},
+        engineering_overrides={"base_modulation_index": {"value": 0.8, "unit": "pu"},
+                               "stored_energy_mj": {"value": 64.0, "unit": "MJ"}})
+    insufficient = derive_mmc_parameters(request, avm_cable_profile=native_cable_profile())
+    assert not insufficient.feasible
+    constraint = next(c for c in insufficient.constraints if c.name == "native_arm_energy")
+    assert not constraint.passed and 77 < constraint.limit < 78
+    assert all(c.parameters["stored_energy_mj"] == 64.0 for c in insufficient.candidates)
+    request["engineering_overrides"]["stored_energy_mj"]["value"] = 80.0
+    sufficient = derive_mmc_parameters(request, avm_cable_profile=native_cable_profile())
+    assert sufficient.feasible
+    assert all(c.parameters["stored_energy_mj"] == 80.0 for c in sufficient.candidates)
+
+
+def test_native_modulation_uses_transformer_valve_voltage_not_primary_voltage():
+    reports = []
+    for primary in (230.0, 460.0):
+        request = valid_request(model_fidelity="average_value", dc_link={"kind": "cable", "length_km": 100.0},
+            station_p={"ac_voltage_kv": primary, "short_circuit_ratio": 5.0, "x_over_r": 10.0},
+            station_vdc={"ac_voltage_kv": primary, "short_circuit_ratio": 5.0, "x_over_r": 10.0})
+        reports.append(derive_mmc_parameters(request, avm_cable_profile=native_cable_profile()))
+    assert all(r.feasible for r in reports)
+    a, b = (r.candidates[0].parameters for r in reports)
+    assert a["base_modulation_index"] == b["base_modulation_index"] == 0.85
+    assert a["stored_energy_mj"] == b["stored_energy_mj"] == 75.0
+    assert a["native_periodic_sizing"]["required_stored_energy_mj"] == pytest.approx(b["native_periodic_sizing"]["required_stored_energy_mj"])
+
+
+def test_native_dc_loop_uses_cable_energy_and_reverse_incremental_loss():
+    profile = {**native_cable_profile(), "core_sheath_capacitance_f_per_km": [5.294853924008914e-7] * 2}
+    request = valid_request(model_fidelity="average_value", dc_link={"kind": "cable", "length_km": 100.0})
+    p = derive_mmc_parameters(request, avm_cable_profile=profile).candidates[0].parameters
+    cap = p["line_differential_capacitance_f"]
+    assert cap == pytest.approx(26.47426962004457e-6)
+    kp, ti = p["dc_voltage_control_kp"], p["dc_voltage_control_ti_s"]
+    assert 0.5 < kp < 0.53 and 0.18 < ti < 0.20
+    assert math.sqrt(kp / ti / (cap * 640)) / (2 * math.pi) == pytest.approx(2.0)
+
+
 @pytest.mark.parametrize("resistances", [[], [0.08], [0.08, float("nan")], [0.08, -1.0], [True, 0.08]])
 def test_native_cable_rejects_invalid_physical_profile(resistances):
     with pytest.raises(BackendError) as error:

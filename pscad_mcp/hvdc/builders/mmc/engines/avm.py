@@ -54,6 +54,7 @@ def _native_producer_hashes() -> dict[str, str]:
             "derivation.py", "parametric_planner.py",
             "native_startup.py",
             "native_dq.py",
+            "native_sizing.py",
         )
     }
 
