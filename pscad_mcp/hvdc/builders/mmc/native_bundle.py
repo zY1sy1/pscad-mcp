@@ -229,6 +229,7 @@ def _closed_loop_control(root: ET.Element, master: dict, defaults: dict) -> dict
             "Q_MEAS": (-72, -36, "Transfer", "Input"),
             "VDC_MEAS": (-72, 0, "Transfer", "Input"),
             "POWER_CORRECTION": (-72, 36, "Transfer", "Input"),
+            "VDC_REFERENCE": (-72, 72, "Transfer", "Input"),
             "ACTIVE_ERROR": (72, -72, "Transfer", "Output"),
             "Q_ERROR": (72, -36, "Transfer", "Output"),
             "BLOCK": (72, 0, "Transfer", "Output"),
@@ -266,7 +267,7 @@ def _closed_loop_control(root: ET.Element, master: dict, defaults: dict) -> dict
       ENDIF
       $ACTIVE_ERROR = $P_MEAS - PREF
       IF ($Control_Mode .GE. 0.5) $ACTIVE_ERROR = $P_MEAS + PREF - $POWER_CORRECTION
-      $VDC_ERROR = $Vdc_Order_kV - $VDC_MEAS
+      $VDC_ERROR = $VDC_REFERENCE - $VDC_MEAS
       IF ($Control_Mode .LT. 0.5) $VDC_ERROR = 0.0
       $Q_ERROR = $Q_MEAS - SCALE * $Q_Order_MVAr
       $BLOCK = 0.0
@@ -427,6 +428,7 @@ def _closed_loop_control(root: ET.Element, master: dict, defaults: dict) -> dict
             "Q_MEAS": "Q_FILTERED",
             "VDC_MEAS": "VDC_FILTERED",
             "POWER_CORRECTION": "VDC_POWER_CORRECTION",
+            "VDC_REFERENCE": "VDC_REFERENCE",
             "ACTIVE_ERROR": "ACTIVE_ERROR",
             "Q_ERROR": "Q_ERROR",
             "BLOCK": "CTRL_BLOCK",
@@ -438,6 +440,7 @@ def _closed_loop_control(root: ET.Element, master: dict, defaults: dict) -> dict
         ("p_filter", "P_MEAS", "P_FILTERED", 10000.0),
         ("q_filter", "Q_MEAS", "Q_FILTERED", 10000.0),
         ("vdc_filter", "VDC_MEAS", "VDC_FILTERED", 2000.0),
+        ("voltage_reference_ramp", "Vdc_Order_kV", "VDC_REFERENCE", 2000.0),
         ("frame_d_filter", "FRAME_D_RAW", "FRAME_D", 2000.0),
         ("frame_q_filter", "FRAME_Q_RAW", "FRAME_Q", 2000.0),
         *((f"energy_difference_{phase}", f"DW{phase}_RAW", f"DW{phase}", 1000.0) for phase in "ABC"),
@@ -452,7 +455,11 @@ def _closed_loop_control(root: ET.Element, master: dict, defaults: dict) -> dict
                 "YO": "0.0",
                 "Dim": "1",
                 "G": "1.0",
-                "T": "0.05 [s]" if role.startswith("energy_difference_") else "0.02 [s]",
+                "T": (
+                    "0.1 [s]" if role == "voltage_reference_ramp"
+                    else "0.05 [s]" if role.startswith("energy_difference_")
+                    else "0.02 [s]"
+                ),
                 "Max": str(limit),
                 "Min": str(-limit),
             },
