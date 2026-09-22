@@ -56,6 +56,7 @@ def _native_producer_hashes() -> dict[str, str]:
             "native_dq.py",
             "native_sizing.py",
             "native_protection.py",
+            "native_faults.py",
         )
     }
 
@@ -347,6 +348,7 @@ class AvmBlueprintEngine:
         fixture_auditor: Any = audit_native_avm_fixture,
         operation_timeout_s: float = 600.0,
         native_control_kind: str = "closed_loop",
+        native_fault_kind: str | None = None,
     ) -> None:
         self.asset_set = load_packaged_asset_set() if asset_set is None else asset_set
         self.inventory = inventory
@@ -360,10 +362,14 @@ class AvmBlueprintEngine:
         self.fixture_auditor = fixture_auditor
         self.operation_timeout_s = float(operation_timeout_s)
         self.native_control_kind = native_control_kind
+        self.native_fault_kind = native_fault_kind
         if not math.isfinite(self.operation_timeout_s) or self.operation_timeout_s <= 0:
             raise ValueError("operation_timeout_s must be finite and positive")
         if self.native_control_kind not in {"scheduled_open_loop", "closed_loop", "dq_current"}:
             raise ValueError("native_control_kind is unsupported")
+        from ..native_faults import FAULT_KINDS
+        if native_fault_kind is not None and (native_fault_kind not in FAULT_KINDS or native_control_kind != "dq_current"):
+            raise ValueError("Native fault injection requires a supported dq fault scenario")
 
     def planning_inputs(self, request: object) -> dict[str, object] | None:
         link = getattr(request, "dc_link", None)
@@ -381,9 +387,12 @@ class AvmBlueprintEngine:
                 "The native average-value path currently requires a cable DC link.",
                 dc_link_kind=kind,
             )
-        return _native_input_record(
+        record = _native_input_record(
             self.native_sources, control_kind=self.native_control_kind
         )
+        if self.native_fault_kind is not None:
+            record["capabilities"]["native_fault_kind"] = self.native_fault_kind
+        return record
 
     @staticmethod
     def _native_arm_parameters(values: Mapping[str, Any]) -> AverageArmParameters:
@@ -436,6 +445,8 @@ class AvmBlueprintEngine:
         candidate_id: str | None,
     ) -> dict[str, object]:
         selected = _candidate(plan, candidate_id)
+        if plan.capabilities.get("native_fault_kind") != self.native_fault_kind:
+            raise _error("MMC_PLAN_STALE", "Native fault scenario differs from its immutable plan.")
         inputs = _native_input_record(
             plan.source_paths, control_kind=self.native_control_kind
         )
@@ -510,6 +521,8 @@ class AvmBlueprintEngine:
         duration = float(values["maximum_precharge_time_s"]) + reversal_time - 0.10 + reversal_duration + 1.0
         if self.native_control_kind == "dq_current":
             duration += float(values["maximum_conditioning_time_s"])
+        if self.native_fault_kind is not None:
+            duration += 2.0
         candidate_project_name = (
             "AVM_"
             + plan.plan_hash[:12]
@@ -562,6 +575,7 @@ class AvmBlueprintEngine:
             time_step_s=float(selected.settings["time_step_s"]),
             output_step_s=float(selected.settings["output_step_s"]),
             arm_parameters=self._native_arm_parameters(values),
+            fault_kind=self.native_fault_kind,
             **self._native_control_parameters(values),
         )
         project = Path(receipt["project_path"])

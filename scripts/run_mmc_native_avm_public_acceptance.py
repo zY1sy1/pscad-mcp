@@ -33,6 +33,7 @@ from pscad_mcp.hvdc.builders.mmc.native_physical import evaluate_native_network_
 from pscad_mcp.hvdc.builders.mmc.native_startup import analyze_precharge_trace
 from pscad_mcp.hvdc.builders.mmc.native_control_checks import evaluate_native_dq_controls
 from pscad_mcp.hvdc.builders.mmc.native_dynamic_checks import evaluate_native_dynamic_envelope
+from pscad_mcp.hvdc.builders.mmc.native_faults import FAULT_KINDS, evaluate_native_fault_trace
 from pscad_mcp.hvdc.builders.mmc.parametric_models import parse_parametric_request
 from pscad_mcp.hvdc.builders.mmc.parametric_service import ParametricMmcBuilderService
 from scripts.run_mmc_average_arm_acceptance import (
@@ -101,6 +102,7 @@ def _code_snapshot() -> dict[str, Any]:
         REPOSITORY / "pscad_mcp/hvdc/builders/mmc/engines/avm.py",
         REPOSITORY / "pscad_mcp/hvdc/builders/mmc/native_bundle.py",
         REPOSITORY / "pscad_mcp/hvdc/builders/mmc/native_dynamic_checks.py",
+        REPOSITORY / "pscad_mcp/hvdc/builders/mmc/native_faults.py",
         REPOSITORY / "pscad_mcp/hvdc/builders/mmc/parametric_service.py",
     ):
         snapshot["source_code_hashes"][str(path)] = _sha256(path)
@@ -112,6 +114,7 @@ def _require_public_plan(
     sources: dict[str, str],
     *,
     control_kind: str = "closed_loop",
+    fault_kind: str | None = None,
 ) -> dict[str, Any]:
     children = plan.get("engine_plans", ())
     if len(children) != 1 or children[0].get("engine") != "average_value":
@@ -125,6 +128,7 @@ def _require_public_plan(
         or capabilities.get("native_cable_constants") is not True
         or capabilities.get("control_kind") != control_kind
         or capabilities.get("model_accepted") is not False
+        or capabilities.get("native_fault_kind") != fault_kind
     ):
         raise ValueError("Public AVM plan overstates or omits native capabilities")
     return child
@@ -236,6 +240,7 @@ async def run_attempt(
 
         begin("plan")
         control_kind = getattr(args, "control_kind", "closed_loop")
+        fault_kind = getattr(args, "fault_kind", None)
         if control_kind == "closed_loop":
             builder = builder_factory(service, workspace_root=workspace)
         else:
@@ -251,6 +256,7 @@ async def run_attempt(
                     native_sources=native_sources,
                     native_required=True,
                     native_control_kind=control_kind,
+                    native_fault_kind=fault_kind,
                 ),
             )
         plan = builder.plan_model(
@@ -263,8 +269,10 @@ async def run_attempt(
             plan,
             {name: source_hashes[name] for name in ("master", "cable_donor", "tline")},
             control_kind=control_kind,
+            fault_kind=fault_kind,
         )
         report["diagnostic_control_kind"] = control_kind
+        report["fault_kind"] = fault_kind
 
         begin("build_and_verify_acceptance_boundary")
         started = await builder.build_model(
@@ -448,14 +456,24 @@ async def run_attempt(
         if control_kind == "dq_current":
             report["control_envelope"] = evaluate_native_dq_controls(
                 observed["samples"], fixture_parameters, {"forward": forward_window, "reverse": reverse_window})
-            report["dynamic_envelope"] = evaluate_native_dynamic_envelope(
-                observed["samples"], fixture_parameters, report["precharge"])
+            normal_samples = observed["samples"]
+            if fault_kind is not None:
+                report["fault_envelope"] = evaluate_native_fault_trace(observed["samples"], fixture_parameters)
+                start = report["fault_envelope"].get("metrics", {}).get("fault_start_s")
+                if start is None:
+                    raise ValueError("The fault scenario did not produce a verified event window")
+                count = sum(t < start for t in observed["samples"]["time"])
+                normal_samples = {name: values[:count] for name, values in observed["samples"].items()}
+                report["normal_analysis_window_s"] = [normal_samples["time"][0], normal_samples["time"][-1]]
+            report["dynamic_envelope"] = evaluate_native_dynamic_envelope(normal_samples, fixture_parameters, report["precharge"])
         report["control_envelope_accepted"] = report.get("control_envelope", {}).get("status") == "PASS"
         report["dynamic_envelope_accepted"] = report.get("dynamic_envelope", {}).get("status") == "PASS"
+        report["fault_envelope_accepted"] = report.get("fault_envelope", {}).get("status") == "PASS"
         report["status"] = (
             "PASS" if report["assembly_accepted"]
             and (control_kind == "scheduled_open_loop" or (report["steady_operating_accepted"] and report["network_identities_accepted"] and report["precharge_accepted"]))
             and (control_kind != "dq_current" or (report["control_envelope_accepted"] and report["dynamic_envelope_accepted"]))
+            and (fault_kind is None or report["fault_envelope_accepted"])
             else "FAIL"
         )
         if report["status"] != "PASS":
@@ -555,6 +573,7 @@ async def run_attempt(
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--fault-kind", choices=FAULT_KINDS)
     parser.add_argument("--workspace-root", type=Path, required=True)
     parser.add_argument("--request-json", type=Path, help="Immutable complete parameterized AVM request; included in source hashes")
     parser.add_argument("--master", type=Path, default=DEFAULT_MASTER)
@@ -588,6 +607,8 @@ def main(argv: list[str] | None = None) -> int:
     ):
         parser.add_argument("--" + name, type=float, default=default)
     args = parser.parse_args(argv)
+    if args.fault_kind is not None and args.control_kind != "dq_current":
+        parser.error("Native fault acceptance requires --control-kind dq_current")
     if args.diagnostic_time_step_us is not None and (
         not math.isfinite(args.diagnostic_time_step_us)
         or args.diagnostic_time_step_us <= 0

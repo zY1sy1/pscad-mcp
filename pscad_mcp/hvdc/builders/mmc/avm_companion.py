@@ -713,7 +713,7 @@ class _Writer:
                 for top, bottom, old, members in sorted(blocks, key=lambda b: b[0] - b[1]):
                     column = min(range(12), key=heights.__getitem__)
                     point = (216 + 504 * column, heights[column] - top)
-                    heights[column] = point[1] + bottom + 36
+                    heights[column] = point[1] + bottom + 18
                     if heights[column] > 4788:
                         raise ValueError("Native schematic exceeds the PSCAD 4.6 page")
                     dx, dy = point[0] - old[0], point[1] - old[1]

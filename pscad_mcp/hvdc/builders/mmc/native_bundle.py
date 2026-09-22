@@ -33,6 +33,7 @@ from .cable_companion import (
 from .native_startup import STARTUP_NAME, STARTUP_INPUTS, STARTUP_OUTPUTS, STARTUP_DEFAULTS, append_precharge_readiness
 from .native_dq import PLL_NAME, PLL_OUTPUTS, PLL_DEFAULTS, DQ_NAME, DQ_DEFAULTS, DQ_INPUTS, DQ_OUTPUTS, append_native_pll_and_dq
 from .native_protection import PROTECTION_NAME, PROTECTION_INPUTS, PROTECTION_OUTPUTS, PROTECTION_DEFAULTS, append_native_protection
+from .native_faults import FAULT_NAME, FAULT_KINDS, FAULT_OUTPUTS, FAULT_DEFAULTS, append_native_fault_protocol, fault_branches
 
 NATIVE_SCOPE = "cigre_mmc_avm_v1"
 CONTROL_NAME = "MMCStationModulator"
@@ -695,6 +696,7 @@ def materialize_native_avm_library(
     append_precharge_readiness(root)
     append_native_pll_and_dq(root)
     append_native_protection(root)
+    append_native_fault_protocol(root)
     sample = _definition(root, SAMPLE_NAME,
                          {"IN": (-36, 0, "Transfer", "Input"), "OUT": (36, 0, "Transfer", "Output")}, {})
     _script(sample, "Dsdyn", "      $OUT = $IN\n")
@@ -884,6 +886,7 @@ def materialize_native_avm_fixture(
     time_step_s: float = 20e-6,
     output_step_s: float = 100e-6,
     arm_parameters: AverageArmParameters | None = None,
+    fault_kind: str | None = None,
 ) -> dict:
     """Create a complete two-station, twelve-arm native integration fixture."""
     folder = Path(destination).resolve()
@@ -933,9 +936,14 @@ def materialize_native_avm_fixture(
     if control_kind not in {"scheduled_open_loop", "closed_loop", "dq_current"}:
         raise ValueError("control_kind must be scheduled_open_loop, closed_loop or dq_current")
     channels = {**FIXTURE_CHANNELS}
+    if fault_kind is not None and (fault_kind not in FAULT_KINDS or control_kind != "dq_current"):
+        raise ValueError("Native fault injection requires a supported dq fault scenario")
     if control_kind == "dq_current":
         channels.update({f"{s}_{name}": unit for s in ("P", "V") for name, unit in DQ_OUTPUTS.items()})
         channels.update({name: unit for name, unit in PROTECTION_OUTPUTS.values()})
+    if fault_kind is not None:
+        channels.update({name: unit for name, unit in FAULT_OUTPUTS.values()})
+        channels.update({"FAULT_I_" + name: "kA" for name in fault_branches(fault_kind)})
     current_control_bandwidth_hz = _number(current_control_bandwidth_hz, "current_control_bandwidth_hz", positive=True)
     pll_bandwidth_hz = _number(pll_bandwidth_hz, "pll_bandwidth_hz", positive=True)
     active_power_order_mw = _number(
@@ -1313,6 +1321,16 @@ def materialize_native_avm_fixture(
         },
     )
     custom.append((cable, "MMCCableLink"))
+    if fault_kind is not None:
+        writer.add(main, "fault_protocol", NATIVE_SCOPE + ":" + FAULT_NAME,
+                   {**FAULT_DEFAULTS, "Fault_Delay_s": reversal_time_s - deblock_time_s + reversal_duration_s + 1.0},
+                   {"POWER_READY": "POWER_READY", "POWER_START": "POWER_START_TIME",
+                    **{port: name for port, (name, _) in FAULT_OUTPUTS.items()}})
+        for name, (a, b) in fault_branches(fault_kind).items():
+            writer.add(main, "fault_branch_" + name, "master:breaker1",
+                       {"NAME": "FAULT_OPEN", "OPCUR": "1", "ENAB": "0", "ViewB": "0",
+                        "RON": "0.1 [ohm]", "ROFF": "1e8 [ohm]", "CLVL": "0.0 [kA]",
+                        "IBR": "FAULT_I_" + name, "SBR": "", "VBR": ""}, {"A": a, "B": b})
     writer.add(main, "neutral_ground", "master:ground", {}, {"A": "GND"})
     for prefix in ("P", "V"):
         for pole in ("POS", "NEG"):
@@ -1518,6 +1536,7 @@ def materialize_native_avm_fixture(
             "reversal_time_s": reversal_time_s,
             "reversal_duration_s": reversal_duration_s,
             "simulation_duration_s": simulation_duration_s,
+            "fault_kind": fault_kind,
             "time_step_s": time_step_s,
             "output_step_s": output_step_s,
             "cable_length_km": library_receipt["cable_length_km"],
