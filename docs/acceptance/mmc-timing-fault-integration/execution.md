@@ -319,3 +319,142 @@ journal I/O failures report FAIL while retaining the actual process-cleanup
 facts and any original failure. The focused combined gate reports 203 passed,
 1 skipped after these review fixes; actual integration execution is still
 pending review closure and licensed opt-in.
+
+## Licensed Public Attempts and Publication Recovery
+
+B's final native handoff was admitted at `f79c265`. Its immutable native
+producer is `86adfe0227e5914d01ff07fcad3f742c2aba8e21`, and the accepted
+recipe is `native_full_sort_dc_integral_004_v1`. Both original steady windows,
+the fault case and electrical recovery passed. The final handoff SHA-256 is
+`36c78d3c660a22ebfb05daaba2e4d4d587b64051bf69df3b2e1722f1dc024ccf`.
+
+The subsequent real public attempts remain separate diagnostic evidence:
+
+| Attempt under `D:/PSCAD-Workspace/mmc-timing-fault-integration/` | Result and repair |
+| --- | --- |
+| `public-joint-20260915-f79c265` | Public physics passed; replay identity rejected a Windows venv child interpreter and vendor save metadata. `198420a` repairs launcher binding and permits only verified nonphysical metadata normalization. |
+| `public-joint-20260917-198420a` | Public physics passed; the legacy TLine solver truncated a 217-character input path. `b172f6d` moves replay to a short owned directory and rejects paths over 199 characters before execution. |
+| `public-joint-20260917-b172f6d` | Interrupted during preflight, before PSCAD startup; preserved as an unfinished attempt. |
+| `public-joint-20260917-b172f6d-r2` | Both public and independent replay physics passed; publication alone failed with WinError 206 while copying into the deeply nested candidate directory. All owned processes closed and leases were released. Joint execution had not started. |
+
+In r2, both datasets contain 312 channels and 51 OUT/INF/INFX files. Each
+passed all 122 physical checks. The coordinator journal is
+`.pscad-mcp/mmc-builds/c269d4cc96aa40728b996500ee8ad1bd/journal.json`, with
+SHA-256 `648c946f3c0f8cfc972161f49778129d277a352a7e637486233edfb339e0be33`.
+The public journal is
+`public/.pscad-mcp/mmc-builds/2c6e30d4bb404b8aa6a9aa29d16ed6ca/journal.json`,
+with SHA-256 `7a0055227da79ed7df55f00bdb86be1047d2de59ec95e83acbf9c766f4a3572f`.
+
+`7cd7cb42217408c45ecc2980cb7a3fde97ee5850` replaces the publication candidate
+with a short owned `.pscad-mcp/mmc-publications/<build_id>` directory and
+preflights all candidate and final destinations before copying. For r2 the
+maximum candidate file/directory lengths fall from 279/262 to 248/231; final
+destination lengths are 187/170. The focused software gate passed 195 tests
+with 1 skip, and independent review passed the 22 boundary/rejection cases.
+
+Publication-only recovery is being validated separately. It must preserve
+the old FAIL journals, old partial candidate, original plan and producer
+identities, then revalidate the unchanged datasets and published copy. It may
+supersede only the failed publication stage. A new licensed joint run and an
+independent joint replay remain required before overall integration PASS.
+
+The original r2 `blank_service.py` raw hash is
+`35e78ec157d7af2fe5ecb29bd61caafa7ba69494c361c4e222b0843aeddcc70d`.
+Its exact mixed-line-ending bytes were recovered at
+`D:/PSCAD-Workspace/mmc-timing-fault-integration/recovered-producer-b172f6d/blank_service.py`.
+This is a recovered historical snapshot, not an artifact archived during
+the original run. Its raw hash matches the frozen plan, and normalization
+to LF matches the `b172f6d` Git blob exactly. Independent review confirmed
+the independent file identity, absence of reparse points, and unchanged
+original journal hashes.
+
+The recovery/continuation entry points are committed at
+`6a2fe24f29ffbaa02cf681a6ad767f3f67b4ca38`. `7838f8a` additionally prevents
+joint acceptance PASS when lease release returns `False` without raising.
+The combined recovery, continuation and lifecycle software gate passed
+99 tests in 19.74 s, with targeted Ruff and diff checks clean. Independent
+review accepted the publication-only recovery entry point after a read-only
+audit of 282 frozen files, including all 27 files in the failed candidate.
+
+Actual recovery started at 20:23:42 Asia/Shanghai on September 22 in
+`D:/PSCAD-Workspace/mmc-publication-recovery-20260922-r1`, from the exact old
+coordinator/public journal hashes above. The independent launcher PID was
+42848; stdout, stderr and launch provenance are under
+`D:/PSCAD-Workspace/mmc-integration-logs/publication-r1.*`.
+This entry records startup only; fresh recovery and joint verdicts remain
+pending until their durable reports and cleanup are verified.
+
+## Publication Recovery PASS
+
+Recovery completed with a final PASS at
+`D:/PSCAD-Workspace/mmc-publication-recovery-20260922-r1/.pscad-mcp/mmc-builds/59d8d98b1fec42a5aa0b870ba1c682a7/journal.json`.
+Receipt SHA-256:
+`268605847ec6d2b257de39e0b133bc889bdfd55d3800fa1e7359bcde7fe32ede`.
+Both old datasets were reread completely; each reproduced 312 channels and
+all 122 passing physical checks. The delivered copy passed the actual
+publication loader and `validate_model` physical re-evaluation with
+`accepted: true`. No PSCAD instance was launched for this recovery.
+Both owned workspace leases were released, and there were no finalization
+errors. All 282 frozen inputs, including the old journals and 27 partial
+publication files, retained their identities.
+
+The delivered project is the original public workspace's
+`PublicFault_c269d4cc.pscx`, SHA-256
+`907ca7b02153b1a59587aa6234a1375b87432f3ca1924a69e1ed060c78cf21cc`.
+The final bundle manifest SHA-256 is
+`752ec59e49dbd7a20a1dfb23606e8c0c9b77c2f674cf52295525326b23dc5f2f`.
+Only the publication failure is superseded; the original attempts stay FAIL.
+
+The reviewed continuation started a fresh acceptance process at 20:44:39
+Asia/Shanghai in `D:/PSCAD-Workspace/mmc-joint-20260922-r1` (launcher PID 47532,
+Python PID 52916). Its journal is
+`.pscad-mcp/mmc-builds/9d05449d39ac48ada2844f48de0954a0/journal.json`.
+It consumes the exact recovery receipt and unchanged B handoff, builds a new
+joint preparation with current producer hashes, and reuses the reviewed owned
+joint/independent-replay lifecycle. Joint physical acceptance remains pending.
+
+## Joint r1 First-Save Failure and Accepted-Model Derivation
+
+The r1 continuation ended at 21:03:54 with a first-save XML comparison failure,
+before build or simulation. The final journal SHA-256 is
+`d8f801692ec61175e0279f99dc69b82a310fd5ef30c980ff34a21d60397f8797`.
+The owned PSCAD PID 33972 was cleaned; cleanup was not pending and the lease
+was released. Parent publication/B evidence validation had completed.
+
+The raw preparation retained an old startup snapshot filename and older
+vendor component metadata/defaults. The first save migrated these fields.
+The fix does not expand the physical model ignore list. Commit
+`330017cf71b5619b9b961d183ef7ee3b54ad9fdb` instead derives the joint case from
+the byte-verified published saved model, copying its 15 frozen runtime
+dependencies and changing only the two declared local TLine paths before
+applying the deterministic A schedule. Parent publication plan/producer
+identities, receipt, channel contract, checks, B handoff and source identities
+remain explicit and immutable. Current joint derivation code is frozen
+separately, and parent physical PASS is not inherited by the new run.
+
+The two planned A components receive verified vendor display metadata on
+first save: control owner 450184592 changes width/height and parameter CRC;
+PGB owner 2000000000 changes width and gains q=4 and a parameter CRC.
+The old Slider panel Control linked to owner 450184592 changes only its Name
+from Pref2 to empty. These checks are limited to the declared A nodes;
+parameters, scripts, ports, positions, wires and all remaining XML stay under
+the full canonical comparison. A read-only comparison of the new seed-derived
+model against r1's actual saved model passed after these bounded rules.
+
+The affected joint-seed, continuation, lifecycle and preparation suite passed
+88 tests in 43.75 s. Targeted Ruff and diff checks passed. New licensed joint
+execution and independent replay are still required; r1 remains failed.
+
+Independent Spec/Quality review of fixed `330017c` passed, including a
+write-free real-model comparison and nine rejected mutation cases: command,
+position, display quality, malformed CRC, panel label, physical fault setting,
+unrelated component size, line-path escape and duplicate event owner.
+
+Fresh joint r2 started at 22:11:58 Asia/Shanghai in
+`D:/PSCAD-Workspace/mmc-joint-20260922-r2`, launcher PID 51172 and actual Python
+PID 43124. The report is
+`.pscad-mcp/mmc-builds/8107d3b43a1c494fa9c20a3925964942/journal.json`.
+`D:/PSCAD-Workspace/mmc-integration-logs/joint-r2.launcher.json` binds this
+execution to fixed source revision `330017c` and the exact superseded r1
+journal SHA. Separate stdout/stderr logs retain startup and final outcomes.
+This entry records launch, not physical acceptance completion.
