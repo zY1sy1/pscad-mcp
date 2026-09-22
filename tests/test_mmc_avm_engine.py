@@ -227,7 +227,7 @@ def test_native_avm_engine_freezes_sources_and_materializes_candidate_values(
     assert result["fixture"]["parameters"]["cable_length_km"] == 100.0
     assert result["fixture"]["parameters"]["reversal_time_s"] == 1.0
     assert result["fixture"]["parameters"]["reversal_duration_s"] == request.power_reversal_time_s
-    assert result["fixture"]["parameters"]["simulation_duration_s"] == 2.0 + request.power_reversal_time_s
+    assert result["fixture"]["parameters"]["simulation_duration_s"] == pytest.approx(2.9 + request.power_reversal_time_s)
 
 
 def test_native_avm_engine_rejects_unmodeled_overhead_link(tmp_path: Path) -> None:

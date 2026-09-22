@@ -52,6 +52,7 @@ def _native_producer_hashes() -> dict[str, str]:
             "engines/avm.py", "native_bundle.py", "avm_companion.py",
             "cable_companion.py", "cable_constants.py",
             "derivation.py", "parametric_planner.py",
+            "native_startup.py",
         )
     }
 
@@ -500,7 +501,7 @@ class AvmBlueprintEngine:
         )
         reversal_time = 1.0
         reversal_duration = float(values["power_reversal_time_s"])
-        duration = reversal_time + reversal_duration + 1.0
+        duration = float(values["maximum_precharge_time_s"]) + reversal_time - 0.10 + reversal_duration + 1.0
         candidate_project_name = (
             "AVM_"
             + plan.plan_hash[:12]
@@ -541,6 +542,8 @@ class AvmBlueprintEngine:
             converter_loss_mw=12 * float(values["loss_per_arm_mw"]),
             dc_grounding_resistance_ohm=float(values["dc_grounding_resistance_ohm"]),
             valve_grounding_resistance_ohm=float(values["valve_grounding_resistance_ohm"]),
+            maximum_precharge_time_s=float(values["maximum_precharge_time_s"]),
+            precharge_current_limit_ka=float(values["precharge_current_limit_ka"]),
             ramp_time_s=0.20,
             deblock_time_s=0.10,
             reversal_time_s=reversal_time,

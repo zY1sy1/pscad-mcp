@@ -29,6 +29,7 @@ from .cable_companion import (
     DEFAULT_MASTER,
     append_native_cable_link,
 )
+from .native_startup import STARTUP_NAME, STARTUP_INPUTS, STARTUP_OUTPUTS, STARTUP_DEFAULTS, append_precharge_readiness
 
 NATIVE_SCOPE = "cigre_mmc_avm_v1"
 CONTROL_NAME = "MMCStationModulator"
@@ -139,6 +140,7 @@ ARM_OBSERVABLES = {
     "ICAP": ("I_CAP", "kA"),
     "PLOSS": ("P_NONOHMIC", "MW"),
 }
+FIXTURE_CHANNELS.update({signal: units for signal, units in STARTUP_OUTPUTS.values()})
 for _prefix in ("P", "V"):
     FIXTURE_CHANNELS.update({f"{_prefix}_P_REFERENCE": "MW", f"{_prefix}_Q_REFERENCE": "MVAr", f"{_prefix}_VDC_REFERENCE": "kV"})
     FIXTURE_CHANNELS.update({f"{_prefix}_KCL_{name}": unit for name, unit in KCL_MEASUREMENTS.items()})
@@ -271,6 +273,8 @@ def _closed_loop_control(root: ET.Element, master: dict, defaults: dict) -> dict
             "VDC_MEAS": (-72, 0, "Transfer", "Input"),
             "POWER_CORRECTION": (-72, 36, "Transfer", "Input"),
             "VDC_REFERENCE": (-72, 72, "Transfer", "Input"),
+            "STARTUP_READY": (-72, 108, "Transfer", "Input"),
+            "START_TIME": (-72, 144, "Transfer", "Input"),
             "ACTIVE_ERROR": (72, -72, "Transfer", "Output"),
             "Q_ERROR": (72, -36, "Transfer", "Output"),
             "BLOCK": (72, 0, "Transfer", "Output"),
@@ -302,13 +306,15 @@ def _closed_loop_control(root: ET.Element, master: dict, defaults: dict) -> dict
         """#LOCAL REAL SCALE
 #LOCAL REAL REVERSE_SCALE
 #LOCAL REAL PREF
+#LOCAL REAL REVERSE_START
       SCALE = 0.0
-      IF (TIME .GE. $Deblock_Time_s) SCALE = MIN(1.0, MAX(0.0, (TIME - $Deblock_Time_s) / $Ramp_Time_s))
+      REVERSE_START = $START_TIME + $Reversal_Time_s - $Deblock_Time_s
+      IF ($STARTUP_READY .GE. 0.5) SCALE = MIN(1.0, MAX(0.0, (TIME - $START_TIME) / $Ramp_Time_s))
       PREF = SCALE * $P_Order_MW
       $SEQUENCE = 1.0
-      IF (TIME .GE. $Deblock_Time_s) $SEQUENCE = 2.0
-      IF (TIME .GE. $Reversal_Time_s) THEN
-        REVERSE_SCALE = MIN(1.0, MAX(0.0, (TIME - $Reversal_Time_s) / $Reversal_Duration_s))
+      IF ($STARTUP_READY .GE. 0.5) $SEQUENCE = 2.0
+      IF ($STARTUP_READY .GE. 0.5 .AND. TIME .GE. REVERSE_START) THEN
+        REVERSE_SCALE = MIN(1.0, MAX(0.0, (TIME - REVERSE_START) / $Reversal_Duration_s))
         PREF = $P_Order_MW * (1.0 - 2.0 * REVERSE_SCALE)
         $SEQUENCE = 3.0
       ENDIF
@@ -320,7 +326,7 @@ def _closed_loop_control(root: ET.Element, master: dict, defaults: dict) -> dict
       $Q_REFERENCE = SCALE * $Q_Order_MVAr
       $Q_ERROR = $Q_MEAS - $Q_REFERENCE
       $BLOCK = 0.0
-      IF (TIME .LT. $Deblock_Time_s) THEN
+      IF ($STARTUP_READY .LT. 0.5) THEN
         $ACTIVE_ERROR = 0.0
         $Q_ERROR = 0.0
         $VDC_ERROR = 0.0
@@ -415,7 +421,7 @@ def _closed_loop_control(root: ET.Element, master: dict, defaults: dict) -> dict
         ),
     )
     ports = {
-        **_feedback_ports(("P_MEAS", "Q_MEAS", "VDC_MEAS", *ARM_FEEDBACK_INPUTS)),
+        **_feedback_ports(("P_MEAS", "Q_MEAS", "VDC_MEAS", "STARTUP_READY", "START_TIME", *ARM_FEEDBACK_INPUTS)),
         **{
             name: (90, -180 + index * 36, "Transfer", "Output")
             for index, name in enumerate(CONTROL_OUTPUTS)
@@ -439,7 +445,7 @@ def _closed_loop_control(root: ET.Element, master: dict, defaults: dict) -> dict
     add = lambda role, scoped, parameters, bindings: writer.add(
         controller, role, scoped, parameters, bindings
     )
-    for name in ("P_MEAS", "Q_MEAS", "VDC_MEAS", *ARM_FEEDBACK_INPUTS):
+    for name in ("P_MEAS", "Q_MEAS", "VDC_MEAS", "STARTUP_READY", "START_TIME", *ARM_FEEDBACK_INPUTS):
         add("input_" + name, "master:import", {"Name": name}, {"N": name})
     for name in CLOSED_LOOP_DEFAULTS:
         add("parameter_" + name, "master:import", {"Name": name}, {"N": name})
@@ -486,6 +492,8 @@ def _closed_loop_control(root: ET.Element, master: dict, defaults: dict) -> dict
             "VDC_MEAS": "VDC_FILTERED",
             "POWER_CORRECTION": "CTRL_POWER_CORRECTION",
             "VDC_REFERENCE": "CTRL_VDC_REFERENCE",
+            "STARTUP_READY": "STARTUP_READY",
+            "START_TIME": "START_TIME",
             "ACTIVE_ERROR": "ACTIVE_ERROR",
             "Q_ERROR": "Q_ERROR",
             "BLOCK": "CTRL_BLOCK",
@@ -650,6 +658,7 @@ def materialize_native_avm_library(
     root, arm_writer = _make_library(metadata, defaults, scope=NATIVE_SCOPE)
     _station_control(root)
     _station_measurements(root)
+    append_precharge_readiness(root)
     sample = _definition(root, SAMPLE_NAME,
                          {"IN": (-36, 0, "Transfer", "Input"), "OUT": (36, 0, "Transfer", "Output")}, {})
     _script(sample, "Dsdyn", "      $OUT = $IN\n")
@@ -825,6 +834,8 @@ def materialize_native_avm_fixture(
     converter_loss_mw: float = 0.0,
     dc_grounding_resistance_ohm: float = 1e6,
     valve_grounding_resistance_ohm: float = 1e6,
+    maximum_precharge_time_s: float = 1.0,
+    precharge_current_limit_ka: float = 2.0,
     deblock_time_s: float = 0.10,
     reversal_time_s: float = 0.30,
     reversal_duration_s: float = 0.50,
@@ -871,6 +882,8 @@ def materialize_native_avm_fixture(
     frequency_hz = _number(frequency_hz, "frequency_hz", positive=True)
     dc_grounding_resistance_ohm = _number(dc_grounding_resistance_ohm, "dc_grounding_resistance_ohm", positive=True)
     valve_grounding_resistance_ohm = _number(valve_grounding_resistance_ohm, "valve_grounding_resistance_ohm", positive=True)
+    maximum_precharge_time_s = _number(maximum_precharge_time_s, "maximum_precharge_time_s", positive=True)
+    precharge_current_limit_ka = _number(precharge_current_limit_ka, "precharge_current_limit_ka", positive=True)
     transformer_rating_mva = _number(
         transformer_rating_mva, "transformer_rating_mva", positive=True
     )
@@ -932,6 +945,7 @@ def materialize_native_avm_fixture(
     output_step_s = _number(output_step_s, "output_step_s", positive=True)
     if (
         not 0 <= modulation_index < 1
+        or maximum_precharge_time_s <= deblock_time_s
         or reversal_time_s <= deblock_time_s
         or (
             control_kind == "closed_loop"
@@ -1140,6 +1154,8 @@ def materialize_native_avm_fixture(
                     "P_MEAS": prefix + "_P",
                     "Q_MEAS": prefix + "_Q",
                     "VDC_MEAS": prefix + "_VDC",
+                    "STARTUP_READY": "PRECHARGE_READY",
+                    "START_TIME": "DEBLOCK_TIME",
                     **{name: prefix + "_" + name for name in ARM_FEEDBACK_INPUTS},
                     **{name: prefix + "_" + name for name in CONTROL_OUTPUTS},
                 },
@@ -1260,6 +1276,13 @@ def materialize_native_avm_fixture(
             },
         )
     selected_signals = {name: name for name in FIXTURE_CHANNELS}
+    writer.add(
+        main, "precharge_readiness", NATIVE_SCOPE + ":" + STARTUP_NAME,
+        {**STARTUP_DEFAULTS, "Frequency_Hz": frequency_hz, "Vdc_Order_kV": vdc_order_kv,
+         "C_eq_F": arm_values["C_eq_F"], "Deblock_Time_s": deblock_time_s,
+         "Maximum_Precharge_s": maximum_precharge_time_s, "Precharge_Current_Limit_kA": precharge_current_limit_ka},
+        {**{name: name for name in STARTUP_INPUTS}, **{port: name for port, (name, _) in STARTUP_OUTPUTS.items()}},
+    )
     for prefix in ("P", "V"):
         for phase in "ABC":
             for position in ("UPPER", "LOWER"):
@@ -1374,6 +1397,8 @@ def materialize_native_avm_fixture(
             "circulating_control_bandwidth_hz": circulating_control_bandwidth_hz,
             "dc_grounding_resistance_ohm": dc_grounding_resistance_ohm,
             "valve_grounding_resistance_ohm": valve_grounding_resistance_ohm,
+            "maximum_precharge_time_s": maximum_precharge_time_s,
+            "precharge_current_limit_ka": precharge_current_limit_ka,
             "transformer_rating_mva": transformer_rating_mva,
             "modulation_index": modulation_index,
             "control_kind": control_kind,
@@ -1439,6 +1464,8 @@ def audit_native_avm_fixture(
         f"{NATIVE_SCOPE}:{control_definition}": 2,
         f"{NATIVE_SCOPE}:{MEASUREMENT_NAME}": 2,
         f"{NATIVE_SCOPE}:MMCCableLink": 1,
+        f"{NATIVE_SCOPE}:{STARTUP_NAME}": 1,
+        f"{NATIVE_SCOPE}:{SAMPLE_NAME}": 2 * len(KCL_MEASUREMENTS),
         "master:source3": 2,
         "master:xfmr-3p2w": 2,
         "master:breakout": 6,

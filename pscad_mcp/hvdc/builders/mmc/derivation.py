@@ -19,7 +19,7 @@ from .parametric_models import (
 )
 
 
-EQUATION_VERSION = "mmc-parametric-v3"
+EQUATION_VERSION = "mmc-parametric-v4"
 
 _PWM_REFERENCE: dict[str, Any] = {
     "evidence": "audited-template-reference-v1",
@@ -43,7 +43,7 @@ _AVM_REFERENCE: dict[str, Any] = {
 }
 
 
-_ENERGY_OVERRIDE_UNITS = {
+_OVERRIDE_UNIT_FACTORS = {
     "stored_energy_mj": {"MJ": 1.0, "J": 1e-6},
     "equivalent_arm_capacitance_f": {"F": 1.0, "uF": 1e-6},
     "dc_voltage_control_kp": {"MW/kV": 1.0},
@@ -190,6 +190,7 @@ def _engine_candidates(
         # Installed breaker1 and peswitch defaults use a 1 Mohm open branch.
         base_parameters["arm_off_state_resistance_ohm"] = 1e6
         base_parameters["base_modulation_index"] = 0.9
+        base_parameters["maximum_precharge_time_s"] = 1.0
     for name, override in request.engineering_overrides.items():
         if name == _CAPACITOR_VOLTAGE_TARGET:
             raise _error(
@@ -197,7 +198,7 @@ def _engine_candidates(
                 "The equivalent capacitor-voltage target is fixed at half the requested DC voltage.",
                 field=f"engineering_overrides.{name}",
             )
-        unit_factors = _ENERGY_OVERRIDE_UNITS.get(name)
+        unit_factors = _OVERRIDE_UNIT_FACTORS.get(name)
         if unit_factors is None:
             base_parameters[name] = override["value"]
             continue
@@ -212,6 +213,10 @@ def _engine_candidates(
             )
         base_parameters[name] = override["value"] * unit_factors[unit]
     # Preserve the existing half-normalized capacitor-voltage convention.
+    if "native_cable_profile_hash" in common:
+        valve_voltage = float(base_parameters["base_modulation_index"]) * request.dc_voltage_kv * math.sqrt(3.0) / (2 * math.sqrt(2.0))
+        ac_peak = math.sqrt(2.0) * math.hypot(request.active_power_mw, request.reactive_power_mvar) / (math.sqrt(3.0) * valve_voltage)
+        base_parameters["precharge_current_limit_ka"] = 1.25 * (common["dc_current_ka"] / 3.0 + ac_peak / 2.0)
     capacitor_voltage_target_kv = request.dc_voltage_kv / 2.0
     _synchronize_arm_energy(
         base_parameters,

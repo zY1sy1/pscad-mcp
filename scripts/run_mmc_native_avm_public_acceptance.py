@@ -29,6 +29,7 @@ from pscad_mcp.hvdc.builders.mmc.native_bundle import FIXTURE_CHANNELS, NATIVE_S
 from pscad_mcp.hvdc.builders.mmc.native_energy import diagnose_native_arm_energy
 from pscad_mcp.hvdc.builders.mmc.native_envelope import evaluate_native_steady_envelope
 from pscad_mcp.hvdc.builders.mmc.native_physical import evaluate_native_network_identities
+from pscad_mcp.hvdc.builders.mmc.native_startup import analyze_precharge_trace
 from pscad_mcp.hvdc.builders.mmc.parametric_models import parse_parametric_request
 from pscad_mcp.hvdc.builders.mmc.parametric_service import ParametricMmcBuilderService
 from scripts.run_mmc_average_arm_acceptance import (
@@ -369,16 +370,26 @@ async def run_attempt(
         report["trace"] = {"path": str(trace_path), "sha256": _sha256(trace_path)}
         fixture_parameters = engine["candidate_result"]["fixture"]["parameters"]
         reversal_end = fixture_parameters["reversal_time_s"] + fixture_parameters["reversal_duration_s"]
+        forward_window = (0.6, 0.9)
         reverse_window = (reversal_end + 0.5, reversal_end + 0.8)
+        deblock_time = fixture_parameters["deblock_time_s"]
+        if control_kind == "closed_loop":
+            report["precharge"] = analyze_precharge_trace(observed["samples"], fixture_parameters)
+            if "operating_windows" not in report["precharge"]:
+                raise ValueError(report["precharge"].get("error", "Precharge operating windows are missing"))
+            forward_window = tuple(report["precharge"]["operating_windows"]["forward"])
+            reverse_window = tuple(report["precharge"]["operating_windows"]["reverse"])
+            deblock_time = report["precharge"]["deblock_time_s"]
         report["energy_diagnostics"] = diagnose_native_arm_energy(
             observed["samples"],
             engine["candidate_result"]["fixture"]["parameters"]["arm"],
-            windows=((0.4, 0.9), reverse_window),
+            windows=(forward_window, reverse_window),
         )
         if control_kind == "closed_loop":
             report["steady_envelope"] = evaluate_native_steady_envelope(
                 observed["samples"], power_mw=request["active_power_mw"],
                 voltage_kv=request["dc_voltage_kv"], reactive_mvar=request["reactive_power_mvar"],
+                forward_window_s=forward_window,
                 reverse_window_s=reverse_window,
             )
             report["network_identities"] = evaluate_native_network_identities(
@@ -387,13 +398,13 @@ async def run_attempt(
                 grounding_resistance_ohm=fixture_parameters["dc_grounding_resistance_ohm"],
                 valve_grounding_resistance_ohm=fixture_parameters["valve_grounding_resistance_ohm"],
                 voltage_kv=request["dc_voltage_kv"], frequency_hz=request["frequency_hz"],
-                windows={"forward": (0.6, 0.9), "reverse": reverse_window},
+                windows={"forward": forward_window, "reverse": reverse_window},
             )
         report["analysis"] = analyze_integration_trace(
             observed["samples"],
             sequence_windows=(
-                (0.02, 0.09, 1.0),
-                (0.40, 0.90, 2.0),
+                (0.02, deblock_time - 0.01, 1.0),
+                (*forward_window, 2.0),
                 (*reverse_window, 3.0),
             ),
             minimum_end_s=fixture_parameters["simulation_duration_s"] - 0.001,
@@ -401,9 +412,10 @@ async def run_attempt(
         report["assembly_accepted"] = report["analysis"]["status"] == "PASS"
         report["steady_operating_accepted"] = report.get("steady_envelope", {}).get("status") == "PASS"
         report["network_identities_accepted"] = report.get("network_identities", {}).get("status") == "PASS"
+        report["precharge_accepted"] = report.get("precharge", {}).get("status") == "PASS"
         report["status"] = (
             "PASS" if report["assembly_accepted"]
-            and (control_kind != "closed_loop" or (report["steady_operating_accepted"] and report["network_identities_accepted"]))
+            and (control_kind != "closed_loop" or (report["steady_operating_accepted"] and report["network_identities_accepted"] and report["precharge_accepted"]))
             else "FAIL"
         )
         if report["status"] != "PASS":
