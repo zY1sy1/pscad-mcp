@@ -299,6 +299,45 @@ def _normalize_new_sticky_styles(before, after):
         _normalize_new_sticky_styles(old, new)
 
 
+def _normalize_hierarchy_call_order(before, after):
+    """Validate vendor ordinal assignment before comparing reordered call indexes."""
+    def canonical_hierarchies(root):
+        return [ET.canonicalize(ET.tostring(item, encoding='unicode'), strip_text=True)
+                for item in root.findall('./hierarchy')]
+
+    if canonical_hierarchies(before) == canonical_hierarchies(after):
+        return
+    for root in (before, after):
+        for hierarchy in root.findall('./hierarchy'):
+            counts, indexed = {}, {}
+            for call in hierarchy.iter('call'):
+                name, ordinal = call.get('name'), call.get('instance')
+                present = ordinal is not None
+                if name in indexed and indexed[name] != present:
+                    raise ValueError('Saved hierarchy instance numbering is incomplete')
+                indexed[name] = present
+                expected = counts.get(name, 0)
+                if present and ordinal != str(expected):
+                    raise ValueError('Saved hierarchy instances are not numbered in definition traversal order')
+                counts[name] = expected + 1
+            for parent in hierarchy.iter():
+                calls = [child for child in parent if child.tag == 'call']
+                if len(calls) < 2:
+                    continue
+                links = [child.get('link') for child in calls]
+                if any(link is None for link in links) or len(links) != len(set(links)):
+                    raise ValueError('Saved hierarchy calls have missing or duplicate instance identities')
+                ordered = iter(sorted(calls, key=lambda child: child.get('link')))
+                parent[:] = [next(ordered) if child.tag == 'call' else child for child in parent]
+            counts = {}
+            for call in hierarchy.iter('call'):
+                name = call.get('name')
+                if indexed[name]:
+                    ordinal = counts.get(name, 0)
+                    call.set('instance', str(ordinal))
+                    counts[name] = ordinal + 1
+
+
 def _verify_saved_model_roots(before, after, contract) -> bool:
     binding = contract.get("virtual_root_rebinding")
     if binding:
@@ -309,6 +348,7 @@ def _verify_saved_model_roots(before, after, contract) -> bool:
             if before.get("id") == ids[0][1] and after.get("id") == ids[1][1]:
                 after.set("id", before.get("id"))
     _normalize_new_sticky_styles(before, after)
+    _normalize_hierarchy_call_order(before, after)
     for root in (before, after):
         for revisor in root.findall("./paramlist[@name='Settings']/param[@name='revisor']"):
             if "value" in revisor.attrib:

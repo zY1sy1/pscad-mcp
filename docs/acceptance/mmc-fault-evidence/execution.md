@@ -459,3 +459,15 @@ checks and `git diff --check` passed. This is software repair validation;
 native physical acceptance remains bound to the immutable `86adfe0` producer
 and evidence above. Fresh public/joint closure is recorded separately by the
 integration branch, including the retained publication-only failed attempt.
+
+The final shared replay comparator repair was then synchronized from
+`4c2a9ae9b9def6624382cf84f078cee4ff4b0ea4`. It accepts vendor reordering of
+hierarchy calls only after validating unique call identities and complete
+definition-wide instance ordinals; all other XML remains under the full
+comparison. The B-worktree replay gate passed 77 tests in 1.81 s, with targeted
+Ruff and diff checks clean. Fresh integration replay at producer `6410b5e`
+passed all 122 physical checks and same-dataset timing, with owned cleanup and
+lease release confirmed. Its final recovery report is
+`D:/PSCAD-Workspace/mmc-joint-replay-20260922-r1/.pscad-mcp/mmc-builds/99f5b751febe446ab35182a8156b4692/journal.json`,
+SHA-256 `285a9af72060b26d9051c609948bcc260bba6f1bd4519fb4302966a3d22c132b`.
+The native B handoff and original `86adfe0` physical producer remain unchanged.
