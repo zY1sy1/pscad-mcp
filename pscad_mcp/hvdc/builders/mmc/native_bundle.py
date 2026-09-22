@@ -65,7 +65,23 @@ CLOSED_LOOP_DEFAULTS = {
     "Kp_Reactive": 0.00005,
     "Ti_Reactive_s": 0.50,
     "Base_Modulation": 0.90,
+    "C_eq_F": 6.510416666666667e-5,
+    "Circulating_Gain_ohm": 18.84955592153876,
+    "Energy_Gain_per_s": 10.0,
 }
+ARM_FEEDBACK_INPUTS = tuple(
+    f"{phase}_{position}_{quantity}"
+    for phase in "ABC"
+    for position in ("UPPER", "LOWER")
+    for quantity in ("VCAP", "I")
+)
+
+
+def _feedback_ports(names: tuple[str, ...]) -> dict:
+    return {
+        name: (-90 - (index // 8) * 108, -180 + (index % 8) * 36, "Transfer", "Input")
+        for index, name in enumerate(names)
+    }
 FIXTURE_CHANNELS = {
     "P_VDC": "kV",
     "V_VDC": "kV",
@@ -256,14 +272,15 @@ def _closed_loop_control(root: ET.Element, master: dict, defaults: dict) -> dict
         root,
         "MMCModulationSynthesis",
         {
-            "ANGLE_COMMAND": (-72, -36, "Transfer", "Input"),
-            "MODULATION_COMMAND": (-72, 0, "Transfer", "Input"),
+            **_feedback_ports(("ANGLE_COMMAND", "MODULATION_COMMAND", "VDC_MEAS", "P_MEAS", *ARM_FEEDBACK_INPUTS)),
             **{
                 name: (72, -126 + index * 36, "Transfer", "Output")
                 for index, name in enumerate(CONTROL_OUTPUTS[:6])
             },
         },
-        {"Frequency_Hz": CLOSED_LOOP_DEFAULTS["Frequency_Hz"]},
+        {name: CLOSED_LOOP_DEFAULTS[name] for name in (
+            "Frequency_Hz", "Vdc_Order_kV", "C_eq_F", "Circulating_Gain_ohm", "Energy_Gain_per_s"
+        )},
     )
     _script(
         synthesis,
@@ -273,23 +290,31 @@ def _closed_loop_control(root: ET.Element, master: dict, defaults: dict) -> dict
 #LOCAL REAL MA
 #LOCAL REAL MB
 #LOCAL REAL MC
+#LOCAL REAL WREF
+#LOCAL REAL WPAIR
+#LOCAL REAL ISUM
+#LOCAL REAL IREF
+#LOCAL REAL VCOMMON
+#LOCAL REAL VACOM
       ANGLE = 6.28318530717959 * $Frequency_Hz * TIME + $ANGLE_COMMAND * 0.0174532925199433
       MODULATION = MIN(0.98, MAX(0.10, $MODULATION_COMMAND))
       MA = MODULATION * SIN(ANGLE)
       MB = MODULATION * SIN(ANGLE - 2.09439510239320)
       MC = MODULATION * SIN(ANGLE + 2.09439510239320)
-      $M_A_UPPER = 0.5 * (1.0 - MA)
-      $M_A_LOWER = 0.5 * (1.0 + MA)
-      $M_B_UPPER = 0.5 * (1.0 - MB)
-      $M_B_LOWER = 0.5 * (1.0 + MB)
-      $M_C_UPPER = 0.5 * (1.0 - MC)
-      $M_C_LOWER = 0.5 * (1.0 + MC)
-""",
+      WREF = 0.25 * $C_eq_F * $Vdc_Order_kV * $Vdc_Order_kV
+""" + "".join(
+            f"""      WPAIR = 0.5 * $C_eq_F * (${phase}_UPPER_VCAP**2 + ${phase}_LOWER_VCAP**2)
+      ISUM = 0.5 * (${phase}_UPPER_I + ${phase}_LOWER_I)
+      IREF = (-$P_MEAS / 3.0 - $Energy_Gain_per_s * (WPAIR - WREF)) / MAX(0.1 * $Vdc_Order_kV, $VDC_MEAS)
+      VCOMMON = 0.5 * $VDC_MEAS + $Circulating_Gain_ohm * (ISUM - IREF)
+      VACOM = 0.5 * $Vdc_Order_kV * M{phase}
+      $M_{phase}_UPPER = MIN(1.0, MAX(0.0, (VCOMMON - VACOM) / MAX(0.1 * $Vdc_Order_kV, 2.0 * ${phase}_UPPER_VCAP)))
+      $M_{phase}_LOWER = MIN(1.0, MAX(0.0, (VCOMMON + VACOM) / MAX(0.1 * $Vdc_Order_kV, 2.0 * ${phase}_LOWER_VCAP)))
+""" for phase in "ABC"
+        ),
     )
     ports = {
-        "P_MEAS": (-90, -180, "Transfer", "Input"),
-        "Q_MEAS": (-90, -144, "Transfer", "Input"),
-        "VDC_MEAS": (-90, -108, "Transfer", "Input"),
+        **_feedback_ports(("P_MEAS", "Q_MEAS", "VDC_MEAS", *ARM_FEEDBACK_INPUTS)),
         **{
             name: (90, -180 + index * 36, "Transfer", "Output")
             for index, name in enumerate(CONTROL_OUTPUTS)
@@ -313,7 +338,7 @@ def _closed_loop_control(root: ET.Element, master: dict, defaults: dict) -> dict
     add = lambda role, scoped, parameters, bindings: writer.add(
         controller, role, scoped, parameters, bindings
     )
-    for name in ("P_MEAS", "Q_MEAS", "VDC_MEAS"):
+    for name in ("P_MEAS", "Q_MEAS", "VDC_MEAS", *ARM_FEEDBACK_INPUTS):
         add("input_" + name, "master:import", {"Name": name}, {"N": name})
     for name in CLOSED_LOOP_DEFAULTS:
         add("parameter_" + name, "master:import", {"Name": name}, {"N": name})
@@ -408,10 +433,15 @@ def _closed_loop_control(root: ET.Element, master: dict, defaults: dict) -> dict
     add(
         "synthesis",
         f"{NATIVE_SCOPE}:MMCModulationSynthesis",
-        {"Frequency_Hz": "Frequency_Hz"},
+        {name: name for name in (
+            "Frequency_Hz", "Vdc_Order_kV", "C_eq_F", "Circulating_Gain_ohm", "Energy_Gain_per_s"
+        )},
         {
             "ANGLE_COMMAND": "CTRL_ANGLE_COMMAND",
             "MODULATION_COMMAND": "CTRL_MODULATION_COMMAND",
+            "VDC_MEAS": "VDC_MEAS",
+            "P_MEAS": "P_FILTERED",
+            **{name: name for name in ARM_FEEDBACK_INPUTS},
             **{name: "CTRL_" + name for name in CONTROL_OUTPUTS[:6]},
         },
     )
@@ -898,6 +928,8 @@ def materialize_native_avm_fixture(
                     "Kp_Reactive": reactive_control_kp,
                     "Ti_Reactive_s": reactive_control_ti_s,
                     "Base_Modulation": modulation_index,
+                    "C_eq_F": arm_values["C_eq_F"],
+                    "Circulating_Gain_ohm": 2 * math.pi * 60 * arm_values["L_arm_H"],
                     "Deblock_Time_s": deblock_time_s,
                     "Reversal_Time_s": reversal_time_s,
                     "Ramp_Time_s": ramp_time_s,
@@ -906,6 +938,7 @@ def materialize_native_avm_fixture(
                     "P_MEAS": prefix + "_P",
                     "Q_MEAS": prefix + "_Q",
                     "VDC_MEAS": prefix + "_VDC",
+                    **{name: prefix + "_" + name for name in ARM_FEEDBACK_INPUTS},
                     **{name: prefix + "_" + name for name in CONTROL_OUTPUTS},
                 },
             )

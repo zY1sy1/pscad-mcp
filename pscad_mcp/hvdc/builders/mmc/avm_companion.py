@@ -241,6 +241,8 @@ _PARAMETER_UNITS = {
     "Kp_Reactive": "1",
     "Ti_Reactive_s": "s",
     "Base_Modulation": "1",
+    "Circulating_Gain_ohm": "ohm",
+    "Energy_Gain_per_s": "1",
 }
 
 
