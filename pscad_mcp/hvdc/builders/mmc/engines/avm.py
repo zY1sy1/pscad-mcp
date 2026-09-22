@@ -418,6 +418,7 @@ class AvmBlueprintEngine:
             "dc_voltage_control_ti_s": float(values.get("dc_voltage_control_ti_s", 0.30 / scale)),
             "energy_control_gain": 10.0 * scale,
             "circulating_control_bandwidth_hz": 60.0 * scale,
+            "circulating_integral_time_s": 0.05 / scale,
             "feedback_filter_s": 0.02 / scale,
             "energy_difference_filter_s": 0.05 / scale,
         }

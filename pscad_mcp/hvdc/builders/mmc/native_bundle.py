@@ -56,6 +56,9 @@ INSERTION_OUTPUTS = CONTROL_OUTPUTS[:6]
 RAW_INSERTION_OUTPUTS = tuple(name + "_RAW" for name in INSERTION_OUTPUTS)
 CONTROL_OUTPUTS += RAW_INSERTION_OUTPUTS
 MODULATION_OUTPUTS = INSERTION_OUTPUTS + RAW_INSERTION_OUTPUTS
+CIRCULATING_OUTPUTS = tuple(f"CIRC_{quantity}_{phase}" for phase in "ABC" for quantity in ("REFERENCE", "INTEGRATOR"))
+CONTROL_OUTPUTS += CIRCULATING_OUTPUTS
+SYNTHESIS_OUTPUTS = MODULATION_OUTPUTS + CIRCULATING_OUTPUTS
 KCL_MEASUREMENTS = {"IDC": "kA", "IDC_NEG": "kA", "VDC_POS": "kV", "VDC_NEG": "kV",
                     **{f"VALVE_{q}_{p}": unit for p in "ABC" for q, unit in (("I", "kA"), ("V", "kV"))}}
 CONTROL_DEFAULTS = {
@@ -85,6 +88,7 @@ CLOSED_LOOP_DEFAULTS = {
     "Base_Modulation": 0.90,
     "C_eq_F": 6.510416666666667e-5,
     "Circulating_Gain_ohm": 18.84955592153876,
+    "Circulating_Integral_Time_s": 0.05,
     "Energy_Gain_per_s": 10.0,
     "R_arm_ohm": 0.15,
     "P_nonohmic_MW": 0.0,
@@ -142,6 +146,7 @@ ARM_OBSERVABLES = {
 }
 FIXTURE_CHANNELS.update({signal: units for signal, units in STARTUP_OUTPUTS.values()})
 for _prefix in ("P", "V"):
+    FIXTURE_CHANNELS.update({f"{_prefix}_{name}": "kA" if "REFERENCE" in name else "kV" for name in CIRCULATING_OUTPUTS})
     FIXTURE_CHANNELS.update({f"{_prefix}_P_REFERENCE": "MW", f"{_prefix}_Q_REFERENCE": "MVAr", f"{_prefix}_VDC_REFERENCE": "kV"})
     FIXTURE_CHANNELS.update({f"{_prefix}_KCL_{name}": unit for name, unit in KCL_MEASUREMENTS.items()})
     FIXTURE_CHANNELS.update({
@@ -232,7 +237,8 @@ def _station_control(root: ET.Element) -> ET.Element:
       ELSEIF (TIME .GE. $Reversal_Time_s) THEN
         $SEQUENCE = 3.0
       ENDIF
-""" + "".join(f"      ${name}_RAW = ${name}\n" for name in INSERTION_OUTPUTS),
+""" + "".join(f"      ${name}_RAW = ${name}\n" for name in INSERTION_OUTPUTS)
+        + "".join(f"      ${name} = 0.0\n" for name in CIRCULATING_OUTPUTS),
     )
     return control
 
@@ -372,20 +378,21 @@ def _closed_loop_control(root: ET.Element, master: dict, defaults: dict) -> dict
         root,
         "MMCModulationSynthesis",
         {
-            **_feedback_ports(("ANGLE_COMMAND", "MODULATION_COMMAND", "VDC_MEAS", "P_MEAS", "FRAME_D", "FRAME_Q", *ARM_FEEDBACK_INPUTS, "DWA", "DWB", "DWC", "SWA", "SWB", "SWC")),
+            **_feedback_ports(("ANGLE_COMMAND", "MODULATION_COMMAND", "BLOCK", "VDC_MEAS", "P_MEAS", "FRAME_D", "FRAME_Q", *ARM_FEEDBACK_INPUTS, "DWA", "DWB", "DWC", "SWA", "SWB", "SWC")),
             **{
                 name: (72, -126 + index * 36, "Transfer", "Output")
-                for index, name in enumerate(MODULATION_OUTPUTS)
+                for index, name in enumerate(SYNTHESIS_OUTPUTS)
             },
         },
         {name: CLOSED_LOOP_DEFAULTS[name] for name in (
-            "Frequency_Hz", "Vdc_Order_kV", "C_eq_F", "Circulating_Gain_ohm", "Energy_Gain_per_s", "R_arm_ohm", "P_nonohmic_MW"
+            "Frequency_Hz", "Vdc_Order_kV", "C_eq_F", "Circulating_Gain_ohm", "Circulating_Integral_Time_s", "Energy_Gain_per_s", "R_arm_ohm", "P_nonohmic_MW"
         )},
     )
     _script(
         synthesis,
-        "Fortran",
-        """#LOCAL REAL ANGLE
+        "Dsdyn",
+        """#STORAGE REAL:3
+#LOCAL REAL ANGLE
 #LOCAL REAL MODULATION
 #LOCAL REAL MA
 #LOCAL REAL MB
@@ -397,6 +404,14 @@ def _closed_loop_control(root: ET.Element, master: dict, defaults: dict) -> dict
 #LOCAL REAL VCOMMON
 #LOCAL REAL VACOM
 #LOCAL REAL PLOSS
+#LOCAL REAL IERROR
+#LOCAL REAL VMIN
+#LOCAL REAL VMAX
+      IF (TIMEZERO) THEN
+        STORF(NSTORF) = 0.0
+        STORF(NSTORF+1) = 0.0
+        STORF(NSTORF+2) = 0.0
+      ENDIF
       ANGLE = 6.28318530717959 * $Frequency_Hz * TIME
       IF ($FRAME_D * $FRAME_D + $FRAME_Q * $FRAME_Q .GT. 1.0) ANGLE = ANGLE + ATAN2($FRAME_Q, $FRAME_D)
       ANGLE = ANGLE + $ANGLE_COMMAND * 0.0174532925199433
@@ -412,13 +427,25 @@ def _closed_loop_control(root: ET.Element, master: dict, defaults: dict) -> dict
       VACOM = 0.5 * $Vdc_Order_kV * M{phase}
       IREF = (PLOSS - $P_MEAS / 3.0 - $Energy_Gain_per_s * (WPAIR - WREF)) / MAX(0.1 * $Vdc_Order_kV, $VDC_MEAS)
       IREF = IREF + 5.0 * $DW{phase} * VACOM / MAX(1.0, (0.5 * $Vdc_Order_kV * MODULATION)**2)
-      VCOMMON = 0.5 * $VDC_MEAS + $Circulating_Gain_ohm * (ISUM - IREF)
+      IERROR = ISUM - IREF
+      IF ($BLOCK .GE. 0.5) STORF(NSTORF+{index}) = 0.0
+      VCOMMON = 0.5 * $VDC_MEAS - $R_arm_ohm * IREF + $Circulating_Gain_ohm * IERROR + STORF(NSTORF+{index})
+      VMIN = ABS(VACOM)
+      VMAX = MIN(2.0 * ${phase}_UPPER_VCAP + VACOM, 2.0 * ${phase}_LOWER_VCAP - VACOM)
+      IF ($BLOCK .LT. 0.5 .AND. VMAX .GE. VMIN) THEN
+        IF ((VCOMMON .LT. VMAX .OR. IERROR .LT. 0.0) .AND. (VCOMMON .GT. VMIN .OR. IERROR .GT. 0.0)) THEN
+          STORF(NSTORF+{index}) = MIN(0.5 * $Vdc_Order_kV, MAX(-0.5 * $Vdc_Order_kV, STORF(NSTORF+{index}) + DELT * $Circulating_Gain_ohm * IERROR / $Circulating_Integral_Time_s))
+        ENDIF
+      ENDIF
+      VCOMMON = 0.5 * $VDC_MEAS - $R_arm_ohm * IREF + $Circulating_Gain_ohm * IERROR + STORF(NSTORF+{index})
+      $CIRC_REFERENCE_{phase} = IREF
+      $CIRC_INTEGRATOR_{phase} = STORF(NSTORF+{index})
       $M_{phase}_UPPER_RAW = (VCOMMON - VACOM) / MAX(0.1 * $Vdc_Order_kV, 2.0 * ${phase}_UPPER_VCAP)
       $M_{phase}_LOWER_RAW = (VCOMMON + VACOM) / MAX(0.1 * $Vdc_Order_kV, 2.0 * ${phase}_LOWER_VCAP)
       $M_{phase}_UPPER = MIN(1.0, MAX(0.0, $M_{phase}_UPPER_RAW))
       $M_{phase}_LOWER = MIN(1.0, MAX(0.0, $M_{phase}_LOWER_RAW))
-""" for phase in "ABC"
-        ),
+""" for index, phase in enumerate("ABC")
+        ) + "      NSTORF = NSTORF + 3\n",
     )
     ports = {
         **_feedback_ports(("P_MEAS", "Q_MEAS", "VDC_MEAS", "STARTUP_READY", "START_TIME", *ARM_FEEDBACK_INPUTS)),
@@ -439,6 +466,7 @@ def _closed_loop_control(root: ET.Element, master: dict, defaults: dict) -> dict
         "ERROR Reversal must follow the initial ramp : Reversal_Time_s > Deblock_Time_s + Ramp_Time_s\n"
         "ERROR Active PI time constant must be positive : Ti_Active_s > 0\n"
         "ERROR Reactive PI time constant must be positive : Ti_Reactive_s > 0\n"
+        "ERROR Circulating PI time constant must be positive : Circulating_Integral_Time_s > 0\n"
         "ERROR Base modulation must be bounded : Base_Modulation > 0.1 && Base_Modulation < 0.98\n",
     )
     writer = _Writer(root, master, defaults)
@@ -598,11 +626,12 @@ def _closed_loop_control(root: ET.Element, master: dict, defaults: dict) -> dict
         "synthesis",
         f"{NATIVE_SCOPE}:MMCModulationSynthesis",
         {name: name for name in (
-            "Frequency_Hz", "Vdc_Order_kV", "C_eq_F", "Circulating_Gain_ohm", "Energy_Gain_per_s", "R_arm_ohm", "P_nonohmic_MW"
+            "Frequency_Hz", "Vdc_Order_kV", "C_eq_F", "Circulating_Gain_ohm", "Circulating_Integral_Time_s", "Energy_Gain_per_s", "R_arm_ohm", "P_nonohmic_MW"
         )},
         {
             "ANGLE_COMMAND": "CTRL_ANGLE_COMMAND",
             "MODULATION_COMMAND": "CTRL_MODULATION_COMMAND",
+            "BLOCK": "CTRL_BLOCK",
             "VDC_MEAS": "VDC_MEAS",
             "P_MEAS": "P_FILTERED",
             "FRAME_D": "FRAME_D",
@@ -610,7 +639,7 @@ def _closed_loop_control(root: ET.Element, master: dict, defaults: dict) -> dict
             **{f"DW{phase}": f"DW{phase}" for phase in "ABC"},
             **{f"SW{phase}": f"SW{phase}" for phase in "ABC"},
             **{name: name for name in ARM_FEEDBACK_INPUTS},
-            **{name: "CTRL_" + name for name in MODULATION_OUTPUTS},
+            **{name: "CTRL_" + name for name in SYNTHESIS_OUTPUTS},
         },
     )
     for name in CONTROL_OUTPUTS:
@@ -828,6 +857,7 @@ def materialize_native_avm_fixture(
     dc_voltage_control_ti_s: float = 0.30,
     energy_control_gain: float = 10.0,
     circulating_control_bandwidth_hz: float = 60.0,
+    circulating_integral_time_s: float = 0.05,
     feedback_filter_s: float = 0.02,
     energy_difference_filter_s: float = 0.05,
     cable_loss_mw: float = 0.0,
@@ -918,6 +948,7 @@ def materialize_native_avm_fixture(
         "Energy_Gain_per_s": _number(energy_control_gain, "energy_control_gain", positive=True),
         "Feedback_Filter_s": _number(feedback_filter_s, "feedback_filter_s", positive=True),
         "Energy_Difference_Filter_s": _number(energy_difference_filter_s, "energy_difference_filter_s", positive=True),
+        "Circulating_Integral_Time_s": _number(circulating_integral_time_s, "circulating_integral_time_s", positive=True),
     }
     circulating_control_bandwidth_hz = _number(circulating_control_bandwidth_hz, "circulating_control_bandwidth_hz", positive=True)
     station_p_grid_r_ohm = _number(

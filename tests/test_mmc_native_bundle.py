@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import hashlib
 import math
+import os
+import re
+import subprocess
 from pathlib import Path
 from xml.etree import ElementTree as ET
 
@@ -20,6 +23,84 @@ from pscad_mcp.hvdc.builders.mmc.native_bundle import (
     materialize_native_avm_library,
 )
 from tests.test_mmc_cable_constants import _fake_native_run
+
+
+def test_native_circulating_pi_rejects_stationary_voltage_bias(constants_evidence, installed_sources, tmp_path):
+    """Compile the actual native control law and close it around an RL plant."""
+    compiler = Path("C:/Program Files (x86)/GFortran/4.6/bin/gfortran.exe")
+    if not compiler.is_file():
+        pytest.skip("Native Fortran compiler is unavailable")
+    donor, master = installed_sources
+    report = materialize_native_avm_library(tmp_path / "pi-library.pslx", constants_evidence=constants_evidence,
+                                           source_project=donor, master_path=master)
+    root = ET.parse(report["library_path"])
+    definition = root.find("./definitions/Definition[@name='MMCModulationSynthesis']")
+    script = definition.find("./script/segment[@name='Dsdyn']").text
+    defaults = {p.get("name"): float(p.findtext("value")) for p in definition.findall("./form/category/parameter")}
+    local_names = re.findall(r"#LOCAL REAL (\w+)", script)
+    symbols = set(defaults) | {p.get("name") for p in definition.findall("./svg/port")} | set(local_names)
+    body = re.sub(r"^#.*$", "", script, flags=re.MULTILINE)
+    body = re.sub(r"\$(\w+)", r"\1", body)
+    declarations = "\n".join(f"real(8) :: {name}" for name in sorted(symbols))
+    initialize = "\n".join(f"{name} = {defaults.get(name, 0.0):.17e}" for name in sorted(symbols))
+    feedback = "\n".join(
+        f"{p}_{q}_I = plant_current\n{p}_{q}_VCAP = 320.0\n" for p in "ABC" for q in ("UPPER", "LOWER")
+    )
+    energy = "\n".join(f"SW{p} = 0.25 * C_eq_F * Vdc_Order_kV**2\nDW{p} = 0.0" for p in "ABC")
+    program = f"""program current_loop
+implicit none
+{declarations}
+real(8) :: STORF(3), TIME, DELT, plant_current, plant_voltage, bias
+integer :: NSTORF, sample, scenario
+logical :: TIMEZERO
+{initialize}
+DELT = 0.00005
+VDC_MEAS = 640.0
+MODULATION_COMMAND = 0.8
+FRAME_D = 1.0
+BLOCK = 0.0
+{energy}
+do scenario = 1, 2
+  bias = 0.5 * (2 * scenario - 3)
+  P_MEAS = 960.0 * (2 * scenario - 3)
+  plant_current = 0.0
+  STORF = 0.0
+  do sample = 1, 12000
+    TIME = sample * DELT
+    TIMEZERO = sample == 1
+    NSTORF = 1
+    {feedback}
+    {body}
+    plant_voltage = 320.0 * (M_A_UPPER_RAW + M_A_LOWER_RAW)
+    plant_current = plant_current + DELT * (320.0 + bias - plant_voltage - R_arm_ohm * plant_current) / 0.05
+  enddo
+  print *, plant_current - CIRC_REFERENCE_A, CIRC_INTEGRATOR_A - bias
+enddo
+BLOCK = 1.0
+NSTORF = 1
+{body}
+print *, maxval(abs(STORF))
+end program
+"""
+    source = tmp_path / "current-loop.f90"
+    executable = tmp_path / "current-loop.exe"
+    source.write_text(program, encoding="ascii")
+    compiler_environment = {**os.environ, "PATH": str(compiler.parent) + os.pathsep + os.environ.get("PATH", "")}
+    compiler_environment.pop("GCC_EXEC_PREFIX", None)
+    compiler_environment.pop("LIBRARY_PATH", None)
+    with subprocess.Popen([str(compiler), "-ffree-form", "-ffree-line-length-none", "-fdefault-real-8",
+                           "-fdefault-double-8", str(source), "-o", str(executable)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=compiler_environment) as built:
+        compiler_output, errors = built.communicate(timeout=30)
+    assert built.returncode == 0, compiler_output + errors
+    with subprocess.Popen([str(executable)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=compiler_environment) as run:
+        output, errors = run.communicate(timeout=30)
+    assert run.returncode == 0, errors
+    rows = [[float(v.replace("D", "E")) for v in line.split()] for line in output.splitlines()]
+    assert len(rows) == 3
+    for current_error, integral_error in rows[:2]:
+        assert abs(current_error) < 1e-4
+        assert abs(integral_error) < 0.01
+    assert rows[2] == [0.0]
 
 
 @pytest.fixture(scope="module")
