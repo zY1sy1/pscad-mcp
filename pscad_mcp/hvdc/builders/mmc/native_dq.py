@@ -42,6 +42,7 @@ DQ_OUTPUTS = {
     "MODULATION_UNCLIPPED": "1",
     "ZERO_SEQUENCE_COMMAND": "kV",
     "CAP_VOLTAGE_REFERENCE": "kV", "CHARGE_POWER_REFERENCE": "MW",
+    "POWER_VOLTAGE_BASE": "kV",
     "LIMIT_ACTIVE": "1", "LIMIT_DURATION": "s",
 }
 
@@ -131,7 +132,7 @@ def append_native_pll_and_dq(root: ET.Element) -> None:
 
 
 def _dq_script() -> str:
-    text = """#STORAGE REAL:22
+    text = """#STORAGE REAL:23
 #LOCAL INTEGER K
 #LOCAL REAL A
 #LOCAL REAL VA
@@ -184,7 +185,7 @@ def _dq_script() -> str:
 #LOCAL REAL CHARGE_POWER
 #LOCAL REAL WREF_RATE
       IF (TIMEZERO) THEN
-        DO K = 0, 21
+        DO K = 0, 22
           STORF(NSTORF+K) = 0.0
         ENDDO
       ENDIF
@@ -198,8 +199,13 @@ def _dq_script() -> str:
       VQ = VA * COS(THETA) + VB * SIN(THETA)
       ID = IA * SIN(THETA) - IB * COS(THETA)
       IQ = IA * COS(THETA) + IB * SIN(THETA)
-      VBASE = MAX(0.1 * $Vdc_Order_kV, VD)
       A = 1.0 - EXP(-DELT / $Feedback_Filter_s)
+! Power-to-current normalization must not feed instantaneous PCC voltage
+! changes back into current demand through the network/interface dynamics.
+! Raw VD/VQ remain available to the inner-loop voltage feedforward below.
+      STORF(NSTORF+22) = STORF(NSTORF+22) + A * (VD - STORF(NSTORF+22))
+      VBASE = MAX(0.1 * $Vdc_Order_kV, STORF(NSTORF+22))
+      $POWER_VOLTAGE_BASE = VBASE
       STORF(NSTORF+1) = STORF(NSTORF+1) + A * ($VDC_MEAS - STORF(NSTORF+1))
       STORF(NSTORF+2) = STORF(NSTORF+2) + A * ($P_MEAS - STORF(NSTORF+2))
       STORF(NSTORF+3) = STORF(NSTORF+3) + A * ($Q_MEAS - STORF(NSTORF+3))
@@ -347,5 +353,5 @@ def _dq_script() -> str:
       $IQ_INTEGRATOR = STORF(NSTORF+7)
       $VDC_INTEGRATOR = STORF(NSTORF)
       STORF(NSTORF+18) = $LIMIT_ACTIVE
-      NSTORF = NSTORF + 22
+      NSTORF = NSTORF + 23
 """
