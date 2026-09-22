@@ -268,11 +268,30 @@ def _closed_loop_control(root: ET.Element, master: dict, defaults: dict) -> dict
       ENDIF
 """,
     )
+    reference_frame = _definition(
+        root,
+        "MMCVoltageReferenceFrame",
+        {
+            **_feedback_ports(tuple(f"{phase}_UPPER_VT" for phase in "ABC")),
+            "D": (72, -36, "Transfer", "Output"),
+            "Q": (72, 0, "Transfer", "Output"),
+        },
+        {"Frequency_Hz": CLOSED_LOOP_DEFAULTS["Frequency_Hz"]},
+    )
+    _script(reference_frame, "Fortran", """#LOCAL REAL THETA
+#LOCAL REAL VALPHA
+#LOCAL REAL VBETA
+      THETA = 6.28318530717959 * $Frequency_Hz * TIME
+      VALPHA = (-2.0 * $A_UPPER_VT + $B_UPPER_VT + $C_UPPER_VT) / 3.0
+      VBETA = ($C_UPPER_VT - $B_UPPER_VT) * 0.577350269189626
+      $D = VALPHA * SIN(THETA) - VBETA * COS(THETA)
+      $Q = VALPHA * COS(THETA) + VBETA * SIN(THETA)
+""")
     synthesis = _definition(
         root,
         "MMCModulationSynthesis",
         {
-            **_feedback_ports(("ANGLE_COMMAND", "MODULATION_COMMAND", "VDC_MEAS", "P_MEAS", *ARM_FEEDBACK_INPUTS)),
+            **_feedback_ports(("ANGLE_COMMAND", "MODULATION_COMMAND", "VDC_MEAS", "P_MEAS", "FRAME_D", "FRAME_Q", *ARM_FEEDBACK_INPUTS)),
             **{
                 name: (72, -126 + index * 36, "Transfer", "Output")
                 for index, name in enumerate(CONTROL_OUTPUTS[:6])
@@ -296,12 +315,8 @@ def _closed_loop_control(root: ET.Element, master: dict, defaults: dict) -> dict
 #LOCAL REAL IREF
 #LOCAL REAL VCOMMON
 #LOCAL REAL VACOM
-#LOCAL REAL VALPHA
-#LOCAL REAL VBETA
-      VALPHA = (-2.0 * $A_UPPER_VT + $B_UPPER_VT + $C_UPPER_VT) / 3.0
-      VBETA = ($C_UPPER_VT - $B_UPPER_VT) * 0.577350269189626
       ANGLE = 6.28318530717959 * $Frequency_Hz * TIME
-      IF (VALPHA * VALPHA + VBETA * VBETA .GT. 1.0) ANGLE = ATAN2(VALPHA, -VBETA)
+      IF ($FRAME_D * $FRAME_D + $FRAME_Q * $FRAME_Q .GT. 1.0) ANGLE = ANGLE + ATAN2($FRAME_Q, $FRAME_D)
       ANGLE = ANGLE + $ANGLE_COMMAND * 0.0174532925199433
       MODULATION = MIN(0.98, MAX(0.10, $MODULATION_COMMAND))
       MA = MODULATION * SIN(ANGLE)
@@ -349,6 +364,15 @@ def _closed_loop_control(root: ET.Element, master: dict, defaults: dict) -> dict
     for name in CLOSED_LOOP_DEFAULTS:
         add("parameter_" + name, "master:import", {"Name": name}, {"N": name})
     add(
+        "voltage_reference_frame",
+        f"{NATIVE_SCOPE}:MMCVoltageReferenceFrame",
+        {"Frequency_Hz": "Frequency_Hz"},
+        {
+            **{f"{phase}_UPPER_VT": f"{phase}_UPPER_VT" for phase in "ABC"},
+            "D": "FRAME_D_RAW", "Q": "FRAME_Q_RAW",
+        },
+    )
+    add(
         "errors",
         f"{NATIVE_SCOPE}:MMCControlErrors",
         {
@@ -377,6 +401,8 @@ def _closed_loop_control(root: ET.Element, master: dict, defaults: dict) -> dict
         ("p_filter", "P_MEAS", "P_FILTERED", 10000.0),
         ("q_filter", "Q_MEAS", "Q_FILTERED", 10000.0),
         ("vdc_filter", "VDC_MEAS", "VDC_FILTERED", 2000.0),
+        ("frame_d_filter", "FRAME_D_RAW", "FRAME_D", 2000.0),
+        ("frame_q_filter", "FRAME_Q_RAW", "FRAME_Q", 2000.0),
     ):
         add(
             role,
@@ -447,6 +473,8 @@ def _closed_loop_control(root: ET.Element, master: dict, defaults: dict) -> dict
             "MODULATION_COMMAND": "CTRL_MODULATION_COMMAND",
             "VDC_MEAS": "VDC_MEAS",
             "P_MEAS": "P_FILTERED",
+            "FRAME_D": "FRAME_D",
+            "FRAME_Q": "FRAME_Q",
             **{name: name for name in ARM_FEEDBACK_INPUTS},
             **{name: "CTRL_" + name for name in CONTROL_OUTPUTS[:6]},
         },
