@@ -1421,6 +1421,7 @@ def materialize_native_avm_fixture(
         writer.add(main, prefix + "_pll", NATIVE_SCOPE + ":" + PLL_NAME,
                    {**PLL_DEFAULTS, "Frequency_Hz": frequency_hz, "Vdc_Order_kV": vdc_order_kv, "PLL_Bandwidth_Hz": pll_bandwidth_hz},
                    {**{f"V{p}": f"{prefix}_VALVE_V_{p}" for p in "ABC"},
+                    "RESTART": restart_signal,
                     **{port: prefix + "_" + name for port, (name, _) in PLL_OUTPUTS.items()}})
     selected_signals = {name: name for name in channels}
     if control_kind == "dq_current":

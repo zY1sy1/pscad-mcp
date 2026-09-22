@@ -251,3 +251,21 @@ def test_energy_feedforward_uses_arm_current_and_dc_midpoint_reference(tmp_path)
             initialize=f"SIG_VDC_POS = {320+shift}\nSIG_VDC_NEG = {-320+shift}\nSIG_VA = {256+shift}\nSIG_VB = {-128+shift}\nSIG_VC = {-128+shift}\nSIG_IA = 3.0\nSIG_IB = -1.5\nSIG_IC = -1.5\n" + arm_currents,
             loop="", observations="print *, SIG_VALVE_POWER", steps=1)
         assert rows[0][0] == pytest.approx(768.0, abs=1e-10)
+
+
+def test_explicit_pll_restart_requires_two_cycles_but_a_held_request_does_not_starve_lock(tmp_path):
+    rows = _run_native_equations(tmp_path, PLL_NAME, declarations="real(8) :: actual_angle",
+        initialize="", loop="""actual_angle = 6.283185307179586 * 60.0 * TIME
+SIG_RESTART = 0.0
+if (TIME >= 0.2) then
+ actual_angle = actual_angle + 0.8
+ SIG_RESTART = 1.0
+endif
+SIG_VA = 280.0 * SIN(actual_angle)
+SIG_VB = 280.0 * SIN(actual_angle - 2.09439510239320)
+SIG_VC = 280.0 * SIN(actual_angle + 2.09439510239320)""",
+        observations="if (sample == 4010 .or. sample == 4600 .or. sample == 4900) print *, SIG_LOCKED, SIG_ERROR, SIG_FREQUENCY", steps=5000)
+    assert [row[0] for row in rows] == [0.0, 0.0, 1.0]
+    for row in rows:
+        assert abs(row[1]) < 1e-6
+        assert row[2] == pytest.approx(60.0, abs=1e-5)

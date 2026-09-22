@@ -63,8 +63,8 @@ def append_native_pll_and_dq(root: ET.Element) -> None:
                              "Current_Bandwidth_Hz": "Hz", "Current_Damping": "1",
                              "AC_Current_Limit_kA": "kA", "Transformer_Leakage_ohm": "ohm"})
     _PARAMETER_UNITS["Angle_Limit_Deg"] = "deg"
-    pll = _definition(root, PLL_NAME, _ports(("VA", "VB", "VC"), PLL_OUTPUTS), PLL_DEFAULTS)
-    _script(pll, "Dsdyn", """#STORAGE REAL:6
+    pll = _definition(root, PLL_NAME, _ports(("VA", "VB", "VC", "RESTART"), PLL_OUTPUTS), PLL_DEFAULTS)
+    _script(pll, "Dsdyn", """#STORAGE REAL:7
 #LOCAL REAL ALPHA
 #LOCAL REAL BETA
 #LOCAL REAL MAGNITUDE
@@ -83,10 +83,21 @@ def append_native_pll_and_dq(root: ET.Element) -> None:
         STORF(NSTORF+3) = 0.0
         STORF(NSTORF+4) = 0.0
         STORF(NSTORF+5) = 0.0
+        STORF(NSTORF+6) = 0.0
       ENDIF
       ALPHA = (2.0 * $VA - $VB - $VC) / 3.0
       BETA = ($VB - $VC) * 0.577350269189626
       MAGNITUDE = SQRT(ALPHA**2 + BETA**2)
+! Reacquire a restored voltage on the explicit restart edge. Keeping the
+! request high must not repeatedly erase the two-cycle lock qualification.
+      IF ($RESTART .GE. 0.5 .AND. STORF(NSTORF+6) .LT. 0.5 .AND. MAGNITUDE .GT. 0.1 * $Vdc_Order_kV) THEN
+        STORF(NSTORF+1) = 0.0
+        STORF(NSTORF+2) = 0.0
+        STORF(NSTORF+3) = 0.0
+        STORF(NSTORF+4) = 0.0
+        STORF(NSTORF+5) = 0.0
+      ENDIF
+      STORF(NSTORF+6) = $RESTART
       IF (STORF(NSTORF+3) .LT. 0.5 .AND. MAGNITUDE .GT. 0.1 * $Vdc_Order_kV) THEN
         STORF(NSTORF) = ATAN2(ALPHA, -BETA)
         STORF(NSTORF+3) = 1.0
@@ -132,7 +143,7 @@ def append_native_pll_and_dq(root: ET.Element) -> None:
       $FREQUENCY = OMEGA / 6.283185307179586
       $INTEGRATOR = STORF(NSTORF+1)
       STORF(NSTORF) = MODULO(THETA + DELT * OMEGA, 6.283185307179586)
-      NSTORF = NSTORF + 6
+      NSTORF = NSTORF + 7
 """)
     dq = _definition(root, DQ_NAME, _ports(DQ_INPUTS, DQ_OUTPUTS), DQ_DEFAULTS, signed_parameters=("Q_Order_MVAr",))
     _script(dq, "Dsdyn", _dq_script())
