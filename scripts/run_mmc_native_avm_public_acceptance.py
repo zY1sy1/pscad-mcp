@@ -26,6 +26,7 @@ from pscad_mcp.hvdc.builders.mmc.engines.avm import (
     discover_native_avm_sources,
 )
 from pscad_mcp.hvdc.builders.mmc.native_bundle import FIXTURE_CHANNELS, NATIVE_SCOPE
+from pscad_mcp.hvdc.builders.mmc.native_energy import diagnose_native_arm_energy
 from pscad_mcp.hvdc.builders.mmc.parametric_service import ParametricMmcBuilderService
 from scripts.run_mmc_average_arm_acceptance import (
     _probe_owners,
@@ -354,6 +355,10 @@ async def run_attempt(
         trace_path = run_dir / "trace.json"
         _write_report(trace_path, observed["samples"])
         report["trace"] = {"path": str(trace_path), "sha256": _sha256(trace_path)}
+        report["energy_diagnostics"] = diagnose_native_arm_energy(
+            observed["samples"],
+            engine["candidate_result"]["fixture"]["parameters"]["arm"],
+        )
         report["analysis"] = analyze_integration_trace(
             observed["samples"],
             sequence_windows=(
