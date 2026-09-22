@@ -5,6 +5,7 @@ import importlib
 from types import SimpleNamespace
 
 import pytest
+from pscad_mcp.core.backend.base import BackendError
 
 
 @pytest.fixture
@@ -50,3 +51,12 @@ def test_public_plan_gate_requires_native_hashes_and_conservative_capabilities(r
             changed["capabilities"]["model_accepted"] = True
         with pytest.raises(ValueError):
             runner._require_public_plan({"engine_plans": [changed]}, sources)
+
+
+def test_interrupted_runtime_is_rejected_before_a_precharge_verdict(runner):
+    with pytest.raises(BackendError) as raised:
+        runner._require_complete_trace({"time": [0.0, 0.0901]}, {"output_step_s": 0.0001, "simulation_duration_s": 3.9})
+    assert raised.value.code == "MMC_RUN_INCOMPLETE"
+    assert runner._public_failure_category("read_and_analyze", raised.value, []) == "process_or_runtime"
+    assert runner._public_failure_category("run", ValueError("runtime"), [{"text": "WinSock Error #10048"}]) == "environment_contention"
+    runner._require_complete_trace({"time": [0.0, 3.9]}, {"output_step_s": 0.0001, "simulation_duration_s": 3.9})

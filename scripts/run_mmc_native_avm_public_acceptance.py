@@ -20,6 +20,7 @@ sys.path.insert(0, str(REPOSITORY))
 from pscad_mcp.acceptance.executable_finalization import verify_executable_relink
 from pscad_mcp.acceptance.process_scope import concurrent_acceptance_enabled
 from pscad_mcp.core.process_inventory import list_pscad_processes
+from pscad_mcp.core.backend.base import BackendError
 from pscad_mcp.hvdc.builders.mmc.cable_companion import DEFAULT_DONOR, DEFAULT_MASTER
 from pscad_mcp.hvdc.builders.mmc.engines.avm import (
     AvmBlueprintEngine,
@@ -124,6 +125,30 @@ def _require_public_plan(
     ):
         raise ValueError("Public AVM plan overstates or omits native capabilities")
     return child
+
+
+def _require_complete_trace(trace: dict, parameters: dict) -> None:
+    times = trace.get("time", ())
+    tolerance = 1.1 * float(parameters["output_step_s"])
+    expected_end = float(parameters["simulation_duration_s"])
+    if (len(times) < 2 or any(not math.isfinite(t) for t in times)
+            or any(b <= a for a, b in zip(times, times[1:]))
+            or times[0] > tolerance or times[-1] < expected_end - tolerance):
+        raise BackendError("MMC_RUN_INCOMPLETE", "The native output does not cover the complete planned run.",
+                           "hvdc", "native_avm_acceptance",
+                           {"expected_end_s": expected_end, "observed_start_s": times[0] if times else None,
+                            "observed_end_s": times[-1] if times else None})
+
+
+def _public_failure_category(stage: str, error: BaseException, messages: list) -> str:
+    text = json.dumps(messages).casefold()
+    if "bind the new server socket" in text or "winsock error #10048" in text:
+        return "environment_contention"
+    if getattr(error, "code", "") == "MMC_RUN_INCOMPLETE":
+        return "process_or_runtime"
+    if getattr(error, "code", "") == "MMC_PRECHARGE_FAILED":
+        return "model_physical"
+    return _category(stage, error)
 
 
 async def run_attempt(
@@ -369,6 +394,7 @@ async def run_attempt(
         _write_report(trace_path, observed["samples"])
         report["trace"] = {"path": str(trace_path), "sha256": _sha256(trace_path)}
         fixture_parameters = engine["candidate_result"]["fixture"]["parameters"]
+        _require_complete_trace(observed["samples"], fixture_parameters)
         reversal_end = fixture_parameters["reversal_time_s"] + fixture_parameters["reversal_duration_s"]
         forward_window = (0.6, 0.9)
         reverse_window = (reversal_end + 0.5, reversal_end + 0.8)
@@ -376,7 +402,8 @@ async def run_attempt(
         if control_kind == "closed_loop":
             report["precharge"] = analyze_precharge_trace(observed["samples"], fixture_parameters)
             if "operating_windows" not in report["precharge"]:
-                raise ValueError(report["precharge"].get("error", "Precharge operating windows are missing"))
+                raise BackendError("MMC_PRECHARGE_FAILED", report["precharge"].get("error", "Precharge operating windows are missing"),
+                                   "hvdc", "native_avm_acceptance", report["precharge"])
             forward_window = tuple(report["precharge"]["operating_windows"]["forward"])
             reverse_window = tuple(report["precharge"]["operating_windows"]["reverse"])
             deblock_time = report["precharge"]["deblock_time_s"]
@@ -437,7 +464,7 @@ async def run_attempt(
             assembly_accepted=False,
             error=_error(error),
             failed_stage=stage,
-            failure_category=_category(stage, error),
+            failure_category=_public_failure_category(stage, error, report.get("run_messages", [])),
         )
         if service is not None and project_name and runtime.get("owns_process"):
             try:
