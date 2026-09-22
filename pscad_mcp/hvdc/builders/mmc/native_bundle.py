@@ -86,6 +86,19 @@ FIXTURE_CHANNELS = {
     "V_ANGLE_COMMAND": "deg",
     "V_MODULATION_COMMAND": "1",
 }
+ARM_OBSERVABLES = {
+    "I": ("I_ARM", "kA"),
+    "W": ("ENERGY", "MJ"),
+    "VCAP": ("V_CAP_EQ", "kV"),
+    "V": ("V_INSERTED", "kV"),
+    "VT": ("V_ARM", "kV"),
+    "ICAP": ("I_CAP", "kA"),
+}
+for _prefix in ("P", "V"):
+    for _phase in "ABC":
+        for _position in ("UPPER", "LOWER"):
+            for _suffix, (_, _unit) in ARM_OBSERVABLES.items():
+                FIXTURE_CHANNELS[f"{_prefix}_{_phase}_{_position}_{_suffix}"] = _unit
 
 
 def _hash(path: Path) -> str:
@@ -915,10 +928,10 @@ def materialize_native_avm_fixture(
                         "OUT": inputs[1],
                         "M": prefix + f"_M_{phase}_{position}",
                         "BLOCK": prefix + "_BLOCK",
-                        "V_INSERTED": role + "_V",
-                        "I_ARM": role + "_I",
-                        "ENERGY": role + "_W",
-                        "V_CAP_EQ": role + "_VCAP",
+                        **{
+                            port: role + "_" + suffix
+                            for suffix, (port, _) in ARM_OBSERVABLES.items()
+                        },
                     },
                 )
                 custom.append((arm, "MMCAverageArm"))
@@ -980,26 +993,7 @@ def materialize_native_avm_fixture(
                 "Q": prefix + "_Q",
             },
         )
-    selected_signals = {
-        "P_VDC": "P_VDC",
-        "V_VDC": "V_VDC",
-        "P_A_UPPER_I": "P_A_UPPER_I",
-        "P_A_UPPER_W": "P_A_UPPER_W",
-        "V_A_UPPER_I": "V_A_UPPER_I",
-        "V_A_UPPER_W": "V_A_UPPER_W",
-        "P_SEQUENCE": "P_SEQUENCE",
-        "V_SEQUENCE": "V_SEQUENCE",
-        "P_P": "P_P",
-        "P_Q": "P_Q",
-        "P_IDC": "P_IDC",
-        "V_P": "V_P",
-        "V_Q": "V_Q",
-        "V_IDC": "V_IDC",
-        "P_ANGLE_COMMAND": "P_ANGLE_COMMAND",
-        "P_MODULATION_COMMAND": "P_MODULATION_COMMAND",
-        "V_ANGLE_COMMAND": "V_ANGLE_COMMAND",
-        "V_MODULATION_COMMAND": "V_MODULATION_COMMAND",
-    }
+    selected_signals = {name: name for name in FIXTURE_CHANNELS}
     for name, signal in selected_signals.items():
         writer.add(
             main,
