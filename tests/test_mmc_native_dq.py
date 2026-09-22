@@ -100,12 +100,14 @@ plant_q = 0.0
 PAR_P_Order_MW = 300.0
 PAR_Reversal_Duration_s = 0.5
 SIG_START_TIME = 0.1
+SIG_POWER_START = 0.1
 SIG_PLL_LOCKED = 1.0
 SIG_VDC_MEAS = 640.0
 """, loop="""angle_input = 6.283185307179586 * 60.0 * TIME
 SIG_PLL_ANGLE = angle_input
 SIG_STARTUP_READY = 0.0
 if (TIME >= 0.1) SIG_STARTUP_READY = 1.0
+SIG_POWER_READY = SIG_STARTUP_READY
 SIG_VA = 256.0 * SIN(angle_input)
 SIG_VB = 256.0 * SIN(angle_input - 2.09439510239320)
 SIG_VC = 256.0 * SIN(angle_input + 2.09439510239320)
@@ -150,3 +152,22 @@ SIG_VC = 256.0 * SIN(phase_input + 2.09439510239320)
 """, observations="if (sample == 10000) print *, SIG_VDC_INTEGRATOR, SIG_LIMIT_ACTIVE", steps=10000)
     assert rows[0][1] == 1.0
     assert abs(rows[0][0]) < 0.1
+
+
+def test_native_charge_power_accounts_for_capacitor_energy_and_waits_for_power_readiness(tmp_path):
+    capacitor_fields = "\n".join(f"SIG_{p}_{q}_VCAP = 250.0" for p in "ABC" for q in ("UPPER", "LOWER"))
+    rows = _run_native_equations(tmp_path, DQ_NAME, declarations="real(8) :: accumulated_charge",
+        initialize="""PAR_C_eq_F = 0.0001041666666666667
+SIG_START_TIME = 0.1
+SIG_PLL_LOCKED = 1.0
+SIG_VDC_MEAS = 500.0
+accumulated_charge = 0.0
+""" + capacitor_fields, loop="""SIG_STARTUP_READY = 0.0
+if (TIME >= 0.1) SIG_STARTUP_READY = 1.0
+SIG_POWER_READY = 0.0
+""", observations="""accumulated_charge = accumulated_charge + SIG_CHARGE_POWER_REFERENCE * DELT
+if (sample == 16000) print *, accumulated_charge, SIG_P_REFERENCE, SIG_SEQUENCE
+""", steps=16000)
+    expected_energy = 3 * 0.0001041666666666667 * (320.0**2 - 250.0**2)
+    assert rows[0][0] == pytest.approx(expected_energy, rel=2e-4)
+    assert rows[0][1] == 0.0 and rows[0][2] == 4.0

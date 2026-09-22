@@ -870,6 +870,8 @@ def materialize_native_avm_fixture(
     valve_grounding_resistance_ohm: float = 1e6,
     maximum_precharge_time_s: float = 1.0,
     precharge_current_limit_ka: float = 2.0,
+    startup_charge_time_s: float = 0.5,
+    maximum_conditioning_time_s: float = 1.5,
     deblock_time_s: float = 0.10,
     reversal_time_s: float = 0.30,
     reversal_duration_s: float = 0.50,
@@ -918,6 +920,8 @@ def materialize_native_avm_fixture(
     valve_grounding_resistance_ohm = _number(valve_grounding_resistance_ohm, "valve_grounding_resistance_ohm", positive=True)
     maximum_precharge_time_s = _number(maximum_precharge_time_s, "maximum_precharge_time_s", positive=True)
     precharge_current_limit_ka = _number(precharge_current_limit_ka, "precharge_current_limit_ka", positive=True)
+    startup_charge_time_s = _number(startup_charge_time_s, "startup_charge_time_s", positive=True)
+    maximum_conditioning_time_s = _number(maximum_conditioning_time_s, "maximum_conditioning_time_s", positive=True)
     transformer_rating_mva = _number(
         transformer_rating_mva, "transformer_rating_mva", positive=True
     )
@@ -1173,11 +1177,13 @@ def materialize_native_avm_fixture(
                 "Cable_Loss_MW": cable_loss_mw, "Converter_Loss_MW": converter_loss_mw,
                 "Deblock_Time_s": deblock_time_s, "Reversal_Time_s": reversal_time_s,
                 "Ramp_Time_s": ramp_time_s, "Reversal_Duration_s": reversal_duration_s,
+                "Startup_Charge_Time_s": startup_charge_time_s,
             }
             control = writer.add(main, prefix + "_dq_controller", NATIVE_SCOPE + ":" + DQ_NAME, dq_parameters,
-                                 {**{name: prefix + "_" + name for name in DQ_INPUTS if name not in ("P_MEAS", "Q_MEAS", "VDC_MEAS", "STARTUP_READY", "START_TIME", "VA", "VB", "VC", "IA", "IB", "IC")},
+                                 {**{name: prefix + "_" + name for name in DQ_INPUTS if name not in ("P_MEAS", "Q_MEAS", "VDC_MEAS", "STARTUP_READY", "START_TIME", "POWER_READY", "POWER_START", "VA", "VB", "VC", "IA", "IB", "IC")},
                                   "P_MEAS": prefix + "_P", "Q_MEAS": prefix + "_Q", "VDC_MEAS": prefix + "_VDC",
                                   "STARTUP_READY": "PRECHARGE_READY", "START_TIME": "DEBLOCK_TIME",
+                                  "POWER_READY": "POWER_READY", "POWER_START": "POWER_START_TIME",
                                   **{f"{q}{p}": f"{prefix}_VALVE_{q}_{p}" for p in "ABC" for q in ("V", "I")},
                                   **{name: prefix + "_" + name for name in DQ_OUTPUTS}})
         else:
@@ -1347,6 +1353,9 @@ def materialize_native_avm_fixture(
         {**STARTUP_DEFAULTS, "Frequency_Hz": frequency_hz, "Vdc_Order_kV": vdc_order_kv,
          "C_eq_F": arm_values["C_eq_F"], "Deblock_Time_s": deblock_time_s,
          "PLL_Required": 1.0 if control_kind == "dq_current" else 0.0,
+         "Controlled_Charge": 1.0 if control_kind == "dq_current" else 0.0,
+         "Startup_Charge_Time_s": startup_charge_time_s,
+         "Maximum_Conditioning_s": maximum_conditioning_time_s,
          "Maximum_Precharge_s": maximum_precharge_time_s, "Precharge_Current_Limit_kA": precharge_current_limit_ka},
         {**{name: name for name in STARTUP_INPUTS}, **{port: name for port, (name, _) in STARTUP_OUTPUTS.items()}},
     )
@@ -1466,6 +1475,8 @@ def materialize_native_avm_fixture(
             "valve_grounding_resistance_ohm": valve_grounding_resistance_ohm,
             "maximum_precharge_time_s": maximum_precharge_time_s,
             "precharge_current_limit_ka": precharge_current_limit_ka,
+            "startup_charge_time_s": startup_charge_time_s,
+            "maximum_conditioning_time_s": maximum_conditioning_time_s,
             "transformer_rating_mva": transformer_rating_mva,
             "modulation_index": modulation_index,
             "control_kind": control_kind,

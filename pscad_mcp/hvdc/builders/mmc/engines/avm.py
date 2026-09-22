@@ -505,6 +505,8 @@ class AvmBlueprintEngine:
         reversal_time = 1.0
         reversal_duration = float(values["power_reversal_time_s"])
         duration = float(values["maximum_precharge_time_s"]) + reversal_time - 0.10 + reversal_duration + 1.0
+        if self.native_control_kind == "dq_current":
+            duration += float(values["maximum_conditioning_time_s"])
         candidate_project_name = (
             "AVM_"
             + plan.plan_hash[:12]
@@ -547,6 +549,8 @@ class AvmBlueprintEngine:
             valve_grounding_resistance_ohm=float(values["valve_grounding_resistance_ohm"]),
             maximum_precharge_time_s=float(values["maximum_precharge_time_s"]),
             precharge_current_limit_ka=float(values["precharge_current_limit_ka"]),
+            startup_charge_time_s=float(values["startup_charge_time_s"]),
+            maximum_conditioning_time_s=float(values["maximum_conditioning_time_s"]),
             ramp_time_s=0.20,
             deblock_time_s=0.10,
             reversal_time_s=reversal_time,

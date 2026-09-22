@@ -17,6 +17,7 @@ DQ_DEFAULTS = {
     "Frequency_Hz": 60.0, "Vdc_Order_kV": 640.0, "P_Order_MW": 1000.0, "Q_Order_MVAr": 0.0,
     "Deblock_Time_s": 0.1, "Ramp_Time_s": 0.2, "Reversal_Time_s": 1.0, "Reversal_Duration_s": 1.0,
     "Control_Mode": 0.0,
+    "Startup_Charge_Time_s": 0.5,
     "C_eq_F": 6.510416666666667e-5, "L_arm_H": 0.05, "R_arm_ohm": 0.15,
     "P_nonohmic_MW": 1.1, "Kp_Vdc_MW_per_kV": 0.25, "Ti_Vdc_s": 0.1125,
     "Power_Correction_Limit_MW": 1500.0, "Cable_Loss_MW": 0.0, "Converter_Loss_MW": 15.0,
@@ -28,6 +29,7 @@ DQ_DEFAULTS = {
 }
 ARM_INPUTS = tuple(f"{p}_{q}_{s}" for p in "ABC" for q in ("UPPER", "LOWER") for s in ("VCAP", "I"))
 DQ_INPUTS = ("P_MEAS", "Q_MEAS", "VDC_MEAS", "PLL_ANGLE", "PLL_LOCKED", "STARTUP_READY", "START_TIME",
+             "POWER_READY", "POWER_START",
              "VA", "VB", "VC", "IA", "IB", "IC", *ARM_INPUTS)
 DQ_OUTPUTS = {
     **{f"M_{p}_{q}{suffix}": "1" for p in "ABC" for q in ("UPPER", "LOWER") for suffix in ("", "_RAW")},
@@ -39,6 +41,7 @@ DQ_OUTPUTS = {
     "ID_INTEGRATOR": "kV", "IQ_INTEGRATOR": "kV", "VDC_INTEGRATOR": "MW",
     "MODULATION_UNCLIPPED": "1",
     "ZERO_SEQUENCE_COMMAND": "kV",
+    "CAP_VOLTAGE_REFERENCE": "kV", "CHARGE_POWER_REFERENCE": "MW",
     "LIMIT_ACTIVE": "1", "LIMIT_DURATION": "s",
 }
 
@@ -128,7 +131,7 @@ def append_native_pll_and_dq(root: ET.Element) -> None:
 
 
 def _dq_script() -> str:
-    text = """#STORAGE REAL:19
+    text = """#STORAGE REAL:22
 #LOCAL INTEGER K
 #LOCAL REAL A
 #LOCAL REAL VA
@@ -174,8 +177,14 @@ def _dq_script() -> str:
 #LOCAL REAL WDIFF
 #LOCAL REAL WREF
 #LOCAL REAL VBASE
+#LOCAL REAL VCAP_START
+#LOCAL REAL VCAP_REFERENCE
+#LOCAL REAL VCAP_RATE
+#LOCAL REAL CHARGE_SCALE
+#LOCAL REAL CHARGE_POWER
+#LOCAL REAL WREF_RATE
       IF (TIMEZERO) THEN
-        DO K = 0, 18
+        DO K = 0, 21
           STORF(NSTORF+K) = 0.0
         ENDDO
       ENDIF
@@ -196,18 +205,36 @@ def _dq_script() -> str:
       STORF(NSTORF+3) = STORF(NSTORF+3) + A * ($Q_MEAS - STORF(NSTORF+3))
       $BLOCK = 1.0
       IF ($STARTUP_READY .GE. 0.5 .AND. $PLL_LOCKED .GE. 0.5) $BLOCK = 0.0
+      VCAP_START = ($A_UPPER_VCAP + $A_LOWER_VCAP + $B_UPPER_VCAP + $B_LOWER_VCAP + $C_UPPER_VCAP + $C_LOWER_VCAP) / 3.0
+      IF ($STARTUP_READY .GE. 0.5 .AND. STORF(NSTORF+21) .LT. 0.5) THEN
+        STORF(NSTORF+19) = VCAP_START
+        STORF(NSTORF+20) = $VDC_MEAS
+        STORF(NSTORF+21) = 1.0
+      ENDIF
+      CHARGE_SCALE = 0.0
+      VCAP_RATE = 0.0
+      IF ($STARTUP_READY .GE. 0.5) THEN
+        CHARGE_SCALE = MIN(1.0, MAX(0.0, (TIME - $START_TIME) / $Startup_Charge_Time_s))
+        IF (CHARGE_SCALE .LT. 1.0) VCAP_RATE = ($Vdc_Order_kV - STORF(NSTORF+19)) / $Startup_Charge_Time_s
+      ENDIF
+      VCAP_REFERENCE = STORF(NSTORF+19) + CHARGE_SCALE * ($Vdc_Order_kV - STORF(NSTORF+19))
+      CHARGE_POWER = 1.5 * $C_eq_F * VCAP_REFERENCE * VCAP_RATE
+      WREF_RATE = 0.5 * $C_eq_F * VCAP_REFERENCE * VCAP_RATE
+      $CAP_VOLTAGE_REFERENCE = VCAP_REFERENCE
+      $CHARGE_POWER_REFERENCE = CHARGE_POWER
       SCALE = 0.0
-      IF ($STARTUP_READY .GE. 0.5) SCALE = MIN(1.0, MAX(0.0, (TIME - $START_TIME) / $Ramp_Time_s))
+      IF ($POWER_READY .GE. 0.5) SCALE = MIN(1.0, MAX(0.0, (TIME - $POWER_START) / $Ramp_Time_s))
       PREF = SCALE * $P_Order_MW
       QREF = SCALE * $Q_Order_MVAr
       $SEQUENCE = 1.0
-      IF ($STARTUP_READY .GE. 0.5) $SEQUENCE = 2.0
-      REVERSE_START = $START_TIME + $Reversal_Time_s - $Deblock_Time_s
-      IF ($STARTUP_READY .GE. 0.5 .AND. TIME .GE. REVERSE_START) THEN
+      IF ($STARTUP_READY .GE. 0.5) $SEQUENCE = 4.0
+      IF ($POWER_READY .GE. 0.5) $SEQUENCE = 2.0
+      REVERSE_START = $POWER_START + $Reversal_Time_s - $Deblock_Time_s
+      IF ($POWER_READY .GE. 0.5 .AND. TIME .GE. REVERSE_START) THEN
         PREF = $P_Order_MW * (1.0 - 2.0 * MIN(1.0, (TIME - REVERSE_START) / $Reversal_Duration_s))
         $SEQUENCE = 3.0
       ENDIF
-      $VDC_REFERENCE = $Vdc_Order_kV * (1.0 - EXP(-TIME / 0.1))
+      $VDC_REFERENCE = STORF(NSTORF+20) + CHARGE_SCALE * ($Vdc_Order_kV - STORF(NSTORF+20))
       VERR = $VDC_REFERENCE - STORF(NSTORF+1)
       IF ($Control_Mode .LT. 0.5) VERR = 0.0
       PCORR = $Kp_Vdc_MW_per_kV * VERR + STORF(NSTORF)
@@ -218,6 +245,7 @@ def _dq_script() -> str:
       ENDIF
       $POWER_CORRECTION = MAX(-$Power_Correction_Limit_MW, MIN($Power_Correction_Limit_MW, $Kp_Vdc_MW_per_kV * VERR + STORF(NSTORF)))
       IF ($Control_Mode .GE. 0.5) PREF = -PREF + $POWER_CORRECTION + $Converter_Loss_MW + $Cable_Loss_MW * (PREF / $P_Order_MW)**2
+      PREF = PREF + CHARGE_POWER
       $P_REFERENCE = PREF
       $Q_REFERENCE = QREF
       PLOSS = 1.5 * $Transformer_Leakage_ohm * (ID**2 + IQ**2)
@@ -271,7 +299,7 @@ def _dq_script() -> str:
       $ZERO_SEQUENCE_COMMAND = VZERO
       $ANGLE_COMMAND = ATAN2(VQREF, VDREF) * 57.2957795130823
       $MODULATION_COMMAND = 2.0 * SQRT(VDREF**2 + VQREF**2) / $Vdc_Order_kV
-      WREF = 0.25 * $C_eq_F * $Vdc_Order_kV**2
+      WREF = 0.25 * $C_eq_F * VCAP_REFERENCE**2
 """
     for i, phase in enumerate("ABC"):
         ac = f"VPHASE_{phase} + VZERO"
@@ -282,7 +310,7 @@ def _dq_script() -> str:
       VACOM = {ac}
       ISUM = 0.5 * (${phase}_UPPER_I + ${phase}_LOWER_I)
       PLOSS = 2.0 * $P_nonohmic_MW + $R_arm_ohm * (${phase}_UPPER_I**2 + ${phase}_LOWER_I**2)
-      IREF = (PLOSS - STORF(NSTORF+2) / 3.0 - $Energy_Gain_per_s * (STORF(NSTORF+{8+i}) - WREF)) / MAX(0.1 * $Vdc_Order_kV, $VDC_MEAS)
+      IREF = (PLOSS - STORF(NSTORF+2) / 3.0 + WREF_RATE - $Energy_Gain_per_s * (STORF(NSTORF+{8+i}) - WREF)) / MAX(0.1 * $Vdc_Order_kV, $VDC_MEAS)
       IREF = IREF + 5.0 * STORF(NSTORF+{11+i}) * VACOM / MAX(1.0, VDREF**2 + VQREF**2)
       IERR = ISUM - IREF
       IF ($BLOCK .GE. 0.5) STORF(NSTORF+{14+i}) = 0.0
@@ -316,5 +344,5 @@ def _dq_script() -> str:
       $IQ_INTEGRATOR = STORF(NSTORF+7)
       $VDC_INTEGRATOR = STORF(NSTORF)
       STORF(NSTORF+18) = $LIMIT_ACTIVE
-      NSTORF = NSTORF + 19
+      NSTORF = NSTORF + 22
 """

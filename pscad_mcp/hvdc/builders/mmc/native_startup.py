@@ -23,6 +23,8 @@ STARTUP_OUTPUTS = {
     "V_RATE": ("V_PRECHARGE_ENERGY_RATE", "1/s"),
     "CURRENT_MAX": ("PRECHARGE_CURRENT_MAX", "kA"),
     "CAP_MIN": ("PRECHARGE_CAP_MIN", "kV"),
+    "POWER_READY": ("POWER_READY", "1"), "POWER_START": ("POWER_START_TIME", "s"),
+    "CHARGE_FAILED": ("CHARGE_FAILED", "1"),
 }
 STARTUP_DEFAULTS = {
     "Frequency_Hz": 60.0, "Vdc_Order_kV": 640.0, "C_eq_F": 6.510416666666667e-5,
@@ -30,6 +32,7 @@ STARTUP_DEFAULTS = {
     "Precharge_Voltage_Fraction": 0.65, "Precharge_Current_Limit_kA": 2.0,
     "Precharge_Rate_Per_Cycle": 0.01, "Precharge_Hold_Cycles": 2.0,
     "PLL_Required": 0.0,
+    "Controlled_Charge": 0.0, "Startup_Charge_Time_s": 0.5, "Maximum_Conditioning_s": 1.5,
 }
 
 
@@ -49,7 +52,7 @@ def advance_precharge(state: PrechargeState, observation: dict[str, float],
     if set(observation) != set(STARTUP_INPUTS) or any(not math.isfinite(v) for v in observation.values()):
         raise ValueError("Precharge requires all finite capacitor, current and bus observations")
     p = {**STARTUP_DEFAULTS, **parameters}
-    if any(isinstance(v, bool) or not math.isfinite(v) or (v < 0 if name in {"Deblock_Time_s", "PLL_Required"} else v <= 0) for name, v in p.items()):
+    if any(isinstance(v, bool) or not math.isfinite(v) or (v < 0 if name in {"Deblock_Time_s", "PLL_Required", "Controlled_Charge"} else v <= 0) for name, v in p.items()):
         raise ValueError("Precharge parameters must be finite and positive")
     alpha = 1.0 - math.exp(-step_s * p["Frequency_Hz"])
     energies = [sum(0.5 * p["C_eq_F"] * observation[f"{s}_{phase}_{position}_VCAP"]**2
@@ -88,19 +91,22 @@ def append_precharge_readiness(root: ET.Element) -> None:
     extremes = "".join(f"      $CAP_MIN = MIN($CAP_MIN, ${s}_{p}_{q}_VCAP)\n"
                        f"      $CURRENT_MAX = MAX($CURRENT_MAX, ABS(${s}_{p}_{q}_I))\n"
                        for s in ("P", "V") for p in "ABC" for q in ("UPPER", "LOWER"))
-    _script(component, "Dsdyn", """#STORAGE REAL:4
+    _script(component, "Dsdyn", """#STORAGE REAL:6
 #LOCAL REAL EP
 #LOCAL REAL EV
 #LOCAL REAL FP
 #LOCAL REAL FV
 #LOCAL REAL ALPHA
 #LOCAL REAL EFLOOR
+#LOCAL REAL CAPMAX
 #LOCAL INTEGER QUALIFIED
       IF (TIMEZERO) THEN
         STORF(NSTORF) = 0.0
         STORF(NSTORF+1) = 0.0
         STORF(NSTORF+2) = 0.0
         STORF(NSTORF+3) = -1.0
+        STORF(NSTORF+4) = -1.0
+        STORF(NSTORF+5) = 0.0
       ENDIF
       EP = 0.0
       EV = 0.0
@@ -111,8 +117,9 @@ def append_precharge_readiness(root: ET.Element) -> None:
       $P_RATE = ABS(FP - STORF(NSTORF)) / (DELT * MAX(FP, EFLOOR))
       $V_RATE = ABS(FV - STORF(NSTORF+1)) / (DELT * MAX(FV, EFLOOR))
       $CAP_MIN = $P_A_UPPER_VCAP
+      CAPMAX = $P_A_UPPER_VCAP
       $CURRENT_MAX = 0.0
-""" + extremes + """      QUALIFIED = 1
+""" + extremes + "".join(f"      CAPMAX = MAX(CAPMAX, ${s}_{p}_{q}_VCAP)\n" for s in ("P", "V") for p in "ABC" for q in ("UPPER", "LOWER")) + """      QUALIFIED = 1
       IF (TIME .LT. $Deblock_Time_s .OR. TIME .GT. $Maximum_Precharge_s) QUALIFIED = 0
       IF ($CAP_MIN .LT. 0.5 * $Precharge_Voltage_Fraction * $Vdc_Order_kV) QUALIFIED = 0
       IF (MIN($P_VDC, $V_VDC) .LT. $Precharge_Voltage_Fraction * $Vdc_Order_kV) QUALIFIED = 0
@@ -132,7 +139,28 @@ def append_precharge_readiness(root: ET.Element) -> None:
       IF ($START_TIME .LT. 0.0 .AND. TIME .GT. $Maximum_Precharge_s) $FAILED = 1.0
       STORF(NSTORF) = FP
       STORF(NSTORF+1) = FV
-      NSTORF = NSTORF + 4
+      $POWER_READY = $READY
+      $POWER_START = $START_TIME
+      $CHARGE_FAILED = 0.0
+      IF ($Controlled_Charge .GE. 0.5) THEN
+        QUALIFIED = 0
+        IF ($READY .GE. 0.5 .AND. TIME .GE. $START_TIME + $Startup_Charge_Time_s) QUALIFIED = 1
+        IF (MIN($P_PLL_LOCKED, $V_PLL_LOCKED) .LT. 0.5) QUALIFIED = 0
+        IF ($CAP_MIN .LT. 0.475 * $Vdc_Order_kV .OR. CAPMAX .GT. 0.525 * $Vdc_Order_kV) QUALIFIED = 0
+        IF (ABS($P_VDC / $Vdc_Order_kV - 1.0) .GT. 0.05 .OR. ABS($V_VDC / $Vdc_Order_kV - 1.0) .GT. 0.05) QUALIFIED = 0
+        IF ($CURRENT_MAX .GT. 0.1 * $Precharge_Current_Limit_kA) QUALIFIED = 0
+        IF (QUALIFIED .EQ. 1) THEN
+          STORF(NSTORF+5) = STORF(NSTORF+5) + DELT
+        ELSE
+          STORF(NSTORF+5) = 0.0
+        ENDIF
+        IF (STORF(NSTORF+4) .LT. 0.0 .AND. STORF(NSTORF+5) .GE. 2.0 / $Frequency_Hz) STORF(NSTORF+4) = TIME
+        $POWER_START = STORF(NSTORF+4)
+        $POWER_READY = 0.0
+        IF ($POWER_START .GE. 0.0) $POWER_READY = 1.0
+        IF ($READY .GE. 0.5 .AND. $POWER_READY .LT. 0.5 .AND. TIME .GT. $START_TIME + $Maximum_Conditioning_s) $CHARGE_FAILED = 1.0
+      ENDIF
+      NSTORF = NSTORF + 6
 """)
 
 
@@ -143,6 +171,8 @@ def analyze_precharge_trace(trace: dict, parameters: dict) -> dict:
                                         "voltage_fraction": 0.65, "ready_current_fraction": 0.10}}
     arms = [f"{s}_{p}_{q}" for s in ("P", "V") for p in "ABC" for q in ("UPPER", "LOWER")]
     required = {"time", "PRECHARGE_READY", "PRECHARGE_FAILED", "DEBLOCK_TIME", "P_BLOCK", "V_BLOCK", "P_VDC", "V_VDC"}
+    if parameters.get("control_kind") == "dq_current":
+        required.update(("POWER_READY", "POWER_START_TIME", "CHARGE_FAILED"))
     required.update(arm + suffix for arm in arms for suffix in ("_I", "_VCAP", "_W"))
     time = trace.get("time", ())
     if not required <= trace.keys() or len(time) < 2 or any(
@@ -193,9 +223,25 @@ def analyze_precharge_trace(trace: dict, parameters: dict) -> dict:
         checks[s + ":precharge_energy_convergence"] = mean > 0 and excursion <= 0.02
     result["metrics"] = metrics
     result["deblock_time_s"] = start
-    reversal_start = start + parameters["reversal_time_s"] - parameters["deblock_time_s"]
+    power_start = start
+    if parameters.get("control_kind") == "dq_current":
+        power_ready = [i for i, value in enumerate(trace["POWER_READY"]) if value >= 0.5]
+        if not power_ready or any(v >= 0.5 for v in trace["CHARGE_FAILED"]):
+            result["error"] = "Active capacitor charging did not reach measured readiness before its deadline"
+            return result
+        power_start = trace["POWER_START_TIME"][power_ready[0]]
+        checks["charge_finishes_before_power_transfer"] = power_start >= start + parameters["startup_charge_time_s"]
+        ready_indexes = [i for i, t in enumerate(time) if power_start - hold <= t < power_start]
+        checks["capacitor_voltages_ready_for_power"] = bool(ready_indexes) and all(
+            0.95 <= 2 * trace[arm + "_VCAP"][i] / voltage <= 1.05 for arm in arms for i in ready_indexes
+        )
+        checks["dc_voltages_ready_for_power"] = bool(ready_indexes) and all(
+            abs(trace[s + "_VDC"][i] / voltage - 1) <= 0.05 for s in ("P", "V") for i in ready_indexes
+        )
+    result["power_start_time_s"] = power_start
+    reversal_start = power_start + parameters["reversal_time_s"] - parameters["deblock_time_s"]
     reversal_end = reversal_start + parameters["reversal_duration_s"]
-    result["operating_windows"] = {"forward": [start + 0.5, start + 0.8], "reverse": [reversal_end + 0.5, reversal_end + 0.8]}
+    result["operating_windows"] = {"forward": [power_start + 0.5, power_start + 0.8], "reverse": [reversal_end + 0.5, reversal_end + 0.8]}
     result["reversal_window_s"] = [reversal_start, reversal_end]
     result["failed_checks"] = [name for name, value in checks.items() if not value]
     result["status"] = "FAIL" if result["failed_checks"] else "PASS"
