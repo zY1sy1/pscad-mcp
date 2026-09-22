@@ -194,6 +194,7 @@ _MASTER_PORTS = {
     "import": {"N": (36, 0, "Transfer", 0)},
     "export": {"N": (36, 0, "Transfer", 0)},
     "pgb": {"Signl": (0, 0, "Transfer", 0)},
+    "arrester": {"NF": (0, -36, "Natural", 0), "NT": (0, 0, "Natural", 0)},
 }
 _MASTER_WRITER_PORTS = {
     **_MASTER_PORTS,
@@ -354,6 +355,7 @@ def _audit_master(path: Path) -> tuple[dict, str, dict]:
         ("peswitch", "EFVD", "kV"),
         ("peswitch", "RON", "ohm"),
         ("peswitch", "ROFF", "ohm"),
+        ("arrester", "VSCAL", "kV"),
     ):
         if (
             parameter not in metadata[name][0].parameters
@@ -374,12 +376,17 @@ def _audit_master(path: Path) -> tuple[dict, str, dict]:
         ("voltmeter", "Dsout", "$VDC:N1:N2"),
         ("breaker1", "Dsdyn", "NINT(1.0-$NAME)"),
         ("peswitch", "Branch", "NBR = $DP $DN BREAKER $ROFF"),
+        ("arrester", "Dsdyn", "CALL ARRESTERZNO_EXE"),
     ):
         element = root.find(
             f"./definitions/Definition[@name='{name}']/script/segment[@name='{segment}']"
         )
         if element is None or token not in re.sub(r"\s+", " ", element.text or ""):
             raise ValueError(f"Master electrical directive changed: {name}:{segment}")
+    for parameter, unit_label in (("Energy", "[kJoules]"), ("Curr", "[kA]")):
+        element = root.find(f"./definitions/Definition[@name='arrester']/form//parameter[@name='{parameter}']")
+        if element is None or unit_label not in element.get("desc", ""):
+            raise ValueError("Master arrester output units changed")
     if _sha(path.read_bytes()) != _sha(payload):
         raise ValueError("Master changed during native arm audit")
     defaults = {

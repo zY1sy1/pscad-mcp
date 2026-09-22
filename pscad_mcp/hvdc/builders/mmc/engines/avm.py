@@ -57,6 +57,7 @@ def _native_producer_hashes() -> dict[str, str]:
             "native_sizing.py",
             "native_protection.py",
             "native_faults.py",
+            "native_isolation.py",
         )
     }
 
@@ -576,6 +577,7 @@ class AvmBlueprintEngine:
             output_step_s=float(selected.settings["output_step_s"]),
             arm_parameters=self._native_arm_parameters(values),
             fault_kind=self.native_fault_kind,
+            dc_reactor_inductance_h=float(values["dc_reactor_inductance_h"]),
             **self._native_control_parameters(values),
         )
         project = Path(receipt["project_path"])

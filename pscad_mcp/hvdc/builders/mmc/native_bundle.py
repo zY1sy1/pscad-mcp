@@ -34,6 +34,7 @@ from .native_startup import STARTUP_NAME, STARTUP_INPUTS, STARTUP_OUTPUTS, START
 from .native_dq import PLL_NAME, PLL_OUTPUTS, PLL_DEFAULTS, DQ_NAME, DQ_DEFAULTS, DQ_INPUTS, DQ_OUTPUTS, append_native_pll_and_dq
 from .native_protection import PROTECTION_NAME, PROTECTION_INPUTS, PROTECTION_OUTPUTS, PROTECTION_DEFAULTS, append_native_protection
 from .native_faults import FAULT_NAME, FAULT_KINDS, FAULT_OUTPUTS, FAULT_DEFAULTS, append_native_fault_protocol, fault_branches
+from .native_isolation import AC_ISOLATION, DC_ISOLATION, ISOLATION_OUTPUTS, append_native_isolation
 
 NATIVE_SCOPE = "cigre_mmc_avm_v1"
 CONTROL_NAME = "MMCStationModulator"
@@ -697,6 +698,7 @@ def materialize_native_avm_library(
     append_native_pll_and_dq(root)
     append_native_protection(root)
     append_native_fault_protocol(root)
+    isolation = append_native_isolation(root, metadata, defaults)
     sample = _definition(root, SAMPLE_NAME,
                          {"IN": (-36, 0, "Transfer", "Input"), "OUT": (36, 0, "Transfer", "Output")}, {})
     _script(sample, "Dsdyn", "      $OUT = $IN\n")
@@ -744,6 +746,8 @@ def materialize_native_avm_library(
             },
             "routes": arm_writer.routes,
         },
+        "isolation_topology": {"electrical_nets": {name: dict(nets) for name, nets in isolation.nets.items()},
+                               "routes": isolation.routes},
         "control": {
             "definition": f"{NATIVE_SCOPE}:{CONTROL_NAME}",
             "kind": "scheduled_open_loop",
@@ -887,6 +891,7 @@ def materialize_native_avm_fixture(
     output_step_s: float = 100e-6,
     arm_parameters: AverageArmParameters | None = None,
     fault_kind: str | None = None,
+    dc_reactor_inductance_h: float = 0.05,
 ) -> dict:
     """Create a complete two-station, twelve-arm native integration fixture."""
     folder = Path(destination).resolve()
@@ -941,6 +946,10 @@ def materialize_native_avm_fixture(
     if control_kind == "dq_current":
         channels.update({f"{s}_{name}": unit for s in ("P", "V") for name, unit in DQ_OUTPUTS.items()})
         channels.update({name: unit for name, unit in PROTECTION_OUTPUTS.values()})
+        channels.update({f"{s}_{domain}_{branch}_{name}": unit for s in ("P", "V")
+                         for domain, branches in (("AC", "ABC"), ("DC", ("POS", "NEG")))
+                         for branch in branches for name, unit in ISOLATION_OUTPUTS.items()})
+        channels.update({f"{s}_CABLE_{name}": "kV" for s in ("P", "V") for name in ("VDC", "VPOS", "VNEG")})
     if fault_kind is not None:
         channels.update({name: unit for name, unit in FAULT_OUTPUTS.values()})
         channels.update({"FAULT_I_" + name: "kA" for name in fault_branches(fault_kind)})
@@ -1000,6 +1009,7 @@ def materialize_native_avm_fixture(
         simulation_duration_s, "simulation_duration_s", positive=True
     )
     time_step_s = _number(time_step_s, "time_step_s", positive=True)
+    dc_reactor_inductance_h = _number(dc_reactor_inductance_h, "dc_reactor_inductance_h", positive=True)
     output_step_s = _number(output_step_s, "output_step_s", positive=True)
     if (
         not 0 <= modulation_index < 1
@@ -1094,16 +1104,17 @@ def materialize_native_avm_fixture(
             },
         )
         for phase in "ABC":
-            writer.add(
-                main,
-                prefix + "_grid_resistor_" + phase,
-                "master:resistor",
-                {"R": f"{_format(explicit_grid_r)} [ohm]"},
-                {
-                    "A": prefix + "_SOURCE_" + phase,
-                    "B": prefix + "_GRID_R_" + phase,
-                },
-            )
+            if control_kind == "dq_current":
+                contact = writer.add(main, prefix + "_grid_resistor_" + phase, NATIVE_SCOPE + ":" + AC_ISOLATION,
+                    {"Contact_On_ohm": explicit_grid_r, "Contact_Off_ohm": 1e8,
+                     "Arrester_Rating_kV": 1.1 * math.sqrt(2 / 3) * station_voltage},
+                    {"IN": prefix + "_SOURCE_" + phase, "OUT": prefix + "_GRID_R_" + phase,
+                     "OPEN": "PROTECTION_TRIP", **{n: f"{prefix}_AC_{phase}_{n}" for n in ISOLATION_OUTPUTS}})
+                custom.append((contact, AC_ISOLATION))
+            else:
+                writer.add(main, prefix + "_grid_resistor_" + phase, "master:resistor",
+                    {"R": f"{_format(explicit_grid_r)} [ohm]"},
+                    {"A": prefix + "_SOURCE_" + phase, "B": prefix + "_GRID_R_" + phase})
             writer.add(
                 main,
                 prefix + "_grid_current_" + phase,
@@ -1301,13 +1312,26 @@ def materialize_native_avm_fixture(
             prefix + "_dc_current",
             "master:ammeter",
             {"Name": prefix + "_IDC"},
-            {"N1": prefix + "_DC_POS", "N2": prefix + "_CABLE_POS"},
+            {"N1": prefix + "_DC_POS", "N2": prefix + ("_DC_METER_POS" if control_kind == "dq_current" else "_CABLE_POS")},
         )
         writer.add(
             main, prefix + "_dc_negative_current", "master:ammeter",
             {"Name": prefix + "_IDC_NEG"},
-            {"N1": prefix + "_DC_NEG", "N2": prefix + "_CABLE_NEG"},
+            {"N1": prefix + "_DC_NEG", "N2": prefix + ("_DC_METER_NEG" if control_kind == "dq_current" else "_CABLE_NEG")},
         )
+        if control_kind == "dq_current":
+            for pole in ("POS", "NEG"):
+                contact = writer.add(main, prefix + "_dc_isolation_" + pole, NATIVE_SCOPE + ":" + DC_ISOLATION,
+                    {"Contact_On_ohm": 0.001, "Contact_Off_ohm": 1e8, "Arrester_Rating_kV": 0.46875 * vdc_order_kv,
+                     "Reactor_H": dc_reactor_inductance_h, "Preinsert_ohm": 150 * (vdc_order_kv / 640)**2 / (active_power_order_mw / 1000),
+                     "Preinsert_Time_s": 0.02},
+                    {"IN": prefix + "_DC_METER_" + pole, "OUT": prefix + "_CABLE_" + pole,
+                     "OPEN": "PROTECTION_TRIP", **{n: f"{prefix}_DC_{pole}_{n}" for n in ISOLATION_OUTPUTS}})
+                custom.append((contact, DC_ISOLATION))
+                writer.add(main, prefix + "_cable_voltage_" + pole, "master:voltmeter",
+                           {"Name": prefix + "_CABLE_V" + pole}, {"N1": prefix + "_CABLE_" + pole, "N2": "GND"})
+            writer.add(main, prefix + "_cable_voltage", "master:voltmeter", {"Name": prefix + "_CABLE_VDC"},
+                       {"N1": prefix + "_CABLE_POS", "N2": prefix + "_CABLE_NEG"})
     cable = writer.add(
         main,
         "DC_CABLE",
@@ -1466,7 +1490,7 @@ def materialize_native_avm_fixture(
         call = _hierarchy_call(
             hierarchy,
             component,
-            z=hierarchy_order[component.get("name")],
+            z=hierarchy_order.get(component.get("name"), 0),
             instance=(
                 arm_instances[component.get("name")] if definition == "MMCAverageArm"
                 else 1 if component.get("name") == "V_controller" else 0
@@ -1537,6 +1561,7 @@ def materialize_native_avm_fixture(
             "reversal_duration_s": reversal_duration_s,
             "simulation_duration_s": simulation_duration_s,
             "fault_kind": fault_kind,
+            "dc_reactor_inductance_h": dc_reactor_inductance_h,
             "time_step_s": time_step_s,
             "output_step_s": output_step_s,
             "cable_length_km": library_receipt["cable_length_km"],
@@ -1575,6 +1600,7 @@ def audit_native_avm_fixture(
     main = root.find("./definitions/Definition[@name='Main']")
     counts = Counter(user.get("defn") for user in main.findall("./schematic/User"))
     control_definition = {"closed_loop": CLOSED_LOOP_CONTROL_NAME, "dq_current": DQ_NAME, "scheduled_open_loop": CONTROL_NAME}[receipt["control_kind"]]
+    isolated = receipt["control_kind"] == "dq_current"
     required = {
         f"{NATIVE_SCOPE}:MMCAverageArm": 12,
         f"{NATIVE_SCOPE}:{control_definition}": 2,
@@ -1592,6 +1618,9 @@ def audit_native_avm_fixture(
         "master:voltmeter": 18,
         "master:pgb": len(receipt["channels"]),
     }
+    if isolated:
+        required.update({f"{NATIVE_SCOPE}:{AC_ISOLATION}": 6, f"{NATIVE_SCOPE}:{DC_ISOLATION}": 4,
+                         f"{NATIVE_SCOPE}:{PROTECTION_NAME}": 1, "master:resistor": 10, "master:voltmeter": 24})
     if any(counts[name] != count for name, count in required.items()):
         raise ValueError("Native AVM fixture is missing a required physical component")
     nets = receipt["electrical_nets"]["Main"]
@@ -1617,9 +1646,9 @@ def audit_native_avm_fixture(
         for phase_index, phase in enumerate("ABC", start=1):
             if {
             f"{prefix}_source_breakout:N{phase_index}",
-            f"{prefix}_grid_resistor_{phase}:A",
+            f"{prefix}_grid_resistor_{phase}:{'IN' if isolated else 'A'}",
             } - set(nets[prefix + "_SOURCE_" + phase]) or {
-                f"{prefix}_grid_resistor_{phase}:B",
+                f"{prefix}_grid_resistor_{phase}:{'OUT' if isolated else 'B'}",
                 f"{prefix}_grid_current_{phase}:N1",
             } - set(nets[prefix + "_GRID_R_" + phase]) or {
                 f"{prefix}_grid_current_{phase}:N2",
@@ -1651,15 +1680,19 @@ def audit_native_avm_fixture(
         ):
             raise ValueError("Native AVM DC arm polarity is incomplete")
         if {
-            f"{prefix}_dc_current:N2",
+            f"{prefix}_dc_isolation_POS:OUT" if isolated else f"{prefix}_dc_current:N2",
             f"DC_CABLE:{'SEND_POS' if prefix == 'P' else 'RECV_POS'}",
         } - set(nets[prefix + "_CABLE_POS"]):
             raise ValueError("Native AVM DC current measurement path is incomplete")
         if {
-            f"{prefix}_dc_negative_current:N2",
+            f"{prefix}_dc_isolation_NEG:OUT" if isolated else f"{prefix}_dc_negative_current:N2",
             f"DC_CABLE:{'SEND_NEG' if prefix == 'P' else 'RECV_NEG'}",
         } - set(nets[prefix + "_CABLE_NEG"]):
             raise ValueError("Native AVM negative DC current measurement path is incomplete")
+        if isolated:
+            for pole, meter in (("POS", "dc_current"), ("NEG", "dc_negative_current")):
+                if {f"{prefix}_{meter}:N2", f"{prefix}_dc_isolation_{pole}:IN"} - set(nets[prefix + "_DC_METER_" + pole]):
+                    raise ValueError("Native DC current meter does not feed its isolation reactor")
     if set(nets["P_DC_POS"]) & set(nets["P_DC_NEG"]) or set(nets["V_DC_POS"]) & set(
         nets["V_DC_NEG"]
     ):

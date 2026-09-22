@@ -7,6 +7,7 @@ from .avm_companion import _definition, _script, _PARAMETER_UNITS
 PROTECTION_NAME = "MMCNativeProtection"
 PROTECTION_INPUTS = ("PRECHARGE_READY", "POWER_READY", "PRECHARGE_FAILED", "CHARGE_FAILED",
                      "P_VDC", "V_VDC", "P_PLL_LOCKED", "V_PLL_LOCKED", "P_LIMIT_ACTIVE", "V_LIMIT_ACTIVE") + tuple(
+    f"{s}_CABLE_{n}" for s in ("P", "V") for n in ("VDC", "VPOS", "VNEG")) + tuple(
     f"{s}_{p}_{q}_{n}" for s in ("P", "V") for p in "ABC" for q in ("UPPER", "LOWER") for n in ("I", "VCAP"))
 PROTECTION_OUTPUTS = {"TRIP": ("PROTECTION_TRIP", "1"), "CODE": ("PROTECTION_CODE", "1"),
                       "TRIP_TIME": ("PROTECTION_TIME", "s"), "SATURATION_HOLD": ("PROTECTION_SATURATION_HOLD", "s")}
@@ -43,6 +44,8 @@ def append_native_protection(root: ET.Element) -> None:
       IF ($POWER_READY .GE. 0.5) THEN
         IF (MIN($P_VDC, $V_VDC) .LT. 0.90 * $Vdc_Order_kV) REASON = REASON + 8
         IF (CMIN .LT. 0.45 * $Vdc_Order_kV) REASON = REASON + 16
+        IF (MAX(ABS($P_CABLE_VPOS + $P_CABLE_VNEG), ABS($V_CABLE_VPOS + $V_CABLE_VNEG)) .GT. 0.01 * $Vdc_Order_kV) REASON = REASON + 256
+        IF (MIN($P_CABLE_VDC, $V_CABLE_VDC) .LT. 0.90 * $Vdc_Order_kV) REASON = REASON + 512
       ENDIF
       IF ($PRECHARGE_READY .GE. 0.5) THEN
         IF (MIN($P_PLL_LOCKED, $V_PLL_LOCKED) .LT. 0.5) REASON = REASON + 32

@@ -50,6 +50,7 @@ def evaluate_native_fault_trace(trace: dict, parameters: dict) -> dict:
     result = {"scope": "native_half_bridge_fault_response", "status": "FAIL", "model_accepted": False,
               "intrinsic_dc_fault_blocking": False, "checks": {}, "metrics": {},
               "limits": {"trip_latency_s": 0.005, "recovery_time_s": 0.5,
+                         "isolation_latency_s": 0.005,
                          "dc_current_peak_pu": 2.0, "arm_current_peak_pu": 2.0,
                          "recovered_power_error_pu": 0.05, "recovered_voltage_error_pu": 0.10}}
     kind = parameters.get("fault_kind")
@@ -61,6 +62,8 @@ def evaluate_native_fault_trace(trace: dict, parameters: dict) -> dict:
     for s in ("P", "V"):
         required.update(s + "_" + n for n in ("BLOCK", "VDC", "IDC", "P", "P_REFERENCE", "PLL_LOCKED"))
         required.update(f"{s}_{p}_{q}_I" for p in "ABC" for q in ("UPPER", "LOWER"))
+        required.update(f"{s}_{domain}_{branch}_{name}" for domain, branches_ in (("AC", "ABC"), ("DC", ("POS", "NEG")))
+                        for branch in branches_ for name in ("CONTACT_STATE", "MOV_ENERGY"))
     if not required <= trace.keys():
         result["missing_channels"] = sorted(required - trace.keys())
         return result
@@ -84,6 +87,10 @@ def evaluate_native_fault_trace(trace: dict, parameters: dict) -> dict:
     checks["protection_trips_after_fault"] = trip is not None and start - 1.1 * step <= trace["PROTECTION_TIME"][trip] <= start + result["limits"]["trip_latency_s"]
     if trip is not None:
         checks["both_stations_block"] = all(any(trace[s + "_BLOCK"][i] >= 0.5 for i in range(trip, min(len(time), trip + 4))) for s in ("P", "V"))
+        isolation = [i for i, t in enumerate(time) if time[trip] <= t <= time[trip] + result["limits"]["isolation_latency_s"]]
+        for s in ("P", "V"):
+            contacts = [f"{s}_{domain}_{branch}_CONTACT_STATE" for domain, branches_ in (("AC", "ABC"), ("DC", ("POS", "NEG"))) for branch in branches_]
+            checks[s + ":external_isolation"] = all(any(trace[c][i] >= 1.5 for i in isolation) for c in contacts)
     checks["fault_clears"] = all(v < 0.5 for t, v in zip(time, trace["FAULT_ACTIVE"]) if t >= end + step)
     fault_window = [i for i, t in enumerate(time) if start <= t <= end + 0.5]
     recovery = [i for i, t in enumerate(time) if end + 0.5 <= t <= end + 0.7]
@@ -96,6 +103,9 @@ def evaluate_native_fault_trace(trace: dict, parameters: dict) -> dict:
         metrics[s] = {"dc_current_peak_pu": max(abs(trace[s + "_IDC"][i]) for i in fault_window) / (power / vdc),
                       "arm_current_peak_pu": max(abs(trace[a][i]) for a in arms for i in fault_window) / base,
                       "recovered_dc_voltage_error_pu": max(abs(trace[s + "_VDC"][i] / vdc - 1) for i in recovery)}
+        arresters = [f"{s}_{domain}_{branch}_MOV_ENERGY" for domain, branches_ in (("AC", "ABC"), ("DC", ("POS", "NEG"))) for branch in branches_]
+        metrics[s]["arrester_energy_increment_kj"] = sum(trace[n][fault_window[-1]] - trace[n][fault_window[0]] for n in arresters)
+        checks[s + ":arrester_energy_valid"] = all(min(trace[n][i] for i in fault_window) >= -1e-9 for n in arresters)
         checks[s + ":dc_current_bound"] = metrics[s]["dc_current_peak_pu"] <= result["limits"]["dc_current_peak_pu"]
         checks[s + ":arm_current_bound"] = metrics[s]["arm_current_peak_pu"] <= result["limits"]["arm_current_peak_pu"]
         checks[s + ":voltage_recovery"] = metrics[s]["recovered_dc_voltage_error_pu"] <= result["limits"]["recovered_voltage_error_pu"]

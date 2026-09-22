@@ -60,6 +60,10 @@ def test_trip_without_postfault_control_recovery_cannot_pass(evidence):
         trace[s + "_P"] = trace["P_P"][:]
         trace[s + "_P_REFERENCE"] = trace["P_P_REFERENCE"][:]
         trace[s + "_BLOCK"] = [float(t >= 2.101) for t in time]
+        for domain, branches in (("AC", "ABC"), ("DC", ("POS", "NEG"))):
+            for branch in branches:
+                trace[f"{s}_{domain}_{branch}_CONTACT_STATE"] = [2.0 if t >= 2.102 else 0.0 for t in time]
+                trace[f"{s}_{domain}_{branch}_MOV_ENERGY"] = [10.0 if t >= 2.102 else 0.0 for t in time]
     result = evaluate_native_fault_trace(trace, parameters)
     assert result["checks"]["protection_trips_after_fault"]
     assert result["checks"]["both_stations_block"]

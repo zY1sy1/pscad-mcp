@@ -17,6 +17,7 @@ def _definition():
 def _healthy():
     return "\n".join(["SIG_PRECHARGE_READY = 1.0", "SIG_POWER_READY = 1.0",
         *(f"SIG_{s}_VDC = 640.0\nSIG_{s}_PLL_LOCKED = 1.0" for s in ("P", "V")),
+        *(f"SIG_{s}_CABLE_VDC = 640.0\nSIG_{s}_CABLE_VPOS = 320.0\nSIG_{s}_CABLE_VNEG = -320.0" for s in ("P", "V")),
         *(f"SIG_{s}_{p}_{q}_VCAP = 320.0" for s in ("P", "V") for p in "ABC" for q in ("UPPER", "LOWER"))])
 
 
@@ -25,9 +26,10 @@ def _healthy():
     ("V_C_LOWER_VCAP", 353.0, 4), ("V_VDC", 570.0, 8),
     ("P_B_UPPER_VCAP", 287.0, 16), ("V_PLL_LOCKED", 0.0, 32),
     ("CHARGE_FAILED", 1.0, 128),
+    ("P_CABLE_VPOS", 330.0, 256), ("V_CABLE_VDC", 570.0, 512),
 ])
 def test_native_protection_latches_first_cause_after_the_fault_disappears(tmp_path, field, bad, code):
-    restore = 320.0 if field.endswith("VCAP") else 640.0 if field.endswith("VDC") else 1.0 if field.endswith("LOCKED") else 0.0
+    restore = 320.0 if field.endswith(("VCAP", "VPOS")) else 640.0 if field.endswith("VDC") else 1.0 if field.endswith("LOCKED") else 0.0
     rows = _run_native_equations(tmp_path, PROTECTION_NAME, definition=_definition(), declarations="",
         initialize=_healthy(), loop=f"""SIG_{field} = {restore}
 if (TIME >= 0.1 .and. TIME < 0.102) SIG_{field} = {bad}""",

@@ -239,6 +239,7 @@ def _engine_candidates(
         # several MW of unintended stack and capacitor-clamp leakage.
         base_parameters["arm_off_state_resistance_ohm"] = 1e8
         base_parameters["base_modulation_index"] = 0.9
+        base_parameters["dc_reactor_inductance_h"] = 0.05 * impedance_scale
         base_parameters["maximum_precharge_time_s"] = 1.0
         base_parameters["startup_charge_time_s"] = 0.5
         base_parameters["maximum_conditioning_time_s"] = 1.5
