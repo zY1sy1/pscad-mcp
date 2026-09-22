@@ -82,7 +82,7 @@ def discover_native_avm_sources(
 
 
 def _native_input_record(
-    paths: Mapping[str, str], *, control_kind: str = "closed_loop"
+    paths: Mapping[str, str], *, control_kind: str = "dq_current"
 ) -> dict[str, object]:
     if set(paths) != _NATIVE_SOURCE_KEYS:
         raise _error(
@@ -348,7 +348,7 @@ class AvmBlueprintEngine:
         fixture_builder: Any = materialize_native_avm_fixture,
         fixture_auditor: Any = audit_native_avm_fixture,
         operation_timeout_s: float = 600.0,
-        native_control_kind: str = "closed_loop",
+        native_control_kind: str = "dq_current",
         native_fault_kind: str | None = None,
     ) -> None:
         self.asset_set = load_packaged_asset_set() if asset_set is None else asset_set

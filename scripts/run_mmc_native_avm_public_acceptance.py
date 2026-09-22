@@ -113,7 +113,7 @@ def _require_public_plan(
     plan: dict[str, Any],
     sources: dict[str, str],
     *,
-    control_kind: str = "closed_loop",
+    control_kind: str = "dq_current",
     fault_kind: str | None = None,
 ) -> dict[str, Any]:
     children = plan.get("engine_plans", ())
@@ -239,26 +239,12 @@ async def run_attempt(
         require_runtime(runtime)
 
         begin("plan")
-        control_kind = getattr(args, "control_kind", "closed_loop")
+        control_kind = getattr(args, "control_kind", "dq_current")
         fault_kind = getattr(args, "fault_kind", None)
-        if control_kind == "closed_loop":
-            builder = builder_factory(service, workspace_root=workspace)
-        else:
-            native_sources = discover_native_avm_sources(
-                master_path=args.master,
-                source_project=args.source_project,
-                executable=args.tline,
-            )
-            builder = builder_factory(
-                service,
-                workspace_root=workspace,
-                avm_engine=AvmBlueprintEngine(
-                    native_sources=native_sources,
-                    native_required=True,
-                    native_control_kind=control_kind,
-                    native_fault_kind=fault_kind,
-                ),
-            )
+        native_sources = discover_native_avm_sources(master_path=args.master, source_project=args.source_project, executable=args.tline)
+        builder = builder_factory(service, workspace_root=workspace,
+            avm_engine=AvmBlueprintEngine(native_sources=native_sources, native_required=True,
+                                          native_control_kind=control_kind, native_fault_kind=fault_kind))
         plan = builder.plan_model(
             request,
             project_name="MMC_PUBLIC_NATIVE",
@@ -584,7 +570,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--control-kind",
         choices=("scheduled_open_loop", "closed_loop", "dq_current"),
-        default="closed_loop",
+        default="dq_current",
     )
     parser.add_argument(
         "--tline",
