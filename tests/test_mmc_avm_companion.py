@@ -416,3 +416,45 @@ def test_native_coupling_tracks_passive_rlc_and_converges_with_timestep(companio
     coarse, fine = integrate(50e-6), integrate(25e-6)
     assert coarse < 0.3
     assert fine < coarse * 0.51
+
+
+@pytest.mark.parametrize("current_sign", (1.0, -1.0))
+def test_native_variable_insertion_preserves_port_energy(library, tmp_path, current_sign):
+    from tests.test_mmc_native_dq import _run_native_equations
+
+    # Drive the actual generated equations with periodic arm current and a
+    # varying insertion ratio. The network solves a trapezoidal capacitor;
+    # the coupling sees the previous network current, just as EMTDC Dsdyn does.
+    # Constant-insertion RLC tests cannot reveal a ratio/current time mismatch.
+    definition = library[0].find("./definitions/Definition[@name='MMCAverageCoupling']")
+    residuals = []
+    for step in (50e-6, 25e-6):
+        rows = _run_native_equations(
+            tmp_path, "MMCAverageCoupling", definition=definition,
+            declarations="""real(8) :: capacitor, previous_storage, current_now, source_power
+real(8) :: previous_power, supplied, initial_energy, physical_capacitance""",
+            initialize=f"""DELT = {step}
+PAR_C_eq_F = 0.0001041666666666667
+PAR_P_nonohmic_MW = 0.0
+physical_capacitance = PAR_C_eq_F / 4.0
+capacitor = 640.0
+previous_storage = 0.0
+previous_power = 0.0
+supplied = 0.0
+initial_energy = 0.0""",
+            loop=f"""SIG_M = 0.5 + 0.35 * SIN(6.283185307179586 * 60.0 * TIME)
+SIG_VCAP = capacitor
+SIG_INORMAL = {current_sign} * (-0.35 * 1.25 * COS(0.35) + 1.25 * SIN(6.283185307179586 * 60.0 * (TIME - DELT) + 0.35))
+current_now = {current_sign} * (-0.35 * 1.25 * COS(0.35) + 1.25 * SIN(6.283185307179586 * 60.0 * TIME + 0.35))""",
+            observations="""capacitor = capacitor + DELT * (SIG_ISTORE + previous_storage) / (2.0 * physical_capacitance)
+source_power = SIG_VNORMAL * current_now
+if (sample == NINT(0.1 / DELT)) initial_energy = 0.5 * physical_capacitance * capacitor**2
+if (sample > NINT(0.1 / DELT)) supplied = supplied + 0.5 * DELT * (source_power + previous_power)
+previous_storage = SIG_ISTORE
+previous_power = source_power
+if (sample == NINT(0.5 / DELT)) print *, (supplied - (0.5 * physical_capacitance * capacitor**2 - initial_energy)) / 0.4""",
+            steps=round(0.5 / step),
+        )
+        residuals.append(abs(rows[0][0]))
+    assert residuals[0] < 0.001  # < 1 kW; old coupling injects about 1 MW/arm
+    assert residuals[1] < residuals[0] * 0.3

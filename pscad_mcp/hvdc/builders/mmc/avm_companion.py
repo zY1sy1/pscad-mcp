@@ -740,16 +740,21 @@ def _make_library(
     _script(
         coupling,
         "Fortran",
-        f"""#LOCAL REAL NINSERT
+        f"""#STORAGE REAL:1
+#LOCAL REAL NINSERT
 #LOCAL REAL ILOSS
 #LOCAL REAL VPREDICT
       NINSERT = MIN(1.0, MAX(0.0, $M))
+      IF (TIMEZERO) STORF(NSTORF) = NINSERT
       ILOSS = 0.0
       IF ($VCAP .GT. 0.0) THEN
         ILOSS = $P_nonohmic_MW / MAX($VCAP, $V_loss_floor_kV)
         ILOSS = MIN(ILOSS, 0.25 * $C_eq_F * $VCAP / (8.0 * DELT))
       ENDIF
-      $ISTORE = NINSERT * $INORMAL + $ICLAMP - ILOSS
+! The measured branch current belongs to the preceding network solution.
+! Pair it with the ratio that produced that solution, not the new command.
+! Otherwise a varying insertion ratio creates first-order artificial power.
+      $ISTORE = STORF(NSTORF) * $INORMAL + $ICLAMP - ILOSS
       VPREDICT = MAX(0.0, $VCAP + {CAPACITOR_FEEDBACK_ADVANCE_STEPS} * DELT * $ISTORE / (0.25 * $C_eq_F))
       $VNORMAL = NINSERT * VPREDICT
       $VCLAMP = VPREDICT
@@ -758,6 +763,8 @@ def _make_library(
       $PLOSS = ILOSS * $VCAP
       $OPEN = 0.0
       IF ($BLOCK .GE. 0.5) $OPEN = 1.0
+      STORF(NSTORF) = NINSERT
+      NSTORF = NSTORF + 1
 """,
     )
     writer = _Writer(root, master, master_defaults)

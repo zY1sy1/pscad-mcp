@@ -10,19 +10,24 @@ import pytest
 from pscad_mcp.hvdc.builders.mmc.native_dq import PLL_NAME, DQ_NAME, append_native_pll_and_dq
 
 
-def _run_native_equations(tmp_path, definition_name, *, declarations, initialize, loop, observations, steps):
+def _run_native_equations(tmp_path, definition_name, *, declarations, initialize, loop, observations, steps, definition=None):
     compiler = Path("C:/Program Files (x86)/GFortran/4.6/bin/gfortran.exe")
     if not compiler.is_file():
         pytest.skip("Native Fortran compiler is unavailable")
-    root = ET.Element("project")
-    ET.SubElement(root, "definitions")
-    append_native_pll_and_dq(root)
-    definition = root.find(f"./definitions/Definition[@name='{definition_name}']")
-    script = definition.find("./script/segment[@name='Dsdyn']").text
+    if definition is None:
+        root = ET.Element("project")
+        ET.SubElement(root, "definitions")
+        append_native_pll_and_dq(root)
+        definition = root.find(f"./definitions/Definition[@name='{definition_name}']")
+    segment = definition.find("./script/segment[@name='Dsdyn']")
+    if segment is None:
+        segment = definition.find("./script/segment[@name='Fortran']")
+    script = segment.text
     parameters = {p.get("name"): p.findtext("value") for p in definition.findall("./form/category/parameter")}
     ports = [p.get("name") for p in definition.findall("./svg/port")]
     locals_ = re.findall(r"#LOCAL (REAL|INTEGER) (\w+)", script)
-    storage = int(re.search(r"#STORAGE REAL:(\d+)", script).group(1))
+    storage_match = re.search(r"#STORAGE REAL:(\d+)", script)
+    storage = int(storage_match.group(1)) if storage_match else 1
     body = re.sub(r"^#.*$", "", script, flags=re.MULTILINE)
     body = re.sub(r"\$(\w+)", lambda m: ("PAR_" if m[1] in parameters else "SIG_") + m[1], body)
     variable_declarations = "\n".join(
