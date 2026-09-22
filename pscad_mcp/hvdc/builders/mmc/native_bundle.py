@@ -63,13 +63,15 @@ CLOSED_LOOP_DEFAULTS = {
     "Kp_Active": 0.01,
     "Ti_Active_s": 0.10,
     "Kp_Reactive": 0.00005,
-    "Ti_Reactive_s": 0.10,
+    "Ti_Reactive_s": 0.05,
     "Base_Modulation": 0.90,
     "C_eq_F": 6.510416666666667e-5,
     "Circulating_Gain_ohm": 18.84955592153876,
     "Energy_Gain_per_s": 10.0,
+    "R_arm_ohm": 0.15,
+    "P_nonohmic_MW": 0.0,
     "Kp_Vdc_MW_per_kV": 1.0,
-    "Ti_Vdc_s": 0.10,
+    "Ti_Vdc_s": 0.05,
     "Power_Correction_Limit_MW": 1500.0,
 }
 ARM_FEEDBACK_INPUTS = tuple(
@@ -295,18 +297,31 @@ def _closed_loop_control(root: ET.Element, master: dict, defaults: dict) -> dict
       $D = VALPHA * SIN(THETA) - VBETA * COS(THETA)
       $Q = VALPHA * COS(THETA) + VBETA * SIN(THETA)
 """)
+    energy_difference = _definition(
+        root,
+        "MMCArmEnergyDifference",
+        {
+            **_feedback_ports(tuple(f"{phase}_{position}_VCAP" for phase in "ABC" for position in ("UPPER", "LOWER"))),
+            **{f"D{phase}": (72, -36 + index * 36, "Transfer", "Output") for index, phase in enumerate("ABC")},
+        },
+        {"C_eq_F": CLOSED_LOOP_DEFAULTS["C_eq_F"]},
+    )
+    _script(energy_difference, "Fortran", "".join(
+        f"      $D{phase} = 0.5 * $C_eq_F * (${phase}_UPPER_VCAP**2 - ${phase}_LOWER_VCAP**2)\n"
+        for phase in "ABC"
+    ))
     synthesis = _definition(
         root,
         "MMCModulationSynthesis",
         {
-            **_feedback_ports(("ANGLE_COMMAND", "MODULATION_COMMAND", "VDC_MEAS", "P_MEAS", "FRAME_D", "FRAME_Q", *ARM_FEEDBACK_INPUTS)),
+            **_feedback_ports(("ANGLE_COMMAND", "MODULATION_COMMAND", "VDC_MEAS", "P_MEAS", "FRAME_D", "FRAME_Q", *ARM_FEEDBACK_INPUTS, "DWA", "DWB", "DWC")),
             **{
                 name: (72, -126 + index * 36, "Transfer", "Output")
                 for index, name in enumerate(CONTROL_OUTPUTS[:6])
             },
         },
         {name: CLOSED_LOOP_DEFAULTS[name] for name in (
-            "Frequency_Hz", "Vdc_Order_kV", "C_eq_F", "Circulating_Gain_ohm", "Energy_Gain_per_s"
+            "Frequency_Hz", "Vdc_Order_kV", "C_eq_F", "Circulating_Gain_ohm", "Energy_Gain_per_s", "R_arm_ohm", "P_nonohmic_MW"
         )},
     )
     _script(
@@ -323,6 +338,7 @@ def _closed_loop_control(root: ET.Element, master: dict, defaults: dict) -> dict
 #LOCAL REAL IREF
 #LOCAL REAL VCOMMON
 #LOCAL REAL VACOM
+#LOCAL REAL PLOSS
       ANGLE = 6.28318530717959 * $Frequency_Hz * TIME
       IF ($FRAME_D * $FRAME_D + $FRAME_Q * $FRAME_Q .GT. 1.0) ANGLE = ANGLE + ATAN2($FRAME_Q, $FRAME_D)
       ANGLE = ANGLE + $ANGLE_COMMAND * 0.0174532925199433
@@ -334,9 +350,11 @@ def _closed_loop_control(root: ET.Element, master: dict, defaults: dict) -> dict
 """ + "".join(
             f"""      WPAIR = 0.5 * $C_eq_F * (${phase}_UPPER_VCAP**2 + ${phase}_LOWER_VCAP**2)
       ISUM = 0.5 * (${phase}_UPPER_I + ${phase}_LOWER_I)
-      IREF = (-$P_MEAS / 3.0 - $Energy_Gain_per_s * (WPAIR - WREF)) / MAX(0.1 * $Vdc_Order_kV, $VDC_MEAS)
-      VCOMMON = 0.5 * $VDC_MEAS + $Circulating_Gain_ohm * (ISUM - IREF)
+      PLOSS = 2.0 * $P_nonohmic_MW + $R_arm_ohm * (${phase}_UPPER_I**2 + ${phase}_LOWER_I**2)
       VACOM = 0.5 * $Vdc_Order_kV * M{phase}
+      IREF = (PLOSS - $P_MEAS / 3.0 - $Energy_Gain_per_s * (WPAIR - WREF)) / MAX(0.1 * $Vdc_Order_kV, $VDC_MEAS)
+      IREF = IREF + 5.0 * $DW{phase} * VACOM / MAX(1.0, (0.5 * $Vdc_Order_kV * MODULATION)**2)
+      VCOMMON = 0.5 * $VDC_MEAS + $Circulating_Gain_ohm * (ISUM - IREF)
       $M_{phase}_UPPER = MIN(1.0, MAX(0.0, (VCOMMON - VACOM) / MAX(0.1 * $Vdc_Order_kV, 2.0 * ${phase}_UPPER_VCAP)))
       $M_{phase}_LOWER = MIN(1.0, MAX(0.0, (VCOMMON + VACOM) / MAX(0.1 * $Vdc_Order_kV, 2.0 * ${phase}_LOWER_VCAP)))
 """ for phase in "ABC"
@@ -381,6 +399,15 @@ def _closed_loop_control(root: ET.Element, master: dict, defaults: dict) -> dict
         },
     )
     add(
+        "arm_energy_difference",
+        f"{NATIVE_SCOPE}:MMCArmEnergyDifference",
+        {"C_eq_F": "C_eq_F"},
+        {
+            **{f"{phase}_{position}_VCAP": f"{phase}_{position}_VCAP" for phase in "ABC" for position in ("UPPER", "LOWER")},
+            **{f"D{phase}": f"DW{phase}_RAW" for phase in "ABC"},
+        },
+    )
+    add(
         "errors",
         f"{NATIVE_SCOPE}:MMCControlErrors",
         {
@@ -413,6 +440,7 @@ def _closed_loop_control(root: ET.Element, master: dict, defaults: dict) -> dict
         ("vdc_filter", "VDC_MEAS", "VDC_FILTERED", 2000.0),
         ("frame_d_filter", "FRAME_D_RAW", "FRAME_D", 2000.0),
         ("frame_q_filter", "FRAME_Q_RAW", "FRAME_Q", 2000.0),
+        *((f"energy_difference_{phase}", f"DW{phase}_RAW", f"DW{phase}", 1000.0) for phase in "ABC"),
     ):
         add(
             role,
@@ -424,7 +452,7 @@ def _closed_loop_control(root: ET.Element, master: dict, defaults: dict) -> dict
                 "YO": "0.0",
                 "Dim": "1",
                 "G": "1.0",
-                "T": "0.02 [s]",
+                "T": "0.05 [s]" if role.startswith("energy_difference_") else "0.02 [s]",
                 "Max": str(limit),
                 "Min": str(-limit),
             },
@@ -489,7 +517,7 @@ def _closed_loop_control(root: ET.Element, master: dict, defaults: dict) -> dict
         "synthesis",
         f"{NATIVE_SCOPE}:MMCModulationSynthesis",
         {name: name for name in (
-            "Frequency_Hz", "Vdc_Order_kV", "C_eq_F", "Circulating_Gain_ohm", "Energy_Gain_per_s"
+            "Frequency_Hz", "Vdc_Order_kV", "C_eq_F", "Circulating_Gain_ohm", "Energy_Gain_per_s", "R_arm_ohm", "P_nonohmic_MW"
         )},
         {
             "ANGLE_COMMAND": "CTRL_ANGLE_COMMAND",
@@ -498,6 +526,7 @@ def _closed_loop_control(root: ET.Element, master: dict, defaults: dict) -> dict
             "P_MEAS": "P_FILTERED",
             "FRAME_D": "FRAME_D",
             "FRAME_Q": "FRAME_Q",
+            **{f"DW{phase}": f"DW{phase}" for phase in "ABC"},
             **{name: name for name in ARM_FEEDBACK_INPUTS},
             **{name: "CTRL_" + name for name in CONTROL_OUTPUTS[:6]},
         },
@@ -708,7 +737,7 @@ def materialize_native_avm_fixture(
     vdc_control_kp: float = 0.01,
     active_control_ti_s: float = 0.10,
     reactive_control_kp: float = 0.00005,
-    reactive_control_ti_s: float = 0.10,
+    reactive_control_ti_s: float = 0.05,
     deblock_time_s: float = 0.10,
     reversal_time_s: float = 0.30,
     simulation_duration_s: float = 0.5,
@@ -987,6 +1016,8 @@ def materialize_native_avm_fixture(
                     "Base_Modulation": modulation_index,
                     "Power_Correction_Limit_MW": 1.5 * active_power_order_mw,
                     "C_eq_F": arm_values["C_eq_F"],
+                    "R_arm_ohm": arm_values["R_arm_ohm"],
+                    "P_nonohmic_MW": arm_values["P_nonohmic_MW"],
                     "Circulating_Gain_ohm": 2 * math.pi * 60 * arm_values["L_arm_H"],
                     "Deblock_Time_s": deblock_time_s,
                     "Reversal_Time_s": reversal_time_s,

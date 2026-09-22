@@ -103,7 +103,7 @@ def test_native_bundle_contains_physical_arm_control_and_coupled_cable(
     assert all(measurement_ports[name] == ("Output", "Real") for name in ("P", "Q"))
     controller = definitions[CLOSED_LOOP_CONTROL_NAME]
     assert len(controller.findall("./schematic/User[@defn='master:pi_ctlr']")) == 3
-    assert len(controller.findall("./schematic/User[@defn='master:realpole']")) == 5
+    assert len(controller.findall("./schematic/User[@defn='master:realpole']")) == 8
     controller_components = {
         component.get("name"): component
         for component in controller.findall("./schematic/User")
