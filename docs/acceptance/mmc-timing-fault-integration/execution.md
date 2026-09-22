@@ -497,3 +497,88 @@ will execute from a separate checkout. Only the unfinished independent replay
 requires a fresh simulation. Its closure must bind the unchanged first saved
 model, full output/index/sample/analysis identities, original failed attempt,
 new comparison code and new worker evidence. No old verdict will be rewritten.
+
+Link-aligned inspection refined the diagnosis: swapping the two DCTL calls
+also changes their definition-wide `instance` ordinals 0/1. Commit
+`4c2a9ae9b9def6624382cf84f078cee4ff4b0ea4` validates complete original DFS
+ordinal sequences before sorting unique sibling links and assigning canonical
+ordinals. The final whole-XML comparison remains mandatory. An already equal
+hierarchy remains untouched. Real r2 saved models now compare equal; illegal
+ordinal changes, replaced/duplicated/deleted/added calls, nested changes and
+schematic ordering changes are rejected. The affected core/joint gate passed
+140 tests in 44.65 s, and independent review passed ten mutation cases.
+
+The old integration checkout is frozen at detached `b7473eb`; its actual raw
+native source SHA remains `2e1cd94b2588127520b2d3be167940aa398275c9927f45ff8ac62beb576091bb`.
+The integration branch now executes in
+`D:/pscad-mcp/.worktrees/mmc-timing-fault-final`. This preserves all recorded
+old code paths while allowing a separately identified replay comparator fix.
+
+Commit `6410b5e1b76b38ecec8557554ddedf5b09a8b633` adds the bounded replay-only
+recovery runner. It validates 323 retained/current file identities, including
+191 current production/worker code files, and permits only the reviewed
+native hierarchy helper/call difference against the first-run source revision.
+It re-evaluates the hash-bound archived first samples with unchanged checks,
+independently rereads timing on the same complete output dataset, then runs
+the existing fixed independent replay. It never materializes a new first case
+or writes into an old evidence/source tree. The final affected gate passed
+187 tests; independent Spec/Quality review passed, including 13 failure and
+cleanup protocol cases. A pre-invocation journal failure releases the lease;
+unknown post-invocation ownership retains it, and release=False cannot yield PASS.
+
+Actual replay recovery started at 23:45:14 Asia/Shanghai on September 22,
+launcher PID 11428 and actual Python PID 51324, at
+`D:/PSCAD-Workspace/mmc-joint-replay-20260922-r1`.
+Journal: `.pscad-mcp/mmc-builds/99f5b751febe446ab35182a8156b4692/journal.json`.
+Separate logs/provenance are under
+`D:/PSCAD-Workspace/mmc-integration-logs/joint-replay-r1.*`.
+The new replay's final physical/timing verdict and cleanup remain pending.
+
+## Final Joint and Independent Replay Acceptance — September 23
+
+The recovery closed at 00:05:25 Asia/Shanghai with final status PASS and
+physical_acceptance_verified=true. Both retained first-run and fresh
+independent replay datasets pass all 122 physical checks, and both measure
+the A command edges at 1.0/1.2 s with zero error and 800 active samples.
+Both fault-current peaks are 8.2468144896141 kA under the unchanged 20 kA
+bound. The new dataset contains 51 OUT/INF/INFX files and all 312 physical/
+diagnostic channels plus the separately checked command channel.
+
+Final report:
+`D:/PSCAD-Workspace/mmc-joint-replay-20260922-r1/.pscad-mcp/mmc-builds/99f5b751febe446ab35182a8156b4692/journal.json`
+SHA-256 `285a9af72060b26d9051c609948bcc260bba6f1bd4519fb4302966a3d22c132b`.
+The worker report SHA-256 is
+`817011332c68a530630b5ec0c5af411ceb26befb22835f330289ace03813926a`;
+the supervisor report SHA-256 is
+`be54a8bae0808c3c6fddabf20ab60a32cd15927dfa5993301cae9864961eb57a`.
+The independent worker copied the exact first saved model (dc3f5b…80e07)
+and all 16 declared dependencies, then saved the verified equivalent model
+`d4e7e95a0db66bc187fa9205d5b9aaff937ecd3ce7f4bc8b0a94e940f0e1790f`.
+Its new request SHA-256 is
+`638053f4104a847a854de9e31b50ca3cb80e8c87ce211996a2e7fc043a3f73e0`.
+
+Worker, supervisor and outer report all pass. Worker exit code is 0;
+owned_process_cleaned=true, cleanup_pending=false and lease_retained=false,
+with no finalization errors. The lock does not exist. Independent process
+queries confirmed that PSCAD 41476, worker 47140, worker launcher 50340,
+coordinator 51324 and launcher 11428 have exited. The earlier r2 instances
+25872 and 32816 had already exited and remain separate failed-attempt history.
+
+Final independent evidence review passed 582 hash references / 469 unique
+files, including 323 retained inputs, 145 fresh artifacts and 191 current
+code files at execution revision 6410b5e. It rechecked both complete datasets'
+identities, sizes, mtimes and run freshness, native saved-model equivalence,
+same-dataset timing and all request/context/model/dependency/report bindings.
+The old public, joint r1 and joint r2 failure reports retain their hashes and
+FAIL verdicts. The old preparation code remains in the frozen detached
+integration checkout. This is affected-gate replay recovery, with no stale
+plan rewriting or inherited physical PASS for the new worker.
+
+The shared comparator fix was synchronized to B at
+`effe98385923ad1c8aed538b00e6494e99cf0e21`, with 77 replay regressions passing
+in B's worktree and lint/diff checks clean. A remains at 16c7bf9 with its
+accepted independent timing evidence. The two independent tasks, public
+publication and combined timing/fault/recovery plus independent replay are
+now accepted. Main has not been merged or pushed.
+
+The concise delivery index is [delivery.md](delivery.md) in this final worktree.
