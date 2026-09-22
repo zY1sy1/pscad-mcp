@@ -788,6 +788,7 @@ def materialize_native_avm_fixture(
     cable_loss_mw: float = 0.0,
     converter_loss_mw: float = 0.0,
     dc_grounding_resistance_ohm: float = 1e6,
+    valve_grounding_resistance_ohm: float = 1e6,
     deblock_time_s: float = 0.10,
     reversal_time_s: float = 0.30,
     reversal_duration_s: float = 0.50,
@@ -833,6 +834,7 @@ def materialize_native_avm_fixture(
     )
     frequency_hz = _number(frequency_hz, "frequency_hz", positive=True)
     dc_grounding_resistance_ohm = _number(dc_grounding_resistance_ohm, "dc_grounding_resistance_ohm", positive=True)
+    valve_grounding_resistance_ohm = _number(valve_grounding_resistance_ohm, "valve_grounding_resistance_ohm", positive=True)
     transformer_rating_mva = _number(
         transformer_rating_mva, "transformer_rating_mva", positive=True
     )
@@ -1099,6 +1101,11 @@ def materialize_native_avm_fixture(
                 {"N1": prefix + "_VALVE_" + phase, "N2": prefix + "_PHASE_" + phase},
             )
             writer.add(
+                main, prefix + "_valve_ground_" + phase, "master:resistor",
+                {"R": f"{_format(valve_grounding_resistance_ohm)} [ohm]"},
+                {"A": prefix + "_PHASE_" + phase, "B": "GND"},
+            )
+            writer.add(
                 main, prefix + "_valve_voltage_" + phase, "master:voltmeter",
                 {"Name": prefix + "_VALVE_V_" + phase},
                 {"N1": prefix + "_PHASE_" + phase, "N2": "GND"},
@@ -1310,6 +1317,7 @@ def materialize_native_avm_fixture(
             "station_vdc_grid_r_ohm": station_vdc_grid_r_ohm,
             "station_vdc_grid_x_ohm": station_vdc_grid_x_ohm,
             "dc_grounding_resistance_ohm": dc_grounding_resistance_ohm,
+            "valve_grounding_resistance_ohm": valve_grounding_resistance_ohm,
             "transformer_rating_mva": transformer_rating_mva,
             "modulation_index": modulation_index,
             "control_kind": control_kind,
@@ -1377,7 +1385,7 @@ def audit_native_avm_fixture(
         "master:source3": 2,
         "master:xfmr-3p2w": 2,
         "master:breakout": 6,
-        "master:resistor": 10,
+        "master:resistor": 16,
         "master:ammeter": 28,
         "master:ground": 1,
         "master:voltmeter": 18,
@@ -1428,8 +1436,11 @@ def audit_native_avm_fixture(
                 f"{prefix}_{phase}_LOWER:IN",
                 f"{prefix}_valve_current_{phase}:N2",
                 f"{prefix}_valve_voltage_{phase}:N1",
+                f"{prefix}_valve_ground_{phase}:A",
             } - set(nets[prefix + "_PHASE_" + phase]):
                 raise ValueError("Native AVM phase midpoint is incomplete")
+            if f"{prefix}_valve_ground_{phase}:B" not in nets["GND"]:
+                raise ValueError("Native AVM valve-side common-mode reference is incomplete")
             if {f"{prefix}_breakout:N{'ABC'.index(phase) + 1}", f"{prefix}_valve_current_{phase}:N1"} - set(nets[prefix + "_VALVE_" + phase]):
                 raise ValueError("Native AVM valve current measurement path is incomplete")
             for position, endpoint in (("UPPER", "IN"), ("LOWER", "OUT")):
