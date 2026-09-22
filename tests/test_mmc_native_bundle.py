@@ -151,10 +151,10 @@ def test_native_bundle_contains_physical_arm_control_and_coupled_cable(
     error_script = definitions["MMCControlErrors"].find(
         "./script/segment[@name='Fortran']"
     ).text
-    assert "$P_MEAS - PREF" in error_script
+    assert "$P_MEAS - $P_REFERENCE" in error_script
     assert "$VDC_REFERENCE - $VDC_MEAS" in error_script
-    assert "$P_MEAS + PREF - $POWER_CORRECTION" in error_script
-    assert "$Q_MEAS - SCALE * $Q_Order_MVAr" in error_script
+    assert "$P_REFERENCE = -PREF + $POWER_CORRECTION" in error_script
+    assert "$Q_MEAS - $Q_REFERENCE" in error_script
     assert (
         controller.find(
             f"./schematic/User[@defn='{NATIVE_SCOPE}:MMCModulationSynthesis']"

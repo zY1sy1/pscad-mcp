@@ -47,6 +47,9 @@ CONTROL_OUTPUTS = (
     "ANGLE_COMMAND",
     "MODULATION_COMMAND",
     "POWER_CORRECTION",
+    "P_REFERENCE",
+    "Q_REFERENCE",
+    "VDC_REFERENCE",
 )
 INSERTION_OUTPUTS = CONTROL_OUTPUTS[:6]
 RAW_INSERTION_OUTPUTS = tuple(name + "_RAW" for name in INSERTION_OUTPUTS)
@@ -60,6 +63,11 @@ CONTROL_DEFAULTS = {
     "Phase_Offset_Deg": 0.0,
     "Deblock_Time_s": 0.10,
     "Reversal_Time_s": 0.30,
+    "P_Order_MW": 1000.0,
+    "Q_Order_MVAr": 0.0,
+    "Vdc_Order_kV": 640.0,
+    "Ramp_Time_s": 0.20,
+    "Reversal_Duration_s": 0.50,
 }
 CLOSED_LOOP_DEFAULTS = {
     **CONTROL_DEFAULTS,
@@ -132,6 +140,7 @@ ARM_OBSERVABLES = {
     "PLOSS": ("P_NONOHMIC", "MW"),
 }
 for _prefix in ("P", "V"):
+    FIXTURE_CHANNELS.update({f"{_prefix}_P_REFERENCE": "MW", f"{_prefix}_Q_REFERENCE": "MVAr", f"{_prefix}_VDC_REFERENCE": "kV"})
     FIXTURE_CHANNELS.update({f"{_prefix}_KCL_{name}": unit for name, unit in KCL_MEASUREMENTS.items()})
     FIXTURE_CHANNELS.update({
         f"{_prefix}_VDC_POS": "kV", f"{_prefix}_VDC_NEG": "kV",
@@ -175,7 +184,7 @@ def _station_control(root: ET.Element) -> ET.Element:
         name: (72, -126 + index * 36, "Transfer", "Output")
         for index, name in enumerate(CONTROL_OUTPUTS)
     }
-    control = _definition(root, CONTROL_NAME, ports, CONTROL_DEFAULTS, signed_parameters=("Phase_Offset_Deg",))
+    control = _definition(root, CONTROL_NAME, ports, CONTROL_DEFAULTS, signed_parameters=("Phase_Offset_Deg", "Q_Order_MVAr"))
     control.find("./paramlist/param[@name='Description']").set(
         "value", "Native scheduled six-arm modulation and blocking"
     )
@@ -199,6 +208,10 @@ def _station_control(root: ET.Element) -> ET.Element:
       $ANGLE_COMMAND = OFFSET / 0.0174532925199433
       $MODULATION_COMMAND = $Modulation_Index
       $POWER_CORRECTION = 0.0
+      $P_REFERENCE = $P_Order_MW * MIN(1.0, MAX(0.0, (TIME - $Deblock_Time_s) / $Ramp_Time_s))
+      IF (TIME .GE. $Reversal_Time_s) $P_REFERENCE = $P_Order_MW * (1.0 - 2.0 * MIN(1.0, (TIME - $Reversal_Time_s) / $Reversal_Duration_s))
+      $Q_REFERENCE = $Q_Order_MVAr * MIN(1.0, MAX(0.0, (TIME - $Deblock_Time_s) / $Ramp_Time_s))
+      $VDC_REFERENCE = $Vdc_Order_kV
       ANGLE = 6.28318530717959 * $Frequency_Hz * TIME + OFFSET
       MA = $Modulation_Index * SIN(ANGLE)
       MB = $Modulation_Index * SIN(ANGLE - 2.09439510239320)
@@ -263,6 +276,8 @@ def _closed_loop_control(root: ET.Element, master: dict, defaults: dict) -> dict
             "BLOCK": (72, 0, "Transfer", "Output"),
             "SEQUENCE": (72, 36, "Transfer", "Output"),
             "VDC_ERROR": (72, 72, "Transfer", "Output"),
+            "P_REFERENCE": (72, 108, "Transfer", "Output"),
+            "Q_REFERENCE": (72, 144, "Transfer", "Output"),
         },
         {
             name: CLOSED_LOOP_DEFAULTS[name]
@@ -297,11 +312,13 @@ def _closed_loop_control(root: ET.Element, master: dict, defaults: dict) -> dict
         PREF = $P_Order_MW * (1.0 - 2.0 * REVERSE_SCALE)
         $SEQUENCE = 3.0
       ENDIF
-      $ACTIVE_ERROR = $P_MEAS - PREF
-      IF ($Control_Mode .GE. 0.5) $ACTIVE_ERROR = $P_MEAS + PREF - $POWER_CORRECTION - $Converter_Loss_MW - $Cable_Loss_MW * (PREF / $P_Order_MW)**2
+      $P_REFERENCE = PREF
+      IF ($Control_Mode .GE. 0.5) $P_REFERENCE = -PREF + $POWER_CORRECTION + $Converter_Loss_MW + $Cable_Loss_MW * (PREF / $P_Order_MW)**2
+      $ACTIVE_ERROR = $P_MEAS - $P_REFERENCE
       $VDC_ERROR = $VDC_REFERENCE - $VDC_MEAS
       IF ($Control_Mode .LT. 0.5) $VDC_ERROR = 0.0
-      $Q_ERROR = $Q_MEAS - SCALE * $Q_Order_MVAr
+      $Q_REFERENCE = SCALE * $Q_Order_MVAr
+      $Q_ERROR = $Q_MEAS - $Q_REFERENCE
       $BLOCK = 0.0
       IF (TIME .LT. $Deblock_Time_s) THEN
         $ACTIVE_ERROR = 0.0
@@ -474,6 +491,8 @@ def _closed_loop_control(root: ET.Element, master: dict, defaults: dict) -> dict
             "BLOCK": "CTRL_BLOCK",
             "SEQUENCE": "CTRL_SEQUENCE",
             "VDC_ERROR": "VDC_ERROR",
+            "P_REFERENCE": "CTRL_P_REFERENCE",
+            "Q_REFERENCE": "CTRL_Q_REFERENCE",
         },
     )
     for role, source, output, limit in (
@@ -591,7 +610,7 @@ def _closed_loop_control(root: ET.Element, master: dict, defaults: dict) -> dict
             "output_" + name,
             "master:export",
             {"Name": name},
-            {"N": "CTRL_" + name},
+            {"N": "VDC_REFERENCE" if name == "VDC_REFERENCE" else "CTRL_" + name},
         )
     writer.verify()
     return {"routes": writer.routes, "electrical_nets": dict(writer.nets)}
@@ -1076,6 +1095,11 @@ def materialize_native_avm_fixture(
                     "Phase_Offset_Deg": phase_offset,
                     "Deblock_Time_s": deblock_time_s,
                     "Reversal_Time_s": reversal_time_s,
+                    "P_Order_MW": active_power_order_mw,
+                    "Q_Order_MVAr": reactive_power_order_mvar,
+                    "Vdc_Order_kV": vdc_order_kv,
+                    "Ramp_Time_s": ramp_time_s,
+                    "Reversal_Duration_s": reversal_duration_s,
                 },
                 {name: prefix + "_" + name for name in CONTROL_OUTPUTS},
             )
