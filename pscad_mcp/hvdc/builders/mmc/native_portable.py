@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import shutil
 from pathlib import Path
+from xml.etree import ElementTree as ET
 
 
 def _digest(path: Path) -> str:
@@ -46,6 +47,25 @@ def copy_native_bundle(project: Path, library: Path, expected: dict[str, str], d
         if _digest(target) != digest or _digest(source) != digest:
             raise ValueError("Native portable copy differs from its frozen source")
         copied[str(target)] = digest
+    copied_library = destination / library.name
+    parser = ET.XMLParser(target=ET.TreeBuilder(insert_comments=True, insert_pis=True))
+    tree = ET.parse(copied_library, parser=parser)
+    relocations = []
+    for parameter in tree.findall(".//param[@name='const_path']"):
+        value = parameter.get("value", "")
+        old = Path(value)
+        old = (old if old.is_absolute() else source_root / old).resolve()
+        if str(old) not in resolved or old.relative_to(source_root).parts[0] != "constants":
+            raise ValueError("A cable dependency has no frozen portable file")
+        target = destination / old.relative_to(source_root)
+        parameter.set("value", str(target))
+        relocations.append({"parameter": "const_path", "before": value, "after": str(target), "sha256": resolved[str(old)]})
+    if relocations:
+        tree.write(copied_library, encoding="utf-8", xml_declaration=True)
+        copied[str(copied_library)] = _digest(copied_library)
+    if any(_digest(Path(path)) != digest for path, digest in resolved.items()):
+        raise ValueError("A frozen source changed during portable dependency relocation")
     return {"project_path": str(destination / project.name), "library_path": str(destination / library.name),
             "source_hashes": resolved, "copied_hashes": copied, "source_immutable": True,
+            "dependency_relocations": relocations,
             "compiled_artifacts_copied": False, "model_accepted": False}

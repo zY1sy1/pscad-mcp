@@ -10,14 +10,17 @@ def test_portable_copy_contains_only_frozen_models_and_declared_constants(tmp_pa
     source.mkdir()
     project, library, constants = source / "model.pscx", source / "lib.pslx", source / "constants" / "cable.clo"
     constants.parent.mkdir()
-    for path in (project, library, constants):
-        path.write_text(path.name)
+    project.write_text('<project name="model"/>')
+    library.write_text(f'<project name="lib"><paramlist><param name="const_path" value="{constants}"/></paramlist></project>')
+    constants.write_text("constants")
     (source / "model.exe").write_text("stale executable")
     hashes = {str(p): hashlib.sha256(p.read_bytes()).hexdigest() for p in (project, library, constants)}
     result = copy_native_bundle(project, library, hashes, tmp_path / "reload")
     assert len(result["copied_hashes"]) == 3
     assert not (tmp_path / "reload" / "model.exe").exists()
     assert result["model_accepted"] is False
+    assert result["dependency_relocations"][0]["after"] == str(tmp_path / "reload" / "constants" / "cable.clo")
+    assert str(source) not in (tmp_path / "reload" / "lib.pslx").read_text()
     constants.write_text("changed")
     with pytest.raises(ValueError, match="source changed"):
         copy_native_bundle(project, library, hashes, tmp_path / "bad")
