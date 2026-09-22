@@ -22,6 +22,7 @@ from tests.mmc_parametric_fakes import (
     valid_request,
 )
 from tests.test_mmc_planner import ASSET, INVENTORY
+from tests.test_mmc_cable_constants import cable_sources
 
 
 def test_avm_engine_applies_derived_parameters_to_twelve_visible_arms(
@@ -148,6 +149,8 @@ def test_native_avm_engine_freezes_sources_and_materializes_candidate_values(
         avm_assets(),
         avm_native_inputs=inputs,
     ).engine_plans[0]
+    expected_loop_r = 2 * 2.82e-8 * 1000.0 * 100.0 / (3.141592653589793 * 0.0104**2)
+    assert plan.candidates[0].parameters["line_resistance_ohm"] == pytest.approx(expected_loop_r)
 
     class Service:
         def __init__(self):
@@ -209,15 +212,14 @@ def test_native_avm_engine_rejects_unmodeled_overhead_link(tmp_path: Path) -> No
     assert raised.value.code == "MMC_AVM_LINK_UNSUPPORTED"
 
 
-def test_native_producer_change_invalidates_execution_before_writing(tmp_path, monkeypatch):
+def test_native_producer_change_invalidates_execution_before_writing(tmp_path, monkeypatch, cable_sources):
     import pscad_mcp.hvdc.builders.mmc.engines.avm as module
     from types import SimpleNamespace
 
-    paths = {}
-    for name in ("master", "cable_donor", "tline"):
-        path = tmp_path / name
-        path.write_bytes(name.encode())
-        paths[name] = str(path)
+    donor, master = cable_sources
+    tline = tmp_path / "tline.exe"
+    tline.write_bytes(b"test-only executable identity; never executed")
+    paths = {"master": str(master), "cable_donor": str(donor), "tline": str(tline)}
     engine = AvmBlueprintEngine(native_sources=paths)
     request = parse_parametric_request(valid_request(
         model_fidelity="average_value", dc_link={"kind": "cable", "length_km": 100.0}
@@ -231,3 +233,38 @@ def test_native_producer_change_invalidates_execution_before_writing(tmp_path, m
         asyncio.run(engine.execute_candidate(parent.engine_plans[0], SimpleNamespace()))
     assert raised.value.code == "MMC_PLAN_STALE"
     assert set(tmp_path.iterdir()) == before
+
+
+@pytest.mark.parametrize("drift", ["candidate", "constants"])
+def test_native_cable_resistance_drift_stops_before_model_construction(tmp_path, cable_sources, drift):
+    from types import SimpleNamespace
+    donor, master = cable_sources
+    tline = tmp_path / "tline.exe"
+    tline.write_bytes(b"test-only executable identity; never executed")
+    calls = []
+
+    def wrong_constants(*args, **kwargs):
+        calls.append("constants")
+        return (SimpleNamespace(loop_dc_resistance_ohm=1.0, length_km=100.0,
+                                core_dc_resistance_ohm_per_km=(0.005, 0.005)),)
+
+    def builder(*args, **kwargs):
+        pytest.fail("The model must not be constructed after a physical cable mismatch")
+
+    engine = AvmBlueprintEngine(
+        native_sources={"master": str(master), "cable_donor": str(donor), "tline": str(tline)},
+        constants_generator=wrong_constants, fixture_builder=builder,
+    )
+    request = parse_parametric_request(valid_request(
+        model_fidelity="average_value", dc_link={"kind": "cable", "length_km": 100.0}
+    ))
+    inputs = engine.planning_inputs(request)
+    plan = create_parametric_plan(request, "PROFILE", tmp_path, None, avm_assets(), avm_native_inputs=inputs).engine_plans[0]
+    if drift == "candidate":
+        candidate = replace(plan.candidates[0], parameters={**plan.candidates[0].parameters, "line_resistance_ohm": 1.0})
+        plan = replace(plan, candidates=(candidate,))
+    with pytest.raises(BackendError) as error:
+        asyncio.run(engine.execute_candidate(plan, SimpleNamespace()))
+    assert error.value.code == ("MMC_PLAN_STALE" if drift == "candidate" else "MMC_AVM_CONSTANTS_INVALID")
+    assert calls == ([] if drift == "candidate" else ["constants"])
+    assert not Path(plan.target_path).exists()

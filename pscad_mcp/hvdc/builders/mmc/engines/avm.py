@@ -20,7 +20,8 @@ from .....acceptance.project_finalization import (
 from ..assets import load_packaged_asset_set
 from ..avm_companion import AverageArmParameters
 from ..cable_companion import DEFAULT_DONOR, DEFAULT_MASTER
-from ..cable_constants import generate_public_cable_constants
+from ...common.serialization import content_hash
+from ..cable_constants import extract_cable_configuration, generate_public_cable_constants
 from ..master_bindings import (
     context_from_inventory,
     load_mmc_master_registry,
@@ -50,6 +51,7 @@ def _native_producer_hashes() -> dict[str, str]:
         for name in (
             "engines/avm.py", "native_bundle.py", "avm_companion.py",
             "cable_companion.py", "cable_constants.py",
+            "derivation.py", "parametric_planner.py",
         )
     }
 
@@ -92,15 +94,22 @@ def _native_input_record(
                 source=name,
                 path=str(path),
             )
+    source_hashes = {name: _sha256(path) for name, path in resolved.items()}
+    configuration = extract_cable_configuration(resolved["cable_donor"], master_path=resolved["master"])
+    if (configuration.project_sha256 != source_hashes["cable_donor"]
+            or configuration.master_sha256 != source_hashes["master"]
+            or source_hashes != {name: _sha256(path) for name, path in resolved.items()}):
+        raise _error("MMC_SOURCE_CHANGED", "Native AVM sources changed while reading the cable geometry.")
     return {
         "source_paths": {name: str(path) for name, path in resolved.items()},
-        "source_hashes": {name: _sha256(path) for name, path in resolved.items()},
+        "source_hashes": source_hashes,
         "capabilities": {
             "native_physical_assembly": True,
             "native_cable_constants": True,
             "control_kind": control_kind,
             "model_accepted": False,
             "native_producer_hashes": _native_producer_hashes(),
+            "native_cable_profile": configuration.dc_profile(),
         },
     }
 
@@ -414,6 +423,13 @@ class AvmBlueprintEngine:
                 "The native AVM producer changed after the immutable child plan was created.",
             )
         values = selected.parameters
+        actual_profile = inputs["capabilities"]["native_cable_profile"]
+        planned_profile = plan.capabilities.get("native_cable_profile")
+        expected_resistance = math.fsum(actual_profile["core_dc_resistance_ohm_per_km"]) * float(values["dc_link_length_km"])
+        if (content_hash(actual_profile) != content_hash(planned_profile)
+                or values.get("native_cable_profile_hash") != content_hash(actual_profile)
+                or not math.isclose(float(values["line_resistance_ohm"]), expected_resistance, rel_tol=1e-12)):
+            raise _error("MMC_PLAN_STALE", "Native AVM candidate cable resistance differs from its frozen geometry.")
         if values.get("dc_link_kind") != "cable":
             raise _error(
                 "MMC_AVM_LINK_UNSUPPORTED",
@@ -444,6 +460,12 @@ class AvmBlueprintEngine:
                 "Native cable generation did not return exactly one artifact.",
                 artifact_count=len(constants),
             )
+        if (not math.isclose(constants[0].loop_dc_resistance_ohm, expected_resistance, rel_tol=1e-12)
+                or not math.isclose(constants[0].length_km, float(values["dc_link_length_km"]), rel_tol=1e-12)
+                or tuple(constants[0].core_dc_resistance_ohm_per_km) != tuple(actual_profile["core_dc_resistance_ohm_per_km"])):
+            raise _error("MMC_AVM_CONSTANTS_INVALID", "Generated cable constants differ from the planned physical profile.",
+                         expected_loop_resistance_ohm=expected_resistance,
+                         observed_loop_resistance_ohm=constants[0].loop_dc_resistance_ohm)
         modulation_index = 0.9
         valve_voltage = (
             modulation_index

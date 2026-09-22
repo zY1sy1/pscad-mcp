@@ -163,6 +163,20 @@ class CableConfiguration:
     master_path: str
     master_sha256: str
 
+    def dc_profile(self) -> dict[str, object]:
+        """Freeze the physical DC geometry independently of requested ratings."""
+        return {
+            "schema_version": 1,
+            "definition_name": self.definition_name,
+            "conductors": self.conductors,
+            "cables": [cable.to_dict() for cable in self.cables],
+            "core_dc_resistance_ohm_per_km": [
+                cable.core_dc_resistance_ohm_per_km for cable in self.cables
+            ],
+            "project_sha256": self.project_sha256,
+            "master_sha256": self.master_sha256,
+        }
+
     def to_dict(self) -> dict[str, object]:
         return {
             "name": self.name, "definition_name": self.definition_name,

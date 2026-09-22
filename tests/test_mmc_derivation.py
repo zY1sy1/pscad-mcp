@@ -1,3 +1,5 @@
+import math
+
 import pytest
 
 from pscad_mcp.core.backend.base import BackendError
@@ -5,6 +7,58 @@ from pscad_mcp.hvdc.builders.mmc.derivation import derive_mmc_parameters
 from pscad_mcp.hvdc.builders.mmc.electrical import arm_energy
 from pscad_mcp.hvdc.builders.mmc.parametric_models import parse_parametric_request
 from tests.mmc_parametric_fakes import valid_request
+
+
+def native_cable_profile():
+    return {
+        "schema_version": 1,
+        "conductors": 2,
+        "core_dc_resistance_ohm_per_km": [
+            2.82e-8 * 1000.0 / (math.pi * 0.0104**2)
+        ] * 2,
+    }
+
+
+@pytest.mark.parametrize("voltage, power, length", [(640.0, 1000.0, 100.0), (1280.0, 2000.0, 300.0)])
+def test_native_cable_line_drop_uses_geometry_without_rating_scaling(voltage, power, length):
+    report = derive_mmc_parameters(
+        valid_request(model_fidelity="average_value", dc_voltage_kv=voltage,
+                      active_power_mw=power, dc_link={"kind": "cable", "length_km": length}),
+        avm_cable_profile=native_cable_profile(),
+    )
+    expected_r = 2.0 * 2.82e-8 * length * 1000.0 / (math.pi * 0.0104**2)
+    assert report.common["line_resistance_ohm"] == pytest.approx(expected_r)
+    assert report.common["line_drop_pu"] == pytest.approx(power * expected_r / voltage**2)
+    for candidate in report.candidates:
+        assert candidate.parameters["line_resistance_ohm"] == pytest.approx(expected_r)
+
+
+def test_native_cable_rejects_line_drop_hidden_by_legacy_resistance_estimate():
+    request = valid_request(model_fidelity="average_value", dc_link={"kind": "cable", "length_km": 500.0})
+    assert derive_mmc_parameters(request).feasible
+    physical = derive_mmc_parameters(request, avm_cable_profile=native_cable_profile())
+    assert not physical.feasible
+    assert not next(c for c in physical.constraints if c.name == "line_drop").passed
+
+
+def test_native_cable_profile_changes_only_avm_candidates_in_dual_plan():
+    request = valid_request(dc_link={"kind": "cable", "length_km": 100.0})
+    legacy = derive_mmc_parameters(request)
+    native = derive_mmc_parameters(request, avm_cable_profile=native_cable_profile())
+    assert native.candidates[:4] == legacy.candidates[:4]
+    assert native.candidates[4].parameter_hash != legacy.candidates[4].parameter_hash
+    assert native.common["engine_line_parameters"]["average_value"]["line_resistance_ohm"] == pytest.approx(16.5982595976)
+    assert "line_resistance_ohm" not in native.common
+
+
+@pytest.mark.parametrize("resistances", [[], [0.08], [0.08, float("nan")], [0.08, -1.0], [True, 0.08]])
+def test_native_cable_rejects_invalid_physical_profile(resistances):
+    with pytest.raises(BackendError) as error:
+        derive_mmc_parameters(
+            valid_request(model_fidelity="average_value", dc_link={"kind": "cable", "length_km": 100.0}),
+            avm_cable_profile={**native_cable_profile(), "core_dc_resistance_ohm_per_km": resistances},
+        )
+    assert error.value.code == "MMC_AVM_CABLE_PROFILE_INVALID"
 
 
 def test_common_base_quantities_are_dimensionally_correct() -> None:

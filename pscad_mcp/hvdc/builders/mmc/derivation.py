@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Mapping
+from dataclasses import replace
 from typing import Any
 
 from ....core.backend.base import BackendError
@@ -18,7 +19,7 @@ from .parametric_models import (
 )
 
 
-EQUATION_VERSION = "mmc-parametric-v2"
+EQUATION_VERSION = "mmc-parametric-v3"
 
 _PWM_REFERENCE: dict[str, Any] = {
     "evidence": "audited-template-reference-v1",
@@ -102,6 +103,26 @@ def _constraint(name: str, passed: bool, value: float | int, limit: float | int 
     return MmcConstraintResult(name, passed, value, limit, units, None if passed else message)
 
 
+def _native_cable_line_parameters(request: MmcParametricRequest, profile: Mapping[str, Any]) -> dict[str, Any]:
+    if not isinstance(profile, Mapping):
+        raise _error("MMC_AVM_CABLE_PROFILE_INVALID", "Native cable profile must be a structured record.")
+    resistances = profile.get("core_dc_resistance_ohm_per_km", ())
+    if (request.dc_link.kind != "cable" or profile.get("schema_version") != 1
+            or profile.get("conductors") != 2 or not isinstance(resistances, (list, tuple))
+            or len(resistances) != 2
+            or any(isinstance(value, bool) or not isinstance(value, (float, int))
+                   or not math.isfinite(value) or value <= 0 for value in resistances)):
+        raise _error("MMC_AVM_CABLE_PROFILE_INVALID", "Native AVM requires a finite two-core DC cable profile.")
+    resistance = math.fsum(resistances) * request.dc_link.length_km
+    drop = request.active_power_mw / request.dc_voltage_kv * resistance
+    return {
+        "line_resistance_ohm": resistance,
+        "line_drop_kv": drop,
+        "line_drop_pu": drop / request.dc_voltage_kv,
+        "native_cable_profile_hash": content_hash(profile),
+    }
+
+
 def _candidate(
     engine: str,
     index: int,
@@ -160,6 +181,8 @@ def _engine_candidates(
         "line_resistance_ohm": common["line_resistance_ohm"],
         "loss_per_arm_mw": common["loss_budget_mw"] / 12.0,
     }
+    if "native_cable_profile_hash" in common:
+        base_parameters["native_cable_profile_hash"] = common["native_cable_profile_hash"]
     for name, override in request.engineering_overrides.items():
         if name == _CAPACITOR_VOLTAGE_TARGET:
             raise _error(
@@ -218,6 +241,7 @@ def derive_mmc_parameters(
     *,
     pwm_reference: Mapping[str, Any] | None = None,
     avm_reference: Mapping[str, Any] | None = None,
+    avm_cable_profile: Mapping[str, Any] | None = None,
 ) -> MmcDerivedParameters:
     parsed = parse_parametric_request(request)
     voltage_scale = parsed.dc_voltage_kv / 640.0
@@ -269,19 +293,45 @@ def derive_mmc_parameters(
         else (parsed.model_fidelity,)
     )
     candidates: list[MmcCandidate] = []
+    engine_line_parameters: dict[str, dict[str, Any]] = {}
+    all_constraints: list[MmcConstraintResult] = []
     for engine in requested_engines:
         reference = (pwm_reference or _PWM_REFERENCE) if engine == "detailed_pwm" else (avm_reference or _AVM_REFERENCE)
-        candidates.extend(_engine_candidates(engine, parsed, reference, common, constraints))
-    feasible = all(item.passed for item in constraints)
+        engine_common = dict(common)
+        engine_constraints = constraints
+        if engine == "average_value" and avm_cable_profile is not None:
+            engine_common.update(_native_cable_line_parameters(parsed, avm_cable_profile))
+            drop = engine_common["line_drop_pu"]
+            engine_constraints = tuple(
+                _constraint("line_drop", drop <= 0.15, drop, 0.15, "pu", "Physical native cable DC line drop exceeds the bound.")
+                if item.name == "line_drop" else item for item in constraints
+            )
+        engine_line_parameters[engine] = {
+            name: engine_common[name] for name in ("line_resistance_ohm", "line_drop_kv", "line_drop_pu")
+        }
+        candidates.extend(_engine_candidates(engine, parsed, reference, engine_common, engine_constraints))
+        for item in engine_constraints:
+            if item.name == "line_drop" and len(requested_engines) > 1 and avm_cable_profile is not None:
+                all_constraints.append(replace(item, name=f"{engine}:line_drop"))
+            elif item not in all_constraints:
+                all_constraints.append(item)
+    if avm_cable_profile is not None and "average_value" in requested_engines:
+        if len(requested_engines) == 1:
+            common.update(engine_line_parameters["average_value"])
+        else:
+            for name in ("line_resistance_ohm", "line_drop_kv", "line_drop_pu"):
+                common.pop(name)
+            common["engine_line_parameters"] = engine_line_parameters
+    feasible = all(item.passed for item in all_constraints)
     return MmcDerivedParameters(
         equation_version=EQUATION_VERSION,
         model_fidelity=parsed.model_fidelity,
         request=parsed,
         common=common,
         candidates=tuple(candidates),
-        constraints=constraints,
+        constraints=tuple(all_constraints),
         feasible=feasible,
-        diagnostics=tuple(item.message for item in constraints if item.message),
+        diagnostics=tuple(item.message for item in all_constraints if item.message),
     )
 
 

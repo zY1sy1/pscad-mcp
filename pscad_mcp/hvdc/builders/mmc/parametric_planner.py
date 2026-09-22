@@ -208,10 +208,16 @@ def create_parametric_plan(
                 "The audited PWM template contains unresolved line dependencies.",
                 dependencies=[dict(item) for item in unresolved],
             )
+    native_inputs = dict(avm_native_inputs or {})
+    native_capabilities = dict(native_inputs.get("capabilities", {}))
+    cable_profile = native_capabilities.get("native_cable_profile")
+    if native_capabilities.get("native_physical_assembly") is True and not isinstance(cable_profile, Mapping):
+        raise _error("MMC_AVM_CABLE_PROFILE_INVALID", "Native AVM planning requires the source cable geometry.")
     derived = derive_mmc_parameters(
         parsed,
         pwm_reference=_pwm_reference(audit) if "detailed_pwm" in requested_engines else None,
         avm_reference=_avm_reference(avm_assets),
+        avm_cable_profile=cable_profile,
     )
     if not derived.feasible:
         raise _error("MMC_REQUEST_INFEASIBLE", "The MMC request failed analytic constraints.", diagnostics=list(derived.diagnostics))
@@ -244,7 +250,6 @@ def create_parametric_plan(
         else:
             bindings = ()
             dependencies = ()
-            native_inputs = dict(avm_native_inputs or {})
             plan_source_paths = {
                 str(key): str(value)
                 for key, value in dict(native_inputs.get("source_paths", {})).items()
