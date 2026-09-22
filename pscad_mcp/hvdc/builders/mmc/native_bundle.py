@@ -633,10 +633,7 @@ def _closed_loop_control(root: ET.Element, master: dict, defaults: dict) -> dict
             "MODULATION_COMMAND": "CTRL_MODULATION_COMMAND",
             "BLOCK": "CTRL_BLOCK",
             "VDC_MEAS": "VDC_MEAS",
-            # Arm energy obeys instantaneous terminal power balance. The
-            # outer P controller keeps its filter; delaying this feedforward
-            # injects a spurious energy demand during voltage/power swings.
-            "P_MEAS": "P_MEAS",
+            "P_MEAS": "P_FILTERED",
             "FRAME_D": "FRAME_D",
             "FRAME_Q": "FRAME_Q",
             **{f"DW{phase}": f"DW{phase}" for phase in "ABC"},

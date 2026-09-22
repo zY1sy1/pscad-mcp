@@ -187,8 +187,10 @@ def _engine_candidates(
         base_parameters["native_cable_profile_hash"] = common["native_cable_profile_hash"]
         base_parameters["dc_grounding_resistance_ohm"] = 1e6
         base_parameters["valve_grounding_resistance_ohm"] = 1e6
-        # Installed breaker1 and peswitch defaults use a 1 Mohm open branch.
-        base_parameters["arm_off_state_resistance_ohm"] = 1e6
+        # This is a complete averaged arm, not one individual Master switch.
+        # Preserve its validated off-state resistance; 1 Mohm would create
+        # several MW of unintended stack and capacitor-clamp leakage.
+        base_parameters["arm_off_state_resistance_ohm"] = 1e8
         base_parameters["base_modulation_index"] = 0.9
         base_parameters["maximum_precharge_time_s"] = 1.0
     for name, override in request.engineering_overrides.items():
