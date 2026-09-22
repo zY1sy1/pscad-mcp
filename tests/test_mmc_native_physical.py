@@ -49,6 +49,18 @@ def test_independent_network_identities_include_ground_current_and_preserve_part
     assert evaluate(balanced_measurements(), valve_grounding_resistance_ohm=1e12)["status"] == "FAIL"
 
 
+def test_neutral_reactor_current_must_be_observed_in_phase_kcl():
+    trace = balanced_measurements()
+    for s in ("P", "V"):
+        for phase, current in zip("ABC", (0.03, -0.015, -0.015)):
+            trace[f"{s}_NEUTRAL_I_{phase}"] = [current] * len(trace["time"])
+            trace[f"{s}_KCL_VALVE_I_{phase}"] = [v + current for v in trace[f"{s}_KCL_VALVE_I_{phase}"]]
+    assert evaluate(trace)["status"] == "FAIL"
+    assert evaluate(trace, neutral_grounded=True)["status"] == "PASS"
+    del trace["V_NEUTRAL_I_C"]
+    assert evaluate(trace, neutral_grounded=True)["status"] == "FAIL"
+
+
 @pytest.mark.parametrize("signal, value, failed", [
     ("P_KCL_VALVE_I_A", 1.0, "P:A:phase_kcl"),
     ("V_KCL_IDC_NEG", 1.0, "V:negative_pole_kcl_max_residual_ka"),

@@ -446,6 +446,8 @@ async def run_attempt(
                 valve_grounding_resistance_ohm=fixture_parameters["valve_grounding_resistance_ohm"],
                 voltage_kv=request["dc_voltage_kv"], frequency_hz=request["frequency_hz"],
                 windows={"forward": forward_window, "reverse": reverse_window},
+                neutral_grounded=fixture_parameters.get("neutral_grounded", False),
+                neutral_resistance_ohm=fixture_parameters.get("neutral_resistance_ohm", 350.0),
             )
         report["analysis"] = analyze_integration_trace(
             observed["samples"],

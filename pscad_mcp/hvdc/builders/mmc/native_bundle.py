@@ -34,7 +34,7 @@ from .native_startup import STARTUP_NAME, STARTUP_INPUTS, STARTUP_OUTPUTS, START
 from .native_dq import PLL_NAME, PLL_OUTPUTS, PLL_DEFAULTS, DQ_NAME, DQ_DEFAULTS, DQ_INPUTS, DQ_OUTPUTS, append_native_pll_and_dq
 from .native_protection import PROTECTION_NAME, PROTECTION_INPUTS, PROTECTION_OUTPUTS, PROTECTION_DEFAULTS, append_native_protection
 from .native_faults import FAULT_NAME, FAULT_KINDS, FAULT_OUTPUTS, FAULT_DEFAULTS, append_native_fault_protocol, fault_branches
-from .native_isolation import AC_ISOLATION, DC_ISOLATION, ISOLATION_OUTPUTS, append_native_isolation
+from .native_isolation import AC_ISOLATION, DC_ISOLATION, NEUTRAL_GROUNDING, ISOLATION_OUTPUTS, append_native_isolation
 
 NATIVE_SCOPE = "cigre_mmc_avm_v1"
 CONTROL_NAME = "MMCStationModulator"
@@ -892,6 +892,8 @@ def materialize_native_avm_fixture(
     arm_parameters: AverageArmParameters | None = None,
     fault_kind: str | None = None,
     dc_reactor_inductance_h: float = 0.05,
+    neutral_inductance_h: float | None = None,
+    neutral_resistance_ohm: float | None = None,
 ) -> dict:
     """Create a complete two-station, twelve-arm native integration fixture."""
     folder = Path(destination).resolve()
@@ -950,6 +952,7 @@ def materialize_native_avm_fixture(
                          for domain, branches in (("AC", "ABC"), ("DC", ("POS", "NEG")))
                          for branch in branches for name, unit in ISOLATION_OUTPUTS.items()})
         channels.update({f"{s}_CABLE_{name}": "kV" for s in ("P", "V") for name in ("VDC", "VPOS", "VNEG")})
+        channels.update({f"{s}_NEUTRAL_I_{p}": "kA" for s in ("P", "V") for p in "ABC"})
     if fault_kind is not None:
         channels.update({name: unit for name, unit in FAULT_OUTPUTS.values()})
         channels.update({"FAULT_I_" + name: "kA" for name in fault_branches(fault_kind)})
@@ -1010,6 +1013,9 @@ def materialize_native_avm_fixture(
     )
     time_step_s = _number(time_step_s, "time_step_s", positive=True)
     dc_reactor_inductance_h = _number(dc_reactor_inductance_h, "dc_reactor_inductance_h", positive=True)
+    impedance_scale = (vdc_order_kv / 640)**2 / (active_power_order_mw / 1000)
+    neutral_inductance_h = _number(10.0 * impedance_scale if neutral_inductance_h is None else neutral_inductance_h, "neutral_inductance_h", positive=True)
+    neutral_resistance_ohm = _number(350.0 * impedance_scale if neutral_resistance_ohm is None else neutral_resistance_ohm, "neutral_resistance_ohm", positive=True)
     output_step_s = _number(output_step_s, "output_step_s", positive=True)
     if (
         not 0 <= modulation_index < 1
@@ -1314,6 +1320,12 @@ def materialize_native_avm_fixture(
             )
         if source is None or transformer is None:
             raise ValueError(f"Native station {station} instances were not authored")
+        if control_kind == "dq_current":
+            neutral = writer.add(main, prefix + "_neutral_grounding", NATIVE_SCOPE + ":" + NEUTRAL_GROUNDING,
+                {"Neutral_L_H": neutral_inductance_h, "Neutral_R_ohm": neutral_resistance_ohm},
+                {**{p: prefix + "_PHASE_" + p for p in "ABC"}, "G": "GND",
+                 **{f"I_{p}": prefix + "_NEUTRAL_I_" + p for p in "ABC"}})
+            custom.append((neutral, NEUTRAL_GROUNDING))
 
     for prefix in ("P", "V"):
         writer.add(
@@ -1424,7 +1436,9 @@ def materialize_native_avm_fixture(
          "Startup_Charge_Time_s": startup_charge_time_s,
          "Maximum_Conditioning_s": maximum_conditioning_time_s,
          "Maximum_Precharge_s": maximum_precharge_time_s, "Precharge_Current_Limit_kA": precharge_current_limit_ka},
-        {**{name: name for name in STARTUP_INPUTS}, "RESTART": restart_signal, **{port: name for port, (name, _) in STARTUP_OUTPUTS.items()}},
+        {**{name: name for name in STARTUP_INPUTS}, "RESTART": restart_signal,
+         **({f"{s}_CABLE_V{p}": f"{s}_VDC_{p}" for s in ("P", "V") for p in ("POS", "NEG")} if control_kind != "dq_current" else {}),
+         **{port: name for port, (name, _) in STARTUP_OUTPUTS.items()}},
     )
     for prefix in ("P", "V"):
         for phase in "ABC":
@@ -1574,6 +1588,9 @@ def materialize_native_avm_fixture(
             "fault_kind": fault_kind,
             "dc_reactor_inductance_h": dc_reactor_inductance_h,
             "dc_link_capacitance_f": dc_link_capacitance_f,
+            "neutral_grounded": control_kind == "dq_current",
+            "neutral_inductance_h": neutral_inductance_h,
+            "neutral_resistance_ohm": neutral_resistance_ohm,
             "time_step_s": time_step_s,
             "output_step_s": output_step_s,
             "cable_length_km": library_receipt["cable_length_km"],
@@ -1633,6 +1650,7 @@ def audit_native_avm_fixture(
     }
     if isolated:
         required.update({f"{NATIVE_SCOPE}:{AC_ISOLATION}": 6, f"{NATIVE_SCOPE}:{DC_ISOLATION}": 4,
+                         f"{NATIVE_SCOPE}:{NEUTRAL_GROUNDING}": 2,
                          f"{NATIVE_SCOPE}:{PROTECTION_NAME}": 1, "master:resistor": 10, "master:voltmeter": 24})
     if any(counts[name] != count for name, count in required.items()):
         raise ValueError("Native AVM fixture is missing a required physical component")
@@ -1673,7 +1691,11 @@ def audit_native_avm_fixture(
         for pole in ("POS", "NEG"):
             if f"{prefix}_pole_ground_{pole}:A" not in nets[prefix + "_DC_" + pole] or f"{prefix}_pole_ground_{pole}:B" not in nets["GND"]:
                 raise ValueError("Native AVM symmetric high-impedance grounding is incomplete")
+        if isolated and f"{prefix}_neutral_grounding:G" not in nets["GND"]:
+            raise ValueError("Native neutral resistor is not grounded")
         for phase in "ABC":
+            if isolated and f"{prefix}_neutral_grounding:{phase}" not in nets[prefix + "_PHASE_" + phase]:
+                raise ValueError("Native neutral reactor is disconnected from a valve phase")
             if {
                 f"{prefix}_{phase}_UPPER:OUT",
                 f"{prefix}_{phase}_LOWER:IN",

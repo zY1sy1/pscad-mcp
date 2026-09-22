@@ -578,6 +578,8 @@ class AvmBlueprintEngine:
             arm_parameters=self._native_arm_parameters(values),
             fault_kind=self.native_fault_kind,
             dc_reactor_inductance_h=float(values["dc_reactor_inductance_h"]),
+            neutral_inductance_h=float(values["neutral_inductance_h"]),
+            neutral_resistance_ohm=float(values["neutral_resistance_ohm"]),
             **self._native_control_parameters(values),
         )
         project = Path(receipt["project_path"])

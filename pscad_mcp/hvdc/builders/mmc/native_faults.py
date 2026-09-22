@@ -78,7 +78,7 @@ def evaluate_native_fault_trace(trace: dict, parameters: dict) -> dict:
     required.update(voltage_channels)
     for s in ("P", "V"):
         required.update(f"FAULT_{s}_{n}" for n in ("ARM_PEAK", "DC_PEAK", "CAP_MIN", "CAP_MAX"))
-        required.update(s + "_" + n for n in ("BLOCK", "VDC", "IDC", "P", "P_REFERENCE", "PLL_LOCKED"))
+        required.update(s + "_" + n for n in ("BLOCK", "VDC", "VDC_POS", "VDC_NEG", "IDC", "P", "P_REFERENCE", "PLL_LOCKED"))
         required.update(f"{s}_{p}_{q}_{n}" for p in "ABC" for q in ("UPPER", "LOWER") for n in ("I", "VCAP"))
         required.update(f"{s}_{domain}_{branch}_{name}" for domain, branches_ in (("AC", "ABC"), ("DC", ("POS", "NEG")))
                         for branch in branches_ for name in ("CONTACT_STATE", "MOV_ENERGY"))
@@ -135,6 +135,8 @@ def evaluate_native_fault_trace(trace: dict, parameters: dict) -> dict:
         checks[s + ":dc_current_bound"] = metrics[s]["dc_current_peak_pu"] <= result["limits"]["dc_current_peak_pu"]
         checks[s + ":arm_current_bound"] = metrics[s]["arm_current_peak_pu"] <= result["limits"]["arm_current_peak_pu"]
         checks[s + ":voltage_recovery"] = metrics[s]["recovered_dc_voltage_error_pu"] <= result["limits"]["recovered_voltage_error_pu"]
+        metrics[s]["recovered_pole_asymmetry_pu"] = max(abs(trace[s + "_VDC_POS"][i] + trace[s + "_VDC_NEG"][i]) / vdc for i in recovery)
+        checks[s + ":pole_symmetry_recovery"] = metrics[s]["recovered_pole_asymmetry_pu"] <= 0.01
         checks[s + ":control_recovery"] = all(trace[s + "_BLOCK"][i] < 0.5 and trace[s + "_PLL_LOCKED"][i] >= 0.5 for i in recovery)
     metrics["recovered_power_error_pu"] = max(abs(trace["P_P"][i] / power + 1) for i in recovery)
     checks["power_recovery"] = metrics["recovered_power_error_pu"] <= result["limits"]["recovered_power_error_pu"]

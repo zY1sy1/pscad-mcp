@@ -31,7 +31,7 @@ DQ_DEFAULTS = {
     "Energy_Difference_Filter_s": 0.05,
 }
 ARM_INPUTS = tuple(f"{p}_{q}_{s}" for p in "ABC" for q in ("UPPER", "LOWER") for s in ("VCAP", "I"))
-DQ_INPUTS = ("P_MEAS", "Q_MEAS", "VDC_MEAS", "PLL_ANGLE", "PLL_LOCKED", "STARTUP_READY", "START_TIME",
+DQ_INPUTS = ("P_MEAS", "Q_MEAS", "VDC_MEAS", "VDC_POS", "VDC_NEG", "PLL_ANGLE", "PLL_LOCKED", "STARTUP_READY", "START_TIME",
              "POWER_READY", "POWER_START", "PROTECTION_TRIP", "RESTART", "RECOVERY_MODE",
              "VA", "VB", "VC", "IA", "IB", "IC", *ARM_INPUTS)
 DQ_OUTPUTS = {
@@ -186,6 +186,7 @@ def _dq_script() -> str:
 #LOCAL REAL WREF
 #LOCAL REAL VBASE
 #LOCAL REAL PVALVE
+#LOCAL REAL VMID
 #LOCAL REAL VCAP_START
 #LOCAL REAL VCAP_REFERENCE
 #LOCAL REAL VCAP_RATE
@@ -212,7 +213,8 @@ def _dq_script() -> str:
       VQ = VA * COS(THETA) + VB * SIN(THETA)
       ID = IA * SIN(THETA) - IB * COS(THETA)
       IQ = IA * COS(THETA) + IB * SIN(THETA)
-      PVALVE = 1.5 * (VD * ID + VQ * IQ)
+      VMID = 0.5 * ($VDC_POS + $VDC_NEG)
+      PVALVE = ($VA - VMID) * ($A_LOWER_I - $A_UPPER_I) + ($VB - VMID) * ($B_LOWER_I - $B_UPPER_I) + ($VC - VMID) * ($C_LOWER_I - $C_UPPER_I)
       $VALVE_POWER = PVALVE
 ! A controller reset does not empty physical capacitors. Seed observers from
 ! their measured states so deblocking cannot request fictitious recharge.

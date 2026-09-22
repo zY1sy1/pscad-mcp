@@ -242,3 +242,12 @@ def test_enabled_voltage_vector_respects_the_declared_thirty_degree_limit(tmp_pa
     assert abs(angle) <= 30.0 + 1e-9
     assert limited == 1.0
     assert magnitude == pytest.approx(math.sqrt(20000), abs=1e-8)
+
+
+def test_energy_feedforward_uses_arm_current_and_dc_midpoint_reference(tmp_path):
+    for shift in (0.0, 100.0):
+        arm_currents = "\n".join(f"SIG_{p}_UPPER_I = {-i/2}\nSIG_{p}_LOWER_I = {i/2}" for p, i in zip("ABC", (1.9, -1.1, -1.1)))
+        rows = _run_native_equations(tmp_path, DQ_NAME, declarations="",
+            initialize=f"SIG_VDC_POS = {320+shift}\nSIG_VDC_NEG = {-320+shift}\nSIG_VA = {256+shift}\nSIG_VB = {-128+shift}\nSIG_VC = {-128+shift}\nSIG_IA = 3.0\nSIG_IB = -1.5\nSIG_IC = -1.5\n" + arm_currents,
+            loop="", observations="print *, SIG_VALVE_POWER", steps=1)
+        assert rows[0][0] == pytest.approx(768.0, abs=1e-10)

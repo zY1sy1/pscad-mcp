@@ -58,7 +58,7 @@ def test_native_storage_override_is_a_constraint_and_cannot_be_silently_increase
     insufficient = derive_mmc_parameters(request, avm_cable_profile=native_cable_profile())
     assert not insufficient.feasible
     constraint = next(c for c in insufficient.constraints if c.name == "native_arm_energy")
-    assert not constraint.passed and 77 < constraint.limit < 78
+    assert not constraint.passed and 78 < constraint.limit < 79
     assert all(c.parameters["stored_energy_mj"] == 64.0 for c in insufficient.candidates)
     request["engineering_overrides"]["stored_energy_mj"]["value"] = 80.0
     sufficient = derive_mmc_parameters(request, avm_cable_profile=native_cable_profile())

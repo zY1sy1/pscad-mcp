@@ -20,7 +20,7 @@ from .parametric_models import (
 )
 
 
-EQUATION_VERSION = "mmc-parametric-v6"
+EQUATION_VERSION = "mmc-parametric-v7"
 
 _PWM_REFERENCE: dict[str, Any] = {
     "evidence": "audited-template-reference-v1",
@@ -240,6 +240,8 @@ def _engine_candidates(
         base_parameters["arm_off_state_resistance_ohm"] = 1e8
         base_parameters["base_modulation_index"] = 0.9
         base_parameters["dc_reactor_inductance_h"] = 0.05 * impedance_scale
+        base_parameters["neutral_inductance_h"] = 10.0 * impedance_scale
+        base_parameters["neutral_resistance_ohm"] = 350.0 * impedance_scale
         base_parameters["maximum_precharge_time_s"] = 1.0
         base_parameters["startup_charge_time_s"] = 0.5
         base_parameters["maximum_conditioning_time_s"] = 1.5

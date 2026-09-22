@@ -56,7 +56,10 @@ def periodic_native_envelope(parameters: dict, *, points: int = 1440) -> dict:
             ac_current = complex(active, -reactive) / (math.sqrt(3) * primary * ratio)
             transformer_x = 0.15 * valve_rating**2 / float(p["transformer_rating_mva"])
             valve = primary * ratio / math.sqrt(3) - 1j * transformer_x * ac_current
-            converter = valve - complex(resistance / 2, omega * inductance / 2) * ac_current
+            arm_current = ac_current
+            if "neutral_inductance_h" in p:
+                arm_current -= valve / (1j * omega * float(p["neutral_inductance_h"]))
+            converter = valve - complex(resistance / 2, omega * inductance / 2) * arm_current
             converter_modulation = 2 * math.sqrt(2) * abs(converter) / voltage
             result["maximum_converter_modulation"] = max(result["maximum_converter_modulation"], converter_modulation)
             arm_voltages = [[] for _ in range(6)]
@@ -66,7 +69,7 @@ def periodic_native_envelope(parameters: dict, *, points: int = 1440) -> dict:
                 waves = [math.sqrt(2) * (converter * z).real for z in rotations]
                 common_mode = -(max(waves) + min(waves)) / 2
                 for phase, rotation in enumerate(rotations):
-                    alternating = math.sqrt(2) * (ac_current * rotation).real
+                    alternating = math.sqrt(2) * (arm_current * rotation).real
                     for position, sign in enumerate((-1.0, 1.0)):
                         arm = phase * 2 + position
                         inserted = dc_bus / 2 - resistance * circulating + sign * (waves[phase] + common_mode)

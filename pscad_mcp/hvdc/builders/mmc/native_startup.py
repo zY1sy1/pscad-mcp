@@ -11,7 +11,8 @@ from .avm_companion import _definition, _script
 
 
 STARTUP_NAME = "MMCPrechargeReadiness"
-STARTUP_INPUTS = ("P_VDC", "V_VDC", "P_PLL_LOCKED", "V_PLL_LOCKED", "RESTART") + tuple(
+STARTUP_INPUTS = ("P_VDC", "V_VDC", "P_PLL_LOCKED", "V_PLL_LOCKED", "RESTART",
+                  "P_CABLE_VPOS", "P_CABLE_VNEG", "V_CABLE_VPOS", "V_CABLE_VNEG") + tuple(
     f"{s}_{p}_{q}_{quantity}" for s in ("P", "V") for p in "ABC"
     for q in ("UPPER", "LOWER") for quantity in ("VCAP", "I")
 )
@@ -169,6 +170,7 @@ def append_precharge_readiness(root: ET.Element) -> None:
         IF (MIN($P_PLL_LOCKED, $V_PLL_LOCKED) .LT. 0.5) QUALIFIED = 0
         IF ($CAP_MIN .LT. 0.475 * $Vdc_Order_kV .OR. CAPMAX .GT. 0.525 * $Vdc_Order_kV) QUALIFIED = 0
         IF (ABS($P_VDC / $Vdc_Order_kV - 1.0) .GT. 0.05 .OR. ABS($V_VDC / $Vdc_Order_kV - 1.0) .GT. 0.05) QUALIFIED = 0
+        IF (MAX(ABS($P_CABLE_VPOS + $P_CABLE_VNEG), ABS($V_CABLE_VPOS + $V_CABLE_VNEG)) .GT. 0.01 * $Vdc_Order_kV) QUALIFIED = 0
         IF ($CURRENT_MAX .GT. 0.1 * $Precharge_Current_Limit_kA) QUALIFIED = 0
         IF (QUALIFIED .EQ. 1) THEN
           STORF(NSTORF+5) = STORF(NSTORF+5) + DELT
@@ -194,6 +196,8 @@ def analyze_precharge_trace(trace: dict, parameters: dict) -> dict:
     required = {"time", "PRECHARGE_READY", "PRECHARGE_FAILED", "DEBLOCK_TIME", "P_BLOCK", "V_BLOCK", "P_VDC", "V_VDC"}
     if parameters.get("control_kind") == "dq_current":
         required.update(("POWER_READY", "POWER_START_TIME", "CHARGE_FAILED"))
+    if parameters.get("neutral_grounded"):
+        required.update(f"{s}_CABLE_V{p}" for s in ("P", "V") for p in ("POS", "NEG"))
     required.update(arm + suffix for arm in arms for suffix in ("_I", "_VCAP", "_W"))
     time = trace.get("time", ())
     if not required <= trace.keys() or len(time) < 2 or any(
@@ -259,6 +263,9 @@ def analyze_precharge_trace(trace: dict, parameters: dict) -> dict:
         checks["dc_voltages_ready_for_power"] = bool(ready_indexes) and all(
             abs(trace[s + "_VDC"][i] / voltage - 1) <= 0.05 for s in ("P", "V") for i in ready_indexes
         )
+        if parameters.get("neutral_grounded"):
+            checks["symmetric_poles_ready_for_power"] = bool(ready_indexes) and all(
+                abs(trace[s + "_CABLE_VPOS"][i] + trace[s + "_CABLE_VNEG"][i]) / voltage <= 0.01 for s in ("P", "V") for i in ready_indexes)
     result["power_start_time_s"] = power_start
     reversal_start = power_start + parameters["reversal_time_s"] - parameters["deblock_time_s"]
     reversal_end = reversal_start + parameters["reversal_duration_s"]

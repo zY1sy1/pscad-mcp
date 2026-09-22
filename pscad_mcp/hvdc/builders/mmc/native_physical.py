@@ -19,6 +19,7 @@ def evaluate_native_network_identities(
     grounding_resistance_ohm: float, voltage_kv: float, frequency_hz: float,
     valve_grounding_resistance_ohm: float,
     windows: Mapping[str, tuple[float, float]],
+    neutral_grounded: bool = False, neutral_resistance_ohm: float = 350.0,
 ) -> dict:
     result = {
         "scope": "native_network_identities_and_physical_diagnostics",
@@ -31,6 +32,8 @@ def evaluate_native_network_identities(
                                     "pll", "protection", "reversal", "fault_recovery"],
     }
     parameters = (capacitance_f, grounding_resistance_ohm, valve_grounding_resistance_ohm, voltage_kv, frequency_hz)
+    if not isinstance(neutral_grounded, bool) or (neutral_grounded and (isinstance(neutral_resistance_ohm, bool) or not isinstance(neutral_resistance_ohm, (int, float)) or not math.isfinite(neutral_resistance_ohm) or neutral_resistance_ohm <= 0)):
+        raise ValueError("Neutral grounding requires a positive physical resistance")
     if any(isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) or v <= 0 for v in parameters):
         raise ValueError("Network identity parameters must be finite and positive")
     required = {"time"}
@@ -38,6 +41,8 @@ def evaluate_native_network_identities(
         required.update(f"{station}_{s}" for s in ("VDC", "VDC_POS", "VDC_NEG", "IDC", "IDC_NEG"))
         required.update(f"{station}_KCL_{s}" for s in ("VDC_POS", "VDC_NEG", "IDC", "IDC_NEG"))
         for phase in "ABC":
+            if neutral_grounded:
+                required.add(f"{station}_NEUTRAL_I_{phase}")
             required.add(f"{station}_VALVE_I_{phase}")
             required.add(f"{station}_VALVE_V_{phase}")
             required.add(f"{station}_KCL_VALVE_V_{phase}")
@@ -78,8 +83,9 @@ def evaluate_native_network_identities(
             lower = trace[f"{station}_{phase}_LOWER_INET"]
             phase_current = trace[f"{station}_KCL_VALVE_I_{phase}"]
             phase_voltage = trace[f"{station}_KCL_VALVE_V_{phase}"]
+            neutral = trace[f"{station}_NEUTRAL_I_{phase}"] if neutral_grounded else [0.0] * len(time)
             phases[phase] = {
-                "kcl_max_residual_ka": max(abs(u + ac - l - v / valve_grounding_resistance_ohm) for u, ac, l, v in zip(upper, phase_current, lower, phase_voltage)),
+                "kcl_max_residual_ka": max(abs(u + ac - l - v / valve_grounding_resistance_ohm - n) for u, ac, l, v, n in zip(upper, phase_current, lower, phase_voltage, neutral)),
             }
             result["checks"][f"{station}:{phase}:phase_kcl"] = phases[phase]["kcl_max_residual_ka"] <= result["limits"]["current_residual_ka"]
             for position in ("UPPER", "LOWER"):
@@ -113,6 +119,7 @@ def evaluate_native_network_identities(
                 "pole_polarity_valid": all(vpos[i] > 0 > vneg[i] for i in indexes),
                 "grounding_loss_mean_mw": fmean((vpos[i]**2 + vneg[i]**2) / grounding_resistance_ohm for i in indexes),
                 "valve_grounding_loss_mean_mw": fmean(sum(trace[f"{station}_VALVE_V_{p}"][i]**2 for p in "ABC") / valve_grounding_resistance_ohm for i in indexes),
+                "neutral_grounding_loss_mean_mw": fmean(neutral_resistance_ohm * sum(trace[f"{station}_NEUTRAL_I_{p}"][i] for p in "ABC")**2 for i in indexes) if neutral_grounded else 0.0,
                 "dc_terminal_power_mean_mw": fmean(vpos[i] * ipos[i] + vneg[i] * ineg[i] for i in indexes),
                 "arms": {}, "phases": {},
             }
