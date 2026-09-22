@@ -25,7 +25,7 @@ def test_voltage_and_impedance_scaling_preserves_energy_swing():
     scaled = dict(parameters)
     for name in ("rated_dc_voltage_kv", "station_p_ac_voltage_kv", "station_vdc_ac_voltage_kv"):
         scaled[name] *= 2
-    for name in ("arm_resistance_ohm", "arm_inductance_h", "line_resistance_ohm", "neutral_inductance_h", "neutral_resistance_ohm", "station_p_grid_r_ohm", "station_p_grid_x_ohm", "station_vdc_grid_r_ohm", "station_vdc_grid_x_ohm"):
+    for name in ("arm_resistance_ohm", "arm_inductance_h", "line_resistance_ohm", "neutral_inductance_h", "neutral_resistance_ohm", "neutral_phase_resistance_ohm", "station_p_grid_r_ohm", "station_p_grid_x_ohm", "station_vdc_grid_r_ohm", "station_vdc_grid_x_ohm"):
         scaled[name] *= 4
     a, b = map(periodic_native_envelope, (parameters, scaled))
     assert a["required_stored_energy_mj"] == pytest.approx(b["required_stored_energy_mj"], rel=1e-12)

@@ -517,6 +517,9 @@ class AvmBlueprintEngine:
             * math.sqrt(3.0)
             / (2.0 * math.sqrt(2.0))
         )
+        neutral_r = float(values["neutral_phase_resistance_ohm"])
+        neutral_x = 2 * math.pi * float(values["frequency_hz"]) * float(values["neutral_inductance_h"])
+        neutral_loss = 2 * valve_voltage**2 * neutral_r / (neutral_r**2 + neutral_x**2) if self.native_control_kind == "dq_current" else 0.0
         reversal_time = 1.0
         reversal_duration = float(values["power_reversal_time_s"])
         duration = float(values["maximum_precharge_time_s"]) + reversal_time - 0.10 + reversal_duration + 1.0
@@ -561,7 +564,7 @@ class AvmBlueprintEngine:
             cable_loss_mw=(
                 float(values["rated_power_mw"]) / float(values["rated_dc_voltage_kv"])
             ) ** 2 * constants[0].loop_dc_resistance_ohm,
-            converter_loss_mw=12 * float(values["loss_per_arm_mw"]),
+            converter_loss_mw=12 * float(values["loss_per_arm_mw"]) + neutral_loss,
             dc_grounding_resistance_ohm=float(values["dc_grounding_resistance_ohm"]),
             valve_grounding_resistance_ohm=float(values["valve_grounding_resistance_ohm"]),
             maximum_precharge_time_s=float(values["maximum_precharge_time_s"]),
@@ -580,6 +583,7 @@ class AvmBlueprintEngine:
             dc_reactor_inductance_h=float(values["dc_reactor_inductance_h"]),
             neutral_inductance_h=float(values["neutral_inductance_h"]),
             neutral_resistance_ohm=float(values["neutral_resistance_ohm"]),
+            neutral_phase_resistance_ohm=neutral_r,
             **self._native_control_parameters(values),
         )
         project = Path(receipt["project_path"])

@@ -20,6 +20,7 @@ def evaluate_native_network_identities(
     valve_grounding_resistance_ohm: float,
     windows: Mapping[str, tuple[float, float]],
     neutral_grounded: bool = False, neutral_resistance_ohm: float = 350.0,
+    neutral_phase_resistance_ohm: float = 0.0,
 ) -> dict:
     result = {
         "scope": "native_network_identities_and_physical_diagnostics",
@@ -119,7 +120,8 @@ def evaluate_native_network_identities(
                 "pole_polarity_valid": all(vpos[i] > 0 > vneg[i] for i in indexes),
                 "grounding_loss_mean_mw": fmean((vpos[i]**2 + vneg[i]**2) / grounding_resistance_ohm for i in indexes),
                 "valve_grounding_loss_mean_mw": fmean(sum(trace[f"{station}_VALVE_V_{p}"][i]**2 for p in "ABC") / valve_grounding_resistance_ohm for i in indexes),
-                "neutral_grounding_loss_mean_mw": fmean(neutral_resistance_ohm * sum(trace[f"{station}_NEUTRAL_I_{p}"][i] for p in "ABC")**2 for i in indexes) if neutral_grounded else 0.0,
+                "neutral_grounding_loss_mean_mw": fmean(neutral_resistance_ohm * sum(trace[f"{station}_NEUTRAL_I_{p}"][i] for p in "ABC")**2
+                    + neutral_phase_resistance_ohm * sum(trace[f"{station}_NEUTRAL_I_{p}"][i]**2 for p in "ABC") for i in indexes) if neutral_grounded else 0.0,
                 "dc_terminal_power_mean_mw": fmean(vpos[i] * ipos[i] + vneg[i] * ineg[i] for i in indexes),
                 "arms": {}, "phases": {},
             }

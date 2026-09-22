@@ -19,7 +19,7 @@ ISOLATION_OUTPUTS = {"CONTACT_STATE": "1", "MOV_CURRENT": "kA", "MOV_ENERGY": "k
 def append_native_isolation(root, master, defaults):
     _PARAMETER_UNITS.update({"Contact_On_ohm": "ohm", "Contact_Off_ohm": "ohm",
         "Arrester_Rating_kV": "kV", "Reactor_H": "H", "Preinsert_ohm": "ohm", "Preinsert_Time_s": "s",
-        "Neutral_L_H": "H", "Neutral_R_ohm": "ohm"})
+        "Neutral_L_H": "H", "Neutral_R_ohm": "ohm", "Neutral_Phase_R_ohm": "ohm"})
     logic = _definition(root, PREINSERT_LOGIC,
         {"OPEN": (-72, 0, "Transfer", "Input"), "MAIN_OPEN": (72, -18, "Transfer", "Output"),
          "AUX_OPEN": (72, 18, "Transfer", "Output")}, {"Preinsert_Time_s": 0.02})
@@ -57,7 +57,7 @@ def append_native_isolation(root, master, defaults):
         {**{p: (-90, -36 + i * 36, "Natural", "Electrical") for i, p in enumerate("ABC")},
          "G": (90, 0, "Natural", "Electrical"),
          **{f"I_{p}": (144, -36 + i * 36, "Transfer", "Output") for i, p in enumerate("ABC")}},
-        {"Neutral_L_H": 10.0, "Neutral_R_ohm": 350.0})
+        {"Neutral_L_H": 10.0, "Neutral_R_ohm": 320.0, "Neutral_Phase_R_ohm": 100.0})
     writer = _Writer(root, master, defaults)
     for definition, parameters, dc in definitions:
         add = lambda role, name, values, bindings: writer.add(definition, role, "master:" + name, values, bindings)
@@ -88,12 +88,15 @@ def append_native_isolation(root, master, defaults):
             _manual_sequence(definition, ((PREINSERT_LOGIC,), ("breaker1", "arrester", "varrlc"), (CONTACT_STATUS,), ("export",)))
     for name in ("A", "B", "C", "G"):
         writer.add(neutral, "terminal_" + name, "master:xnode", {"Name": name}, {"N": name})
-    for name in ("Neutral_L_H", "Neutral_R_ohm"):
+    for name in ("Neutral_L_H", "Neutral_R_ohm", "Neutral_Phase_R_ohm"):
         writer.add(neutral, "input_" + name, "master:import", {"Name": name}, {"N": name})
     for phase in "ABC":
+        writer.add(neutral, "damping_" + phase, "master:varrlc",
+                   {"RLC": "0", "R": "Neutral_Phase_R_ohm", "E": "0.0 [kV]", "dLdC": "0", "I": ""},
+                   {"A": phase, "B": "REACTOR_" + phase})
         writer.add(neutral, "reactor_" + phase, "master:varrlc",
                    {"RLC": "1", "L": "Neutral_L_H", "E": "0.0 [kV]", "dLdC": "0", "I": "CURRENT_" + phase},
-                   {"A": phase, "B": "STAR"})
+                   {"A": "REACTOR_" + phase, "B": "STAR"})
         writer.add(neutral, "output_" + phase, "master:export", {"Name": "I_" + phase}, {"N": "CURRENT_" + phase})
     writer.add(neutral, "neutral_resistor", "master:varrlc",
                {"RLC": "0", "R": "Neutral_R_ohm", "E": "0.0 [kV]", "dLdC": "0", "I": ""}, {"A": "STAR", "B": "G"})

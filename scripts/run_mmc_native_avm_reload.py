@@ -53,7 +53,8 @@ def _evaluate(trace: dict, fixture: dict) -> dict:
     result["network"] = evaluate_native_network_identities(trace, capacitance_f=p["arm"]["C_eq_F"],
         grounding_resistance_ohm=p["dc_grounding_resistance_ohm"], valve_grounding_resistance_ohm=p["valve_grounding_resistance_ohm"],
         voltage_kv=p["vdc_order_kv"], frequency_hz=p["frequency_hz"], windows=windows,
-        neutral_grounded=p.get("neutral_grounded", False), neutral_resistance_ohm=p.get("neutral_resistance_ohm", 350.0))
+        neutral_grounded=p.get("neutral_grounded", False), neutral_resistance_ohm=p.get("neutral_resistance_ohm", 350.0),
+        neutral_phase_resistance_ohm=p.get("neutral_phase_resistance_ohm", 0.0))
     result["controls"] = evaluate_native_dq_controls(trace, p, windows)
     result["dynamics"] = evaluate_native_dynamic_envelope(prefix, p, precharge)
     return result

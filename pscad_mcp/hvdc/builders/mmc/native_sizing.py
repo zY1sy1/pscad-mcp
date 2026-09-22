@@ -30,6 +30,10 @@ def periodic_native_envelope(parameters: dict, *, points: int = 1440) -> dict:
     omega = 2 * math.pi * frequency
     arm_base = energy / 12
     loss_station = 6 * float(p["loss_per_arm_mw"])
+    if "neutral_inductance_h" in p:
+        neutral_r = float(p.get("neutral_phase_resistance_ohm", 0.0))
+        neutral_x = omega * float(p["neutral_inductance_h"])
+        loss_station += valve_rating**2 * neutral_r / (neutral_r**2 + neutral_x**2)
     result = {"method": "native_valve_svm_periodic_power_v1", "model_accepted": False,
               "mean_energy_reserve_pu": 0.05, "capacitor_voltage_limit_pu": 0.10,
               "required_stored_energy_mj": 0.0, "minimum_insertion_margin": 1.0,
@@ -58,7 +62,7 @@ def periodic_native_envelope(parameters: dict, *, points: int = 1440) -> dict:
             valve = primary * ratio / math.sqrt(3) - 1j * transformer_x * ac_current
             arm_current = ac_current
             if "neutral_inductance_h" in p:
-                arm_current -= valve / (1j * omega * float(p["neutral_inductance_h"]))
+                arm_current -= valve / complex(float(p.get("neutral_phase_resistance_ohm", 0.0)), omega * float(p["neutral_inductance_h"]))
             converter = valve - complex(resistance / 2, omega * inductance / 2) * arm_current
             converter_modulation = 2 * math.sqrt(2) * abs(converter) / voltage
             result["maximum_converter_modulation"] = max(result["maximum_converter_modulation"], converter_modulation)

@@ -894,6 +894,7 @@ def materialize_native_avm_fixture(
     dc_reactor_inductance_h: float = 0.05,
     neutral_inductance_h: float | None = None,
     neutral_resistance_ohm: float | None = None,
+    neutral_phase_resistance_ohm: float | None = None,
 ) -> dict:
     """Create a complete two-station, twelve-arm native integration fixture."""
     folder = Path(destination).resolve()
@@ -1015,7 +1016,8 @@ def materialize_native_avm_fixture(
     dc_reactor_inductance_h = _number(dc_reactor_inductance_h, "dc_reactor_inductance_h", positive=True)
     impedance_scale = (vdc_order_kv / 640)**2 / (active_power_order_mw / 1000)
     neutral_inductance_h = _number(10.0 * impedance_scale if neutral_inductance_h is None else neutral_inductance_h, "neutral_inductance_h", positive=True)
-    neutral_resistance_ohm = _number(350.0 * impedance_scale if neutral_resistance_ohm is None else neutral_resistance_ohm, "neutral_resistance_ohm", positive=True)
+    neutral_resistance_ohm = _number(320.0 * impedance_scale if neutral_resistance_ohm is None else neutral_resistance_ohm, "neutral_resistance_ohm", positive=True)
+    neutral_phase_resistance_ohm = _number(100.0 * impedance_scale if neutral_phase_resistance_ohm is None else neutral_phase_resistance_ohm, "neutral_phase_resistance_ohm", positive=True)
     output_step_s = _number(output_step_s, "output_step_s", positive=True)
     if (
         not 0 <= modulation_index < 1
@@ -1322,7 +1324,8 @@ def materialize_native_avm_fixture(
             raise ValueError(f"Native station {station} instances were not authored")
         if control_kind == "dq_current":
             neutral = writer.add(main, prefix + "_neutral_grounding", NATIVE_SCOPE + ":" + NEUTRAL_GROUNDING,
-                {"Neutral_L_H": neutral_inductance_h, "Neutral_R_ohm": neutral_resistance_ohm},
+                {"Neutral_L_H": neutral_inductance_h, "Neutral_R_ohm": neutral_resistance_ohm,
+                 "Neutral_Phase_R_ohm": neutral_phase_resistance_ohm},
                 {**{p: prefix + "_PHASE_" + p for p in "ABC"}, "G": "GND",
                  **{f"I_{p}": prefix + "_NEUTRAL_I_" + p for p in "ABC"}})
             custom.append((neutral, NEUTRAL_GROUNDING))
@@ -1591,6 +1594,7 @@ def materialize_native_avm_fixture(
             "neutral_grounded": control_kind == "dq_current",
             "neutral_inductance_h": neutral_inductance_h,
             "neutral_resistance_ohm": neutral_resistance_ohm,
+            "neutral_phase_resistance_ohm": neutral_phase_resistance_ohm,
             "time_step_s": time_step_s,
             "output_step_s": output_step_s,
             "cable_length_km": library_receipt["cable_length_km"],
