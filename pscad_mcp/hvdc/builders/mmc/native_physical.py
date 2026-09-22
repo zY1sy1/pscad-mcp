@@ -1,7 +1,8 @@
 """Independent native network identities and unresolved physical diagnostics.
 
-Network currents are direct Main/DSOUT measurements, not delayed arm-module
-exports. Identity checks use the existing 1e-9 kA current, 1e-6 kV voltage,
+KCL uses native DSDYN copies of the preceding network solution at both the
+independent terminal meters and the arm resistance branches. Identity checks
+use the existing 1e-9 kA current, 1e-6 kV voltage,
 and 1e-9 relative energy tolerances. Diagnostic ripple, pole symmetry, and
 circulating-current metrics are not promoted to a full-model PASS.
 """
@@ -35,9 +36,12 @@ def evaluate_native_network_identities(
     required = {"time"}
     for station in ("P", "V"):
         required.update(f"{station}_{s}" for s in ("VDC", "VDC_POS", "VDC_NEG", "IDC", "IDC_NEG"))
+        required.update(f"{station}_KCL_{s}" for s in ("VDC_POS", "VDC_NEG", "IDC", "IDC_NEG"))
         for phase in "ABC":
             required.add(f"{station}_VALVE_I_{phase}")
             required.add(f"{station}_VALVE_V_{phase}")
+            required.add(f"{station}_KCL_VALVE_V_{phase}")
+            required.add(f"{station}_KCL_VALVE_I_{phase}")
             for position in ("UPPER", "LOWER"):
                 required.update(f"{station}_{phase}_{position}_{s}" for s in ("INET", "W", "VCAP"))
                 required.update((f"{station}_M_{phase}_{position}", f"{station}_M_{phase}_{position}_RAW"))
@@ -72,8 +76,8 @@ def evaluate_native_network_identities(
         for phase in "ABC":
             upper = trace[f"{station}_{phase}_UPPER_INET"]
             lower = trace[f"{station}_{phase}_LOWER_INET"]
-            phase_current = trace[f"{station}_VALVE_I_{phase}"]
-            phase_voltage = trace[f"{station}_VALVE_V_{phase}"]
+            phase_current = trace[f"{station}_KCL_VALVE_I_{phase}"]
+            phase_voltage = trace[f"{station}_KCL_VALVE_V_{phase}"]
             phases[phase] = {
                 "kcl_max_residual_ka": max(abs(u + ac - l - v / valve_grounding_resistance_ohm) for u, ac, l, v in zip(upper, phase_current, lower, phase_voltage)),
             }
@@ -93,8 +97,8 @@ def evaluate_native_network_identities(
         upper_sum = [math.fsum(trace[f"{station}_{phase}_UPPER_INET"][i] for phase in "ABC") for i in range(len(time))]
         lower_sum = [math.fsum(trace[f"{station}_{phase}_LOWER_INET"][i] for phase in "ABC") for i in range(len(time))]
         metrics = {
-            "positive_pole_kcl_max_residual_ka": max(abs(u + i + v / grounding_resistance_ohm) for u, i, v in zip(upper_sum, ipos, vpos)),
-            "negative_pole_kcl_max_residual_ka": max(abs(l - i - v / grounding_resistance_ohm) for l, i, v in zip(lower_sum, ineg, vneg)),
+            "positive_pole_kcl_max_residual_ka": max(abs(u + i + v / grounding_resistance_ohm) for u, i, v in zip(upper_sum, trace[station + "_KCL_IDC"], trace[station + "_KCL_VDC_POS"])),
+            "negative_pole_kcl_max_residual_ka": max(abs(l - i - v / grounding_resistance_ohm) for l, i, v in zip(lower_sum, trace[station + "_KCL_IDC_NEG"], trace[station + "_KCL_VDC_NEG"])),
             "voltage_max_residual_kv": max(abs(p - n - d) for p, n, d in zip(vpos, vneg, vdc)),
             "phases": phases, "arms": arms,
         }
@@ -113,7 +117,7 @@ def evaluate_native_network_identities(
                 "arms": {}, "phases": {},
             }
             for phase in "ABC":
-                circulating = [(trace[f"{station}_{phase}_UPPER_INET"][i] + trace[f"{station}_{phase}_LOWER_INET"][i]) * 0.5 + ipos[i] / 3.0 for i in indexes]
+                circulating = [(trace[f"{station}_{phase}_UPPER_INET"][i] + trace[f"{station}_{phase}_LOWER_INET"][i]) * 0.5 + trace[station + "_KCL_IDC"][i] / 3.0 for i in indexes]
                 mean = fmean(circulating)
                 sine = 2 * fmean((x - mean) * math.sin(4 * math.pi * frequency_hz * time[i]) for x, i in zip(circulating, indexes))
                 cosine = 2 * fmean((x - mean) * math.cos(4 * math.pi * frequency_hz * time[i]) for x, i in zip(circulating, indexes))

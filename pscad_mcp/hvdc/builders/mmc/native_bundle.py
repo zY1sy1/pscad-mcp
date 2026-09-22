@@ -51,6 +51,8 @@ INSERTION_OUTPUTS = CONTROL_OUTPUTS[:6]
 RAW_INSERTION_OUTPUTS = tuple(name + "_RAW" for name in INSERTION_OUTPUTS)
 CONTROL_OUTPUTS += RAW_INSERTION_OUTPUTS
 MODULATION_OUTPUTS = INSERTION_OUTPUTS + RAW_INSERTION_OUTPUTS
+KCL_MEASUREMENTS = {"IDC": "kA", "IDC_NEG": "kA", "VDC_POS": "kV", "VDC_NEG": "kV",
+                    **{f"VALVE_{q}_{p}": unit for p in "ABC" for q, unit in (("I", "kA"), ("V", "kV"))}}
 CONTROL_DEFAULTS = {
     "Frequency_Hz": 60.0,
     "Modulation_Index": 0.82,
@@ -126,6 +128,7 @@ ARM_OBSERVABLES = {
     "ICAP": ("I_CAP", "kA"),
 }
 for _prefix in ("P", "V"):
+    FIXTURE_CHANNELS.update({f"{_prefix}_KCL_{name}": unit for name, unit in KCL_MEASUREMENTS.items()})
     FIXTURE_CHANNELS.update({
         f"{_prefix}_VDC_POS": "kV", f"{_prefix}_VDC_NEG": "kV",
         f"{_prefix}_IDC_NEG": "kA", f"{_prefix}_BLOCK": "1",
@@ -1114,16 +1117,9 @@ def materialize_native_avm_fixture(
             for position in ("UPPER", "LOWER"):
                 role = f"{prefix}_{phase}_{position}"
                 inputs = (
-                    (role + "_IN", prefix + "_PHASE_" + phase)
+                    (prefix + "_DC_POS", prefix + "_PHASE_" + phase)
                     if position == "UPPER"
-                    else (prefix + "_PHASE_" + phase, role + "_OUT")
-                )
-                writer.add(
-                    main, role + "_network_current", "master:ammeter",
-                    {"Name": role + "_INET"},
-                    {"N1": prefix + "_DC_POS", "N2": role + "_IN"}
-                    if position == "UPPER" else
-                    {"N1": role + "_OUT", "N2": prefix + "_DC_NEG"},
+                    else (prefix + "_PHASE_" + phase, prefix + "_DC_NEG")
                 )
                 arm = writer.add(
                     main,
@@ -1217,6 +1213,17 @@ def materialize_native_avm_fixture(
             },
         )
     selected_signals = {name: name for name in FIXTURE_CHANNELS}
+    for prefix in ("P", "V"):
+        for phase in "ABC":
+            for position in ("UPPER", "LOWER"):
+                selected_signals[f"{prefix}_{phase}_{position}_INET"] = f"{prefix}_{phase}_{position}_I"
+        # Arm exports are written in DSDYN from the preceding DSOUT solution.
+        # Copy the independent Main meters in that same phase; do not shift or
+        # interpolate OUT samples after the simulation to manufacture KCL.
+        for name in KCL_MEASUREMENTS:
+            writer.add(main, prefix + "_kcl_sample_" + name, "master:gain",
+                       {"G": "1.0", "Dim": "1", "COM": "Previous network solution, aligned with arm exports"},
+                       {"IN:Dim": prefix + "_" + name, "OUT:Dim": prefix + "_KCL_" + name})
     for name, signal in selected_signals.items():
         writer.add(
             main,
@@ -1345,6 +1352,7 @@ def materialize_native_avm_fixture(
         "electrical_nets": {name: dict(nets) for name, nets in writer.nets.items()},
         "routes": writer.routes,
         "channels": FIXTURE_CHANNELS,
+        "network_identity_sampling": "DSDYN copies of the preceding network solution; arm resistance branch current exports",
         "control_kind": control_kind,
         "model_accepted": False,
         "licensed_acceptance": "NOT_RUN",
@@ -1387,7 +1395,7 @@ def audit_native_avm_fixture(
         "master:xfmr-3p2w": 2,
         "master:breakout": 6,
         "master:resistor": 16,
-        "master:ammeter": 28,
+        "master:ammeter": 16,
         "master:ground": 1,
         "master:voltmeter": 18,
         "master:pgb": len(FIXTURE_CHANNELS),
@@ -1444,14 +1452,9 @@ def audit_native_avm_fixture(
                 raise ValueError("Native AVM valve-side common-mode reference is incomplete")
             if {f"{prefix}_breakout:N{'ABC'.index(phase) + 1}", f"{prefix}_valve_current_{phase}:N1"} - set(nets[prefix + "_VALVE_" + phase]):
                 raise ValueError("Native AVM valve current measurement path is incomplete")
-            for position, endpoint in (("UPPER", "IN"), ("LOWER", "OUT")):
-                role = f"{prefix}_{phase}_{position}"
-                meter_endpoint = "N2" if position == "UPPER" else "N1"
-                if {f"{role}:{endpoint}", f"{role}_network_current:{meter_endpoint}"} - set(nets[role + "_" + endpoint]):
-                    raise ValueError("Native AVM arm current measurement path is incomplete")
         if not all(
-            f"{prefix}_{phase}_UPPER_network_current:N1" in nets[prefix + "_DC_POS"]
-            and f"{prefix}_{phase}_LOWER_network_current:N2" in nets[prefix + "_DC_NEG"]
+            f"{prefix}_{phase}_UPPER:IN" in nets[prefix + "_DC_POS"]
+            and f"{prefix}_{phase}_LOWER:OUT" in nets[prefix + "_DC_NEG"]
             for phase in "ABC"
         ):
             raise ValueError("Native AVM DC arm polarity is incomplete")

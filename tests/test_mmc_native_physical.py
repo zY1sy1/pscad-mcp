@@ -23,6 +23,9 @@ def balanced_measurements():
                 trace[prefix + "_VCAP"] = [320.0] * len(time)
                 trace[f"{station}_M_{phase}_{position}"] = [0.5] * len(time)
                 trace[f"{station}_M_{phase}_{position}_RAW"] = [0.5] * len(time)
+        for name, values in list(trace.items()):
+            if name.startswith(station + "_") and name.removeprefix(station + "_") in {"VDC_POS", "VDC_NEG", "IDC", "IDC_NEG", *(f"VALVE_{q}_{p}" for p in "ABC" for q in ("I", "V"))}:
+                trace[station + "_KCL_" + name.removeprefix(station + "_")] = list(values)
     return trace
 
 
@@ -47,8 +50,8 @@ def test_independent_network_identities_include_ground_current_and_preserve_part
 
 
 @pytest.mark.parametrize("signal, value, failed", [
-    ("P_VALVE_I_A", 1.0, "P:A:phase_kcl"),
-    ("V_IDC_NEG", 1.0, "V:negative_pole_kcl_max_residual_ka"),
+    ("P_KCL_VALVE_I_A", 1.0, "P:A:phase_kcl"),
+    ("V_KCL_IDC_NEG", 1.0, "V:negative_pole_kcl_max_residual_ka"),
     ("P_VDC", 639.0, "P:pole_voltage_identity"),
     ("P_A_UPPER_W", 4.0, "P_A_UPPER:energy_capacitance"),
     ("P_M_A_UPPER_RAW", 1.1, "P_A_UPPER:modulation_clip"),
