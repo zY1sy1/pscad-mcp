@@ -71,8 +71,8 @@ CLOSED_LOOP_DEFAULTS = {
     "Energy_Gain_per_s": 10.0,
     "R_arm_ohm": 0.15,
     "P_nonohmic_MW": 0.0,
-    "Kp_Vdc_MW_per_kV": 0.5,
-    "Ti_Vdc_s": 0.10,
+    "Kp_Vdc_MW_per_kV": 3.0,
+    "Ti_Vdc_s": 0.30,
     "Power_Correction_Limit_MW": 1500.0,
     "Cable_Loss_MW": 0.0,
     "Converter_Loss_MW": 0.0,
@@ -312,18 +312,20 @@ def _closed_loop_control(root: ET.Element, master: dict, defaults: dict) -> dict
         {
             **_feedback_ports(tuple(f"{phase}_{position}_VCAP" for phase in "ABC" for position in ("UPPER", "LOWER"))),
             **{f"D{phase}": (72, -36 + index * 36, "Transfer", "Output") for index, phase in enumerate("ABC")},
+            **{f"S{phase}": (72, 72 + index * 36, "Transfer", "Output") for index, phase in enumerate("ABC")},
         },
         {"C_eq_F": CLOSED_LOOP_DEFAULTS["C_eq_F"]},
     )
     _script(energy_difference, "Fortran", "".join(
         f"      $D{phase} = 0.5 * $C_eq_F * (${phase}_UPPER_VCAP**2 - ${phase}_LOWER_VCAP**2)\n"
+        f"      $S{phase} = 0.5 * $C_eq_F * (${phase}_UPPER_VCAP**2 + ${phase}_LOWER_VCAP**2)\n"
         for phase in "ABC"
     ))
     synthesis = _definition(
         root,
         "MMCModulationSynthesis",
         {
-            **_feedback_ports(("ANGLE_COMMAND", "MODULATION_COMMAND", "VDC_MEAS", "P_MEAS", "FRAME_D", "FRAME_Q", *ARM_FEEDBACK_INPUTS, "DWA", "DWB", "DWC")),
+            **_feedback_ports(("ANGLE_COMMAND", "MODULATION_COMMAND", "VDC_MEAS", "P_MEAS", "FRAME_D", "FRAME_Q", *ARM_FEEDBACK_INPUTS, "DWA", "DWB", "DWC", "SWA", "SWB", "SWC")),
             **{
                 name: (72, -126 + index * 36, "Transfer", "Output")
                 for index, name in enumerate(CONTROL_OUTPUTS[:6])
@@ -357,7 +359,7 @@ def _closed_loop_control(root: ET.Element, master: dict, defaults: dict) -> dict
       MC = MODULATION * SIN(ANGLE + 2.09439510239320)
       WREF = 0.25 * $C_eq_F * $Vdc_Order_kV * $Vdc_Order_kV
 """ + "".join(
-            f"""      WPAIR = 0.5 * $C_eq_F * (${phase}_UPPER_VCAP**2 + ${phase}_LOWER_VCAP**2)
+            f"""      WPAIR = $SW{phase}
       ISUM = 0.5 * (${phase}_UPPER_I + ${phase}_LOWER_I)
       PLOSS = 2.0 * $P_nonohmic_MW + $R_arm_ohm * (${phase}_UPPER_I**2 + ${phase}_LOWER_I**2)
       VACOM = 0.5 * $Vdc_Order_kV * M{phase}
@@ -414,6 +416,7 @@ def _closed_loop_control(root: ET.Element, master: dict, defaults: dict) -> dict
         {
             **{f"{phase}_{position}_VCAP": f"{phase}_{position}_VCAP" for phase in "ABC" for position in ("UPPER", "LOWER")},
             **{f"D{phase}": f"DW{phase}_RAW" for phase in "ABC"},
+            **{f"S{phase}": f"SW{phase}_RAW" for phase in "ABC"},
         },
     )
     add(
@@ -454,6 +457,7 @@ def _closed_loop_control(root: ET.Element, master: dict, defaults: dict) -> dict
         ("frame_d_filter", "FRAME_D_RAW", "FRAME_D", 2000.0),
         ("frame_q_filter", "FRAME_Q_RAW", "FRAME_Q", 2000.0),
         *((f"energy_difference_{phase}", f"DW{phase}_RAW", f"DW{phase}", 1000.0) for phase in "ABC"),
+        *((f"energy_sum_{phase}", f"SW{phase}_RAW", f"SW{phase}", 1000.0) for phase in "ABC"),
     ):
         add(
             role,
@@ -550,6 +554,7 @@ def _closed_loop_control(root: ET.Element, master: dict, defaults: dict) -> dict
             "FRAME_D": "FRAME_D",
             "FRAME_Q": "FRAME_Q",
             **{f"DW{phase}": f"DW{phase}" for phase in "ABC"},
+            **{f"SW{phase}": f"SW{phase}" for phase in "ABC"},
             **{name: name for name in ARM_FEEDBACK_INPUTS},
             **{name: "CTRL_" + name for name in CONTROL_OUTPUTS[:6]},
         },
