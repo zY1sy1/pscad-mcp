@@ -442,3 +442,20 @@ licensed opt-ins disabled, passed 2610 tests with 49 skips in 102.13 s.
 Handoff regeneration exactly matched the saved JSON. Negative publication
 checks rejected both the earlier failed full report and the steady-only PASS
 report before creating a handoff.
+
+## September 22 Public-Service Repair Intake
+
+The four public-service/replay production and test files now match integration
+revision `7cd7cb42217408c45ecc2980cb7a3fde97ee5850`. This scoped intake adds
+pending vendor-call cleanup tracking, verified Windows venv launcher/worker
+binding, narrowly normalized PSCAD save metadata, short independent replay
+paths with the legacy TLine preflight, and short publication candidates with
+complete Windows destination-length checks before copying. Timing and joint
+harness modules were not imported into this independent branch.
+
+The affected `test_blank_mmc_service.py` and `test_mmc_native_fault_replay.py`
+gate passed 136 tests with 1 licensed opt-in skip in 9.69 s. The targeted Ruff
+checks and `git diff --check` passed. This is software repair validation;
+native physical acceptance remains bound to the immutable `86adfe0` producer
+and evidence above. Fresh public/joint closure is recorded separately by the
+integration branch, including the retained publication-only failed attempt.

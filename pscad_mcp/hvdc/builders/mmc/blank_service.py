@@ -957,6 +957,45 @@ def _materialize_native_mmc_case(plan: Mapping[str, Any], source: Path, library:
     return contract
 
 
+def _native_attempt_workspace(plan: Mapping[str, Any], workspace: Path, build_id: str, directory: str) -> Path:
+    workspace = workspace.resolve()
+    if directory not in {"mmc-replays", "mmc-publications"} or workspace != Path(plan["workspace"]).resolve() or not isinstance(build_id, str) or re.fullmatch(r"[0-9a-f]{32}", build_id) is None:
+        raise _error("MMC_LAYOUT_INVALID", "The build attempt has no valid workspace/build identity.", "build_blank_mmc_model")
+    attempt_root = workspace / ".pscad-mcp" / directory / build_id
+    for ancestor in (attempt_root, *attempt_root.parents):
+        try:
+            if _is_reparse_point(ancestor.lstat()):
+                raise _error("MMC_LAYOUT_INVALID", "The build attempt directory must not traverse links.", "build_blank_mmc_model", path=str(ancestor))
+        except FileNotFoundError:
+            pass
+        if ancestor == workspace:
+            break
+    attempt_root = attempt_root.resolve()
+    excluded = (Path(plan["staging_path"]).resolve(), Path(plan["target_path"]).resolve(), Path(plan["target_path"]).with_suffix(".bundle").resolve())
+    if not attempt_root.is_relative_to(workspace) or any(attempt_root.is_relative_to(path) or path.is_relative_to(attempt_root) for path in excluded):
+        raise _error("MMC_LAYOUT_INVALID", "The build attempt directory overlaps another build artifact.", "build_blank_mmc_model", path=str(attempt_root))
+    if attempt_root.exists():
+        raise _error("MMC_BUILD_CONFLICT", "The build attempt directory already exists.", "build_blank_mmc_model", path=str(attempt_root))
+    return attempt_root
+
+
+def _native_replay_workspace(plan: Mapping[str, Any], workspace: Path, build_id: str) -> Path:
+    """Keep legacy TLine inputs below its observed 200-character input buffer."""
+    replay_root = _native_attempt_workspace(plan, workspace, build_id, "mmc-replays")
+    compilers = {"gf42"}
+    for item in plan["compiler_support"]["files"]:
+        parts = Path(item["relative_path"]).parts
+        if len(parts) >= 3 and parts[0].casefold() == "lib":
+            compilers.add(parts[1])
+    for compiler in sorted(compilers):
+        generated = replay_root / "worker" / (Path(plan["target_path"]).stem + "." + compiler)
+        for line in plan["line_constants"]["inputs"]:
+            path = generated / (line["name"] + ".tli")
+            if len(str(path)) > 199:
+                raise _error("MMC_LAYOUT_INVALID", "The independent replay TLine path exceeds the legacy solver limit; use a shorter workspace or project name.", "build_blank_mmc_model", path=str(path), max_path_chars=199)
+    return replay_root
+
+
 async def _execute_native_mmc_plan(
     plan: Mapping[str, Any], service: Any, workspace: Path, *,
     build_id: str, journal: AtomicJournal, record: dict[str, Any],
@@ -965,6 +1004,9 @@ async def _execute_native_mmc_plan(
     record["result"] = {}
     checkpoint = lambda state: _checkpoint(record, journal, state)
     _verify_plan_inputs(plan, audit_loader)
+    replay_workspace = _native_replay_workspace(plan, workspace, build_id)
+    publication_workspace = _native_attempt_workspace(plan, workspace, build_id, "mmc-publications")
+    record["result"]["publication_workspace"] = str(publication_workspace)
     record["runtime_master"] = await _verify_runtime_master(service, plan["source_identities"]["master"])
     staging = Path(plan["staging_path"])
     target = Path(plan["target_path"])
@@ -998,22 +1040,22 @@ async def _execute_native_mmc_plan(
         from .native_fault_replay import verify_native_fault_replay
         replay_verifier = verify_native_fault_replay
     record["result"]["reload"] = {"status": "FAIL", "cleanup_pending": True, "owned_process_cleaned": False,
-                                   "workspace": str(staging / "reload-verification"), "phase": "verification_requested"}
+                                   "workspace": str(replay_workspace), "phase": "verification_requested"}
     checkpoint("verifying_reload")
     replay = await replay_verifier(project=project, bundle=bundle, channel_contract=contract, checks_contract=plan["checks_contract"],
         settings=plan["settings"], source_identities=plan["source_identities"],
         dependency_files={Path(item["path"]).relative_to(bundle).as_posix(): item["sha256"] for item in record["dependency_copies"]},
-        workspace=staging / "reload-verification")
-    record["result"]["reload"] = replay
+        workspace=replay_workspace)
+    record["result"]["reload"] = {**replay, "workspace": str(replay_workspace)}
     if replay.get("status") != "PASS" or replay.get("project_sha256") != _sha256(project) or replay.get("checks_sha256") != plan["checks_sha256"] or replay.get("owned_process_cleaned") is not True or replay.get("worker_exit_code") != 0 or replay.get("parent_channel_contract_sha256") != hashlib.sha256(json_bytes(contract)).hexdigest() or not replay.get("artifacts"):
         raise _error("MMC_ACCEPTANCE_INCOMPLETE", "The frozen saved model did not pass independent owned replay.", "build_blank_mmc_model", replay=replay)
-    replay_report = _read_hashed_json(_bundle_file(staging / "reload-verification", "worker/report.json"), replay["report_sha256"])
+    replay_report = _read_hashed_json(_bundle_file(replay_workspace, "worker/report.json"), replay["report_sha256"])
     if replay_report.get("status") != "PASS" or replay_report.get("parent_channel_contract_sha256") != replay["parent_channel_contract_sha256"]:
         raise _error("MMC_ACCEPTANCE_INCOMPLETE", "The independent replay summary differs from its frozen worker report.", "build_blank_mmc_model")
     _verify_plan_inputs(plan, audit_loader)
     _verify_copies(record["dependency_copies"])
     verify_fault_instrumentation(project, contract)
-    record["result"].update(_publish_tested_fault_case(plan, project, bundle, contract, record))
+    record["result"].update(_publish_tested_fault_case(plan, project, bundle, contract, record, replay_workspace=replay_workspace, publication_workspace=publication_workspace))
     checkpoint("published")
     return record
 
@@ -1098,21 +1140,38 @@ def _load_publication_evidence(project: Path) -> tuple[dict[str, Any], dict[str,
         raise _error("MMC_OUTPUT_IDENTITY_CHANGED", "The publication evidence is missing or malformed.", "validate_blank_mmc_model", reason=str(error)) from error
 
 
-def _publish_tested_fault_case(plan: Mapping[str, Any], project: Path, bundle: Path, contract: Mapping[str, Any], record: Mapping[str, Any]) -> dict[str, Any]:
+def _preflight_publication_layout(workspace: Path, candidate: Path, target: Path, bundle_name: str, files: set[Path], directories: set[Path]) -> None:
+    """Check every destination before any copy, using legacy Win32 path bounds."""
+    for destination, project, bundle in (("candidate", candidate / target.name, candidate / bundle_name), ("final", target, target.parent / bundle_name)):
+        file_paths = {project, *(bundle / relative for relative in files)}
+        directory_paths = {bundle / relative for relative in directories}
+        for path in file_paths | directory_paths.copy():
+            directory_paths.update(parent for parent in path.parents if parent.is_relative_to(workspace))
+        for paths, limit, kind in ((file_paths, 259, "file"), (directory_paths, 248, "directory")):
+            for path in sorted(paths):
+                if not path.resolve().is_relative_to(workspace):
+                    raise _error("MMC_LAYOUT_INVALID", "A publication destination escapes its workspace.", "build_blank_mmc_model", path=str(path), destination=destination)
+                size = len(str(path).encode("utf-16-le")) // 2
+                if size > limit or any(len(part.encode("utf-16-le")) // 2 > 255 for part in path.parts):
+                    raise _error("MMC_LAYOUT_INVALID", "A publication destination exceeds the legacy Windows path limit.", "build_blank_mmc_model", path=str(path), destination=destination, path_kind=kind, max_path_chars=limit, observed_path_chars=size)
+                try:
+                    if _is_reparse_point(path.lstat()):
+                        raise _error("MMC_LAYOUT_INVALID", "Publication destinations must not traverse links.", "build_blank_mmc_model", path=str(path), destination=destination)
+                except FileNotFoundError:
+                    pass
+
+
+def _publish_tested_fault_case(plan: Mapping[str, Any], project: Path, bundle: Path, contract: Mapping[str, Any], record: Mapping[str, Any], *, replay_workspace: Path, publication_workspace: Path) -> dict[str, Any]:
     target = Path(plan["target_path"])
     final_bundle = target.parent / bundle.name
     if target.exists() or target.is_symlink() or final_bundle.exists() or final_bundle.is_symlink():
         raise _error("MMC_BUILD_CONFLICT", "A publication destination already exists.", "build_blank_mmc_model")
     tested_bundle = bundle
     tested_bundle_files = _bundle_files(tested_bundle)
-    candidate = project.parent / "publication-candidate"
-    candidate.mkdir()
-    candidate_bundle = candidate / bundle.name
-    candidate_project = candidate / project.name
-    shutil.copytree(tested_bundle, candidate_bundle)
-    if _bundle_files(candidate_bundle) != tested_bundle_files:
-        raise _error("MMC_POSTCONDITION_FAILED", "The copied publication dependencies differ from the tested bundle.", "build_blank_mmc_model")
-    bundle = candidate_bundle
+    workspace = Path(plan["workspace"]).resolve()
+    candidate = _native_attempt_workspace(plan, workspace, record["build_id"], "mmc-publications")
+    if candidate != publication_workspace:
+        raise _error("MMC_LAYOUT_INVALID", "The publication directory differs from its owned attempt.", "build_blank_mmc_model")
     tested_hash = _sha256(project)
     result = record["result"]
     manifest = _read_hashed_json(Path(result["output_index_path"]), result["output_index_sha256"])
@@ -1120,9 +1179,24 @@ def _publish_tested_fault_case(plan: Mapping[str, Any], project: Path, bundle: P
     if frozen_contract != contract:
         raise _error("MMC_OUTPUT_IDENTITY_CHANGED", "The evaluated channel contract differs from its frozen file.", "build_blank_mmc_model")
     verify_output_dataset(manifest)
-    replay_root = project.parent / "reload-verification"
+    files = {Path(relative) for relative in tested_bundle_files}
+    directories = {path.relative_to(tested_bundle) for path in tested_bundle.rglob("*") if path.is_dir()}
     for relative, item in result["reload"]["artifacts"].items():
-        origin = _bundle_file(replay_root, relative)
+        if _bundle_file(replay_workspace, relative) != Path(item["path"]).resolve():
+            raise _error("MMC_OUTPUT_IDENTITY_CHANGED", "Replay artifact path differs from its owned directory.", "build_blank_mmc_model")
+        files.add(Path("reload") / relative)
+    files.update(Path("outputs") / Path(item["path"]).name for item in manifest["files"].values())
+    files.update(map(Path, ("evidence/published-output-index.json", "evidence/published-channels.json", "manifest.json")))
+    _preflight_publication_layout(workspace, candidate, target, bundle.name, files, directories)
+    candidate.mkdir(parents=True, exist_ok=False)
+    candidate_bundle = candidate / bundle.name
+    candidate_project = candidate / project.name
+    shutil.copytree(tested_bundle, candidate_bundle)
+    if _bundle_files(candidate_bundle) != tested_bundle_files:
+        raise _error("MMC_POSTCONDITION_FAILED", "The copied publication dependencies differ from the tested bundle.", "build_blank_mmc_model")
+    bundle = candidate_bundle
+    for relative, item in result["reload"]["artifacts"].items():
+        origin = _bundle_file(replay_workspace, relative)
         if origin != Path(item["path"]).resolve():
             raise _error("MMC_OUTPUT_IDENTITY_CHANGED", "Replay artifact path differs from its owned directory.", "build_blank_mmc_model")
         _copy_frozen(origin, bundle / "reload" / relative, item["sha256"])

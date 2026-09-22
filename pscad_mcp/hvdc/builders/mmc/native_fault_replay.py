@@ -71,6 +71,20 @@ def _frozen_output_index(root, report):
     return _read_hashed_json(path, result["output_index_sha256"])
 
 
+def _pending_owned_calls(service, *owners):
+    getter = getattr(getattr(service, "executor", None), "pending_settlements_for", None)
+    if not callable(getter):
+        return []
+    pending = {}
+    for owner in owners:
+        if owner is None:
+            continue
+        for token in getter(owner):
+            if not token.settled:
+                pending[id(token)] = {"operation_id": getattr(token, "operation_id", None), "generation": getattr(token, "generation", None), "operation": str(getattr(token, "operation", "unknown"))}
+    return list(pending.values())
+
+
 async def _terminate_owned_pscad(ownership):
     """Terminate only a recorded PID with matching birth time and executable."""
     result = {"owned_process_cleaned": False, "cleanup_pending": True}
@@ -139,6 +153,16 @@ async def _finalize_python_worker(process, communication, root, result):
         result["finalization_errors"] = errors
 
 
+def _worker_matches_launcher(report, launcher_pid):
+    worker_pid, parent_pid = report.get("python_pid"), report.get("worker_parent_pid")
+    if any(type(pid) is not int or pid <= 0 for pid in (launcher_pid, worker_pid)):
+        return False
+    if "worker_parent_pid" in report and (type(parent_pid) is not int or parent_pid <= 0 or parent_pid == worker_pid):
+        return False
+    # Windows venv python.exe can launch the interpreter as its child.
+    return worker_pid == launcher_pid or parent_pid == launcher_pid
+
+
 async def verify_native_fault_replay(*, project, bundle, channel_contract, checks_contract, settings, source_identities, dependency_files, workspace, verification_context=None, worker_module=None):
     """Launch one fresh worker; request JSON never supplies an alternate verifier."""
     root = Path(workspace).resolve()
@@ -178,16 +202,16 @@ async def verify_native_fault_replay(*, project, bundle, channel_contract, check
         process = await asyncio.create_subprocess_exec(sys.executable, "-m", worker_module or __name__, "--request", str(request_path), "--request-sha256", request_hash,
             cwd=Path(__file__).resolve().parents[4], env=environment, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
             **({"creationflags": 0x08000000} if os.name == "nt" else {}))
-        result.update({"worker_launched": True, "python_pid": process.pid, "owned_process_cleaned": False, "cleanup_pending": True})
+        result.update({"worker_launched": True, "launcher_pid": process.pid, "python_pid": process.pid, "owned_process_cleaned": False, "cleanup_pending": True})
         communication = asyncio.create_task(process.communicate())
         output, _ = await asyncio.wait_for(asyncio.shield(communication), timeout=1800)
         (root / "worker.log").write_bytes(output)
         report_path = root / "worker" / "report.json"
         report_hash = _hash(report_path)
         report = json.loads(report_path.read_text(encoding="utf-8"))
-        if report.get("python_pid") != process.pid or report.get("request_sha256") != request_hash or _hash(report_path) != report_hash:
+        if not _worker_matches_launcher(report, process.pid) or report.get("request_sha256") != request_hash or _hash(report_path) != report_hash:
             raise ValueError("Worker report identity differs from the launched request")
-        result.update({**report, "worker_launched": True, "report_path": str(report_path), "report_sha256": report_hash,
+        result.update({**report, "worker_launched": True, "launcher_pid": process.pid, "report_path": str(report_path), "report_sha256": report_hash,
             "cleanup_pending": report.get("owned_process_cleaned") is not True})
         if process.returncode != 0 or report.get("status") != "PASS" or report.get("owned_process_cleaned") is not True:
             raise ValueError("Independent worker did not complete a passing run and owned cleanup")
@@ -215,7 +239,11 @@ async def verify_native_fault_replay(*, project, bundle, channel_contract, check
         result.update({"status": "PASS", "project_sha256": request["project"]["sha256"]})
     except BaseException as error:  # noqa: BLE001 - retain worker/cancellation evidence through cleanup
         result["status"] = "FAIL"
-        result["error"] = {"type": type(error).__name__, "message": str(error)}
+        supervisor_error = {"type": type(error).__name__, "message": str(error)}
+        if result.get("error") is not None:
+            result["supervisor_error"] = supervisor_error
+        else:
+            result["error"] = supervisor_error
     finally:
         if process is not None and result.get("cleanup_pending"):
             ownership_path = root / "worker" / "ownership.json"
@@ -236,6 +264,42 @@ async def verify_native_fault_replay(*, project, bundle, channel_contract, check
 
 def _verify_replay_saved_model(original: Path, saved: Path, contract) -> bool:
     before, after = ET.parse(original).getroot(), ET.parse(saved).getroot()
+    return _verify_saved_model_roots(before, after, contract)
+
+
+_VENDOR_STICKY_STYLE = {
+    "full_font": "Arial, 12pt", "align": "0", "style": "1",
+    "fg_color": "0", "bg_color": "11920639", "opacity": "25",
+}
+
+
+def _is_vendor_sticky_style(style):
+    if style.attrib or (style.text or "").strip() or len(style) != len(_VENDOR_STICKY_STYLE):
+        return False
+    if {param.get("name") for param in style} != set(_VENDOR_STICKY_STYLE):
+        return False
+    return all(
+        param.tag == "param" and not len(param)
+        and param.attrib == {"name": param.get("name"), "value": _VENDOR_STICKY_STYLE[param.get("name")]}
+        and not (param.text or "").strip() and not (param.tail or "").strip()
+        for param in style
+    )
+
+
+def _normalize_new_sticky_styles(before, after):
+    if before.tag != after.tag:
+        return
+    if before.tag == "Sticky" and before.attrib == after.attrib and not len(before) and len(after) == 1:
+        style = after.find("paramlist")
+        if style is not None and _is_vendor_sticky_style(style) and "".join(before.itertext()).strip() == "".join(after.itertext()).strip():
+            # Vendor moves the unchanged visible text into the new style's tail.
+            after.remove(style)
+            after.text = before.text
+    for old, new in zip(before, after):
+        _normalize_new_sticky_styles(old, new)
+
+
+def _verify_saved_model_roots(before, after, contract) -> bool:
     binding = contract.get("virtual_root_rebinding")
     if binding:
         ids = [re.fullmatch(r"Station\[(\d+)\]", binding.get(key, "")) for key in ("before", "after")]
@@ -244,8 +308,15 @@ def _verify_replay_saved_model(original: Path, saved: Path, contract) -> bool:
             new.set("link", old.get("link"))
             if before.get("id") == ids[0][1] and after.get("id") == ids[1][1]:
                 after.set("id", before.get("id"))
+    _normalize_new_sticky_styles(before, after)
+    for root in (before, after):
+        for revisor in root.findall("./paramlist[@name='Settings']/param[@name='revisor']"):
+            if "value" in revisor.attrib:
+                revisor.set("value", "")
+        for definition in root.findall("./definitions/Definition"):
+            definition.attrib.pop("crc", None)
     if ET.canonicalize(ET.tostring(before, encoding="unicode"), strip_text=True) != ET.canonicalize(ET.tostring(after, encoding="unicode"), strip_text=True):
-        raise ValueError("The replay saved model differs beyond the verified virtual document root")
+        raise ValueError("The replay saved model differs beyond the verified virtual document root and vendor save metadata")
     return True
 
 
@@ -283,11 +354,12 @@ async def _worker(request_path: Path, expected_hash: str, *, saved_verifier=None
     root = request_path.parent / "worker"
     root.mkdir()
     report = {"schema_version": 1, "status": "FAIL", "owned_process_cleaned": False, "history": [], "result": {},
-        "python_pid": os.getpid(), "request_sha256": expected_hash, "parent_channel_contract_sha256": request["channel_contract_sha256"], "checks_sha256": request["checks_sha256"]}
+        "python_pid": os.getpid(), "worker_parent_pid": os.getppid(), "request_sha256": expected_hash, "parent_channel_contract_sha256": request["channel_contract_sha256"], "checks_sha256": request["checks_sha256"]}
     report_path = root / "report.json"
     service = _service(root)
     ownership = None
     bundle = None
+    quit_task = None
 
     def verify_dependencies(stage):
         observed = _dependency_hashes(bundle, request["bundle"]["files"])
@@ -345,7 +417,9 @@ async def _worker(request_path: Path, expected_hash: str, *, saved_verifier=None
         contract.pop("virtual_root_rebinding", None)
         contract["replay_parent_contract_sha256"] = request["channel_contract_sha256"]
         checkpoint("frozen_copy_verified")
+        report["attach_started"] = True
         await service.attach_local()
+        report["attach_completed"] = True
         ownership = _capture_ownership(service, expected_hash)
         if ownership is None:
             raise RuntimeError("The replay worker has no owned connection")
@@ -390,12 +464,15 @@ async def _worker(request_path: Path, expected_hash: str, *, saved_verifier=None
         try:
             ownership = ownership or _capture_ownership(service, expected_hash)
             if ownership is None:
-                report.update({"owned_process_cleaned": True, "cleanup_pending": False, "ownership_status": "no_retained_owned_backend"})
+                uncertain = report.get("attach_started") is True
+                report.update({"owned_process_cleaned": not uncertain, "cleanup_pending": uncertain,
+                               "attach_outcome_uncertain": uncertain, "ownership_status": "launch_identity_unconfirmed" if uncertain else "no_launch_attempted"})
             else:
                 _write(root / "ownership.json", ownership)
                 report["cleanup_ownership"] = ownership
                 try:
-                    await asyncio.wait_for(service.quit_pscad(confirm=True), timeout=30)
+                    quit_task = asyncio.create_task(service.quit_pscad(confirm=True))
+                    await asyncio.wait_for(quit_task, timeout=30)
                     await asyncio.to_thread(psutil.Process(ownership["pid"]).wait, 10)
                     report.update({"owned_process_cleaned": True, "cleanup_pending": False})
                 except psutil.NoSuchProcess:
@@ -405,6 +482,12 @@ async def _worker(request_path: Path, expected_hash: str, *, saved_verifier=None
                     report.update(await _terminate_owned_pscad(ownership))
         except BaseException as error:  # noqa: BLE001 - preserve unknown ownership, never infer a foreign PID
             report.update({"cleanup_error": str(error), "owned_process_cleaned": False, "cleanup_pending": True})
+        try:
+            report["pending_vendor_calls"] = _pending_owned_calls(service, asyncio.current_task(), quit_task)
+            if report["pending_vendor_calls"]:
+                report.update({"owned_process_cleaned": False, "cleanup_pending": True})
+        except BaseException as error:  # noqa: BLE001 - unreadable settlement state cannot prove cleanup
+            report.update({"settlement_error": str(error), "owned_process_cleaned": False, "cleanup_pending": True})
         if bundle is not None and bundle.is_dir():
             try:
                 verify_dependencies("after_cleanup")
