@@ -787,6 +787,7 @@ def materialize_native_avm_fixture(
     reactive_control_ti_s: float = 0.05,
     cable_loss_mw: float = 0.0,
     converter_loss_mw: float = 0.0,
+    dc_grounding_resistance_ohm: float = 1e6,
     deblock_time_s: float = 0.10,
     reversal_time_s: float = 0.30,
     reversal_duration_s: float = 0.50,
@@ -831,6 +832,7 @@ def materialize_native_avm_fixture(
         positive=True,
     )
     frequency_hz = _number(frequency_hz, "frequency_hz", positive=True)
+    dc_grounding_resistance_ohm = _number(dc_grounding_resistance_ohm, "dc_grounding_resistance_ohm", positive=True)
     transformer_rating_mva = _number(
         transformer_rating_mva, "transformer_rating_mva", positive=True
     )
@@ -1172,6 +1174,11 @@ def materialize_native_avm_fixture(
     for prefix in ("P", "V"):
         for pole in ("POS", "NEG"):
             writer.add(
+                main, prefix + "_pole_ground_" + pole, "master:resistor",
+                {"R": f"{_format(dc_grounding_resistance_ohm)} [ohm]"},
+                {"A": prefix + "_DC_" + pole, "B": "GND"},
+            )
+            writer.add(
                 main, prefix + "_pole_voltage_" + pole, "master:voltmeter",
                 {"Name": prefix + "_VDC_" + pole},
                 {"N1": prefix + "_DC_" + pole, "N2": "GND"},
@@ -1302,6 +1309,7 @@ def materialize_native_avm_fixture(
             "station_p_grid_x_ohm": station_p_grid_x_ohm,
             "station_vdc_grid_r_ohm": station_vdc_grid_r_ohm,
             "station_vdc_grid_x_ohm": station_vdc_grid_x_ohm,
+            "dc_grounding_resistance_ohm": dc_grounding_resistance_ohm,
             "transformer_rating_mva": transformer_rating_mva,
             "modulation_index": modulation_index,
             "control_kind": control_kind,
@@ -1369,7 +1377,7 @@ def audit_native_avm_fixture(
         "master:source3": 2,
         "master:xfmr-3p2w": 2,
         "master:breakout": 6,
-        "master:resistor": 6,
+        "master:resistor": 10,
         "master:ammeter": 28,
         "master:ground": 1,
         "master:voltmeter": 18,
@@ -1411,6 +1419,9 @@ def audit_native_avm_fixture(
             } - set(nets[prefix + "_GRID_" + phase]):
                 raise ValueError("Native AVM explicit grid impedance is incomplete")
     for prefix in ("P", "V"):
+        for pole in ("POS", "NEG"):
+            if f"{prefix}_pole_ground_{pole}:A" not in nets[prefix + "_DC_" + pole] or f"{prefix}_pole_ground_{pole}:B" not in nets["GND"]:
+                raise ValueError("Native AVM symmetric high-impedance grounding is incomplete")
         for phase in "ABC":
             if {
                 f"{prefix}_{phase}_UPPER:OUT",

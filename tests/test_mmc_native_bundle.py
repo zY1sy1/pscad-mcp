@@ -188,7 +188,7 @@ def test_full_fixture_wires_twelve_two_terminal_arms_to_two_three_phase_stations
         == 12
     )
     assert len([item for item in users if item.get("defn") == "master:breakout"]) == 6
-    assert len([item for item in users if item.get("defn") == "master:resistor"]) == 6
+    assert len([item for item in users if item.get("defn") == "master:resistor"]) == 10
     assert len([item for item in users if item.get("defn") == "master:ammeter"]) == 28
     assert len([item for item in users if item.get("defn") == "master:voltmeter"]) == 18
     assert (

@@ -514,6 +514,7 @@ class AvmBlueprintEngine:
                 float(values["rated_power_mw"]) / float(values["rated_dc_voltage_kv"])
             ) ** 2 * constants[0].loop_dc_resistance_ohm,
             converter_loss_mw=12 * float(values["loss_per_arm_mw"]),
+            dc_grounding_resistance_ohm=float(values["dc_grounding_resistance_ohm"]),
             ramp_time_s=0.20,
             deblock_time_s=0.10,
             reversal_time_s=reversal_time,

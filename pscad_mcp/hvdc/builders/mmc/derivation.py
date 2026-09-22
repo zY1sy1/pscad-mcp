@@ -183,6 +183,7 @@ def _engine_candidates(
     }
     if "native_cable_profile_hash" in common:
         base_parameters["native_cable_profile_hash"] = common["native_cable_profile_hash"]
+        base_parameters["dc_grounding_resistance_ohm"] = 1e6
     for name, override in request.engineering_overrides.items():
         if name == _CAPACITOR_VOLTAGE_TARGET:
             raise _error(
