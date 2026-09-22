@@ -32,6 +32,7 @@ from .cable_companion import (
 )
 from .native_startup import STARTUP_NAME, STARTUP_INPUTS, STARTUP_OUTPUTS, STARTUP_DEFAULTS, append_precharge_readiness
 from .native_dq import PLL_NAME, PLL_OUTPUTS, PLL_DEFAULTS, DQ_NAME, DQ_DEFAULTS, DQ_INPUTS, DQ_OUTPUTS, append_native_pll_and_dq
+from .native_protection import PROTECTION_NAME, PROTECTION_INPUTS, PROTECTION_OUTPUTS, PROTECTION_DEFAULTS, append_native_protection
 
 NATIVE_SCOPE = "cigre_mmc_avm_v1"
 CONTROL_NAME = "MMCStationModulator"
@@ -693,6 +694,7 @@ def materialize_native_avm_library(
     _station_measurements(root)
     append_precharge_readiness(root)
     append_native_pll_and_dq(root)
+    append_native_protection(root)
     sample = _definition(root, SAMPLE_NAME,
                          {"IN": (-36, 0, "Transfer", "Input"), "OUT": (36, 0, "Transfer", "Output")}, {})
     _script(sample, "Dsdyn", "      $OUT = $IN\n")
@@ -933,6 +935,7 @@ def materialize_native_avm_fixture(
     channels = {**FIXTURE_CHANNELS}
     if control_kind == "dq_current":
         channels.update({f"{s}_{name}": unit for s in ("P", "V") for name, unit in DQ_OUTPUTS.items()})
+        channels.update({name: unit for name, unit in PROTECTION_OUTPUTS.values()})
     current_control_bandwidth_hz = _number(current_control_bandwidth_hz, "current_control_bandwidth_hz", positive=True)
     pll_bandwidth_hz = _number(pll_bandwidth_hz, "pll_bandwidth_hz", positive=True)
     active_power_order_mw = _number(
@@ -1184,10 +1187,11 @@ def materialize_native_avm_fixture(
                 "Startup_Charge_Time_s": startup_charge_time_s,
             }
             control = writer.add(main, prefix + "_dq_controller", NATIVE_SCOPE + ":" + DQ_NAME, dq_parameters,
-                                 {**{name: prefix + "_" + name for name in DQ_INPUTS if name not in ("P_MEAS", "Q_MEAS", "VDC_MEAS", "STARTUP_READY", "START_TIME", "POWER_READY", "POWER_START", "VA", "VB", "VC", "IA", "IB", "IC")},
+                                 {**{name: prefix + "_" + name for name in DQ_INPUTS if name not in ("P_MEAS", "Q_MEAS", "VDC_MEAS", "STARTUP_READY", "START_TIME", "POWER_READY", "POWER_START", "PROTECTION_TRIP", "VA", "VB", "VC", "IA", "IB", "IC")},
                                   "P_MEAS": prefix + "_P", "Q_MEAS": prefix + "_Q", "VDC_MEAS": prefix + "_VDC",
                                   "STARTUP_READY": "PRECHARGE_READY", "START_TIME": "DEBLOCK_TIME",
                                   "POWER_READY": "POWER_READY", "POWER_START": "POWER_START_TIME",
+                                  "PROTECTION_TRIP": "PROTECTION_TRIP",
                                   **{f"{q}{p}": f"{prefix}_VALVE_{q}_{p}" for p in "ABC" for q in ("V", "I")},
                                   **{name: prefix + "_" + name for name in DQ_OUTPUTS}})
         else:
@@ -1352,6 +1356,12 @@ def materialize_native_avm_fixture(
                    {**{f"V{p}": f"{prefix}_VALVE_V_{p}" for p in "ABC"},
                     **{port: prefix + "_" + name for port, (name, _) in PLL_OUTPUTS.items()}})
     selected_signals = {name: name for name in channels}
+    if control_kind == "dq_current":
+        writer.add(main, "native_protection", NATIVE_SCOPE + ":" + PROTECTION_NAME,
+                   {**PROTECTION_DEFAULTS, "Frequency_Hz": frequency_hz, "Vdc_Order_kV": vdc_order_kv,
+                    "Arm_Current_Limit_kA": precharge_current_limit_ka},
+                   {**{name: name for name in PROTECTION_INPUTS},
+                    **{port: name for port, (name, _) in PROTECTION_OUTPUTS.items()}})
     writer.add(
         main, "precharge_readiness", NATIVE_SCOPE + ":" + STARTUP_NAME,
         {**STARTUP_DEFAULTS, "Frequency_Hz": frequency_hz, "Vdc_Order_kV": vdc_order_kv,
@@ -1395,7 +1405,7 @@ def materialize_native_avm_fixture(
         )
     if control_kind == "dq_current":
         _manual_sequence(main, ((MEASUREMENT_NAME, SAMPLE_NAME), ("MMCAverageArm",),
-                                (PLL_NAME,), (STARTUP_NAME,), (DQ_NAME,), ("pgb",)))
+                                (PLL_NAME,), (STARTUP_NAME,), (PROTECTION_NAME,), (DQ_NAME,), ("pgb",)))
     writer.verify()
     arm_instances = {
         "P_A_UPPER": 0,

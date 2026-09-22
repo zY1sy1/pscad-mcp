@@ -41,7 +41,7 @@ def evaluate_native_dynamic_envelope(trace: dict, parameters: dict, startup: dic
     result = {"scope": "native_energy_and_normal_dynamics", "status": "FAIL",
               "model_accepted": False, "limits": dict(LIMITS), "checks": {}, "windows": {}}
     arms = [f"{s}_{p}_{q}" for s in ("P", "V") for p in "ABC" for q in ("UPPER", "LOWER")]
-    required = {"time", "P_P_REFERENCE", "P_P"}
+    required = {"time", "P_P_REFERENCE", "P_P", "PROTECTION_TRIP", "PROTECTION_CODE", "PROTECTION_TIME"}
     for s in ("P", "V"):
         required.update(s + "_" + n for n in ("VDC", "VDC_POS", "VDC_NEG", "IDC", "KCL_IDC", "Q", "BLOCK", "PLL_LOCKED", "LIMIT_ACTIVE"))
         for p in "ABC":
@@ -81,6 +81,9 @@ def evaluate_native_dynamic_envelope(trace: dict, parameters: dict, startup: dic
 
     def check(name, passed):
         result["checks"][name] = bool(passed)
+
+    check("normal:protection_inactive", all(v < 0.5 for v in trace["PROTECTION_TRIP"])
+          and all(v == 0 for v in trace["PROTECTION_CODE"]) and all(v < 0 for v in trace["PROTECTION_TIME"]))
 
     energy = diagnose_native_arm_energy(trace, parameters["arm"], tuple(startup["operating_windows"].values()))
     result["energy_accounting"] = energy

@@ -29,7 +29,7 @@ DQ_DEFAULTS = {
 }
 ARM_INPUTS = tuple(f"{p}_{q}_{s}" for p in "ABC" for q in ("UPPER", "LOWER") for s in ("VCAP", "I"))
 DQ_INPUTS = ("P_MEAS", "Q_MEAS", "VDC_MEAS", "PLL_ANGLE", "PLL_LOCKED", "STARTUP_READY", "START_TIME",
-             "POWER_READY", "POWER_START",
+             "POWER_READY", "POWER_START", "PROTECTION_TRIP",
              "VA", "VB", "VC", "IA", "IB", "IC", *ARM_INPUTS)
 DQ_OUTPUTS = {
     **{f"M_{p}_{q}{suffix}": "1" for p in "ABC" for q in ("UPPER", "LOWER") for suffix in ("", "_RAW")},
@@ -214,7 +214,7 @@ def _dq_script() -> str:
       STORF(NSTORF+2) = STORF(NSTORF+2) + A * ($P_MEAS - STORF(NSTORF+2))
       STORF(NSTORF+3) = STORF(NSTORF+3) + A * ($Q_MEAS - STORF(NSTORF+3))
       $BLOCK = 1.0
-      IF ($STARTUP_READY .GE. 0.5 .AND. $PLL_LOCKED .GE. 0.5) $BLOCK = 0.0
+      IF ($STARTUP_READY .GE. 0.5 .AND. $PLL_LOCKED .GE. 0.5 .AND. $PROTECTION_TRIP .LT. 0.5) $BLOCK = 0.0
       VCAP_START = ($A_UPPER_VCAP + $A_LOWER_VCAP + $B_UPPER_VCAP + $B_LOWER_VCAP + $C_UPPER_VCAP + $C_LOWER_VCAP) / 3.0
       IF ($STARTUP_READY .GE. 0.5 .AND. STORF(NSTORF+21) .LT. 0.5) THEN
         STORF(NSTORF+19) = VCAP_START
@@ -256,6 +256,11 @@ def _dq_script() -> str:
       $POWER_CORRECTION = MAX(-$Power_Correction_Limit_MW, MIN($Power_Correction_Limit_MW, $Kp_Vdc_MW_per_kV * VERR + STORF(NSTORF)))
       IF ($Control_Mode .GE. 0.5) PREF = -PREF + $POWER_CORRECTION + $Converter_Loss_MW + $Cable_Loss_MW * (PREF / $P_Order_MW)**2
       PREF = PREF + CHARGE_POWER
+      IF ($PROTECTION_TRIP .GE. 0.5) THEN
+        PREF = 0.0
+        QREF = 0.0
+        $SEQUENCE = 5.0
+      ENDIF
       $P_REFERENCE = PREF
       $Q_REFERENCE = QREF
       PLOSS = 1.5 * $Transformer_Leakage_ohm * (ID**2 + IQ**2)

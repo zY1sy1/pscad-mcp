@@ -55,6 +55,7 @@ def _native_producer_hashes() -> dict[str, str]:
             "native_startup.py",
             "native_dq.py",
             "native_sizing.py",
+            "native_protection.py",
         )
     }
 

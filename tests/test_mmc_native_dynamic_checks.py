@@ -12,6 +12,7 @@ def evidence():
     order = lambda t: 1000.0 * max(-1.0, min(1.0, 1.0 - 2.0 * (t - 1.0)))
     trace = {"time": time, "P_P_REFERENCE": [order(t) for t in time],
              "P_P": [order(t - 0.002) for t in time]}
+    trace.update({"PROTECTION_TRIP": [0.0] * len(time), "PROTECTION_CODE": [0.0] * len(time), "PROTECTION_TIME": [-1.0] * len(time)})
     capacitance = 1e-4
     for s in ("P", "V"):
         current = [(1 if s == "P" else -1) * order(t - 0.002) / 640 for t in time]
@@ -55,6 +56,7 @@ def test_normal_dynamics_do_not_claim_protection_or_complete_model_acceptance(ev
     ("P_P", 2200, -1200.0, "reversal:power_overshoot"),
     ("P_IDC", 2600, 1.0, "reverse:P:dc_current_direction"),
     ("P_A_UPPER_VT", 650, -20.0, "forward:P:power_balance"),
+    ("PROTECTION_TRIP", 2900, 1.0, "normal:protection_inactive"),
 ])
 def test_one_bad_sample_is_not_hidden_by_valid_steady_averages(evidence, channel, index, value, failed):
     evidence[0][channel][index] = value
