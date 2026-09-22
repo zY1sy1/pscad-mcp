@@ -37,6 +37,7 @@ DQ_OUTPUTS = {
     "ID_MEASURED": "kA", "IQ_MEASURED": "kA", "ID_REFERENCE": "kA", "IQ_REFERENCE": "kA",
     "VD_MEASURED": "kV", "VQ_MEASURED": "kV", "VD_REFERENCE": "kV", "VQ_REFERENCE": "kV",
     "ID_INTEGRATOR": "kV", "IQ_INTEGRATOR": "kV", "VDC_INTEGRATOR": "MW",
+    "MODULATION_UNCLIPPED": "1",
     "LIMIT_ACTIVE": "1", "LIMIT_DURATION": "s",
 }
 
@@ -51,7 +52,7 @@ def append_native_pll_and_dq(root: ET.Element) -> None:
                              "Current_Bandwidth_Hz": "Hz", "Current_Damping": "1",
                              "AC_Current_Limit_kA": "kA", "Transformer_Leakage_ohm": "ohm"})
     pll = _definition(root, PLL_NAME, _ports(("VA", "VB", "VC"), PLL_OUTPUTS), PLL_DEFAULTS)
-    _script(pll, "Dsdyn", """#STORAGE REAL:4
+    _script(pll, "Dsdyn", """#STORAGE REAL:6
 #LOCAL REAL ALPHA
 #LOCAL REAL BETA
 #LOCAL REAL MAGNITUDE
@@ -68,6 +69,8 @@ def append_native_pll_and_dq(root: ET.Element) -> None:
         STORF(NSTORF+1) = 0.0
         STORF(NSTORF+2) = 0.0
         STORF(NSTORF+3) = 0.0
+        STORF(NSTORF+4) = 0.0
+        STORF(NSTORF+5) = 0.0
       ENDIF
       ALPHA = (2.0 * $VA - $VB - $VC) / 3.0
       BETA = ($VB - $VC) * 0.577350269189626
@@ -100,13 +103,24 @@ def append_native_pll_and_dq(root: ET.Element) -> None:
       ELSE
         STORF(NSTORF+2) = 0.0
       ENDIF
-      $LOCKED = 0.0
-      IF (STORF(NSTORF+2) .GE. 2.0 / $Frequency_Hz) $LOCKED = 1.0
+      IF (STORF(NSTORF+2) .GE. 2.0 / $Frequency_Hz) STORF(NSTORF+4) = 1.0
+      IF (MAGNITUDE .LE. 0.1 * $Vdc_Order_kV) THEN
+        STORF(NSTORF+4) = 0.0
+        STORF(NSTORF+5) = 0.0
+      ELSE
+        IF (ABS($ERROR) .GT. 0.174532925199433 .OR. $LIMITED .GE. 0.5) THEN
+          STORF(NSTORF+5) = STORF(NSTORF+5) + DELT
+        ELSE
+          STORF(NSTORF+5) = 0.0
+        ENDIF
+        IF (STORF(NSTORF+5) .GE. 0.5 / $Frequency_Hz) STORF(NSTORF+4) = 0.0
+      ENDIF
+      $LOCKED = STORF(NSTORF+4)
       $ANGLE = THETA
       $FREQUENCY = OMEGA / 6.283185307179586
       $INTEGRATOR = STORF(NSTORF+1)
       STORF(NSTORF) = MODULO(THETA + DELT * OMEGA, 6.283185307179586)
-      NSTORF = NSTORF + 4
+      NSTORF = NSTORF + 6
 """)
     dq = _definition(root, DQ_NAME, _ports(DQ_INPUTS, DQ_OUTPUTS), DQ_DEFAULTS, signed_parameters=("Q_Order_MVAr",))
     _script(dq, "Dsdyn", _dq_script())
@@ -237,6 +251,12 @@ def _dq_script() -> str:
       ENDIF
       VDREF = VD - 0.5 * $R_arm_ohm * ID + 0.5 * OMEGA * $L_arm_H * IQ + KP * ED + STORF(NSTORF+6)
       VQREF = VQ - 0.5 * $R_arm_ohm * IQ - 0.5 * OMEGA * $L_arm_H * ID + KP * EQ + STORF(NSTORF+7)
+      $MODULATION_UNCLIPPED = 2.0 * SQRT(VDREF**2 + VQREF**2) / $Vdc_Order_kV
+      IF ($MODULATION_UNCLIPPED .GT. 0.98) THEN
+        VDREF = VDREF * 0.98 / $MODULATION_UNCLIPPED
+        VQREF = VQREF * 0.98 / $MODULATION_UNCLIPPED
+        $LIMIT_ACTIVE = 1.0
+      ENDIF
       VALPHA = VDREF * SIN(THETA) + VQREF * COS(THETA)
       VBETA = -VDREF * COS(THETA) + VQREF * SIN(THETA)
       $ANGLE_COMMAND = ATAN2(VQREF, VDREF) * 57.2957795130823

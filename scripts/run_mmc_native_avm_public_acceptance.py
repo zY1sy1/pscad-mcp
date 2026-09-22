@@ -436,6 +436,7 @@ async def run_attempt(
                 (*reverse_window, 3.0),
             ),
             minimum_end_s=fixture_parameters["simulation_duration_s"] - 0.001,
+            channel_units=channel_units,
         )
         report["assembly_accepted"] = report["analysis"]["status"] == "PASS"
         report["steady_operating_accepted"] = report.get("steady_envelope", {}).get("status") == "PASS"

@@ -70,21 +70,24 @@ def test_native_pll_tracks_frequency_and_phase_changes_and_reports_voltage_loss(
     rows = _run_native_equations(tmp_path, PLL_NAME, declarations="real(8) :: grid_angle, magnitude_input", initialize="",
         loop="""grid_angle = 6.283185307179586 * (60.0 * TIME + MAX(0.0, TIME - 0.2))
 if (TIME >= 0.5) grid_angle = grid_angle + 0.2
+if (TIME >= 1.05) grid_angle = grid_angle + 1.0
 magnitude_input = 280.0
 if (TIME >= 0.7 .and. TIME < 0.75) magnitude_input = 0.0
 SIG_VA = magnitude_input * SIN(grid_angle)
 SIG_VB = magnitude_input * SIN(grid_angle - 2.09439510239320)
 SIG_VC = magnitude_input * SIN(grid_angle + 2.09439510239320)
-""", observations="""if (sample == 9000 .or. sample == 13000 .or. sample == 14500 .or. sample == 19000) print *, TIME, SIG_FREQUENCY, SIG_ERROR, SIG_LOCKED, SIG_INTEGRATOR, SIG_LIMITED
-""", steps=20000)
-    assert len(rows) == 4
-    for index in (0, 1, 3):
+""", observations="""if (sample == 9000 .or. sample == 10001 .or. sample == 13000 .or. sample == 14500 .or. sample == 19000 .or. sample == 21250) print *, TIME, SIG_FREQUENCY, SIG_ERROR, SIG_LOCKED, SIG_INTEGRATOR, SIG_LIMITED
+""", steps=23000)
+    assert len(rows) == 6
+    for index in (0, 2, 4):
         _, frequency, error, locked, integrator, limited = rows[index]
         assert frequency == pytest.approx(61.0, abs=0.03)
         assert abs(error) < 0.005
         assert locked == 1.0 and limited == 0.0
         assert integrator == pytest.approx(2 * math.pi, abs=0.2)
-    assert rows[2][3] == 0.0
+    assert rows[1][3] == 1.0  # a brief phase step does not chatter the deblock signal
+    assert rows[3][3] == 0.0  # loss of voltage clears lock immediately
+    assert rows[5][3] == 0.0 and rows[5][5] == 1.0  # sustained desynchronization is rejected
 
 
 def test_native_dq_tracks_both_power_directions_through_an_inductive_plant(tmp_path):

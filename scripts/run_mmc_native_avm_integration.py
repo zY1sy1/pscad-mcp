@@ -101,6 +101,7 @@ def analyze_integration_trace(
     *,
     sequence_windows: tuple[tuple[float, float, float], ...] | None = None,
     minimum_end_s: float = 0.4998,
+    channel_units: dict[str, str] | None = None,
 ) -> dict:
     result = {
         "status": "FAIL",
@@ -108,7 +109,8 @@ def analyze_integration_trace(
         "checks": {},
         "metrics": {},
     }
-    required = {"time", *FIXTURE_CHANNELS}
+    profile = FIXTURE_CHANNELS if channel_units is None else channel_units
+    required = {"time", *profile}
     if set(trace) != required:
         result["missing_channels"] = sorted(required - set(trace))
         result["unexpected_channels"] = sorted(set(trace) - required)
@@ -116,7 +118,7 @@ def analyze_integration_trace(
     time_domain = trace["time"]
     if (
         len(time_domain) < 4000
-        or any(len(trace[name]) != len(time_domain) for name in FIXTURE_CHANNELS)
+        or any(len(trace[name]) != len(time_domain) for name in profile)
         or any(
             isinstance(value, bool)
             or not isinstance(value, (int, float))
@@ -161,7 +163,12 @@ def analyze_integration_trace(
     for channel in ("P_ANGLE_COMMAND", "V_ANGLE_COMMAND"):
         checks[channel + ":bounded"] = max(abs(value) for value in trace[channel]) <= 30.0 + 1e-9
     for channel in ("P_MODULATION_COMMAND", "V_MODULATION_COMMAND"):
-        checks[channel + ":bounded"] = min(trace[channel]) >= 0.10 - 1e-9 and max(
+        active_samples = trace[channel]
+        # dq voltage feedforward is zero before the grid is energized. Its
+        # operating lower bound still applies whenever the valves are enabled.
+        if channel.replace("MODULATION_COMMAND", "MODULATION_UNCLIPPED") in profile:
+            active_samples = [v for i, v in enumerate(trace[channel]) if trace[channel[:2] + "BLOCK"][i] < 0.5]
+        checks[channel + ":bounded"] = bool(active_samples) and min(active_samples) >= 0.10 - 1e-9 and min(trace[channel]) >= 0 and max(
             trace[channel]
         ) <= 0.98 + 1e-9
     for channel in ("P_VDC", "V_VDC"):
