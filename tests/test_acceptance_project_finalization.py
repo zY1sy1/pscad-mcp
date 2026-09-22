@@ -295,7 +295,7 @@ def test_generated_module_policy_allows_compiler_assigned_direct_child_instance(
     ]
 
 
-@pytest.mark.parametrize("mutation", ["remove_child", "add_child", "order", "script"])
+@pytest.mark.parametrize("mutation", ["remove_child", "add_child", "script"])
 def test_generated_module_policy_preserves_hierarchy_structure_and_script(
     tmp_path, mutation
 ):
@@ -308,8 +308,6 @@ def test_generated_module_policy_preserves_hierarchy_structure_and_script(
         main.remove(extra)
     elif mutation == "add_child":
         ET.SubElement(main, "call", name="module:New", link="4", z="2")
-    elif mutation == "order":
-        main[:] = list(reversed(main[:]))
     else:
         root.find(".//script").text = "V = R / I"
     write(path, root)
@@ -317,6 +315,31 @@ def test_generated_module_policy_preserves_hierarchy_structure_and_script(
         compare_project_finalization(
             authored, snapshot_project_semantics(path, policy=GENERATED_MODULE_POLICY)
         )
+
+
+@pytest.mark.parametrize("automatic", [True, False])
+def test_generated_main_order_is_compiler_metadata_only_with_automatic_sequence(tmp_path, automatic):
+    from pscad_mcp.acceptance.project_finalization import GENERATED_MODULE_POLICY_V1
+
+    path, root = project(tmp_path)
+    main = root.find("./hierarchy/call/call")
+    ET.SubElement(main, "call", name="module:Other", link="3", z="1")
+    root.find(".//schematic/paramlist/param[@name='auto_sequence']").set("value", "1" if automatic else "0")
+    write(path, root)
+    before = snapshot_project_semantics(path, policy=GENERATED_MODULE_POLICY)
+    before_v1 = snapshot_project_semantics(path, policy=GENERATED_MODULE_POLICY_V1)
+    main[:] = list(reversed(main[:]))
+    write(path, root)
+    after = snapshot_project_semantics(path, policy=GENERATED_MODULE_POLICY)
+    if automatic:
+        result = compare_project_finalization(before, after)
+        assert result["semantic_structure_unchanged"]
+        assert any(item["field"].endswith("compiler_child_order") for item in result["metadata_changes"])
+    else:
+        with pytest.raises(ValueError, match="semantic"):
+            compare_project_finalization(before, after)
+    with pytest.raises(ValueError, match="semantic"):
+        compare_project_finalization(before_v1, snapshot_project_semantics(path, policy=GENERATED_MODULE_POLICY_V1))
 
 
 @pytest.mark.parametrize(

@@ -227,7 +227,7 @@ async def run_attempt(
         )
         report["diagnostic_control_kind"] = control_kind
 
-        begin("build_and_publish")
+        begin("build_and_verify_acceptance_boundary")
         started = await builder.build_model(
             REQUEST,
             plan["plan_hash"],
@@ -239,14 +239,14 @@ async def run_attempt(
         deadline = time.monotonic() + args.build_timeout
         while True:
             terminal = builder.get_status(started["build_id"])
-            if terminal.get("state") in {"published", "failed", "interrupted"}:
+            if terminal.get("state") in {"built", "published", "failed", "interrupted"}:
                 break
             if time.monotonic() >= deadline:
                 raise TimeoutError("Public native AVM build exceeded its deadline")
             await asyncio.sleep(0.25)
         report["build_terminal"] = terminal
-        if terminal.get("state") != "published":
-            raise RuntimeError("Public native AVM build did not publish")
+        if terminal.get("state") != "built":
+            raise RuntimeError("Public native AVM must retain unaccepted candidates in staging")
         engine = terminal["engines"][0]
         if (
             engine.get("capability_level") != "built"
@@ -254,10 +254,11 @@ async def run_attempt(
             or terminal.get("result", {}).get("model_accepted") is not False
         ):
             raise ValueError("Public lifecycle overstated native AVM acceptance")
-        project = Path(engine["final_path"]).resolve()
-        library = Path(engine["final_library_path"]).resolve()
-        if project != Path(child["target_path"]).resolve():
-            raise ValueError("Published project differs from the immutable child plan")
+        project = Path(engine["candidate_result"]["project_path"]).resolve()
+        library = Path(engine["candidate_result"]["library_path"]).resolve()
+        if not project.is_relative_to(workspace) or Path(child["target_path"]).exists():
+            raise ValueError("An unaccepted native AVM candidate escaped staging or was published")
+        report["publication_blocked_until_full_acceptance"] = True
         project_name = project.stem
         diagnostic_step = getattr(args, "diagnostic_time_step_us", None)
         if diagnostic_step is not None:

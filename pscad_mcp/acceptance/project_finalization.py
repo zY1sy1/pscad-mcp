@@ -11,6 +11,9 @@ It permits compiler-assigned ``instance`` and automatic execution-order ``z``
 only on direct children of the Main hierarchy call; component links, names and
 nested child calls remain semantic. Schematic User/Wire ``z`` already follows
 the same automatic-sequence rule.
+Version 2 compares direct Main calls by their unchanged link/name identity
+when Main uses automatic sequencing; the observed permutation remains in the
+metadata evidence. Version 1 retains its original child-order policy.
 These were observed in the authored/model pair from average-arm acceptance
 attempt-20260908-174633-918404c6. Nested hierarchy calls and all parameter children
 remain semantic; the generator must author defaults and child calls explicitly.
@@ -19,6 +22,7 @@ remain semantic; the generator must author defaults and child calls explicitly.
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 from pathlib import Path
 from typing import Any
@@ -27,8 +31,10 @@ from xml.etree import ElementTree as ET
 from pscad_mcp.topology.hashing import canonical_sha256
 
 POLICY = "pscad_compiler_metadata_v1"
-GENERATED_MODULE_POLICY = "pscad_generated_module_metadata_v1"
-_POLICIES = {POLICY, GENERATED_MODULE_POLICY}
+GENERATED_MODULE_POLICY_V1 = "pscad_generated_module_metadata_v1"
+GENERATED_MODULE_POLICY = "pscad_generated_module_metadata_v2"
+_GENERATED_POLICIES = {GENERATED_MODULE_POLICY_V1, GENERATED_MODULE_POLICY}
+_POLICIES = {POLICY, *_GENERATED_POLICIES}
 
 
 def snapshot_project_semantics(
@@ -76,7 +82,7 @@ def snapshot_project_semantics(
             excluded.add("z")
         if in_schematic and tag == "Wire":
             excluded.update(("w", "h"))
-        if policy == GENERATED_MODULE_POLICY:
+        if policy in _GENERATED_POLICIES:
             if in_schematic and tag == "User" and element.get("classid") == "UserCmp":
                 excluded.update(("w", "h"))
             if (
@@ -109,6 +115,26 @@ def snapshot_project_semantics(
             else:
                 attributes[name] = value
         children = list(element)
+        if (
+            policy == GENERATED_MODULE_POLICY
+            and tag == "call"
+            and parents == ("project", "hierarchy", "call")
+            and element.get("name") == f"{root.get('name')}:Main"
+            and ancestors[-1].get("name") == f"{root.get('name')}:Station"
+            and root.find(
+                "./definitions/Definition[@name='Main']/schematic/paramlist/param[@name='auto_sequence']"
+            ) is not None
+            and root.find(
+                "./definitions/Definition[@name='Main']/schematic/paramlist/param[@name='auto_sequence']"
+            ).get("value") == "1"
+        ):
+            keys = [(child.get("link"), child.get("name")) for child in children]
+            if any(child.tag != "call" for child in children) or any(
+                not link or not name for link, name in keys
+            ) or len(set(keys)) != len(keys):
+                raise ValueError("Generated Main hierarchy calls must have unique identities")
+            metadata[address + "/@compiler_child_order"] = json.dumps(keys)
+            children.sort(key=lambda child: (child.get("link"), child.get("name")))
         content = element.text
         if children and content is not None and not content.strip():
             content = None

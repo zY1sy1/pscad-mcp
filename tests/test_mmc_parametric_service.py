@@ -171,6 +171,25 @@ def test_validation_without_outputs_cannot_claim_acceptance(tmp_path: Path) -> N
     assert validation["acceptance"]["status"] == "not_evaluated"
 
 
+def test_compiled_native_candidate_stays_staged_until_dynamic_acceptance(tmp_path):
+    service = make_parametric_service(tmp_path)
+    execute = service.avm_engine.execute_candidate
+
+    async def compiled_only(*args, **kwargs):
+        result = await execute(*args, **kwargs)
+        result.update(state="built", capability_level="built", model_accepted=False)
+        return result
+
+    service.avm_engine.execute_candidate = compiled_only
+    _, terminal = _build(service, tmp_path, valid_request(model_fidelity="average_value"))
+    assert terminal["state"] == "built"
+    assert terminal["result"]["model_accepted"] is False
+    assert terminal["result"]["publication_pending"] == "required_dynamic_physical_acceptance"
+    assert not (tmp_path / "MMC_CASE_avm.pscx").exists()
+    assert all(Path(path).is_file() for path in terminal["result"]["staged_projects"])
+    assert not any(call[0] in {"load_projects", "save_project_as"} for call in service.pscad_service.calls)
+
+
 def test_native_avm_publication_uses_pscad_save_as_for_distinct_candidate_name(
     tmp_path: Path,
 ) -> None:

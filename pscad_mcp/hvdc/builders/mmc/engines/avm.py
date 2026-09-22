@@ -507,6 +507,11 @@ class AvmBlueprintEngine:
             str(path): snapshot_project_semantics(path, policy=GENERATED_MODULE_POLICY)
             for path in (project, library)
         }
+        authored_directory = candidate_root / "authored-models"
+        authored_directory.mkdir()
+        for path in (project, library):
+            with (authored_directory / path.name).open("xb") as target:
+                target.write(path.read_bytes())
 
         async def bounded(awaitable: Any) -> Any:
             return await asyncio.wait_for(awaitable, self.operation_timeout_s)
@@ -564,7 +569,7 @@ class AvmBlueprintEngine:
         written = [project, library]
         written.extend(Path(path) for path in receipt["library"]["constants_artifacts"])
         return {
-            "state": "accepted",
+            "state": "built",
             "engine": self.name,
             "candidate_id": selected.candidate_id,
             "candidate_path": str(candidate_root),

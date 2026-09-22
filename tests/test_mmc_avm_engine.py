@@ -171,7 +171,7 @@ def test_native_avm_engine_freezes_sources_and_materializes_candidate_values(
 
     service = Service()
     result = asyncio.run(engine.execute_candidate(plan, service))
-    assert result["state"] == "accepted"
+    assert result["state"] == "built"
     assert result["capability_level"] == "built"
     assert result["assembly_accepted"] is False
     assert result["model_accepted"] is False

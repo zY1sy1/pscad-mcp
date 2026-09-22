@@ -40,7 +40,7 @@ from .template_audit import audit_mmc_template
 
 
 _CACHE_MAX = 64
-_TERMINAL = {"published", "failed", "interrupted"}
+_TERMINAL = {"built", "published", "failed", "interrupted"}
 
 
 def _error(code: str, message: str, operation: str, **details: object) -> BackendError:
@@ -396,7 +396,7 @@ class ParametricMmcBuilderService:
                     result = await engine.execute_candidate(
                         child, self.pscad_service, candidate_id=candidate_id
                     )
-                if not isinstance(result, Mapping) or result.get("state") != "accepted":
+                if not isinstance(result, Mapping) or result.get("state") not in {"built", "accepted"}:
                     raise _error(
                         "MMC_ACCEPTANCE_FAILED",
                         "An MMC engine returned a non-accepted candidate record.",
@@ -405,13 +405,14 @@ class ParametricMmcBuilderService:
                         candidate_id=candidate_id,
                     )
                 result_dict = copy.deepcopy(dict(result))
+                candidate_state = str(result_dict["state"])
                 capability_level = str(
                     result_dict.get("capability_level", "accepted")
                 )
                 attempts.append(
                     {
                         "candidate_id": candidate_id,
-                        "state": "accepted",
+                        "state": candidate_state,
                         "parameter_hash": next(
                             item.parameter_hash
                             for item in child.candidates
@@ -421,7 +422,7 @@ class ParametricMmcBuilderService:
                 )
                 return {
                     "engine": child.engine,
-                    "state": "accepted",
+                    "state": candidate_state,
                     "capability_level": capability_level,
                     "assembly_accepted": bool(
                         result_dict.get("assembly_accepted", False)
@@ -896,11 +897,22 @@ class ParametricMmcBuilderService:
                 )
                 journal.write(record)
             record["engines"] = engines
-            failed = [item for item in engines if item["state"] != "accepted"]
+            failed = [item for item in engines if item["state"] == "failed"]
             if failed:
                 record["state"] = "failed"
                 record["error"] = failed[0]["error"]
                 record["history"].append({"state": "failed", "reason": "child_failed"})
+            elif any(item["state"] == "built" for item in engines):
+                record["state"] = "built"
+                record["result"] = {
+                    "capability_level": "built",
+                    "model_accepted": False,
+                    "staged_projects": [
+                        str(self._candidate_project(item)) for item in engines
+                    ],
+                    "publication_pending": "required_dynamic_physical_acceptance",
+                }
+                record["history"].append({"state": "built", "reason": "dynamic_acceptance_pending"})
             else:
                 final_paths = await self._publish(engines, plan.engine_plans)
                 for child, engine_record, final_path in zip(

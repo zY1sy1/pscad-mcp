@@ -450,7 +450,7 @@ def make_parametric_service(
 
 
 def wait_for_terminal(service: object, build_id: str) -> dict[str, Any]:
-    terminal_states = {"published", "failed", "interrupted"}
+    terminal_states = {"built", "published", "failed", "interrupted"}
     deadline = time.monotonic() + 5.0
     while time.monotonic() < deadline:
         status = service.get_status(build_id)
