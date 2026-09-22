@@ -42,6 +42,7 @@ OPERATING_WINDOWS = {
     "blocked_bypass": (0.16, 0.18),
 }
 MIN_SWITCH_ON_RESISTANCE_OHM = 1e-3
+CAPACITOR_FEEDBACK_ADVANCE_STEPS = 2.0
 VOLTAGE_CONVENTION = {
     "equivalent_voltage_target": "rated_dc_voltage_kv / 2",
     "full_stack_voltage": "2 * V_CAP_EQ",
@@ -118,6 +119,24 @@ def average_arm_reference(
         "arm_ohmic_loss_mw": parameters.R_arm_ohm * i_arm_ka**2,
         "nonohmic_loss_mw": loss_current * v_cap_total_kv,
     }
+
+
+def predict_coupled_capacitor_voltage(
+    voltage_kv: float, storage_current_ka: float, capacitance_f: float, step_s: float
+) -> float:
+    """Compensate the current-source and voltage-source interface delays.
+
+    Each EMTDC Dsdyn reads the preceding Dsout measurement. The isolated
+    capacitor is driven by the preceding arm current, and its voltage is then
+    applied on the next network solution. Advance that measured voltage by
+    both interface steps. This introduces no capacitor-energy state override.
+    """
+    if not all(math.isfinite(value) for value in (
+        voltage_kv, storage_current_ka, capacitance_f, step_s
+    )) or capacitance_f <= 0 or step_s <= 0:
+        raise ValueError("Capacitor prediction requires finite physical values")
+    return max(0.0, voltage_kv + CAPACITOR_FEEDBACK_ADVANCE_STEPS
+               * step_s * storage_current_ka / capacitance_f)
 
 
 # Exact port occurrences matter: source_1 has a distinct grounded NB occurrence.
@@ -671,7 +690,7 @@ def _make_library(
         {
             name: (72, -72 + index * 36, "Transfer", "Output")
             for index, name in enumerate(
-                ("VNORMAL", "ISTORE", "W", "VEQ", "OPEN", "PLOSS")
+                ("VNORMAL", "ISTORE", "W", "VEQ", "OPEN", "PLOSS", "VCLAMP")
             )
         }
     )
@@ -684,15 +703,18 @@ def _make_library(
     _script(
         coupling,
         "Fortran",
-        """#LOCAL REAL NINSERT
+        f"""#LOCAL REAL NINSERT
 #LOCAL REAL ILOSS
+#LOCAL REAL VPREDICT
       NINSERT = MIN(1.0, MAX(0.0, $M))
-      $VNORMAL = NINSERT * $VCAP
       ILOSS = 0.0
       IF ($VCAP .GT. 0.0) THEN
         ILOSS = $P_nonohmic_MW / MAX($VCAP, $V_loss_floor_kV)
       ENDIF
       $ISTORE = NINSERT * $INORMAL + $ICLAMP - ILOSS
+      VPREDICT = MAX(0.0, $VCAP + {CAPACITOR_FEEDBACK_ADVANCE_STEPS} * DELT * $ISTORE / (0.25 * $C_eq_F))
+      $VNORMAL = NINSERT * VPREDICT
+      $VCLAMP = VPREDICT
       $W = 0.125 * $C_eq_F * $VCAP * $VCAP
       $VEQ = 0.5 * $VCAP
       $PLOSS = ILOSS * $VCAP
@@ -769,7 +791,7 @@ def _make_library(
         "clamp_voltage",
         "source_1",
         _SOURCE_PARAMETERS,
-        {"NA": "CLAMP_POS", "NB": "OUT", "Mag": "CAP_V"},
+        {"NA": "CLAMP_POS", "NB": "OUT", "Mag": "CLAMP_V"},
     )
     add(
         "negative_bypass",
@@ -845,6 +867,7 @@ def _make_library(
             "VEQ": "CAP_EQ_V",
             "OPEN": "ARM_OPEN",
             "PLOSS": "NONOHMIC_P",
+            "VCLAMP": "CLAMP_V",
         },
     )
     signals = {

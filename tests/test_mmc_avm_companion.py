@@ -358,3 +358,43 @@ def test_nonohmic_loss_is_distinct_from_physical_arm_resistance(companion):
     assert result["p_cap_mw"] == pytest.approx(-1.02)
     assert result["i_cap_ka"] == pytest.approx(-0.102)
     assert result["arm_ohmic_loss_mw"] == pytest.approx(0.004)
+
+
+def test_native_coupling_tracks_passive_rlc_and_converges_with_timestep(companion):
+    # A constant-insertion arm driven by n*640 kV has the analytic damped
+    # RLC response below. This exposes energy injection hidden by a fixture
+    # that imposes arm current independently of inserted voltage.
+    resistance, inductance, capacitance, insertion = 0.15, 0.05, 6.510416666666668e-5 / 4, 0.5
+    decay = resistance / (2 * inductance)
+    omega = math.sqrt(insertion**2 / (inductance * capacitance) - decay**2)
+
+    def integrate(step):
+        current, previous_current = 0.0, 0.0
+        capacitor, previous_capacitor = 630.0, 630.0
+        maximum_error = 0.0
+        for index in range(1, round(0.2 / step) + 1):
+            source = insertion * companion.predict_coupled_capacitor_voltage(
+                capacitor, insertion * current, capacitance, step
+            )
+            previous_source = insertion * companion.predict_coupled_capacitor_voltage(
+                previous_capacitor, insertion * previous_current, capacitance, step
+            )
+            next_current = (
+                (2 * inductance / step - resistance) * current
+                + 2 * insertion * 640 - source - previous_source
+            ) / (2 * inductance / step + resistance)
+            next_capacitor = capacitor + step * insertion * (
+                current + previous_current
+            ) / (2 * capacitance)
+            instant = index * step
+            reference = 640 - 10 * math.exp(-decay * instant) * (
+                math.cos(omega * instant) + decay / omega * math.sin(omega * instant)
+            )
+            maximum_error = max(maximum_error, abs(next_capacitor - reference))
+            previous_current, current = current, next_current
+            previous_capacitor, capacitor = capacitor, next_capacitor
+        return maximum_error
+
+    coarse, fine = integrate(50e-6), integrate(25e-6)
+    assert coarse < 0.3
+    assert fine < coarse * 0.51
