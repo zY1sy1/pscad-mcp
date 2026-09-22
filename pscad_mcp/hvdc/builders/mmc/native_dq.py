@@ -29,6 +29,7 @@ DQ_DEFAULTS = {
     "Energy_Gain_per_s": 10.0, "Circulating_Gain_ohm": 18.84955592153876,
     "Circulating_Integral_Time_s": 0.05, "Feedback_Filter_s": 0.02,
     "Energy_Difference_Filter_s": 0.05,
+    "Energy_Difference_Gain_per_s": 20.0,
 }
 ARM_INPUTS = tuple(f"{p}_{q}_{s}" for p in "ABC" for q in ("UPPER", "LOWER") for s in ("VCAP", "I"))
 DQ_INPUTS = ("P_MEAS", "Q_MEAS", "VDC_MEAS", "VDC_POS", "VDC_NEG", "PLL_ANGLE", "PLL_LOCKED", "STARTUP_READY", "START_TIME",
@@ -387,7 +388,10 @@ def _dq_script() -> str:
       ISUM = 0.5 * (${phase}_UPPER_I + ${phase}_LOWER_I)
       PLOSS = 2.0 * $P_nonohmic_MW + $R_arm_ohm * (${phase}_UPPER_I**2 + ${phase}_LOWER_I**2)
       IREF = (PLOSS - PVALVE / 3.0 + WREF_RATE - $Energy_Gain_per_s * (STORF(NSTORF+{8+i}) - WREF)) / MAX(0.1 * $Vdc_Order_kV, $VDC_MEAS)
-      IREF = IREF + 5.0 * STORF(NSTORF+{11+i}) * VACOM / MAX(1.0, VDREF**2 + VQREF**2)
+! The circulating PI has about 0.5 in-phase gain at the AC fundamental.
+! A 20/s difference gain therefore gives roughly 10/s mean-energy response;
+! the 50 ms observer gives an averaged damping ratio of about 0.707.
+      IREF = IREF + $Energy_Difference_Gain_per_s * STORF(NSTORF+{11+i}) * VACOM / MAX(1.0, VDREF**2 + VQREF**2)
       IERR = ISUM - IREF
       IF ($BLOCK .GE. 0.5) STORF(NSTORF+{14+i}) = 0.0
       VCOMMON = 0.5 * $VDC_MEAS - $R_arm_ohm * IREF + $Circulating_Gain_ohm * IERR + STORF(NSTORF+{14+i})

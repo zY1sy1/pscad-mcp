@@ -277,6 +277,7 @@ _PARAMETER_UNITS = {
     "Startup_Charge_Time_s": "s",
     "Recovery_Charge_Time_s": "s",
     "DC_Link_Capacitance_F": "F",
+    "Energy_Difference_Gain_per_s": "1/s",
     "Maximum_Conditioning_s": "s",
     "Power_Correction_Limit_MW": "MW",
     "Cable_Loss_MW": "MW",
