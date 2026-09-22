@@ -6,7 +6,78 @@ and leaves unaccepted candidates in staging. Complete MMC acceptance and
 publication are still pending. A steady operating envelope PASS is narrower
 than the required startup, protection, fault, and complete physical contracts.
 
-## Current frozen result
+## Later implementation and evidence
+
+The following results supersede the original implementation below within their
+declared scope. **Full model acceptance remains pending.** The native public
+builder continues to retain candidates in staging and does not publish them.
+
+- Full offline regression at `3dcf54f`: **2944 passed, 48 skipped**, 139.71 s.
+- Single-arm licensed acceptance at `c4a2301`: PASS, source/code immutable,
+  managed PID 35692 cleaned. Report:
+  `D:/PSCAD-Workspace/mmc-average-arm-acceptance-20260922/attempt-20260922-220023-63615a3e/report.json`;
+  SHA-256 `ce67fd9e178580f7a04d76aa5066d1569db1563fac3d6aa601be8d9d833d9ada`.
+- Public native AVM at `fea47ff`, with an explicit **48 MJ** engineering
+  request: assembly, forward/reverse steady envelopes, and independent
+  network identities PASS. Source/code immutable, managed PID 35256 cleaned.
+  Report: `D:/PSCAD-Workspace/mmc-native-avm-energy48-20260922/attempt-20260922-221153-d87c0fed/report.json`;
+  SHA-256 `75ac0e567702991f73f2119aed4ff0a94a6779540ddf9b0b0e317c058147c7f8`.
+  This is a different request from the original 40 MJ reference, and is not
+  evidence that the default 40 MJ configuration passed at this revision.
+- The default 40 MJ request at `c4a2301` passes network identities but fails
+  steady DC-voltage excursion. Its report remains FAIL:
+  `D:/PSCAD-Workspace/mmc-native-avm-public-acceptance-20260922/attempt-20260922-220023-5606ec02/report.json`,
+  SHA-256 `498280fa9f9b5efa7af9e6449561cb8101626c6e6fb225ca79a319b7b1a64e68`.
+  The P-terminal peak deviations are 12.1161% forward and 10.1047% reverse;
+  the unchanged limit is 10%. Managed PID 36412 was cleaned.
+
+The 48 MJ request still exhibits clipped insertion commands and insufficient
+modulation margin. Neither its energy-ripple diagnostics nor its startup,
+PLL, protection, reversal dynamics, or fault behavior have a full PASS.
+
+Implemented consistency repairs:
+
+- Equation version v3 computes grid impedance from the requested AC voltage
+  and SCR, without a second DC-voltage scaling. A native fixture's explicit
+  grid resistance is included in the requested total, not added on top.
+- Cable planning freezes the actual coaxial geometry and per-core DC
+  resistance. Both candidate and generated constants must agree. A 100 km
+  VSCTrans pair has approximately 16.59826 ohm loop resistance; this does not
+  scale with converter ratings. Unrelated PWM/overhead estimates are retained.
+- Native arm non-ohmic loss budgeting uses valve-side apparent current,
+  including reactive power. Native controller gains and filter times now
+  consume the declared candidate bandwidth and rating scales. Explicit Vdc
+  PI overrides have physical units, including MW/kV and normalized seconds.
+- The native model declares 1 Mohm pole and valve common-mode grounding and
+  records their losses. Its public arm open resistance uses the installed
+  vendor's 1 Mohm value. These changes alone did not resolve the startup
+  matrix error exposed by extra series arm ammeters; the failed attempts are
+  retained. Eliminating those additional branches removed the matrix error.
+- Arm current is observed on the existing physical resistor branch. Native
+  DSDYN copies align independent terminal currents/voltages with those arm
+  exports. An ordinary gain was insufficient because PSCAD scheduled it in
+  DSOUT. The explicit sampling component passes strict KCL (1e-9 kA), pole
+  voltage identity (1e-6 kV), energy/capacitance identity (1e-9 relative), and
+  modulation-clipping identity checks. No OUT samples are shifted afterward.
+- Near zero charge, the explicit non-ohmic sink is limited by available
+  capacitor charge across the two-step interface. This eliminated an observed
+  approximately -55 V startup excursion; the retained minimum after repair is
+  roundoff, approximately -4e-13 kV. Rated-voltage loss remains unchanged, and
+  measured loss power is exported for energy accounting.
+- Negative Q commands and phase offsets are permitted by their native forms.
+  Actual P/Q/Vdc controller references are now exported. The acceptance runner
+  can load a complete request JSON and binds its hash into immutable evidence.
+
+Diagnostic requests and failed runs are preserved under
+`D:/PSCAD-Workspace/mmc-native-avm-controls-20260922` and the corresponding
+`mmc-native-avm-*-20260922` attempt directories. Lowering modulation to 0.8,
+reducing the common bandwidth to 64 Hz, or increasing energy to 80 MJ with
+modulation 0.8/0.82 did not establish physical acceptance. Voltage oscillation
+has a dominant 6–7 Hz component. Further Vdc-loop tests use explicit frozen
+requests, preserve the same envelope limits, and remain diagnostics until all
+required physical checks pass.
+
+## Earlier frozen result
 
 - Revision: `7a186fbc67d51f1296a326f3d6a27726b5c4ecc6`.
 - Report: `D:/PSCAD-Workspace/mmc-native-avm-public-acceptance-20260922/attempt-20260922-205626-5eda1190/report.json`.
