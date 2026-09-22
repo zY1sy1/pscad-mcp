@@ -471,6 +471,7 @@ def _closed_loop_control(root: ET.Element, master: dict, defaults: dict) -> dict
                 "G": "1.0",
                 "T": (
                     "0.1 [s]" if role == "voltage_reference_ramp"
+                    else "0.002 [s]" if role == "vdc_filter"
                     else "0.05 [s]" if role.startswith("energy_difference_")
                     else "0.02 [s]"
                 ),
