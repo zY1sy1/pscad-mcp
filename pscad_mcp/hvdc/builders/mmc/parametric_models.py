@@ -17,7 +17,7 @@ _CONVERTERS = {"half_bridge"}
 _LINK_KINDS = {"overhead_line", "cable"}
 _UNITS = {
     "A", "F", "H", "Hz", "J", "V", "W", "kA", "kV", "kW", "km", "mH",
-    "ms", "MJ", "MW", "Mvar", "ohm", "pu", "s", "uF", "%",
+    "ms", "MJ", "MW", "MW/kV", "Mvar", "ohm", "pu", "s", "uF", "%",
 }
 
 

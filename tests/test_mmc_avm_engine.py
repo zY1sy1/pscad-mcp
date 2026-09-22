@@ -49,6 +49,13 @@ def test_native_candidate_bandwidth_and_ratings_change_the_control_response():
     assert scaled["p_control_kp"] * 2000 == pytest.approx(nominal["p_control_kp"] * 1000)
     assert scaled["reactive_control_kp"] * 2000 == pytest.approx(nominal["reactive_control_kp"] * 1000)
     assert scaled["dc_voltage_control_kp"] * 1280 / 2000 == pytest.approx(nominal["dc_voltage_control_kp"] * 640 / 1000)
+    adjusted = derive_mmc_parameters(valid_request(model_fidelity="average_value", engineering_overrides={
+        "dc_voltage_control_kp": {"value": 0.3, "unit": "MW/kV"},
+        "dc_voltage_control_ti_s": {"value": 300.0, "unit": "ms"},
+    })).candidates[0]
+    control = AvmBlueprintEngine._native_control_parameters(adjusted.parameters)
+    assert control["dc_voltage_control_kp"] == 0.3
+    assert control["dc_voltage_control_ti_s"] == 0.3
 
 
 def test_avm_engine_applies_derived_parameters_to_twelve_visible_arms(

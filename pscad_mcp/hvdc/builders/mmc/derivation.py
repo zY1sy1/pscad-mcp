@@ -46,6 +46,8 @@ _AVM_REFERENCE: dict[str, Any] = {
 _ENERGY_OVERRIDE_UNITS = {
     "stored_energy_mj": {"MJ": 1.0, "J": 1e-6},
     "equivalent_arm_capacitance_f": {"F": 1.0, "uF": 1e-6},
+    "dc_voltage_control_kp": {"MW/kV": 1.0},
+    "dc_voltage_control_ti_s": {"s": 1.0, "ms": 1e-3},
 }
 _CAPACITOR_VOLTAGE_TARGET = "equivalent_capacitor_voltage_target_kv"
 
@@ -203,7 +205,7 @@ def _engine_candidates(
         if unit not in unit_factors:
             raise _error(
                 "MMC_REQUEST_INVALID",
-                "The energy override has an incompatible unit.",
+                "The engineering override has an incompatible unit.",
                 field=f"engineering_overrides.{name}",
                 unit=unit,
                 supported_units=sorted(unit_factors),
