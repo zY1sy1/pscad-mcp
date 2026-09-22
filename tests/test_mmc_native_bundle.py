@@ -104,6 +104,28 @@ def test_native_bundle_contains_physical_arm_control_and_coupled_cable(
     controller = definitions[CLOSED_LOOP_CONTROL_NAME]
     assert len(controller.findall("./schematic/User[@defn='master:pi_ctlr']")) == 2
     assert len(controller.findall("./schematic/User[@defn='master:realpole']")) == 3
+    controller_components = {
+        component.get("name"): component
+        for component in controller.findall("./schematic/User")
+    }
+    for prefix, kp, ti, error in (
+        ("active", 0.003, 0.5, 1000.0),
+        ("reactive", 0.00005, 0.5, 1000.0),
+    ):
+        gain = {
+            p.get("name"): p.get("value")
+            for p in controller_components[prefix + "_error_gain"].findall("./paramlist/param")
+        }
+        native_pi = {
+            p.get("name"): p.get("value")
+            for p in controller_components[prefix + "_pi"].findall("./paramlist/param")
+        }
+        assert gain["G"] == ("Kp_Active" if prefix == "active" else "Kp_Reactive")
+        assert float(native_pi["GP"]) == 1.0
+        # A native parallel PI must reproduce the specified series gain,
+        # including its integral slope rather than only proportional gain.
+        step_response = float(native_pi["GP"]) * kp * error + kp * error * 0.01 / ti
+        assert step_response == pytest.approx(kp * error * (1 + 0.01 / ti))
     assert (
         controller.find(
             f"./schematic/User[@defn='{NATIVE_SCOPE}:MMCControlErrors']"

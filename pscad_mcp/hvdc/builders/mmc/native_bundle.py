@@ -350,11 +350,25 @@ def _closed_loop_control(root: ET.Element, master: dict, defaults: dict) -> dict
             },
             {"I:Dim": source, "O:Dim": output},
         )
+    # EMTDC_XPI is parallel: GP*e + integral(e/TI). Scaling its input and
+    # using GP=1 realizes the declared Kp*(e + integral(e/Ti)) controller.
+    add(
+        "active_error_gain",
+        "master:gain",
+        {"G": "Kp_Active", "Dim": "1", "COM": "PI input scaled for Ki=Kp/Ti"},
+        {"IN:Dim": "ACTIVE_ERROR", "OUT:Dim": "ACTIVE_PI_INPUT"},
+    )
+    add(
+        "reactive_error_gain",
+        "master:gain",
+        {"G": "Kp_Reactive", "Dim": "1", "COM": "PI input scaled for Ki=Kp/Ti"},
+        {"IN:Dim": "Q_ERROR", "OUT:Dim": "REACTIVE_PI_INPUT"},
+    )
     add(
         "active_pi",
         "master:pi_ctlr",
         {
-            "GP": "Kp_Active",
+            "GP": "1.0",
             "TI": "Ti_Active_s",
             "YHI": "30.0",
             "YLO": "-30.0",
@@ -362,13 +376,13 @@ def _closed_loop_control(root: ET.Element, master: dict, defaults: dict) -> dict
             "Mthd": "0",
             "INTR": "0",
         },
-        {"IN": "ACTIVE_ERROR", "OUT": "CTRL_ANGLE_COMMAND"},
+        {"IN": "ACTIVE_PI_INPUT", "OUT": "CTRL_ANGLE_COMMAND"},
     )
     add(
         "reactive_pi",
         "master:pi_ctlr",
         {
-            "GP": "Kp_Reactive",
+            "GP": "1.0",
             "TI": "Ti_Reactive_s",
             "YHI": "0.98",
             "YLO": "0.10",
@@ -376,7 +390,7 @@ def _closed_loop_control(root: ET.Element, master: dict, defaults: dict) -> dict
             "Mthd": "0",
             "INTR": "0",
         },
-        {"IN": "Q_ERROR", "OUT": "CTRL_MODULATION_COMMAND"},
+        {"IN": "REACTIVE_PI_INPUT", "OUT": "CTRL_MODULATION_COMMAND"},
     )
     add(
         "synthesis",
