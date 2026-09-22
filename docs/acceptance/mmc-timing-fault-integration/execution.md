@@ -458,3 +458,42 @@ PID 43124. The report is
 execution to fixed source revision `330017c` and the exact superseded r1
 journal SHA. Separate stdout/stderr logs retain startup and final outcomes.
 This entry records launch, not physical acceptance completion.
+
+r2 passed the actual first-save and compilation gates, then completed the
+first owned joint simulation (PSCAD PID 25872). The shared-dataset analysis
+at `joint/joint-analysis/bc916f4809fb45448a7722560dba8df1.json` has SHA-256
+`b03bc0115812a1394c063175678f0e7bcca0e8003fab59f5095038c36f6f27db` and verdict
+PASS. All 122 physical checks passed, including fault application, all required
+negative insertion/blocking evidence, bounded fault current and recovery.
+Fault-current peak was 8.2468144896141 kA against the unchanged 20 kA maximum.
+The A command edges were exactly 1.0/1.2 s with zero measured error, 800 active
+samples and 20001 samples over [0, 5] s.
+
+The first saved joint model SHA-256 is
+`dc3f5b8dd35267a19c625b8fde234606bebff04f04bdcce54d820f7428c80e07`.
+The fixed independent worker was then launched with request SHA-256
+`5c9b523ef1aef995414412885914065df745449f77c7324dfae16ffaa9540d02`
+(launcher PID 28972, actual interpreter PID 43220). Its new run and final
+owned cleanup remain pending; the first dataset PASS is not the outer final
+acceptance verdict.
+
+r2's first joint dataset remains PASS, but the independent worker failed its
+saved-model comparison before build/run. Only the two sibling DCTL calls in
+`hierarchy/Station/Main` changed order: links 1533195475 and 2005307872 were
+swapped as complete entries. No schematic, parameter, connection or other XML
+content changed after the existing verified save normalization. The final
+r2 journal SHA-256 is
+`09081033de02474a322435e3dbffb0e6814f7c2f2552f12aa5422d36b03b55b3`;
+the failed child report SHA-256 is
+`54a776e7587d187b4eaae85d1c0f7330990aa2c12b4c3e64a2028a62b39ffc5e`.
+Both owned PSCAD PIDs 25872 and 32816 exited, no cleanup was pending, and the
+outer lease was released. Both failed reports and child saved bytes remain.
+
+The affected repair is hierarchy comparison by unique call identity, retaining
+full subtree equality and rejecting missing, added, duplicate or altered calls.
+The original integration worktree will remain frozen so its recorded producer
+code paths and the completed first-run preparation stay valid; the next fix
+will execute from a separate checkout. Only the unfinished independent replay
+requires a fresh simulation. Its closure must bind the unchanged first saved
+model, full output/index/sample/analysis identities, original failed attempt,
+new comparison code and new worker evidence. No old verdict will be rewritten.

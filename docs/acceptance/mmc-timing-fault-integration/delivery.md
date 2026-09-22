@@ -6,7 +6,7 @@
 | --- | --- | --- |
 | A：严格 EMTDC 定时控制 | `codex/emt-timed-control`，`16c7bf9` | 最小事件工程、官方 PWM 命令及各自独立保存重放均 PASS；四个自有进程已退出。 |
 | B：MMC 故障证据 | `codex/mmc-fault-evidence`，`d1139ff` | 两个稳态窗口、DC 故障及电气恢复均 PASS；原始输入未改，自有进程已退出。 |
-| A+B 联合交付 | `codex/mmc-timing-fault-integration`，执行版本 `330017c` | 公开模型、独立重放及本地结果发布均已通过；联合 r1 的保存校验问题已修复，r2 正在运行。 |
+| A+B 联合交付 | `codex/mmc-timing-fault-integration`，执行版本 `330017c` | 公开模型及发布恢复已通过；r2 首轮联合定时/物理检查 PASS，独立重放的层级排序比较待修复。 |
 
 ## 独立交付证据
 
@@ -58,6 +58,15 @@ B 的实际验收生产版本为 `86adfe0`，模型配方为
 （Asia/Shanghai）启动，使用全新工作区，实际 Python PID 为 43124。
 当前报告见 [joint r2 journal](D:/PSCAD-Workspace/mmc-joint-20260922-r2/.pscad-mcp/mmc-builds/8107d3b43a1c494fa9c20a3925964942/journal.json)。
 运行中的占位 FAIL 只在 `history` 最后一项为 `finished` 时才能解释为最终结果。
+
+r2 已通过真实保存与编译，并完成首轮联合仿真。首轮 122 项物理检查全部 PASS，
+故障电流峰值为 8.246814 kA（原定上限 20 kA）。功率命令边沿实测为
+1.0 s 和 1.2 s，两条边沿误差均为 0，包含 800 个有效区间样本。
+首轮分析证据见 [joint dataset analysis](D:/PSCAD-Workspace/mmc-joint-20260922-r2/joint/joint-analysis/bc916f4809fb45448a7722560dba8df1.json)。
+独立重放 worker（launcher PID 28972，实际 Python PID 43220）在保存后比较时 FAIL，
+未进入第二次编译或仿真。差异只有层级清单中两条 DCTL call 的顺序互换，实例、
+参数和接线未改变。主实例 25872 和重放实例 32816 均已清理，工作区锁已释放。
+将保留已通过的首轮模型及完整数据，修复层级比较后仅重跑独立重放；整体验收尚未完成。
 
 分支尚未合并或推送。完整诊断与执行历史见
 [集成执行记录](D:/pscad-mcp/.worktrees/mmc-timing-fault-integration/docs/acceptance/mmc-timing-fault-integration/execution.md)。
