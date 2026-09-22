@@ -339,6 +339,7 @@ def _audit_master(path: Path) -> tuple[dict, str, dict]:
         ("src_ccin_1", "Dsdyn", "CCBR($BR,$SS) = $Mag"),
         ("varrlc", "Branch", "BR = $A $B BREAKER"),
         ("varrlc", "Dsdyn", "CALL E_VARRLC1_EXE"),
+        ("varrlc", "Dsout", "#OUTPUT REAL I 0 {$CBR:BR}"),
         ("gain", "Fortran", "$OUT = $G * $IN"),
         ("ammeter", "Branch", "BN = $N1 $N2 AMMETER"),
         ("ammeter", "Dsout", "$CBR:BN"),
@@ -737,16 +738,10 @@ def _make_library(
     add("arm_in", "xnode", {"Name": "IN"}, {"N": "IN"})
     add("arm_out", "xnode", {"Name": "OUT"}, {"N": "OUT"})
     add(
-        "arm_current_meter",
-        "ammeter",
-        {"Name": "ARM_I"},
-        {"N1": "IN", "N2": "ARM_R_IN"},
-    )
-    add(
         "arm_resistance",
         "varrlc",
-        {"RLC": "0", "R": "R_arm_ohm", "E": "0.0 [kV]", "dLdC": "0", "I": ""},
-        {"A": "ARM_R_IN", "B": "ARM_L_IN"},
+        {"RLC": "0", "R": "R_arm_ohm", "E": "0.0 [kV]", "dLdC": "0", "I": "ARM_I"},
+        {"A": "IN", "B": "ARM_L_IN"},
     )
     add(
         "arm_inductance",

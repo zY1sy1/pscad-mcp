@@ -103,13 +103,14 @@ def test_native_branches_preserve_signed_storage_and_blocked_diode_paths(library
         "storage_current": "master:src_ccin_1",
         "storage_capacitor": "master:varrlc",
         "capacitance_conversion": "master:gain",
-        "arm_current_meter": "master:ammeter",
         "normal_current_meter": "master:ammeter",
         "clamp_current_meter": "master:ammeter",
         "capacitor_current_meter": "master:ammeter",
     }
     for role, definition in expected_types.items():
         assert components[role].get("defn") == definition
+    assert components["arm_resistance"].find("./paramlist/param[@name='I']").get("value") == "ARM_I"
+    assert {"arm_in:N", "arm_resistance:A"} <= set(report["electrical_nets"]["MMCAverageArm"]["IN"])
     for role in ("normal_voltage", "clamp_voltage"):
         values = _parameters(components[role])
         assert {
