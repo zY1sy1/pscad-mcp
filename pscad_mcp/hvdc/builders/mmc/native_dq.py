@@ -1,0 +1,290 @@
+"""Native synchronous-frame PLL and MMC current-control equations."""
+
+from __future__ import annotations
+
+from xml.etree import ElementTree as ET
+
+from .avm_companion import _definition, _script, _PARAMETER_UNITS
+
+PLL_NAME = "MMCSynchronousPLL"
+DQ_NAME = "MMCDqCurrentController"
+PLL_OUTPUTS = {"ANGLE": ("PLL_ANGLE", "rad"), "FREQUENCY": ("PLL_FREQUENCY", "Hz"),
+               "LOCKED": ("PLL_LOCKED", "1"), "ERROR": ("PLL_ERROR", "rad"),
+               "INTEGRATOR": ("PLL_INTEGRATOR", "rad/s"), "LIMITED": ("PLL_LIMITED", "1")}
+PLL_DEFAULTS = {"Frequency_Hz": 60.0, "Vdc_Order_kV": 640.0, "PLL_Bandwidth_Hz": 10.0,
+                "PLL_Damping": 0.707106781186548, "PLL_Frequency_Limit_Hz": 5.0}
+DQ_DEFAULTS = {
+    "Frequency_Hz": 60.0, "Vdc_Order_kV": 640.0, "P_Order_MW": 1000.0, "Q_Order_MVAr": 0.0,
+    "Deblock_Time_s": 0.1, "Ramp_Time_s": 0.2, "Reversal_Time_s": 1.0, "Reversal_Duration_s": 1.0,
+    "Control_Mode": 0.0,
+    "C_eq_F": 6.510416666666667e-5, "L_arm_H": 0.05, "R_arm_ohm": 0.15,
+    "P_nonohmic_MW": 1.1, "Kp_Vdc_MW_per_kV": 0.25, "Ti_Vdc_s": 0.1125,
+    "Power_Correction_Limit_MW": 1500.0, "Cable_Loss_MW": 0.0, "Converter_Loss_MW": 15.0,
+    "Current_Bandwidth_Hz": 80.0, "Current_Damping": 0.707106781186548,
+    "AC_Current_Limit_kA": 3.0, "Transformer_Leakage_ohm": 16.94,
+    "Energy_Gain_per_s": 10.0, "Circulating_Gain_ohm": 18.84955592153876,
+    "Circulating_Integral_Time_s": 0.05, "Feedback_Filter_s": 0.02,
+    "Energy_Difference_Filter_s": 0.05,
+}
+ARM_INPUTS = tuple(f"{p}_{q}_{s}" for p in "ABC" for q in ("UPPER", "LOWER") for s in ("VCAP", "I"))
+DQ_INPUTS = ("P_MEAS", "Q_MEAS", "VDC_MEAS", "PLL_ANGLE", "PLL_LOCKED", "STARTUP_READY", "START_TIME",
+             "VA", "VB", "VC", "IA", "IB", "IC", *ARM_INPUTS)
+DQ_OUTPUTS = {
+    **{f"M_{p}_{q}{suffix}": "1" for p in "ABC" for q in ("UPPER", "LOWER") for suffix in ("", "_RAW")},
+    "BLOCK": "1", "SEQUENCE": "1", "ANGLE_COMMAND": "deg", "MODULATION_COMMAND": "1",
+    "POWER_CORRECTION": "MW", "P_REFERENCE": "MW", "Q_REFERENCE": "MVAr", "VDC_REFERENCE": "kV",
+    **{f"CIRC_{s}_{p}": unit for p in "ABC" for s, unit in (("REFERENCE", "kA"), ("INTEGRATOR", "kV"))},
+    "ID_MEASURED": "kA", "IQ_MEASURED": "kA", "ID_REFERENCE": "kA", "IQ_REFERENCE": "kA",
+    "VD_MEASURED": "kV", "VQ_MEASURED": "kV", "VD_REFERENCE": "kV", "VQ_REFERENCE": "kV",
+    "ID_INTEGRATOR": "kV", "IQ_INTEGRATOR": "kV", "VDC_INTEGRATOR": "MW",
+    "LIMIT_ACTIVE": "1", "LIMIT_DURATION": "s",
+}
+
+
+def _ports(inputs, outputs):
+    return {**{name: (-108, -432 + 36 * i, "Transfer", "Input") for i, name in enumerate(inputs)},
+            **{name: (108, -432 + 36 * i, "Transfer", "Output") for i, name in enumerate(outputs)}}
+
+
+def append_native_pll_and_dq(root: ET.Element) -> None:
+    _PARAMETER_UNITS.update({"PLL_Bandwidth_Hz": "Hz", "PLL_Damping": "1", "PLL_Frequency_Limit_Hz": "Hz",
+                             "Current_Bandwidth_Hz": "Hz", "Current_Damping": "1",
+                             "AC_Current_Limit_kA": "kA", "Transformer_Leakage_ohm": "ohm"})
+    pll = _definition(root, PLL_NAME, _ports(("VA", "VB", "VC"), PLL_OUTPUTS), PLL_DEFAULTS)
+    _script(pll, "Dsdyn", """#STORAGE REAL:4
+#LOCAL REAL ALPHA
+#LOCAL REAL BETA
+#LOCAL REAL MAGNITUDE
+#LOCAL REAL D
+#LOCAL REAL Q
+#LOCAL REAL THETA
+#LOCAL REAL OMEGA
+#LOCAL REAL OMEGA_RAW
+#LOCAL REAL KP
+#LOCAL REAL KI
+#LOCAL REAL LIMIT
+      IF (TIMEZERO) THEN
+        STORF(NSTORF) = 0.0
+        STORF(NSTORF+1) = 0.0
+        STORF(NSTORF+2) = 0.0
+        STORF(NSTORF+3) = 0.0
+      ENDIF
+      ALPHA = (2.0 * $VA - $VB - $VC) / 3.0
+      BETA = ($VB - $VC) * 0.577350269189626
+      MAGNITUDE = SQRT(ALPHA**2 + BETA**2)
+      IF (STORF(NSTORF+3) .LT. 0.5 .AND. MAGNITUDE .GT. 0.1 * $Vdc_Order_kV) THEN
+        STORF(NSTORF) = ATAN2(ALPHA, -BETA)
+        STORF(NSTORF+3) = 1.0
+      ENDIF
+      THETA = STORF(NSTORF)
+      D = ALPHA * SIN(THETA) - BETA * COS(THETA)
+      Q = ALPHA * COS(THETA) + BETA * SIN(THETA)
+      $ERROR = 0.0
+      $LIMITED = 0.0
+      OMEGA = 6.283185307179586 * $Frequency_Hz
+      KP = 2.0 * $PLL_Damping * 6.283185307179586 * $PLL_Bandwidth_Hz
+      KI = (6.283185307179586 * $PLL_Bandwidth_Hz)**2
+      LIMIT = 6.283185307179586 * $PLL_Frequency_Limit_Hz
+      IF (MAGNITUDE .GT. 0.1 * $Vdc_Order_kV) THEN
+        $ERROR = ATAN2(Q, D)
+        OMEGA_RAW = KP * $ERROR + STORF(NSTORF+1)
+        IF ((OMEGA_RAW .LT. LIMIT .OR. $ERROR .LT. 0.0) .AND. (OMEGA_RAW .GT. -LIMIT .OR. $ERROR .GT. 0.0)) STORF(NSTORF+1) = MAX(-LIMIT, MIN(LIMIT, STORF(NSTORF+1) + KI * $ERROR * DELT))
+        OMEGA_RAW = KP * $ERROR + STORF(NSTORF+1)
+        IF (ABS(OMEGA_RAW) .GT. LIMIT) $LIMITED = 1.0
+        OMEGA = OMEGA + MAX(-LIMIT, MIN(LIMIT, OMEGA_RAW))
+      ELSE
+        STORF(NSTORF+1) = 0.0
+      ENDIF
+      IF (MAGNITUDE .GT. 0.1 * $Vdc_Order_kV .AND. ABS($ERROR) .LT. 0.0349065850398866 .AND. $LIMITED .LT. 0.5) THEN
+        STORF(NSTORF+2) = STORF(NSTORF+2) + DELT
+      ELSE
+        STORF(NSTORF+2) = 0.0
+      ENDIF
+      $LOCKED = 0.0
+      IF (STORF(NSTORF+2) .GE. 2.0 / $Frequency_Hz) $LOCKED = 1.0
+      $ANGLE = THETA
+      $FREQUENCY = OMEGA / 6.283185307179586
+      $INTEGRATOR = STORF(NSTORF+1)
+      STORF(NSTORF) = MODULO(THETA + DELT * OMEGA, 6.283185307179586)
+      NSTORF = NSTORF + 4
+""")
+    dq = _definition(root, DQ_NAME, _ports(DQ_INPUTS, DQ_OUTPUTS), DQ_DEFAULTS, signed_parameters=("Q_Order_MVAr",))
+    _script(dq, "Dsdyn", _dq_script())
+
+
+def _dq_script() -> str:
+    text = """#STORAGE REAL:19
+#LOCAL INTEGER K
+#LOCAL REAL A
+#LOCAL REAL VA
+#LOCAL REAL VB
+#LOCAL REAL IA
+#LOCAL REAL IB
+#LOCAL REAL VD
+#LOCAL REAL VQ
+#LOCAL REAL ID
+#LOCAL REAL IQ
+#LOCAL REAL THETA
+#LOCAL REAL OMEGA
+#LOCAL REAL SCALE
+#LOCAL REAL PREF
+#LOCAL REAL QREF
+#LOCAL REAL REVERSE_START
+#LOCAL REAL VERR
+#LOCAL REAL PCORR
+#LOCAL REAL PLOSS
+#LOCAL REAL IDREF
+#LOCAL REAL IQREF
+#LOCAL REAL IMAG
+#LOCAL REAL KP
+#LOCAL REAL KI
+#LOCAL REAL ED
+#LOCAL REAL EQ
+#LOCAL REAL VDREF
+#LOCAL REAL VQREF
+#LOCAL REAL VALPHA
+#LOCAL REAL VBETA
+#LOCAL REAL VACOM
+#LOCAL REAL ISUM
+#LOCAL REAL IREF
+#LOCAL REAL IERR
+#LOCAL REAL VCOMMON
+#LOCAL REAL VMIN
+#LOCAL REAL VMAX
+#LOCAL REAL WSUM
+#LOCAL REAL WDIFF
+#LOCAL REAL WREF
+#LOCAL REAL VBASE
+      IF (TIMEZERO) THEN
+        DO K = 0, 18
+          STORF(NSTORF+K) = 0.0
+        ENDDO
+      ENDIF
+      THETA = $PLL_ANGLE
+      OMEGA = 6.283185307179586 * $Frequency_Hz
+      VA = (2.0 * $VA - $VB - $VC) / 3.0
+      VB = ($VB - $VC) * 0.577350269189626
+      IA = (2.0 * $IA - $IB - $IC) / 3.0
+      IB = ($IB - $IC) * 0.577350269189626
+      VD = VA * SIN(THETA) - VB * COS(THETA)
+      VQ = VA * COS(THETA) + VB * SIN(THETA)
+      ID = IA * SIN(THETA) - IB * COS(THETA)
+      IQ = IA * COS(THETA) + IB * SIN(THETA)
+      VBASE = MAX(0.1 * $Vdc_Order_kV, VD)
+      A = 1.0 - EXP(-DELT / $Feedback_Filter_s)
+      STORF(NSTORF+1) = STORF(NSTORF+1) + A * ($VDC_MEAS - STORF(NSTORF+1))
+      STORF(NSTORF+2) = STORF(NSTORF+2) + A * ($P_MEAS - STORF(NSTORF+2))
+      STORF(NSTORF+3) = STORF(NSTORF+3) + A * ($Q_MEAS - STORF(NSTORF+3))
+      $BLOCK = 1.0
+      IF ($STARTUP_READY .GE. 0.5 .AND. $PLL_LOCKED .GE. 0.5) $BLOCK = 0.0
+      SCALE = 0.0
+      IF ($STARTUP_READY .GE. 0.5) SCALE = MIN(1.0, MAX(0.0, (TIME - $START_TIME) / $Ramp_Time_s))
+      PREF = SCALE * $P_Order_MW
+      QREF = SCALE * $Q_Order_MVAr
+      $SEQUENCE = 1.0
+      IF ($STARTUP_READY .GE. 0.5) $SEQUENCE = 2.0
+      REVERSE_START = $START_TIME + $Reversal_Time_s - $Deblock_Time_s
+      IF ($STARTUP_READY .GE. 0.5 .AND. TIME .GE. REVERSE_START) THEN
+        PREF = $P_Order_MW * (1.0 - 2.0 * MIN(1.0, (TIME - REVERSE_START) / $Reversal_Duration_s))
+        $SEQUENCE = 3.0
+      ENDIF
+      $VDC_REFERENCE = $Vdc_Order_kV * (1.0 - EXP(-TIME / 0.1))
+      VERR = $VDC_REFERENCE - STORF(NSTORF+1)
+      IF ($Control_Mode .LT. 0.5) VERR = 0.0
+      PCORR = $Kp_Vdc_MW_per_kV * VERR + STORF(NSTORF)
+      IF ($BLOCK .LT. 0.5) THEN
+        IF ((PCORR .LT. $Power_Correction_Limit_MW .OR. VERR .LT. 0.0) .AND. (PCORR .GT. -$Power_Correction_Limit_MW .OR. VERR .GT. 0.0)) STORF(NSTORF) = STORF(NSTORF) + DELT * $Kp_Vdc_MW_per_kV * VERR / $Ti_Vdc_s
+      ELSE
+        STORF(NSTORF) = 0.0
+      ENDIF
+      $POWER_CORRECTION = MAX(-$Power_Correction_Limit_MW, MIN($Power_Correction_Limit_MW, $Kp_Vdc_MW_per_kV * VERR + STORF(NSTORF)))
+      IF ($Control_Mode .GE. 0.5) PREF = -PREF + $POWER_CORRECTION + $Converter_Loss_MW + $Cable_Loss_MW * (PREF / $P_Order_MW)**2
+      $P_REFERENCE = PREF
+      $Q_REFERENCE = QREF
+      PLOSS = 1.5 * $Transformer_Leakage_ohm * (ID**2 + IQ**2)
+      IF ($BLOCK .LT. 0.5) THEN
+        STORF(NSTORF+4) = MAX(-0.2 * $P_Order_MW, MIN(0.2 * $P_Order_MW, STORF(NSTORF+4) + DELT * 2.0 * (PREF - $P_MEAS)))
+        STORF(NSTORF+5) = MAX(-0.5 * $P_Order_MW, MIN(0.5 * $P_Order_MW, STORF(NSTORF+5) + DELT * 2.0 * (STORF(NSTORF+3) - QREF)))
+      ELSE
+        STORF(NSTORF+4) = 0.0
+        STORF(NSTORF+5) = 0.0
+      ENDIF
+      IDREF = (PREF + 0.1 * (PREF - $P_MEAS) + STORF(NSTORF+4)) / (1.5 * VBASE)
+      IQREF = -(QREF - PLOSS - 0.1 * (STORF(NSTORF+3) - QREF) - STORF(NSTORF+5)) / (1.5 * VBASE)
+      IMAG = SQRT(IDREF**2 + IQREF**2)
+      $LIMIT_ACTIVE = 0.0
+      IF (IMAG .GT. $AC_Current_Limit_kA) THEN
+        IDREF = IDREF * $AC_Current_Limit_kA / IMAG
+        IQREF = IQREF * $AC_Current_Limit_kA / IMAG
+        $LIMIT_ACTIVE = 1.0
+      ENDIF
+      IF ($BLOCK .GE. 0.5) THEN
+        IDREF = 0.0
+        IQREF = 0.0
+      ENDIF
+      ED = ID - IDREF
+      EQ = IQ - IQREF
+      KP = $Current_Damping * $L_arm_H * 6.283185307179586 * $Current_Bandwidth_Hz
+      KI = 0.5 * $L_arm_H * (6.283185307179586 * $Current_Bandwidth_Hz)**2
+      IF ($BLOCK .LT. 0.5) THEN
+        IF ($LIMIT_ACTIVE .LT. 0.5 .AND. STORF(NSTORF+18) .LT. 0.5) THEN
+          STORF(NSTORF+6) = MAX(-0.5 * $Vdc_Order_kV, MIN(0.5 * $Vdc_Order_kV, STORF(NSTORF+6) + DELT * KI * ED))
+          STORF(NSTORF+7) = MAX(-0.5 * $Vdc_Order_kV, MIN(0.5 * $Vdc_Order_kV, STORF(NSTORF+7) + DELT * KI * EQ))
+        ENDIF
+      ELSE
+        STORF(NSTORF+6) = 0.0
+        STORF(NSTORF+7) = 0.0
+      ENDIF
+      VDREF = VD - 0.5 * $R_arm_ohm * ID + 0.5 * OMEGA * $L_arm_H * IQ + KP * ED + STORF(NSTORF+6)
+      VQREF = VQ - 0.5 * $R_arm_ohm * IQ - 0.5 * OMEGA * $L_arm_H * ID + KP * EQ + STORF(NSTORF+7)
+      VALPHA = VDREF * SIN(THETA) + VQREF * COS(THETA)
+      VBETA = -VDREF * COS(THETA) + VQREF * SIN(THETA)
+      $ANGLE_COMMAND = ATAN2(VQREF, VDREF) * 57.2957795130823
+      $MODULATION_COMMAND = 2.0 * SQRT(VDREF**2 + VQREF**2) / $Vdc_Order_kV
+      WREF = 0.25 * $C_eq_F * $Vdc_Order_kV**2
+"""
+    for i, phase in enumerate("ABC"):
+        ac = ("VALPHA", "-0.5 * VALPHA + 0.866025403784439 * VBETA", "-0.5 * VALPHA - 0.866025403784439 * VBETA")[i]
+        text += f"""      WSUM = 0.5 * $C_eq_F * (${phase}_UPPER_VCAP**2 + ${phase}_LOWER_VCAP**2)
+      WDIFF = 0.5 * $C_eq_F * (${phase}_UPPER_VCAP**2 - ${phase}_LOWER_VCAP**2)
+      STORF(NSTORF+{8+i}) = STORF(NSTORF+{8+i}) + A * (WSUM - STORF(NSTORF+{8+i}))
+      STORF(NSTORF+{11+i}) = STORF(NSTORF+{11+i}) + (1.0 - EXP(-DELT / $Energy_Difference_Filter_s)) * (WDIFF - STORF(NSTORF+{11+i}))
+      VACOM = {ac}
+      ISUM = 0.5 * (${phase}_UPPER_I + ${phase}_LOWER_I)
+      PLOSS = 2.0 * $P_nonohmic_MW + $R_arm_ohm * (${phase}_UPPER_I**2 + ${phase}_LOWER_I**2)
+      IREF = (PLOSS - STORF(NSTORF+2) / 3.0 - $Energy_Gain_per_s * (STORF(NSTORF+{8+i}) - WREF)) / MAX(0.1 * $Vdc_Order_kV, $VDC_MEAS)
+      IREF = IREF + 5.0 * STORF(NSTORF+{11+i}) * VACOM / MAX(1.0, VDREF**2 + VQREF**2)
+      IERR = ISUM - IREF
+      IF ($BLOCK .GE. 0.5) STORF(NSTORF+{14+i}) = 0.0
+      VCOMMON = 0.5 * $VDC_MEAS - $R_arm_ohm * IREF + $Circulating_Gain_ohm * IERR + STORF(NSTORF+{14+i})
+      VMIN = ABS(VACOM)
+      VMAX = MIN(2.0 * ${phase}_UPPER_VCAP + VACOM, 2.0 * ${phase}_LOWER_VCAP - VACOM)
+      IF ($BLOCK .LT. 0.5 .AND. VMAX .GE. VMIN) THEN
+        IF ((VCOMMON .LT. VMAX .OR. IERR .LT. 0.0) .AND. (VCOMMON .GT. VMIN .OR. IERR .GT. 0.0)) STORF(NSTORF+{14+i}) = MAX(-0.5 * $Vdc_Order_kV, MIN(0.5 * $Vdc_Order_kV, STORF(NSTORF+{14+i}) + DELT * $Circulating_Gain_ohm * IERR / $Circulating_Integral_Time_s))
+      ENDIF
+      VCOMMON = 0.5 * $VDC_MEAS - $R_arm_ohm * IREF + $Circulating_Gain_ohm * IERR + STORF(NSTORF+{14+i})
+      $M_{phase}_UPPER_RAW = (VCOMMON - VACOM) / MAX(0.1 * $Vdc_Order_kV, 2.0 * ${phase}_UPPER_VCAP)
+      $M_{phase}_LOWER_RAW = (VCOMMON + VACOM) / MAX(0.1 * $Vdc_Order_kV, 2.0 * ${phase}_LOWER_VCAP)
+      $M_{phase}_UPPER = MIN(1.0, MAX(0.0, $M_{phase}_UPPER_RAW))
+      $M_{phase}_LOWER = MIN(1.0, MAX(0.0, $M_{phase}_LOWER_RAW))
+      IF (MIN($M_{phase}_UPPER_RAW, $M_{phase}_LOWER_RAW) .LT. 0.0 .OR. MAX($M_{phase}_UPPER_RAW, $M_{phase}_LOWER_RAW) .GT. 1.0) $LIMIT_ACTIVE = 1.0
+      $CIRC_REFERENCE_{phase} = IREF
+      $CIRC_INTEGRATOR_{phase} = STORF(NSTORF+{14+i})
+"""
+    return text + """      IF ($BLOCK .GE. 0.5) $LIMIT_ACTIVE = 0.0
+      IF ($LIMIT_ACTIVE .GE. 0.5) STORF(NSTORF+17) = STORF(NSTORF+17) + DELT
+      $LIMIT_DURATION = STORF(NSTORF+17)
+      $ID_MEASURED = ID
+      $IQ_MEASURED = IQ
+      $ID_REFERENCE = IDREF
+      $IQ_REFERENCE = IQREF
+      $VD_MEASURED = VD
+      $VQ_MEASURED = VQ
+      $VD_REFERENCE = VDREF
+      $VQ_REFERENCE = VQREF
+      $ID_INTEGRATOR = STORF(NSTORF+6)
+      $IQ_INTEGRATOR = STORF(NSTORF+7)
+      $VDC_INTEGRATOR = STORF(NSTORF)
+      STORF(NSTORF+18) = $LIMIT_ACTIVE
+      NSTORF = NSTORF + 19
+"""

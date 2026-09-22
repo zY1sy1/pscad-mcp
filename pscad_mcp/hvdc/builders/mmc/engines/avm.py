@@ -53,6 +53,7 @@ def _native_producer_hashes() -> dict[str, str]:
             "cable_companion.py", "cable_constants.py",
             "derivation.py", "parametric_planner.py",
             "native_startup.py",
+            "native_dq.py",
         )
     }
 
@@ -359,7 +360,7 @@ class AvmBlueprintEngine:
         self.native_control_kind = native_control_kind
         if not math.isfinite(self.operation_timeout_s) or self.operation_timeout_s <= 0:
             raise ValueError("operation_timeout_s must be finite and positive")
-        if self.native_control_kind not in {"scheduled_open_loop", "closed_loop"}:
+        if self.native_control_kind not in {"scheduled_open_loop", "closed_loop", "dq_current"}:
             raise ValueError("native_control_kind is unsupported")
 
     def planning_inputs(self, request: object) -> dict[str, object] | None:
@@ -419,6 +420,7 @@ class AvmBlueprintEngine:
             "energy_control_gain": 10.0 * scale,
             "circulating_control_bandwidth_hz": 60.0 * scale,
             "circulating_integral_time_s": 0.05 / scale,
+            "current_control_bandwidth_hz": bandwidth,
             "feedback_filter_s": 0.02 / scale,
             "energy_difference_filter_s": 0.05 / scale,
         }

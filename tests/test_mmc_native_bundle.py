@@ -25,6 +25,27 @@ from pscad_mcp.hvdc.builders.mmc.native_bundle import (
 from tests.test_mmc_cable_constants import _fake_native_run
 
 
+def test_native_dq_fixture_connects_measured_valve_signals_and_exports_internal_states(constants_evidence, installed_sources, tmp_path):
+    from pscad_mcp.hvdc.builders.mmc.native_dq import DQ_NAME
+    donor, master = installed_sources
+    report = materialize_native_avm_fixture(
+        tmp_path / "dq-model", constants_evidence=constants_evidence,
+        source_project=donor, master_path=master, control_kind="dq_current",
+        reversal_time_s=1.0, simulation_duration_s=3.9,
+        reactive_power_order_mvar=-25.0, dc_voltage_control_kp=0.25, dc_voltage_control_ti_s=0.1125,
+    )
+    assert report["topology"]["physical_power_control_closed"] is True
+    root = ET.parse(report["project_path"])
+    controllers = root.findall(f"./definitions/Definition[@name='Main']/schematic/User[@defn='{NATIVE_SCOPE}:{DQ_NAME}']")
+    assert len(controllers) == 2
+    for c in controllers:
+        assert float(c.find("./paramlist/param[@name='Q_Order_MVAr']").get("value")) == -25.0
+    assert report["channels"]["P_PLL_FREQUENCY"] == "Hz"
+    assert report["channels"]["V_ID_REFERENCE"] == "kA"
+    assert report["channels"]["V_ID_INTEGRATOR"] == "kV"
+    assert report["channels"]["P_LIMIT_DURATION"] == "s"
+
+
 def test_native_circulating_pi_rejects_stationary_voltage_bias(constants_evidence, installed_sources, tmp_path):
     """Compile the actual native control law and close it around an RL plant."""
     compiler = Path("C:/Program Files (x86)/GFortran/4.6/bin/gfortran.exe")

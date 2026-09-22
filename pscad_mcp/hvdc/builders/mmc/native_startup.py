@@ -11,7 +11,7 @@ from .avm_companion import _definition, _script
 
 
 STARTUP_NAME = "MMCPrechargeReadiness"
-STARTUP_INPUTS = ("P_VDC", "V_VDC") + tuple(
+STARTUP_INPUTS = ("P_VDC", "V_VDC", "P_PLL_LOCKED", "V_PLL_LOCKED") + tuple(
     f"{s}_{p}_{q}_{quantity}" for s in ("P", "V") for p in "ABC"
     for q in ("UPPER", "LOWER") for quantity in ("VCAP", "I")
 )
@@ -29,6 +29,7 @@ STARTUP_DEFAULTS = {
     "Deblock_Time_s": 0.10, "Maximum_Precharge_s": 1.0,
     "Precharge_Voltage_Fraction": 0.65, "Precharge_Current_Limit_kA": 2.0,
     "Precharge_Rate_Per_Cycle": 0.01, "Precharge_Hold_Cycles": 2.0,
+    "PLL_Required": 0.0,
 }
 
 
@@ -48,7 +49,7 @@ def advance_precharge(state: PrechargeState, observation: dict[str, float],
     if set(observation) != set(STARTUP_INPUTS) or any(not math.isfinite(v) for v in observation.values()):
         raise ValueError("Precharge requires all finite capacitor, current and bus observations")
     p = {**STARTUP_DEFAULTS, **parameters}
-    if any(isinstance(v, bool) or not math.isfinite(v) or (v < 0 if name == "Deblock_Time_s" else v <= 0) for name, v in p.items()):
+    if any(isinstance(v, bool) or not math.isfinite(v) or (v < 0 if name in {"Deblock_Time_s", "PLL_Required"} else v <= 0) for name, v in p.items()):
         raise ValueError("Precharge parameters must be finite and positive")
     alpha = 1.0 - math.exp(-step_s * p["Frequency_Hz"])
     energies = [sum(0.5 * p["C_eq_F"] * observation[f"{s}_{phase}_{position}_VCAP"]**2
@@ -65,6 +66,7 @@ def advance_precharge(state: PrechargeState, observation: dict[str, float],
         and min(observation["P_VDC"], observation["V_VDC"]) >= p["Precharge_Voltage_Fraction"] * p["Vdc_Order_kV"]
         and current <= 0.1 * p["Precharge_Current_Limit_kA"]
         and max(rates) <= p["Precharge_Rate_Per_Cycle"] * p["Frequency_Hz"]
+        and (p["PLL_Required"] < 0.5 or min(observation["P_PLL_LOCKED"], observation["V_PLL_LOCKED"]) >= 0.5)
     )
     stable = state.stable_time_s + step_s if qualified else 0.0
     start = state.start_time_s
@@ -116,6 +118,7 @@ def append_precharge_readiness(root: ET.Element) -> None:
       IF (MIN($P_VDC, $V_VDC) .LT. $Precharge_Voltage_Fraction * $Vdc_Order_kV) QUALIFIED = 0
       IF ($CURRENT_MAX .GT. 0.1 * $Precharge_Current_Limit_kA) QUALIFIED = 0
       IF (MAX($P_RATE, $V_RATE) .GT. $Precharge_Rate_Per_Cycle * $Frequency_Hz) QUALIFIED = 0
+      IF ($PLL_Required .GE. 0.5 .AND. MIN($P_PLL_LOCKED, $V_PLL_LOCKED) .LT. 0.5) QUALIFIED = 0
       IF (QUALIFIED .EQ. 1) THEN
         STORF(NSTORF+2) = STORF(NSTORF+2) + DELT
       ELSE

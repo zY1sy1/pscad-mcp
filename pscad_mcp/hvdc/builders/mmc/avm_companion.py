@@ -269,6 +269,7 @@ _PARAMETER_UNITS = {
     "Precharge_Current_Limit_kA": "kA",
     "Precharge_Rate_Per_Cycle": "1",
     "Precharge_Hold_Cycles": "1",
+    "PLL_Required": "1",
     "Power_Correction_Limit_MW": "MW",
     "Cable_Loss_MW": "MW",
     "Converter_Loss_MW": "MW",

@@ -30,6 +30,7 @@ from .cable_companion import (
     append_native_cable_link,
 )
 from .native_startup import STARTUP_NAME, STARTUP_INPUTS, STARTUP_OUTPUTS, STARTUP_DEFAULTS, append_precharge_readiness
+from .native_dq import PLL_NAME, PLL_OUTPUTS, PLL_DEFAULTS, DQ_NAME, DQ_DEFAULTS, DQ_INPUTS, DQ_OUTPUTS, append_native_pll_and_dq
 
 NATIVE_SCOPE = "cigre_mmc_avm_v1"
 CONTROL_NAME = "MMCStationModulator"
@@ -146,6 +147,7 @@ ARM_OBSERVABLES = {
 }
 FIXTURE_CHANNELS.update({signal: units for signal, units in STARTUP_OUTPUTS.values()})
 for _prefix in ("P", "V"):
+    FIXTURE_CHANNELS.update({f"{_prefix}_{name}": unit for name, unit in PLL_OUTPUTS.values()})
     FIXTURE_CHANNELS.update({f"{_prefix}_{name}": "kA" if "REFERENCE" in name else "kV" for name in CIRCULATING_OUTPUTS})
     FIXTURE_CHANNELS.update({f"{_prefix}_P_REFERENCE": "MW", f"{_prefix}_Q_REFERENCE": "MVAr", f"{_prefix}_VDC_REFERENCE": "kV"})
     FIXTURE_CHANNELS.update({f"{_prefix}_KCL_{name}": unit for name, unit in KCL_MEASUREMENTS.items()})
@@ -688,6 +690,7 @@ def materialize_native_avm_library(
     _station_control(root)
     _station_measurements(root)
     append_precharge_readiness(root)
+    append_native_pll_and_dq(root)
     sample = _definition(root, SAMPLE_NAME,
                          {"IN": (-36, 0, "Transfer", "Input"), "OUT": (36, 0, "Transfer", "Output")}, {})
     _script(sample, "Dsdyn", "      $OUT = $IN\n")
@@ -858,6 +861,7 @@ def materialize_native_avm_fixture(
     energy_control_gain: float = 10.0,
     circulating_control_bandwidth_hz: float = 60.0,
     circulating_integral_time_s: float = 0.05,
+    current_control_bandwidth_hz: float = 80.0,
     feedback_filter_s: float = 0.02,
     energy_difference_filter_s: float = 0.05,
     cable_loss_mw: float = 0.0,
@@ -917,8 +921,12 @@ def materialize_native_avm_fixture(
     transformer_rating_mva = _number(
         transformer_rating_mva, "transformer_rating_mva", positive=True
     )
-    if control_kind not in {"scheduled_open_loop", "closed_loop"}:
-        raise ValueError("control_kind must be scheduled_open_loop or closed_loop")
+    if control_kind not in {"scheduled_open_loop", "closed_loop", "dq_current"}:
+        raise ValueError("control_kind must be scheduled_open_loop, closed_loop or dq_current")
+    channels = {**FIXTURE_CHANNELS}
+    if control_kind == "dq_current":
+        channels.update({f"{s}_{name}": unit for s in ("P", "V") for name, unit in DQ_OUTPUTS.items()})
+    current_control_bandwidth_hz = _number(current_control_bandwidth_hz, "current_control_bandwidth_hz", positive=True)
     active_power_order_mw = _number(
         active_power_order_mw, "active_power_order_mw", positive=True
     )
@@ -979,7 +987,7 @@ def materialize_native_avm_fixture(
         or maximum_precharge_time_s <= deblock_time_s
         or reversal_time_s <= deblock_time_s
         or (
-            control_kind == "closed_loop"
+            control_kind != "scheduled_open_loop"
             and reversal_time_s <= deblock_time_s + ramp_time_s
         )
         or simulation_duration_s <= reversal_time_s
@@ -1149,6 +1157,29 @@ def materialize_native_avm_fixture(
                 {name: prefix + "_" + name for name in CONTROL_OUTPUTS},
             )
             custom.append((control, CONTROL_NAME))
+        elif control_kind == "dq_current":
+            dq_parameters = {
+                **DQ_DEFAULTS, **{key: value for key, value in control_settings.items() if key in DQ_DEFAULTS},
+                "Frequency_Hz": frequency_hz, "Vdc_Order_kV": vdc_order_kv,
+                "P_Order_MW": active_power_order_mw, "Q_Order_MVAr": reactive_power_order_mvar,
+                "Control_Mode": 0.0 if station == "P" else 1.0,
+                "C_eq_F": arm_values["C_eq_F"], "L_arm_H": arm_values["L_arm_H"],
+                "R_arm_ohm": arm_values["R_arm_ohm"], "P_nonohmic_MW": arm_values["P_nonohmic_MW"],
+                "Current_Bandwidth_Hz": current_control_bandwidth_hz,
+                "Circulating_Gain_ohm": 2 * math.pi * circulating_control_bandwidth_hz * arm_values["L_arm_H"],
+                "AC_Current_Limit_kA": 1.25 * math.sqrt(2.0) * math.hypot(active_power_order_mw, reactive_power_order_mvar) / (math.sqrt(3.0) * valve_voltage),
+                "Transformer_Leakage_ohm": 0.15 * valve_voltage**2 / transformer_rating_mva,
+                "Power_Correction_Limit_MW": 1.5 * active_power_order_mw,
+                "Cable_Loss_MW": cable_loss_mw, "Converter_Loss_MW": converter_loss_mw,
+                "Deblock_Time_s": deblock_time_s, "Reversal_Time_s": reversal_time_s,
+                "Ramp_Time_s": ramp_time_s, "Reversal_Duration_s": reversal_duration_s,
+            }
+            control = writer.add(main, prefix + "_dq_controller", NATIVE_SCOPE + ":" + DQ_NAME, dq_parameters,
+                                 {**{name: prefix + "_" + name for name in DQ_INPUTS if name not in ("P_MEAS", "Q_MEAS", "VDC_MEAS", "STARTUP_READY", "START_TIME", "VA", "VB", "VC", "IA", "IB", "IC")},
+                                  "P_MEAS": prefix + "_P", "Q_MEAS": prefix + "_Q", "VDC_MEAS": prefix + "_VDC",
+                                  "STARTUP_READY": "PRECHARGE_READY", "START_TIME": "DEBLOCK_TIME",
+                                  **{f"{q}{p}": f"{prefix}_VALVE_{q}_{p}" for p in "ABC" for q in ("V", "I")},
+                                  **{name: prefix + "_" + name for name in DQ_OUTPUTS}})
         else:
             control = writer.add(
                 main,
@@ -1306,11 +1337,16 @@ def materialize_native_avm_fixture(
                 "Q": prefix + "_Q",
             },
         )
-    selected_signals = {name: name for name in FIXTURE_CHANNELS}
+        writer.add(main, prefix + "_pll", NATIVE_SCOPE + ":" + PLL_NAME,
+                   {**PLL_DEFAULTS, "Frequency_Hz": frequency_hz, "Vdc_Order_kV": vdc_order_kv},
+                   {**{f"V{p}": f"{prefix}_VALVE_V_{p}" for p in "ABC"},
+                    **{port: prefix + "_" + name for port, (name, _) in PLL_OUTPUTS.items()}})
+    selected_signals = {name: name for name in channels}
     writer.add(
         main, "precharge_readiness", NATIVE_SCOPE + ":" + STARTUP_NAME,
         {**STARTUP_DEFAULTS, "Frequency_Hz": frequency_hz, "Vdc_Order_kV": vdc_order_kv,
          "C_eq_F": arm_values["C_eq_F"], "Deblock_Time_s": deblock_time_s,
+         "PLL_Required": 1.0 if control_kind == "dq_current" else 0.0,
          "Maximum_Precharge_s": maximum_precharge_time_s, "Precharge_Current_Limit_kA": precharge_current_limit_ka},
         {**{name: name for name in STARTUP_INPUTS}, **{port: name for port, (name, _) in STARTUP_OUTPUTS.items()}},
     )
@@ -1331,7 +1367,7 @@ def materialize_native_avm_fixture(
             "master:pgb",
             {
                 "Name": name,
-                "Units": FIXTURE_CHANNELS[name],
+                "Units": channels[name],
                 "Group": "MMC_NATIVE",
                 "UseSignalName": "0",
                 "enab": "1",
@@ -1455,7 +1491,7 @@ def materialize_native_avm_fixture(
         },
         "electrical_nets": {name: dict(nets) for name, nets in writer.nets.items()},
         "routes": writer.routes,
-        "channels": FIXTURE_CHANNELS,
+        "channels": channels,
         "network_identity_sampling": "DSDYN copies of the preceding network solution; arm resistance branch current exports",
         "control_kind": control_kind,
         "model_accepted": False,
@@ -1485,17 +1521,14 @@ def audit_native_avm_fixture(
         raise ValueError("Native AVM project identity changed")
     main = root.find("./definitions/Definition[@name='Main']")
     counts = Counter(user.get("defn") for user in main.findall("./schematic/User"))
-    control_definition = (
-        CLOSED_LOOP_CONTROL_NAME
-        if receipt["control_kind"] == "closed_loop"
-        else CONTROL_NAME
-    )
+    control_definition = {"closed_loop": CLOSED_LOOP_CONTROL_NAME, "dq_current": DQ_NAME, "scheduled_open_loop": CONTROL_NAME}[receipt["control_kind"]]
     required = {
         f"{NATIVE_SCOPE}:MMCAverageArm": 12,
         f"{NATIVE_SCOPE}:{control_definition}": 2,
         f"{NATIVE_SCOPE}:{MEASUREMENT_NAME}": 2,
         f"{NATIVE_SCOPE}:MMCCableLink": 1,
         f"{NATIVE_SCOPE}:{STARTUP_NAME}": 1,
+        f"{NATIVE_SCOPE}:{PLL_NAME}": 2,
         f"{NATIVE_SCOPE}:{SAMPLE_NAME}": 2 * len(KCL_MEASUREMENTS),
         "master:source3": 2,
         "master:xfmr-3p2w": 2,
@@ -1504,7 +1537,7 @@ def audit_native_avm_fixture(
         "master:ammeter": 16,
         "master:ground": 1,
         "master:voltmeter": 18,
-        "master:pgb": len(FIXTURE_CHANNELS),
+        "master:pgb": len(receipt["channels"]),
     }
     if any(counts[name] != count for name, count in required.items()):
         raise ValueError("Native AVM fixture is missing a required physical component")
@@ -1611,7 +1644,7 @@ def audit_native_avm_fixture(
         "phase_breakout_count": 2,
         "coupled_cable_count": 1,
         "control_kind": receipt["control_kind"],
-        "physical_power_control_closed": receipt["control_kind"] == "closed_loop",
+        "physical_power_control_closed": receipt["control_kind"] != "scheduled_open_loop",
     }
 
 

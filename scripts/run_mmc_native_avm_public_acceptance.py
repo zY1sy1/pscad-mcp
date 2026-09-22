@@ -311,8 +311,9 @@ async def run_attempt(
             report["scope"] = "native_avm_timestep_diagnostic"
         await bounded(service.save_project(NATIVE_SCOPE, confirm=True))
         await bounded(service.save_project(project_name, confirm=True))
+        channel_units = engine["candidate_result"]["fixture"]["channels"]
         report["probe_owners"] = _probe_owners(
-            project, channel_units=FIXTURE_CHANNELS
+            project, channel_units=channel_units
         )
         finalized_inputs = {
             str(project): _sha256(project),
@@ -387,7 +388,7 @@ async def run_attempt(
         )
         report["outputs"] = files
         observed = read_arm_trace(
-            files, report["probe_owners"], channel_units=FIXTURE_CHANNELS
+            files, report["probe_owners"], channel_units=channel_units
         )
         report["channel_sources"] = observed["channel_sources"]
         trace_path = run_dir / "trace.json"
@@ -399,7 +400,7 @@ async def run_attempt(
         forward_window = (0.6, 0.9)
         reverse_window = (reversal_end + 0.5, reversal_end + 0.8)
         deblock_time = fixture_parameters["deblock_time_s"]
-        if control_kind == "closed_loop":
+        if control_kind != "scheduled_open_loop":
             report["precharge"] = analyze_precharge_trace(observed["samples"], fixture_parameters)
             if "operating_windows" not in report["precharge"]:
                 raise BackendError("MMC_PRECHARGE_FAILED", report["precharge"].get("error", "Precharge operating windows are missing"),
@@ -412,7 +413,7 @@ async def run_attempt(
             engine["candidate_result"]["fixture"]["parameters"]["arm"],
             windows=(forward_window, reverse_window),
         )
-        if control_kind == "closed_loop":
+        if control_kind != "scheduled_open_loop":
             report["steady_envelope"] = evaluate_native_steady_envelope(
                 observed["samples"], power_mw=request["active_power_mw"],
                 voltage_kv=request["dc_voltage_kv"], reactive_mvar=request["reactive_power_mvar"],
@@ -442,7 +443,7 @@ async def run_attempt(
         report["precharge_accepted"] = report.get("precharge", {}).get("status") == "PASS"
         report["status"] = (
             "PASS" if report["assembly_accepted"]
-            and (control_kind != "closed_loop" or (report["steady_operating_accepted"] and report["network_identities_accepted"] and report["precharge_accepted"]))
+            and (control_kind == "scheduled_open_loop" or (report["steady_operating_accepted"] and report["network_identities_accepted"] and report["precharge_accepted"]))
             else "FAIL"
         )
         if report["status"] != "PASS":
@@ -549,7 +550,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--diagnostic-time-step-us", type=float)
     parser.add_argument(
         "--control-kind",
-        choices=("scheduled_open_loop", "closed_loop"),
+        choices=("scheduled_open_loop", "closed_loop", "dq_current"),
         default="closed_loop",
     )
     parser.add_argument(
