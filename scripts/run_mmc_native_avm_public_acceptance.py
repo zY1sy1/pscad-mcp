@@ -29,6 +29,7 @@ from pscad_mcp.hvdc.builders.mmc.native_bundle import FIXTURE_CHANNELS, NATIVE_S
 from pscad_mcp.hvdc.builders.mmc.native_energy import diagnose_native_arm_energy
 from pscad_mcp.hvdc.builders.mmc.native_envelope import evaluate_native_steady_envelope
 from pscad_mcp.hvdc.builders.mmc.native_physical import evaluate_native_network_identities
+from pscad_mcp.hvdc.builders.mmc.parametric_models import parse_parametric_request
 from pscad_mcp.hvdc.builders.mmc.parametric_service import ParametricMmcBuilderService
 from scripts.run_mmc_average_arm_acceptance import (
     _probe_owners,
@@ -143,7 +144,7 @@ async def run_attempt(
         "run_directory": str(run_dir),
         "concurrent": concurrent_acceptance_enabled(),
         "remaining_scope": [
-            "Closed-loop P/Q/Vdc tracking, rated reversal, fault behavior and independent golden acceptance remain unverified."
+            "Complete startup, protection, PLL, energy/ripple, reversal, fault and portable reload acceptance remain pending. Fixed golden comparison applies only to the fixed profile."
         ],
         "stages": [],
     }
@@ -175,12 +176,20 @@ async def run_attempt(
             "compiler_configuration": args.compiler_configuration.resolve(),
             "compiler_executable": args.compiler_executable.resolve(),
         }
+        request_path = getattr(args, "request_json", None)
+        if request_path is not None:
+            paths["request_json"] = request_path.resolve()
         for path in paths.values():
             if path.is_symlink() or not path.is_file():
                 raise FileNotFoundError(f"Required immutable input is unavailable: {path}")
         source_hashes = {name: _sha256(path) for name, path in paths.items()}
         report["source_paths"] = {name: str(path) for name, path in paths.items()}
         report["source_hashes_before"] = source_hashes
+        request = parse_parametric_request(
+            json.loads(paths["request_json"].read_text(encoding="utf-8"))
+            if request_path is not None else REQUEST
+        ).to_dict()
+        report["request"] = request
         report["code_before"] = code_before = _code_snapshot()
         if code_before["working_tree_status"]:
             raise ValueError("Public AVM acceptance requires a clean frozen checkout")
@@ -216,7 +225,7 @@ async def run_attempt(
                 ),
             )
         plan = builder.plan_model(
-            REQUEST,
+            request,
             project_name="MMC_PUBLIC_NATIVE",
             folder=str(workspace),
         )
@@ -230,7 +239,7 @@ async def run_attempt(
 
         begin("build_and_verify_acceptance_boundary")
         started = await builder.build_model(
-            REQUEST,
+            request,
             plan["plan_hash"],
             "MMC_PUBLIC_NATIVE",
             str(workspace),
@@ -368,8 +377,8 @@ async def run_attempt(
         )
         if control_kind == "closed_loop":
             report["steady_envelope"] = evaluate_native_steady_envelope(
-                observed["samples"], power_mw=REQUEST["active_power_mw"],
-                voltage_kv=REQUEST["dc_voltage_kv"], reactive_mvar=REQUEST["reactive_power_mvar"],
+                observed["samples"], power_mw=request["active_power_mw"],
+                voltage_kv=request["dc_voltage_kv"], reactive_mvar=request["reactive_power_mvar"],
                 reverse_window_s=reverse_window,
             )
             report["network_identities"] = evaluate_native_network_identities(
@@ -377,7 +386,7 @@ async def run_attempt(
                 capacitance_f=fixture_parameters["arm"]["C_eq_F"],
                 grounding_resistance_ohm=fixture_parameters["dc_grounding_resistance_ohm"],
                 valve_grounding_resistance_ohm=fixture_parameters["valve_grounding_resistance_ohm"],
-                voltage_kv=REQUEST["dc_voltage_kv"], frequency_hz=REQUEST["frequency_hz"],
+                voltage_kv=request["dc_voltage_kv"], frequency_hz=request["frequency_hz"],
                 windows={"forward": (0.6, 0.9), "reverse": reverse_window},
             )
         report["analysis"] = analyze_integration_trace(
@@ -495,6 +504,7 @@ async def run_attempt(
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--workspace-root", type=Path, required=True)
+    parser.add_argument("--request-json", type=Path, help="Immutable complete parameterized AVM request; included in source hashes")
     parser.add_argument("--master", type=Path, default=DEFAULT_MASTER)
     parser.add_argument("--source-project", type=Path, default=DEFAULT_DONOR)
     parser.add_argument("--diagnostic-time-step-us", type=float)

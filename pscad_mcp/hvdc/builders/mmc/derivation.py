@@ -187,6 +187,7 @@ def _engine_candidates(
         base_parameters["valve_grounding_resistance_ohm"] = 1e6
         # Installed breaker1 and peswitch defaults use a 1 Mohm open branch.
         base_parameters["arm_off_state_resistance_ohm"] = 1e6
+        base_parameters["base_modulation_index"] = 0.9
     for name, override in request.engineering_overrides.items():
         if name == _CAPACITOR_VOLTAGE_TARGET:
             raise _error(

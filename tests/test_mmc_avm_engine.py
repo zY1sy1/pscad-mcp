@@ -36,6 +36,21 @@ def test_native_arm_loss_budget_uses_valve_current_including_reactive_power():
     assert parameters.P_nonohmic_MW + ohmic == pytest.approx(15.0 / 12.0)
 
 
+def test_native_candidate_bandwidth_and_ratings_change_the_control_response():
+    from pscad_mcp.hvdc.builders.mmc.derivation import derive_mmc_parameters
+    candidates = derive_mmc_parameters(valid_request(model_fidelity="average_value")).candidates
+    nominal = AvmBlueprintEngine._native_control_parameters(candidates[0].parameters)
+    slower = AvmBlueprintEngine._native_control_parameters(candidates[2].parameters)
+    assert slower["active_control_ti_s"] == pytest.approx(nominal["active_control_ti_s"] / 0.8)
+    assert slower["p_control_kp"] == pytest.approx(nominal["p_control_kp"] * 0.8)
+    assert slower["feedback_filter_s"] == pytest.approx(nominal["feedback_filter_s"] / 0.8)
+    scaled = AvmBlueprintEngine._native_control_parameters({**candidates[0].parameters, "rated_power_mw": 2000.0, "rated_dc_voltage_kv": 1280.0})
+    # Identical per-unit P/Q error gives the same phase/modulation correction.
+    assert scaled["p_control_kp"] * 2000 == pytest.approx(nominal["p_control_kp"] * 1000)
+    assert scaled["reactive_control_kp"] * 2000 == pytest.approx(nominal["reactive_control_kp"] * 1000)
+    assert scaled["dc_voltage_control_kp"] * 1280 / 2000 == pytest.approx(nominal["dc_voltage_control_kp"] * 640 / 1000)
+
+
 def test_avm_engine_applies_derived_parameters_to_twelve_visible_arms(
     tmp_path: Path,
 ) -> None:

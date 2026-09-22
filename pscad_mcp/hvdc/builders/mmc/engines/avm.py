@@ -386,7 +386,7 @@ class AvmBlueprintEngine:
         dc_current = float(values["rated_power_mw"]) / float(
             values["rated_dc_voltage_kv"]
         )
-        valve_voltage = 0.9 * float(values["rated_dc_voltage_kv"]) * math.sqrt(3.0) / (2.0 * math.sqrt(2.0))
+        valve_voltage = float(values.get("base_modulation_index", 0.9)) * float(values["rated_dc_voltage_kv"]) * math.sqrt(3.0) / (2.0 * math.sqrt(2.0))
         phase_current = math.hypot(float(values["rated_power_mw"]), float(values["reactive_power_mvar"])) / (math.sqrt(3.0) * valve_voltage)
         arm_rms = math.hypot(dc_current / 3.0, phase_current / 2.0)
         ohmic_loss = float(values["arm_resistance_ohm"]) * arm_rms**2
@@ -398,6 +398,28 @@ class AvmBlueprintEngine:
             P_nonohmic_MW=nonohmic_loss,
             R_off_ohm=float(values["arm_off_state_resistance_ohm"]),
         )
+
+    @staticmethod
+    def _native_control_parameters(values: Mapping[str, Any]) -> dict[str, float]:
+        bandwidth = float(values["control_bandwidth_hz"])
+        if not math.isfinite(bandwidth) or bandwidth <= 0:
+            raise _error("MMC_CONTROL_INFEASIBLE", "Native control bandwidth must be finite and positive.")
+        scale = bandwidth / 80.0
+        power_scale = float(values["rated_power_mw"]) / 1000.0
+        voltage_scale = float(values["rated_dc_voltage_kv"]) / 640.0
+        return {
+            "p_control_kp": 0.01 * scale / power_scale,
+            "vdc_control_kp": 0.01 * scale / power_scale,
+            "active_control_ti_s": 0.10 / scale,
+            "reactive_control_kp": 0.00005 * scale / power_scale,
+            "reactive_control_ti_s": 0.05 / scale,
+            "dc_voltage_control_kp": 3.0 * scale * power_scale / voltage_scale,
+            "dc_voltage_control_ti_s": 0.30 / scale,
+            "energy_control_gain": 10.0 * scale,
+            "circulating_control_bandwidth_hz": 60.0 * scale,
+            "feedback_filter_s": 0.02 / scale,
+            "energy_difference_filter_s": 0.05 / scale,
+        }
 
     async def _execute_native_candidate(
         self,
@@ -466,7 +488,7 @@ class AvmBlueprintEngine:
             raise _error("MMC_AVM_CONSTANTS_INVALID", "Generated cable constants differ from the planned physical profile.",
                          expected_loop_resistance_ohm=expected_resistance,
                          observed_loop_resistance_ohm=constants[0].loop_dc_resistance_ohm)
-        modulation_index = 0.9
+        modulation_index = float(values["base_modulation_index"])
         valve_voltage = (
             modulation_index
             * float(values["rated_dc_voltage_kv"])
@@ -524,6 +546,7 @@ class AvmBlueprintEngine:
             time_step_s=float(selected.settings["time_step_s"]),
             output_step_s=float(selected.settings["output_step_s"]),
             arm_parameters=self._native_arm_parameters(values),
+            **self._native_control_parameters(values),
         )
         project = Path(receipt["project_path"])
         library = Path(receipt["library"]["library_path"])

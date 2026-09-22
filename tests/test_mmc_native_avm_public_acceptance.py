@@ -24,7 +24,7 @@ def test_public_runner_cannot_claim_complete_model_acceptance(runner):
     assert runner.SCOPE == "public_native_cable_avm_assembly"
     source = runner.Path(runner.__file__).read_text(encoding="utf-8")
     assert 'report["model_accepted"] = False' in source
-    assert "Closed-loop P/Q/Vdc tracking" in source
+    assert "fault and portable reload acceptance remain pending" in source
 
 
 def test_public_plan_gate_requires_native_hashes_and_conservative_capabilities(runner):

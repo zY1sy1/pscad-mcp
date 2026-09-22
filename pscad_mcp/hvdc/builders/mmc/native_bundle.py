@@ -81,6 +81,8 @@ CLOSED_LOOP_DEFAULTS = {
     "P_nonohmic_MW": 0.0,
     "Kp_Vdc_MW_per_kV": 3.0,
     "Ti_Vdc_s": 0.30,
+    "Feedback_Filter_s": 0.02,
+    "Energy_Difference_Filter_s": 0.05,
     "Power_Correction_Limit_MW": 1500.0,
     "Cable_Loss_MW": 0.0,
     "Converter_Loss_MW": 0.0,
@@ -496,8 +498,8 @@ def _closed_loop_control(root: ET.Element, master: dict, defaults: dict) -> dict
                 "G": "1.0",
                 "T": (
                     "0.1 [s]" if role == "voltage_reference_ramp"
-                    else "0.05 [s]" if role.startswith("energy_difference_")
-                    else "0.02 [s]"
+                    else "Energy_Difference_Filter_s" if role.startswith("energy_difference_")
+                    else "Feedback_Filter_s"
                 ),
                 "Max": str(limit),
                 "Min": str(-limit),
@@ -794,6 +796,12 @@ def materialize_native_avm_fixture(
     active_control_ti_s: float = 0.10,
     reactive_control_kp: float = 0.00005,
     reactive_control_ti_s: float = 0.05,
+    dc_voltage_control_kp: float = 3.0,
+    dc_voltage_control_ti_s: float = 0.30,
+    energy_control_gain: float = 10.0,
+    circulating_control_bandwidth_hz: float = 60.0,
+    feedback_filter_s: float = 0.02,
+    energy_difference_filter_s: float = 0.05,
     cable_loss_mw: float = 0.0,
     converter_loss_mw: float = 0.0,
     dc_grounding_resistance_ohm: float = 1e6,
@@ -872,6 +880,14 @@ def materialize_native_avm_fixture(
     reactive_control_ti_s = _number(
         reactive_control_ti_s, "reactive_control_ti_s", positive=True
     )
+    control_settings = {
+        "Kp_Vdc_MW_per_kV": _number(dc_voltage_control_kp, "dc_voltage_control_kp", positive=True),
+        "Ti_Vdc_s": _number(dc_voltage_control_ti_s, "dc_voltage_control_ti_s", positive=True),
+        "Energy_Gain_per_s": _number(energy_control_gain, "energy_control_gain", positive=True),
+        "Feedback_Filter_s": _number(feedback_filter_s, "feedback_filter_s", positive=True),
+        "Energy_Difference_Filter_s": _number(energy_difference_filter_s, "energy_difference_filter_s", positive=True),
+    }
+    circulating_control_bandwidth_hz = _number(circulating_control_bandwidth_hz, "circulating_control_bandwidth_hz", positive=True)
     station_p_grid_r_ohm = _number(
         station_p_grid_r_ohm, "station_p_grid_r_ohm", positive=True
     )
@@ -1071,6 +1087,7 @@ def materialize_native_avm_fixture(
                 f"{NATIVE_SCOPE}:{CLOSED_LOOP_CONTROL_NAME}",
                 {
                     **CLOSED_LOOP_DEFAULTS,
+                    **control_settings,
                     "Frequency_Hz": frequency_hz,
                     "P_Order_MW": active_power_order_mw,
                     "Q_Order_MVAr": reactive_power_order_mvar,
@@ -1089,7 +1106,7 @@ def materialize_native_avm_fixture(
                     "C_eq_F": arm_values["C_eq_F"],
                     "R_arm_ohm": arm_values["R_arm_ohm"],
                     "P_nonohmic_MW": arm_values["P_nonohmic_MW"],
-                    "Circulating_Gain_ohm": 2 * math.pi * 60 * arm_values["L_arm_H"],
+                    "Circulating_Gain_ohm": 2 * math.pi * circulating_control_bandwidth_hz * arm_values["L_arm_H"],
                     "Deblock_Time_s": deblock_time_s,
                     "Reversal_Time_s": reversal_time_s,
                     "Ramp_Time_s": ramp_time_s,
@@ -1329,6 +1346,8 @@ def materialize_native_avm_fixture(
             "station_p_grid_x_ohm": station_p_grid_x_ohm,
             "station_vdc_grid_r_ohm": station_vdc_grid_r_ohm,
             "station_vdc_grid_x_ohm": station_vdc_grid_x_ohm,
+            "control_settings": control_settings,
+            "circulating_control_bandwidth_hz": circulating_control_bandwidth_hz,
             "dc_grounding_resistance_ohm": dc_grounding_resistance_ohm,
             "valve_grounding_resistance_ohm": valve_grounding_resistance_ohm,
             "transformer_rating_mva": transformer_rating_mva,

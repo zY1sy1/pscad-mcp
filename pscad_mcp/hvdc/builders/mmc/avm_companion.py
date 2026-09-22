@@ -261,6 +261,8 @@ _PARAMETER_UNITS = {
     "Energy_Gain_per_s": "1",
     "Kp_Vdc_MW_per_kV": "1",
     "Ti_Vdc_s": "s",
+    "Feedback_Filter_s": "s",
+    "Energy_Difference_Filter_s": "s",
     "Power_Correction_Limit_MW": "MW",
     "Cable_Loss_MW": "MW",
     "Converter_Loss_MW": "MW",
