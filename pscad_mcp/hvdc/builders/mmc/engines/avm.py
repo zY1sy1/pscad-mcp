@@ -386,9 +386,8 @@ class AvmBlueprintEngine:
         dc_current = float(values["rated_power_mw"]) / float(
             values["rated_dc_voltage_kv"]
         )
-        phase_current = float(values["rated_power_mw"]) / (
-            math.sqrt(3.0) * float(values["station_p_ac_voltage_kv"])
-        )
+        valve_voltage = 0.9 * float(values["rated_dc_voltage_kv"]) * math.sqrt(3.0) / (2.0 * math.sqrt(2.0))
+        phase_current = math.hypot(float(values["rated_power_mw"]), float(values["reactive_power_mvar"])) / (math.sqrt(3.0) * valve_voltage)
         arm_rms = math.hypot(dc_current / 3.0, phase_current / 2.0)
         ohmic_loss = float(values["arm_resistance_ohm"]) * arm_rms**2
         nonohmic_loss = max(0.0, float(values["loss_per_arm_mw"]) - ohmic_loss)

@@ -951,6 +951,7 @@ def materialize_native_avm_fixture(
             station_vdc_grid_x_ohm,
         ),
     ):
+        explicit_grid_r = min(0.1, grid_r)
         source = writer.add(
             main,
             prefix + "_source",
@@ -959,7 +960,7 @@ def materialize_native_avm_fixture(
                 prefix + "_SOURCE",
                 station_voltage,
                 frequency_hz,
-                grid_r,
+                grid_r - explicit_grid_r,
                 grid_x,
             ),
             {"N3": prefix + "_SOURCE_VECTOR", "N": "GND"},
@@ -981,7 +982,7 @@ def materialize_native_avm_fixture(
                 main,
                 prefix + "_grid_resistor_" + phase,
                 "master:resistor",
-                {"R": "0.1 [ohm]"},
+                {"R": f"{_format(explicit_grid_r)} [ohm]"},
                 {
                     "A": prefix + "_SOURCE_" + phase,
                     "B": prefix + "_GRID_R_" + phase,

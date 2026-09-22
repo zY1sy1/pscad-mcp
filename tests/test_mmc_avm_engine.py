@@ -1,5 +1,6 @@
 import asyncio
 import hashlib
+import math
 from dataclasses import replace
 from pathlib import Path
 from xml.etree import ElementTree as ET
@@ -23,6 +24,16 @@ from tests.mmc_parametric_fakes import (
 )
 from tests.test_mmc_planner import ASSET, INVENTORY
 from tests.test_mmc_cable_constants import cable_sources
+
+
+def test_native_arm_loss_budget_uses_valve_current_including_reactive_power():
+    from pscad_mcp.hvdc.builders.mmc.derivation import derive_mmc_parameters
+    values = derive_mmc_parameters(valid_request(model_fidelity="average_value", reactive_power_mvar=-200.0)).candidates[0].parameters
+    parameters = AvmBlueprintEngine._native_arm_parameters({**values, "arm_off_state_resistance_ohm": 1e6})
+    valve_ll_kv = 0.9 * 640.0 * math.sqrt(3.0) / (2 * math.sqrt(2.0))
+    current_rms = math.hypot(1000.0, -200.0) / (math.sqrt(3.0) * valve_ll_kv)
+    ohmic = 0.15 * ((1000.0 / 640.0 / 3.0)**2 + (current_rms / 2.0)**2)
+    assert parameters.P_nonohmic_MW + ohmic == pytest.approx(15.0 / 12.0)
 
 
 def test_avm_engine_applies_derived_parameters_to_twelve_visible_arms(

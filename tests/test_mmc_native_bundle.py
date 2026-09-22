@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import math
 from pathlib import Path
 from xml.etree import ElementTree as ET
 
@@ -403,8 +404,12 @@ def test_full_fixture_materializes_parametric_electrical_and_runtime_values(
     }
     assert p_source["Vm"] == p_source["Es"] == "180 [kV]"
     assert v_source["Vm"] == v_source["Es"] == "190 [kV]"
-    assert float(p_source["Z1"].split()[0]) == pytest.approx((0.5**2 + 5.0**2) ** 0.5)
-    assert float(v_source["Z1"].split()[0]) == pytest.approx((0.75**2 + 6.0**2) ** 0.5)
+    for prefix, source, expected_r, expected_x in (("P", p_source, 0.5, 5.0), ("V", v_source, 0.75, 6.0)):
+        magnitude = float(source["Z1"].split()[0])
+        angle = math.radians(float(source["Phi1"].split()[0]))
+        explicit_r = float(users[prefix + "_grid_resistor_A"].find("./paramlist/param[@name='R']").get("value").split()[0])
+        assert magnitude * math.cos(angle) + explicit_r == pytest.approx(expected_r)
+        assert magnitude * math.sin(angle) == pytest.approx(expected_x)
 
     for prefix, primary, secondary in (("P", 180.0, 250.0), ("V", 190.0, 260.0)):
         transformer = {
