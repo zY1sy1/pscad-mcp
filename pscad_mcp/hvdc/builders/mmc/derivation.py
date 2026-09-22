@@ -18,7 +18,7 @@ from .parametric_models import (
 )
 
 
-EQUATION_VERSION = "mmc-parametric-v1"
+EQUATION_VERSION = "mmc-parametric-v2"
 
 _PWM_REFERENCE: dict[str, Any] = {
     "evidence": "audited-template-reference-v1",
@@ -88,12 +88,12 @@ def _synchronize_arm_energy(
     )
 
 
-def _grid(station: object, power_mw: float, voltage_scale: float) -> tuple[float, float, float]:
+def _grid(station: object, power_mw: float) -> tuple[float, float, float]:
     ac_voltage = float(getattr(station, "ac_voltage_kv"))
     scr = float(getattr(station, "short_circuit_ratio"))
     x_over_r = float(getattr(station, "x_over_r"))
     z_base_ohm = ac_voltage**2 / power_mw
-    z_grid_ohm = z_base_ohm / scr * voltage_scale**2
+    z_grid_ohm = z_base_ohm / scr
     r_grid_ohm = z_grid_ohm / math.sqrt(1.0 + x_over_r**2)
     return z_grid_ohm, r_grid_ohm, r_grid_ohm * x_over_r
 
@@ -224,8 +224,8 @@ def derive_mmc_parameters(
     power_scale = parsed.active_power_mw / 1000.0
     impedance_scale = voltage_scale**2 / power_scale
     dc_current_ka = parsed.active_power_mw / parsed.dc_voltage_kv
-    p_z, p_r, p_x = _grid(parsed.station_p, parsed.active_power_mw, voltage_scale)
-    v_z, v_r, v_x = _grid(parsed.station_vdc, parsed.active_power_mw, voltage_scale)
+    p_z, p_r, p_x = _grid(parsed.station_p, parsed.active_power_mw)
+    v_z, v_r, v_x = _grid(parsed.station_vdc, parsed.active_power_mw)
     line_resistance = (0.015 if parsed.dc_link.kind == "overhead_line" else 0.01) * parsed.dc_link.length_km * impedance_scale
     line_drop_kv = dc_current_ka * line_resistance
     line_drop_pu = line_drop_kv / parsed.dc_voltage_kv

@@ -16,15 +16,33 @@ def test_common_base_quantities_are_dimensionally_correct() -> None:
     assert {candidate.engine for candidate in report.candidates} == {"detailed_pwm", "average_value"}
 
 
-def test_voltage_and_power_scaling_preserves_dimensionless_margin() -> None:
+def test_grid_impedance_uses_requested_ac_rating_without_dc_rescaling() -> None:
     base = derive_mmc_parameters(parse_parametric_request(valid_request()))
     scaled = derive_mmc_parameters(
         parse_parametric_request(valid_request(dc_voltage_kv=1280.0, active_power_mw=2000.0))
     )
     assert scaled.common["dc_current_ka"] == pytest.approx(base.common["dc_current_ka"])
     assert scaled.common["station_p_grid_impedance_ohm"] == pytest.approx(
-        2.0 * base.common["station_p_grid_impedance_ohm"]
+        230.0**2 / (5.0 * 2000.0)
     )
+    assert scaled.common["station_p_grid_impedance_ohm"] == pytest.approx(
+        0.5 * base.common["station_p_grid_impedance_ohm"]
+    )
+
+
+def test_ac_voltage_and_power_scaling_preserves_requested_scr() -> None:
+    request = valid_request(dc_voltage_kv=1280.0, active_power_mw=2000.0)
+    for station in ("station_p", "station_vdc"):
+        request[station] = {**request[station], "ac_voltage_kv": 460.0}
+    scaled = derive_mmc_parameters(request)
+    for station in ("station_p", "station_vdc"):
+        resistance = scaled.common[f"{station}_grid_r_ohm"]
+        reactance = scaled.common[f"{station}_grid_x_ohm"]
+        impedance = (resistance**2 + reactance**2) ** 0.5
+        assert 460.0**2 / (2000.0 * impedance) == pytest.approx(
+            request[station]["short_circuit_ratio"]
+        )
+        assert reactance / resistance == pytest.approx(request[station]["x_over_r"])
 
 
 def test_candidates_are_bounded_ordered_and_have_unique_parameter_hashes() -> None:
