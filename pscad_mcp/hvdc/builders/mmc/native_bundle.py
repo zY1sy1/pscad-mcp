@@ -468,7 +468,7 @@ def _closed_loop_control(root: ET.Element, master: dict, defaults: dict) -> dict
             {
                 "Limit": "0",
                 "COM": role,
-                "Reset": "0",
+                "Reset": "2" if role == "voltage_reference_ramp" else "0",
                 "YO": "0.0",
                 "Dim": "1",
                 "G": "1.0",

@@ -109,6 +109,9 @@ def test_native_bundle_contains_physical_arm_control_and_coupled_cable(
         for component in controller.findall("./schematic/User")
     }
     lower_limit = controller_components["voltage_power_lower_limit"]
+    reference_filter = controller_components["voltage_reference_ramp"]
+    assert reference_filter.find("./paramlist/param[@name='Reset']").get("value") == "2"
+    assert reference_filter.find("./paramlist/param[@name='YO']").get("value") == "0.0"
     assert lower_limit.find("./paramlist/param[@name='G']").get("value") == "-1.0"
     assert controller_components["voltage_pi"].find(
         "./paramlist/param[@name='YLO']"
