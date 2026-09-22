@@ -108,6 +108,11 @@ def test_native_bundle_contains_physical_arm_control_and_coupled_cable(
         component.get("name"): component
         for component in controller.findall("./schematic/User")
     }
+    lower_limit = controller_components["voltage_power_lower_limit"]
+    assert lower_limit.find("./paramlist/param[@name='G']").get("value") == "-1.0"
+    assert controller_components["voltage_pi"].find(
+        "./paramlist/param[@name='YLO']"
+    ).get("value") == "POWER_CORRECTION_MIN"
     for prefix, kp, ti, error in (
         ("active", 0.003, 0.5, 1000.0),
         ("reactive", 0.00005, 0.5, 1000.0),

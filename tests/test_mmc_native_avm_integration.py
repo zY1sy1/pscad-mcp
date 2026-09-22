@@ -38,6 +38,8 @@ def _trace():
         "P_MODULATION_COMMAND": [0.8] * len(time),
         "V_ANGLE_COMMAND": [8.0] * len(time),
         "V_MODULATION_COMMAND": [0.82] * len(time),
+        "P_POWER_CORRECTION": [0.0] * len(time),
+        "V_POWER_CORRECTION": [15.0] * len(time),
     }
     for name, unit in FIXTURE_CHANNELS.items():
         if name not in trace:

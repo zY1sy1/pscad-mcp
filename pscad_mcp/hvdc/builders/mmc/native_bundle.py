@@ -45,6 +45,7 @@ CONTROL_OUTPUTS = (
     "SEQUENCE",
     "ANGLE_COMMAND",
     "MODULATION_COMMAND",
+    "POWER_CORRECTION",
 )
 CONTROL_DEFAULTS = {
     "Frequency_Hz": 60.0,
@@ -106,6 +107,8 @@ FIXTURE_CHANNELS = {
     "P_MODULATION_COMMAND": "1",
     "V_ANGLE_COMMAND": "deg",
     "V_MODULATION_COMMAND": "1",
+    "P_POWER_CORRECTION": "MW",
+    "V_POWER_CORRECTION": "MW",
 }
 ARM_OBSERVABLES = {
     "I": ("I_ARM", "kA"),
@@ -171,6 +174,7 @@ def _station_control(root: ET.Element) -> ET.Element:
       IF (TIME .GE. $Reversal_Time_s) OFFSET = -OFFSET
       $ANGLE_COMMAND = OFFSET / 0.0174532925199433
       $MODULATION_COMMAND = $Modulation_Index
+      $POWER_CORRECTION = 0.0
       ANGLE = 6.28318530717959 * $Frequency_Hz * TIME + OFFSET
       MA = $Modulation_Index * SIN(ANGLE)
       MB = $Modulation_Index * SIN(ANGLE - 2.09439510239320)
@@ -427,7 +431,7 @@ def _closed_loop_control(root: ET.Element, master: dict, defaults: dict) -> dict
             "P_MEAS": "P_FILTERED",
             "Q_MEAS": "Q_FILTERED",
             "VDC_MEAS": "VDC_FILTERED",
-            "POWER_CORRECTION": "VDC_POWER_CORRECTION",
+            "POWER_CORRECTION": "CTRL_POWER_CORRECTION",
             "VDC_REFERENCE": "VDC_REFERENCE",
             "ACTIVE_ERROR": "ACTIVE_ERROR",
             "Q_ERROR": "Q_ERROR",
@@ -474,11 +478,17 @@ def _closed_loop_control(root: ET.Element, master: dict, defaults: dict) -> dict
         {"IN:Dim": "VDC_ERROR", "OUT:Dim": "VDC_PI_INPUT"},
     )
     add(
+        "voltage_power_lower_limit",
+        "master:gain",
+        {"G": "-1.0", "Dim": "1", "COM": "Negative physical power correction limit"},
+        {"IN:Dim": "Power_Correction_Limit_MW", "OUT:Dim": "POWER_CORRECTION_MIN"},
+    )
+    add(
         "voltage_pi",
         "master:pi_ctlr",
         {"GP": "1.0", "TI": "Ti_Vdc_s", "YHI": "Power_Correction_Limit_MW",
-         "YLO": "-Power_Correction_Limit_MW", "YINIT": "0.0", "Mthd": "0", "INTR": "0"},
-        {"IN": "VDC_PI_INPUT", "OUT": "VDC_POWER_CORRECTION"},
+         "YLO": "POWER_CORRECTION_MIN", "YINIT": "0.0", "Mthd": "0", "INTR": "0"},
+        {"IN": "VDC_PI_INPUT", "OUT": "CTRL_POWER_CORRECTION"},
     )
     add(
         "active_error_gain",
