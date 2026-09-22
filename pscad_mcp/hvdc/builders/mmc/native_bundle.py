@@ -74,7 +74,7 @@ ARM_FEEDBACK_INPUTS = tuple(
     for phase in "ABC"
     for position in ("UPPER", "LOWER")
     for quantity in ("VCAP", "I")
-)
+) + tuple(f"{phase}_UPPER_VT" for phase in "ABC")
 
 
 def _feedback_ports(names: tuple[str, ...]) -> dict:
@@ -296,7 +296,13 @@ def _closed_loop_control(root: ET.Element, master: dict, defaults: dict) -> dict
 #LOCAL REAL IREF
 #LOCAL REAL VCOMMON
 #LOCAL REAL VACOM
-      ANGLE = 6.28318530717959 * $Frequency_Hz * TIME + $ANGLE_COMMAND * 0.0174532925199433
+#LOCAL REAL VALPHA
+#LOCAL REAL VBETA
+      VALPHA = (-2.0 * $A_UPPER_VT + $B_UPPER_VT + $C_UPPER_VT) / 3.0
+      VBETA = ($C_UPPER_VT - $B_UPPER_VT) * 0.577350269189626
+      ANGLE = 6.28318530717959 * $Frequency_Hz * TIME
+      IF (VALPHA * VALPHA + VBETA * VBETA .GT. 1.0) ANGLE = ATAN2(VALPHA, -VBETA)
+      ANGLE = ANGLE + $ANGLE_COMMAND * 0.0174532925199433
       MODULATION = MIN(0.98, MAX(0.10, $MODULATION_COMMAND))
       MA = MODULATION * SIN(ANGLE)
       MB = MODULATION * SIN(ANGLE - 2.09439510239320)
