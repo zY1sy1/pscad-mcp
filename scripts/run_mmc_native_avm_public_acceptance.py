@@ -257,6 +257,19 @@ async def run_attempt(
         if project != Path(child["target_path"]).resolve():
             raise ValueError("Published project differs from the immutable child plan")
         project_name = project.stem
+        diagnostic_step = getattr(args, "diagnostic_time_step_us", None)
+        if diagnostic_step is not None:
+            original_settings = await bounded(service.get_project_settings(project_name))
+            await bounded(service.set_project_settings(project_name, {"time_step": str(diagnostic_step)}))
+            observed_settings = await bounded(service.get_project_settings(project_name))
+            if float(observed_settings["time_step"]) != diagnostic_step:
+                raise ValueError("Diagnostic EMT timestep did not read back")
+            report["timestep_diagnostic"] = {
+                "planned_time_step_us": float(original_settings["time_step"]),
+                "applied_time_step_us": diagnostic_step,
+                "public_plan_execution_unchanged": False,
+            }
+            report["scope"] = "native_avm_timestep_diagnostic"
         await bounded(service.save_project(NATIVE_SCOPE, confirm=True))
         await bounded(service.save_project(project_name, confirm=True))
         report["probe_owners"] = _probe_owners(
@@ -452,6 +465,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--workspace-root", type=Path, required=True)
     parser.add_argument("--master", type=Path, default=DEFAULT_MASTER)
     parser.add_argument("--source-project", type=Path, default=DEFAULT_DONOR)
+    parser.add_argument("--diagnostic-time-step-us", type=float)
     parser.add_argument(
         "--control-kind",
         choices=("scheduled_open_loop", "closed_loop"),
@@ -480,6 +494,11 @@ def main(argv: list[str] | None = None) -> int:
     ):
         parser.add_argument("--" + name, type=float, default=default)
     args = parser.parse_args(argv)
+    if args.diagnostic_time_step_us is not None and (
+        not math.isfinite(args.diagnostic_time_step_us)
+        or args.diagnostic_time_step_us <= 0
+    ):
+        parser.error("Diagnostic timestep must be finite and positive")
     try:
         _optins()
     except PermissionError as error:
