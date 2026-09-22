@@ -60,14 +60,17 @@ CLOSED_LOOP_DEFAULTS = {
     "Q_Order_MVAr": 0.0,
     "Vdc_Order_kV": 640.0,
     "Control_Mode": 0.0,
-    "Kp_Active": 0.003,
-    "Ti_Active_s": 0.50,
+    "Kp_Active": 0.01,
+    "Ti_Active_s": 0.10,
     "Kp_Reactive": 0.00005,
     "Ti_Reactive_s": 0.50,
     "Base_Modulation": 0.90,
     "C_eq_F": 6.510416666666667e-5,
     "Circulating_Gain_ohm": 18.84955592153876,
     "Energy_Gain_per_s": 10.0,
+    "Kp_Vdc_MW_per_kV": 1.0,
+    "Ti_Vdc_s": 0.50,
+    "Power_Correction_Limit_MW": 1500.0,
 }
 ARM_FEEDBACK_INPUTS = tuple(
     f"{phase}_{position}_{quantity}"
@@ -223,10 +226,12 @@ def _closed_loop_control(root: ET.Element, master: dict, defaults: dict) -> dict
             "P_MEAS": (-72, -72, "Transfer", "Input"),
             "Q_MEAS": (-72, -36, "Transfer", "Input"),
             "VDC_MEAS": (-72, 0, "Transfer", "Input"),
+            "POWER_CORRECTION": (-72, 36, "Transfer", "Input"),
             "ACTIVE_ERROR": (72, -72, "Transfer", "Output"),
             "Q_ERROR": (72, -36, "Transfer", "Output"),
             "BLOCK": (72, 0, "Transfer", "Output"),
             "SEQUENCE": (72, 36, "Transfer", "Output"),
+            "VDC_ERROR": (72, 72, "Transfer", "Output"),
         },
         {
             name: CLOSED_LOOP_DEFAULTS[name]
@@ -258,12 +263,15 @@ def _closed_loop_control(root: ET.Element, master: dict, defaults: dict) -> dict
         $SEQUENCE = 3.0
       ENDIF
       $ACTIVE_ERROR = $P_MEAS - PREF
-      IF ($Control_Mode .GE. 0.5) $ACTIVE_ERROR = $VDC_MEAS - $Vdc_Order_kV
+      IF ($Control_Mode .GE. 0.5) $ACTIVE_ERROR = $P_MEAS + PREF - $POWER_CORRECTION
+      $VDC_ERROR = $Vdc_Order_kV - $VDC_MEAS
+      IF ($Control_Mode .LT. 0.5) $VDC_ERROR = 0.0
       $Q_ERROR = $Q_MEAS - SCALE * $Q_Order_MVAr
       $BLOCK = 0.0
       IF (TIME .LT. $Deblock_Time_s) THEN
         $ACTIVE_ERROR = 0.0
         $Q_ERROR = 0.0
+        $VDC_ERROR = 0.0
         $BLOCK = 1.0
       ENDIF
 """,
@@ -391,10 +399,12 @@ def _closed_loop_control(root: ET.Element, master: dict, defaults: dict) -> dict
             "P_MEAS": "P_FILTERED",
             "Q_MEAS": "Q_FILTERED",
             "VDC_MEAS": "VDC_FILTERED",
+            "POWER_CORRECTION": "VDC_POWER_CORRECTION",
             "ACTIVE_ERROR": "ACTIVE_ERROR",
             "Q_ERROR": "Q_ERROR",
             "BLOCK": "CTRL_BLOCK",
             "SEQUENCE": "CTRL_SEQUENCE",
+            "VDC_ERROR": "VDC_ERROR",
         },
     )
     for role, source, output, limit in (
@@ -422,6 +432,19 @@ def _closed_loop_control(root: ET.Element, master: dict, defaults: dict) -> dict
         )
     # EMTDC_XPI is parallel: GP*e + integral(e/TI). Scaling its input and
     # using GP=1 realizes the declared Kp*(e + integral(e/Ti)) controller.
+    add(
+        "voltage_error_gain",
+        "master:gain",
+        {"G": "Kp_Vdc_MW_per_kV", "Dim": "1", "COM": "Vdc PI output is active-power correction in MW"},
+        {"IN:Dim": "VDC_ERROR", "OUT:Dim": "VDC_PI_INPUT"},
+    )
+    add(
+        "voltage_pi",
+        "master:pi_ctlr",
+        {"GP": "1.0", "TI": "Ti_Vdc_s", "YHI": "Power_Correction_Limit_MW",
+         "YLO": "-Power_Correction_Limit_MW", "YINIT": "0.0", "Mthd": "0", "INTR": "0"},
+        {"IN": "VDC_PI_INPUT", "OUT": "VDC_POWER_CORRECTION"},
+    )
     add(
         "active_error_gain",
         "master:gain",
@@ -681,9 +704,9 @@ def materialize_native_avm_fixture(
     reactive_power_order_mvar: float = 0.0,
     vdc_order_kv: float = 640.0,
     ramp_time_s: float = 0.20,
-    p_control_kp: float = 0.003,
+    p_control_kp: float = 0.01,
     vdc_control_kp: float = 0.01,
-    active_control_ti_s: float = 0.50,
+    active_control_ti_s: float = 0.10,
     reactive_control_kp: float = 0.00005,
     reactive_control_ti_s: float = 0.50,
     deblock_time_s: float = 0.10,
@@ -962,6 +985,7 @@ def materialize_native_avm_fixture(
                     "Kp_Reactive": reactive_control_kp,
                     "Ti_Reactive_s": reactive_control_ti_s,
                     "Base_Modulation": modulation_index,
+                    "Power_Correction_Limit_MW": 1.5 * active_power_order_mw,
                     "C_eq_F": arm_values["C_eq_F"],
                     "Circulating_Gain_ohm": 2 * math.pi * 60 * arm_values["L_arm_H"],
                     "Deblock_Time_s": deblock_time_s,

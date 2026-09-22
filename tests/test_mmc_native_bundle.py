@@ -102,7 +102,7 @@ def test_native_bundle_contains_physical_arm_control_and_coupled_cable(
     assert all(measurement_ports[name] == ("Input", "Real") for name in ("VA", "VB", "VC", "IA", "IB", "IC", "VDC", "IDC"))
     assert all(measurement_ports[name] == ("Output", "Real") for name in ("P", "Q"))
     controller = definitions[CLOSED_LOOP_CONTROL_NAME]
-    assert len(controller.findall("./schematic/User[@defn='master:pi_ctlr']")) == 2
+    assert len(controller.findall("./schematic/User[@defn='master:pi_ctlr']")) == 3
     assert len(controller.findall("./schematic/User[@defn='master:realpole']")) == 5
     controller_components = {
         component.get("name"): component
@@ -136,7 +136,8 @@ def test_native_bundle_contains_physical_arm_control_and_coupled_cable(
         "./script/segment[@name='Fortran']"
     ).text
     assert "$P_MEAS - PREF" in error_script
-    assert "$VDC_MEAS - $Vdc_Order_kV" in error_script
+    assert "$Vdc_Order_kV - $VDC_MEAS" in error_script
+    assert "$P_MEAS + PREF - $POWER_CORRECTION" in error_script
     assert "$Q_MEAS - SCALE * $Q_Order_MVAr" in error_script
     assert (
         controller.find(
