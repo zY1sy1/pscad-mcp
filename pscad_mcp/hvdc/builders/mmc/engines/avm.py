@@ -397,6 +397,7 @@ class AvmBlueprintEngine:
             L_arm_H=float(values["arm_inductance_h"]),
             R_arm_ohm=float(values["arm_resistance_ohm"]),
             P_nonohmic_MW=nonohmic_loss,
+            R_off_ohm=float(values["arm_off_state_resistance_ohm"]),
         )
 
     async def _execute_native_candidate(
