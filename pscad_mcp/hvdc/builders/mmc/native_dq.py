@@ -38,6 +38,7 @@ DQ_OUTPUTS = {
     "VD_MEASURED": "kV", "VQ_MEASURED": "kV", "VD_REFERENCE": "kV", "VQ_REFERENCE": "kV",
     "ID_INTEGRATOR": "kV", "IQ_INTEGRATOR": "kV", "VDC_INTEGRATOR": "MW",
     "MODULATION_UNCLIPPED": "1",
+    "ZERO_SEQUENCE_COMMAND": "kV",
     "LIMIT_ACTIVE": "1", "LIMIT_DURATION": "s",
 }
 
@@ -158,6 +159,10 @@ def _dq_script() -> str:
 #LOCAL REAL VQREF
 #LOCAL REAL VALPHA
 #LOCAL REAL VBETA
+#LOCAL REAL VZERO
+#LOCAL REAL VPHASE_A
+#LOCAL REAL VPHASE_B
+#LOCAL REAL VPHASE_C
 #LOCAL REAL VACOM
 #LOCAL REAL ISUM
 #LOCAL REAL IREF
@@ -259,12 +264,17 @@ def _dq_script() -> str:
       ENDIF
       VALPHA = VDREF * SIN(THETA) + VQREF * COS(THETA)
       VBETA = -VDREF * COS(THETA) + VQREF * SIN(THETA)
+      VPHASE_A = VALPHA
+      VPHASE_B = -0.5 * VALPHA + 0.866025403784439 * VBETA
+      VPHASE_C = -0.5 * VALPHA - 0.866025403784439 * VBETA
+      VZERO = -0.5 * (MAX(VPHASE_A, VPHASE_B, VPHASE_C) + MIN(VPHASE_A, VPHASE_B, VPHASE_C))
+      $ZERO_SEQUENCE_COMMAND = VZERO
       $ANGLE_COMMAND = ATAN2(VQREF, VDREF) * 57.2957795130823
       $MODULATION_COMMAND = 2.0 * SQRT(VDREF**2 + VQREF**2) / $Vdc_Order_kV
       WREF = 0.25 * $C_eq_F * $Vdc_Order_kV**2
 """
     for i, phase in enumerate("ABC"):
-        ac = ("VALPHA", "-0.5 * VALPHA + 0.866025403784439 * VBETA", "-0.5 * VALPHA - 0.866025403784439 * VBETA")[i]
+        ac = f"VPHASE_{phase} + VZERO"
         text += f"""      WSUM = 0.5 * $C_eq_F * (${phase}_UPPER_VCAP**2 + ${phase}_LOWER_VCAP**2)
       WDIFF = 0.5 * $C_eq_F * (${phase}_UPPER_VCAP**2 - ${phase}_LOWER_VCAP**2)
       STORF(NSTORF+{8+i}) = STORF(NSTORF+{8+i}) + A * (WSUM - STORF(NSTORF+{8+i}))

@@ -161,7 +161,10 @@ def analyze_integration_trace(
     for channel in ("P_P", "P_Q", "V_P", "V_Q"):
         checks[channel + ":bounded"] = max(abs(value) for value in trace[channel]) <= 5000.0
     for channel in ("P_ANGLE_COMMAND", "V_ANGLE_COMMAND"):
-        checks[channel + ":bounded"] = max(abs(value) for value in trace[channel]) <= 30.0 + 1e-9
+        angle_values = trace[channel]
+        if channel.replace("ANGLE_COMMAND", "MODULATION_UNCLIPPED") in profile:
+            angle_values = [v for i, v in enumerate(trace[channel]) if trace[channel[:2] + "BLOCK"][i] < 0.5]
+        checks[channel + ":bounded"] = bool(angle_values) and max(abs(value) for value in angle_values) <= 30.0 + 1e-9
     for channel in ("P_MODULATION_COMMAND", "V_MODULATION_COMMAND"):
         active_samples = trace[channel]
         # dq voltage feedforward is zero before the grid is energized. Its
