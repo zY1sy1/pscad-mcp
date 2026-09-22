@@ -57,6 +57,7 @@ CONTROL_DEFAULTS = {
 CLOSED_LOOP_DEFAULTS = {
     **CONTROL_DEFAULTS,
     "Ramp_Time_s": 0.20,
+    "Reversal_Duration_s": 0.50,
     "P_Order_MW": 1000.0,
     "Q_Order_MVAr": 0.0,
     "Vdc_Order_kV": 640.0,
@@ -252,6 +253,7 @@ def _closed_loop_control(root: ET.Element, master: dict, defaults: dict) -> dict
                 "Deblock_Time_s",
                 "Reversal_Time_s",
                 "Ramp_Time_s",
+                "Reversal_Duration_s",
                 "Cable_Loss_MW",
                 "Converter_Loss_MW",
             )
@@ -269,7 +271,7 @@ def _closed_loop_control(root: ET.Element, master: dict, defaults: dict) -> dict
       $SEQUENCE = 1.0
       IF (TIME .GE. $Deblock_Time_s) $SEQUENCE = 2.0
       IF (TIME .GE. $Reversal_Time_s) THEN
-        REVERSE_SCALE = MIN(1.0, MAX(0.0, (TIME - $Reversal_Time_s) / $Ramp_Time_s))
+        REVERSE_SCALE = MIN(1.0, MAX(0.0, (TIME - $Reversal_Time_s) / $Reversal_Duration_s))
         PREF = $P_Order_MW * (1.0 - 2.0 * REVERSE_SCALE)
         $SEQUENCE = 3.0
       ENDIF
@@ -432,6 +434,7 @@ def _closed_loop_control(root: ET.Element, master: dict, defaults: dict) -> dict
                 "Deblock_Time_s",
                 "Reversal_Time_s",
                 "Ramp_Time_s",
+                "Reversal_Duration_s",
                 "Cable_Loss_MW",
                 "Converter_Loss_MW",
             )
@@ -471,7 +474,6 @@ def _closed_loop_control(root: ET.Element, master: dict, defaults: dict) -> dict
                 "G": "1.0",
                 "T": (
                     "0.1 [s]" if role == "voltage_reference_ramp"
-                    else "0.002 [s]" if role == "vdc_filter"
                     else "0.05 [s]" if role.startswith("energy_difference_")
                     else "0.02 [s]"
                 ),
@@ -771,6 +773,7 @@ def materialize_native_avm_fixture(
     converter_loss_mw: float = 0.0,
     deblock_time_s: float = 0.10,
     reversal_time_s: float = 0.30,
+    reversal_duration_s: float = 0.50,
     simulation_duration_s: float = 0.5,
     time_step_s: float = 20e-6,
     output_step_s: float = 100e-6,
@@ -857,6 +860,7 @@ def materialize_native_avm_fixture(
         raise ValueError("Grid reactance and deblock time must be nonnegative")
     modulation_index = _number(modulation_index, "modulation_index")
     reversal_time_s = _number(reversal_time_s, "reversal_time_s", positive=True)
+    reversal_duration_s = _number(reversal_duration_s, "reversal_duration_s", positive=True)
     simulation_duration_s = _number(
         simulation_duration_s, "simulation_duration_s", positive=True
     )
@@ -1059,6 +1063,7 @@ def materialize_native_avm_fixture(
                     "Deblock_Time_s": deblock_time_s,
                     "Reversal_Time_s": reversal_time_s,
                     "Ramp_Time_s": ramp_time_s,
+                    "Reversal_Duration_s": reversal_duration_s,
                 },
                 {
                     "P_MEAS": prefix + "_P",
@@ -1264,6 +1269,7 @@ def materialize_native_avm_fixture(
             "converter_loss_mw": converter_loss_mw,
             "deblock_time_s": deblock_time_s,
             "reversal_time_s": reversal_time_s,
+            "reversal_duration_s": reversal_duration_s,
             "simulation_duration_s": simulation_duration_s,
             "time_step_s": time_step_s,
             "output_step_s": output_step_s,

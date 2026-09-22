@@ -231,6 +231,7 @@ _PARAMETER_UNITS = {
     "Phase_Offset_Deg": "deg",
     "Deblock_Time_s": "s",
     "Reversal_Time_s": "s",
+    "Reversal_Duration_s": "s",
     "Ramp_Time_s": "s",
     "P_Order_MW": "MW",
     "Q_Order_MVAr": "MVAr",

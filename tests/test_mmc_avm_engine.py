@@ -189,6 +189,9 @@ def test_native_avm_engine_freezes_sources_and_materializes_candidate_values(
     assert result["fixture"]["parameters"]["station_p_ac_voltage_kv"] == 180.0
     assert result["fixture"]["parameters"]["station_vdc_ac_voltage_kv"] == 190.0
     assert result["fixture"]["parameters"]["cable_length_km"] == 100.0
+    assert result["fixture"]["parameters"]["reversal_time_s"] == 1.0
+    assert result["fixture"]["parameters"]["reversal_duration_s"] == request.power_reversal_time_s
+    assert result["fixture"]["parameters"]["simulation_duration_s"] == 2.0 + request.power_reversal_time_s
 
 
 def test_native_avm_engine_rejects_unmodeled_overhead_link(tmp_path: Path) -> None:

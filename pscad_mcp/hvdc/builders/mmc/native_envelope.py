@@ -17,7 +17,8 @@ LIMITS = {
 
 
 def evaluate_native_steady_envelope(trace: dict, *, power_mw: float, voltage_kv: float,
-                                    reactive_mvar: float = 0.0) -> dict:
+                                    reactive_mvar: float = 0.0,
+                                    reverse_window_s: tuple[float, float] = (1.6, 1.9)) -> dict:
     result = {
         "scope": "native_steady_operating_envelope",
         "status": "FAIL",
@@ -41,7 +42,7 @@ def evaluate_native_steady_envelope(trace: dict, *, power_mw: float, voltage_kv:
         result["error"] = "Missing, unaligned or nonfinite samples"
         return result
     for window, start, end, direction in (
-        ("forward", 0.6, 0.9, 1.0), ("reverse", 1.6, 1.9, -1.0)
+        ("forward", 0.6, 0.9, 1.0), ("reverse", *reverse_window_s, -1.0)
     ):
         indexes = [i for i, instant in enumerate(time) if start <= instant <= end]
         if len(indexes) < 2 or time[indexes[0]] > start + 1.1e-4 or time[indexes[-1]] < end - 1.1e-4:

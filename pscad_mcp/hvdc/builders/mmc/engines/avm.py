@@ -446,8 +446,9 @@ class AvmBlueprintEngine:
             * math.sqrt(3.0)
             / (2.0 * math.sqrt(2.0))
         )
-        reversal_time = max(0.31, float(values["power_reversal_time_s"]))
-        duration = max(2.0, reversal_time + 1.0)
+        reversal_time = 1.0
+        reversal_duration = float(values["power_reversal_time_s"])
+        duration = reversal_time + reversal_duration + 1.0
         candidate_project_name = (
             "AVM_"
             + plan.plan_hash[:12]
@@ -489,6 +490,7 @@ class AvmBlueprintEngine:
             ramp_time_s=0.20,
             deblock_time_s=0.10,
             reversal_time_s=reversal_time,
+            reversal_duration_s=reversal_duration,
             simulation_duration_s=duration,
             time_step_s=float(selected.settings["time_step_s"]),
             output_step_s=float(selected.settings["output_step_s"]),

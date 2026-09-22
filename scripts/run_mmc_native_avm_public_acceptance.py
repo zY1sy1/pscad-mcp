@@ -356,23 +356,28 @@ async def run_attempt(
         trace_path = run_dir / "trace.json"
         _write_report(trace_path, observed["samples"])
         report["trace"] = {"path": str(trace_path), "sha256": _sha256(trace_path)}
+        fixture_parameters = engine["candidate_result"]["fixture"]["parameters"]
+        reversal_end = fixture_parameters["reversal_time_s"] + fixture_parameters["reversal_duration_s"]
+        reverse_window = (reversal_end + 0.5, reversal_end + 0.8)
         report["energy_diagnostics"] = diagnose_native_arm_energy(
             observed["samples"],
             engine["candidate_result"]["fixture"]["parameters"]["arm"],
+            windows=((0.4, 0.9), reverse_window),
         )
         if control_kind == "closed_loop":
             report["steady_envelope"] = evaluate_native_steady_envelope(
                 observed["samples"], power_mw=REQUEST["active_power_mw"],
                 voltage_kv=REQUEST["dc_voltage_kv"], reactive_mvar=REQUEST["reactive_power_mvar"],
+                reverse_window_s=reverse_window,
             )
         report["analysis"] = analyze_integration_trace(
             observed["samples"],
             sequence_windows=(
                 (0.02, 0.09, 1.0),
                 (0.40, 0.90, 2.0),
-                (1.25, 1.90, 3.0),
+                (*reverse_window, 3.0),
             ),
-            minimum_end_s=1.999,
+            minimum_end_s=fixture_parameters["simulation_duration_s"] - 0.001,
         )
         report["assembly_accepted"] = report["analysis"]["status"] == "PASS"
         report["steady_operating_accepted"] = report.get("steady_envelope", {}).get("status") == "PASS"
