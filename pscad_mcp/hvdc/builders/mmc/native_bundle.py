@@ -47,6 +47,10 @@ CONTROL_OUTPUTS = (
     "MODULATION_COMMAND",
     "POWER_CORRECTION",
 )
+INSERTION_OUTPUTS = CONTROL_OUTPUTS[:6]
+RAW_INSERTION_OUTPUTS = tuple(name + "_RAW" for name in INSERTION_OUTPUTS)
+CONTROL_OUTPUTS += RAW_INSERTION_OUTPUTS
+MODULATION_OUTPUTS = INSERTION_OUTPUTS + RAW_INSERTION_OUTPUTS
 CONTROL_DEFAULTS = {
     "Frequency_Hz": 60.0,
     "Modulation_Index": 0.82,
@@ -122,8 +126,18 @@ ARM_OBSERVABLES = {
     "ICAP": ("I_CAP", "kA"),
 }
 for _prefix in ("P", "V"):
+    FIXTURE_CHANNELS.update({
+        f"{_prefix}_VDC_POS": "kV", f"{_prefix}_VDC_NEG": "kV",
+        f"{_prefix}_IDC_NEG": "kA", f"{_prefix}_BLOCK": "1",
+    })
+    for _name in MODULATION_OUTPUTS:
+        FIXTURE_CHANNELS[f"{_prefix}_{_name}"] = "1"
     for _phase in "ABC":
+        for _quantity, _unit in (("I", "kA"), ("V", "kV")):
+            FIXTURE_CHANNELS[f"{_prefix}_{_quantity}_{_phase}"] = _unit
+            FIXTURE_CHANNELS[f"{_prefix}_VALVE_{_quantity}_{_phase}"] = _unit
         for _position in ("UPPER", "LOWER"):
+            FIXTURE_CHANNELS[f"{_prefix}_{_phase}_{_position}_INET"] = "kA"
             for _suffix, (_, _unit) in ARM_OBSERVABLES.items():
                 FIXTURE_CHANNELS[f"{_prefix}_{_phase}_{_position}_{_suffix}"] = _unit
 
@@ -196,7 +210,7 @@ def _station_control(root: ET.Element) -> ET.Element:
       ELSEIF (TIME .GE. $Reversal_Time_s) THEN
         $SEQUENCE = 3.0
       ENDIF
-""",
+""" + "".join(f"      ${name}_RAW = ${name}\n" for name in INSERTION_OUTPUTS),
     )
     return control
 
@@ -330,7 +344,7 @@ def _closed_loop_control(root: ET.Element, master: dict, defaults: dict) -> dict
             **_feedback_ports(("ANGLE_COMMAND", "MODULATION_COMMAND", "VDC_MEAS", "P_MEAS", "FRAME_D", "FRAME_Q", *ARM_FEEDBACK_INPUTS, "DWA", "DWB", "DWC", "SWA", "SWB", "SWC")),
             **{
                 name: (72, -126 + index * 36, "Transfer", "Output")
-                for index, name in enumerate(CONTROL_OUTPUTS[:6])
+                for index, name in enumerate(MODULATION_OUTPUTS)
             },
         },
         {name: CLOSED_LOOP_DEFAULTS[name] for name in (
@@ -368,8 +382,10 @@ def _closed_loop_control(root: ET.Element, master: dict, defaults: dict) -> dict
       IREF = (PLOSS - $P_MEAS / 3.0 - $Energy_Gain_per_s * (WPAIR - WREF)) / MAX(0.1 * $Vdc_Order_kV, $VDC_MEAS)
       IREF = IREF + 5.0 * $DW{phase} * VACOM / MAX(1.0, (0.5 * $Vdc_Order_kV * MODULATION)**2)
       VCOMMON = 0.5 * $VDC_MEAS + $Circulating_Gain_ohm * (ISUM - IREF)
-      $M_{phase}_UPPER = MIN(1.0, MAX(0.0, (VCOMMON - VACOM) / MAX(0.1 * $Vdc_Order_kV, 2.0 * ${phase}_UPPER_VCAP)))
-      $M_{phase}_LOWER = MIN(1.0, MAX(0.0, (VCOMMON + VACOM) / MAX(0.1 * $Vdc_Order_kV, 2.0 * ${phase}_LOWER_VCAP)))
+      $M_{phase}_UPPER_RAW = (VCOMMON - VACOM) / MAX(0.1 * $Vdc_Order_kV, 2.0 * ${phase}_UPPER_VCAP)
+      $M_{phase}_LOWER_RAW = (VCOMMON + VACOM) / MAX(0.1 * $Vdc_Order_kV, 2.0 * ${phase}_LOWER_VCAP)
+      $M_{phase}_UPPER = MIN(1.0, MAX(0.0, $M_{phase}_UPPER_RAW))
+      $M_{phase}_LOWER = MIN(1.0, MAX(0.0, $M_{phase}_LOWER_RAW))
 """ for phase in "ABC"
         ),
     )
@@ -559,7 +575,7 @@ def _closed_loop_control(root: ET.Element, master: dict, defaults: dict) -> dict
             **{f"DW{phase}": f"DW{phase}" for phase in "ABC"},
             **{f"SW{phase}": f"SW{phase}" for phase in "ABC"},
             **{name: name for name in ARM_FEEDBACK_INPUTS},
-            **{name: "CTRL_" + name for name in CONTROL_OUTPUTS[:6]},
+            **{name: "CTRL_" + name for name in MODULATION_OUTPUTS},
         },
     )
     for name in CONTROL_OUTPUTS:
@@ -1013,9 +1029,9 @@ def materialize_native_avm_fixture(
             {"Com": "0", "Dis": "0"},
             {
                 "N": prefix + "_VALVE_VECTOR",
-                "N1": prefix + "_PHASE_A",
-                "N2": prefix + "_PHASE_B",
-                "N3": prefix + "_PHASE_C",
+                "N1": prefix + "_VALVE_A",
+                "N2": prefix + "_VALVE_B",
+                "N3": prefix + "_VALVE_C",
             },
         )
         if control_kind == "scheduled_open_loop":
@@ -1075,12 +1091,29 @@ def materialize_native_avm_fixture(
             )
             custom.append((control, CLOSED_LOOP_CONTROL_NAME))
         for phase in "ABC":
+            writer.add(
+                main, prefix + "_valve_current_" + phase, "master:ammeter",
+                {"Name": prefix + "_VALVE_I_" + phase},
+                {"N1": prefix + "_VALVE_" + phase, "N2": prefix + "_PHASE_" + phase},
+            )
+            writer.add(
+                main, prefix + "_valve_voltage_" + phase, "master:voltmeter",
+                {"Name": prefix + "_VALVE_V_" + phase},
+                {"N1": prefix + "_PHASE_" + phase, "N2": "GND"},
+            )
             for position in ("UPPER", "LOWER"):
                 role = f"{prefix}_{phase}_{position}"
                 inputs = (
-                    (prefix + "_DC_POS", prefix + "_PHASE_" + phase)
+                    (role + "_IN", prefix + "_PHASE_" + phase)
                     if position == "UPPER"
-                    else (prefix + "_PHASE_" + phase, prefix + "_DC_NEG")
+                    else (prefix + "_PHASE_" + phase, role + "_OUT")
+                )
+                writer.add(
+                    main, role + "_network_current", "master:ammeter",
+                    {"Name": role + "_INET"},
+                    {"N1": prefix + "_DC_POS", "N2": role + "_IN"}
+                    if position == "UPPER" else
+                    {"N1": role + "_OUT", "N2": prefix + "_DC_NEG"},
                 )
                 arm = writer.add(
                     main,
@@ -1117,6 +1150,11 @@ def materialize_native_avm_fixture(
             {"Name": prefix + "_IDC"},
             {"N1": prefix + "_DC_POS", "N2": prefix + "_CABLE_POS"},
         )
+        writer.add(
+            main, prefix + "_dc_negative_current", "master:ammeter",
+            {"Name": prefix + "_IDC_NEG"},
+            {"N1": prefix + "_DC_NEG", "N2": prefix + "_CABLE_NEG"},
+        )
     cable = writer.add(
         main,
         "DC_CABLE",
@@ -1124,14 +1162,20 @@ def materialize_native_avm_fixture(
         {},
         {
             "SEND_POS": "P_CABLE_POS",
-            "SEND_NEG": "P_DC_NEG",
+            "SEND_NEG": "P_CABLE_NEG",
             "RECV_POS": "V_CABLE_POS",
-            "RECV_NEG": "V_DC_NEG",
+            "RECV_NEG": "V_CABLE_NEG",
         },
     )
     custom.append((cable, "MMCCableLink"))
     writer.add(main, "neutral_ground", "master:ground", {}, {"A": "GND"})
     for prefix in ("P", "V"):
+        for pole in ("POS", "NEG"):
+            writer.add(
+                main, prefix + "_pole_voltage_" + pole, "master:voltmeter",
+                {"Name": prefix + "_VDC_" + pole},
+                {"N1": prefix + "_DC_" + pole, "N2": "GND"},
+            )
         writer.add(
             main,
             prefix + "_vdc_meter",
@@ -1326,9 +1370,9 @@ def audit_native_avm_fixture(
         "master:xfmr-3p2w": 2,
         "master:breakout": 6,
         "master:resistor": 6,
-        "master:ammeter": 8,
+        "master:ammeter": 28,
         "master:ground": 1,
-        "master:voltmeter": 8,
+        "master:voltmeter": 18,
         "master:pgb": len(FIXTURE_CHANNELS),
     }
     if any(counts[name] != count for name, count in required.items()):
@@ -1371,12 +1415,20 @@ def audit_native_avm_fixture(
             if {
                 f"{prefix}_{phase}_UPPER:OUT",
                 f"{prefix}_{phase}_LOWER:IN",
-                f"{prefix}_breakout:N{'ABC'.index(phase) + 1}",
+                f"{prefix}_valve_current_{phase}:N2",
+                f"{prefix}_valve_voltage_{phase}:N1",
             } - set(nets[prefix + "_PHASE_" + phase]):
                 raise ValueError("Native AVM phase midpoint is incomplete")
+            if {f"{prefix}_breakout:N{'ABC'.index(phase) + 1}", f"{prefix}_valve_current_{phase}:N1"} - set(nets[prefix + "_VALVE_" + phase]):
+                raise ValueError("Native AVM valve current measurement path is incomplete")
+            for position, endpoint in (("UPPER", "IN"), ("LOWER", "OUT")):
+                role = f"{prefix}_{phase}_{position}"
+                meter_endpoint = "N2" if position == "UPPER" else "N1"
+                if {f"{role}:{endpoint}", f"{role}_network_current:{meter_endpoint}"} - set(nets[role + "_" + endpoint]):
+                    raise ValueError("Native AVM arm current measurement path is incomplete")
         if not all(
-            f"{prefix}_{phase}_UPPER:IN" in nets[prefix + "_DC_POS"]
-            and f"{prefix}_{phase}_LOWER:OUT" in nets[prefix + "_DC_NEG"]
+            f"{prefix}_{phase}_UPPER_network_current:N1" in nets[prefix + "_DC_POS"]
+            and f"{prefix}_{phase}_LOWER_network_current:N2" in nets[prefix + "_DC_NEG"]
             for phase in "ABC"
         ):
             raise ValueError("Native AVM DC arm polarity is incomplete")
@@ -1385,6 +1437,11 @@ def audit_native_avm_fixture(
             f"DC_CABLE:{'SEND_POS' if prefix == 'P' else 'RECV_POS'}",
         } - set(nets[prefix + "_CABLE_POS"]):
             raise ValueError("Native AVM DC current measurement path is incomplete")
+        if {
+            f"{prefix}_dc_negative_current:N2",
+            f"DC_CABLE:{'SEND_NEG' if prefix == 'P' else 'RECV_NEG'}",
+        } - set(nets[prefix + "_CABLE_NEG"]):
+            raise ValueError("Native AVM negative DC current measurement path is incomplete")
     if set(nets["P_DC_POS"]) & set(nets["P_DC_NEG"]) or set(nets["V_DC_POS"]) & set(
         nets["V_DC_NEG"]
     ):

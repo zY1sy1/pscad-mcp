@@ -189,8 +189,8 @@ def test_full_fixture_wires_twelve_two_terminal_arms_to_two_three_phase_stations
     )
     assert len([item for item in users if item.get("defn") == "master:breakout"]) == 6
     assert len([item for item in users if item.get("defn") == "master:resistor"]) == 6
-    assert len([item for item in users if item.get("defn") == "master:ammeter"]) == 8
-    assert len([item for item in users if item.get("defn") == "master:voltmeter"]) == 8
+    assert len([item for item in users if item.get("defn") == "master:ammeter"]) == 28
+    assert len([item for item in users if item.get("defn") == "master:voltmeter"]) == 18
     assert (
         len(
             [
@@ -428,7 +428,7 @@ def test_full_fixture_materializes_parametric_electrical_and_runtime_values(
         assert float(control["Control_Mode"]) == (0.0 if prefix == "P" else 1.0)
 
     for name, component in users.items():
-        if not name.endswith(("_UPPER", "_LOWER")):
+        if component.get("defn") != f"{NATIVE_SCOPE}:MMCAverageArm":
             continue
         values = {
             item.get("name"): item.get("value")
