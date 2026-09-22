@@ -708,8 +708,9 @@ class _Writer:
             )
             if kind == "electrical":
                 self.nets[name][signal].append(f"{role}:{port_name}")
-        top = min([-36, *(port.y - 36 for port in native.ports)])
-        bottom = max([36, *(port.y + 36 for port in native.ports)])
+        margin = 18 if scoped == "master:pgb" else 36
+        top = min([-margin, *(port.y - margin for port in native.ports)])
+        bottom = max([margin, *(port.y + margin for port in native.ports)])
         self.blocks[name].append((top, bottom, point, members))
         return component
 

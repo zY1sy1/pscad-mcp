@@ -6,12 +6,15 @@ from .avm_companion import _definition, _script, _PARAMETER_UNITS
 
 PROTECTION_NAME = "MMCNativeProtection"
 PROTECTION_INPUTS = ("PRECHARGE_READY", "POWER_READY", "PRECHARGE_FAILED", "CHARGE_FAILED", "RESTART",
+                     "FAULT_ACTIVE", "P_IDC", "V_IDC",
                      "P_VDC", "V_VDC", "P_PLL_LOCKED", "V_PLL_LOCKED", "P_LIMIT_ACTIVE", "V_LIMIT_ACTIVE") + tuple(
     f"{s}_CABLE_{n}" for s in ("P", "V") for n in ("VDC", "VPOS", "VNEG")) + tuple(
     f"{s}_{p}_{q}_{n}" for s in ("P", "V") for p in "ABC" for q in ("UPPER", "LOWER") for n in ("I", "VCAP"))
 PROTECTION_OUTPUTS = {"TRIP": ("PROTECTION_TRIP", "1"), "CODE": ("PROTECTION_CODE", "1"),
                       "TRIP_TIME": ("PROTECTION_TIME", "s"), "SATURATION_HOLD": ("PROTECTION_SATURATION_HOLD", "s"),
                       "RESET_ACK": ("PROTECTION_RESET_ACK", "1")}
+PROTECTION_OUTPUTS.update({f"{s}_{n}": (f"FAULT_{s}_{n}", unit) for s in ("P", "V")
+                           for n, unit in (("ARM_PEAK", "kA"), ("DC_PEAK", "kA"), ("CAP_MIN", "kV"), ("CAP_MAX", "kV"))})
 PROTECTION_DEFAULTS = {"Vdc_Order_kV": 640.0, "Frequency_Hz": 60.0, "Arm_Current_Limit_kA": 2.3}
 
 
@@ -25,21 +28,44 @@ def append_native_protection(root: ET.Element) -> None:
                        f"      CMIN = MIN(CMIN, ${s}_{p}_{q}_VCAP)\n"
                        f"      CMAX = MAX(CMAX, ${s}_{p}_{q}_VCAP)\n"
                        for s in ("P", "V") for p in "ABC" for q in ("UPPER", "LOWER"))
-    _script(component, "Dsdyn", """#STORAGE REAL:4
+    peak_update = ""
+    for index, station in enumerate(("P", "V")):
+        offset = 5 + 4 * index
+        for phase in "ABC":
+            for position in ("UPPER", "LOWER"):
+                prefix = f"{station}_{phase}_{position}"
+                peak_update += f"      STORF(NSTORF+{offset}) = MAX(STORF(NSTORF+{offset}), ABS(${prefix}_I))\n"
+                peak_update += f"      STORF(NSTORF+{offset+2}) = MIN(STORF(NSTORF+{offset+2}), ${prefix}_VCAP)\n"
+                peak_update += f"      STORF(NSTORF+{offset+3}) = MAX(STORF(NSTORF+{offset+3}), ${prefix}_VCAP)\n"
+        peak_update += f"      STORF(NSTORF+{offset+1}) = MAX(STORF(NSTORF+{offset+1}), ABS(${station}_IDC))\n"
+    peak_exports = "".join(f"      ${s}_{n} = STORF(NSTORF+{5+4*j+k})\n" for j, s in enumerate(("P", "V"))
+                           for k, n in enumerate(("ARM_PEAK", "DC_PEAK", "CAP_MIN", "CAP_MAX")))
+    _script(component, "Dsdyn", """#STORAGE REAL:13
 #LOCAL REAL IMAX
 #LOCAL REAL CMIN
 #LOCAL REAL CMAX
 #LOCAL INTEGER REASON
+#LOCAL INTEGER K
       IF (TIMEZERO) THEN
         STORF(NSTORF) = 0.0
         STORF(NSTORF+1) = -1.0
         STORF(NSTORF+2) = 0.0
         STORF(NSTORF+3) = 0.0
+        DO K = 4, 12
+          STORF(NSTORF+K) = 0.0
+        ENDDO
+        STORF(NSTORF+7) = $Vdc_Order_kV
+        STORF(NSTORF+11) = $Vdc_Order_kV
       ENDIF
       IMAX = 0.0
       CMIN = $Vdc_Order_kV
       CMAX = 0.0
-""" + extremes + """      REASON = 0
+""" + extremes + """      IF ($FAULT_ACTIVE .GE. 0.5) STORF(NSTORF+4) = 1.0
+! Peak evidence is accumulated on every EMTDC step, including steps between
+! OUT samples. A controller restart does not erase this fault evidence.
+      IF (STORF(NSTORF+4) .GE. 0.5) THEN
+""" + peak_update + """      ENDIF
+      REASON = 0
       IF (IMAX .GT. $Arm_Current_Limit_kA) REASON = REASON + 1
       IF (MAX($P_VDC, $V_VDC) .GT. 1.10 * $Vdc_Order_kV) REASON = REASON + 2
       IF (CMAX .GT. 0.55 * $Vdc_Order_kV) REASON = REASON + 4
@@ -78,5 +104,4 @@ def append_native_protection(root: ET.Element) -> None:
       $TRIP_TIME = STORF(NSTORF+1)
       $SATURATION_HOLD = STORF(NSTORF+2)
       $RESET_ACK = STORF(NSTORF+3)
-      NSTORF = NSTORF + 4
-""")
+""" + peak_exports + "      NSTORF = NSTORF + 13\n")

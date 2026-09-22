@@ -77,6 +77,7 @@ def evaluate_native_fault_trace(trace: dict, parameters: dict) -> dict:
     voltage_channels = ["P_V_" + p for p in branches] if kind.startswith("ac_") else ["P_CABLE_VDC" if kind == "dc_pole_to_pole" else "P_CABLE_VPOS"]
     required.update(voltage_channels)
     for s in ("P", "V"):
+        required.update(f"FAULT_{s}_{n}" for n in ("ARM_PEAK", "DC_PEAK", "CAP_MIN", "CAP_MAX"))
         required.update(s + "_" + n for n in ("BLOCK", "VDC", "IDC", "P", "P_REFERENCE", "PLL_LOCKED"))
         required.update(f"{s}_{p}_{q}_{n}" for p in "ABC" for q in ("UPPER", "LOWER") for n in ("I", "VCAP"))
         required.update(f"{s}_{domain}_{branch}_{name}" for domain, branches_ in (("AC", "ABC"), ("DC", ("POS", "NEG")))
@@ -120,10 +121,13 @@ def evaluate_native_fault_trace(trace: dict, parameters: dict) -> dict:
     for s, voltage_key in (("P", "station_p_valve_voltage_kv"), ("V", "station_vdc_valve_voltage_kv")):
         arms = [f"{s}_{p}_{q}_I" for p in "ABC" for q in ("UPPER", "LOWER")]
         base = power / (3 * vdc) + math.sqrt(2) * math.hypot(power, parameters["reactive_power_order_mvar"]) / (2 * math.sqrt(3) * parameters[voltage_key])
-        metrics[s] = {"dc_current_peak_pu": max(abs(trace[s + "_IDC"][i]) for i in fault_window) / (power / vdc),
-                      "arm_current_peak_pu": max(abs(trace[a][i]) for a in arms for i in fault_window) / base,
+        metrics[s] = {"dc_current_peak_pu": max(trace[f"FAULT_{s}_DC_PEAK"]) / (power / vdc),
+                      "arm_current_peak_pu": max(trace[f"FAULT_{s}_ARM_PEAK"]) / base,
                       "recovered_dc_voltage_error_pu": max(abs(trace[s + "_VDC"][i] / vdc - 1) for i in recovery)}
-        metrics[s]["capacitor_voltage_deviation_pu"] = max(abs(2 * trace[a.removesuffix("_I") + "_VCAP"][i] / vdc - 1) for a in arms for i in fault_window)
+        metrics[s]["capacitor_voltage_deviation_pu"] = max(abs(2 * trace[f"FAULT_{s}_{n}"][i] / vdc - 1) for n in ("CAP_MIN", "CAP_MAX") for i in fault_window)
+        checks[s + ":peak_evidence_bounds_samples"] = (
+            max(trace[f"FAULT_{s}_ARM_PEAK"]) + 1e-9 >= max(abs(trace[a][i]) for a in arms for i in fault_window)
+            and max(trace[f"FAULT_{s}_DC_PEAK"]) + 1e-9 >= max(abs(trace[s + "_IDC"][i]) for i in fault_window))
         checks[s + ":capacitor_voltage_bound"] = metrics[s]["capacitor_voltage_deviation_pu"] <= result["limits"]["capacitor_voltage_deviation_pu"]
         arresters = [f"{s}_{domain}_{branch}_MOV_ENERGY" for domain, branches_ in (("AC", "ABC"), ("DC", ("POS", "NEG"))) for branch in branches_]
         metrics[s]["arrester_energy_increment_kj"] = sum(trace[n][fault_window[-1]] - trace[n][fault_window[0]] for n in arresters)
@@ -134,7 +138,7 @@ def evaluate_native_fault_trace(trace: dict, parameters: dict) -> dict:
         checks[s + ":control_recovery"] = all(trace[s + "_BLOCK"][i] < 0.5 and trace[s + "_PLL_LOCKED"][i] >= 0.5 for i in recovery)
     metrics["recovered_power_error_pu"] = max(abs(trace["P_P"][i] / power + 1) for i in recovery)
     checks["power_recovery"] = metrics["recovered_power_error_pu"] <= result["limits"]["recovered_power_error_pu"]
-    result["recovery_controls"] = evaluate_native_dq_controls(trace, parameters, {"recovery": (end + 0.5, end + 0.7)})
+    result["recovery_controls"] = evaluate_native_dq_controls(trace, parameters, {"recovery": (end + 0.5, end + 0.7), "recovered_steady": (time[-1] - 0.3, time[-1])})
     checks["recovery_dq_storage"] = result["recovery_controls"]["status"] == "PASS"
     result["failed_checks"] = [k for k, passed in checks.items() if not passed]
     result["status"] = "FAIL" if result["failed_checks"] else "PASS"

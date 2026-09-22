@@ -80,3 +80,15 @@ if (TIME >= 0.18 .and. TIME < 0.20) SIG_RESTART = 1.0""",
     assert rows[0][:2] == [1.0, 0.0]
     assert rows[1][:2] == [0.0, 1.0]
     assert rows[0][2] == rows[1][2] == pytest.approx(0.1)
+
+
+def test_fault_peak_memory_keeps_a_single_solver_step_spike_across_reset(tmp_path):
+    rows = _run_native_equations(tmp_path, PROTECTION_NAME, definition=_definition(), declarations="",
+        initialize=_healthy(), loop="""SIG_FAULT_ACTIVE = 0.0
+if (TIME >= 0.1 .and. TIME < 0.15) SIG_FAULT_ACTIVE = 1.0
+SIG_P_A_UPPER_I = 0.0
+if (sample == 2003) SIG_P_A_UPPER_I = 7.0
+SIG_RESTART = 0.0
+if (TIME >= 0.18) SIG_RESTART = 1.0""",
+        observations="if (sample == 2010 .or. sample == 4000) print *, SIG_P_A_UPPER_I, SIG_P_ARM_PEAK", steps=4000)
+    assert rows == [[0.0, 7.0], [0.0, 7.0]]

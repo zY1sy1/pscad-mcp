@@ -1413,6 +1413,7 @@ def materialize_native_avm_fixture(
                    {**PROTECTION_DEFAULTS, "Frequency_Hz": frequency_hz, "Vdc_Order_kV": vdc_order_kv,
                     "Arm_Current_Limit_kA": precharge_current_limit_ka},
                    {**{name: name for name in PROTECTION_INPUTS}, "RESTART": restart_signal,
+                    "FAULT_ACTIVE": "FAULT_ACTIVE" if fault_kind is not None else "NATIVE_ZERO",
                     **{port: name for port, (name, _) in PROTECTION_OUTPUTS.items()}})
     writer.add(
         main, "precharge_readiness", NATIVE_SCOPE + ":" + STARTUP_NAME,

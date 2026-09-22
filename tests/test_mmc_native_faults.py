@@ -58,6 +58,8 @@ def test_trip_without_postfault_control_recovery_cannot_pass(evidence):
     trace["PROTECTION_TIME"] = [2.101 if t >= 2.101 else -1.0 for t in time]
     trace["PROTECTION_CODE"] = [1.0 if t >= 2.101 else 0.0 for t in time]
     for s in ("P", "V"):
+        for n, value in (("ARM_PEAK", 0.6), ("DC_PEAK", 1.6), ("CAP_MIN", 320.0), ("CAP_MAX", 320.0)):
+            trace[f"FAULT_{s}_{n}"] = [value] * len(time)
         trace[s + "_P"] = trace["P_P"][:]
         trace[s + "_P_REFERENCE"] = trace["P_P_REFERENCE"][:]
         trace[s + "_BLOCK"] = [float(t >= 2.101) for t in time]
