@@ -204,3 +204,27 @@ def test_native_avm_engine_rejects_unmodeled_overhead_link(tmp_path: Path) -> No
     with pytest.raises(BackendError) as raised:
         engine.planning_inputs(request)
     assert raised.value.code == "MMC_AVM_LINK_UNSUPPORTED"
+
+
+def test_native_producer_change_invalidates_execution_before_writing(tmp_path, monkeypatch):
+    import pscad_mcp.hvdc.builders.mmc.engines.avm as module
+    from types import SimpleNamespace
+
+    paths = {}
+    for name in ("master", "cable_donor", "tline"):
+        path = tmp_path / name
+        path.write_bytes(name.encode())
+        paths[name] = str(path)
+    engine = AvmBlueprintEngine(native_sources=paths)
+    request = parse_parametric_request(valid_request(
+        model_fidelity="average_value", dc_link={"kind": "cable", "length_km": 100.0}
+    ))
+    inputs = engine.planning_inputs(request)
+    parent = create_parametric_plan(request, "PRODUCER", tmp_path, None, avm_assets(), avm_native_inputs=inputs)
+    before = set(tmp_path.iterdir())
+    changed = {**module._native_producer_hashes(), "native_bundle.py": "f" * 64}
+    monkeypatch.setattr(module, "_native_producer_hashes", lambda: changed)
+    with pytest.raises(BackendError) as raised:
+        asyncio.run(engine.execute_candidate(parent.engine_plans[0], SimpleNamespace()))
+    assert raised.value.code == "MMC_PLAN_STALE"
+    assert set(tmp_path.iterdir()) == before

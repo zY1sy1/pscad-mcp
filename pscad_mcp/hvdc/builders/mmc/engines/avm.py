@@ -38,6 +38,17 @@ def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _native_producer_hashes() -> dict[str, str]:
+    root = Path(__file__).resolve().parent.parent
+    return {
+        name: _sha256(root / name)
+        for name in (
+            "engines/avm.py", "native_bundle.py", "avm_companion.py",
+            "cable_companion.py", "cable_constants.py",
+        )
+    }
+
+
 def discover_native_avm_sources(
     *,
     master_path: str | Path = DEFAULT_MASTER,
@@ -84,6 +95,7 @@ def _native_input_record(
             "native_cable_constants": True,
             "control_kind": control_kind,
             "model_accepted": False,
+            "native_producer_hashes": _native_producer_hashes(),
         },
     }
 
@@ -390,6 +402,11 @@ class AvmBlueprintEngine:
                 "Native AVM source hashes differ from the immutable child plan.",
                 expected=dict(plan.source_hashes),
                 observed=inputs["source_hashes"],
+            )
+        if dict(plan.capabilities.get("native_producer_hashes", {})) != _native_producer_hashes():
+            raise _error(
+                "MMC_PLAN_STALE",
+                "The native AVM producer changed after the immutable child plan was created.",
             )
         values = selected.parameters
         if values.get("dc_link_kind") != "cable":
