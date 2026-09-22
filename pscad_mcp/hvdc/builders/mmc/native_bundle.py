@@ -862,6 +862,7 @@ def materialize_native_avm_fixture(
     circulating_control_bandwidth_hz: float = 60.0,
     circulating_integral_time_s: float = 0.05,
     current_control_bandwidth_hz: float = 80.0,
+    pll_bandwidth_hz: float = 10.0,
     feedback_filter_s: float = 0.02,
     energy_difference_filter_s: float = 0.05,
     cable_loss_mw: float = 0.0,
@@ -931,6 +932,7 @@ def materialize_native_avm_fixture(
     if control_kind == "dq_current":
         channels.update({f"{s}_{name}": unit for s in ("P", "V") for name, unit in DQ_OUTPUTS.items()})
     current_control_bandwidth_hz = _number(current_control_bandwidth_hz, "current_control_bandwidth_hz", positive=True)
+    pll_bandwidth_hz = _number(pll_bandwidth_hz, "pll_bandwidth_hz", positive=True)
     active_power_order_mw = _number(
         active_power_order_mw, "active_power_order_mw", positive=True
     )
@@ -1344,7 +1346,7 @@ def materialize_native_avm_fixture(
             },
         )
         writer.add(main, prefix + "_pll", NATIVE_SCOPE + ":" + PLL_NAME,
-                   {**PLL_DEFAULTS, "Frequency_Hz": frequency_hz, "Vdc_Order_kV": vdc_order_kv},
+                   {**PLL_DEFAULTS, "Frequency_Hz": frequency_hz, "Vdc_Order_kV": vdc_order_kv, "PLL_Bandwidth_Hz": pll_bandwidth_hz},
                    {**{f"V{p}": f"{prefix}_VALVE_V_{p}" for p in "ABC"},
                     **{port: prefix + "_" + name for port, (name, _) in PLL_OUTPUTS.items()}})
     selected_signals = {name: name for name in channels}
@@ -1470,6 +1472,7 @@ def materialize_native_avm_fixture(
             "station_vdc_grid_r_ohm": station_vdc_grid_r_ohm,
             "station_vdc_grid_x_ohm": station_vdc_grid_x_ohm,
             "control_settings": control_settings,
+            "pll_bandwidth_hz": pll_bandwidth_hz,
             "circulating_control_bandwidth_hz": circulating_control_bandwidth_hz,
             "dc_grounding_resistance_ohm": dc_grounding_resistance_ohm,
             "valve_grounding_resistance_ohm": valve_grounding_resistance_ohm,

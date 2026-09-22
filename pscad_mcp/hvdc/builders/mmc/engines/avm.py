@@ -421,6 +421,7 @@ class AvmBlueprintEngine:
             "circulating_control_bandwidth_hz": 60.0 * scale,
             "circulating_integral_time_s": 0.05 / scale,
             "current_control_bandwidth_hz": bandwidth,
+            "pll_bandwidth_hz": float(values.get("pll_bandwidth_hz", 10.0)),
             "feedback_filter_s": 0.02 / scale,
             "energy_difference_filter_s": 0.05 / scale,
         }
