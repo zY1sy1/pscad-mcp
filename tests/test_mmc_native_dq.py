@@ -132,3 +132,21 @@ if (sample == 18000 .or. sample == 39000) print *, SIG_P_MEAS, SIG_P_REFERENCE, 
         assert abs(reactive) < 0.5
         assert abs(d_error) < 0.002 and abs(q_error) < 0.002
         assert limited == 0.0
+
+
+def test_native_outer_integrator_does_not_wind_up_against_unreachable_arm_voltages(tmp_path):
+    arms = "\n".join(f"SIG_{p}_{q}_VCAP = 1.0" for p in "ABC" for q in ("UPPER", "LOWER"))
+    rows = _run_native_equations(tmp_path, DQ_NAME, declarations="real(8) :: phase_input",
+        initialize="""PAR_Control_Mode = 1.0
+SIG_STARTUP_READY = 1.0
+SIG_START_TIME = 0.0
+SIG_PLL_LOCKED = 1.0
+SIG_VDC_MEAS = 400.0
+""" + arms, loop="""phase_input = 6.283185307179586 * 60.0 * TIME
+SIG_PLL_ANGLE = phase_input
+SIG_VA = 256.0 * SIN(phase_input)
+SIG_VB = 256.0 * SIN(phase_input - 2.09439510239320)
+SIG_VC = 256.0 * SIN(phase_input + 2.09439510239320)
+""", observations="if (sample == 10000) print *, SIG_VDC_INTEGRATOR, SIG_LIMIT_ACTIVE", steps=10000)
+    assert rows[0][1] == 1.0
+    assert abs(rows[0][0]) < 0.1

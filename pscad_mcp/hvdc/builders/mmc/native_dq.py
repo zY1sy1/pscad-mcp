@@ -211,9 +211,9 @@ def _dq_script() -> str:
       VERR = $VDC_REFERENCE - STORF(NSTORF+1)
       IF ($Control_Mode .LT. 0.5) VERR = 0.0
       PCORR = $Kp_Vdc_MW_per_kV * VERR + STORF(NSTORF)
-      IF ($BLOCK .LT. 0.5) THEN
+      IF ($BLOCK .LT. 0.5 .AND. STORF(NSTORF+18) .LT. 0.5) THEN
         IF ((PCORR .LT. $Power_Correction_Limit_MW .OR. VERR .LT. 0.0) .AND. (PCORR .GT. -$Power_Correction_Limit_MW .OR. VERR .GT. 0.0)) STORF(NSTORF) = STORF(NSTORF) + DELT * $Kp_Vdc_MW_per_kV * VERR / $Ti_Vdc_s
-      ELSE
+      ELSEIF ($BLOCK .GE. 0.5) THEN
         STORF(NSTORF) = 0.0
       ENDIF
       $POWER_CORRECTION = MAX(-$Power_Correction_Limit_MW, MIN($Power_Correction_Limit_MW, $Kp_Vdc_MW_per_kV * VERR + STORF(NSTORF)))
@@ -221,10 +221,10 @@ def _dq_script() -> str:
       $P_REFERENCE = PREF
       $Q_REFERENCE = QREF
       PLOSS = 1.5 * $Transformer_Leakage_ohm * (ID**2 + IQ**2)
-      IF ($BLOCK .LT. 0.5) THEN
+      IF ($BLOCK .LT. 0.5 .AND. STORF(NSTORF+18) .LT. 0.5) THEN
         STORF(NSTORF+4) = MAX(-0.2 * $P_Order_MW, MIN(0.2 * $P_Order_MW, STORF(NSTORF+4) + DELT * 2.0 * (PREF - $P_MEAS)))
         STORF(NSTORF+5) = MAX(-0.5 * $P_Order_MW, MIN(0.5 * $P_Order_MW, STORF(NSTORF+5) + DELT * 2.0 * (STORF(NSTORF+3) - QREF)))
-      ELSE
+      ELSEIF ($BLOCK .GE. 0.5) THEN
         STORF(NSTORF+4) = 0.0
         STORF(NSTORF+5) = 0.0
       ENDIF
