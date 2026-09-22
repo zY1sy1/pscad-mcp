@@ -361,6 +361,23 @@ def test_nonohmic_loss_is_distinct_from_physical_arm_resistance(companion):
     assert result["arm_ohmic_loss_mw"] == pytest.approx(0.004)
 
 
+def test_delayed_loss_sink_cannot_drive_an_empty_capacitor_negative(companion):
+    parameters = companion.AverageArmParameters(C_eq_F=6.510416666666667e-5, P_nonohmic_MW=1.1)
+    step = 50e-6
+    voltage = previous_voltage = 1.0
+    energy = 0.125 * parameters.C_eq_F * voltage**2
+    for _ in range(500):
+        current = companion.limited_nonohmic_current(previous_voltage, parameters, step)
+        next_voltage = voltage - step * current / (0.25 * parameters.C_eq_F)
+        next_energy = 0.125 * parameters.C_eq_F * next_voltage**2
+        assert 0 <= next_voltage <= voltage
+        assert 0 <= next_energy <= energy
+        previous_voltage, voltage, energy = voltage, next_voltage, next_energy
+    assert voltage < 1e-20
+    # At the rated capacitor voltage, the specified loss power is preserved.
+    assert companion.limited_nonohmic_current(640.0, parameters, step) * 640.0 == pytest.approx(1.1)
+
+
 def test_native_coupling_tracks_passive_rlc_and_converges_with_timestep(companion):
     # A constant-insertion arm driven by n*640 kV has the analytic damped
     # RLC response below. This exposes energy injection hidden by a fixture

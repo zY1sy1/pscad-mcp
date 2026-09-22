@@ -34,6 +34,7 @@ NATIVE_SCOPE = "cigre_mmc_avm_v1"
 CONTROL_NAME = "MMCStationModulator"
 CLOSED_LOOP_CONTROL_NAME = "MMCStationController"
 MEASUREMENT_NAME = "MMCStationMeasurements"
+SAMPLE_NAME = "MMCPreviousSolutionSample"
 CONTROL_OUTPUTS = (
     "M_A_UPPER",
     "M_A_LOWER",
@@ -126,6 +127,7 @@ ARM_OBSERVABLES = {
     "V": ("V_INSERTED", "kV"),
     "VT": ("V_ARM", "kV"),
     "ICAP": ("I_CAP", "kA"),
+    "PLOSS": ("P_NONOHMIC", "MW"),
 }
 for _prefix in ("P", "V"):
     FIXTURE_CHANNELS.update({f"{_prefix}_KCL_{name}": unit for name, unit in KCL_MEASUREMENTS.items()})
@@ -171,7 +173,7 @@ def _station_control(root: ET.Element) -> ET.Element:
         name: (72, -126 + index * 36, "Transfer", "Output")
         for index, name in enumerate(CONTROL_OUTPUTS)
     }
-    control = _definition(root, CONTROL_NAME, ports, CONTROL_DEFAULTS)
+    control = _definition(root, CONTROL_NAME, ports, CONTROL_DEFAULTS, signed_parameters=("Phase_Offset_Deg",))
     control.find("./paramlist/param[@name='Description']").set(
         "value", "Native scheduled six-arm modulation and blocking"
     )
@@ -275,6 +277,7 @@ def _closed_loop_control(root: ET.Element, master: dict, defaults: dict) -> dict
                 "Converter_Loss_MW",
             )
         },
+        signed_parameters=("Q_Order_MVAr",),
     )
     _script(
         errors,
@@ -399,7 +402,7 @@ def _closed_loop_control(root: ET.Element, master: dict, defaults: dict) -> dict
             for index, name in enumerate(CONTROL_OUTPUTS)
         },
     }
-    controller = _definition(root, CLOSED_LOOP_CONTROL_NAME, ports, CLOSED_LOOP_DEFAULTS)
+    controller = _definition(root, CLOSED_LOOP_CONTROL_NAME, ports, CLOSED_LOOP_DEFAULTS, signed_parameters=("Q_Order_MVAr", "Phase_Offset_Deg"))
     controller.find("./paramlist/param[@name='Description']").set(
         "value", "Native P/Q or Vdc/Q closed-loop six-arm modulation"
     )
@@ -626,6 +629,9 @@ def materialize_native_avm_library(
     root, arm_writer = _make_library(metadata, defaults, scope=NATIVE_SCOPE)
     _station_control(root)
     _station_measurements(root)
+    sample = _definition(root, SAMPLE_NAME,
+                         {"IN": (-36, 0, "Transfer", "Input"), "OUT": (36, 0, "Transfer", "Output")}, {})
+    _script(sample, "Dsdyn", "      $OUT = $IN\n")
     closed_loop = _closed_loop_control(root, metadata, defaults)
     evidence = Path(constants_evidence).resolve()
     constants_name = Path(
@@ -1221,9 +1227,8 @@ def materialize_native_avm_fixture(
         # Copy the independent Main meters in that same phase; do not shift or
         # interpolate OUT samples after the simulation to manufacture KCL.
         for name in KCL_MEASUREMENTS:
-            writer.add(main, prefix + "_kcl_sample_" + name, "master:gain",
-                       {"G": "1.0", "Dim": "1", "COM": "Previous network solution, aligned with arm exports"},
-                       {"IN:Dim": prefix + "_" + name, "OUT:Dim": prefix + "_KCL_" + name})
+            writer.add(main, prefix + "_kcl_sample_" + name, NATIVE_SCOPE + ":" + SAMPLE_NAME, {},
+                       {"IN": prefix + "_" + name, "OUT": prefix + "_KCL_" + name})
     for name, signal in selected_signals.items():
         writer.add(
             main,

@@ -37,6 +37,9 @@ def diagnose_native_arm_energy(
                 for position in ("UPPER", "LOWER"):
                     prefix = f"{station}_{phase}_{position}"
                     required = [prefix + suffix for suffix in ("_I", "_W", "_VT", "_VCAP")]
+                    measured_loss = trace.get(prefix + "_PLOSS")
+                    if measured_loss is not None:
+                        required.append(prefix + "_PLOSS")
                     if any(
                         name not in trace
                         or len(trace[name]) != len(times)
@@ -50,7 +53,7 @@ def diagnose_native_arm_energy(
                     terminal = [voltage[i] * current[i] for i in indexes]
                     passive_loss = [
                         resistance * current[i] ** 2
-                        + loss * max(0.0, min(1.0, 2 * capacitor[i] / floor))
+                        + (measured_loss[i] if measured_loss is not None else loss * max(0.0, min(1.0, 2 * capacitor[i] / floor)))
                         for i in indexes
                     ]
 

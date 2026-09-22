@@ -103,6 +103,13 @@ def test_native_bundle_contains_physical_arm_control_and_coupled_cable(
     assert all(measurement_ports[name] == ("Input", "Real") for name in ("VA", "VB", "VC", "IA", "IB", "IC", "VDC", "IDC"))
     assert all(measurement_ports[name] == ("Output", "Real") for name in ("P", "Q"))
     controller = definitions[CLOSED_LOOP_CONTROL_NAME]
+    for definition_name, parameter_name in (
+        (CLOSED_LOOP_CONTROL_NAME, "Q_Order_MVAr"),
+        ("MMCControlErrors", "Q_Order_MVAr"),
+        (CONTROL_NAME, "Phase_Offset_Deg"),
+    ):
+        field = definitions[definition_name].find(f"./form/category/parameter[@name='{parameter_name}']")
+        assert field.get("min") in (None, "") or float(field.get("min")) <= -200.0
     assert len(controller.findall("./schematic/User[@defn='master:pi_ctlr']")) == 3
     assert len(controller.findall("./schematic/User[@defn='master:realpole']")) == 12
     controller_components = {

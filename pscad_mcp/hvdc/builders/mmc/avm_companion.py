@@ -121,6 +121,21 @@ def average_arm_reference(
     }
 
 
+def limited_nonohmic_current(voltage_kv: float, parameters: AverageArmParameters, step_s: float) -> float:
+    """Dissipate available capacitor energy without empty-state current demand.
+
+    The explicit current/voltage interface spans two solver steps. A maximum
+    discharge rate of 1/8 per step keeps this delayed sink passive near zero;
+    normal charged operation retains the declared constant-power loss.
+    """
+    if not math.isfinite(voltage_kv) or not math.isfinite(step_s) or step_s <= 0:
+        raise ValueError("Loss current requires finite voltage and a positive timestep")
+    if voltage_kv <= 0:
+        return 0.0
+    return min(parameters.P_nonohmic_MW / max(voltage_kv, parameters.V_loss_floor_kV),
+               0.25 * parameters.C_eq_F * voltage_kv / (8.0 * step_s))
+
+
 def predict_coupled_capacitor_voltage(
     voltage_kv: float, storage_current_ka: float, capacitance_f: float, step_s: float
 ) -> float:
@@ -392,7 +407,7 @@ def _paramlist(parent: ET.Element, values: dict[str, Any], **attributes: str) ->
         ET.SubElement(element, "param", {"name": name, "value": str(value)})
 
 
-def _form(parent: ET.Element, parameters: dict[str, float]) -> None:
+def _form(parent: ET.Element, parameters: dict[str, float], *, signed_parameters: tuple[str, ...] = ()) -> None:
     form = ET.SubElement(
         parent,
         "form",
@@ -416,14 +431,15 @@ def _form(parent: ET.Element, parameters: dict[str, float]) -> None:
                 "intent": "Input",
                 "dim": "1",
                 "unit": _PARAMETER_UNITS[name],
-                "min": "0",
+                "min": "" if name in signed_parameters else "0",
             },
         )
         ET.SubElement(parameter, "value").text = str(value)
 
 
 def _definition(
-    root: ET.Element, name: str, ports: dict[str, tuple], parameters: dict[str, float]
+    root: ET.Element, name: str, ports: dict[str, tuple], parameters: dict[str, float],
+    *, signed_parameters: tuple[str, ...] = (),
 ) -> ET.Element:
     element = ET.SubElement(
         root.find("definitions"),
@@ -441,7 +457,7 @@ def _definition(
     _paramlist(
         element, {"Description": "Repository-authored native averaged half-bridge arm"}
     )
-    _form(element, parameters)
+    _form(element, parameters, signed_parameters=signed_parameters)
     svg = ET.SubElement(element, "svg", {"viewBox": "-240 -240 240 240"})
     ET.SubElement(
         svg,
@@ -719,6 +735,7 @@ def _make_library(
       ILOSS = 0.0
       IF ($VCAP .GT. 0.0) THEN
         ILOSS = $P_nonohmic_MW / MAX($VCAP, $V_loss_floor_kV)
+        ILOSS = MIN(ILOSS, 0.25 * $C_eq_F * $VCAP / (8.0 * DELT))
       ENDIF
       $ISTORE = NINSERT * $INORMAL + $ICLAMP - ILOSS
       VPREDICT = MAX(0.0, $VCAP + {CAPACITOR_FEEDBACK_ADVANCE_STEPS} * DELT * $ISTORE / (0.25 * $C_eq_F))
