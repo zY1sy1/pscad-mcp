@@ -103,6 +103,15 @@ def test_native_bundle_contains_physical_arm_control_and_coupled_cable(
     assert all(measurement_ports[name] == ("Input", "Real") for name in ("VA", "VB", "VC", "IA", "IB", "IC", "VDC", "IDC"))
     assert all(measurement_ports[name] == ("Output", "Real") for name in ("P", "Q"))
     controller = definitions[CLOSED_LOOP_CONTROL_NAME]
+    export_names = {
+        item.find("./paramlist/param[@name='Name']").get("value")
+        for item in controller.findall("./schematic/User[@defn='master:export']")
+    }
+    local_labels = {
+        item.find("./paramlist/param[@name='Name']").get("value")
+        for item in controller.findall("./schematic/User[@defn='master:datalabel']")
+    }
+    assert not export_names.intersection(local_labels)
     for definition_name, parameter_name in (
         (CLOSED_LOOP_CONTROL_NAME, "Q_Order_MVAr"),
         ("MMCControlErrors", "Q_Order_MVAr"),

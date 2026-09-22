@@ -485,7 +485,7 @@ def _closed_loop_control(root: ET.Element, master: dict, defaults: dict) -> dict
             "Q_MEAS": "Q_FILTERED",
             "VDC_MEAS": "VDC_FILTERED",
             "POWER_CORRECTION": "CTRL_POWER_CORRECTION",
-            "VDC_REFERENCE": "VDC_REFERENCE",
+            "VDC_REFERENCE": "CTRL_VDC_REFERENCE",
             "ACTIVE_ERROR": "ACTIVE_ERROR",
             "Q_ERROR": "Q_ERROR",
             "BLOCK": "CTRL_BLOCK",
@@ -499,7 +499,7 @@ def _closed_loop_control(root: ET.Element, master: dict, defaults: dict) -> dict
         ("p_filter", "P_MEAS", "P_FILTERED", 10000.0),
         ("q_filter", "Q_MEAS", "Q_FILTERED", 10000.0),
         ("vdc_filter", "VDC_MEAS", "VDC_FILTERED", 2000.0),
-        ("voltage_reference_ramp", "Vdc_Order_kV", "VDC_REFERENCE", 2000.0),
+        ("voltage_reference_ramp", "Vdc_Order_kV", "CTRL_VDC_REFERENCE", 2000.0),
         ("frame_d_filter", "FRAME_D_RAW", "FRAME_D", 2000.0),
         ("frame_q_filter", "FRAME_Q_RAW", "FRAME_Q", 2000.0),
         *((f"energy_difference_{phase}", f"DW{phase}_RAW", f"DW{phase}", 1000.0) for phase in "ABC"),
@@ -610,7 +610,7 @@ def _closed_loop_control(root: ET.Element, master: dict, defaults: dict) -> dict
             "output_" + name,
             "master:export",
             {"Name": name},
-            {"N": "VDC_REFERENCE" if name == "VDC_REFERENCE" else "CTRL_" + name},
+            {"N": "CTRL_" + name},
         )
     writer.verify()
     return {"routes": writer.routes, "electrical_nets": dict(writer.nets)}
