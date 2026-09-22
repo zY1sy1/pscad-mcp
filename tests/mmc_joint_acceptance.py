@@ -668,7 +668,8 @@ def _finalize_run(report, lease, journal, previous_concurrent):
             failed("finalizing_journal", error)
         if lease is not None and not report["cleanup_pending"]:
             try:
-                lease.release(lease.token)
+                if lease.release(lease.token) is not True:
+                    raise RuntimeError("The owned acceptance lease was not released")
                 report["lease_retained"] = False
             except BaseException as error:  # noqa: BLE001 - I/O failure does not imply a running process
                 failed("lease_release", error)

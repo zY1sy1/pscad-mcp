@@ -504,7 +504,7 @@ def test_owned_lifecycle_orders_phases_and_retains_uncertain_cleanup(
     assert "PSCAD_MCP_ACCEPTANCE_CONCURRENT" not in module.os.environ
 
 
-@pytest.mark.parametrize("failure", ["release", "journal", "primary_and_journal"])
+@pytest.mark.parametrize("failure", ["release", "release_false", "journal", "primary_and_journal"])
 def test_finalizer_restores_environment_and_never_leaves_unconfirmed_pass(
     tmp_path, monkeypatch, failure
 ):
@@ -541,6 +541,7 @@ def test_finalizer_restores_environment_and_never_leaves_unconfirmed_pass(
         def release(self, token):
             if failure == "release":
                 raise OSError("lease unlink denied")
+            return failure != "release_false"
 
     assert callable(getattr(module, "_finalize_run", None))
     module._finalize_run(report, Lease(), journal, None)
@@ -548,7 +549,7 @@ def test_finalizer_restores_environment_and_never_leaves_unconfirmed_pass(
     assert report["physical_acceptance_verified"] is False
     assert report["owned_process_cleaned"] is True
     assert report["cleanup_pending"] is False
-    assert report["lease_retained"] is (failure == "release")
+    assert report["lease_retained"] is (failure in {"release", "release_false"})
     assert "PSCAD_MCP_ACCEPTANCE_CONCURRENT" not in module.os.environ
     assert json.loads(journal.path.read_text())["status"] == "FAIL"
     assert report["finalization_errors"]
