@@ -1,10 +1,92 @@
-# Native MMC AVM implementation evidence, 2026-09-22
+# Native MMC AVM implementation evidence, updated 2026-09-23
 
 The public parameterized cable AVM now constructs a native two-station,
 twelve-arm model, preserves the authored XML, checks compiler finalization,
 and leaves unaccepted candidates in staging. Complete MMC acceptance and
-publication are still pending. A steady operating envelope PASS is narrower
-than the required startup, protection, fault, and complete physical contracts.
+publication are still pending. The dq path now passes normal-operation startup,
+steady, energy, protection-inactive and reversal checks. Fault isolation,
+recovery, independent reload and final publication still require fresh evidence.
+
+## Current normal-operation result
+
+- Revision: `60ff800d5d5e8e948a9c32b050203b8446c978e3`.
+- Report: `D:/PSCAD-Workspace/mmc-dq-20260923/attempt-20260923-022955-726008e9/report.json`.
+- SHA-256: `936daf88bec551404ae51712b468c1528e0d1e81994b9b2acbec3a6043e126a2`.
+- Default request: 640 kV, 1000 MW, 60 Hz, Q=0, 100 km cable; no engineering overrides.
+- Equation version v5 selects 75 MJ total arm storage and base modulation 0.85.
+  The DC PI is Kp=0.51528735794 MW/kV, Ti=0.19258648118 s, derived from the
+  cable capacitance, reverse incremental loss and a 2 Hz natural frequency.
+- Assembly, measured startup, both steady operating windows, network identities,
+  dq control and the normal dynamic envelope all PASS. Protection does not trip.
+- Source inputs and code retain their hashes; owned PID 43392 exited.
+- `model_accepted=false`; the public candidate remains staged with state `built`.
+
+| Normal-operation metric | P terminal | Vdc terminal | Limit |
+| --- | ---: | ---: | ---: |
+| Maximum DC voltage deviation | 6.4407% | 4.5309% | 10% |
+| Maximum capacitor-voltage deviation | 8.5326% | 7.4135% | 10% |
+| Peak DC current | 1.08246 pu | 1.08595 pu | 1.25 pu |
+| Peak arm current | 1.03750 pu | 1.11823 pu | 1.25 pu |
+| Minimum dynamic insertion margin | 7.1789% | 9.3534% | 2% |
+
+Steady insertion retains the stricter 5% margin. Reversal has approximately
+0.1763% power overshoot and a one-cycle maximum slew ratio of 1.0762 (limit
+1.10). The direction check declares measured reversal outside an explicit
+0.1% rated-power deadband; the command crosses zero first. No samples are shifted.
+The observed deblock is 0.3029 s and power transfer begins at 0.8362 s.
+
+Measured arm switch/disconnect/clamp losses are now included in energy balance.
+The four steady station residuals are 0.247, 0.447, 0.363 and 0.431 kW, below
+the unchanged relative 1e-6 power-balance tolerance (1 kW at this rating).
+Each arm's positivity, mean energy, ripple, upper/lower mean difference and
+each phase's circulating RMS/second harmonic are checked in both directions.
+
+The normal protection block latches the first overcurrent, voltage, capacitor,
+PLL-loss, saturation-timeout or startup-timeout cause and its time. Both dq
+controllers block and cancel remaining P/Q commands on a trip. Native Fortran
+regressions verify the latch, cause code, transient versus sustained saturation,
+and controller response. This does not yet demonstrate fault isolation or recovery.
+
+## Repairs behind this result and retained counterexamples
+
+- `c00aa95` filters only voltage used for power-to-current normalization (20 ms).
+  Raw voltage feedforward remains in the dq current loop. An independent exact
+  ZOH network regression reproduces the old directional 160 Hz instability.
+- `d3c9eee` uses aligned instantaneous valve power for circulating energy
+  feedforward. The former 20 ms primary-power lag displaced approximately
+  +8.57/-7.59 MJ during the initial power ramp.
+- `6dc46cf` pairs measured arm current with the insertion ratio that actually
+  produced that network solution. The previous varying-ratio interface created
+  about 3 MW per station. Actual generated-equation tests reproduce the defect,
+  including both current signs and timestep convergence. Licensed residuals fell
+  to about 0.05 MW, then below 1 kW after separately measuring physical switch loss.
+- `2975a6c` freezes dq Main and arm execution ordering. Moving schematic blocks
+  had exposed a dependency on automatic sequencing: some arms ran before the
+  controller and others after it. The failed layout attempt is preserved at
+  `D:/PSCAD-Workspace/mmc-dq-20260923/attempt-20260923-020306-f6c80924/report.json`.
+  PSCAD 4.6 pages now use supported 34x44 inch sheets with bounded packing;
+  page-bound warnings are gone. The vendor's manual-sequencing notice remains
+  expected because all critical order numbers are explicitly authored and verified.
+- `595f14f` adds normal dynamic and strict energy acceptance. Its expanded
+  analysis rejected the earlier 64 MJ / m=0.8 request for an 11.4777% capacitor
+  deviation, despite passing steady windows. That evidence is preserved in
+  `D:/PSCAD-Workspace/mmc-dq-20260923/expanded-analysis-021238.json`.
+- `8e9afe3` replaces native primary-voltage/cell-count sizing estimates with
+  valve-circuit load flow and periodic SVM arm-power integration, keeping a 5%
+  mean-energy reserve inside the 10% capacitor envelope. An explicit inadequate
+  storage override is rejected, not silently enlarged. Native cable R and C are
+  derived from frozen donor geometry and included in source/producer hashes.
+
+The single-arm gate, including current loss observability and manual sequencing,
+passed at
+`D:/PSCAD-Workspace/mmc-average-arm-acceptance-20260923/attempt-20260923-023455-ff124ca1/report.json`.
+The full offline run at `60ff800` had 2999 passed, 48 skipped and one failure:
+the ideal single-arm test trace lacked the newly required switch-loss channel.
+That fixture now supplies its known on-resistance loss; all 46 affected
+single-arm/component/energy tests pass. This is not recorded as a fresh full-suite PASS.
+
+The following sections retain historical evidence and are superseded by the
+current normal-operation result where their scope overlaps.
 
 ## Measured startup closure and current control work
 

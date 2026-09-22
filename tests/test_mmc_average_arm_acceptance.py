@@ -42,6 +42,7 @@ def _physical_trace():
             "V_INSERTED",
             "V_ARM",
             "P_NONOHMIC",
+            "P_SWITCH",
         )
     }
     step, vcap, previous_cap_current = 2e-5, 0.0, 0.0
@@ -93,6 +94,7 @@ def _physical_trace():
             + parameters.R_arm_ohm * current
             + parameters.L_arm_H * derivative,
             "P_NONOHMIC": 0.0,
+            "P_SWITCH": parameters.R_on_ohm * current**2,
         }
         for name, value in row.items():
             trace[name].append(value)
