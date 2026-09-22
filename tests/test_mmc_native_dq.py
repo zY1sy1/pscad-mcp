@@ -231,3 +231,14 @@ def test_diagnostic_angle_is_wrapped_without_clipping_its_direction(tmp_path):
     expected = math.atan2(q, d) + 2 * 2 * math.pi * 60 * 0.00005
     assert math.sin(math.radians(angle)) == pytest.approx(math.sin(expected), abs=1e-12)
     assert math.cos(math.radians(angle)) == pytest.approx(math.cos(expected), abs=1e-12)
+
+
+def test_enabled_voltage_vector_respects_the_declared_thirty_degree_limit(tmp_path):
+    arms = "\n".join(f"SIG_{p}_{q}_VCAP = 320.0" for p in "ABC" for q in ("UPPER", "LOWER"))
+    rows = _run_native_equations(tmp_path, DQ_NAME, declarations="",
+        initialize="SIG_STARTUP_READY = 1.0\nSIG_PLL_LOCKED = 1.0\nSIG_VDC_MEAS = 640.0\nSIG_VA = 100.0\nSIG_VB = -136.6025403784439\nSIG_VC = 36.6025403784439\n" + arms,
+        loop="", observations="print *, SIG_ANGLE_COMMAND, SIG_LIMIT_ACTIVE, SQRT(SIG_VD_REFERENCE**2 + SIG_VQ_REFERENCE**2)", steps=1)
+    angle, limited, magnitude = rows[0]
+    assert abs(angle) <= 30.0 + 1e-9
+    assert limited == 1.0
+    assert magnitude == pytest.approx(math.sqrt(20000), abs=1e-8)

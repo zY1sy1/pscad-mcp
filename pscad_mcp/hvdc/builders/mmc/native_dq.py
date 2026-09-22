@@ -24,6 +24,7 @@ DQ_DEFAULTS = {
     "P_nonohmic_MW": 1.1, "Kp_Vdc_MW_per_kV": 0.25, "Ti_Vdc_s": 0.1125,
     "Power_Correction_Limit_MW": 1500.0, "Cable_Loss_MW": 0.0, "Converter_Loss_MW": 15.0,
     "Current_Bandwidth_Hz": 80.0, "Current_Damping": 0.707106781186548,
+    "Angle_Limit_Deg": 30.0,
     "AC_Current_Limit_kA": 3.0, "Transformer_Leakage_ohm": 16.94,
     "Energy_Gain_per_s": 10.0, "Circulating_Gain_ohm": 18.84955592153876,
     "Circulating_Integral_Time_s": 0.05, "Feedback_Filter_s": 0.02,
@@ -42,6 +43,7 @@ DQ_OUTPUTS = {
     "VD_MEASURED": "kV", "VQ_MEASURED": "kV", "VD_REFERENCE": "kV", "VQ_REFERENCE": "kV",
     "ID_INTEGRATOR": "kV", "IQ_INTEGRATOR": "kV", "VDC_INTEGRATOR": "MW",
     "MODULATION_UNCLIPPED": "1",
+    "ANGLE_UNCLIPPED": "deg",
     "ZERO_SEQUENCE_COMMAND": "kV",
     "CAP_VOLTAGE_REFERENCE": "kV", "CHARGE_POWER_REFERENCE": "MW",
     "DC_CHARGE_POWER_REFERENCE": "MW",
@@ -60,6 +62,7 @@ def append_native_pll_and_dq(root: ET.Element) -> None:
     _PARAMETER_UNITS.update({"PLL_Bandwidth_Hz": "Hz", "PLL_Damping": "1", "PLL_Frequency_Limit_Hz": "Hz",
                              "Current_Bandwidth_Hz": "Hz", "Current_Damping": "1",
                              "AC_Current_Limit_kA": "kA", "Transformer_Leakage_ohm": "ohm"})
+    _PARAMETER_UNITS["Angle_Limit_Deg"] = "deg"
     pll = _definition(root, PLL_NAME, _ports(("VA", "VB", "VC"), PLL_OUTPUTS), PLL_DEFAULTS)
     _script(pll, "Dsdyn", """#STORAGE REAL:6
 #LOCAL REAL ALPHA
@@ -190,6 +193,9 @@ def _dq_script() -> str:
 #LOCAL REAL CHARGE_POWER
 #LOCAL REAL CHARGE_DURATION
 #LOCAL REAL VDC_RATE
+#LOCAL REAL ANGLE_LIMIT
+#LOCAL REAL ANGLE_RAW
+#LOCAL REAL VMAG
 #LOCAL REAL WREF_RATE
       IF (TIMEZERO .OR. $RESTART .GE. 0.5) THEN
         DO K = 0, 22
@@ -328,6 +334,16 @@ def _dq_script() -> str:
       ENDIF
       VDREF = VD - 0.5 * $R_arm_ohm * ID + 0.5 * OMEGA * $L_arm_H * IQ + KP * ED + STORF(NSTORF+6)
       VQREF = VQ - 0.5 * $R_arm_ohm * IQ - 0.5 * OMEGA * $L_arm_H * ID + KP * EQ + STORF(NSTORF+7)
+      ANGLE_RAW = MODULO(ATAN2(VQREF, VDREF) + 2.0 * OMEGA * DELT + 3.141592653589793, 6.283185307179586) - 3.141592653589793
+      $ANGLE_UNCLIPPED = ANGLE_RAW * 57.2957795130823
+      ANGLE_LIMIT = $Angle_Limit_Deg / 57.2957795130823
+      IF ($BLOCK .LT. 0.5 .AND. ABS(ANGLE_RAW) .GT. ANGLE_LIMIT) THEN
+        VMAG = SQRT(VDREF**2 + VQREF**2)
+        ANGLE_RAW = MAX(-ANGLE_LIMIT, MIN(ANGLE_LIMIT, ANGLE_RAW)) - 2.0 * OMEGA * DELT
+        VDREF = VMAG * COS(ANGLE_RAW)
+        VQREF = VMAG * SIN(ANGLE_RAW)
+        $LIMIT_ACTIVE = 1.0
+      ENDIF
       $MODULATION_UNCLIPPED = 2.0 * SQRT(VDREF**2 + VQREF**2) / $Vdc_Order_kV
       IF ($MODULATION_UNCLIPPED .GT. 0.98) THEN
         VDREF = VDREF * 0.98 / $MODULATION_UNCLIPPED
