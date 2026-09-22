@@ -1427,6 +1427,7 @@ def materialize_native_avm_fixture(
     if control_kind == "dq_current":
         writer.add(main, "native_protection", NATIVE_SCOPE + ":" + PROTECTION_NAME,
                    {**PROTECTION_DEFAULTS, "Frequency_Hz": frequency_hz, "Vdc_Order_kV": vdc_order_kv,
+                    "P_AC_Voltage_kV": station_p_ac_voltage_kv, "V_AC_Voltage_kV": station_vdc_ac_voltage_kv,
                     "Arm_Current_Limit_kA": precharge_current_limit_ka},
                    {**{name: name for name in PROTECTION_INPUTS}, "RESTART": restart_signal,
                     "FAULT_ACTIVE": "FAULT_ACTIVE" if fault_kind is not None else "NATIVE_ZERO",

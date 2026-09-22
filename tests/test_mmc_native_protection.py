@@ -18,6 +18,7 @@ def _healthy():
     return "\n".join(["SIG_PRECHARGE_READY = 1.0", "SIG_POWER_READY = 1.0",
         *(f"SIG_{s}_VDC = 640.0\nSIG_{s}_PLL_LOCKED = 1.0" for s in ("P", "V")),
         *(f"SIG_{s}_CABLE_VDC = 640.0\nSIG_{s}_CABLE_VPOS = 320.0\nSIG_{s}_CABLE_VNEG = -320.0" for s in ("P", "V")),
+        *(f"SIG_{s}_V_{p} = 200.0" for s in ("P", "V") for p in "ABC"),
         *(f"SIG_{s}_{p}_{q}_VCAP = 320.0" for s in ("P", "V") for p in "ABC" for q in ("UPPER", "LOWER"))])
 
 
@@ -92,3 +93,16 @@ SIG_RESTART = 0.0
 if (TIME >= 0.18) SIG_RESTART = 1.0""",
         observations="if (sample == 2010 .or. sample == 4000) print *, SIG_P_A_UPPER_I, SIG_P_ARM_PEAK", steps=4000)
     assert rows == [[0.0, 7.0], [0.0, 7.0]]
+
+
+def test_phase_loss_detector_rejects_a_short_without_tripping_at_sinusoidal_zero_crossings(tmp_path):
+    waves = "\n".join(f"SIG_{s}_V_{p} = 187.794213613 * SIN(6.283185307179586 * 60.0 * TIME - {i} * 2.09439510239320)"
+                      for s in ("P", "V") for i, p in enumerate("ABC"))
+    rows = _run_native_equations(tmp_path, PROTECTION_NAME, definition=_definition(), declarations="",
+        initialize=_healthy(), loop=waves + "\n" + """SIG_PRECHARGE_READY = 0.0
+if (TIME >= 0.05) SIG_PRECHARGE_READY = 1.0
+if (TIME >= 0.2) SIG_P_V_A = 0.0""",
+        observations="if (sample == 3900 .or. sample == 4020) print *, SIG_TRIP, SIG_CODE, SIG_TRIP_TIME", steps=4020)
+    assert rows[0] == [0.0, 0.0, -1.0]
+    assert rows[1][:2] == [1.0, 1024.0]
+    assert 0.2 <= rows[1][2] <= 0.2001
