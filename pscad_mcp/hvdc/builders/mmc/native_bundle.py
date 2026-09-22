@@ -1035,6 +1035,9 @@ def materialize_native_avm_fixture(
         Path(master_path).resolve()
     )
     library_metadata = read_definition_metadata_document(library.read_bytes())
+    cable_evidence = json.loads(Path(constants_evidence).read_text(encoding="utf-8"))
+    capacitances = [float(c["core_sheath_capacitance_f_per_km"]) for c in cable_evidence["configuration"]["cables"]]
+    dc_link_capacitance_f = float(cable_evidence["length_km"]) / math.fsum(1.0 / c for c in capacitances)
     root = _project(project_name, library=False)
     settings = root.find("./paramlist[@name='Settings']")
     for name, value in {
@@ -1208,6 +1211,7 @@ def materialize_native_avm_fixture(
                 "Deblock_Time_s": deblock_time_s, "Reversal_Time_s": reversal_time_s,
                 "Ramp_Time_s": ramp_time_s, "Reversal_Duration_s": reversal_duration_s,
                 "Startup_Charge_Time_s": startup_charge_time_s,
+                "DC_Link_Capacitance_F": dc_link_capacitance_f,
             }
             control = writer.add(main, prefix + "_dq_controller", NATIVE_SCOPE + ":" + DQ_NAME, dq_parameters,
                                  {**{name: prefix + "_" + name for name in DQ_INPUTS if name not in ("P_MEAS", "Q_MEAS", "VDC_MEAS", "STARTUP_READY", "START_TIME", "POWER_READY", "POWER_START", "PROTECTION_TRIP", "RESTART", "RECOVERY_MODE", "VA", "VB", "VC", "IA", "IB", "IC")},
@@ -1568,6 +1572,7 @@ def materialize_native_avm_fixture(
             "simulation_duration_s": simulation_duration_s,
             "fault_kind": fault_kind,
             "dc_reactor_inductance_h": dc_reactor_inductance_h,
+            "dc_link_capacitance_f": dc_link_capacitance_f,
             "time_step_s": time_step_s,
             "output_step_s": output_step_s,
             "cable_length_km": library_receipt["cable_length_km"],

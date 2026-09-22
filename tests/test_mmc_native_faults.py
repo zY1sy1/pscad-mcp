@@ -53,6 +53,7 @@ def test_trip_without_postfault_control_recovery_cannot_pass(evidence):
     trace["FAULT_END"] = [2.15] * len(time)
     trace["FAULT_ACTIVE"] = [float(2.1 <= t < 2.15) for t in time]
     trace["FAULT_I_DC"] = [0.2 if 2.1 <= t < 2.15 else 0.0 for t in time]
+    trace["P_CABLE_VDC"] = [0.02 if 2.1 <= t < 2.15 else 640.0 for t in time]
     trace["PROTECTION_TRIP"] = [float(t >= 2.101) for t in time]
     trace["PROTECTION_TIME"] = [2.101 if t >= 2.101 else -1.0 for t in time]
     trace["PROTECTION_CODE"] = [1.0 if t >= 2.101 else 0.0 for t in time]

@@ -19,6 +19,7 @@ DQ_DEFAULTS = {
     "Control_Mode": 0.0,
     "Startup_Charge_Time_s": 0.5,
     "Recovery_Charge_Time_s": 0.1,
+    "DC_Link_Capacitance_F": 0.0,
     "C_eq_F": 6.510416666666667e-5, "L_arm_H": 0.05, "R_arm_ohm": 0.15,
     "P_nonohmic_MW": 1.1, "Kp_Vdc_MW_per_kV": 0.25, "Ti_Vdc_s": 0.1125,
     "Power_Correction_Limit_MW": 1500.0, "Cable_Loss_MW": 0.0, "Converter_Loss_MW": 15.0,
@@ -43,6 +44,7 @@ DQ_OUTPUTS = {
     "MODULATION_UNCLIPPED": "1",
     "ZERO_SEQUENCE_COMMAND": "kV",
     "CAP_VOLTAGE_REFERENCE": "kV", "CHARGE_POWER_REFERENCE": "MW",
+    "DC_CHARGE_POWER_REFERENCE": "MW",
     "POWER_VOLTAGE_BASE": "kV",
     "VALVE_POWER": "MW",
     "LIMIT_ACTIVE": "1", "LIMIT_DURATION": "s",
@@ -187,6 +189,7 @@ def _dq_script() -> str:
 #LOCAL REAL CHARGE_SCALE
 #LOCAL REAL CHARGE_POWER
 #LOCAL REAL CHARGE_DURATION
+#LOCAL REAL VDC_RATE
 #LOCAL REAL WREF_RATE
       IF (TIMEZERO .OR. $RESTART .GE. 0.5) THEN
         DO K = 0, 22
@@ -251,7 +254,13 @@ def _dq_script() -> str:
         $SEQUENCE = 3.0
       ENDIF
       $VDC_REFERENCE = STORF(NSTORF+20) + CHARGE_SCALE * ($Vdc_Order_kV - STORF(NSTORF+20))
-      VERR = $VDC_REFERENCE - STORF(NSTORF+1)
+! The cable energy ramp is a known demand. Its feedforward must stop with
+! the reference ramp; raw DC feedback avoids retaining the ramp's filter lag.
+      VDC_RATE = 0.0
+      IF ($STARTUP_READY .GE. 0.5 .AND. CHARGE_SCALE .LT. 1.0) VDC_RATE = ($Vdc_Order_kV - STORF(NSTORF+20)) / CHARGE_DURATION
+      $DC_CHARGE_POWER_REFERENCE = 0.0
+      IF ($Control_Mode .GE. 0.5 .AND. $BLOCK .LT. 0.5) $DC_CHARGE_POWER_REFERENCE = $DC_Link_Capacitance_F * $VDC_REFERENCE * VDC_RATE
+      VERR = $VDC_REFERENCE - $VDC_MEAS
       IF ($Control_Mode .LT. 0.5) VERR = 0.0
       PCORR = $Kp_Vdc_MW_per_kV * VERR + STORF(NSTORF)
       IF ($BLOCK .LT. 0.5 .AND. STORF(NSTORF+18) .LT. 0.5) THEN
@@ -261,7 +270,7 @@ def _dq_script() -> str:
       ENDIF
       $POWER_CORRECTION = MAX(-$Power_Correction_Limit_MW, MIN($Power_Correction_Limit_MW, $Kp_Vdc_MW_per_kV * VERR + STORF(NSTORF)))
       IF ($Control_Mode .GE. 0.5) PREF = -PREF + $POWER_CORRECTION + $Converter_Loss_MW + $Cable_Loss_MW * (PREF / $P_Order_MW)**2
-      PREF = PREF + CHARGE_POWER
+      PREF = PREF + CHARGE_POWER + $DC_CHARGE_POWER_REFERENCE
       IF ($PROTECTION_TRIP .GE. 0.5) THEN
         PREF = 0.0
         QREF = 0.0

@@ -192,3 +192,19 @@ if (TIME >= 0.8) SIG_STARTUP_READY = 1.0
 if (TIME >= 1.0) SIG_POWER_READY = 1.0""",
         observations="if (sample == 26000 .or. sample == 40000) print *, SIG_P_REFERENCE, SIG_SEQUENCE, SIG_BLOCK", steps=40000)
     assert rows == [[-1000.0, 3.0, 0.0], [-1000.0, 3.0, 0.0]]
+
+
+def test_dc_charge_feedforward_accounts_for_the_actual_cable_energy_increment(tmp_path):
+    arms = "\n".join(f"SIG_{p}_{q}_VCAP = 320.0" for p in "ABC" for q in ("UPPER", "LOWER"))
+    rows = _run_native_equations(tmp_path, DQ_NAME, declarations="real(8) :: dc_energy",
+        initialize="""PAR_Control_Mode = 1.0
+PAR_DC_Link_Capacitance_F = 0.00002647426962004457
+SIG_START_TIME = 0.1
+SIG_VDC_MEAS = 500.0
+SIG_PLL_LOCKED = 1.0
+dc_energy = 0.0""" + "\n" + arms,
+        loop="SIG_STARTUP_READY = 0.0\nif (TIME >= 0.1) SIG_STARTUP_READY = 1.0",
+        observations="""dc_energy = dc_energy + DELT * SIG_DC_CHARGE_POWER_REFERENCE
+if (sample == 16000) print *, dc_energy, SIG_DC_CHARGE_POWER_REFERENCE""", steps=16000)
+    assert rows[0][0] == pytest.approx(0.5 * 26.47426962004457e-6 * (640.0**2 - 500.0**2), rel=2e-4)
+    assert rows[0][1] == 0.0
