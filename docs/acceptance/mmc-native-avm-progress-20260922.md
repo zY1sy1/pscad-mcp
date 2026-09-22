@@ -6,7 +6,60 @@ and leaves unaccepted candidates in staging. Complete MMC acceptance and
 publication are still pending. A steady operating envelope PASS is narrower
 than the required startup, protection, fault, and complete physical contracts.
 
-## Later implementation and evidence
+## Measured startup closure and current control work
+
+At `0d7c1cd`, the default 40 MJ request passes measured precharge, forward and
+reverse steady envelopes, and network identities. It deblocks at **0.2974 s**
+after both stations satisfy the voltage, current, and energy-convergence hold;
+time alone cannot release the valves. Peak precharge current is 1.473304 kA,
+the final hold current is at most 0.055451 kA, and the station-energy excursion
+over the two-cycle hold is 1.1935% (limit 2%). Operating windows are anchored
+to the recorded readiness transition, and the requested one-second power
+reversal still lasts one second.
+
+- Report: `D:/PSCAD-Workspace/mmc-native-avm-precharge-20260922/attempt-20260922-230206-81f38406/report.json`.
+- SHA-256: `44d382427514b08b8a4a79ae9497002b0a63694b5859118f32016bad93a86694`.
+- Source and code hashes unchanged; owned PID 49328 exited.
+- Complete offline regression at this revision: **2949 passed, 48 skipped**,
+  134.38 s.
+
+This remains a scoped result: steady insertion margin and arm-energy ripple
+do not yet meet the complete physical contract. Subsequent controller work
+is not covered by this historical PASS.
+
+Later work adds a bounded circulating-current integrator and exposes its
+actual state/reference. A compiled native-Fortran regression closes the exact
+controller equations around an RL plant and verifies rejection of positive
+and negative voltage bias plus reset while blocked. This removes the large
+mean energy offset seen with proportional-only circulating control, but did
+not by itself stabilize all parameterized operating points. An unfiltered
+power-feedforward experiment worsened the result and was reverted. The arm
+off-state resistance is restored to 100 Mohm; a per-device vendor default of
+1 Mohm created unintended leakage when applied to an entire averaged stack.
+
+The experimental `dq_current` path now contains an explicit synchronous-frame
+PLL and dq current controllers. Native-Fortran tests cover frequency changes,
+phase steps, loss of voltage, and bidirectional current/power tracking through
+an inductive plant. PLL lock acquisition requires a two-cycle hold; genuine
+voltage loss clears lock immediately, while sustained phase/frequency loss
+uses hysteresis to avoid repeated blocking on a brief phase transient. Its
+licensed two-station acceptance is still being completed. Neither tests nor
+an independent-controller result establish whole-model acceptance.
+
+Two concurrent attempts at `d589f84` encountered a vendor runtime socket
+conflict (`WinSock #10048` on port 30129) and a companion run stopped at
+0.0901 s. These reports are retained under `mmc-native-avm-circpi*-20260922`.
+Their owned instances exited. Later licensed runs are serialized, while
+keeping isolated workspaces and ownership checks. The runner now rejects
+incomplete time coverage before interpreting precharge and distinguishes
+runtime interruption from a complete-run physical failure.
+
+Candidate directory hashes use a 20-character prefix to avoid PSCAD 4.6's
+legacy path-length limit. Full plan hashes remain in the evidence; an existing
+candidate directory is never reused. Native compiler page-bound warnings
+also remain a delivery/layout issue to close.
+
+## Earlier implementation and evidence
 
 The following results supersede the original implementation below within their
 declared scope. **Full model acceptance remains pending.** The native public
@@ -153,12 +206,14 @@ threshold was increased to obtain the passing result.
 
 ## Work still required
 
-1. Complete independent pole-voltage/KCL, precharge/readiness, modulation,
-   protection, PLL, and full arm-energy/ripple checks and their measured outputs.
+1. Close the complete modulation, PLL/dq, protection, power/loss balance,
+   and arm-energy/ripple contracts with fresh licensed evidence. Network
+   identities and measured precharge have separate scoped PASS evidence.
 2. Complete the applicable native AVM fault scenarios and recovery acceptance.
    Existing PWM timing/fault work remains owned by its separate worktrees.
-3. Finish physical cable-profile consistency in all planning/derivation paths
-   and validate additional requested operating points.
+3. Complete native modulation/ripple sizing consistency and validate additional
+   requested operating points. Native cable geometry and DC resistance are
+   already bound into planning and verified against generated constants.
 4. Complete independent reload/portable dependency delivery and the accepted
    candidate promotion path. Fixed-profile golden acceptance still requires
    an independently reviewed reference; no golden data has been fabricated.
