@@ -44,6 +44,19 @@ def test_native_dq_fixture_connects_measured_valve_signals_and_exports_internal_
     assert report["channels"]["V_ID_REFERENCE"] == "kA"
     assert report["channels"]["V_ID_INTEGRATOR"] == "kV"
     assert report["channels"]["P_LIMIT_DURATION"] == "s"
+    canvas = root.find("./definitions/Definition[@name='Main']/schematic")
+    assert canvas.find("./paramlist/param[@name='auto_sequence']").get("value") == "0"
+    arms = canvas.findall(f"User[@defn='{NATIVE_SCOPE}:MMCAverageArm']")
+    # Every phase must read the same preceding command. A geometry-dependent
+    # mixture of arm calls before/after the controller changes the plant delay.
+    assert max(int(a.get("z")) for a in arms) < min(int(c.get("z")) for c in controllers)
+    sequence = {c.get("id"): int(c.get("z")) for c in canvas.findall("User")}
+    calls = root.findall("./hierarchy/call/call/call")
+    assert [sequence[c.get("link")] for c in calls] == sorted(sequence[c.get("link")] for c in calls)
+    for item in canvas:
+        if item.tag in {"User", "Wire"}:
+            assert 0 < int(item.get("x")) < 6336
+            assert 0 < int(item.get("y")) < 4896
 
 
 def test_native_circulating_pi_rejects_stationary_voltage_bias(constants_evidence, installed_sources, tmp_path):

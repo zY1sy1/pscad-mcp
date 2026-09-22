@@ -406,7 +406,7 @@ def _project(name: str, *, library: bool) -> ET.Element:
     for size in root.findall(
         "./definitions/Definition/schematic[@classid='UserCanvas']/paramlist/param[@name='size']"
     ):
-        size.set("value", "5")
+        size.set("value", "4")
     for element in root.iter():
         for key, value in tuple(element.attrib.items()):
             if value.startswith(previous + ":"):
@@ -471,8 +471,8 @@ def _definition(
         element, {"Description": "Repository-authored native averaged half-bridge arm"}
     )
     _form(element, parameters, signed_parameters=signed_parameters)
-    top = min([-198, *(port[1] - 18 for port in ports.values())])
-    bottom = max([198, *(port[1] + 18 for port in ports.values())])
+    top = min([-36, *(port[1] - 18 for port in ports.values())])
+    bottom = max([36, *(port[1] + 18 for port in ports.values())])
     svg = ET.SubElement(element, "svg", {"viewBox": f"-240 {top - 36} 240 {bottom + 36}"})
     ET.SubElement(
         svg,
@@ -511,6 +511,17 @@ def _script(definition: ET.Element, segment: str, text: str) -> None:
     ET.SubElement(script, "segment", {"name": segment}).text = text
 
 
+def _manual_sequence(definition: ET.Element, groups: tuple[tuple[str, ...], ...]) -> None:
+    """Freeze Dsdyn feedback boundaries independently of schematic position."""
+    canvas = definition.find("schematic")
+    canvas.find("./paramlist/param[@name='auto_sequence']").set("value", "0")
+    priority = {name: index + 1 for index, names in enumerate(groups) for name in names}
+    components = sorted(canvas.findall("User"), key=lambda c: (
+        priority.get(c.get("defn", "").split(":")[-1], 0), int(c.get("id"))))
+    for index, component in enumerate(components, 1):
+        component.set("z", str(index * 10))
+
+
 class _Writer:
     def __init__(
         self,
@@ -532,7 +543,8 @@ class _Writer:
             list
         )
         self.counts: dict[str, int] = defaultdict(int)
-        self.rows: dict[str, list[int]] = defaultdict(lambda: [108, 108])
+        self.blocks: dict[str, list[tuple]] = defaultdict(list)
+        self.layout_complete = False
 
     def identifier(self) -> str:
         self.sequence += 1
@@ -569,7 +581,7 @@ class _Writer:
                 canvas,
                 {
                     "show_grid": 0,
-                    "size": 5,
+                    "size": 4,
                     "orient": 1,
                     "show_border": 0,
                     "monitor_bus_voltage": 0,
@@ -616,17 +628,9 @@ class _Writer:
         index = self.counts[name]
         self.counts[name] += 1
         native = self.metadata(scoped)
-        extent = 36 if scoped == "master:pgb" else 216
-        top = min([-extent, *(port.y - 36 for port in native.ports)])
-        bottom = max([extent, *(port.y + 36 for port in native.ports)])
-        row = self.rows[name]
-        if index and index % 12 == 0:
-            row[0] = row[1] + 108
-        point = (270 + (index % 12) * 1008, row[0] - top)
-        row[1] = max(row[1], point[1] + bottom)
-        if row[1] >= 14300:
-            raise ValueError("Native schematic exceeds the 100 by 100 inch canvas")
+        point = (180 + (index % 6) * 432, 270 + (index // 6) * 432)
         component = self.component(definition, role, scoped, parameters, point)
+        members = [component]
         for port_name, signal in bindings.items():
             occurrence = (
                 _MASTER_WRITER_PORTS[scoped.split(":", 1)[1]][port_name][3]
@@ -670,6 +674,7 @@ class _Writer:
             )
             ET.SubElement(wire, "vertex", {"x": "0", "y": "0"})
             ET.SubElement(wire, "vertex", {"x": str(dx), "y": str(dy)})
+            members.extend((label, wire))
             self.routes.append(
                 {
                     "definition": name,
@@ -692,9 +697,36 @@ class _Writer:
             )
             if kind == "electrical":
                 self.nets[name][signal].append(f"{role}:{port_name}")
+        top = min([-36, *(port.y - 36 for port in native.ports)])
+        bottom = max([36, *(port.y + 36 for port in native.ports)])
+        self.blocks[name].append((top, bottom, point, members))
         return component
 
     def verify(self) -> None:
+        if not self.layout_complete:
+            # PSCAD 4.6 supports 34x44 inch landscape (6336x4896 XML units).
+            # Pack complete local wire/label groups into twelve columns. Tall
+            # controllers go first; probes fill the remaining column heights.
+            offsets = {}
+            for name, blocks in self.blocks.items():
+                heights = [108] * 12
+                for top, bottom, old, members in sorted(blocks, key=lambda b: b[0] - b[1]):
+                    column = min(range(12), key=heights.__getitem__)
+                    point = (216 + 504 * column, heights[column] - top)
+                    heights[column] = point[1] + bottom + 36
+                    if heights[column] > 4788:
+                        raise ValueError("Native schematic exceeds the PSCAD 4.6 page")
+                    dx, dy = point[0] - old[0], point[1] - old[1]
+                    for member in members:
+                        member.set("x", str(int(member.get("x")) + dx))
+                        member.set("y", str(int(member.get("y")) + dy))
+                        offsets[member.get("id")] = (dx, dy)
+                self.ports[name] = [((point[0] + offsets[owner][0], point[1] + offsets[owner][1]), owner, kind)
+                                    for point, owner, kind in self.ports[name]]
+            for route in self.routes:
+                dx, dy = offsets[route["endpoints"][0]["component_id"]]
+                route["vertices"] = [[x + dx, y + dy] for x, y in route["vertices"]]
+            self.layout_complete = True
         for route in self.routes:
             (x1, y1), (x2, y2) = route["vertices"]
             owners = {endpoint["component_id"] for endpoint in route["endpoints"]}
@@ -957,6 +989,7 @@ def _make_library(
     }
     for name, signal in signals.items():
         add("output_" + name, "export", {"Name": name}, {"N": signal})
+    _manual_sequence(arm, (("MMCAverageCoupling",), ("varrlc", "src_ccin_1", "source_1", "breaker1", "peswitch"), ("export",)))
     writer.verify()
     return root, writer
 

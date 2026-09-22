@@ -18,6 +18,7 @@ from .avm_companion import (
     _audit_master,
     _definition,
     _make_library,
+    _manual_sequence,
     _project,
     _script,
     _sha,
@@ -1392,6 +1393,9 @@ def materialize_native_avm_fixture(
             },
             {"Signl": signal},
         )
+    if control_kind == "dq_current":
+        _manual_sequence(main, ((MEASUREMENT_NAME, SAMPLE_NAME), ("MMCAverageArm",),
+                                (PLL_NAME,), (STARTUP_NAME,), (DQ_NAME,), ("pgb",)))
     writer.verify()
     arm_instances = {
         "P_A_UPPER": 0,
@@ -1452,6 +1456,11 @@ def materialize_native_avm_fixture(
                     "instance": "0",
                 },
             )
+    if control_kind == "dq_current":
+        sequence = {c.get("id"): int(c.get("z")) for c in main.findall("./schematic/User")}
+        for call in hierarchy:
+            call.set("z", str(sequence[call.get("link")]))
+        hierarchy[:] = sorted(hierarchy, key=lambda call: int(call.get("z")))
     project = folder / (project_name + ".pscx")
     project_hash = _write_new(project, root)
     receipt = {
