@@ -20,7 +20,7 @@ from .parametric_models import (
 )
 
 
-EQUATION_VERSION = "mmc-parametric-v5"
+EQUATION_VERSION = "mmc-parametric-v6"
 
 _PWM_REFERENCE: dict[str, Any] = {
     "evidence": "audited-template-reference-v1",
@@ -295,6 +295,10 @@ def _engine_candidates(
     switching_frequency = float(reference.get("switching_frequency_hz", 0.0))
     control_sample = float(reference["control_sample_time_s"])
     nominal_step = min(control_sample / 5.0, 1.0 / switching_frequency / 40.0) if switching_frequency else control_sample / 2.0
+    if "native_cable_profile_hash" in common:
+        # The nonlinear isolation/MOV network needs the demonstrated 10 us
+        # energy accuracy; shorter lines also retain the propagation bound.
+        nominal_step = min(control_sample / 10.0, request.dc_link.length_km / 300_000.0 / 20.0)
     base_settings = {
         "time_step_s": nominal_step,
         "output_step_s": max(nominal_step, control_sample),

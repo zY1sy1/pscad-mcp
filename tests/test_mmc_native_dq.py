@@ -176,3 +176,19 @@ if (sample == 16000) print *, accumulated_charge, SIG_P_REFERENCE, SIG_SEQUENCE
     expected_energy = 3 * 0.0001041666666666667 * (320.0**2 - 250.0**2)
     assert rows[0][0] == pytest.approx(expected_energy, rel=2e-4)
     assert rows[0][1] == 0.0 and rows[0][2] == 4.0
+
+
+def test_recovery_keeps_reverse_power_without_replaying_the_initial_reversal(tmp_path):
+    arms = "\n".join(f"SIG_{p}_{q}_VCAP = 320.0" for p in "ABC" for q in ("UPPER", "LOWER"))
+    rows = _run_native_equations(tmp_path, DQ_NAME, declarations="",
+        initialize="""SIG_RECOVERY_MODE = 1.0
+SIG_START_TIME = 0.8
+SIG_POWER_START = 1.0
+SIG_VDC_MEAS = 640.0
+SIG_PLL_LOCKED = 1.0""" + "\n" + arms,
+        loop="""SIG_STARTUP_READY = 0.0
+SIG_POWER_READY = 0.0
+if (TIME >= 0.8) SIG_STARTUP_READY = 1.0
+if (TIME >= 1.0) SIG_POWER_READY = 1.0""",
+        observations="if (sample == 26000 .or. sample == 40000) print *, SIG_P_REFERENCE, SIG_SEQUENCE, SIG_BLOCK", steps=40000)
+    assert rows == [[-1000.0, 3.0, 0.0], [-1000.0, 3.0, 0.0]]

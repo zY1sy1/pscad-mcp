@@ -18,6 +18,7 @@ DQ_DEFAULTS = {
     "Deblock_Time_s": 0.1, "Ramp_Time_s": 0.2, "Reversal_Time_s": 1.0, "Reversal_Duration_s": 1.0,
     "Control_Mode": 0.0,
     "Startup_Charge_Time_s": 0.5,
+    "Recovery_Charge_Time_s": 0.1,
     "C_eq_F": 6.510416666666667e-5, "L_arm_H": 0.05, "R_arm_ohm": 0.15,
     "P_nonohmic_MW": 1.1, "Kp_Vdc_MW_per_kV": 0.25, "Ti_Vdc_s": 0.1125,
     "Power_Correction_Limit_MW": 1500.0, "Cable_Loss_MW": 0.0, "Converter_Loss_MW": 15.0,
@@ -29,7 +30,7 @@ DQ_DEFAULTS = {
 }
 ARM_INPUTS = tuple(f"{p}_{q}_{s}" for p in "ABC" for q in ("UPPER", "LOWER") for s in ("VCAP", "I"))
 DQ_INPUTS = ("P_MEAS", "Q_MEAS", "VDC_MEAS", "PLL_ANGLE", "PLL_LOCKED", "STARTUP_READY", "START_TIME",
-             "POWER_READY", "POWER_START", "PROTECTION_TRIP",
+             "POWER_READY", "POWER_START", "PROTECTION_TRIP", "RESTART", "RECOVERY_MODE",
              "VA", "VB", "VC", "IA", "IB", "IC", *ARM_INPUTS)
 DQ_OUTPUTS = {
     **{f"M_{p}_{q}{suffix}": "1" for p in "ABC" for q in ("UPPER", "LOWER") for suffix in ("", "_RAW")},
@@ -185,8 +186,9 @@ def _dq_script() -> str:
 #LOCAL REAL VCAP_RATE
 #LOCAL REAL CHARGE_SCALE
 #LOCAL REAL CHARGE_POWER
+#LOCAL REAL CHARGE_DURATION
 #LOCAL REAL WREF_RATE
-      IF (TIMEZERO) THEN
+      IF (TIMEZERO .OR. $RESTART .GE. 0.5) THEN
         DO K = 0, 22
           STORF(NSTORF+K) = 0.0
         ENDDO
@@ -223,9 +225,11 @@ def _dq_script() -> str:
       ENDIF
       CHARGE_SCALE = 0.0
       VCAP_RATE = 0.0
+      CHARGE_DURATION = $Startup_Charge_Time_s
+      IF ($RECOVERY_MODE .GE. 0.5) CHARGE_DURATION = $Recovery_Charge_Time_s
       IF ($STARTUP_READY .GE. 0.5) THEN
-        CHARGE_SCALE = MIN(1.0, MAX(0.0, (TIME - $START_TIME) / $Startup_Charge_Time_s))
-        IF (CHARGE_SCALE .LT. 1.0) VCAP_RATE = ($Vdc_Order_kV - STORF(NSTORF+19)) / $Startup_Charge_Time_s
+        CHARGE_SCALE = MIN(1.0, MAX(0.0, (TIME - $START_TIME) / CHARGE_DURATION))
+        IF (CHARGE_SCALE .LT. 1.0) VCAP_RATE = ($Vdc_Order_kV - STORF(NSTORF+19)) / CHARGE_DURATION
       ENDIF
       VCAP_REFERENCE = STORF(NSTORF+19) + CHARGE_SCALE * ($Vdc_Order_kV - STORF(NSTORF+19))
       CHARGE_POWER = 1.5 * $C_eq_F * VCAP_REFERENCE * VCAP_RATE
@@ -235,12 +239,14 @@ def _dq_script() -> str:
       SCALE = 0.0
       IF ($POWER_READY .GE. 0.5) SCALE = MIN(1.0, MAX(0.0, (TIME - $POWER_START) / $Ramp_Time_s))
       PREF = SCALE * $P_Order_MW
+      IF ($RECOVERY_MODE .GE. 0.5) PREF = -PREF
       QREF = SCALE * $Q_Order_MVAr
       $SEQUENCE = 1.0
       IF ($STARTUP_READY .GE. 0.5) $SEQUENCE = 4.0
       IF ($POWER_READY .GE. 0.5) $SEQUENCE = 2.0
+      IF ($POWER_READY .GE. 0.5 .AND. $RECOVERY_MODE .GE. 0.5) $SEQUENCE = 3.0
       REVERSE_START = $POWER_START + $Reversal_Time_s - $Deblock_Time_s
-      IF ($POWER_READY .GE. 0.5 .AND. TIME .GE. REVERSE_START) THEN
+      IF ($POWER_READY .GE. 0.5 .AND. TIME .GE. REVERSE_START .AND. $RECOVERY_MODE .LT. 0.5) THEN
         PREF = $P_Order_MW * (1.0 - 2.0 * MIN(1.0, (TIME - REVERSE_START) / $Reversal_Duration_s))
         $SEQUENCE = 3.0
       ENDIF

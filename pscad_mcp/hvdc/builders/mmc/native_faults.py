@@ -7,27 +7,39 @@ from .avm_companion import _definition, _script, _PARAMETER_UNITS
 FAULT_KINDS = ("ac_three_phase", "ac_single_line_ground", "dc_pole_to_pole", "dc_pole_to_ground")
 FAULT_NAME = "MMCNativeFaultProtocol"
 FAULT_OUTPUTS = {"ACTIVE": ("FAULT_ACTIVE", "1"), "OPEN": ("FAULT_OPEN", "1"),
-                 "START": ("FAULT_START", "s"), "END": ("FAULT_END", "s")}
-FAULT_DEFAULTS = {"Fault_Delay_s": 2.9, "Fault_Duration_s": 0.05}
+                 "START": ("FAULT_START", "s"), "END": ("FAULT_END", "s"),
+                 "ISOLATE": ("FAULT_ISOLATION_OPEN", "1"), "RESTART": ("FAULT_RESTART", "1"),
+                 "RECOVERY": ("FAULT_RECOVERY_MODE", "1")}
+FAULT_DEFAULTS = {"Fault_Delay_s": 2.9, "Fault_Duration_s": 0.05,
+                  "Reclose_Delay_s": 0.02, "Reset_Delay_s": 0.05, "Reset_Deadline_s": 0.15}
 
 
 def append_native_fault_protocol(root: ET.Element) -> None:
     _PARAMETER_UNITS.update({name: "s" for name in FAULT_DEFAULTS})
     definition = _definition(root, FAULT_NAME,
-        {"POWER_READY": (-90, -18, "Transfer", "Input"), "POWER_START": (-90, 18, "Transfer", "Input"),
+        {**{n: (-90, -54 + i * 36, "Transfer", "Input") for i, n in enumerate(("POWER_READY", "POWER_START", "TRIP", "RESET_ACK"))},
          **{n: (90, -54 + i * 36, "Transfer", "Output") for i, n in enumerate(FAULT_OUTPUTS)}}, FAULT_DEFAULTS)
-    _script(definition, "Dsdyn", """      $ACTIVE = 0.0
+    _script(definition, "Dsdyn", """#STORAGE REAL:1
+      IF (TIMEZERO) STORF(NSTORF) = -1.0
+      IF ($POWER_READY .GE. 0.5 .AND. STORF(NSTORF) .LT. 0.0) STORF(NSTORF) = $POWER_START + $Fault_Delay_s
+      $ACTIVE = 0.0
       $OPEN = 1.0
-      $START = -1.0
+      $START = STORF(NSTORF)
       $END = -1.0
-      IF ($POWER_READY .GE. 0.5) THEN
-        $START = $POWER_START + $Fault_Delay_s
+      $ISOLATE = $TRIP
+      $RESTART = 0.0
+      $RECOVERY = 0.0
+      IF ($START .GE. 0.0) THEN
         $END = $START + $Fault_Duration_s
         IF (TIME .GE. $START .AND. TIME .LT. $END) THEN
           $ACTIVE = 1.0
           $OPEN = 0.0
         ENDIF
+        IF (TIME .GE. $END + $Reclose_Delay_s) $RECOVERY = 1.0
+        IF (TIME .GE. $END + $Reclose_Delay_s .AND. TIME .LT. $END + $Reset_Deadline_s) $ISOLATE = 0.0
+        IF (TIME .GE. $END + $Reset_Delay_s .AND. TIME .LT. $END + $Reset_Deadline_s .AND. $TRIP .GE. 0.5 .AND. $RESET_ACK .LT. 0.5) $RESTART = 1.0
       ENDIF
+      NSTORF = NSTORF + 1
 """)
 
 

@@ -2,7 +2,7 @@ from pscad_mcp.hvdc.builders.mmc.native_startup import PrechargeState, STARTUP_I
 
 
 def observation(capacitor=240.0, current=0.01):
-    return {name: capacitor if name.endswith("_VCAP") else current if name.endswith("_I") else 480.0 for name in STARTUP_INPUTS}
+    return {name: 0.0 if name == "RESTART" else capacitor if name.endswith("_VCAP") else current if name.endswith("_I") else 480.0 for name in STARTUP_INPUTS}
 
 
 def test_precharge_waits_for_charge_convergence_and_a_continuous_ready_hold():
@@ -50,3 +50,15 @@ def test_independent_precharge_audit_checks_waveforms_before_using_state_anchors
     assert "P:precharge_energy_convergence" in result["failed_checks"]
     trace["P_A_UPPER_I"][230] = float("nan")
     assert analyze_precharge_trace(trace, parameters)["status"] == "FAIL"
+
+
+def test_explicit_restart_requires_a_new_continuous_measured_hold():
+    state = PrechargeState(20.0, 20.0, 0.1, 0.2)
+    sample = observation()
+    state, result = advance_precharge(state, {**sample, "RESTART": 1.0}, 10.0, 0.0001, {})
+    assert not result["ready"] and state.recovery
+    for i in range(1, 400):
+        state, result = advance_precharge(state, sample, 10.0 + i * 0.0001, 0.0001, {})
+        if i < 333:
+            assert not result["ready"]
+    assert result["ready"] and 10.033 <= state.start_time_s < 10.034

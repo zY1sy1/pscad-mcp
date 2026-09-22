@@ -61,3 +61,22 @@ SIG_POWER_READY = 1.0
 SIG_VDC_MEAS = 640.0""",
         loop="", observations="print *, SIG_BLOCK, SIG_SEQUENCE, SIG_P_REFERENCE, SIG_Q_REFERENCE, SIG_ID_REFERENCE, SIG_IQ_REFERENCE", steps=1)
     assert rows == [[1.0, 5.0, 0.0, 0.0, 0.0, 0.0]]
+
+
+def test_reset_request_cannot_bypass_an_uncharged_cable(tmp_path):
+    rows = _run_native_equations(tmp_path, PROTECTION_NAME, definition=_definition(), declarations="",
+        initialize=_healthy(), loop="""SIG_PRECHARGE_READY = 0.0
+SIG_POWER_READY = 0.0
+SIG_P_A_UPPER_I = 0.0
+if (TIME >= 0.1 .and. TIME < 0.102) SIG_P_A_UPPER_I = 2.4
+SIG_RESTART = 0.0
+SIG_P_CABLE_VDC = 640.0
+if (TIME >= 0.12 .and. TIME < 0.14) then
+ SIG_RESTART = 1.0
+ SIG_P_CABLE_VDC = 300.0
+endif
+if (TIME >= 0.18 .and. TIME < 0.20) SIG_RESTART = 1.0""",
+        observations="if (sample == 2600 .or. sample == 3800) print *, SIG_TRIP, SIG_RESET_ACK, SIG_TRIP_TIME", steps=4200)
+    assert rows[0][:2] == [1.0, 0.0]
+    assert rows[1][:2] == [0.0, 1.0]
+    assert rows[0][2] == rows[1][2] == pytest.approx(0.1)

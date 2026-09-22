@@ -195,6 +195,7 @@ _MASTER_PORTS = {
     "export": {"N": (36, 0, "Transfer", 0)},
     "pgb": {"Signl": (0, 0, "Transfer", 0)},
     "arrester": {"NF": (0, -36, "Natural", 0), "NT": (0, 0, "Natural", 0)},
+    "const": {"OUT": (36, 0, "Transfer", 0)},
 }
 _MASTER_WRITER_PORTS = {
     **_MASTER_PORTS,
@@ -274,6 +275,7 @@ _PARAMETER_UNITS = {
     "PLL_Required": "1",
     "Controlled_Charge": "1",
     "Startup_Charge_Time_s": "s",
+    "Recovery_Charge_Time_s": "s",
     "Maximum_Conditioning_s": "s",
     "Power_Correction_Limit_MW": "MW",
     "Cable_Loss_MW": "MW",
@@ -328,6 +330,7 @@ def _audit_master(path: Path) -> tuple[dict, str, dict]:
                     "peswitch",
                     "ground",
                     "pi_ctlr",
+                    "const",
                 }
                 else 0,
             )

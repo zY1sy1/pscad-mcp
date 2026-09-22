@@ -11,7 +11,7 @@ from .avm_companion import _definition, _script
 
 
 STARTUP_NAME = "MMCPrechargeReadiness"
-STARTUP_INPUTS = ("P_VDC", "V_VDC", "P_PLL_LOCKED", "V_PLL_LOCKED") + tuple(
+STARTUP_INPUTS = ("P_VDC", "V_VDC", "P_PLL_LOCKED", "V_PLL_LOCKED", "RESTART") + tuple(
     f"{s}_{p}_{q}_{quantity}" for s in ("P", "V") for p in "ABC"
     for q in ("UPPER", "LOWER") for quantity in ("VCAP", "I")
 )
@@ -32,7 +32,7 @@ STARTUP_DEFAULTS = {
     "Precharge_Voltage_Fraction": 0.65, "Precharge_Current_Limit_kA": 2.0,
     "Precharge_Rate_Per_Cycle": 0.01, "Precharge_Hold_Cycles": 2.0,
     "PLL_Required": 0.0,
-    "Controlled_Charge": 0.0, "Startup_Charge_Time_s": 0.5, "Maximum_Conditioning_s": 1.5,
+    "Controlled_Charge": 0.0, "Startup_Charge_Time_s": 0.5, "Recovery_Charge_Time_s": 0.1, "Maximum_Conditioning_s": 1.5,
 }
 
 
@@ -42,6 +42,8 @@ class PrechargeState:
     v_energy_filtered_mj: float = 0.0
     stable_time_s: float = 0.0
     start_time_s: float = -1.0
+    epoch_s: float = 0.0
+    recovery: bool = False
 
 
 def advance_precharge(state: PrechargeState, observation: dict[str, float],
@@ -57,6 +59,8 @@ def advance_precharge(state: PrechargeState, observation: dict[str, float],
     alpha = 1.0 - math.exp(-step_s * p["Frequency_Hz"])
     energies = [sum(0.5 * p["C_eq_F"] * observation[f"{s}_{phase}_{position}_VCAP"]**2
                     for phase in "ABC" for position in ("UPPER", "LOWER")) for s in ("P", "V")]
+    if observation["RESTART"] >= 0.5:
+        state = PrechargeState(*energies, 0.0, -1.0, time_s, True)
     previous = (state.p_energy_filtered_mj, state.v_energy_filtered_mj)
     filtered = tuple(old + alpha * (new - old) for old, new in zip(previous, energies))
     energy_floor = 0.75 * p["C_eq_F"] * (p["Precharge_Voltage_Fraction"] * p["Vdc_Order_kV"])**2
@@ -64,7 +68,8 @@ def advance_precharge(state: PrechargeState, observation: dict[str, float],
     cap_min = min(v for name, v in observation.items() if name.endswith("_VCAP"))
     current = max(abs(v) for name, v in observation.items() if name.endswith("_I"))
     qualified = (
-        time_s >= p["Deblock_Time_s"] and time_s <= p["Maximum_Precharge_s"]
+        time_s - state.epoch_s >= (0.0 if state.recovery else p["Deblock_Time_s"])
+        and time_s - state.epoch_s <= p["Maximum_Precharge_s"] and observation["RESTART"] < 0.5
         and cap_min >= 0.5 * p["Precharge_Voltage_Fraction"] * p["Vdc_Order_kV"]
         and min(observation["P_VDC"], observation["V_VDC"]) >= p["Precharge_Voltage_Fraction"] * p["Vdc_Order_kV"]
         and current <= 0.1 * p["Precharge_Current_Limit_kA"]
@@ -75,8 +80,8 @@ def advance_precharge(state: PrechargeState, observation: dict[str, float],
     start = state.start_time_s
     if start < 0 and stable >= p["Precharge_Hold_Cycles"] / p["Frequency_Hz"]:
         start = time_s
-    return PrechargeState(*filtered, stable, start), {
-        "ready": start >= 0, "failed": start < 0 and time_s > p["Maximum_Precharge_s"],
+    return PrechargeState(*filtered, stable, start, state.epoch_s, state.recovery), {
+        "ready": start >= 0, "failed": start < 0 and time_s - state.epoch_s > p["Maximum_Precharge_s"],
         "energy_rates_per_s": rates, "current_max_ka": current, "cap_min_kv": cap_min,
     }
 
@@ -91,7 +96,7 @@ def append_precharge_readiness(root: ET.Element) -> None:
     extremes = "".join(f"      $CAP_MIN = MIN($CAP_MIN, ${s}_{p}_{q}_VCAP)\n"
                        f"      $CURRENT_MAX = MAX($CURRENT_MAX, ABS(${s}_{p}_{q}_I))\n"
                        for s in ("P", "V") for p in "ABC" for q in ("UPPER", "LOWER"))
-    _script(component, "Dsdyn", """#STORAGE REAL:6
+    _script(component, "Dsdyn", """#STORAGE REAL:8
 #LOCAL REAL EP
 #LOCAL REAL EV
 #LOCAL REAL FP
@@ -99,18 +104,30 @@ def append_precharge_readiness(root: ET.Element) -> None:
 #LOCAL REAL ALPHA
 #LOCAL REAL EFLOOR
 #LOCAL REAL CAPMAX
+#LOCAL REAL EARLIEST
+#LOCAL REAL CHARGE_DURATION
 #LOCAL INTEGER QUALIFIED
-      IF (TIMEZERO) THEN
+      IF (TIMEZERO .OR. $RESTART .GE. 0.5) THEN
         STORF(NSTORF) = 0.0
         STORF(NSTORF+1) = 0.0
         STORF(NSTORF+2) = 0.0
         STORF(NSTORF+3) = -1.0
         STORF(NSTORF+4) = -1.0
         STORF(NSTORF+5) = 0.0
+        STORF(NSTORF+6) = 0.0
+        STORF(NSTORF+7) = 0.0
+        IF ($RESTART .GE. 0.5) THEN
+          STORF(NSTORF+6) = TIME
+          STORF(NSTORF+7) = 1.0
+        ENDIF
       ENDIF
       EP = 0.0
       EV = 0.0
-""" + energy + """      ALPHA = 1.0 - EXP(-DELT * $Frequency_Hz)
+""" + energy + """      IF ($RESTART .GE. 0.5) THEN
+        STORF(NSTORF) = EP
+        STORF(NSTORF+1) = EV
+      ENDIF
+      ALPHA = 1.0 - EXP(-DELT * $Frequency_Hz)
       FP = STORF(NSTORF) + ALPHA * (EP - STORF(NSTORF))
       FV = STORF(NSTORF+1) + ALPHA * (EV - STORF(NSTORF+1))
       EFLOOR = 0.75 * $C_eq_F * ($Precharge_Voltage_Fraction * $Vdc_Order_kV)**2
@@ -120,7 +137,9 @@ def append_precharge_readiness(root: ET.Element) -> None:
       CAPMAX = $P_A_UPPER_VCAP
       $CURRENT_MAX = 0.0
 """ + extremes + "".join(f"      CAPMAX = MAX(CAPMAX, ${s}_{p}_{q}_VCAP)\n" for s in ("P", "V") for p in "ABC" for q in ("UPPER", "LOWER")) + """      QUALIFIED = 1
-      IF (TIME .LT. $Deblock_Time_s .OR. TIME .GT. $Maximum_Precharge_s) QUALIFIED = 0
+      EARLIEST = $Deblock_Time_s
+      IF (STORF(NSTORF+7) .GE. 0.5) EARLIEST = 0.0
+      IF (TIME - STORF(NSTORF+6) .LT. EARLIEST .OR. TIME - STORF(NSTORF+6) .GT. $Maximum_Precharge_s .OR. $RESTART .GE. 0.5) QUALIFIED = 0
       IF ($CAP_MIN .LT. 0.5 * $Precharge_Voltage_Fraction * $Vdc_Order_kV) QUALIFIED = 0
       IF (MIN($P_VDC, $V_VDC) .LT. $Precharge_Voltage_Fraction * $Vdc_Order_kV) QUALIFIED = 0
       IF ($CURRENT_MAX .GT. 0.1 * $Precharge_Current_Limit_kA) QUALIFIED = 0
@@ -136,15 +155,17 @@ def append_precharge_readiness(root: ET.Element) -> None:
       $READY = 0.0
       IF ($START_TIME .GE. 0.0) $READY = 1.0
       $FAILED = 0.0
-      IF ($START_TIME .LT. 0.0 .AND. TIME .GT. $Maximum_Precharge_s) $FAILED = 1.0
+      IF ($START_TIME .LT. 0.0 .AND. TIME - STORF(NSTORF+6) .GT. $Maximum_Precharge_s) $FAILED = 1.0
       STORF(NSTORF) = FP
       STORF(NSTORF+1) = FV
       $POWER_READY = $READY
       $POWER_START = $START_TIME
       $CHARGE_FAILED = 0.0
       IF ($Controlled_Charge .GE. 0.5) THEN
+        CHARGE_DURATION = $Startup_Charge_Time_s
+        IF (STORF(NSTORF+7) .GE. 0.5) CHARGE_DURATION = $Recovery_Charge_Time_s
         QUALIFIED = 0
-        IF ($READY .GE. 0.5 .AND. TIME .GE. $START_TIME + $Startup_Charge_Time_s) QUALIFIED = 1
+        IF ($READY .GE. 0.5 .AND. TIME .GE. $START_TIME + CHARGE_DURATION) QUALIFIED = 1
         IF (MIN($P_PLL_LOCKED, $V_PLL_LOCKED) .LT. 0.5) QUALIFIED = 0
         IF ($CAP_MIN .LT. 0.475 * $Vdc_Order_kV .OR. CAPMAX .GT. 0.525 * $Vdc_Order_kV) QUALIFIED = 0
         IF (ABS($P_VDC / $Vdc_Order_kV - 1.0) .GT. 0.05 .OR. ABS($V_VDC / $Vdc_Order_kV - 1.0) .GT. 0.05) QUALIFIED = 0
@@ -160,7 +181,7 @@ def append_precharge_readiness(root: ET.Element) -> None:
         IF ($POWER_START .GE. 0.0) $POWER_READY = 1.0
         IF ($READY .GE. 0.5 .AND. $POWER_READY .LT. 0.5 .AND. TIME .GT. $START_TIME + $Maximum_Conditioning_s) $CHARGE_FAILED = 1.0
       ENDIF
-      NSTORF = NSTORF + 6
+      NSTORF = NSTORF + 8
 """)
 
 

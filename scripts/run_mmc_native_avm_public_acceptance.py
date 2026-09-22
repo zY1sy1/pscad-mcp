@@ -407,12 +407,20 @@ async def run_attempt(
         report["trace"] = {"path": str(trace_path), "sha256": _sha256(trace_path)}
         fixture_parameters = engine["candidate_result"]["fixture"]["parameters"]
         _require_complete_trace(observed["samples"], fixture_parameters)
+        normal_samples = observed["samples"]
+        if fault_kind is not None:
+            report["fault_envelope"] = evaluate_native_fault_trace(observed["samples"], fixture_parameters)
+            start = next((v for v in observed["samples"].get("FAULT_START", ()) if v >= 0), None)
+            if start is not None:
+                count = sum(t < start for t in observed["samples"]["time"])
+                normal_samples = {name: values[:count] for name, values in observed["samples"].items()}
+                report["normal_analysis_window_s"] = [normal_samples["time"][0], normal_samples["time"][-1]]
         reversal_end = fixture_parameters["reversal_time_s"] + fixture_parameters["reversal_duration_s"]
         forward_window = (0.6, 0.9)
         reverse_window = (reversal_end + 0.5, reversal_end + 0.8)
         deblock_time = fixture_parameters["deblock_time_s"]
         if control_kind != "scheduled_open_loop":
-            report["precharge"] = analyze_precharge_trace(observed["samples"], fixture_parameters)
+            report["precharge"] = analyze_precharge_trace(normal_samples, fixture_parameters)
             if "operating_windows" not in report["precharge"]:
                 raise BackendError("MMC_PRECHARGE_FAILED", report["precharge"].get("error", "Precharge operating windows are missing"),
                                    "hvdc", "native_avm_acceptance", report["precharge"])
@@ -456,15 +464,6 @@ async def run_attempt(
         if control_kind == "dq_current":
             report["control_envelope"] = evaluate_native_dq_controls(
                 observed["samples"], fixture_parameters, {"forward": forward_window, "reverse": reverse_window})
-            normal_samples = observed["samples"]
-            if fault_kind is not None:
-                report["fault_envelope"] = evaluate_native_fault_trace(observed["samples"], fixture_parameters)
-                start = report["fault_envelope"].get("metrics", {}).get("fault_start_s")
-                if start is None:
-                    raise ValueError("The fault scenario did not produce a verified event window")
-                count = sum(t < start for t in observed["samples"]["time"])
-                normal_samples = {name: values[:count] for name, values in observed["samples"].items()}
-                report["normal_analysis_window_s"] = [normal_samples["time"][0], normal_samples["time"][-1]]
             report["dynamic_envelope"] = evaluate_native_dynamic_envelope(normal_samples, fixture_parameters, report["precharge"])
         report["control_envelope_accepted"] = report.get("control_envelope", {}).get("status") == "PASS"
         report["dynamic_envelope_accepted"] = report.get("dynamic_envelope", {}).get("status") == "PASS"

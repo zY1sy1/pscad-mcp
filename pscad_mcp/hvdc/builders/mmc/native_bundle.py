@@ -1056,6 +1056,10 @@ def materialize_native_avm_fixture(
     hierarchy = root.find("./hierarchy/call/call")
     custom: list[tuple[ET.Element, str]] = []
     arm_values = asdict(arm_parameters or AverageArmParameters(L_arm_H=0.1))
+    writer.add(main, "normal_zero", "master:const", {"Name": "", "Value": "0.0"}, {"OUT": "NATIVE_ZERO"})
+    restart_signal = "FAULT_RESTART" if fault_kind is not None else "NATIVE_ZERO"
+    recovery_signal = "FAULT_RECOVERY_MODE" if fault_kind is not None else "NATIVE_ZERO"
+    isolation_signal = "FAULT_ISOLATION_OPEN" if fault_kind is not None else "PROTECTION_TRIP"
 
     for station, prefix, phase_offset, station_voltage, valve_voltage, grid_r, grid_x in (
         (
@@ -1109,7 +1113,7 @@ def materialize_native_avm_fixture(
                     {"Contact_On_ohm": explicit_grid_r, "Contact_Off_ohm": 1e8,
                      "Arrester_Rating_kV": 1.1 * math.sqrt(2 / 3) * station_voltage},
                     {"IN": prefix + "_SOURCE_" + phase, "OUT": prefix + "_GRID_R_" + phase,
-                     "OPEN": "PROTECTION_TRIP", **{n: f"{prefix}_AC_{phase}_{n}" for n in ISOLATION_OUTPUTS}})
+                     "OPEN": isolation_signal, **{n: f"{prefix}_AC_{phase}_{n}" for n in ISOLATION_OUTPUTS}})
                 custom.append((contact, AC_ISOLATION))
             else:
                 writer.add(main, prefix + "_grid_resistor_" + phase, "master:resistor",
@@ -1206,11 +1210,12 @@ def materialize_native_avm_fixture(
                 "Startup_Charge_Time_s": startup_charge_time_s,
             }
             control = writer.add(main, prefix + "_dq_controller", NATIVE_SCOPE + ":" + DQ_NAME, dq_parameters,
-                                 {**{name: prefix + "_" + name for name in DQ_INPUTS if name not in ("P_MEAS", "Q_MEAS", "VDC_MEAS", "STARTUP_READY", "START_TIME", "POWER_READY", "POWER_START", "PROTECTION_TRIP", "VA", "VB", "VC", "IA", "IB", "IC")},
+                                 {**{name: prefix + "_" + name for name in DQ_INPUTS if name not in ("P_MEAS", "Q_MEAS", "VDC_MEAS", "STARTUP_READY", "START_TIME", "POWER_READY", "POWER_START", "PROTECTION_TRIP", "RESTART", "RECOVERY_MODE", "VA", "VB", "VC", "IA", "IB", "IC")},
                                   "P_MEAS": prefix + "_P", "Q_MEAS": prefix + "_Q", "VDC_MEAS": prefix + "_VDC",
                                   "STARTUP_READY": "PRECHARGE_READY", "START_TIME": "DEBLOCK_TIME",
                                   "POWER_READY": "POWER_READY", "POWER_START": "POWER_START_TIME",
                                   "PROTECTION_TRIP": "PROTECTION_TRIP",
+                                  "RESTART": restart_signal, "RECOVERY_MODE": recovery_signal,
                                   **{f"{q}{p}": f"{prefix}_VALVE_{q}_{p}" for p in "ABC" for q in ("V", "I")},
                                   **{name: prefix + "_" + name for name in DQ_OUTPUTS}})
         else:
@@ -1326,7 +1331,7 @@ def materialize_native_avm_fixture(
                      "Reactor_H": dc_reactor_inductance_h, "Preinsert_ohm": 150 * (vdc_order_kv / 640)**2 / (active_power_order_mw / 1000),
                      "Preinsert_Time_s": 0.02},
                     {"IN": prefix + "_DC_METER_" + pole, "OUT": prefix + "_CABLE_" + pole,
-                     "OPEN": "PROTECTION_TRIP", **{n: f"{prefix}_DC_{pole}_{n}" for n in ISOLATION_OUTPUTS}})
+                     "OPEN": isolation_signal, **{n: f"{prefix}_DC_{pole}_{n}" for n in ISOLATION_OUTPUTS}})
                 custom.append((contact, DC_ISOLATION))
                 writer.add(main, prefix + "_cable_voltage_" + pole, "master:voltmeter",
                            {"Name": prefix + "_CABLE_V" + pole}, {"N1": prefix + "_CABLE_" + pole, "N2": "GND"})
@@ -1349,6 +1354,7 @@ def materialize_native_avm_fixture(
         writer.add(main, "fault_protocol", NATIVE_SCOPE + ":" + FAULT_NAME,
                    {**FAULT_DEFAULTS, "Fault_Delay_s": reversal_time_s - deblock_time_s + reversal_duration_s + 1.0},
                    {"POWER_READY": "POWER_READY", "POWER_START": "POWER_START_TIME",
+                    "TRIP": "PROTECTION_TRIP", "RESET_ACK": "PROTECTION_RESET_ACK",
                     **{port: name for port, (name, _) in FAULT_OUTPUTS.items()}})
         for name, (a, b) in fault_branches(fault_kind).items():
             writer.add(main, "fault_branch_" + name, "master:breaker1",
@@ -1402,7 +1408,7 @@ def materialize_native_avm_fixture(
         writer.add(main, "native_protection", NATIVE_SCOPE + ":" + PROTECTION_NAME,
                    {**PROTECTION_DEFAULTS, "Frequency_Hz": frequency_hz, "Vdc_Order_kV": vdc_order_kv,
                     "Arm_Current_Limit_kA": precharge_current_limit_ka},
-                   {**{name: name for name in PROTECTION_INPUTS},
+                   {**{name: name for name in PROTECTION_INPUTS}, "RESTART": restart_signal,
                     **{port: name for port, (name, _) in PROTECTION_OUTPUTS.items()}})
     writer.add(
         main, "precharge_readiness", NATIVE_SCOPE + ":" + STARTUP_NAME,
@@ -1413,7 +1419,7 @@ def materialize_native_avm_fixture(
          "Startup_Charge_Time_s": startup_charge_time_s,
          "Maximum_Conditioning_s": maximum_conditioning_time_s,
          "Maximum_Precharge_s": maximum_precharge_time_s, "Precharge_Current_Limit_kA": precharge_current_limit_ka},
-        {**{name: name for name in STARTUP_INPUTS}, **{port: name for port, (name, _) in STARTUP_OUTPUTS.items()}},
+        {**{name: name for name in STARTUP_INPUTS}, "RESTART": restart_signal, **{port: name for port, (name, _) in STARTUP_OUTPUTS.items()}},
     )
     for prefix in ("P", "V"):
         for phase in "ABC":
@@ -1610,6 +1616,7 @@ def audit_native_avm_fixture(
         f"{NATIVE_SCOPE}:{PLL_NAME}": 2,
         f"{NATIVE_SCOPE}:{SAMPLE_NAME}": 2 * len(KCL_MEASUREMENTS),
         "master:source3": 2,
+        "master:const": 1,
         "master:xfmr-3p2w": 2,
         "master:breakout": 6,
         "master:resistor": 16,

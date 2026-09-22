@@ -16,11 +16,11 @@ def test_native_fault_uses_observed_power_start_and_emtdc_time(tmp_path):
     definition = root.find(f"./definitions/Definition[@name='{FAULT_NAME}']")
     rows = _run_native_equations(tmp_path, FAULT_NAME, definition=definition, declarations="",
         initialize="PAR_Fault_Delay_s = 0.3\nPAR_Fault_Duration_s = 0.05\nSIG_POWER_START = 0.2",
-        loop="SIG_POWER_READY = 0.0\nif (TIME >= 0.2) SIG_POWER_READY = 1.0",
-        observations="if (sample == 2000 .or. sample == 9999 .or. sample == 10000 .or. sample == 10999 .or. sample == 11000) print *, SIG_ACTIVE, SIG_OPEN, SIG_START, SIG_END",
-        steps=12000)
+        loop="SIG_POWER_READY = 0.0\nif (TIME >= 0.2) SIG_POWER_READY = 1.0\nif (TIME >= 0.6) SIG_POWER_START = 0.6",
+        observations="if (sample == 2000 .or. sample == 9999 .or. sample == 10000 .or. sample == 10999 .or. sample == 11000 .or. sample == 18000) print *, SIG_ACTIVE, SIG_OPEN, SIG_START, SIG_END",
+        steps=18000)
     assert rows[0] == [0.0, 1.0, -1.0, -1.0]
-    assert [row[0] for row in rows[1:]] == [0.0, 1.0, 1.0, 0.0]
+    assert [row[0] for row in rows[1:]] == [0.0, 1.0, 1.0, 0.0, 0.0]
     for row in rows[1:]:
         assert row[2:] == pytest.approx([0.5, 0.55])
 
