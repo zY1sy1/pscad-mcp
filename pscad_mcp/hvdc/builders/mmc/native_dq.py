@@ -43,6 +43,7 @@ DQ_OUTPUTS = {
     "ZERO_SEQUENCE_COMMAND": "kV",
     "CAP_VOLTAGE_REFERENCE": "kV", "CHARGE_POWER_REFERENCE": "MW",
     "POWER_VOLTAGE_BASE": "kV",
+    "VALVE_POWER": "MW",
     "LIMIT_ACTIVE": "1", "LIMIT_DURATION": "s",
 }
 
@@ -178,6 +179,7 @@ def _dq_script() -> str:
 #LOCAL REAL WDIFF
 #LOCAL REAL WREF
 #LOCAL REAL VBASE
+#LOCAL REAL PVALVE
 #LOCAL REAL VCAP_START
 #LOCAL REAL VCAP_REFERENCE
 #LOCAL REAL VCAP_RATE
@@ -199,6 +201,8 @@ def _dq_script() -> str:
       VQ = VA * COS(THETA) + VB * SIN(THETA)
       ID = IA * SIN(THETA) - IB * COS(THETA)
       IQ = IA * COS(THETA) + IB * SIN(THETA)
+      PVALVE = 1.5 * (VD * ID + VQ * IQ)
+      $VALVE_POWER = PVALVE
       A = 1.0 - EXP(-DELT / $Feedback_Filter_s)
 ! Power-to-current normalization must not feed instantaneous PCC voltage
 ! changes back into current demand through the network/interface dynamics.
@@ -319,7 +323,7 @@ def _dq_script() -> str:
       VACOM = {ac}
       ISUM = 0.5 * (${phase}_UPPER_I + ${phase}_LOWER_I)
       PLOSS = 2.0 * $P_nonohmic_MW + $R_arm_ohm * (${phase}_UPPER_I**2 + ${phase}_LOWER_I**2)
-      IREF = (PLOSS - STORF(NSTORF+2) / 3.0 + WREF_RATE - $Energy_Gain_per_s * (STORF(NSTORF+{8+i}) - WREF)) / MAX(0.1 * $Vdc_Order_kV, $VDC_MEAS)
+      IREF = (PLOSS - PVALVE / 3.0 + WREF_RATE - $Energy_Gain_per_s * (STORF(NSTORF+{8+i}) - WREF)) / MAX(0.1 * $Vdc_Order_kV, $VDC_MEAS)
       IREF = IREF + 5.0 * STORF(NSTORF+{11+i}) * VACOM / MAX(1.0, VDREF**2 + VQREF**2)
       IERR = ISUM - IREF
       IF ($BLOCK .GE. 0.5) STORF(NSTORF+{14+i}) = 0.0
