@@ -71,8 +71,8 @@ CLOSED_LOOP_DEFAULTS = {
     "Energy_Gain_per_s": 10.0,
     "R_arm_ohm": 0.15,
     "P_nonohmic_MW": 0.0,
-    "Kp_Vdc_MW_per_kV": 2.0,
-    "Ti_Vdc_s": 0.20,
+    "Kp_Vdc_MW_per_kV": 3.0,
+    "Ti_Vdc_s": 0.30,
     "Power_Correction_Limit_MW": 1500.0,
 }
 ARM_FEEDBACK_INPUTS = tuple(
