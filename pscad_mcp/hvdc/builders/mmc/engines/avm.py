@@ -461,7 +461,10 @@ class AvmBlueprintEngine:
         candidate_root = (
             Path(plan.workspace).resolve()
             / ".mmc-candidates"
-            / plan.plan_hash
+            # PSCAD 4.6 writes compiler files through legacy MAX_PATH APIs.
+            # The full hash remains in the immutable plan/receipt. A directory
+            # collision still fails at mkdir rather than reusing any artifacts.
+            / plan.plan_hash[:20]
             / selected.candidate_id
         )
         candidate_root.mkdir(parents=True, exist_ok=False)
