@@ -7,6 +7,7 @@ import asyncio
 import copy
 import json
 import os
+import shutil
 import sys
 import time
 import uuid
@@ -122,7 +123,10 @@ async def run_attempt(args, directory: Path) -> dict:
         inputs = {name: _sha256(Path(name)) for name in copied["copied_hashes"]}
         executable = fresh_project_executable(project, compile_started)
         report["fresh_executable"] = executable
-        executable_before = {**inputs, executable["path"]: executable["sha256"]}
+        executable_before = directory / "before-run.exe"
+        shutil.copy2(executable["path"], executable_before)
+        if _sha256(executable_before) != executable["sha256"]:
+            raise ValueError("Independent replay could not preserve its pre-run executable")
         owners = _probe_owners(project, channel_units=fixture["channels"])
         run_started = time.time()
         run_pending = True
