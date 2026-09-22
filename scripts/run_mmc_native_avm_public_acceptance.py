@@ -31,6 +31,7 @@ from pscad_mcp.hvdc.builders.mmc.native_energy import diagnose_native_arm_energy
 from pscad_mcp.hvdc.builders.mmc.native_envelope import evaluate_native_steady_envelope
 from pscad_mcp.hvdc.builders.mmc.native_physical import evaluate_native_network_identities
 from pscad_mcp.hvdc.builders.mmc.native_startup import analyze_precharge_trace
+from pscad_mcp.hvdc.builders.mmc.native_control_checks import evaluate_native_dq_controls
 from pscad_mcp.hvdc.builders.mmc.parametric_models import parse_parametric_request
 from pscad_mcp.hvdc.builders.mmc.parametric_service import ParametricMmcBuilderService
 from scripts.run_mmc_average_arm_acceptance import (
@@ -442,9 +443,14 @@ async def run_attempt(
         report["steady_operating_accepted"] = report.get("steady_envelope", {}).get("status") == "PASS"
         report["network_identities_accepted"] = report.get("network_identities", {}).get("status") == "PASS"
         report["precharge_accepted"] = report.get("precharge", {}).get("status") == "PASS"
+        if control_kind == "dq_current":
+            report["control_envelope"] = evaluate_native_dq_controls(
+                observed["samples"], fixture_parameters, {"forward": forward_window, "reverse": reverse_window})
+        report["control_envelope_accepted"] = report.get("control_envelope", {}).get("status") == "PASS"
         report["status"] = (
             "PASS" if report["assembly_accepted"]
             and (control_kind == "scheduled_open_loop" or (report["steady_operating_accepted"] and report["network_identities_accepted"] and report["precharge_accepted"]))
+            and (control_kind != "dq_current" or report["control_envelope_accepted"])
             else "FAIL"
         )
         if report["status"] != "PASS":

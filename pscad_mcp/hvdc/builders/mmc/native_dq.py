@@ -290,14 +290,17 @@ def _dq_script() -> str:
         VQREF = VQREF * 0.98 / $MODULATION_UNCLIPPED
         $LIMIT_ACTIVE = 1.0
       ENDIF
-      VALPHA = VDREF * SIN(THETA) + VQREF * COS(THETA)
-      VBETA = -VDREF * COS(THETA) + VQREF * SIN(THETA)
+! Native module and voltage-source interfaces apply this command two steps
+! after its network measurements. Advance the synthesis frame, not the
+! measurement frame, to compensate that physical carrier-phase delay.
+      VALPHA = VDREF * SIN(THETA + 2.0 * OMEGA * DELT) + VQREF * COS(THETA + 2.0 * OMEGA * DELT)
+      VBETA = -VDREF * COS(THETA + 2.0 * OMEGA * DELT) + VQREF * SIN(THETA + 2.0 * OMEGA * DELT)
       VPHASE_A = VALPHA
       VPHASE_B = -0.5 * VALPHA + 0.866025403784439 * VBETA
       VPHASE_C = -0.5 * VALPHA - 0.866025403784439 * VBETA
       VZERO = -0.5 * (MAX(VPHASE_A, VPHASE_B, VPHASE_C) + MIN(VPHASE_A, VPHASE_B, VPHASE_C))
       $ZERO_SEQUENCE_COMMAND = VZERO
-      $ANGLE_COMMAND = ATAN2(VQREF, VDREF) * 57.2957795130823
+      $ANGLE_COMMAND = (ATAN2(VQREF, VDREF) + 2.0 * OMEGA * DELT) * 57.2957795130823
       $MODULATION_COMMAND = 2.0 * SQRT(VDREF**2 + VQREF**2) / $Vdc_Order_kV
       WREF = 0.25 * $C_eq_F * VCAP_REFERENCE**2
 """
