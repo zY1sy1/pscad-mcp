@@ -1,0 +1,115 @@
+{
+  "schema_version": 1,
+  "name": "mmc_direct_master_bindings_v1",
+  "pscad_version": "4.6.2",
+  "bindings": [
+    {
+      "logical_name": "master:dc_bus", "physical_definition": "nodelabel",
+      "shape": {"kind": "direct"},
+      "ports": [{"logical": "DC", "physical": "A", "kind": "electrical", "dimension": 1, "occurrence": 0}],
+      "parameters": [{"logical": ["Name"], "physical": ["Name"], "transform": {"kind": "identity"}, "physical_contracts": {"Name": {"type": "Text", "unit": null}}}],
+      "fixed_parameters": [{"physical": "MeasV", "value": 0, "contract": {"type": "Choice", "unit": null, "choices": ["0", "1"]}}],
+      "evidence_parameters": []
+    },
+    {
+      "logical_name": "master:source3", "physical_definition": "source3",
+      "shape": {"kind": "direct"},
+      "ports": [
+        {"logical": "AC", "physical": "N3", "kind": "electrical", "dimension": 3, "occurrence": 0},
+        {"logical": "NEUTRAL", "physical": "N", "kind": "electrical", "dimension": 1, "occurrence": 1}
+      ],
+      "parameters": [
+        {"logical": ["Name"], "physical": ["Name"], "transform": {"kind": "identity"}, "physical_contracts": {"Name": {"type": "Text", "unit": null}}},
+        {"logical": ["Amplitude"], "physical": ["Vm"], "transform": {"kind": "identity"}, "physical_contracts": {"Vm": {"type": "Real", "unit": "kV"}}},
+        {"logical": ["Frequency"], "physical": ["F"], "transform": {"kind": "identity"}, "physical_contracts": {"F": {"type": "Real", "unit": "Hz"}}},
+        {"logical": ["OperatingVoltage_kV"], "physical": ["Es"], "transform": {"kind": "identity"}, "physical_contracts": {"Es": {"type": "Real", "unit": "kV"}}},
+        {"logical": ["OperatingFrequency_Hz"], "physical": ["F0"], "transform": {"kind": "identity"}, "physical_contracts": {"F0": {"type": "Real", "unit": "Hz"}}},
+        {"logical": ["GridMagnitude"], "physical": ["Z1"], "transform": {"kind": "identity"}, "physical_contracts": {"Z1": {"type": "Real", "unit": "ohm"}}},
+        {"logical": ["GridAngle"], "physical": ["Phi1"], "transform": {"kind": "identity"}, "physical_contracts": {"Phi1": {"type": "Real", "unit": "deg"}}}
+      ],
+      "fixed_parameters": [
+        {"physical": "View", "value": 1, "contract": {"type": "Choice", "unit": null, "choices": ["0", "1"]}},
+        {"physical": "Type", "value": 3, "contract": {"type": "Choice", "unit": null, "choices": ["1", "2", "3", "4"]}},
+        {"physical": "Imp", "value": 1, "contract": {"type": "Choice", "unit": null, "choices": ["0", "1"]}},
+        {"physical": "Ctrl", "value": 0, "contract": {"type": "Choice", "unit": null, "choices": ["0", "2", "3"]}},
+        {"physical": "Term", "value": 0, "contract": {"type": "Choice", "unit": null, "choices": ["0", "1"]}},
+        {"physical": "ZSeq", "value": 0, "contract": {"type": "Choice", "unit": null, "choices": ["0", "1"]}},
+        {"physical": "Ph", "value": 0, "contract": {"type": "Real", "unit": "deg"}}
+      ],
+      "evidence_parameters": [
+        {"logical": "GridR", "type": "float", "unit": "ohm", "minimum": 0},
+        {"logical": "GridX", "type": "float", "unit": "ohm", "minimum": 0}
+      ]
+    },
+    {
+      "logical_name": "master:transformer", "physical_definition": "xfmr-3p2w",
+      "shape": {"kind": "direct"},
+      "ports": [
+        {"logical": "AC", "physical": "N1", "kind": "electrical", "dimension": 3, "occurrence": 0},
+        {"logical": "VALVE", "physical": "N2", "kind": "electrical", "dimension": 3, "occurrence": 0},
+        {"logical": "NEUTRAL", "physical": "G1", "kind": "electrical", "dimension": 1, "occurrence": 0}
+      ],
+      "parameters": [
+        {"logical": ["Name"], "physical": ["Name"], "transform": {"kind": "identity"}, "physical_contracts": {"Name": {"type": "Text", "unit": null}}},
+        {"logical": ["RatedPower_MVA"], "physical": ["Tmva"], "transform": {"kind": "identity"}, "physical_contracts": {"Tmva": {"type": "Real", "unit": "MVA"}}},
+        {"logical": ["Primary_kV"], "physical": ["V1"], "transform": {"kind": "identity"}, "physical_contracts": {"V1": {"type": "Real", "unit": "kV"}}},
+        {"logical": ["Secondary_kV"], "physical": ["V2"], "transform": {"kind": "identity"}, "physical_contracts": {"V2": {"type": "Real", "unit": "kV"}}},
+        {"logical": ["Frequency"], "physical": ["f"], "transform": {"kind": "identity"}, "physical_contracts": {"f": {"type": "Real", "unit": "Hz"}}},
+        {"logical": ["Leakage_pu"], "physical": ["Xl"], "transform": {"kind": "identity"}, "physical_contracts": {"Xl": {"type": "Real", "unit": "pu"}}}
+      ],
+      "fixed_parameters": [
+        {"physical": "View", "value": 1, "contract": {"type": "Choice", "unit": null, "choices": ["0", "1", "2"]}},
+        {"physical": "YD1", "value": 0, "contract": {"type": "Choice", "unit": null, "choices": ["0", "1"]}},
+        {"physical": "YD2", "value": 1, "contract": {"type": "Choice", "unit": null, "choices": ["0", "1"]}},
+        {"physical": "Lead", "value": 1, "contract": {"type": "Choice", "unit": null, "choices": ["1", "2"]}},
+        {"physical": "Ideal", "value": 1, "contract": {"type": "Choice", "unit": null, "choices": ["0", "1"]}},
+        {"physical": "Sat", "value": 0, "contract": {"type": "Choice", "unit": null, "choices": ["0", "1", "2"]}},
+        {"physical": "NLL", "value": 0, "contract": {"type": "Real", "unit": "pu"}},
+        {"physical": "CuL", "value": 0, "contract": {"type": "Real", "unit": "pu"}}
+      ],
+      "evidence_parameters": []
+    },
+    {
+      "logical_name": "master:pi_controller", "physical_definition": "pi_ctlr",
+      "shape": {"kind": "direct"},
+      "ports": [
+        {"logical": "IN", "physical": "IN", "kind": "data", "dimension": 1, "occurrence": 0},
+        {"logical": "OUT", "physical": "OUT", "kind": "data", "dimension": 1, "occurrence": 0}
+      ],
+      "parameters": [
+        {"logical": ["Kp"], "physical": ["GP"], "transform": {"kind": "identity"}, "physical_contracts": {"GP": {"type": "Real", "unit": null}}},
+        {"logical": ["Ti_s"], "physical": ["TI"], "transform": {"kind": "identity"}, "physical_contracts": {"TI": {"type": "Real", "unit": "s"}}},
+        {"logical": ["Lower"], "physical": ["YLO"], "transform": {"kind": "identity"}, "physical_contracts": {"YLO": {"type": "Real", "unit": null}}},
+        {"logical": ["Upper"], "physical": ["YHI"], "transform": {"kind": "identity"}, "physical_contracts": {"YHI": {"type": "Real", "unit": null}}},
+        {"logical": ["Initial"], "physical": ["YINIT"], "transform": {"kind": "identity"}, "physical_contracts": {"YINIT": {"type": "Real", "unit": null}}}
+      ],
+      "fixed_parameters": [
+        {"physical": "Mthd", "value": 0, "contract": {"type": "Choice", "unit": null, "choices": ["0", "1"]}},
+        {"physical": "INTR", "value": 0, "contract": {"type": "Choice", "unit": null, "choices": ["0", "1"]}}
+      ],
+      "evidence_parameters": []
+    },
+    {
+      "logical_name": "master:ground", "physical_definition": "ground",
+      "shape": {"kind": "direct"},
+      "ports": [{"logical": "GND", "physical": "A", "kind": "electrical", "dimension": 1, "occurrence": 0}],
+      "parameters": [], "fixed_parameters": [], "evidence_parameters": []
+    },
+    {
+      "logical_name": "master:phase_breakout", "physical_definition": "breakout",
+      "shape": {"kind": "direct"},
+      "ports": [
+        {"logical": "AC", "physical": "N", "kind": "electrical", "dimension": 3, "occurrence": 0},
+        {"logical": "A", "physical": "N1", "kind": "electrical", "dimension": 1, "occurrence": 0},
+        {"logical": "B", "physical": "N2", "kind": "electrical", "dimension": 1, "occurrence": 0},
+        {"logical": "C", "physical": "N3", "kind": "electrical", "dimension": 1, "occurrence": 0}
+      ],
+      "parameters": [],
+      "fixed_parameters": [
+        {"physical": "Com", "value": 0, "contract": {"type": "Choice", "unit": null, "choices": ["0", "1"]}},
+        {"physical": "Dis", "value": 0, "contract": {"type": "Choice", "unit": null, "choices": ["0", "1"]}}
+      ],
+      "evidence_parameters": []
+    }
+  ]
+}

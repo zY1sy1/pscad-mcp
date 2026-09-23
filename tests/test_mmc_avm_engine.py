@@ -1,16 +1,61 @@
+import asyncio
+import hashlib
+import math
 from dataclasses import replace
 from pathlib import Path
+from xml.etree import ElementTree as ET
 
 import pytest
 
 from pscad_mcp.core.backend.base import BackendError
 from pscad_mcp.hvdc.builders.mmc.engines.avm import (
+    AvmBlueprintEngine,
     _inventory_catalog,
     create_parametric_avm_plan,
     materialize_parametric_blueprint,
 )
-from tests.mmc_parametric_fakes import avm_parametric_plan
+from pscad_mcp.hvdc.builders.mmc.parametric_models import parse_parametric_request
+from pscad_mcp.hvdc.builders.mmc.parametric_planner import create_parametric_plan
+from tests.mmc_parametric_fakes import (
+    avm_assets,
+    avm_parametric_plan,
+    pwm_audit,
+    valid_request,
+)
 from tests.test_mmc_planner import ASSET, INVENTORY
+from tests.test_mmc_cable_constants import cable_sources
+
+
+def test_native_arm_loss_budget_uses_valve_current_including_reactive_power():
+    from pscad_mcp.hvdc.builders.mmc.derivation import derive_mmc_parameters
+    values = derive_mmc_parameters(valid_request(model_fidelity="average_value", reactive_power_mvar=-200.0)).candidates[0].parameters
+    parameters = AvmBlueprintEngine._native_arm_parameters({**values, "arm_off_state_resistance_ohm": 1e6})
+    valve_ll_kv = 0.9 * 640.0 * math.sqrt(3.0) / (2 * math.sqrt(2.0))
+    current_rms = math.hypot(1000.0, -200.0) / (math.sqrt(3.0) * valve_ll_kv)
+    ohmic = 0.15 * ((1000.0 / 640.0 / 3.0)**2 + (current_rms / 2.0)**2)
+    assert parameters.P_nonohmic_MW + ohmic == pytest.approx(15.0 / 12.0)
+
+
+def test_native_candidate_bandwidth_and_ratings_change_the_control_response():
+    from pscad_mcp.hvdc.builders.mmc.derivation import derive_mmc_parameters
+    candidates = derive_mmc_parameters(valid_request(model_fidelity="average_value")).candidates
+    nominal = AvmBlueprintEngine._native_control_parameters(candidates[0].parameters)
+    slower = AvmBlueprintEngine._native_control_parameters(candidates[2].parameters)
+    assert slower["active_control_ti_s"] == pytest.approx(nominal["active_control_ti_s"] / 0.8)
+    assert slower["p_control_kp"] == pytest.approx(nominal["p_control_kp"] * 0.8)
+    assert slower["feedback_filter_s"] == pytest.approx(nominal["feedback_filter_s"] / 0.8)
+    scaled = AvmBlueprintEngine._native_control_parameters({**candidates[0].parameters, "rated_power_mw": 2000.0, "rated_dc_voltage_kv": 1280.0})
+    # Identical per-unit P/Q error gives the same phase/modulation correction.
+    assert scaled["p_control_kp"] * 2000 == pytest.approx(nominal["p_control_kp"] * 1000)
+    assert scaled["reactive_control_kp"] * 2000 == pytest.approx(nominal["reactive_control_kp"] * 1000)
+    assert scaled["dc_voltage_control_kp"] * 1280 / 2000 == pytest.approx(nominal["dc_voltage_control_kp"] * 640 / 1000)
+    adjusted = derive_mmc_parameters(valid_request(model_fidelity="average_value", engineering_overrides={
+        "dc_voltage_control_kp": {"value": 0.3, "unit": "MW/kV"},
+        "dc_voltage_control_ti_s": {"value": 300.0, "unit": "ms"},
+    })).candidates[0]
+    control = AvmBlueprintEngine._native_control_parameters(adjusted.parameters)
+    assert control["dc_voltage_control_kp"] == 0.3
+    assert control["dc_voltage_control_ti_s"] == 0.3
 
 
 def test_avm_engine_applies_derived_parameters_to_twelve_visible_arms(
@@ -87,3 +132,175 @@ def test_avm_inventory_request_includes_live_master_dependencies() -> None:
     assert "cigre_mmc_avm_v1:MMCAverageArm" in definitions
     assert "master:source3" in definitions
     assert "master:transformer" in definitions
+
+
+def test_native_avm_engine_freezes_sources_and_materializes_candidate_values(
+    tmp_path: Path,
+) -> None:
+    master = Path(r"C:\Program Files (x86)\PSCAD46\master.pslx")
+    donor = Path(
+        r"C:\Users\Public\Documents\PSCAD\4.6\Examples\hvdc_vsc\VSCTrans.pscx"
+    )
+    tline = master.parent / "bin" / "win" / "tline.exe"
+    if not master.is_file() or not donor.is_file() or not tline.is_file():
+        pytest.skip("Installed PSCAD 4.6.2 XML sources are required")
+    engine = AvmBlueprintEngine(
+        native_sources={
+            "master": str(master),
+            "cable_donor": str(donor),
+            "tline": str(tline),
+        }
+    )
+    request = parse_parametric_request(
+        valid_request(
+            model_fidelity="average_value",
+            dc_voltage_kv=500.0,
+            active_power_mw=750.0,
+            station_p={
+                "ac_voltage_kv": 180.0,
+                "short_circuit_ratio": 5.0,
+                "x_over_r": 10.0,
+            },
+            station_vdc={
+                "ac_voltage_kv": 190.0,
+                "short_circuit_ratio": 4.0,
+                "x_over_r": 8.0,
+            },
+            dc_link={"kind": "cable", "length_km": 100.0},
+        )
+    )
+    inputs = engine.planning_inputs(request)
+    assert inputs["capabilities"]["native_physical_assembly"] is True
+    assert inputs["source_hashes"]["master"] == hashlib.sha256(
+        master.read_bytes()
+    ).hexdigest()
+    plan = create_parametric_plan(
+        request,
+        "PUBLIC_NATIVE",
+        tmp_path,
+        pwm_audit(),
+        avm_assets(),
+        avm_native_inputs=inputs,
+    ).engine_plans[0]
+    expected_loop_r = 2 * 2.82e-8 * 1000.0 * 100.0 / (3.141592653589793 * 0.0104**2)
+    assert plan.candidates[0].parameters["line_resistance_ohm"] == pytest.approx(expected_loop_r)
+
+    class Service:
+        def __init__(self):
+            self.calls = []
+
+        async def load_projects(self, paths):
+            self.calls.append(("load", tuple(paths)))
+            return "loaded"
+
+        async def save_project(self, name, *, confirm=False):
+            self.calls.append(("save", name, confirm))
+            return "saved"
+
+        async def build_project(self, name):
+            self.calls.append(("build", name))
+            return "built"
+
+        async def get_project_output(self, name, structured=False):
+            self.calls.append(("output", name, structured))
+            return {"messages": []}
+
+    service = Service()
+    result = asyncio.run(engine.execute_candidate(plan, service))
+    assert result["state"] == "built"
+    assert result["capability_level"] == "built"
+    assert result["assembly_accepted"] is False
+    assert result["model_accepted"] is False
+    assert result["validation"]["scope"] == "native_physical_assembly_compile"
+    assert result["source_hashes"] == dict(plan.source_hashes)
+    candidate_name = "AVM_" + plan.plan_hash[:12] + "_avm_0"
+    assert ("build", candidate_name) in service.calls
+    assert result["publication_project_name"] == candidate_name
+    assert len(candidate_name) <= 30
+    root = ET.parse(result["project_path"]).getroot()
+    users = root.findall("./definitions/Definition[@name='Main']/schematic/User")
+    assert len(
+        [item for item in users if item.get("defn", "").endswith(":MMCAverageArm")]
+    ) == 12
+    assert result["fixture"]["parameters"]["station_p_ac_voltage_kv"] == 180.0
+    assert result["fixture"]["parameters"]["station_vdc_ac_voltage_kv"] == 190.0
+    assert result["fixture"]["parameters"]["cable_length_km"] == 100.0
+    assert result["fixture"]["parameters"]["reversal_time_s"] == 1.0
+    assert result["fixture"]["parameters"]["reversal_duration_s"] == request.power_reversal_time_s
+    assert result["fixture"]["parameters"]["simulation_duration_s"] == pytest.approx(4.4 + request.power_reversal_time_s)
+    assert result["fixture"]["parameters"]["control_kind"] == "dq_current"
+    assert any(c.get("defn", "").endswith(":MMCNativeProtection") for c in users)
+    assert any(c.get("defn", "").endswith(":MMCNeutralGrounding") for c in users)
+
+
+def test_native_avm_engine_rejects_unmodeled_overhead_link(tmp_path: Path) -> None:
+    paths = {}
+    for name in ("master", "cable_donor", "tline"):
+        path = tmp_path / name
+        path.write_bytes(name.encode("ascii"))
+        paths[name] = str(path)
+    engine = AvmBlueprintEngine(native_sources=paths)
+    request = parse_parametric_request(
+        valid_request(model_fidelity="average_value", dc_link={"kind": "overhead_line", "length_km": 100.0})
+    )
+    with pytest.raises(BackendError) as raised:
+        engine.planning_inputs(request)
+    assert raised.value.code == "MMC_AVM_LINK_UNSUPPORTED"
+
+
+def test_native_producer_change_invalidates_execution_before_writing(tmp_path, monkeypatch, cable_sources):
+    import pscad_mcp.hvdc.builders.mmc.engines.avm as module
+    from types import SimpleNamespace
+
+    donor, master = cable_sources
+    tline = tmp_path / "tline.exe"
+    tline.write_bytes(b"test-only executable identity; never executed")
+    paths = {"master": str(master), "cable_donor": str(donor), "tline": str(tline)}
+    engine = AvmBlueprintEngine(native_sources=paths)
+    request = parse_parametric_request(valid_request(
+        model_fidelity="average_value", dc_link={"kind": "cable", "length_km": 100.0}
+    ))
+    inputs = engine.planning_inputs(request)
+    parent = create_parametric_plan(request, "PRODUCER", tmp_path, None, avm_assets(), avm_native_inputs=inputs)
+    before = set(tmp_path.iterdir())
+    changed = {**module._native_producer_hashes(), "native_bundle.py": "f" * 64}
+    monkeypatch.setattr(module, "_native_producer_hashes", lambda: changed)
+    with pytest.raises(BackendError) as raised:
+        asyncio.run(engine.execute_candidate(parent.engine_plans[0], SimpleNamespace()))
+    assert raised.value.code == "MMC_PLAN_STALE"
+    assert set(tmp_path.iterdir()) == before
+
+
+@pytest.mark.parametrize("drift", ["candidate", "constants"])
+def test_native_cable_resistance_drift_stops_before_model_construction(tmp_path, cable_sources, drift):
+    from types import SimpleNamespace
+    donor, master = cable_sources
+    tline = tmp_path / "tline.exe"
+    tline.write_bytes(b"test-only executable identity; never executed")
+    calls = []
+
+    def wrong_constants(*args, **kwargs):
+        calls.append("constants")
+        return (SimpleNamespace(loop_dc_resistance_ohm=1.0, length_km=100.0,
+                                core_dc_resistance_ohm_per_km=(0.005, 0.005)),)
+
+    def builder(*args, **kwargs):
+        pytest.fail("The model must not be constructed after a physical cable mismatch")
+
+    engine = AvmBlueprintEngine(
+        native_sources={"master": str(master), "cable_donor": str(donor), "tline": str(tline)},
+        constants_generator=wrong_constants, fixture_builder=builder,
+    )
+    request = parse_parametric_request(valid_request(
+        model_fidelity="average_value", dc_link={"kind": "cable", "length_km": 100.0}
+    ))
+    inputs = engine.planning_inputs(request)
+    plan = create_parametric_plan(request, "PROFILE", tmp_path, None, avm_assets(), avm_native_inputs=inputs).engine_plans[0]
+    if drift == "candidate":
+        candidate = replace(plan.candidates[0], parameters={**plan.candidates[0].parameters, "line_resistance_ohm": 1.0})
+        plan = replace(plan, candidates=(candidate,))
+    with pytest.raises(BackendError) as error:
+        asyncio.run(engine.execute_candidate(plan, SimpleNamespace()))
+    assert error.value.code == ("MMC_PLAN_STALE" if drift == "candidate" else "MMC_AVM_CONSTANTS_INVALID")
+    assert calls == ([] if drift == "candidate" else ["constants"])
+    assert not Path(plan.target_path).exists()

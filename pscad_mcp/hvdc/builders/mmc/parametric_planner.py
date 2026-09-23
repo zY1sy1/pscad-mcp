@@ -175,6 +175,7 @@ def create_parametric_plan(
     workspace: str | Path,
     pwm_audit: object | None,
     avm_assets: object,
+    avm_native_inputs: Mapping[str, Any] | None = None,
 ) -> MmcParentPlan:
     parsed = parse_parametric_request(request)
     workspace_root = Path(workspace).expanduser().resolve()
@@ -217,10 +218,16 @@ def create_parametric_plan(
                 "The audited PWM template contains unresolved line dependencies.",
                 dependencies=[dict(item) for item in unresolved],
             )
+    native_inputs = dict(avm_native_inputs or {})
+    native_capabilities = dict(native_inputs.get("capabilities", {}))
+    cable_profile = native_capabilities.get("native_cable_profile")
+    if native_capabilities.get("native_physical_assembly") is True and not isinstance(cable_profile, Mapping):
+        raise _error("MMC_AVM_CABLE_PROFILE_INVALID", "Native AVM planning requires the source cable geometry.")
     derived = derive_mmc_parameters(
         parsed,
         pwm_reference=_pwm_reference(audit) if "detailed_pwm" in requested_engines else None,
         avm_reference=_avm_reference(avm_assets),
+        avm_cable_profile=cable_profile,
     )
     if not derived.feasible:
         raise _error("MMC_REQUEST_INFEASIBLE", "The MMC request failed analytic constraints.", diagnostics=list(derived.diagnostics))
@@ -253,8 +260,22 @@ def create_parametric_plan(
         else:
             bindings = ()
             dependencies = ()
-            plan_source_paths, plan_source_hashes, plan_asset_hashes = {}, {}, asset_hashes
-            capabilities = {}
+            plan_source_paths = {
+                str(key): str(value)
+                for key, value in dict(native_inputs.get("source_paths", {})).items()
+            }
+            plan_source_hashes = (
+                _hashes(native_inputs.get("source_hashes"), "AVM native source")
+                if plan_source_paths
+                else {}
+            )
+            if set(plan_source_paths) != set(plan_source_hashes):
+                raise _error(
+                    "MMC_SOURCE_HASH_MISSING",
+                    "AVM native source paths and hashes must have identical keys.",
+                )
+            plan_asset_hashes = asset_hashes
+            capabilities = dict(native_inputs.get("capabilities", {}))
         plans.append(
             _engine_plan(
                 engine=engine,

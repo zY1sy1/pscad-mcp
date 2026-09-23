@@ -141,51 +141,66 @@ def _set_named_control(
     )
 
 
-def _station_instance(root: ET.Element) -> ET.Element | None:
-    for definition in root.iter():
-        if (
-            definition.tag.rsplit("}", 1)[-1].casefold() == "definition"
-            and (definition.attrib.get("name") or "").rsplit(":", 1)[-1].casefold()
-            == "station"
-        ):
-            for component in _components(definition):
-                values = dict(_parameters(component))
-                if "TFlt" in values or "FltDur" in values:
-                    return component
-    return None
-
-
-def _set_station_parameter(
-    root: ET.Element,
-    parameter: str,
-    value: str,
-    bindings: list[dict[str, str]],
-) -> None:
-    component = _station_instance(root)
-    if component is None:
+def _seconds(value: Any, field: str, *, positive: bool = False) -> str:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or not math.isfinite(float(value))
+        or value < 0
+        or positive and value == 0
+    ):
         raise _error(
-            "MMC_TEMPLATE_NATIVE_BINDING_MISSING",
-            "The template has no Station instance with native fault parameters.",
-            parameter=parameter,
+            "MMC_TEMPLATE_NATIVE_BINDING_INVALID",
+            "Fault times must be finite and nonnegative; duration must be positive.",
+            field=field,
         )
+    return _value(value, field)
+
+
+def _bind_fault_timer(
+    root: ET.Element,
+    duration: str | None,
+    bindings: list[dict[str, str]],
+) -> ET.Element:
+    main_definitions = [
+        node for node in root.iter()
+        if node.tag.rsplit("}", 1)[-1].casefold() == "definition"
+        and (node.get("name") or "").rsplit(":", 1)[-1] == "Main"
+    ]
+    matches = [
+        component for main in main_definitions for component in _components(main)
+        if (component.get("defn") or component.get("definition")) == "master:tfaultn"
+        and dict(_parameters(component)).get("TF") == "Flt_time"
+    ]
+    if len(main_definitions) != 1 or len(matches) != 1:
+        raise _error(
+            "MMC_TEMPLATE_NATIVE_BINDING_AMBIGUOUS"
+            if len(main_definitions) > 1 or len(matches) > 1
+            else "MMC_TEMPLATE_NATIVE_BINDING_MISSING",
+            "The Main canvas must contain one fault timer driven by Flt_time.",
+            matches=len(matches),
+        )
+    component = matches[0]
     owner = (component.attrib.get("id") or "").strip()
     params = [
         item
         for item in component.iter()
         if item.tag.rsplit("}", 1)[-1].casefold() == "param"
-        and item.attrib.get("name") == parameter
+        and item.attrib.get("name") == "DF"
     ]
-    if len(params) != 1:
+    if not owner or len(params) != 1:
         raise _error(
             "MMC_TEMPLATE_NATIVE_BINDING_MISSING",
-            "The Station instance has no unique native fault parameter.",
-            parameter=parameter,
+            "The active fault timer has no unique duration parameter or owner.",
+            parameter="DF",
             owner=owner,
         )
-    params[0].set("value", value)
-    bindings.append(
-        {"owner": owner, "name": parameter, "parameter": parameter, "value": value}
-    )
+    if duration is not None:
+        params[0].set("value", duration)
+        bindings.append(
+            {"owner": owner, "name": "Fault Duration", "parameter": "DF", "value": duration}
+        )
+    return component
 
 
 def materialize_template_native_scenario(
@@ -231,6 +246,14 @@ def materialize_template_native_scenario(
             destination=str(destination_path),
         )
 
+    for field, value in (("fault_time_s", fault_time_s), ("dc_fault_time_s", dc_fault_time_s)):
+        if value is not None:
+            _seconds(value, field)
+    duration = (
+        _seconds(fault_duration_s, "fault_duration_s", positive=True)
+        if fault_duration_s is not None else None
+    )
+
     requested: dict[str, Any] = dict(controls or {})
     for key, value in (
         ("Fault Time", fault_time_s),
@@ -257,9 +280,8 @@ def materialize_template_native_scenario(
             "Specify either fault_time_s or dc_fault_time_s, not both.",
         )
     if dc_fault_time_s is not None:
-        # The official fault switches are driven by Flt_time, which is sourced
-        # from the named Fault Time variable.  TFlt is also bound on the
-        # Station instance for templates that use it in the pole model.
+        # The Main timer uses Flt_time; the unused Station wrapper does not
+        # control the duration of the simulated fault switches.
         requested.setdefault("Fault Time", dc_fault_time_s)
 
     try:
@@ -274,47 +296,32 @@ def materialize_template_native_scenario(
     bindings: list[dict[str, str]] = []
     for raw_name, raw_value in requested.items():
         canonical = _CONTROL_NAMES[raw_name.casefold()]
+        if canonical == "Fault Time":
+            _seconds(raw_value, canonical)
         _set_named_control(root, canonical, _value(raw_value, canonical), bindings)
-    if dc_fault_time_s is not None:
-        _set_station_parameter(
-            root, "TFlt", _value(dc_fault_time_s, "dc_fault_time_s"), bindings
-        )
-    elif fault_time_s is not None:
-        # The official Station instance forwards TFlt to the MMC fault model;
-        # binding it alongside Fault Time keeps AC and DC scenarios explicit.
-        _set_station_parameter(
-            root, "TFlt", _value(fault_time_s, "fault_time_s"), bindings
-        )
-    if fault_duration_s is not None:
-        _set_station_parameter(
-            root, "FltDur", _value(fault_duration_s, "fault_duration_s"), bindings
-        )
+    fault_timer = (
+        _bind_fault_timer(root, duration, bindings)
+        if duration is not None or any(name.casefold() == "fault time" for name in requested)
+        else None
+    )
 
     fault_execution: dict[str, Any] = {}
     if dc_fault_time_s is not None:
         main = next((item for item in root.findall("./definitions/Definition") if item.get("name") == "Main"), None)
-        timers = [item for item in _components(main) if item.get("defn") == "master:tfaultn" and dict(_parameters(item)).get("TF") == "Flt_time"] if main is not None else []
-        if timers:
-            if len(timers) != 1:
-                raise _error("MMC_TEMPLATE_NATIVE_BINDING_AMBIGUOUS", "The actual DC fault timer is not unique.")
-            duration = _value(fault_duration_s, "fault_duration_s") if fault_duration_s is not None else dict(_parameters(timers[0]))["DF"]
-            timer_params = [item for item in timers[0].findall("./paramlist/param") if item.get("name") == "DF"]
-            if len(timer_params) != 1:
-                raise _error("MMC_TEMPLATE_NATIVE_BINDING_MISSING", "The actual DC fault timer has no unique duration.")
-            timer_params[0].set("value", duration)
-            bindings.append({"owner": timers[0].get("id"), "name": "DC fault timer", "parameter": "DF", "value": duration})
-            _set_named_control(root, "Flt Location", "3", bindings)
-            switches = [item for item in _components(main) if item.get("defn") == "master:fault_sw" and dict(_parameters(item)).get("Name") == "DC_flt_2_PN"]
-            if len(switches) != 1:
-                raise _error("MMC_TEMPLATE_NATIVE_BINDING_MISSING", "The terminal-2 P-N fault branch is not unique.")
-            clearing = next((item for item in switches[0].findall("./paramlist/param") if item.get("name") == "OpCur"), None)
-            if clearing is None:
-                raise _error("MMC_TEMPLATE_NATIVE_BINDING_MISSING", "The imposed fault clearing mode is missing.")
-            # Removing an externally imposed fault at a specified EMT time is
-            # distinct from modelling a current-zero-only circuit breaker.
-            clearing.set("value", "1")
-            bindings.append({"owner": switches[0].get("id"), "name": "DC_flt_2_PN", "parameter": "OpCur", "value": "1"})
-            fault_execution = {"timer_owner": timers[0].get("id"), "timer_start_signal": "Flt_time", "timer_duration_s": float(duration), "fault_location": 3, "fault_switch_owner": switches[0].get("id"), "fault_switch_signal": "DC_flt_2_PN", "clearing_policy": "imposed_fault_removed_at_scheduled_time", "actual_state_required": "OPENBR"}
+        assert fault_timer is not None
+        timer_duration = dict(_parameters(fault_timer))["DF"]
+        _set_named_control(root, "Flt Location", "3", bindings)
+        switches = [item for item in _components(main) if item.get("defn") == "master:fault_sw" and dict(_parameters(item)).get("Name") == "DC_flt_2_PN"]
+        if len(switches) != 1:
+            raise _error("MMC_TEMPLATE_NATIVE_BINDING_MISSING", "The terminal-2 P-N fault branch is not unique.")
+        clearing = [item for item in switches[0].iter("param") if item.get("name") == "OpCur"]
+        if len(clearing) != 1:
+            raise _error("MMC_TEMPLATE_NATIVE_BINDING_MISSING", "The imposed fault clearing mode is not unique.")
+        # Removing an externally imposed fault at a specified EMT time is
+        # distinct from modelling a current-zero-only circuit breaker.
+        clearing[0].set("value", "1")
+        bindings.append({"owner": switches[0].get("id"), "name": "DC_flt_2_PN", "parameter": "OpCur", "value": "1"})
+        fault_execution = {"timer_owner": fault_timer.get("id"), "timer_start_signal": "Flt_time", "timer_duration_s": float(timer_duration), "fault_location": 3, "fault_switch_owner": switches[0].get("id"), "fault_switch_signal": "DC_flt_2_PN", "clearing_policy": "imposed_fault_removed_at_scheduled_time", "actual_state_required": "OPENBR"}
 
     destination_path.parent.mkdir(parents=True, exist_ok=True)
     try:

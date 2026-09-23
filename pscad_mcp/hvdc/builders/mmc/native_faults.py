@@ -1,0 +1,147 @@
+"""EMTDC-timed physical fault injection for staged native AVM verification."""
+
+from xml.etree import ElementTree as ET
+from statistics import fmean
+
+from .avm_companion import _definition, _script, _PARAMETER_UNITS
+from .native_control_checks import evaluate_native_dq_controls
+
+FAULT_KINDS = ("ac_three_phase", "ac_single_line_ground", "dc_pole_to_pole", "dc_pole_to_ground")
+FAULT_NAME = "MMCNativeFaultProtocol"
+FAULT_OUTPUTS = {"ACTIVE": ("FAULT_ACTIVE", "1"), "OPEN": ("FAULT_OPEN", "1"),
+                 "START": ("FAULT_START", "s"), "END": ("FAULT_END", "s"),
+                 "ISOLATE": ("FAULT_ISOLATION_OPEN", "1"), "RESTART": ("FAULT_RESTART", "1"),
+                 "RECOVERY": ("FAULT_RECOVERY_MODE", "1")}
+FAULT_DEFAULTS = {"Fault_Delay_s": 2.9, "Fault_Duration_s": 0.05,
+                  "Reclose_Delay_s": 0.02, "Reset_Delay_s": 0.05, "Reset_Deadline_s": 0.15}
+
+
+def append_native_fault_protocol(root: ET.Element) -> None:
+    _PARAMETER_UNITS.update({name: "s" for name in FAULT_DEFAULTS})
+    definition = _definition(root, FAULT_NAME,
+        {**{n: (-90, -54 + i * 36, "Transfer", "Input") for i, n in enumerate(("POWER_READY", "POWER_START", "TRIP", "RESET_ACK"))},
+         **{n: (90, -54 + i * 36, "Transfer", "Output") for i, n in enumerate(FAULT_OUTPUTS)}}, FAULT_DEFAULTS)
+    _script(definition, "Dsdyn", """#STORAGE REAL:1
+      IF (TIMEZERO) STORF(NSTORF) = -1.0
+      IF ($POWER_READY .GE. 0.5 .AND. STORF(NSTORF) .LT. 0.0) STORF(NSTORF) = $POWER_START + $Fault_Delay_s
+      $ACTIVE = 0.0
+      $OPEN = 1.0
+      $START = STORF(NSTORF)
+      $END = -1.0
+      $ISOLATE = $TRIP
+      $RESTART = 0.0
+      $RECOVERY = 0.0
+      IF ($START .GE. 0.0) THEN
+        $END = $START + $Fault_Duration_s
+        IF (TIME .GE. $START .AND. TIME .LT. $END) THEN
+          $ACTIVE = 1.0
+          $OPEN = 0.0
+        ENDIF
+        IF (TIME .GE. $END + $Reclose_Delay_s) $RECOVERY = 1.0
+        IF (TIME .GE. $END + $Reclose_Delay_s .AND. TIME .LT. $END + $Reset_Deadline_s) $ISOLATE = 0.0
+        IF (TIME .GE. $END + $Reset_Delay_s .AND. TIME .LT. $END + $Reset_Deadline_s .AND. $TRIP .GE. 0.5 .AND. $RESET_ACK .LT. 0.5) $RESTART = 1.0
+      ENDIF
+      NSTORF = NSTORF + 1
+""")
+
+
+def fault_branches(kind: str) -> dict[str, tuple[str, str]]:
+    if kind == "ac_three_phase":
+        return {p: ("P_GRID_" + p, "GND") for p in "ABC"}
+    if kind == "ac_single_line_ground":
+        return {"A": ("P_GRID_A", "GND")}
+    if kind == "dc_pole_to_pole":
+        return {"DC": ("P_CABLE_POS", "P_CABLE_NEG")}
+    if kind == "dc_pole_to_ground":
+        return {"DC": ("P_CABLE_POS", "GND")}
+    raise ValueError("Unsupported native AVM fault kind")
+
+
+def evaluate_native_fault_trace(trace: dict, parameters: dict) -> dict:
+    """Fault response and recovery gate; a latch alone cannot establish PASS."""
+    import math
+
+    result = {"scope": "native_half_bridge_fault_response", "status": "FAIL", "model_accepted": False,
+              "intrinsic_dc_fault_blocking": False, "checks": {}, "metrics": {},
+              "limits": {"trip_latency_s": 0.005, "recovery_time_s": 0.5,
+                         "isolation_latency_s": 0.005,
+                         "dc_current_peak_pu": 2.0, "arm_current_peak_pu": 2.0,
+                         "fault_voltage_rms_pu": 0.20, "capacitor_voltage_deviation_pu": 0.10,
+                         "recovered_power_error_pu": 0.05, "recovered_voltage_error_pu": 0.10}}
+    kind = parameters.get("fault_kind")
+    branches = fault_branches(kind)
+    if kind.startswith("ac_"):
+        result["limits"]["dc_current_peak_pu"] = 1.25
+    required = {"time", "FAULT_ACTIVE", "FAULT_START", "FAULT_END", "PROTECTION_TRIP", "PROTECTION_TIME", "PROTECTION_CODE"}
+    required.update("FAULT_I_" + name for name in branches)
+    voltage_channels = ["P_V_" + p for p in branches] if kind.startswith("ac_") else ["P_CABLE_VDC" if kind == "dc_pole_to_pole" else "P_CABLE_VPOS"]
+    required.update(voltage_channels)
+    for s in ("P", "V"):
+        required.update(f"FAULT_{s}_{n}" for n in ("ARM_PEAK", "DC_PEAK", "CAP_MIN", "CAP_MAX"))
+        required.update(s + "_" + n for n in ("BLOCK", "VDC", "VDC_POS", "VDC_NEG", "IDC", "P", "P_REFERENCE", "PLL_LOCKED"))
+        required.update(f"{s}_{p}_{q}_{n}" for p in "ABC" for q in ("UPPER", "LOWER") for n in ("I", "VCAP"))
+        required.update(f"{s}_{domain}_{branch}_{name}" for domain, branches_ in (("AC", "ABC"), ("DC", ("POS", "NEG")))
+                        for branch in branches_ for name in ("CONTACT_STATE", "MOV_ENERGY"))
+    if not required <= trace.keys():
+        result["missing_channels"] = sorted(required - trace.keys())
+        return result
+    time = trace["time"]
+    if len(time) < 3 or any(len(trace[k]) != len(time) or any(isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) for v in trace[k]) for k in required) or any(b <= a for a, b in zip(time, time[1:])):
+        result["error"] = "Fault observations are invalid or unaligned"
+        return result
+    active = [i for i, v in enumerate(trace["FAULT_ACTIVE"]) if v >= 0.5]
+    if not active:
+        result["error"] = "The requested fault was never applied"
+        return result
+    start, end = trace["FAULT_START"][active[0]], trace["FAULT_END"][active[0]]
+    step = parameters["output_step_s"]
+    if not 0 < start < end < end + 0.7 <= time[-1]:
+        result["error"] = "Fault and recovery windows are not fully covered"
+        return result
+    checks = result["checks"]
+    checks["fault_timing"] = abs(time[active[0]] - start) <= 1.1 * step and abs(time[active[-1]] + step - end) <= 1.1 * step
+    checks["physical_fault_current"] = all(max(abs(trace["FAULT_I_" + name][i]) for i in active) > 0.01 for name in branches)
+    voltage_base = parameters["station_p_ac_voltage_kv"] / math.sqrt(3) if kind.startswith("ac_") else parameters["vdc_order_kv"] * (0.5 if kind == "dc_pole_to_ground" else 1.0)
+    result["metrics"]["fault_voltage_rms_pu"] = max(math.sqrt(fmean(trace[c][i]**2 for i in active)) / voltage_base for c in voltage_channels)
+    checks["physical_fault_voltage"] = result["metrics"]["fault_voltage_rms_pu"] <= result["limits"]["fault_voltage_rms_pu"]
+    trip = next((i for i, v in enumerate(trace["PROTECTION_TRIP"]) if v >= 0.5), None)
+    checks["protection_trips_after_fault"] = trip is not None and start - 1.1 * step <= trace["PROTECTION_TIME"][trip] <= start + result["limits"]["trip_latency_s"]
+    if trip is not None:
+        checks["both_stations_block"] = all(any(trace[s + "_BLOCK"][i] >= 0.5 for i in range(trip, min(len(time), trip + 4))) for s in ("P", "V"))
+        isolation = [i for i, t in enumerate(time) if time[trip] <= t <= time[trip] + result["limits"]["isolation_latency_s"]]
+        for s in ("P", "V"):
+            contacts = [f"{s}_{domain}_{branch}_CONTACT_STATE" for domain, branches_ in (("AC", "ABC"), ("DC", ("POS", "NEG"))) for branch in branches_]
+            checks[s + ":external_isolation"] = all(any(trace[c][i] >= 1.5 for i in isolation) for c in contacts)
+    checks["fault_clears"] = all(v < 0.5 for t, v in zip(time, trace["FAULT_ACTIVE"]) if t >= end + step)
+    fault_window = [i for i, t in enumerate(time) if start <= t <= end + 0.5]
+    recovery = [i for i, t in enumerate(time) if end + 0.5 <= t]
+    vdc, power = parameters["vdc_order_kv"], parameters["active_power_order_mw"]
+    metrics = result["metrics"]
+    metrics.update(fault_start_s=start, fault_end_s=end, trip_time_s=trace["PROTECTION_TIME"][trip] if trip is not None else None)
+    for s, voltage_key in (("P", "station_p_valve_voltage_kv"), ("V", "station_vdc_valve_voltage_kv")):
+        arms = [f"{s}_{p}_{q}_I" for p in "ABC" for q in ("UPPER", "LOWER")]
+        base = power / (3 * vdc) + math.sqrt(2) * math.hypot(power, parameters["reactive_power_order_mvar"]) / (2 * math.sqrt(3) * parameters[voltage_key])
+        metrics[s] = {"dc_current_peak_pu": max(trace[f"FAULT_{s}_DC_PEAK"]) / (power / vdc),
+                      "arm_current_peak_pu": max(trace[f"FAULT_{s}_ARM_PEAK"]) / base,
+                      "recovered_dc_voltage_error_pu": max(abs(trace[s + "_VDC"][i] / vdc - 1) for i in recovery)}
+        metrics[s]["capacitor_voltage_deviation_pu"] = max(abs(2 * trace[f"FAULT_{s}_{n}"][i] / vdc - 1) for n in ("CAP_MIN", "CAP_MAX") for i in fault_window)
+        checks[s + ":peak_evidence_bounds_samples"] = (
+            max(trace[f"FAULT_{s}_ARM_PEAK"]) + 1e-9 >= max(abs(trace[a][i]) for a in arms for i in fault_window)
+            and max(trace[f"FAULT_{s}_DC_PEAK"]) + 1e-9 >= max(abs(trace[s + "_IDC"][i]) for i in fault_window))
+        checks[s + ":capacitor_voltage_bound"] = metrics[s]["capacitor_voltage_deviation_pu"] <= result["limits"]["capacitor_voltage_deviation_pu"]
+        arresters = [f"{s}_{domain}_{branch}_MOV_ENERGY" for domain, branches_ in (("AC", "ABC"), ("DC", ("POS", "NEG"))) for branch in branches_]
+        metrics[s]["arrester_energy_increment_kj"] = sum(trace[n][fault_window[-1]] - trace[n][fault_window[0]] for n in arresters)
+        checks[s + ":arrester_energy_valid"] = all(min(trace[n][i] for i in fault_window) >= -1e-9 for n in arresters)
+        checks[s + ":dc_current_bound"] = metrics[s]["dc_current_peak_pu"] <= result["limits"]["dc_current_peak_pu"]
+        checks[s + ":arm_current_bound"] = metrics[s]["arm_current_peak_pu"] <= result["limits"]["arm_current_peak_pu"]
+        checks[s + ":voltage_recovery"] = metrics[s]["recovered_dc_voltage_error_pu"] <= result["limits"]["recovered_voltage_error_pu"]
+        metrics[s]["recovered_pole_asymmetry_pu"] = max(abs(trace[s + "_VDC_POS"][i] + trace[s + "_VDC_NEG"][i]) / vdc for i in recovery)
+        checks[s + ":pole_symmetry_recovery"] = metrics[s]["recovered_pole_asymmetry_pu"] <= 0.01
+        checks[s + ":control_recovery"] = all(trace[s + "_BLOCK"][i] < 0.5 and trace[s + "_PLL_LOCKED"][i] >= 0.5 for i in recovery)
+    metrics["recovered_power_error_pu"] = max(abs(trace["P_P"][i] / power + 1) for i in recovery)
+    checks["power_recovery"] = metrics["recovered_power_error_pu"] <= result["limits"]["recovered_power_error_pu"]
+    result["recovery_controls"] = evaluate_native_dq_controls(trace, parameters, {"recovery": (end + 0.5, end + 0.7), "recovered_steady": (time[-1] - 0.3, time[-1])})
+    checks["recovery_dq_storage"] = result["recovery_controls"]["status"] == "PASS"
+    result["failed_checks"] = [k for k, passed in checks.items() if not passed]
+    result["status"] = "FAIL" if result["failed_checks"] else "PASS"
+    return result

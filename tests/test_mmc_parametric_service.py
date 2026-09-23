@@ -171,6 +171,81 @@ def test_validation_without_outputs_cannot_claim_acceptance(tmp_path: Path) -> N
     assert validation["acceptance"]["status"] == "not_evaluated"
 
 
+def test_compiled_native_candidate_stays_staged_until_dynamic_acceptance(tmp_path):
+    service = make_parametric_service(tmp_path)
+    execute = service.avm_engine.execute_candidate
+
+    async def compiled_only(*args, **kwargs):
+        result = await execute(*args, **kwargs)
+        result.update(state="built", capability_level="built", model_accepted=False)
+        return result
+
+    service.avm_engine.execute_candidate = compiled_only
+    _, terminal = _build(service, tmp_path, valid_request(model_fidelity="average_value"))
+    assert terminal["state"] == "built"
+    assert terminal["result"]["model_accepted"] is False
+    assert terminal["result"]["publication_pending"] == "required_dynamic_physical_acceptance"
+    assert not (tmp_path / "MMC_CASE_avm.pscx").exists()
+    assert all(Path(path).is_file() for path in terminal["result"]["staged_projects"])
+    assert not any(call[0] in {"load_projects", "save_project_as"} for call in service.pscad_service.calls)
+
+
+def test_native_avm_publication_uses_pscad_save_as_for_distinct_candidate_name(
+    tmp_path: Path,
+) -> None:
+    service = make_parametric_service(tmp_path)
+
+    class NativeEngine:
+        name = "average_value"
+
+        async def execute_candidate(self, plan, _service, *, candidate_id=None):
+            selected = candidate_id or plan.candidates[0].candidate_id
+            candidate_name = plan.target_name + "_candidate_" + selected.replace("-", "_")
+            root = tmp_path / ".native-candidate"
+            root.mkdir()
+            project = root / (candidate_name + ".pscx")
+            project.write_text(
+                f"<project name='{candidate_name}' version='4.6.2'><definitions/></project>",
+                encoding="utf-8",
+            )
+            return {
+                "state": "accepted",
+                "engine": self.name,
+                "candidate_id": selected,
+                "project_path": str(project),
+                "publication_project_name": candidate_name,
+                "capability_level": "built",
+                "assembly_accepted": False,
+                "model_accepted": False,
+            }
+
+    service.avm_engine = NativeEngine()
+    _, terminal = _build(
+        service, tmp_path, valid_request(model_fidelity="average_value")
+    )
+
+    assert terminal["state"] == "published"
+    engine = terminal["engines"][0]
+    assert engine["publication_method"] == "pscad_save_as"
+    assert engine["publication_settings"] == {
+        "output_filename": "MMC_CASE_avm.out"
+    }
+    assert engine["capability_level"] == "built"
+    final = tmp_path / "MMC_CASE_avm.pscx"
+    assert final.is_file()
+    assert "name='MMC_CASE_avm'" in final.read_text(encoding="utf-8")
+    assert (tmp_path / ".native-candidate" / "MMC_CASE_avm_candidate_avm_0.pscx").is_file()
+    save_as = [
+        call for call in service.pscad_service.calls if call[0] == "save_project_as"
+    ]
+    assert len(save_as) == 1
+    assert save_as[0][1][0] == "MMC_CASE_avm_candidate_avm_0"
+    assert (
+        "set_project_settings",
+        ("MMC_CASE_avm", {"output_filename": "MMC_CASE_avm.out"}),
+    ) in service.pscad_service.calls
+
+
 def test_project_aware_recommendations_bind_cached_derived_project(
     tmp_path: Path,
 ) -> None:

@@ -153,3 +153,25 @@ def test_existing_unreadable_library_target_is_an_asset_mismatch(tmp_path, monke
         asyncio.run(executor._materialize_library(plan.operations[0]))
 
     assert raised.value.code == "MMC_ASSET_MISMATCH"
+
+
+def test_unlabeled_two_vertex_net_uses_native_wire_receipt(tmp_path):
+    plan = _plan(tmp_path)
+    service = RecordingMmcService()
+    executor = MmcExecutor(plan, service, tmp_path, build_id="wire-receipt")
+    operation = MmcPlanOperation(
+        99,
+        "connect_net",
+        "dc_link",
+        {
+            "kind": "electrical",
+            "vertices": [[10, 20], [46, 20]],
+            "label": None,
+        },
+        "connect_net:dc_link:000",
+        "connect_net",
+    )
+
+    asyncio.run(executor._connect_net(operation))
+
+    assert [call[0] for call in service.calls] == ["create_wire"]

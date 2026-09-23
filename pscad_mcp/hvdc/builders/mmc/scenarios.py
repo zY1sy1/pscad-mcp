@@ -68,6 +68,8 @@ def _timing(
     design: MmcDerivedParameters, engine: str, candidate: Mapping[str, Any]
 ) -> tuple[float, float]:
     settings = candidate["settings"]
+    if engine == "average_value" and "native_cable_profile_hash" in candidate["parameters"]:
+        return float(settings["time_step_s"]), float(settings["output_step_s"])
     control_sample = float(settings["control_sample_time_s"])
     if engine == "detailed_pwm":
         switching = float(settings["switching_frequency_hz"])

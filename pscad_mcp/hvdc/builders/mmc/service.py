@@ -19,6 +19,11 @@ from .assets import load_packaged_asset_set, sha256_file
 from .catalog import MmcCatalog, parse_catalog
 from .executor import execute_build
 from .journal import AtomicJournal, WorkspaceBuildLease
+from .master_bindings import (
+    context_from_inventory,
+    load_mmc_master_registry,
+    native_inventory_catalog,
+)
 from .models import MmcBuildPlan, MmcBuildRecord, MmcBuildState
 from .planner import MmcAssetSet, MmcPlanRequest, create_plan
 from .project_graph import read_project_graph
@@ -96,6 +101,12 @@ class MmcBuilderService:
         candidate = getattr(self.pscad_service, "mmc_inventory", None)
         if candidate is not None:
             return candidate() if callable(candidate) else candidate
+        getter = getattr(self.pscad_service, "get_lcc_inventory", None)
+        if callable(getter):
+            inventory = _run_coroutine_sync(lambda: getter(native_inventory_catalog(asset_set.catalog), load_mmc_master_registry().to_dict()))
+            if context_from_inventory(inventory) is None:
+                raise _service_error("MASTER_BINDING_MISSING", "Native MMC planning requires source-hashed Master binding evidence.", "plan_mmc_model")
+            return inventory
         raise _service_error("MMC_DEFINITION_MISSING", "Live PSCAD definition inventory is required before MMC planning; the packaged catalog is not live evidence.", "plan_mmc_model", reason="live_inventory_unavailable", required_version=asset_set.pscad_version)
 
     def _load_assets(self, blueprint: str) -> MmcAssetSet:

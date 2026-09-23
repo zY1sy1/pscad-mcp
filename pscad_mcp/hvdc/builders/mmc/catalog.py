@@ -10,6 +10,15 @@ from typing import Any
 
 from ....core.backend.base import BackendError
 
+_PARAMETER_TYPE_ALIASES = {
+    "int": "integer",
+    "double": "float",
+    "real": "number",
+    "str": "string",
+    "text": "string",
+}
+_PARAMETER_TYPES = {"integer", "float", "number", "boolean", "string"}
+
 
 @dataclass(frozen=True)
 class MmcPortSpec:
@@ -127,7 +136,11 @@ def parse_catalog(data: Mapping[str, Any]) -> MmcCatalog:
                 minimum = _number(minimum, f"catalog parameter {parameter}.minimum")
             if maximum is not None:
                 maximum = _number(maximum, f"catalog parameter {parameter}.maximum")
-            parameters[parameter] = MmcParameterSpec(parameter, _text(parameter_value.get("type", "number"), f"catalog parameter {parameter}.type"), minimum, maximum, bool(parameter_value.get("required", True)), parameter_value.get("default"), "default" in parameter_value)
+            value_type = _text(parameter_value.get("type", "number"), f"catalog parameter {parameter}.type").casefold()
+            value_type = _PARAMETER_TYPE_ALIASES.get(value_type, value_type)
+            if value_type not in _PARAMETER_TYPES:
+                raise _error("MMC_BLUEPRINT_INVALID", f"catalog parameter {parameter}.type has unsupported value type.", parameter=parameter, value_type=value_type)
+            parameters[parameter] = MmcParameterSpec(parameter, value_type, minimum, maximum, bool(parameter_value.get("required", True)), parameter_value.get("default"), "default" in parameter_value)
         box_value = raw.get("bounding_box")
         box = None
         if box_value is not None:
@@ -180,10 +193,25 @@ def validate_parameters(definition: MmcDefinitionSpec, requested: Mapping[str, A
                 continue
         else:
             value = requested[name]
-        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(float(value)):
-            raise _error("MMC_PARAMETER_MISMATCH", f"parameter '{name}' is not finite numeric.", "validate_mmc_parameters", definition=definition.scoped_name, parameter=name)
-        if spec.minimum is not None and value < spec.minimum or spec.maximum is not None and value > spec.maximum:
-            raise _error("MMC_PARAMETER_MISMATCH", f"parameter '{name}' is outside its exact range.", "validate_mmc_parameters", definition=definition.scoped_name, parameter=name, value=value)
+        try:
+            value_type = _PARAMETER_TYPE_ALIASES.get(spec.value_type, spec.value_type)
+            if value_type in {"integer", "float", "number"}:
+                if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(float(value)):
+                    raise ValueError
+                if value_type == "integer" and not isinstance(value, int):
+                    raise ValueError
+            elif value_type == "boolean":
+                if not isinstance(value, bool):
+                    raise ValueError
+            elif value_type == "string":
+                if not isinstance(value, str):
+                    raise ValueError
+            else:
+                raise ValueError
+            if spec.minimum is not None and value < spec.minimum or spec.maximum is not None and value > spec.maximum:
+                raise _error("MMC_PARAMETER_MISMATCH", f"parameter '{name}' is outside its exact range.", "validate_mmc_parameters", definition=definition.scoped_name, parameter=name, value=value)
+        except (TypeError, ValueError, OverflowError):
+            raise _error("MMC_PARAMETER_MISMATCH", f"parameter '{name}' does not match its exact type.", "validate_mmc_parameters", definition=definition.scoped_name, parameter=name, value_type=spec.value_type) from None
         normalized[name] = value
     return normalized
 

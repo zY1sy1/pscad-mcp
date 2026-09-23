@@ -4,21 +4,24 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import math
 import os
 import shutil
 import tempfile
 import time
+from collections.abc import Mapping
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from ....core.backend.base import BackendError
+from ..common.routing import absolute_port
+from ..common.serialization import json_safe
 from .acceptance import evaluate_acceptance
 from .journal import AtomicJournal
 from .models import MmcBuildPlan, MmcBuildRecord, MmcBuildState, MmcPlanOperation
 from .project_graph import read_project_graph
 from .validator import validate_project_graph
-
 
 _TERMINAL_SUCCESS = {"completed", "complete", "finished", "done", "idle", "stopped"}
 _RUNNING = {"running", "started", "simulating", "busy", "queued", "pending"}
@@ -95,8 +98,20 @@ def _response_endpoints(value: Any) -> tuple[tuple[int, int], tuple[int, int]] |
     return None
 
 
-def _same_parameters(expected: dict[str, Any], observed: Any) -> bool:
-    return isinstance(observed, dict) and all(observed.get(key) == value for key, value in expected.items())
+def _same_parameters(expected: dict[str, Any], observed: Any, *, bound: bool = False) -> bool:
+    if not isinstance(observed, Mapping):
+        return False
+    for key, value in expected.items():
+        actual = observed.get(key)
+        if bound and isinstance(value, (int, float)) and not isinstance(value, bool):
+            try:
+                if isinstance(actual, bool) or not math.isclose(float(actual), value, rel_tol=1e-9, abs_tol=1e-12):
+                    return False
+            except (ValueError, TypeError, OverflowError):
+                return False
+        elif actual != value:
+            return False
+    return True
 
 
 def _sha256_file(path: Path) -> str:
@@ -353,7 +368,13 @@ class MmcExecutor:
         location = tuple(arguments.get("location", ()))
         if len(location) != 2:
             raise _error("MMC_BLUEPRINT_INVALID", "Component location must contain two coordinates.", "execute_mmc_build", logical_id=operation.target)
-        created = await self.service.add_canvas_component(self.project_name, library, name, int(location[0]), int(location[1]), int(arguments.get("orientation", 0)), dict(arguments.get("parameters", {})), canvas_name=str(arguments.get("canvas", "Main")))
+        extra = {}
+        binding = arguments.get("binding")
+        if isinstance(binding, Mapping):
+            extra["binding_evidence"] = json_safe(binding)
+        elif library.casefold() == "master" and not self.allow_test_double:
+            raise _error("MASTER_BINDING_MISSING", "Native MMC Master placement requires audited binding evidence.", "execute_mmc_build", logical_id=operation.target)
+        created = await self.service.add_canvas_component(self.project_name, library, name, int(location[0]), int(location[1]), int(arguments.get("orientation", 0)), dict(arguments.get("parameters", {})), canvas_name=str(arguments.get("canvas", "Main")), **extra)
         component_id = _component_id(created)
         self.component_ids[operation.target] = component_id
         observed_location = _point(await self.service.get_component_location(self.project_name, component_id))
@@ -362,13 +383,19 @@ class MmcExecutor:
             self._raise_postcondition("Component location read-back did not match the MMC plan.", logical_id=operation.target, expected=list(expected_location), observed=observed_location)
         expected_parameters = dict(arguments.get("parameters", {}))
         observed_parameters = await self.service.get_component_parameters(self.project_name, component_id)
-        if not _same_parameters(expected_parameters, observed_parameters):
+        if not _same_parameters(expected_parameters, observed_parameters, bound=isinstance(binding, Mapping)):
             raise _error("MMC_PARAMETER_MISMATCH", "Component parameter read-back did not match the MMC plan.", "execute_mmc_build", logical_id=operation.target, expected=expected_parameters, observed=observed_parameters)
         expected_ports = set(arguments.get("ports", ()))
         if expected_ports:
             observed_ports = await self.service.get_component_ports(self.project_name, component_id)
             if not expected_ports.issubset(_port_names(observed_ports)):
                 raise _error("MMC_PORT_MISMATCH", "Component port read-back did not match the MMC plan.", "execute_mmc_build", logical_id=operation.target, expected=sorted(expected_ports), observed=sorted(_port_names(observed_ports)))
+            if isinstance(binding, Mapping):
+                for port_name, contract in binding["selected_ports"].items():
+                    port = observed_ports.get(port_name, {})
+                    expected_point = absolute_port(expected_location, tuple(contract["offset"]), int(arguments.get("orientation", 0)))
+                    if _point(port) != expected_point or port.get("type") != contract["type"] or port.get("dim") != contract["dimension"]:
+                        raise _error("MMC_PORT_MISMATCH", "Native Master terminal geometry or type changed after placement.", "execute_mmc_build", logical_id=operation.target, port=port_name)
         self._operation_completed(component_id=component_id)
 
     async def _create_logical_terminal(self, operation: MmcPlanOperation) -> None:
@@ -388,7 +415,8 @@ class MmcExecutor:
             self._raise_postcondition("MMC parameter verification referenced an unknown component.", logical_id=operation.target)
         observed = await self.service.get_component_parameters(self.project_name, component_id)
         expected = dict(operation.arguments.get("parameters", {}))
-        if not _same_parameters(expected, observed):
+        is_bound = any(op.kind == "place_component" and op.target == operation.target and isinstance(op.arguments.get("binding"), Mapping) for op in self.plan.operations)
+        if not _same_parameters(expected, observed, bound=is_bound):
             raise _error("MMC_PARAMETER_MISMATCH", "MMC parameter verification failed.", "execute_mmc_build", logical_id=operation.target, expected=expected, observed=observed)
         self._operation_completed()
 
@@ -400,7 +428,10 @@ class MmcExecutor:
             self._raise_postcondition("A planned MMC net requires at least two vertices.", net=operation.target)
         kind = str(arguments.get("kind", "electrical"))
         label = arguments.get("label")
-        if label is not None or len(vertices) == 2:
+        # An unlabeled route is a real PSCAD wire even when it has only two
+        # vertices.  Calling create_connection for that case loses the wire
+        # receipt in LegacyBackend and can leave the saved project unconnected.
+        if label is not None:
             created = await self.service.create_connection(self.project_name, vertices[0], vertices[-1], label, kind == "electrical", canvas_name="Main")
         else:
             created = await self.service.create_wire(self.project_name, vertices, canvas_name="Main")
@@ -412,7 +443,12 @@ class MmcExecutor:
         returned_vertices = created.get("vertices")
         if returned_vertices is not None and [list(point) for point in returned_vertices] != vertices:
             self._raise_postcondition("MMC wire vertex read-back did not match the plan.", net=operation.target, expected_vertices=vertices, observed_vertices=returned_vertices)
-        self._operation_completed(kind=kind, vertices=vertices)
+        receipt_id = created.get("wire_id", created.get("id"))
+        self._operation_completed(
+            kind=kind,
+            vertices=vertices,
+            **({"wire_id": receipt_id} if receipt_id is not None else {}),
+        )
 
     async def _create_output(self, operation: MmcPlanOperation) -> None:
         self._operation_started(operation)
@@ -445,17 +481,33 @@ class MmcExecutor:
         if self.staging_file is None:
             self._raise_postcondition("The MMC staging project path is not available.")
         await self.service.save_project(self.project_name, confirm=True)
+        await self._verify_master_binding_state()
         validation = self._validate_graph(self.staging_file)
         self._record(MmcBuildState.STRUCTURE_VERIFIED, validation=validation)
         self._record(MmcBuildState.STAGING_SAVED)
 
     async def _compile(self, operation: MmcPlanOperation) -> None:
         self._operation_started(operation)
+        await self._verify_master_binding_state()
         await self.service.build_project(self.project_name)
         self._record(MmcBuildState.COMPILED)
 
+    async def _verify_master_binding_state(self) -> None:
+        master_hash = self.plan.metadata.get("master_sha256")
+        registry_hash = self.plan.metadata.get("master_binding_registry_sha256")
+        targets = {op.target for op in self.plan.operations if op.kind == "place_component" and isinstance(op.arguments.get("binding"), Mapping)}
+        if not targets and master_hash is None and registry_hash is None:
+            return
+        verifier = getattr(self.service, "verify_master_binding_state", None)
+        if not callable(verifier) or not isinstance(master_hash, str) or not isinstance(registry_hash, str):
+            raise _error("MASTER_BINDING_MISSING", "The native MMC binding state cannot be verified.", "verify_master_binding_state")
+        if not targets <= self.component_ids.keys():
+            raise _error("MASTER_READBACK_FAILED", "A planned native Master component is unavailable for verification.", "verify_master_binding_state", missing_components=sorted(targets - self.component_ids.keys()))
+        await verifier(self.project_name, {target: self.component_ids[target] for target in sorted(targets)}, master_hash, registry_hash, refresh_components=True)
+
     async def _simulate_phase(self, operation: MmcPlanOperation) -> None:
         self._operation_started(operation)
+        await self._verify_master_binding_state()
         stop_simulation = getattr(self.service, "stop_simulation", None)
         if not callable(stop_simulation):
             raise _error("MMC_BUILD_FAILED", "The PSCAD service does not expose simulation stop control required for safe cleanup.", "run_mmc_project")

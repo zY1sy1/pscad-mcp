@@ -39,7 +39,7 @@ def test_energy_conversion_rejects_invalid_states(energy, capacitance):
     assert raised.value.code == "MMC_ENERGY_INFEASIBLE"
 
 
-def test_losses_are_explicit_and_energy_step_rejects_loss_above_inserted_power():
+def test_losses_are_explicit():
     assert conduction_loss(10.0, 2.0) == pytest.approx(200.0)
     assert equivalent_switching_loss(-10.0, 3.0) == pytest.approx(30.0)
     losses = arm_losses(10.0, 2.0, 3.0)
@@ -47,8 +47,53 @@ def test_losses_are_explicit_and_energy_step_rejects_loss_above_inserted_power()
     assert losses.switching_w == pytest.approx(30.0)
     assert losses.total_w == pytest.approx(230.0)
 
+
+@pytest.mark.parametrize(
+    "voltage, current, loss, expected_energy",
+    [
+        (5.0, -10.0, 0.0, 95.0),
+        (5.0, -10.0, 10.0, 94.0),
+        (-5.0, 10.0, 10.0, 94.0),
+        (0.0, 0.0, 10.0, 99.0),
+        (5.0, 10.0, 60.0, 99.0),
+    ],
+)
+def test_arm_energy_step_allows_discharge_and_conserves_energy(
+    voltage, current, loss, expected_energy
+):
+    step = arm_energy_step(100.0, voltage, current, loss, 0.1)
+
+    assert step.energy_j == pytest.approx(expected_energy)
+    assert step.derivative_w == pytest.approx(voltage * current - loss)
+    assert step.inserted_power_w * step.dt_s - (step.energy_j - 100.0) == pytest.approx(
+        step.loss_w * step.dt_s
+    )
+    assert step.energy_j <= 100.0 + step.inserted_power_w * step.dt_s
+
+
+def test_arm_discharge_can_reach_zero_but_cannot_overdraw_stored_energy():
+    assert arm_energy_step(5.0, 5.0, -10.0, 0.0, 0.1).energy_j == 0.0
+
     with pytest.raises(BackendError) as raised:
-        arm_energy_step(100.0, 5.0, 10.0, 60.0, 0.1)
+        arm_energy_step(5.0, 5.0, -10.0, 0.0, 0.2)
+    assert raised.value.code == "MMC_ENERGY_INFEASIBLE"
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        (-1.0, 5.0, -10.0, 0.0, 0.1),
+        (100.0, 5.0, -10.0, -1.0, 0.1),
+        (100.0, math.nan, -10.0, 0.0, 0.1),
+        (100.0, 5.0, math.inf, 0.0, 0.1),
+        (100.0, 5.0, -10.0, math.inf, 0.1),
+        (100.0, 1e308, 1e308, 0.0, 0.1),
+        (100.0, 5.0, -10.0, 0.0, 0.0),
+    ],
+)
+def test_arm_energy_step_keeps_physical_and_finite_guards(arguments):
+    with pytest.raises(BackendError) as raised:
+        arm_energy_step(*arguments)
     assert raised.value.code == "MMC_ENERGY_INFEASIBLE"
 
 

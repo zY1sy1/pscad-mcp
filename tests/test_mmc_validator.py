@@ -59,13 +59,19 @@ def _valid_tree():
             ET.SubElement(node, tag("endpoint"), {"component": component, "port": port})
         return node
 
-    positive = [("STATION_P.positive_bus", "DC"), ("dc_positive_line", "IN"), ("dc_positive_line", "OUT"), ("STATION_VDC.positive_bus", "DC")]
-    negative = [("STATION_P.negative_bus", "DC"), ("dc_negative_line", "IN"), ("dc_negative_line", "OUT"), ("STATION_VDC.negative_bus", "DC")]
+    positive = [("STATION_P.positive_bus", "DC"), ("dc_positive_line", "IN")]
+    negative = [("STATION_P.negative_bus", "DC"), ("dc_negative_line", "IN")]
+    receiving_positive = [("dc_positive_line", "OUT"), ("STATION_VDC.positive_bus", "DC")]
+    receiving_negative = [("dc_negative_line", "OUT"), ("STATION_VDC.negative_bus", "DC")]
     for station in ("STATION_P", "STATION_VDC"):
-        positive += [(f"{station}.{phase}.{arm}", "DC_POS") for phase in ("A", "B", "C") for arm in ("upper", "lower")]
-        negative += [(f"{station}.{phase}.{arm}", "DC_NEG") for phase in ("A", "B", "C") for arm in ("upper", "lower")]
+        pos = positive if station == "STATION_P" else receiving_positive
+        neg = negative if station == "STATION_P" else receiving_negative
+        pos.extend((f"{station}.{phase}.{arm}", "DC_POS") for phase in ("A", "B", "C") for arm in ("upper", "lower"))
+        neg.extend((f"{station}.{phase}.{arm}", "DC_NEG") for phase in ("A", "B", "C") for arm in ("upper", "lower"))
     net("dc_positive_conductor", "electrical", positive)
     net("dc_negative_conductor", "electrical", negative)
+    net("dc_positive_receiving", "electrical", receiving_positive)
+    net("dc_negative_receiving", "electrical", receiving_negative)
     for station in ("STATION_P", "STATION_VDC"):
         for phase in ("A", "B", "C"):
             for arm in ("upper", "lower"):
@@ -107,6 +113,38 @@ def test_validator_accepts_valid_graph_and_rejects_duplicate_output_selector(tmp
     report = validate_project_graph(read_project_graph(path), BLUEPRINT)
     assert report["valid"] is False
     assert any(finding["code"] == "MMC_OUTPUT_INCOMPLETE" for finding in report["findings"])
+
+
+@pytest.mark.parametrize("mode", ["direct", "label"])
+def test_saved_validator_rejects_cable_bypass(tmp_path, mode):
+    root = _valid_tree()
+    canvas = root.find(f".//{tag('canvas')}")
+    sending = canvas.find(f"{tag('net')}[@id='dc_positive_conductor']")
+    receiving = canvas.find(f"{tag('net')}[@id='dc_positive_receiving']")
+    if mode == "direct":
+        ET.SubElement(sending, tag("endpoint"), {"component": "dc_positive_line", "port": "OUT"})
+    else:
+        sending.set("label", "SAME_POLE")
+        receiving.set("label", "SAME_POLE")
+    result = validate_project_graph(read_project_graph(_write_graph(tmp_path, root)), BLUEPRINT)
+    assert any("bypassed" in item["message"] for item in result["findings"])
+
+
+@pytest.mark.parametrize("neutral", [False, True])
+def test_saved_validator_uses_ground_definition_and_allows_source_neutral(tmp_path, neutral):
+    root = _valid_tree()
+    canvas = root.find(f".//{tag('canvas')}")
+    _component(canvas, "reference", "master:ground", 0, 500, [("GND", "electrical", 1)])
+    net = ET.SubElement(canvas, tag("net"), {"id": "reference_connection", "kind": "electrical"})
+    ET.SubElement(net, tag("endpoint"), {"component": "reference", "port": "GND"})
+    if neutral:
+        source = canvas.find(f"{tag('component')}[@id='STATION_P.ac']")
+        ET.SubElement(source, tag("port"), {"name": "NEUTRAL", "kind": "electrical", "dimension": "1"})
+        ET.SubElement(net, tag("endpoint"), {"component": "STATION_P.ac", "port": "NEUTRAL"})
+    else:
+        ET.SubElement(net, tag("endpoint"), {"component": "STATION_P.negative_bus", "port": "DC"})
+    result = validate_project_graph(read_project_graph(_write_graph(tmp_path, root)), BLUEPRINT)
+    assert result["valid"] is neutral
 
 
 @pytest.mark.parametrize(

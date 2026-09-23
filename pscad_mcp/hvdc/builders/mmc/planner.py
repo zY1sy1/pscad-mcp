@@ -11,11 +11,31 @@ from typing import Any
 from ....core.backend.base import BackendError
 from ....core.path_policy import PathPolicy, WorkspaceNotConfiguredError
 from ..common.records import freeze
-from ..common.routing import absolute_port, route_intersects_rectangles, validate_orthogonal_route
+from ..common.routing import (
+    absolute_port,
+    route_intersects_rectangles,
+    validate_orthogonal_route,
+)
 from ..common.serialization import content_hash
-from .catalog import MmcCatalog, MmcDefinitionSpec, parse_catalog, require_definition, require_port, validate_parameters
-from .models import MmcAcceptanceCheck, MmcBlueprint, MmcBuildPlan, MmcComponentSpec, MmcNetSpec, MmcPlanOperation
-
+from .catalog import (
+    MmcCatalog,
+    MmcDefinitionSpec,
+    MmcPortSpec,
+    parse_catalog,
+    require_definition,
+    require_port,
+    validate_parameters,
+)
+from .electrical_contracts import cable_path_issues, is_neutral_reference
+from .master_bindings import context_from_inventory, normalize_mmc_master_parameters
+from .models import (
+    MmcAcceptanceCheck,
+    MmcBlueprint,
+    MmcBuildPlan,
+    MmcComponentSpec,
+    MmcNetSpec,
+    MmcPlanOperation,
+)
 
 PHASES = (
     "materialize_library",
@@ -238,9 +258,22 @@ def _check_structure(blueprint: MmcBlueprint, components: Mapping[str, MmcCompon
                 raise _error("MMC_LAYOUT_INVALID", "blueprint components overlap.", left=left_id, right=right_id)
 
 
-def _check_net_semantics(net: MmcNetSpec) -> None:
+def _check_cable_bypasses(blueprint: MmcBlueprint) -> None:
+    issues = cable_path_issues(blueprint.components, blueprint.nets)
+    if issues:
+        issue = issues[0]
+        message = "An electrical net bypasses a cable conductor." if issue["reason"] == "bypassed" else "Both ends of each cable conductor require an electrical connection."
+        raise _error("MMC_STRUCTURE_INVALID", message, component=issue["component"])
+
+
+def _check_net_semantics(net: MmcNetSpec, components: Mapping[str, MmcComponentSpec]) -> None:
     lowered = " ".join((net.logical_id, *net.endpoints)).casefold()
-    if net.kind == "electrical" and "ground" in lowered:
+    terminals = [_endpoint(endpoint, "net endpoint") for endpoint in net.endpoints]
+    if any(owner not in components for owner, _ in terminals):
+        raise _error("MMC_BLUEPRINT_INVALID", "net references an unknown component.", net=net.logical_id)
+    neutral_reference = is_neutral_reference(terminals, components)
+    has_ground_terminal = any(components[owner].definition == "master:ground" and port == "GND" for owner, port in terminals)
+    if net.kind == "electrical" and (has_ground_terminal or "ground" in lowered) and not neutral_reference:
         raise _error("MMC_STRUCTURE_INVALID", "ground must not be a normal electrical return conductor.", net=net.logical_id)
     has_ac = any(token in lowered for token in (".ac", ":ac", "transformer"))
     has_dc = any(token in lowered for token in ("dc_", "dc:", "positive_bus", "negative_bus", "_line"))
@@ -302,6 +335,16 @@ def create_plan(request: MmcPlanRequest, asset_set: MmcAssetSet, inventory: Any,
     final_path, staging_path, project_name, _ = _resolve_paths(request, workspace)
     catalog = asset_set.catalog if isinstance(asset_set.catalog, MmcCatalog) else parse_catalog(asset_set.catalog)
     inventory_definitions = _inventory_definitions(inventory)
+    master = context_from_inventory(inventory)
+    bindings: dict[str, Any] = {}
+    if master is not None:
+        definitions = dict(catalog.definitions)
+        for name, evidence in master.audited.definitions.items():
+            ports = tuple(MmcPortSpec(port_name, record["kind"], record["dimension"], tuple(record["offset"])) for port_name, record in evidence["selected_ports"].items())
+            previous = definitions.get(name, MmcDefinitionSpec(name))
+            definitions[name] = replace(previous, ports=ports)
+            inventory_definitions[name] = {port.name: {"kind": port.kind, "dimension": port.dimension} for port in ports}
+        catalog = replace(catalog, definitions=definitions)
     normalized_components: list[MmcComponentSpec] = []
     for component in blueprint.components:
         definition = require_definition(catalog, component.definition)
@@ -309,13 +352,31 @@ def create_plan(request: MmcPlanRequest, asset_set: MmcAssetSet, inventory: Any,
         if live_ports is None:
             raise _error("MMC_DEFINITION_MISSING", "definition is missing from live inventory.", definition=component.definition)
         normalized_parameters = validate_parameters(definition, dict(component.parameters))
+        if master is not None and component.definition.startswith("master:"):
+            resolved = master.resolve_component(component.definition, normalized_parameters)
+            bindings[component.logical_id] = resolved.to_evidence()
         _normalize_inventory_contract(component, definition, live_ports)
         normalized_components.append(replace(component, parameters=normalized_parameters))
     normalized_blueprint = replace(blueprint, components=tuple(normalized_components), settings={**dict(blueprint.settings), "simulation_duration_s": duration})
     component_map = {component.logical_id: component for component in normalized_blueprint.components}
+    if master is not None:
+        for component in normalized_blueprint.components:
+            if component.definition not in {"master:source3", "master:transformer"}:
+                continue
+            neutral = f"{component.logical_id}:NEUTRAL"
+            grounded = any(
+                net.kind == "electrical" and neutral in net.endpoints and any(
+                    component_map[owner].definition == "master:ground" and port == "GND"
+                    for owner, port in (_endpoint(endpoint, "neutral endpoint") for endpoint in net.endpoints)
+                )
+                for net in normalized_blueprint.nets
+            )
+            if "NEUTRAL" not in component.ports or not grounded:
+                raise _error("MMC_STRUCTURE_INVALID", "A native source or transformer neutral requires an explicit ground reference.", component=component.logical_id)
     _check_structure(normalized_blueprint, component_map, catalog)
+    _check_cable_bypasses(normalized_blueprint)
     for net in normalized_blueprint.nets:
-        _check_net_semantics(net)
+        _check_net_semantics(net, component_map)
         route = _net_route(net, component_map, catalog)
         rectangles = _catalog_rectangles(tuple(component_map.values()), catalog)
         try:
@@ -338,7 +399,10 @@ def create_plan(request: MmcPlanRequest, asset_set: MmcAssetSet, inventory: Any,
     add("create_staging", "create_staging", project_name, {"target_path": str(final_path), "staging_path": str(staging_path)})
     add("set_settings", "set_project_settings", project_name, {"settings": dict(normalized_blueprint.settings)})
     for component in normalized_blueprint.components:
-        add(_operation_kind(component), "place_component", component.logical_id, {"definition": component.definition, "location": list(component.location), "orientation": component.orientation, "parameters": dict(component.parameters), "ports": list(component.ports)})
+        arguments = {"definition": component.definition, "location": list(component.location), "orientation": component.orientation, "parameters": dict(component.parameters), "ports": list(component.ports)}
+        if component.logical_id in bindings:
+            arguments.update(binding=bindings[component.logical_id], parameters=normalize_mmc_master_parameters(component.definition, component.parameters))
+        add(_operation_kind(component), "place_component", component.logical_id, arguments)
     for station in normalized_blueprint.stations:
         for phase in ("A", "B", "C"):
             add("create_phase_midpoint", "create_phase_midpoint", f"{station.logical_id}.{phase}.midpoint", {"station": station.logical_id, "phase": phase})
@@ -366,6 +430,8 @@ def create_plan(request: MmcPlanRequest, asset_set: MmcAssetSet, inventory: Any,
         "asset_hashes": dict(asset_set.hashes), "catalog_identity": catalog.identity, "project_settings": dict(normalized_blueprint.settings),
         "operations": [operation.to_dict() for operation in operations], "acceptance_contract": [check.to_dict() for check in checks],
     }
+    if master is not None:
+        payload["request"].update(master_path=master.audited.master_path, master_sha256=master.audited.master_sha256, master_binding_registry_sha256=master.audited.registry.sha256)
     return MmcBuildPlan(blueprint=normalized_blueprint, operations=tuple(operations), plan_hash=content_hash(payload), acceptance_checks=checks, target_path=str(final_path), staging_path=str(staging_path), asset_hashes=dict(asset_set.hashes), pscad_version=asset_set.pscad_version, catalog_identity=catalog.identity, metadata=payload["request"])
 
 

@@ -10,6 +10,18 @@
 
 ## 1. 执行依据与当前状态
 
+**执行状态（2026-09-23）：独立任务及 A+B 联合验收均已完成。** 分支
+`codex/mmc-fault-evidence`，当前交付提交 `effe98385923ad1c8aed538b00e6494e99cf0e21`。
+原生物理验收生产版本 `86adfe0227e5914d01ff07fcad3f742c2aba8e21`；
+两个稳态时间窗、DC 故障与恢复均 PASS，故障电流峰值 8.255083 kA，
+低于原定 20 kA 上限，自有进程已清理。离线全套 2610 通过、49 跳过；
+后续公共重放和路径修复的相关回归为 136 通过、1 跳过。详细证据见
+[故障证据执行记录](D:/pscad-mcp/.worktrees/mmc-fault-evidence/docs/acceptance/mmc-fault-evidence/execution.md)。
+下方实施清单保留为原始计划，实际完成情况以上述证据为准。
+最终层级比较修复的 B 分支重放回归为 77 项通过。A+B 首轮联合运行及独立重放均为
+122 项物理检查 PASS、命令边沿实测误差 0，自有进程及工作区锁均已释放。
+完整交付见[联合交付清单](D:/pscad-mcp/.worktrees/mmc-timing-fault-final/docs/acceptance/mmc-timing-fault-integration/delivery.md)。
+
 - 首先读取 [验收与失败处理规则](D:/pscad-mcp/docs/acceptance-criteria.md)，再规划、执行或解释任何验收。
 - 阅读 [总路线图 WP4](D:/pscad-mcp/docs/superpowers/specs/2026-08-30-lcc-mmc-completion-roadmap-design.md:720) 及 [并发验收记录](D:/pscad-mcp/docs/acceptance/concurrent-acceptance-20260908.md)。按用户最新规则使用独立实例并发，不沿用旧文件的全局单实例假设。
 - 配套任务为 [工作 A：严格 EMTDC 定时控制](D:/pscad-mcp/docs/superpowers/plans/2026-09-08-emt-timed-control-work.md)。正在进行的元件映射离线预审不属于本任务。

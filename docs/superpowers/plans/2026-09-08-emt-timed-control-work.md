@@ -10,6 +10,17 @@
 
 ## 1. 执行依据与当前状态
 
+**执行状态（2026-09-23）：独立任务及 A+B 联合验收均已完成。** 分支
+`codex/emt-timed-control`，交付提交 `16c7bf948bdd9724283478f2a66ae5bf097a188d`，
+实际验收生产版本 `216c18ba187f0b86194c4f91dfd3c19d1b281714`。
+最小事件工程、官方 PWM 命令及各自独立保存重放均 PASS，四个自有进程已清理；
+两条边沿误差均为 0，离线全套 2517 通过、50 跳过。详细证据见
+[独立验收记录](D:/pscad-mcp/.worktrees/emt-timed-control/docs/acceptance/emt-timed-control/final-acceptance.md)。
+下方实施清单保留为原始计划，实际完成情况以上述证据为准。
+A+B 首轮联合运行及独立重放均通过 122 项物理检查，1.0 / 1.2 s 命令边沿实测误差均为 0，
+自有进程已清理。完整交付见
+[联合交付清单](D:/pscad-mcp/.worktrees/mmc-timing-fault-final/docs/acceptance/mmc-timing-fault-integration/delivery.md)。
+
 - 首先读取 [验收与失败处理规则](D:/pscad-mcp/docs/acceptance-criteria.md)。它适用于本任务的代码、模型、实机运行和完成判定。
 - 阅读 [总路线图 WP3](D:/pscad-mcp/docs/superpowers/specs/2026-08-30-lcc-mmc-completion-roadmap-design.md:632) 与 [并发验收记录](D:/pscad-mcp/docs/acceptance/concurrent-acceptance-20260908.md)。旧路线图的全局串行约束按用户最新的独立实例规则执行。
 - 配套任务是 [工作 B：MMC 故障证据链补齐](D:/pscad-mcp/docs/superpowers/plans/2026-09-08-mmc-fault-evidence-work.md)。元件映射离线预审由已有任务继续，本任务只读取其最终产物。

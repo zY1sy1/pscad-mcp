@@ -288,6 +288,26 @@ class RecordingMmcService:
         self._record("save_project", project_name, confirm)
         return "saved"
 
+    async def save_project_as(
+        self,
+        project_name: str,
+        filename: str,
+        folder: str,
+        *,
+        confirm: bool = False,
+    ) -> str:
+        self._record("save_project_as", project_name, filename, folder, confirm)
+        matches = list(self.workspace.rglob(project_name + ".pscx"))
+        assert len(matches) == 1
+        target = Path(folder).resolve() / filename
+        target.write_text(
+            matches[0].read_text(encoding="utf-8").replace(
+                f"name='{project_name}'", f"name='{target.stem}'"
+            ),
+            encoding="utf-8",
+        )
+        return "saved as"
+
     async def build_project(self, project_name: str) -> str:
         self._record("build_project", project_name)
         return "built"
@@ -430,7 +450,7 @@ def make_parametric_service(
 
 
 def wait_for_terminal(service: object, build_id: str) -> dict[str, Any]:
-    terminal_states = {"published", "failed", "interrupted"}
+    terminal_states = {"built", "published", "failed", "interrupted"}
     deadline = time.monotonic() + 5.0
     while time.monotonic() < deadline:
         status = service.get_status(build_id)

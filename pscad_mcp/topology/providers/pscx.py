@@ -244,6 +244,8 @@ class PscxSnapshotProvider:
             ),
             element,
         )
+        if schematic is element and _attr(element, "classid") == "UserCmpDefn":
+            schematic = ET.Element("schematic")
         ports, page_ports = _definition_port_contracts(element, schematic)
         template = _DefinitionTemplate(
             definition_name,
@@ -265,7 +267,16 @@ class PscxSnapshotProvider:
         unresolved: set[str],
     ) -> tuple[TopologyComponent, ...]:
         result = []
+        configuration_children = {
+            id(child)
+            for wrapper in template.schematic.iter()
+            if _local_name(wrapper.tag) == "wire" and _text(_attr(wrapper, "classid")).casefold() in {"cable", "tline"}
+            for child in wrapper.iter()
+            if child is not wrapper
+        }
         for index, element in enumerate(template.schematic.iter()):
+            if id(element) in configuration_children:
+                continue
             tag = _local_name(element.tag)
             if tag not in {"user", "component"}:
                 continue
@@ -378,7 +389,7 @@ def _definition_port_contracts(
             continue
         contract = DefinitionPortContract(
             name=name,
-            kind=_namespace(_attr(port, "kind", "type"), tag),
+            kind=_namespace(_attr(port, "kind", "model", "type"), tag),
             dimension=_integer(_attr(port, "dimension", "dim")),
             offset=offset,
             required=_optional_boolean(_attr(port, "required")),
@@ -427,7 +438,7 @@ def _instance_ports(
                 name=name,
                 absolute=absolute,
                 relative=relative,
-                kind=_namespace(_attr(port, "kind", "type"), "port"),
+                kind=_namespace(_attr(port, "kind", "model", "type"), "port"),
                 dimension=_integer(_attr(port, "dimension", "dim")),
                 active=_boolean(_attr(port, "active", "enabled"), True),
                 required=_optional_boolean(_attr(port, "required")),
@@ -497,6 +508,8 @@ def _parse_conductors(
     for index, element in enumerate(schematic.iter()):
         tag = _local_name(element.tag)
         if tag not in {"wire", "bus", "connection", "segment"}:
+            continue
+        if tag == "wire" and _text(_attr(element, "classid")).casefold() in {"cable", "tline"}:
             continue
         object_id = _text(_attr(element, "id", "object_id")) or str(index)
         key = f"{canvas_key}:{object_id}"
@@ -721,9 +734,9 @@ def _point(
 
 def _namespace(value: str | None, tag: str) -> Namespace:
     normalized = _text(value).casefold()
-    if normalized in {"data", "signal", "digital"} or "data" in tag:
+    if normalized in {"data", "signal", "digital", "transfer"} or "data" in tag:
         return "data"
-    if normalized in {"electrical", "power", "analog", "node"}:
+    if normalized in {"electrical", "power", "analog", "node", "natural"}:
         return "electrical"
     if tag in {"wire", "bus", "nodelabel"}:
         return "electrical"
