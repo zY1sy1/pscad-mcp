@@ -54,4 +54,29 @@ Pref2 是控制命令证据；实际故障动作和恢复由 B 的独立物理�
 
 当前集成工作树：D:/pscad-mcp/.worktrees/mmc-timing-fault-final。
 旧 D:/pscad-mcp/.worktrees/mmc-timing-fault-integration 已冻结以保留历史代码身份。
-分支尚未合并或推送。完整诊断、修复与失败尝试见[集成执行记录](D:/pscad-mcp/.worktrees/mmc-timing-fault-final/docs/acceptance/mmc-timing-fault-integration/execution.md)。
+截至独立交付时，分支尚未合并或推送。完整诊断、修复与失败尝试见[集成执行记录](D:/pscad-mcp/.worktrees/mmc-timing-fault-final/docs/acceptance/mmc-timing-fault-integration/execution.md)。
+
+## 合并到 main 的复验
+
+2026-09-23 从 `origin/main` 合入 `codex/mmc-timing-fault-integration` 和
+`codex/mmc-master-offline-audit`；合并代码版本为 `5613ff7`。离线回归为
+3798 通过、52 跳过，冲突文件的 Ruff 与 Git 空白检查通过。
+
+- 原生 MMC 完整套件：正常运行、四类故障和独立重载六个阶段均 PASS，
+  `model_accepted=true`，21 个接受文件的哈希复核无变化。报告：
+  `D:/PSCAD-Workspace/mmc-merge-0923-native/suite-20260923-162524-9c8d4f0e/report.json`；
+  SHA-256 `ffb61ce075bc651036cc370364a76e1d83e63eaf31ba382c7771531cd488c9d2`。
+- 联合首轮与独立重放各 122 项物理检查 PASS，1.0/1.2 s 边沿误差均为 0；
+  两轮使用同一已保存模型哈希
+  `47e0437b993131be291fd1074a6dc0368c45a17a8487cd98443b4ae3a16d39c6`。
+  worker 退出码 0，`owned_process_cleaned=true`、`cleanup_pending=false`、
+  `lease_retained=false`。最终报告：
+  `D:/PSCAD-Workspace/mmc-merge-0923-joint-continuation/.pscad-mcp/mmc-builds/19dc807ce0da42278e5b13e5db849f8c/journal.json`；
+  SHA-256 `95953d8f9e47bb91c48abfa628ebfddc37f458b17291ca263f3ef2ad7574d5fc`。
+
+直接从原始模板启动的一次联合尝试在首次保存核对时失败，未进入联合物理仿真。
+它的报告保留在
+`D:/PSCAD-Workspace/mmc-merge-0923-joint/.pscad-mcp/mmc-builds/7ecf4988297848b5999e4037a706e449/journal.json`
+（SHA-256 `9e569767b24a31cf110bb3ad86a9741d67f651fa1be156b1ec66aaa143dd2887`）。
+新联合验收按正式发布后入口从已保存、已接受的公开模型派生，重新运行并通过，
+没有修改原始输入、物理阈值或旧失败报告。
