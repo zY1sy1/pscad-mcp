@@ -56,3 +56,16 @@ def test_mmc_circulating_current_rms_is_supported():
     metric = result["metrics"][0]
     assert metric["value"] == (5.0) ** 0.5
     assert metric["units"] == "kA"
+
+
+def test_native_fault_profile_preserves_all_arm_roles_and_capacitor_basis():
+    profile = load_profile("mmc_native_fault_evidence_v1")
+    assert profile["command_bindings"] == []
+    assert profile["capabilities"]["intrinsic_dc_fault_blocking"] is False
+    roles = profile["fault_evidence_roles"]
+    assert len(roles["v_inserted"]) == len(roles["blocking_state"]) == len(roles["i_arm"]) == len(roles["v_cap"]) == 12
+    assert len(roles["fault_active"]) == len(roles["i_dc_fault"]) == 1
+    cap = next(item for item in profile["result_channels"] if item["canonical"] in roles["v_cap"])
+    assert cap["quantity"] == "sum_of_submodule_capacitor_voltages"
+    assert cap["units"] == "kV"
+    assert profile["requires_frozen_channel_contract"] is True

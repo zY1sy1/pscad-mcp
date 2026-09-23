@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import hmac
+import json
 import math
 import re
 import shutil
@@ -15,7 +16,6 @@ from typing import Any
 from .....core.backend.base import BackendError
 from ....scanner import scan_project
 from ..parametric_models import MmcCandidate, MmcEnginePlan
-
 
 _SOURCE_NAMES = ("project", "library")
 _PARAMETER_BINDINGS = {
@@ -252,29 +252,53 @@ def _source_files(plan: MmcEnginePlan) -> dict[str, Path]:
     return result
 
 
-def _copy_library_support(library: Path, stage: Path) -> Path | None:
-    """Copy the official library's compiler object tree when present."""
-
-    support = library.parent / "Obj_Files_2016_03_25"
-    if not support.is_dir():
-        try:
-            referenced = "Obj_Files_2016_03_25" in library.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError):
-            referenced = False
-        if referenced:
-            raise _error(
-                "MMC_COMPILER_SUPPORT_MISSING",
-                "The audited MMC library references a missing compiler object tree.",
-                library=str(library),
-                support=str(support),
-            )
+def _copy_library_support(library: Path, stage: Path, *, expected_hashes: Mapping[str, str] | None = None) -> Path | None:
+    """Copy referenced compiler trees after fixing their input hashes."""
+    identities = library_support_files(library)
+    if expected_hashes is not None and {item["path"]: item["sha256"] for item in identities} != dict(expected_hashes):
+        raise _error("MMC_SOURCE_HASH_MISMATCH", "Compiler support differs from the immutable plan; re-audit and replan.")
+    if not identities:
         return None
-    target = stage / support.name
-    shutil.copytree(support, target)
-    return target
+    roots = sorted({Path(item["relative_path"]).parts[0] for item in identities})
+    for item in identities:
+        target = stage / item["relative_path"]
+        if target.exists() or target.is_symlink():
+            raise _error("MMC_BUILD_CONFLICT", "A compiler support destination already exists.", path=str(target))
+    for item in identities:
+        target = stage / item["relative_path"]
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(item["path"], target)
+    for item in identities:
+        if _sha256(Path(item["path"])) != item["sha256"] or _sha256(stage / item["relative_path"]) != item["sha256"]:
+            raise _error("MMC_POSTCONDITION_FAILED", "Compiler support drifted while copying.", file=item)
+    (stage / "compiler-support-inputs.json").write_text(json.dumps(identities, indent=2, ensure_ascii=True), encoding="utf-8")
+    return stage / roots[0]
+
+
+def library_support_files(library: Path) -> list[dict[str, str]]:
+    """Inventory only the companion trees referenced by the local library."""
+    from ..template_audit import _compiler_support
+    audit = _compiler_support(library)
+    linked = audit["link_libraries"]
+    if (audit["required"] and not audit["present"]) or (linked["required"] and not linked["present"]):
+        raise _error("MMC_COMPILER_SUPPORT_MISSING", "The library references unavailable compiler support.", library=str(library), audit=audit)
+    result = [dict(item) for item in audit["files"]]
+    for item in result:
+        path = library.parent / item["relative_path"]
+        if not path.resolve().is_relative_to(library.parent.resolve()) or str(path.resolve()) != item["path"]:
+            raise _error("MMC_COMPILER_SUPPORT_MISSING", "Compiler support must remain in its audited library directory.", path=str(path))
+        for parent in (path, *path.parents):
+            if parent == library.parent:
+                break
+            if parent.is_symlink():
+                raise _error("MMC_COMPILER_SUPPORT_MISSING", "Compiler support cannot contain symlinks.", path=str(parent))
+    return result
 
 
 def _verify_sources(plan: MmcEnginePlan, sources: Mapping[str, Path]) -> None:
+    support = {item["path"]: item["sha256"] for item in library_support_files(sources["library"])}
+    if support != dict(plan.asset_hashes):
+        raise _error("MMC_SOURCE_HASH_MISMATCH", "PWM compiler support differs from the planned input identities; re-audit and replan.", expected=dict(plan.asset_hashes), observed=support)
     for name, source in sources.items():
         if not source.is_file() or source.is_symlink():
             raise _error(
@@ -456,10 +480,17 @@ def _bound_scenarios(
             observed=sorted(by_name),
         )
     result = []
-    for name in plan.scenarios:
+    for index, name in enumerate(plan.scenarios):
         scenario = dict(by_name[name])
         scenario["project"] = str(source_project)
         scenario["derived_project"] = str(derived_project)
+        if scenario.get("timed_control_options") is not None:
+            from ..scenarios import prepare_timed_scenario
+            scenario = prepare_timed_scenario(source_project, scenario, workspace_root=plan.workspace,
+                source_hashes={**{key: {"path": plan.source_paths[key], "sha256": plan.source_hashes[key]} for key in _SOURCE_NAMES},
+                    **{"compiler_support:" + Path(path).relative_to(Path(plan.source_paths["library"]).parent).as_posix(): {"path": path, "sha256": sha256} for path, sha256 in plan.asset_hashes.items()}})
+            stem = re.sub(r"[^A-Za-z0-9_]", "_", derived_project.stem)
+            scenario["derived_project"] = str(derived_project.with_name(f"{stem}_emt_{index}.pscx"))
         result.append(scenario)
     return tuple(result)
 
@@ -505,6 +536,9 @@ async def _execute_scenarios(
     run_method = _require_scenario_method(scenario_service, "run_scenario")
     analyze_method = _require_scenario_method(scenario_service, "analyze_results")
     for scenario in _bound_scenarios(plan, scenarios, source_project, derived_project):
+        evidence_path = source_project.parent / f"scenario_{re.sub(r'[^A-Za-z0-9_]', '_', str(scenario['name']))}_timing.json"
+        if scenario.get("timed_control") is not None:
+            evidence_path.write_text(json.dumps(scenario["timed_control"], indent=2, ensure_ascii=True), encoding="utf-8")
         try:
             started = await run_method(str(source_project), scenario, confirm=True)
             scenario_id = (
@@ -574,8 +608,15 @@ async def _execute_scenarios(
                     "status": "completed",
                     "output_files": list(output_files),
                     "analysis": dict(analysis),
+                    **({"timing_basis": dict(terminal["timing_basis"]), "schedule_path": str(evidence_path)} if scenario.get("timed_control") is not None else {}),
                 }
             )
+        except BaseException as error:
+            failure_path = evidence_path.with_name(evidence_path.stem + "_failure.json")
+            failure_path.write_text(json.dumps({"scenario": scenario["name"], "source_project": str(source_project),
+                "derived_project": scenario["derived_project"], "schedule_sha256": (scenario.get("timed_control") or {}).get("schedule_sha256"),
+                "error": error.to_dict() if isinstance(error, BackendError) else {"type": type(error).__name__, "message": str(error)}}, indent=2, ensure_ascii=True), encoding="utf-8")
+            raise
         finally:
             _verify_scenario_source(source_project, source_hash, str(scenario["name"]))
     return results
@@ -601,7 +642,7 @@ class PwmTemplateEngine:
         stage.mkdir(parents=True)
         shutil.copy2(sources["project"], staged_project)
         shutil.copy2(sources["library"], staged_library)
-        staged_support = _copy_library_support(sources["library"], stage)
+        staged_support = _copy_library_support(sources["library"], stage, expected_hashes=plan.asset_hashes)
         if not hmac.compare_digest(
             _sha256(staged_project), plan.source_hashes["project"]
         ):

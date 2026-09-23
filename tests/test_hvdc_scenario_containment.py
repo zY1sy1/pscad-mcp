@@ -78,7 +78,8 @@ class BlockingBackend:
         self.settings.update(settings)
 
     async def get_timed_control_capabilities(self, project_name):
-        return {"native_schedule": False, "simulation_clock": True}
+        return {"native_schedule": False, "simulation_clock": True, "time_basis": "EMTDC",
+                "time_units": "s", "verified": True, "max_timing_error_s": 1.0}
 
     async def get_simulation_time(self, project_name):
         return 1.0

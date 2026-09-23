@@ -605,22 +605,24 @@ def evaluate_dc_fault_blocking(
             "reason": "half_bridge does not claim intrinsic DC-fault blocking",
         }
     checks = {
-        "fault_applied": bool(evidence.get("fault_applied")),
-        "negative_voltage_inserted": bool(evidence.get("negative_voltage_inserted")),
-        "blocked": bool(evidence.get("blocked")),
-        "recovered": bool(evidence.get("recovered")),
+        "fault_applied": evidence.get("fault_applied") is True,
+        "negative_voltage_inserted": evidence.get("negative_voltage_inserted") is True,
+        "blocked": evidence.get("blocked") is True,
+        "recovered": evidence.get("recovered") is True,
         "bounded_fault_current": False,
     }
+    invalid = [name for name in checks if name != "bounded_fault_current" and type(evidence.get(name)) is not bool]
     try:
         peak = float(evidence.get("fault_current_peak_ka"))
         limit = float(evidence.get("fault_current_limit_ka"))
         checks["bounded_fault_current"] = math.isfinite(peak) and math.isfinite(limit) and 0 <= peak <= limit
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         checks["bounded_fault_current"] = False
     return {
-        "verdict": "PASS" if all(checks.values()) else "FAIL",
+        "verdict": "INCOMPLETE_ANALYSIS" if invalid else "PASS" if all(checks.values()) else "FAIL",
         "capabilities": selected.capabilities(selected),
         "checks": checks,
+        "invalid_evidence": invalid,
     }
 
 

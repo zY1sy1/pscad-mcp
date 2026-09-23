@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
 from ....core.backend.base import BackendError
 from ...profiles import bind_profile_project, load_profile
 from .parametric_models import MmcDerivedParameters, MmcScenarioRecommendation
-
 
 _SCENARIOS = (
     "startup",
@@ -270,4 +270,41 @@ def recommend_scenarios(
     return tuple(result)
 
 
-__all__ = ["recommend_scenarios"]
+def prepare_timed_scenario(
+    source: str | Path,
+    scenario: Mapping[str, Any],
+    *,
+    workspace_root: str | Path,
+    source_hashes: Mapping[str, Mapping[str, str]] | None = None,
+) -> dict[str, Any]:
+    """Resolve a bounded PWM event request against the saved scenario source."""
+    from ...bindings import resolve_requested_commands
+    from ...scanner import scan_project
+    from .timed_control import plan_embedded_control
+
+    result = deepcopy(dict(scenario))
+    options = result.get("timed_control_options")
+    if not isinstance(options, Mapping) or set(options) != {"master_path", "max_timing_error_s"}:
+        raise _error("Embedded PWM timing requires exact Master and error-bound options.")
+    evidence = scan_project(source)
+    profile = bind_profile_project(load_profile(str(result["profile"]), workspace_root=workspace_root), str(source))
+    requests = result.get("events", [])
+    bindings = resolve_requested_commands(evidence, profile, requests)
+    bound = []
+    for index, (request, binding) in enumerate(zip(requests, bindings)):
+        components = [item for item in evidence.components if item.component_id == binding["component_id"]]
+        if len(components) != 1:
+            raise _error("A timed PWM command is not uniquely bound to its source instance.")
+        component = components[0]
+        event_id = str(request.get("event_id") or f"event-{index:06d}")
+        request["event_id"] = event_id
+        bound.append({**request, "target": {"instance_path": component.source.canvas_name,
+            "owner": binding["component_id"], "definition": component.definition, "parameter": binding["parameter_name"]}})
+    result["timed_control"] = plan_embedded_control(source, bound,
+        master_path=options["master_path"], max_timing_error_s=options["max_timing_error_s"],
+        time_step_s=result["time_step_s"], output_step_s=result["output_step_s"], duration_s=result["duration_s"],
+        source_hashes=source_hashes)
+    return result
+
+
+__all__ = ["prepare_timed_scenario", "recommend_scenarios"]

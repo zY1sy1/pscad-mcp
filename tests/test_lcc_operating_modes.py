@@ -134,6 +134,7 @@ class StrictBackend:
             "native_schedule": self.native,
             "simulation_clock": self.clock,
             "time_basis": self.time_basis,
+            "time_units": "s", "verified": True,
         }
 
     async def get_output_channels(self, project_name):
@@ -144,7 +145,7 @@ class StrictBackend:
 
     async def schedule_timed_controls(self, project_name, events):
         self.scheduled.extend(dict(event) for event in events)
-        return [{"status": "registered", "observed_time_s": event["time_s"]} for event in events]
+        return [{**event, "status": "registered", "observed_time_s": event["time_s"]} for event in events]
 
 
 def test_mode_copies_apply_explicit_overrides_and_are_deeply_isolated():
@@ -558,6 +559,7 @@ class ScenarioLccBackend:
             "native_schedule": not changed_after_write,
             "simulation_clock": not changed_after_write,
             "time_basis": self.time_basis,
+            "time_units": "s", "verified": True,
         }
 
     async def get_simulation_time(self, project_name):
@@ -586,7 +588,7 @@ class ScenarioLccBackend:
     async def schedule_timed_controls(self, project_name, events):
         self.calls.append("native_schedule")
         return [
-            {"status": "registered", "observed_time_s": event["time_s"]}
+            {**event, "status": "registered", "observed_time_s": event["time_s"]}
             for event in events
         ]
 
@@ -708,13 +710,14 @@ def test_analyze_results_rejects_sample_injected_recovery_band(monkeypatch, tmp_
     assert result["metrics"][0]["status"] == "invalid"
 
 
-def test_real_scenario_lcc_switching_preflights_before_each_write_class(monkeypatch, tmp_path):
+@pytest.mark.parametrize("capability_drift", [False, True])
+def test_real_scenario_lcc_switching_preflights_before_each_write_class(monkeypatch, tmp_path, capability_drift):
     source = tmp_path / "source.pscx"
     derived = tmp_path / "derived.pscx"
     _write_scenario_project(source)
     _write_scenario_project(derived)
     profile = _scenario_profile()
-    backend = ScenarioLccBackend(profile, fail_capabilities_after_write=True)
+    backend = ScenarioLccBackend(profile, fail_capabilities_after_write=capability_drift)
     service = HvdcDomainService(backend, path_policy=PathPolicy(workspace_root=str(tmp_path)))
     monkeypatch.setattr("pscad_mcp.hvdc.scenarios.load_profile", lambda *args, **kwargs: profile)
     scenario = {
@@ -733,15 +736,19 @@ def test_real_scenario_lcc_switching_preflights_before_each_write_class(monkeypa
 
     terminal = asyncio.run(exercise())
 
+    if capability_drift:
+        assert terminal["status"] == "failed"
+        assert terminal["error"]["code"] == "LCC_SWITCHING_UNAVAILABLE"
+        assert "native_schedule" not in backend.calls
+        assert "run_project" not in backend.calls
+        return
     assert terminal["status"] == "completed", terminal["error"]
     parameter_write = backend.calls.index("parameter_write")
     native_schedule = backend.calls.index("native_schedule")
     assert all(backend.calls.index(item) < parameter_write for item in (
         "capabilities", "simulation_clock", "output_channels",
     ))
-    assert all(item not in backend.calls[parameter_write + 1:native_schedule] for item in (
-        "capabilities", "simulation_clock", "output_channels",
-    ))
+    assert "capabilities" in backend.calls[parameter_write + 1:native_schedule]
 
 
 def test_real_scenario_lcc_switching_fails_before_writes_when_time_basis_is_not_emtdc(monkeypatch, tmp_path):

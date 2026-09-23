@@ -103,6 +103,82 @@ def test_audit_records_official_library_object_dependencies(tmp_path: Path) -> N
     assert report["compatible"] is True
 
 
+def test_audit_binds_declared_compiler_libraries_and_legacy_object_union(tmp_path):
+    from xml.etree import ElementTree as ET
+    project, library = make_synthetic_official_shape(tmp_path)
+    tree = ET.parse(library)
+    params = ET.SubElement(tree.getroot(), "paramlist", {"name": "Libs"})
+    ET.SubElement(params, "param", {"name": "0", "value": r".\lib\$(Compiler)\intermediate.lib"})
+    tree.write(library, encoding="utf-8")
+    linked = tmp_path / "lib" / "gf42" / "intermediate.lib"
+    linked.parent.mkdir(parents=True)
+    linked.write_bytes(b"synthetic-compiler-library")
+    object_file = tmp_path / "Obj_Files_2016_03_25" / "gf42" / "x.obj"
+    object_file.parent.mkdir(parents=True)
+    object_file.write_bytes(b"synthetic-object")
+    report = audit_mmc_template(project, library)
+    support = report["compiler_support"]
+    assert support["link_libraries"]["required"] is True
+    assert support["link_libraries"]["present"] is True
+    assert support["link_libraries"]["files"][0] == {"path": str(linked.resolve()), "relative_path": "lib/gf42/intermediate.lib", "compiler": "gf42", "sha256": sha256(linked)}
+    assert {item["relative_path"] for item in support["files"]} == {"lib/gf42/intermediate.lib", "Obj_Files_2016_03_25/gf42/x.obj"}
+    assert report["compatible"] is True
+
+
+def test_audit_rejects_missing_declared_link_library(tmp_path):
+    from xml.etree import ElementTree as ET
+    project, library = make_synthetic_official_shape(tmp_path)
+    tree = ET.parse(library)
+    params = ET.SubElement(tree.getroot(), "paramlist", {"name": "Libs"})
+    ET.SubElement(params, "param", {"name": "0", "value": r".\lib\$(Compiler)\intermediate.lib"})
+    tree.write(library, encoding="utf-8")
+    report = audit_mmc_template(project, library)
+    assert report["compatible"] is False
+    assert report["compiler_support"]["link_libraries"]["present"] is False
+
+
+def test_audit_legacy_fixture_without_libs_remains_compatible(tmp_path):
+    project, library = make_synthetic_official_shape(tmp_path)
+    report = audit_mmc_template(project, library)
+    assert report["compatible"] is True
+    assert report["compiler_support"]["link_libraries"] == {"required": False, "present": True, "declarations": [], "files": []}
+
+
+@pytest.mark.parametrize("declared", [r"\lib\intermediate.lib", r"C:lib\intermediate.lib"])
+def test_audit_rejects_windows_anchored_nonabsolute_link_paths(tmp_path, declared):
+    from xml.etree import ElementTree as ET
+    project, library = make_synthetic_official_shape(tmp_path)
+    tree = ET.parse(library)
+    params = ET.SubElement(tree.getroot(), "paramlist", {"name": "Libs"})
+    ET.SubElement(params, "param", {"name": "0", "value": declared})
+    tree.write(library, encoding="utf-8")
+    substitute = tmp_path / "lib" / "intermediate.lib"
+    substitute.parent.mkdir()
+    substitute.write_bytes(b"unrelated-sibling")
+    report = audit_mmc_template(project, library)
+    assert report["compatible"] is False
+    assert report["compiler_support"]["files"] == []
+
+
+def test_audit_rejects_object_directory_resolving_outside_library(tmp_path, monkeypatch):
+    project, library = make_synthetic_official_shape(tmp_path)
+    library.write_text(library.read_text().replace("</library>", '<param name="object" value="Obj_Files_2016_03_25/gf42/x.obj" /></library>'))
+    support = tmp_path / "Obj_Files_2016_03_25"
+    support.mkdir()
+    (support / "x.obj").write_bytes(b"synthetic-object")
+    real_resolve = Path.resolve
+    outside = tmp_path.parent / "foreign-object-tree"
+    def resolve(path, *args, **kwargs):
+        if path == support or support in path.parents:
+            return outside / path.relative_to(support)
+        return real_resolve(path, *args, **kwargs)
+    monkeypatch.setattr(Path, "resolve", resolve)
+    report = audit_mmc_template(project, library)
+    assert report["compatible"] is False
+    assert report["compiler_support"]["present"] is False
+    assert report["compiler_support"]["files"] == []
+
+
 def test_audit_records_template_native_emt_control_contract(tmp_path: Path) -> None:
     project, library = make_synthetic_official_shape(tmp_path)
     text = project.read_text(encoding="utf-8")
@@ -225,3 +301,32 @@ def test_installed_example_exposes_station_and_pwm_hierarchy_roles() -> None:
     assert report["compatible"] is True
     assert {"station_p", "station_vdc"} <= roles
     assert len([role for role in roles if role.startswith("pwm_converter_")]) >= 2
+
+
+def test_installed_topology_counts_reachable_arm_instances():
+    try:
+        project, library = discover_official_mmc_template()
+    except BackendError:
+        pytest.skip("Installed MMC source is unavailable")
+    report = audit_mmc_template(project, library)
+    assert report["submodule_topology"]["full_cell_instances"] == 12
+    cells = [item for item in report["instance_bindings"] if item["definition"] == "intermediate:FullCellR_n"]
+    assert len(cells) == 12
+    assert len({item["instance_path"] for item in cells}) == 12
+    assert all("Main[" in item["instance_path"] and "MMC_Hb_PWM[" in item["instance_path"] for item in cells)
+
+
+def test_unused_fullbridge_definition_cannot_override_active_halfbridge(tmp_path):
+    from xml.etree import ElementTree as ET
+    project, library = make_synthetic_official_shape(tmp_path)
+    tree = ET.parse(project)
+    main = tree.find("./definitions/Definition/schematic")
+    ET.SubElement(main, "User", {"classid": "UserCmp", "id": "active-half", "defn": "intermediate:HalfCell_Sdt"})
+    unused = ET.SubElement(tree.find("definitions"), "Definition", {"name": "UnusedFullbridge"})
+    canvas = ET.SubElement(unused, "schematic")
+    ET.SubElement(canvas, "User", {"classid": "UserCmp", "id": "unused-cell", "defn": "intermediate:FullCellR_n"})
+    ET.SubElement(canvas, "User", {"classid": "UserCmp", "id": "unused-firing", "defn": "intermediate:FiringHBridge"})
+    tree.write(project, encoding="utf-8")
+    report = audit_mmc_template(project, library)
+    assert report["submodule_topology"]["declared"] == "half_bridge"
+    assert report["submodule_topology"]["full_cell_instances"] == 0

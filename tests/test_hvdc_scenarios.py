@@ -27,7 +27,7 @@ class ScenarioBackend:
         self.status = "idle"
         self.status_calls = 0
         self.event_pending = False
-        self.simulation_times = iter([0.0, 0.5, 1.02])
+        self.simulation_times = iter([0.0, 0.5, 0.5, 1.02, 1.02])
 
     async def list_projects(self):
         return [{"name": name} for name in self.projects]
@@ -59,10 +59,11 @@ class ScenarioBackend:
 
     async def get_timed_control_capabilities(self, project_name):
         self.event_pending = True
-        return {"native_schedule": False, "simulation_clock": True}
+        return {"native_schedule": False, "simulation_clock": True, "time_basis": "EMTDC",
+                "time_units": "s", "verified": True, "max_timing_error_s": 1.0}
 
     async def get_simulation_time(self, project_name):
-        return next(self.simulation_times)
+        return next(self.simulation_times, 1.02)
 
 
 async def _wait_for_terminal(service, scenario_id, timeout=0.5):

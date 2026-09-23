@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 from copy import deepcopy
 from dataclasses import asdict
 from pathlib import Path
-import threading
 from typing import Any, Mapping
 
 from ..core.backend.base import BackendError
@@ -14,8 +14,8 @@ from ..core.path_policy import PathPolicy, WorkspaceNotConfiguredError
 from ..runtime import PendingCleanupError
 from ..topology.adapters.hvdc import topology_to_hvdc_evidence
 from ..topology.models import ProjectTopology
-from .classifier import classify_topology, extract_assets
 from .builders.mmc.inspection import inspect_mmc_evidence
+from .classifier import classify_topology, extract_assets
 from .mappings import MappingResolution, resolve_mappings
 from .models import HvdcProjectEvidence
 from .profiles import list_profiles, load_profile, register_profile
@@ -604,7 +604,7 @@ class HvdcDomainService:
             raise BackendError("NOT_FOUND", f"Scenario '{scenario_id}' was not found.", "hvdc", "get_hvdc_scenario_status", {"scenario_id": scenario_id})
         record = self._scenarios[scenario_id]
         backend = self.backend_service
-        target_project = record.get("target_project")
+        target_project = record.get("runtime_project_name") or record.get("target_project")
         if backend is not None and target_project:
             get_status = getattr(backend, "get_run_status", None)
             if callable(get_status):

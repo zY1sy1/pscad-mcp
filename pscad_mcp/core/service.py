@@ -328,6 +328,7 @@ class PscadService:
         self.executor = executor
         self.path_policy = path_policy or PathPolicy()
         self._backend: Any = None
+        self._pending_cleanup_backend: Any = None
         self._topology_service: TopologyService | None = None
         self._mutation_lock = asyncio.Lock()
 
@@ -389,11 +390,20 @@ class PscadService:
         return self._backend
 
     async def attach_local(self) -> str:
+        if self._pending_cleanup_backend is not None:
+            raise BackendError(
+                "ATTACH_CLEANUP_FAILED",
+                "A failed owned launch still requires cleanup before another attach.",
+                "service", "attach_local",
+                {"session": dict(getattr(self._pending_cleanup_backend, "session_details", {}))},
+            )
         backend = await self._select_backend()
         try:
             info = await backend.attach()
         except BaseException:
             if self._backend is backend:
+                if bool(getattr(backend, "owns_process", False)):
+                    self._pending_cleanup_backend = backend
                 self._backend = None
                 self._topology_service = None
             raise
@@ -430,6 +440,19 @@ class PscadService:
         }
 
     async def status(self) -> dict[str, Any]:
+        if self._pending_cleanup_backend is not None:
+            pending = self._pending_cleanup_backend
+            return {
+                "connected": False, "pending_cleanup": True,
+                "backend": getattr(pending, "name", None),
+                "version": getattr(pending, "version", None),
+                "selected_version": getattr(pending, "version", None),
+                "x64": getattr(pending, "x64", None),
+                "alive": None, "busy": None, "licensed": None,
+                "owns_process": bool(getattr(pending, "owns_process", False)),
+                "session": dict(getattr(pending, "session_details", {})),
+                "executor": self.executor_status(),
+            }
         if self._backend is None:
             return {
                 "connected": False,
@@ -454,6 +477,8 @@ class PscadService:
         return payload
 
     async def disconnect(self) -> None:
+        if self._pending_cleanup_backend is not None:
+            raise BackendError("ATTACH_CLEANUP_FAILED", "The owned pending-cleanup instance must be quit before disconnecting.", "service", "disconnect")
         if self._backend is not None:
             await self._backend.disconnect()
         self._backend = None
@@ -462,7 +487,7 @@ class PscadService:
     async def shutdown(self) -> None:
         """Release the selected backend according to process ownership."""
         async with self._mutation_lock:
-            backend = self._backend
+            backend = self._pending_cleanup_backend if self._pending_cleanup_backend is not None else self._backend
             if backend is None:
                 return
             if bool(getattr(backend, "owns_process", False)):
@@ -471,12 +496,20 @@ class PscadService:
                 await backend.disconnect()
             if self._backend is backend:
                 self._backend = None
+            if self._pending_cleanup_backend is backend:
+                self._pending_cleanup_backend = None
 
     async def repair_connection(self) -> str:
         async with self._mutation_lock:
             return await self._repair_connection_unlocked()
 
     async def _repair_connection_unlocked(self) -> str:
+        if self._pending_cleanup_backend is not None:
+            if not bool(getattr(self.executor, "healthy", True)):
+                self.executor.reset()
+            await self.quit_pscad(confirm=True)
+            self.executor.reset()
+            return await self.attach_local()
         current = self._backend
         if current is not None:
             owns_process = bool(getattr(current, "owns_process", False))
@@ -522,8 +555,10 @@ class PscadService:
     async def quit_pscad(self, *, confirm: bool = False) -> str:
         if not confirm:
             raise ConfirmationRequired("quit_pscad")
-        backend = self.backend
+        backend = self._pending_cleanup_backend if self._pending_cleanup_backend is not None else self.backend
         await backend.quit()
+        if self._pending_cleanup_backend is backend:
+            self._pending_cleanup_backend = None
         self._backend = None
         self._topology_service = None
         return "PSCAD terminated."
@@ -833,6 +868,10 @@ class PscadService:
 
     async def get_project_definitions(self, project_name: str) -> list[str]:
         return await self.backend.project_definitions(project_name)
+
+    async def get_master_library_identity(self) -> dict[str, Any]:
+        """Read Master identity from the existing connection without selecting a backend."""
+        return await self.backend.get_master_library_identity()
 
     async def get_lcc_inventory(
         self,

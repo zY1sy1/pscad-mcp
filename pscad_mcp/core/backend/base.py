@@ -13,6 +13,17 @@ JsonDict = dict[str, Any]
 Point = tuple[int, int]
 
 
+def timed_control_provider_capabilities(project: Any) -> JsonDict:
+    """Only an explicitly verified provider can claim EMTDC seconds semantics."""
+    contract = getattr(project, "timed_control_contract", None)
+    verified = isinstance(contract, Mapping) and contract.get("verified") is True and contract.get("time_basis") == "EMTDC" and contract.get("time_units") == "s"
+    return {
+        **(dict(contract) if verified else {"time_basis": None, "time_units": None, "verified": False}),
+        "native_schedule": bool(verified and callable(getattr(project, "schedule_timed_controls", None))),
+        "simulation_clock": bool(verified and callable(getattr(project, "get_simulation_time", None))),
+    }
+
+
 @dataclass(frozen=True)
 class BackendInfo:
     backend: str

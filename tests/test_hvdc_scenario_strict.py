@@ -24,7 +24,7 @@ class StrictBackend:
         self.parameters = {17: {"Value": 0}}
         self.forced_readback = forced_readback
         self.settings = {"PlotType": "OUT"}
-        self.times = iter([0.0, 0.5, 1.02])
+        self.times = iter([0.0, 0.5, 1.02, 1.02])
         self.calls = []
         self.status = "idle"
 
@@ -41,6 +41,8 @@ class StrictBackend:
         return {
             "native_schedule": self.mode == "native",
             "simulation_clock": self.mode == "polling",
+            "time_basis": "EMTDC", "time_units": "s", "verified": True,
+            "max_timing_error_s": 0.025,
         }
 
     async def schedule_timed_controls(self, project_name, events):
@@ -161,3 +163,71 @@ def test_verified_parameter_mismatch_restores_old_value(tmp_path):
     assert result["status"] == "failed"
     assert result["error"]["code"] == "HVDC_SCENARIO_EXECUTION_FAILED"
     assert result["partial_completion"]["applied_parameter_changes"] == []
+
+
+@pytest.mark.parametrize("override", [{"event_id": "wrong"}, {"component_id": "99"},
+                                     {"time_s": 0.2}, {"value": 0}, {"after_value": 2}])
+def test_public_native_scenario_rejects_wrong_ack_before_run(tmp_path, override):
+    class Native(StrictBackend):
+        async def schedule_timed_controls(self, project_name, events):
+            return [{**event, **override} for event in events]
+
+    backend = Native(mode="native")
+    service, source, derived = _service(tmp_path, backend)
+    scenario = _scenario(derived)
+    scenario["events"][0].update(end_time_s=1.1, before_value=0, after_value=0)
+
+    async def exercise():
+        started = await service.run_scenario(str(source), scenario, confirm=True)
+        return await _terminal(service, started["scenario_id"])
+
+    result = asyncio.run(exercise())
+    assert result["status"] == "failed"
+    assert result["error"]["code"] == "HVDC_TIMED_CONTROL_UNAVAILABLE"
+    assert not any(call[0] == "run" for call in backend.calls)
+
+
+@pytest.mark.parametrize("failure", ["stalled", "backward", "timeout", "cancelled"])
+def test_clock_failure_stops_only_its_project_and_releases_scenario(tmp_path, failure):
+    class ClockBackend(StrictBackend):
+        def __init__(self):
+            super().__init__()
+            self.clock_reads = 0
+            self.stopped = []
+
+        async def get_simulation_time(self, project_name):
+            self.clock_reads += 1
+            return 0.1 if self.clock_reads == 1 or failure != "backward" else 0.05
+
+        async def stop_simulation(self, project_name):
+            self.stopped.append(project_name)
+            self.status = "stopped"
+
+    backend = ClockBackend()
+    service, source, derived = _service(tmp_path, backend)
+    scenario = _scenario(derived)
+    scenario["run"]["timeout_s"] = 0.02 if failure == "timeout" else 3.0
+
+    async def exercise():
+        started = await service.run_scenario(str(source), scenario, confirm=True)
+        worker = service._scenario_tasks[started["scenario_id"]]
+        if failure == "cancelled":
+            while backend.clock_reads == 0:
+                await asyncio.sleep(0)
+            worker.cancel()
+        await worker
+        for _ in range(10):
+            if service._active_scenario_id is None:
+                break
+            await asyncio.sleep(0)
+        return await service.scenario_status(started["scenario_id"])
+
+    record = asyncio.run(exercise())
+    assert record["status"] == ("timed_out" if failure == "timeout" else "failed")
+    assert record["reservation_held"] is False
+    assert backend.stopped == [str(derived)]
+    assert record["partial_completion"]["applied_events"] == []
+    if failure == "stalled":
+        assert "did not advance" in record["error"]["message"]
+    if failure == "backward":
+        assert "monotonic" in record["error"]["message"]

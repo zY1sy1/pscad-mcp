@@ -1,0 +1,3231 @@
+{
+  "schema_version": 1,
+  "producer_revision": "86adfe0227e5914d01ff07fcad3f742c2aba8e21",
+  "scope": "template_native_dc_fault",
+  "status": "PASS",
+  "source_hashes": {
+    "project": {
+      "path": "C:\\Users\\Public\\Documents\\PSCAD\\4.6\\Examples\\ModelsInProgress\\H_MMC_Mono_DC.pscx",
+      "sha256": "1900be93877400fba228b1808a5310980d801b0260d7df998df6c5a2f6a035dd"
+    },
+    "library": {
+      "path": "C:\\Users\\Public\\Documents\\PSCAD\\4.6\\Examples\\ModelsInProgress\\intermediate.pslx",
+      "sha256": "08466778704e547d7d9d80af99a48c09292dd3a51056ac26216c3913d5cc3a1b"
+    },
+    "master": {
+      "path": "C:\\Program Files (x86)\\PSCAD46\\master.pslx",
+      "sha256": "062a614e68d8b18541f42b6bac95e0777d4de6f923fdf3d558ca8ff40255d939"
+    }
+  },
+  "recipe": {
+    "id": "native_full_sort_dc_integral_004_v1",
+    "parameters": {
+      "current_limit_pu": 1.1,
+      "dc_feedback_time_constant_s": 0.005,
+      "terminal_two_carrier_ratio": 23.0,
+      "arm_virtual_resistance_ohm": 30.0,
+      "sort_extent": "Dim",
+      "sort_enable": "existing_Enab",
+      "t1_dc_integral_time_s": 0.04
+    },
+    "steps": [
+      {
+        "name": "terminal_two_charging",
+        "parameters": {}
+      },
+      {
+        "name": "voltage_control_headroom",
+        "parameters": {
+          "current_limit_pu": 1.1
+        }
+      },
+      {
+        "name": "dc_feedback_filter",
+        "parameters": {
+          "time_constant_s": 0.005
+        }
+      },
+      {
+        "name": "terminal_two_carrier",
+        "parameters": {
+          "ratio": 23.0
+        }
+      },
+      {
+        "name": "arm_virtual_resistance",
+        "parameters": {
+          "resistance_per_arm_ohm": 30.0
+        }
+      },
+      {
+        "name": "complete_arm_sorting",
+        "parameters": {
+          "sort_extent": "Dim",
+          "enable": "existing_Enab"
+        }
+      },
+      {
+        "name": "voltage_control_integral_time",
+        "parameters": {
+          "time_constant_s": 0.04
+        }
+      },
+      {
+        "name": "fault_instrumentation",
+        "parameters": {}
+      }
+    ],
+    "producer_code_hashes": {
+      "fault_channels": {
+        "path": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\producer-code\\fault_channels.py",
+        "sha256": "c5516be5170bd1074bc087c098f13252497690bae1655bbee9b3f61b170680be"
+      },
+      "template_native": {
+        "path": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\producer-code\\template_native.py",
+        "sha256": "8c899f8bbcf137366ac8b0f9f69591544ea237e7efb67de2e7d3a2fa7daadf82"
+      },
+      "steady_gate": {
+        "path": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\producer-code\\test_mmc_fault_evidence_real.py",
+        "sha256": "0419c4a4829799231380c052d45397f601b72cbe289e84795122612f3ffe944c"
+      },
+      "acceptance": {
+        "path": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\producer-code\\acceptance.py",
+        "sha256": "fc5037fc6fb38dd762bf4ce33e382dfe5f0a77ec68499e1cdb2a213b417b86a1"
+      },
+      "template_audit": {
+        "path": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\producer-code\\template_audit.py",
+        "sha256": "c81275f10f6f50a36afcec01e51b90a94c8218bf45423f1a0efe51c484d0d443"
+      },
+      "line_constants": {
+        "path": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\producer-code\\line_constants.py",
+        "sha256": "e6023d71622397044f203f8d3571678e21e009cac60e977467426fb707e78614"
+      }
+    }
+  },
+  "required_checks": {
+    "schema_version": 1,
+    "time_basis": "EMTDC",
+    "time_units": "s",
+    "time_step_s": 2.5e-05,
+    "simulation_duration_s": 5.0,
+    "output_step_s": 0.00025,
+    "max_timing_error_s": 0.0005,
+    "frequency_hz": 60.0,
+    "arm_rms_stability_relative_tolerance": 0.05,
+    "nominal_target_relative_tolerance": 0.05,
+    "arm_peak_limit_ka": 3.0,
+    "maximum_power_loss_fraction": 0.1,
+    "modulation_abs_limit": 2.0,
+    "require_modulation_evidence": true,
+    "fault_window_s": [
+      2.5,
+      2.7
+    ],
+    "prefault_window_s": [
+      2.0,
+      2.4
+    ],
+    "recovery_window_s": [
+      4.6,
+      5.0
+    ],
+    "negative_voltage_max_kv": -1.0,
+    "fault_current_limit_ka": 20.0,
+    "voltage_recovery_relative_tolerance": 0.05,
+    "power_recovery_relative_tolerance": 0.05,
+    "arm_rms_recovery_relative_tolerance": 0.1,
+    "capacitor_recovery_relative_tolerance": 0.05,
+    "steady_relative_rms_tolerance": 0.05,
+    "minimum_operating_fraction": 0.9,
+    "arm_rms_floor_ka": 0.05,
+    "basis": "Native full-bridge engineering contract: 640 kV, T2 -900 MW, T1 supplies power plus measured losses; complete 60 Hz cycle windows; original 20 kA fault and 3 kA arm limits retained."
+  },
+  "channels": [
+    {
+      "channel_id": "MFE_DC_T2_PN_fault_active",
+      "role": "fault_active",
+      "model_scope": "DC_T2_PN",
+      "definition_name": "Main",
+      "owner_id": "1196109358",
+      "definition": "master:pgb",
+      "signal_source": {
+        "kind": "physical_state",
+        "owner_id": "983117456",
+        "definition": "MMC_fault:MmcObservedFaultSwitch",
+        "parameter": "MmcClosed",
+        "signal_name": "MmcFaultClosed",
+        "expression": "1-OPENBR",
+        "quantity": "fault_branch_closed",
+        "instance_path": "Station[1363114171]/Main[152486038]/MmcObservedFaultSwitch[983117456]"
+      },
+      "selector": {
+        "description": "MFE_DC_T2_PN_fault_active",
+        "group": "MMC_FAULT_EVIDENCE",
+        "port": "Signl",
+        "owner_id": "1196109358",
+        "instance_path": "Station[1363114171]/Main[152486038]"
+      },
+      "units": "1",
+      "dimension": 1,
+      "polarity": {
+        "inactive": 0,
+        "active": 1
+      },
+      "nominal": null,
+      "output_part": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault_04.out",
+      "metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.inf",
+      "sample_count": 20001,
+      "time_bounds_s": [
+        0.0,
+        5.0
+      ],
+      "hash": "30ae81f695b8aef3acdb97d25cd4b10188a53605780e7e36d681a3aad9a666af",
+      "instance_path": "Station[1363114171]/Main[152486038]",
+      "metadata_sha256": "3484778f759a552977821f99830bf991529d11fee53d8838757d50e9a73fe452",
+      "compiler_metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.infx",
+      "compiler_metadata_sha256": "9d1b1b165dc970545cddf931f80d506dea00ca7bcacd7a3ea368f4b365931c1a",
+      "call_id": 34,
+      "compiled_identity": {
+        "name": "Main(0):MFE_DC_T2_PN_fault_active",
+        "index": "33",
+        "id": "1196109358:0",
+        "label": "MMC_FAULT_EVIDENCE",
+        "dim": "1",
+        "unit": "1",
+        "min": "-1000.0",
+        "max": "1000.0"
+      }
+    },
+    {
+      "channel_id": "MFE_DC_T2_PN_i_dc_fault",
+      "role": "i_dc_fault",
+      "model_scope": "DC_T2_PN",
+      "definition_name": "Main",
+      "owner_id": "1294315878",
+      "definition": "master:pgb",
+      "signal_source": {
+        "kind": "physical_measurement",
+        "owner_id": "983117456",
+        "definition": "MMC_fault:MmcObservedFaultSwitch",
+        "parameter": "Iflt",
+        "signal_name": "IFlt_2PN",
+        "quantity": "branch_current",
+        "direction": "fault_switch_A_to_B",
+        "instance_path": "Station[1363114171]/Main[152486038]/MmcObservedFaultSwitch[983117456]"
+      },
+      "selector": {
+        "description": "MFE_DC_T2_PN_i_dc_fault",
+        "group": "MMC_FAULT_EVIDENCE",
+        "port": "Signl",
+        "owner_id": "1294315878",
+        "instance_path": "Station[1363114171]/Main[152486038]"
+      },
+      "units": "kA",
+      "dimension": 1,
+      "polarity": null,
+      "nominal": null,
+      "output_part": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault_04.out",
+      "metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.inf",
+      "sample_count": 20001,
+      "time_bounds_s": [
+        0.0,
+        5.0
+      ],
+      "hash": "30ae81f695b8aef3acdb97d25cd4b10188a53605780e7e36d681a3aad9a666af",
+      "instance_path": "Station[1363114171]/Main[152486038]",
+      "metadata_sha256": "3484778f759a552977821f99830bf991529d11fee53d8838757d50e9a73fe452",
+      "compiler_metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.infx",
+      "compiler_metadata_sha256": "9d1b1b165dc970545cddf931f80d506dea00ca7bcacd7a3ea368f4b365931c1a",
+      "call_id": 33,
+      "compiled_identity": {
+        "name": "Main(0):MFE_DC_T2_PN_i_dc_fault",
+        "index": "32",
+        "id": "1294315878:0",
+        "label": "MMC_FAULT_EVIDENCE",
+        "dim": "1",
+        "unit": "kA",
+        "min": "-1000.0",
+        "max": "1000.0"
+      }
+    },
+    {
+      "channel_id": "MFE_T1_A_upper_v_inserted",
+      "role": "v_inserted",
+      "model_scope": "T1/A/upper",
+      "definition_name": "MFE_Pole_T1_A",
+      "owner_id": "1726729604",
+      "definition": "master:pgb",
+      "signal_source": {
+        "kind": "physical_measurement",
+        "owner_id": "488611367",
+        "definition": "MMC_fault:MmcObservedFullCell",
+        "parameter": "MmcInserted",
+        "signal_name": "MmcVTop",
+        "quantity": "cell_group_terminal_voltage",
+        "positive_port": "Ntop",
+        "negative_port": "Nbtm",
+        "condition": {
+          "DTBP": "0"
+        },
+        "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T1[1167847391]/MFE_Pole_T1_A[662961074]/MmcObservedFullCell[488611367]"
+      },
+      "selector": {
+        "description": "MFE_T1_A_upper_v_inserted",
+        "group": "MMC_FAULT_EVIDENCE",
+        "port": "Signl",
+        "owner_id": "1726729604",
+        "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T1[1167847391]/MFE_Pole_T1_A[662961074]"
+      },
+      "units": "kV",
+      "dimension": 1,
+      "polarity": null,
+      "nominal": null,
+      "output_part": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault_47.out",
+      "metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.inf",
+      "sample_count": 20001,
+      "time_bounds_s": [
+        0.0,
+        5.0
+      ],
+      "hash": "5d5edda5069fa472df1e88fb0b8cec4ab32156196a7ad669dfba22d9a3873864",
+      "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T1[1167847391]/MFE_Pole_T1_A[662961074]",
+      "metadata_sha256": "3484778f759a552977821f99830bf991529d11fee53d8838757d50e9a73fe452",
+      "compiler_metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.infx",
+      "compiler_metadata_sha256": "9d1b1b165dc970545cddf931f80d506dea00ca7bcacd7a3ea368f4b365931c1a",
+      "call_id": 465,
+      "compiled_identity": {
+        "name": "Main(0)\\MFE_PWM_T1(0)\\MFE_Pole_T1_A(0):MFE_T1_A_upper_v_inserted",
+        "index": "464",
+        "id": "1726729604:0",
+        "label": "MMC_FAULT_EVIDENCE",
+        "dim": "1",
+        "unit": "kV",
+        "min": "-1000.0",
+        "max": "1000.0"
+      }
+    },
+    {
+      "channel_id": "MFE_T1_A_upper_v_cap",
+      "role": "v_cap",
+      "model_scope": "T1/A/upper",
+      "definition_name": "MFE_Pole_T1_A",
+      "owner_id": "1011905459",
+      "definition": "master:pgb",
+      "signal_source": {
+        "kind": "physical_measurement",
+        "owner_id": "488611367",
+        "definition": "MMC_fault:MmcObservedFullCell",
+        "parameter": "MmcCapSum",
+        "signal_name": "MmcVcTop",
+        "quantity": "sum_of_submodule_capacitor_voltages",
+        "expression": "SUM(Vc)",
+        "cell_count_expression": "$(NoCells1)",
+        "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T1[1167847391]/MFE_Pole_T1_A[662961074]/MmcObservedFullCell[488611367]"
+      },
+      "selector": {
+        "description": "MFE_T1_A_upper_v_cap",
+        "group": "MMC_FAULT_EVIDENCE",
+        "port": "Signl",
+        "owner_id": "1011905459",
+        "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T1[1167847391]/MFE_Pole_T1_A[662961074]"
+      },
+      "units": "kV",
+      "dimension": 1,
+      "polarity": null,
+      "nominal": 640.0,
+      "output_part": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault_47.out",
+      "metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.inf",
+      "sample_count": 20001,
+      "time_bounds_s": [
+        0.0,
+        5.0
+      ],
+      "hash": "5d5edda5069fa472df1e88fb0b8cec4ab32156196a7ad669dfba22d9a3873864",
+      "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T1[1167847391]/MFE_Pole_T1_A[662961074]",
+      "metadata_sha256": "3484778f759a552977821f99830bf991529d11fee53d8838757d50e9a73fe452",
+      "compiler_metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.infx",
+      "compiler_metadata_sha256": "9d1b1b165dc970545cddf931f80d506dea00ca7bcacd7a3ea368f4b365931c1a",
+      "call_id": 464,
+      "compiled_identity": {
+        "name": "Main(0)\\MFE_PWM_T1(0)\\MFE_Pole_T1_A(0):MFE_T1_A_upper_v_cap",
+        "index": "463",
+        "id": "1011905459:0",
+        "label": "MMC_FAULT_EVIDENCE",
+        "dim": "1",
+        "unit": "kV",
+        "min": "-1000.0",
+        "max": "1000.0"
+      }
+    },
+    {
+      "channel_id": "MFE_T1_A_upper_blocking_state",
+      "role": "blocking_state",
+      "model_scope": "T1/A/upper",
+      "definition_name": "MFE_Pole_T1_A",
+      "owner_id": "1867205556",
+      "definition": "master:pgb",
+      "signal_source": {
+        "kind": "physical_state",
+        "owner_id": "488611367",
+        "definition": "MMC_fault:MmcObservedFullCell",
+        "parameter": "MmcBlocked",
+        "signal_name": "MmcBlockTop",
+        "quantity": "firing_based_cell_group_blocked",
+        "expression": "Block_Finder_H result",
+        "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T1[1167847391]/MFE_Pole_T1_A[662961074]/MmcObservedFullCell[488611367]"
+      },
+      "selector": {
+        "description": "MFE_T1_A_upper_blocking_state",
+        "group": "MMC_FAULT_EVIDENCE",
+        "port": "Signl",
+        "owner_id": "1867205556",
+        "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T1[1167847391]/MFE_Pole_T1_A[662961074]"
+      },
+      "units": "1",
+      "dimension": 1,
+      "polarity": {
+        "inactive": 0,
+        "active": 1
+      },
+      "nominal": null,
+      "output_part": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault_46.out",
+      "metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.inf",
+      "sample_count": 20001,
+      "time_bounds_s": [
+        0.0,
+        5.0
+      ],
+      "hash": "96ef62bb17ed597f19a91849529c8791fcc13f3c9637948ca7f4fddc26af35d9",
+      "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T1[1167847391]/MFE_Pole_T1_A[662961074]",
+      "metadata_sha256": "3484778f759a552977821f99830bf991529d11fee53d8838757d50e9a73fe452",
+      "compiler_metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.infx",
+      "compiler_metadata_sha256": "9d1b1b165dc970545cddf931f80d506dea00ca7bcacd7a3ea368f4b365931c1a",
+      "call_id": 456,
+      "compiled_identity": {
+        "name": "Main(0)\\MFE_PWM_T1(0)\\MFE_Pole_T1_A(0):MFE_T1_A_upper_blocking_state",
+        "index": "455",
+        "id": "1867205556:0",
+        "label": "MMC_FAULT_EVIDENCE",
+        "dim": "1",
+        "unit": "1",
+        "min": "-1000.0",
+        "max": "1000.0"
+      }
+    },
+    {
+      "channel_id": "MFE_T1_A_upper_i_arm",
+      "role": "i_arm",
+      "model_scope": "T1/A/upper",
+      "definition_name": "MFE_Pole_T1_A",
+      "owner_id": "1283582601",
+      "definition": "master:pgb",
+      "signal_source": {
+        "kind": "physical_measurement",
+        "owner_id": "1514910955",
+        "definition": "master:varrlc",
+        "parameter": "I",
+        "signal_name": "IaTop",
+        "quantity": "arm_inductor_current",
+        "direction": "original_varrlc_A_to_B",
+        "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T1[1167847391]/MFE_Pole_T1_A[662961074]/varrlc[1514910955]"
+      },
+      "selector": {
+        "description": "MFE_T1_A_upper_i_arm",
+        "group": "MMC_FAULT_EVIDENCE",
+        "port": "Signl",
+        "owner_id": "1283582601",
+        "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T1[1167847391]/MFE_Pole_T1_A[662961074]"
+      },
+      "units": "kA",
+      "dimension": 1,
+      "polarity": null,
+      "nominal": null,
+      "output_part": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault_45.out",
+      "metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.inf",
+      "sample_count": 20001,
+      "time_bounds_s": [
+        0.0,
+        5.0
+      ],
+      "hash": "60d6b9a69b3196ace4f7fc0d70d60f94cd5bbb9509a998f5ded429e0f2c69e76",
+      "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T1[1167847391]/MFE_Pole_T1_A[662961074]",
+      "metadata_sha256": "3484778f759a552977821f99830bf991529d11fee53d8838757d50e9a73fe452",
+      "compiler_metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.infx",
+      "compiler_metadata_sha256": "9d1b1b165dc970545cddf931f80d506dea00ca7bcacd7a3ea368f4b365931c1a",
+      "call_id": 444,
+      "compiled_identity": {
+        "name": "Main(0)\\MFE_PWM_T1(0)\\MFE_Pole_T1_A(0):MFE_T1_A_upper_i_arm",
+        "index": "443",
+        "id": "1283582601:0",
+        "label": "MMC_FAULT_EVIDENCE",
+        "dim": "1",
+        "unit": "kA",
+        "min": "-1000.0",
+        "max": "1000.0"
+      }
+    },
+    {
+      "channel_id": "MFE_T1_A_lower_v_inserted",
+      "role": "v_inserted",
+      "model_scope": "T1/A/lower",
+      "definition_name": "MFE_Pole_T1_A",
+      "owner_id": "1079384033",
+      "definition": "master:pgb",
+      "signal_source": {
+        "kind": "physical_measurement",
+        "owner_id": "1215143890",
+        "definition": "MMC_fault:MmcObservedFullCell",
+        "parameter": "MmcInserted",
+        "signal_name": "MmcVBtm",
+        "quantity": "cell_group_terminal_voltage",
+        "positive_port": "Ntop",
+        "negative_port": "Nbtm",
+        "condition": {
+          "DTBP": "0"
+        },
+        "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T1[1167847391]/MFE_Pole_T1_A[662961074]/MmcObservedFullCell[1215143890]"
+      },
+      "selector": {
+        "description": "MFE_T1_A_lower_v_inserted",
+        "group": "MMC_FAULT_EVIDENCE",
+        "port": "Signl",
+        "owner_id": "1079384033",
+        "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T1[1167847391]/MFE_Pole_T1_A[662961074]"
+      },
+      "units": "kV",
+      "dimension": 1,
+      "polarity": null,
+      "nominal": null,
+      "output_part": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault_46.out",
+      "metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.inf",
+      "sample_count": 20001,
+      "time_bounds_s": [
+        0.0,
+        5.0
+      ],
+      "hash": "96ef62bb17ed597f19a91849529c8791fcc13f3c9637948ca7f4fddc26af35d9",
+      "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T1[1167847391]/MFE_Pole_T1_A[662961074]",
+      "metadata_sha256": "3484778f759a552977821f99830bf991529d11fee53d8838757d50e9a73fe452",
+      "compiler_metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.infx",
+      "compiler_metadata_sha256": "9d1b1b165dc970545cddf931f80d506dea00ca7bcacd7a3ea368f4b365931c1a",
+      "call_id": 455,
+      "compiled_identity": {
+        "name": "Main(0)\\MFE_PWM_T1(0)\\MFE_Pole_T1_A(0):MFE_T1_A_lower_v_inserted",
+        "index": "454",
+        "id": "1079384033:0",
+        "label": "MMC_FAULT_EVIDENCE",
+        "dim": "1",
+        "unit": "kV",
+        "min": "-1000.0",
+        "max": "1000.0"
+      }
+    },
+    {
+      "channel_id": "MFE_T1_A_lower_v_cap",
+      "role": "v_cap",
+      "model_scope": "T1/A/lower",
+      "definition_name": "MFE_Pole_T1_A",
+      "owner_id": "1897929726",
+      "definition": "master:pgb",
+      "signal_source": {
+        "kind": "physical_measurement",
+        "owner_id": "1215143890",
+        "definition": "MMC_fault:MmcObservedFullCell",
+        "parameter": "MmcCapSum",
+        "signal_name": "MmcVcBtm",
+        "quantity": "sum_of_submodule_capacitor_voltages",
+        "expression": "SUM(Vc)",
+        "cell_count_expression": "$(NoCells1)",
+        "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T1[1167847391]/MFE_Pole_T1_A[662961074]/MmcObservedFullCell[1215143890]"
+      },
+      "selector": {
+        "description": "MFE_T1_A_lower_v_cap",
+        "group": "MMC_FAULT_EVIDENCE",
+        "port": "Signl",
+        "owner_id": "1897929726",
+        "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T1[1167847391]/MFE_Pole_T1_A[662961074]"
+      },
+      "units": "kV",
+      "dimension": 1,
+      "polarity": null,
+      "nominal": 640.0,
+      "output_part": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault_46.out",
+      "metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.inf",
+      "sample_count": 20001,
+      "time_bounds_s": [
+        0.0,
+        5.0
+      ],
+      "hash": "96ef62bb17ed597f19a91849529c8791fcc13f3c9637948ca7f4fddc26af35d9",
+      "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T1[1167847391]/MFE_Pole_T1_A[662961074]",
+      "metadata_sha256": "3484778f759a552977821f99830bf991529d11fee53d8838757d50e9a73fe452",
+      "compiler_metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.infx",
+      "compiler_metadata_sha256": "9d1b1b165dc970545cddf931f80d506dea00ca7bcacd7a3ea368f4b365931c1a",
+      "call_id": 454,
+      "compiled_identity": {
+        "name": "Main(0)\\MFE_PWM_T1(0)\\MFE_Pole_T1_A(0):MFE_T1_A_lower_v_cap",
+        "index": "453",
+        "id": "1897929726:0",
+        "label": "MMC_FAULT_EVIDENCE",
+        "dim": "1",
+        "unit": "kV",
+        "min": "-1000.0",
+        "max": "1000.0"
+      }
+    },
+    {
+      "channel_id": "MFE_T1_A_lower_blocking_state",
+      "role": "blocking_state",
+      "model_scope": "T1/A/lower",
+      "definition_name": "MFE_Pole_T1_A",
+      "owner_id": "1279862235",
+      "definition": "master:pgb",
+      "signal_source": {
+        "kind": "physical_state",
+        "owner_id": "1215143890",
+        "definition": "MMC_fault:MmcObservedFullCell",
+        "parameter": "MmcBlocked",
+        "signal_name": "MmcBlockBtm",
+        "quantity": "firing_based_cell_group_blocked",
+        "expression": "Block_Finder_H result",
+        "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T1[1167847391]/MFE_Pole_T1_A[662961074]/MmcObservedFullCell[1215143890]"
+      },
+      "selector": {
+        "description": "MFE_T1_A_lower_blocking_state",
+        "group": "MMC_FAULT_EVIDENCE",
+        "port": "Signl",
+        "owner_id": "1279862235",
+        "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T1[1167847391]/MFE_Pole_T1_A[662961074]"
+      },
+      "units": "1",
+      "dimension": 1,
+      "polarity": {
+        "inactive": 0,
+        "active": 1
+      },
+      "nominal": null,
+      "output_part": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault_45.out",
+      "metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.inf",
+      "sample_count": 20001,
+      "time_bounds_s": [
+        0.0,
+        5.0
+      ],
+      "hash": "60d6b9a69b3196ace4f7fc0d70d60f94cd5bbb9509a998f5ded429e0f2c69e76",
+      "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T1[1167847391]/MFE_Pole_T1_A[662961074]",
+      "metadata_sha256": "3484778f759a552977821f99830bf991529d11fee53d8838757d50e9a73fe452",
+      "compiler_metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.infx",
+      "compiler_metadata_sha256": "9d1b1b165dc970545cddf931f80d506dea00ca7bcacd7a3ea368f4b365931c1a",
+      "call_id": 446,
+      "compiled_identity": {
+        "name": "Main(0)\\MFE_PWM_T1(0)\\MFE_Pole_T1_A(0):MFE_T1_A_lower_blocking_state",
+        "index": "445",
+        "id": "1279862235:0",
+        "label": "MMC_FAULT_EVIDENCE",
+        "dim": "1",
+        "unit": "1",
+        "min": "-1000.0",
+        "max": "1000.0"
+      }
+    },
+    {
+      "channel_id": "MFE_T1_A_lower_i_arm",
+      "role": "i_arm",
+      "model_scope": "T1/A/lower",
+      "definition_name": "MFE_Pole_T1_A",
+      "owner_id": "1173720267",
+      "definition": "master:pgb",
+      "signal_source": {
+        "kind": "physical_measurement",
+        "owner_id": "1386643874",
+        "definition": "master:varrlc",
+        "parameter": "I",
+        "signal_name": "IaBtm",
+        "quantity": "arm_inductor_current",
+        "direction": "original_varrlc_A_to_B",
+        "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T1[1167847391]/MFE_Pole_T1_A[662961074]/varrlc[1386643874]"
+      },
+      "selector": {
+        "description": "MFE_T1_A_lower_i_arm",
+        "group": "MMC_FAULT_EVIDENCE",
+        "port": "Signl",
+        "owner_id": "1173720267",
+        "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T1[1167847391]/MFE_Pole_T1_A[662961074]"
+      },
+      "units": "kA",
+      "dimension": 1,
+      "polarity": null,
+      "nominal": null,
+      "output_part": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault_45.out",
+      "metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.inf",
+      "sample_count": 20001,
+      "time_bounds_s": [
+        0.0,
+        5.0
+      ],
+      "hash": "60d6b9a69b3196ace4f7fc0d70d60f94cd5bbb9509a998f5ded429e0f2c69e76",
+      "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T1[1167847391]/MFE_Pole_T1_A[662961074]",
+      "metadata_sha256": "3484778f759a552977821f99830bf991529d11fee53d8838757d50e9a73fe452",
+      "compiler_metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.infx",
+      "compiler_metadata_sha256": "9d1b1b165dc970545cddf931f80d506dea00ca7bcacd7a3ea368f4b365931c1a",
+      "call_id": 445,
+      "compiled_identity": {
+        "name": "Main(0)\\MFE_PWM_T1(0)\\MFE_Pole_T1_A(0):MFE_T1_A_lower_i_arm",
+        "index": "444",
+        "id": "1173720267:0",
+        "label": "MMC_FAULT_EVIDENCE",
+        "dim": "1",
+        "unit": "kA",
+        "min": "-1000.0",
+        "max": "1000.0"
+      }
+    },
+    {
+      "channel_id": "MFE_T1_B_upper_v_inserted",
+      "role": "v_inserted",
+      "model_scope": "T1/B/upper",
+      "definition_name": "MFE_Pole_T1_B",
+      "owner_id": "1167573696",
+      "definition": "master:pgb",
+      "signal_source": {
+        "kind": "physical_measurement",
+        "owner_id": "488611367",
+        "definition": "MMC_fault:MmcObservedFullCell",
+        "parameter": "MmcInserted",
+        "signal_name": "MmcVTop",
+        "quantity": "cell_group_terminal_voltage",
+        "positive_port": "Ntop",
+        "negative_port": "Nbtm",
+        "condition": {
+          "DTBP": "0"
+        },
+        "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T1[1167847391]/MFE_Pole_T1_B[384065809]/MmcObservedFullCell[488611367]"
+      },
+      "selector": {
+        "description": "MFE_T1_B_upper_v_inserted",
+        "group": "MMC_FAULT_EVIDENCE",
+        "port": "Signl",
+        "owner_id": "1167573696",
+        "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T1[1167847391]/MFE_Pole_T1_B[384065809]"
+      },
+      "units": "kV",
+      "dimension": 1,
+      "polarity": null,
+      "nominal": null,
+      "output_part": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault_41.out",
+      "metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.inf",
+      "sample_count": 20001,
+      "time_bounds_s": [
+        0.0,
+        5.0
+      ],
+      "hash": "1d44fac41a5132459ae1c8b1cf738277c7b4c799cd61d063227e9bdd459ba5d2",
+      "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T1[1167847391]/MFE_Pole_T1_B[384065809]",
+      "metadata_sha256": "3484778f759a552977821f99830bf991529d11fee53d8838757d50e9a73fe452",
+      "compiler_metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.infx",
+      "compiler_metadata_sha256": "9d1b1b165dc970545cddf931f80d506dea00ca7bcacd7a3ea368f4b365931c1a",
+      "call_id": 409,
+      "compiled_identity": {
+        "name": "Main(0)\\MFE_PWM_T1(0)\\MFE_Pole_T1_B(0):MFE_T1_B_upper_v_inserted",
+        "index": "408",
+        "id": "1167573696:0",
+        "label": "MMC_FAULT_EVIDENCE",
+        "dim": "1",
+        "unit": "kV",
+        "min": "-1000.0",
+        "max": "1000.0"
+      }
+    },
+    {
+      "channel_id": "MFE_T1_B_upper_v_cap",
+      "role": "v_cap",
+      "model_scope": "T1/B/upper",
+      "definition_name": "MFE_Pole_T1_B",
+      "owner_id": "1251910730",
+      "definition": "master:pgb",
+      "signal_source": {
+        "kind": "physical_measurement",
+        "owner_id": "488611367",
+        "definition": "MMC_fault:MmcObservedFullCell",
+        "parameter": "MmcCapSum",
+        "signal_name": "MmcVcTop",
+        "quantity": "sum_of_submodule_capacitor_voltages",
+        "expression": "SUM(Vc)",
+        "cell_count_expression": "$(NoCells1)",
+        "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T1[1167847391]/MFE_Pole_T1_B[384065809]/MmcObservedFullCell[488611367]"
+      },
+      "selector": {
+        "description": "MFE_T1_B_upper_v_cap",
+        "group": "MMC_FAULT_EVIDENCE",
+        "port": "Signl",
+        "owner_id": "1251910730",
+        "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T1[1167847391]/MFE_Pole_T1_B[384065809]"
+      },
+      "units": "kV",
+      "dimension": 1,
+      "polarity": null,
+      "nominal": 640.0,
+      "output_part": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault_41.out",
+      "metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.inf",
+      "sample_count": 20001,
+      "time_bounds_s": [
+        0.0,
+        5.0
+      ],
+      "hash": "1d44fac41a5132459ae1c8b1cf738277c7b4c799cd61d063227e9bdd459ba5d2",
+      "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T1[1167847391]/MFE_Pole_T1_B[384065809]",
+      "metadata_sha256": "3484778f759a552977821f99830bf991529d11fee53d8838757d50e9a73fe452",
+      "compiler_metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.infx",
+      "compiler_metadata_sha256": "9d1b1b165dc970545cddf931f80d506dea00ca7bcacd7a3ea368f4b365931c1a",
+      "call_id": 408,
+      "compiled_identity": {
+        "name": "Main(0)\\MFE_PWM_T1(0)\\MFE_Pole_T1_B(0):MFE_T1_B_upper_v_cap",
+        "index": "407",
+        "id": "1251910730:0",
+        "label": "MMC_FAULT_EVIDENCE",
+        "dim": "1",
+        "unit": "kV",
+        "min": "-1000.0",
+        "max": "1000.0"
+      }
+    },
+    {
+      "channel_id": "MFE_T1_B_upper_blocking_state",
+      "role": "blocking_state",
+      "model_scope": "T1/B/upper",
+      "definition_name": "MFE_Pole_T1_B",
+      "owner_id": "1905211489",
+      "definition": "master:pgb",
+      "signal_source": {
+        "kind": "physical_state",
+        "owner_id": "488611367",
+        "definition": "MMC_fault:MmcObservedFullCell",
+        "parameter": "MmcBlocked",
+        "signal_name": "MmcBlockTop",
+        "quantity": "firing_based_cell_group_blocked",
+        "expression": "Block_Finder_H result",
+        "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T1[1167847391]/MFE_Pole_T1_B[384065809]/MmcObservedFullCell[488611367]"
+      },
+      "selector": {
+        "description": "MFE_T1_B_upper_blocking_state",
+        "group": "MMC_FAULT_EVIDENCE",
+        "port": "Signl",
+        "owner_id": "1905211489",
+        "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T1[1167847391]/MFE_Pole_T1_B[384065809]"
+      },
+      "units": "1",
+      "dimension": 1,
+      "polarity": {
+        "inactive": 0,
+        "active": 1
+      },
+      "nominal": null,
+      "output_part": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault_40.out",
+      "metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.inf",
+      "sample_count": 20001,
+      "time_bounds_s": [
+        0.0,
+        5.0
+      ],
+      "hash": "84ec8cca00a2b4c15a1ce49e3114533d228a6f13b633a7c6f0bfb26471a5d20a",
+      "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T1[1167847391]/MFE_Pole_T1_B[384065809]",
+      "metadata_sha256": "3484778f759a552977821f99830bf991529d11fee53d8838757d50e9a73fe452",
+      "compiler_metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.infx",
+      "compiler_metadata_sha256": "9d1b1b165dc970545cddf931f80d506dea00ca7bcacd7a3ea368f4b365931c1a",
+      "call_id": 400,
+      "compiled_identity": {
+        "name": "Main(0)\\MFE_PWM_T1(0)\\MFE_Pole_T1_B(0):MFE_T1_B_upper_blocking_state",
+        "index": "399",
+        "id": "1905211489:0",
+        "label": "MMC_FAULT_EVIDENCE",
+        "dim": "1",
+        "unit": "1",
+        "min": "-1000.0",
+        "max": "1000.0"
+      }
+    },
+    {
+      "channel_id": "MFE_T1_B_upper_i_arm",
+      "role": "i_arm",
+      "model_scope": "T1/B/upper",
+      "definition_name": "MFE_Pole_T1_B",
+      "owner_id": "1129025073",
+      "definition": "master:pgb",
+      "signal_source": {
+        "kind": "physical_measurement",
+        "owner_id": "1514910955",
+        "definition": "master:varrlc",
+        "parameter": "I",
+        "signal_name": "IaTop",
+        "quantity": "arm_inductor_current",
+        "direction": "original_varrlc_A_to_B",
+        "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T1[1167847391]/MFE_Pole_T1_B[384065809]/varrlc[1514910955]"
+      },
+      "selector": {
+        "description": "MFE_T1_B_upper_i_arm",
+        "group": "MMC_FAULT_EVIDENCE",
+        "port": "Signl",
+        "owner_id": "1129025073",
+        "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T1[1167847391]/MFE_Pole_T1_B[384065809]"
+      },
+      "units": "kA",
+      "dimension": 1,
+      "polarity": null,
+      "nominal": null,
+      "output_part": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault_39.out",
+      "metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.inf",
+      "sample_count": 20001,
+      "time_bounds_s": [
+        0.0,
+        5.0
+      ],
+      "hash": "fcc86959d8002ef80e737dd31292251c3370f786662f0ddc8ec574697e9ad981",
+      "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T1[1167847391]/MFE_Pole_T1_B[384065809]",
+      "metadata_sha256": "3484778f759a552977821f99830bf991529d11fee53d8838757d50e9a73fe452",
+      "compiler_metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.infx",
+      "compiler_metadata_sha256": "9d1b1b165dc970545cddf931f80d506dea00ca7bcacd7a3ea368f4b365931c1a",
+      "call_id": 388,
+      "compiled_identity": {
+        "name": "Main(0)\\MFE_PWM_T1(0)\\MFE_Pole_T1_B(0):MFE_T1_B_upper_i_arm",
+        "index": "387",
+        "id": "1129025073:0",
+        "label": "MMC_FAULT_EVIDENCE",
+        "dim": "1",
+        "unit": "kA",
+        "min": "-1000.0",
+        "max": "1000.0"
+      }
+    },
+    {
+      "channel_id": "MFE_T1_B_lower_v_inserted",
+      "role": "v_inserted",
+      "model_scope": "T1/B/lower",
+      "definition_name": "MFE_Pole_T1_B",
+      "owner_id": "1387224794",
+      "definition": "master:pgb",
+      "signal_source": {
+        "kind": "physical_measurement",
+        "owner_id": "1215143890",
+        "definition": "MMC_fault:MmcObservedFullCell",
+        "parameter": "MmcInserted",
+        "signal_name": "MmcVBtm",
+        "quantity": "cell_group_terminal_voltage",
+        "positive_port": "Ntop",
+        "negative_port": "Nbtm",
+        "condition": {
+          "DTBP": "0"
+        },
+        "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T1[1167847391]/MFE_Pole_T1_B[384065809]/MmcObservedFullCell[1215143890]"
+      },
+      "selector": {
+        "description": "MFE_T1_B_lower_v_inserted",
+        "group": "MMC_FAULT_EVIDENCE",
+        "port": "Signl",
+        "owner_id": "1387224794",
+        "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T1[1167847391]/MFE_Pole_T1_B[384065809]"
+      },
+      "units": "kV",
+      "dimension": 1,
+      "polarity": null,
+      "nominal": null,
+      "output_part": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault_40.out",
+      "metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.inf",
+      "sample_count": 20001,
+      "time_bounds_s": [
+        0.0,
+        5.0
+      ],
+      "hash": "84ec8cca00a2b4c15a1ce49e3114533d228a6f13b633a7c6f0bfb26471a5d20a",
+      "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T1[1167847391]/MFE_Pole_T1_B[384065809]",
+      "metadata_sha256": "3484778f759a552977821f99830bf991529d11fee53d8838757d50e9a73fe452",
+      "compiler_metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.infx",
+      "compiler_metadata_sha256": "9d1b1b165dc970545cddf931f80d506dea00ca7bcacd7a3ea368f4b365931c1a",
+      "call_id": 399,
+      "compiled_identity": {
+        "name": "Main(0)\\MFE_PWM_T1(0)\\MFE_Pole_T1_B(0):MFE_T1_B_lower_v_inserted",
+        "index": "398",
+        "id": "1387224794:0",
+        "label": "MMC_FAULT_EVIDENCE",
+        "dim": "1",
+        "unit": "kV",
+        "min": "-1000.0",
+        "max": "1000.0"
+      }
+    },
+    {
+      "channel_id": "MFE_T1_B_lower_v_cap",
+      "role": "v_cap",
+      "model_scope": "T1/B/lower",
+      "definition_name": "MFE_Pole_T1_B",
+      "owner_id": "1791165352",
+      "definition": "master:pgb",
+      "signal_source": {
+        "kind": "physical_measurement",
+        "owner_id": "1215143890",
+        "definition": "MMC_fault:MmcObservedFullCell",
+        "parameter": "MmcCapSum",
+        "signal_name": "MmcVcBtm",
+        "quantity": "sum_of_submodule_capacitor_voltages",
+        "expression": "SUM(Vc)",
+        "cell_count_expression": "$(NoCells1)",
+        "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T1[1167847391]/MFE_Pole_T1_B[384065809]/MmcObservedFullCell[1215143890]"
+      },
+      "selector": {
+        "description": "MFE_T1_B_lower_v_cap",
+        "group": "MMC_FAULT_EVIDENCE",
+        "port": "Signl",
+        "owner_id": "1791165352",
+        "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T1[1167847391]/MFE_Pole_T1_B[384065809]"
+      },
+      "units": "kV",
+      "dimension": 1,
+      "polarity": null,
+      "nominal": 640.0,
+      "output_part": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault_40.out",
+      "metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.inf",
+      "sample_count": 20001,
+      "time_bounds_s": [
+        0.0,
+        5.0
+      ],
+      "hash": "84ec8cca00a2b4c15a1ce49e3114533d228a6f13b633a7c6f0bfb26471a5d20a",
+      "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T1[1167847391]/MFE_Pole_T1_B[384065809]",
+      "metadata_sha256": "3484778f759a552977821f99830bf991529d11fee53d8838757d50e9a73fe452",
+      "compiler_metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.infx",
+      "compiler_metadata_sha256": "9d1b1b165dc970545cddf931f80d506dea00ca7bcacd7a3ea368f4b365931c1a",
+      "call_id": 398,
+      "compiled_identity": {
+        "name": "Main(0)\\MFE_PWM_T1(0)\\MFE_Pole_T1_B(0):MFE_T1_B_lower_v_cap",
+        "index": "397",
+        "id": "1791165352:0",
+        "label": "MMC_FAULT_EVIDENCE",
+        "dim": "1",
+        "unit": "kV",
+        "min": "-1000.0",
+        "max": "1000.0"
+      }
+    },
+    {
+      "channel_id": "MFE_T1_B_lower_blocking_state",
+      "role": "blocking_state",
+      "model_scope": "T1/B/lower",
+      "definition_name": "MFE_Pole_T1_B",
+      "owner_id": "1863240256",
+      "definition": "master:pgb",
+      "signal_source": {
+        "kind": "physical_state",
+        "owner_id": "1215143890",
+        "definition": "MMC_fault:MmcObservedFullCell",
+        "parameter": "MmcBlocked",
+        "signal_name": "MmcBlockBtm",
+        "quantity": "firing_based_cell_group_blocked",
+        "expression": "Block_Finder_H result",
+        "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T1[1167847391]/MFE_Pole_T1_B[384065809]/MmcObservedFullCell[1215143890]"
+      },
+      "selector": {
+        "description": "MFE_T1_B_lower_blocking_state",
+        "group": "MMC_FAULT_EVIDENCE",
+        "port": "Signl",
+        "owner_id": "1863240256",
+        "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T1[1167847391]/MFE_Pole_T1_B[384065809]"
+      },
+      "units": "1",
+      "dimension": 1,
+      "polarity": {
+        "inactive": 0,
+        "active": 1
+      },
+      "nominal": null,
+      "output_part": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault_39.out",
+      "metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.inf",
+      "sample_count": 20001,
+      "time_bounds_s": [
+        0.0,
+        5.0
+      ],
+      "hash": "fcc86959d8002ef80e737dd31292251c3370f786662f0ddc8ec574697e9ad981",
+      "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T1[1167847391]/MFE_Pole_T1_B[384065809]",
+      "metadata_sha256": "3484778f759a552977821f99830bf991529d11fee53d8838757d50e9a73fe452",
+      "compiler_metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.infx",
+      "compiler_metadata_sha256": "9d1b1b165dc970545cddf931f80d506dea00ca7bcacd7a3ea368f4b365931c1a",
+      "call_id": 390,
+      "compiled_identity": {
+        "name": "Main(0)\\MFE_PWM_T1(0)\\MFE_Pole_T1_B(0):MFE_T1_B_lower_blocking_state",
+        "index": "389",
+        "id": "1863240256:0",
+        "label": "MMC_FAULT_EVIDENCE",
+        "dim": "1",
+        "unit": "1",
+        "min": "-1000.0",
+        "max": "1000.0"
+      }
+    },
+    {
+      "channel_id": "MFE_T1_B_lower_i_arm",
+      "role": "i_arm",
+      "model_scope": "T1/B/lower",
+      "definition_name": "MFE_Pole_T1_B",
+      "owner_id": "1203346592",
+      "definition": "master:pgb",
+      "signal_source": {
+        "kind": "physical_measurement",
+        "owner_id": "1386643874",
+        "definition": "master:varrlc",
+        "parameter": "I",
+        "signal_name": "IaBtm",
+        "quantity": "arm_inductor_current",
+        "direction": "original_varrlc_A_to_B",
+        "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T1[1167847391]/MFE_Pole_T1_B[384065809]/varrlc[1386643874]"
+      },
+      "selector": {
+        "description": "MFE_T1_B_lower_i_arm",
+        "group": "MMC_FAULT_EVIDENCE",
+        "port": "Signl",
+        "owner_id": "1203346592",
+        "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T1[1167847391]/MFE_Pole_T1_B[384065809]"
+      },
+      "units": "kA",
+      "dimension": 1,
+      "polarity": null,
+      "nominal": null,
+      "output_part": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault_39.out",
+      "metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.inf",
+      "sample_count": 20001,
+      "time_bounds_s": [
+        0.0,
+        5.0
+      ],
+      "hash": "fcc86959d8002ef80e737dd31292251c3370f786662f0ddc8ec574697e9ad981",
+      "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T1[1167847391]/MFE_Pole_T1_B[384065809]",
+      "metadata_sha256": "3484778f759a552977821f99830bf991529d11fee53d8838757d50e9a73fe452",
+      "compiler_metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.infx",
+      "compiler_metadata_sha256": "9d1b1b165dc970545cddf931f80d506dea00ca7bcacd7a3ea368f4b365931c1a",
+      "call_id": 389,
+      "compiled_identity": {
+        "name": "Main(0)\\MFE_PWM_T1(0)\\MFE_Pole_T1_B(0):MFE_T1_B_lower_i_arm",
+        "index": "388",
+        "id": "1203346592:0",
+        "label": "MMC_FAULT_EVIDENCE",
+        "dim": "1",
+        "unit": "kA",
+        "min": "-1000.0",
+        "max": "1000.0"
+      }
+    },
+    {
+      "channel_id": "MFE_T1_C_upper_v_inserted",
+      "role": "v_inserted",
+      "model_scope": "T1/C/upper",
+      "definition_name": "MFE_Pole_T1_C",
+      "owner_id": "1363028587",
+      "definition": "master:pgb",
+      "signal_source": {
+        "kind": "physical_measurement",
+        "owner_id": "488611367",
+        "definition": "MMC_fault:MmcObservedFullCell",
+        "parameter": "MmcInserted",
+        "signal_name": "MmcVTop",
+        "quantity": "cell_group_terminal_voltage",
+        "positive_port": "Ntop",
+        "negative_port": "Nbtm",
+        "condition": {
+          "DTBP": "0"
+        },
+        "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T1[1167847391]/MFE_Pole_T1_C[1675120167]/MmcObservedFullCell[488611367]"
+      },
+      "selector": {
+        "description": "MFE_T1_C_upper_v_inserted",
+        "group": "MMC_FAULT_EVIDENCE",
+        "port": "Signl",
+        "owner_id": "1363028587",
+        "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T1[1167847391]/MFE_Pole_T1_C[1675120167]"
+      },
+      "units": "kV",
+      "dimension": 1,
+      "polarity": null,
+      "nominal": null,
+      "output_part": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault_36.out",
+      "metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.inf",
+      "sample_count": 20001,
+      "time_bounds_s": [
+        0.0,
+        5.0
+      ],
+      "hash": "7a26dbb75e42339c17e539119d20d65e9a0cec652425dd5755b65b1d2aa9af2c",
+      "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T1[1167847391]/MFE_Pole_T1_C[1675120167]",
+      "metadata_sha256": "3484778f759a552977821f99830bf991529d11fee53d8838757d50e9a73fe452",
+      "compiler_metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.infx",
+      "compiler_metadata_sha256": "9d1b1b165dc970545cddf931f80d506dea00ca7bcacd7a3ea368f4b365931c1a",
+      "call_id": 353,
+      "compiled_identity": {
+        "name": "Main(0)\\MFE_PWM_T1(0)\\MFE_Pole_T1_C(0):MFE_T1_C_upper_v_inserted",
+        "index": "352",
+        "id": "1363028587:0",
+        "label": "MMC_FAULT_EVIDENCE",
+        "dim": "1",
+        "unit": "kV",
+        "min": "-1000.0",
+        "max": "1000.0"
+      }
+    },
+    {
+      "channel_id": "MFE_T1_C_upper_v_cap",
+      "role": "v_cap",
+      "model_scope": "T1/C/upper",
+      "definition_name": "MFE_Pole_T1_C",
+      "owner_id": "1021030398",
+      "definition": "master:pgb",
+      "signal_source": {
+        "kind": "physical_measurement",
+        "owner_id": "488611367",
+        "definition": "MMC_fault:MmcObservedFullCell",
+        "parameter": "MmcCapSum",
+        "signal_name": "MmcVcTop",
+        "quantity": "sum_of_submodule_capacitor_voltages",
+        "expression": "SUM(Vc)",
+        "cell_count_expression": "$(NoCells1)",
+        "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T1[1167847391]/MFE_Pole_T1_C[1675120167]/MmcObservedFullCell[488611367]"
+      },
+      "selector": {
+        "description": "MFE_T1_C_upper_v_cap",
+        "group": "MMC_FAULT_EVIDENCE",
+        "port": "Signl",
+        "owner_id": "1021030398",
+        "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T1[1167847391]/MFE_Pole_T1_C[1675120167]"
+      },
+      "units": "kV",
+      "dimension": 1,
+      "polarity": null,
+      "nominal": 640.0,
+      "output_part": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault_36.out",
+      "metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.inf",
+      "sample_count": 20001,
+      "time_bounds_s": [
+        0.0,
+        5.0
+      ],
+      "hash": "7a26dbb75e42339c17e539119d20d65e9a0cec652425dd5755b65b1d2aa9af2c",
+      "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T1[1167847391]/MFE_Pole_T1_C[1675120167]",
+      "metadata_sha256": "3484778f759a552977821f99830bf991529d11fee53d8838757d50e9a73fe452",
+      "compiler_metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.infx",
+      "compiler_metadata_sha256": "9d1b1b165dc970545cddf931f80d506dea00ca7bcacd7a3ea368f4b365931c1a",
+      "call_id": 352,
+      "compiled_identity": {
+        "name": "Main(0)\\MFE_PWM_T1(0)\\MFE_Pole_T1_C(0):MFE_T1_C_upper_v_cap",
+        "index": "351",
+        "id": "1021030398:0",
+        "label": "MMC_FAULT_EVIDENCE",
+        "dim": "1",
+        "unit": "kV",
+        "min": "-1000.0",
+        "max": "1000.0"
+      }
+    },
+    {
+      "channel_id": "MFE_T1_C_upper_blocking_state",
+      "role": "blocking_state",
+      "model_scope": "T1/C/upper",
+      "definition_name": "MFE_Pole_T1_C",
+      "owner_id": "1308044081",
+      "definition": "master:pgb",
+      "signal_source": {
+        "kind": "physical_state",
+        "owner_id": "488611367",
+        "definition": "MMC_fault:MmcObservedFullCell",
+        "parameter": "MmcBlocked",
+        "signal_name": "MmcBlockTop",
+        "quantity": "firing_based_cell_group_blocked",
+        "expression": "Block_Finder_H result",
+        "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T1[1167847391]/MFE_Pole_T1_C[1675120167]/MmcObservedFullCell[488611367]"
+      },
+      "selector": {
+        "description": "MFE_T1_C_upper_blocking_state",
+        "group": "MMC_FAULT_EVIDENCE",
+        "port": "Signl",
+        "owner_id": "1308044081",
+        "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T1[1167847391]/MFE_Pole_T1_C[1675120167]"
+      },
+      "units": "1",
+      "dimension": 1,
+      "polarity": {
+        "inactive": 0,
+        "active": 1
+      },
+      "nominal": null,
+      "output_part": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault_35.out",
+      "metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.inf",
+      "sample_count": 20001,
+      "time_bounds_s": [
+        0.0,
+        5.0
+      ],
+      "hash": "9dbdafad827d4dd60c4b8ea3e5991ede7bbf632a3359f21b3e5f39cf61a326a6",
+      "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T1[1167847391]/MFE_Pole_T1_C[1675120167]",
+      "metadata_sha256": "3484778f759a552977821f99830bf991529d11fee53d8838757d50e9a73fe452",
+      "compiler_metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.infx",
+      "compiler_metadata_sha256": "9d1b1b165dc970545cddf931f80d506dea00ca7bcacd7a3ea368f4b365931c1a",
+      "call_id": 344,
+      "compiled_identity": {
+        "name": "Main(0)\\MFE_PWM_T1(0)\\MFE_Pole_T1_C(0):MFE_T1_C_upper_blocking_state",
+        "index": "343",
+        "id": "1308044081:0",
+        "label": "MMC_FAULT_EVIDENCE",
+        "dim": "1",
+        "unit": "1",
+        "min": "-1000.0",
+        "max": "1000.0"
+      }
+    },
+    {
+      "channel_id": "MFE_T1_C_upper_i_arm",
+      "role": "i_arm",
+      "model_scope": "T1/C/upper",
+      "definition_name": "MFE_Pole_T1_C",
+      "owner_id": "1673596235",
+      "definition": "master:pgb",
+      "signal_source": {
+        "kind": "physical_measurement",
+        "owner_id": "1514910955",
+        "definition": "master:varrlc",
+        "parameter": "I",
+        "signal_name": "IaTop",
+        "quantity": "arm_inductor_current",
+        "direction": "original_varrlc_A_to_B",
+        "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T1[1167847391]/MFE_Pole_T1_C[1675120167]/varrlc[1514910955]"
+      },
+      "selector": {
+        "description": "MFE_T1_C_upper_i_arm",
+        "group": "MMC_FAULT_EVIDENCE",
+        "port": "Signl",
+        "owner_id": "1673596235",
+        "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T1[1167847391]/MFE_Pole_T1_C[1675120167]"
+      },
+      "units": "kA",
+      "dimension": 1,
+      "polarity": null,
+      "nominal": null,
+      "output_part": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault_34.out",
+      "metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.inf",
+      "sample_count": 20001,
+      "time_bounds_s": [
+        0.0,
+        5.0
+      ],
+      "hash": "17d8b5d7f6bf6169a9b9c8d187208ef4f24d8eb980760b9b8389e7457c86490b",
+      "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T1[1167847391]/MFE_Pole_T1_C[1675120167]",
+      "metadata_sha256": "3484778f759a552977821f99830bf991529d11fee53d8838757d50e9a73fe452",
+      "compiler_metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.infx",
+      "compiler_metadata_sha256": "9d1b1b165dc970545cddf931f80d506dea00ca7bcacd7a3ea368f4b365931c1a",
+      "call_id": 332,
+      "compiled_identity": {
+        "name": "Main(0)\\MFE_PWM_T1(0)\\MFE_Pole_T1_C(0):MFE_T1_C_upper_i_arm",
+        "index": "331",
+        "id": "1673596235:0",
+        "label": "MMC_FAULT_EVIDENCE",
+        "dim": "1",
+        "unit": "kA",
+        "min": "-1000.0",
+        "max": "1000.0"
+      }
+    },
+    {
+      "channel_id": "MFE_T1_C_lower_v_inserted",
+      "role": "v_inserted",
+      "model_scope": "T1/C/lower",
+      "definition_name": "MFE_Pole_T1_C",
+      "owner_id": "1870959051",
+      "definition": "master:pgb",
+      "signal_source": {
+        "kind": "physical_measurement",
+        "owner_id": "1215143890",
+        "definition": "MMC_fault:MmcObservedFullCell",
+        "parameter": "MmcInserted",
+        "signal_name": "MmcVBtm",
+        "quantity": "cell_group_terminal_voltage",
+        "positive_port": "Ntop",
+        "negative_port": "Nbtm",
+        "condition": {
+          "DTBP": "0"
+        },
+        "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T1[1167847391]/MFE_Pole_T1_C[1675120167]/MmcObservedFullCell[1215143890]"
+      },
+      "selector": {
+        "description": "MFE_T1_C_lower_v_inserted",
+        "group": "MMC_FAULT_EVIDENCE",
+        "port": "Signl",
+        "owner_id": "1870959051",
+        "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T1[1167847391]/MFE_Pole_T1_C[1675120167]"
+      },
+      "units": "kV",
+      "dimension": 1,
+      "polarity": null,
+      "nominal": null,
+      "output_part": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault_35.out",
+      "metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.inf",
+      "sample_count": 20001,
+      "time_bounds_s": [
+        0.0,
+        5.0
+      ],
+      "hash": "9dbdafad827d4dd60c4b8ea3e5991ede7bbf632a3359f21b3e5f39cf61a326a6",
+      "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T1[1167847391]/MFE_Pole_T1_C[1675120167]",
+      "metadata_sha256": "3484778f759a552977821f99830bf991529d11fee53d8838757d50e9a73fe452",
+      "compiler_metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.infx",
+      "compiler_metadata_sha256": "9d1b1b165dc970545cddf931f80d506dea00ca7bcacd7a3ea368f4b365931c1a",
+      "call_id": 343,
+      "compiled_identity": {
+        "name": "Main(0)\\MFE_PWM_T1(0)\\MFE_Pole_T1_C(0):MFE_T1_C_lower_v_inserted",
+        "index": "342",
+        "id": "1870959051:0",
+        "label": "MMC_FAULT_EVIDENCE",
+        "dim": "1",
+        "unit": "kV",
+        "min": "-1000.0",
+        "max": "1000.0"
+      }
+    },
+    {
+      "channel_id": "MFE_T1_C_lower_v_cap",
+      "role": "v_cap",
+      "model_scope": "T1/C/lower",
+      "definition_name": "MFE_Pole_T1_C",
+      "owner_id": "1501642366",
+      "definition": "master:pgb",
+      "signal_source": {
+        "kind": "physical_measurement",
+        "owner_id": "1215143890",
+        "definition": "MMC_fault:MmcObservedFullCell",
+        "parameter": "MmcCapSum",
+        "signal_name": "MmcVcBtm",
+        "quantity": "sum_of_submodule_capacitor_voltages",
+        "expression": "SUM(Vc)",
+        "cell_count_expression": "$(NoCells1)",
+        "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T1[1167847391]/MFE_Pole_T1_C[1675120167]/MmcObservedFullCell[1215143890]"
+      },
+      "selector": {
+        "description": "MFE_T1_C_lower_v_cap",
+        "group": "MMC_FAULT_EVIDENCE",
+        "port": "Signl",
+        "owner_id": "1501642366",
+        "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T1[1167847391]/MFE_Pole_T1_C[1675120167]"
+      },
+      "units": "kV",
+      "dimension": 1,
+      "polarity": null,
+      "nominal": 640.0,
+      "output_part": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault_35.out",
+      "metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.inf",
+      "sample_count": 20001,
+      "time_bounds_s": [
+        0.0,
+        5.0
+      ],
+      "hash": "9dbdafad827d4dd60c4b8ea3e5991ede7bbf632a3359f21b3e5f39cf61a326a6",
+      "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T1[1167847391]/MFE_Pole_T1_C[1675120167]",
+      "metadata_sha256": "3484778f759a552977821f99830bf991529d11fee53d8838757d50e9a73fe452",
+      "compiler_metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.infx",
+      "compiler_metadata_sha256": "9d1b1b165dc970545cddf931f80d506dea00ca7bcacd7a3ea368f4b365931c1a",
+      "call_id": 342,
+      "compiled_identity": {
+        "name": "Main(0)\\MFE_PWM_T1(0)\\MFE_Pole_T1_C(0):MFE_T1_C_lower_v_cap",
+        "index": "341",
+        "id": "1501642366:0",
+        "label": "MMC_FAULT_EVIDENCE",
+        "dim": "1",
+        "unit": "kV",
+        "min": "-1000.0",
+        "max": "1000.0"
+      }
+    },
+    {
+      "channel_id": "MFE_T1_C_lower_blocking_state",
+      "role": "blocking_state",
+      "model_scope": "T1/C/lower",
+      "definition_name": "MFE_Pole_T1_C",
+      "owner_id": "1880260748",
+      "definition": "master:pgb",
+      "signal_source": {
+        "kind": "physical_state",
+        "owner_id": "1215143890",
+        "definition": "MMC_fault:MmcObservedFullCell",
+        "parameter": "MmcBlocked",
+        "signal_name": "MmcBlockBtm",
+        "quantity": "firing_based_cell_group_blocked",
+        "expression": "Block_Finder_H result",
+        "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T1[1167847391]/MFE_Pole_T1_C[1675120167]/MmcObservedFullCell[1215143890]"
+      },
+      "selector": {
+        "description": "MFE_T1_C_lower_blocking_state",
+        "group": "MMC_FAULT_EVIDENCE",
+        "port": "Signl",
+        "owner_id": "1880260748",
+        "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T1[1167847391]/MFE_Pole_T1_C[1675120167]"
+      },
+      "units": "1",
+      "dimension": 1,
+      "polarity": {
+        "inactive": 0,
+        "active": 1
+      },
+      "nominal": null,
+      "output_part": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault_34.out",
+      "metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.inf",
+      "sample_count": 20001,
+      "time_bounds_s": [
+        0.0,
+        5.0
+      ],
+      "hash": "17d8b5d7f6bf6169a9b9c8d187208ef4f24d8eb980760b9b8389e7457c86490b",
+      "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T1[1167847391]/MFE_Pole_T1_C[1675120167]",
+      "metadata_sha256": "3484778f759a552977821f99830bf991529d11fee53d8838757d50e9a73fe452",
+      "compiler_metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.infx",
+      "compiler_metadata_sha256": "9d1b1b165dc970545cddf931f80d506dea00ca7bcacd7a3ea368f4b365931c1a",
+      "call_id": 334,
+      "compiled_identity": {
+        "name": "Main(0)\\MFE_PWM_T1(0)\\MFE_Pole_T1_C(0):MFE_T1_C_lower_blocking_state",
+        "index": "333",
+        "id": "1880260748:0",
+        "label": "MMC_FAULT_EVIDENCE",
+        "dim": "1",
+        "unit": "1",
+        "min": "-1000.0",
+        "max": "1000.0"
+      }
+    },
+    {
+      "channel_id": "MFE_T1_C_lower_i_arm",
+      "role": "i_arm",
+      "model_scope": "T1/C/lower",
+      "definition_name": "MFE_Pole_T1_C",
+      "owner_id": "1932878877",
+      "definition": "master:pgb",
+      "signal_source": {
+        "kind": "physical_measurement",
+        "owner_id": "1386643874",
+        "definition": "master:varrlc",
+        "parameter": "I",
+        "signal_name": "IaBtm",
+        "quantity": "arm_inductor_current",
+        "direction": "original_varrlc_A_to_B",
+        "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T1[1167847391]/MFE_Pole_T1_C[1675120167]/varrlc[1386643874]"
+      },
+      "selector": {
+        "description": "MFE_T1_C_lower_i_arm",
+        "group": "MMC_FAULT_EVIDENCE",
+        "port": "Signl",
+        "owner_id": "1932878877",
+        "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T1[1167847391]/MFE_Pole_T1_C[1675120167]"
+      },
+      "units": "kA",
+      "dimension": 1,
+      "polarity": null,
+      "nominal": null,
+      "output_part": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault_34.out",
+      "metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.inf",
+      "sample_count": 20001,
+      "time_bounds_s": [
+        0.0,
+        5.0
+      ],
+      "hash": "17d8b5d7f6bf6169a9b9c8d187208ef4f24d8eb980760b9b8389e7457c86490b",
+      "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T1[1167847391]/MFE_Pole_T1_C[1675120167]",
+      "metadata_sha256": "3484778f759a552977821f99830bf991529d11fee53d8838757d50e9a73fe452",
+      "compiler_metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.infx",
+      "compiler_metadata_sha256": "9d1b1b165dc970545cddf931f80d506dea00ca7bcacd7a3ea368f4b365931c1a",
+      "call_id": 333,
+      "compiled_identity": {
+        "name": "Main(0)\\MFE_PWM_T1(0)\\MFE_Pole_T1_C(0):MFE_T1_C_lower_i_arm",
+        "index": "332",
+        "id": "1932878877:0",
+        "label": "MMC_FAULT_EVIDENCE",
+        "dim": "1",
+        "unit": "kA",
+        "min": "-1000.0",
+        "max": "1000.0"
+      }
+    },
+    {
+      "channel_id": "MFE_T1_p_active",
+      "role": "p_active",
+      "model_scope": "T1",
+      "definition_name": "Main",
+      "owner_id": "1203655010",
+      "definition": "master:pgb",
+      "signal_source": {
+        "kind": "physical_measurement",
+        "owner_id": "1079141496",
+        "definition": "master:multimeter",
+        "parameter": "P",
+        "signal_name": "P1",
+        "quantity": "three_phase_active_power",
+        "direction": "meter_arrow",
+        "base_mva": "1.0 [MVA]",
+        "instance_path": "Station[1363114171]/Main[152486038]/multimeter[1079141496]"
+      },
+      "selector": {
+        "description": "MFE_T1_p_active",
+        "group": "MMC_FAULT_EVIDENCE",
+        "port": "Signl",
+        "owner_id": "1203655010",
+        "instance_path": "Station[1363114171]/Main[152486038]"
+      },
+      "units": "MW",
+      "dimension": 1,
+      "polarity": null,
+      "nominal": 900.0,
+      "output_part": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault_03.out",
+      "metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.inf",
+      "sample_count": 20001,
+      "time_bounds_s": [
+        0.0,
+        5.0
+      ],
+      "hash": "68c2a2a9dc5af32497802f0d5cb56e1bb9386d9ced507b5441c22db719f20434",
+      "nominal_role": "power_balance_input",
+      "instance_path": "Station[1363114171]/Main[152486038]",
+      "metadata_sha256": "3484778f759a552977821f99830bf991529d11fee53d8838757d50e9a73fe452",
+      "compiler_metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.infx",
+      "compiler_metadata_sha256": "9d1b1b165dc970545cddf931f80d506dea00ca7bcacd7a3ea368f4b365931c1a",
+      "call_id": 25,
+      "compiled_identity": {
+        "name": "Main(0):MFE_T1_p_active",
+        "index": "24",
+        "id": "1203655010:0",
+        "label": "MMC_FAULT_EVIDENCE",
+        "dim": "1",
+        "unit": "MW",
+        "min": "-1000.0",
+        "max": "1000.0"
+      }
+    },
+    {
+      "channel_id": "MFE_T1_v_dc",
+      "role": "v_dc",
+      "model_scope": "T1",
+      "definition_name": "Main",
+      "owner_id": "1301331297",
+      "definition": "master:pgb",
+      "signal_source": {
+        "kind": "physical_measurement",
+        "owner_id": "330659379",
+        "definition": "master:voltmeter",
+        "parameter": "Name",
+        "signal_name": "Edc1",
+        "quantity": "dc_pole_to_pole_voltage",
+        "direction": "positive_pole_minus_negative_pole",
+        "instance_path": "Station[1363114171]/Main[152486038]/voltmeter[330659379]"
+      },
+      "selector": {
+        "description": "MFE_T1_v_dc",
+        "group": "MMC_FAULT_EVIDENCE",
+        "port": "Signl",
+        "owner_id": "1301331297",
+        "instance_path": "Station[1363114171]/Main[152486038]"
+      },
+      "units": "kV",
+      "dimension": 1,
+      "polarity": null,
+      "nominal": 640.0,
+      "output_part": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault_03.out",
+      "metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.inf",
+      "sample_count": 20001,
+      "time_bounds_s": [
+        0.0,
+        5.0
+      ],
+      "hash": "68c2a2a9dc5af32497802f0d5cb56e1bb9386d9ced507b5441c22db719f20434",
+      "instance_path": "Station[1363114171]/Main[152486038]",
+      "metadata_sha256": "3484778f759a552977821f99830bf991529d11fee53d8838757d50e9a73fe452",
+      "compiler_metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.infx",
+      "compiler_metadata_sha256": "9d1b1b165dc970545cddf931f80d506dea00ca7bcacd7a3ea368f4b365931c1a",
+      "call_id": 27,
+      "compiled_identity": {
+        "name": "Main(0):MFE_T1_v_dc",
+        "index": "26",
+        "id": "1301331297:0",
+        "label": "MMC_FAULT_EVIDENCE",
+        "dim": "1",
+        "unit": "kV",
+        "min": "-1000.0",
+        "max": "1000.0"
+      }
+    },
+    {
+      "channel_id": "MFE_T1_recovery_enable",
+      "role": "recovery_enable",
+      "model_scope": "T1",
+      "definition_name": "Main",
+      "owner_id": "1961141055",
+      "definition": "master:pgb",
+      "signal_source": {
+        "kind": "recovery_control",
+        "owner_id": "976600655",
+        "definition": "MMC_fault:MFE_VSC_T1",
+        "parameter": "Dblk",
+        "signal_name": "Dblk1P",
+        "quantity": "deblocking_enable",
+        "electrical_recovery_required": true,
+        "instance_path": "Station[1363114171]/Main[152486038]/MFE_VSC_T1[976600655]"
+      },
+      "selector": {
+        "description": "MFE_T1_recovery_enable",
+        "group": "MMC_FAULT_EVIDENCE",
+        "port": "Signl",
+        "owner_id": "1961141055",
+        "instance_path": "Station[1363114171]/Main[152486038]"
+      },
+      "units": "1",
+      "dimension": 1,
+      "polarity": {
+        "inactive": 0,
+        "active": 1
+      },
+      "nominal": null,
+      "output_part": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault_04.out",
+      "metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.inf",
+      "sample_count": 20001,
+      "time_bounds_s": [
+        0.0,
+        5.0
+      ],
+      "hash": "30ae81f695b8aef3acdb97d25cd4b10188a53605780e7e36d681a3aad9a666af",
+      "instance_path": "Station[1363114171]/Main[152486038]",
+      "metadata_sha256": "3484778f759a552977821f99830bf991529d11fee53d8838757d50e9a73fe452",
+      "compiler_metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.infx",
+      "compiler_metadata_sha256": "9d1b1b165dc970545cddf931f80d506dea00ca7bcacd7a3ea368f4b365931c1a",
+      "call_id": 32,
+      "compiled_identity": {
+        "name": "Main(0):MFE_T1_recovery_enable",
+        "index": "31",
+        "id": "1961141055:0",
+        "label": "MMC_FAULT_EVIDENCE",
+        "dim": "1",
+        "unit": "1",
+        "min": "-1000.0",
+        "max": "1000.0"
+      }
+    },
+    {
+      "channel_id": "MFE_T2_A_upper_v_inserted",
+      "role": "v_inserted",
+      "model_scope": "T2/A/upper",
+      "definition_name": "MFE_Pole_T2_A",
+      "owner_id": "1372874114",
+      "definition": "master:pgb",
+      "signal_source": {
+        "kind": "physical_measurement",
+        "owner_id": "488611367",
+        "definition": "MMC_fault:MmcObservedFullCell",
+        "parameter": "MmcInserted",
+        "signal_name": "MmcVTop",
+        "quantity": "cell_group_terminal_voltage",
+        "positive_port": "Ntop",
+        "negative_port": "Nbtm",
+        "condition": {
+          "DTBP": "0"
+        },
+        "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T2[1268416470]/MFE_Pole_T2_A[662961074]/MmcObservedFullCell[488611367]"
+      },
+      "selector": {
+        "description": "MFE_T2_A_upper_v_inserted",
+        "group": "MMC_FAULT_EVIDENCE",
+        "port": "Signl",
+        "owner_id": "1372874114",
+        "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T2[1268416470]/MFE_Pole_T2_A[662961074]"
+      },
+      "units": "kV",
+      "dimension": 1,
+      "polarity": null,
+      "nominal": null,
+      "output_part": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault_25.out",
+      "metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.inf",
+      "sample_count": 20001,
+      "time_bounds_s": [
+        0.0,
+        5.0
+      ],
+      "hash": "7bdda5c264eeeccfc2f2f4d16307e16d18491f9c95962a0c2c31c288295d79e0",
+      "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T2[1268416470]/MFE_Pole_T2_A[662961074]",
+      "metadata_sha256": "3484778f759a552977821f99830bf991529d11fee53d8838757d50e9a73fe452",
+      "compiler_metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.infx",
+      "compiler_metadata_sha256": "9d1b1b165dc970545cddf931f80d506dea00ca7bcacd7a3ea368f4b365931c1a",
+      "call_id": 242,
+      "compiled_identity": {
+        "name": "Main(0)\\MFE_PWM_T2(0)\\MFE_Pole_T2_A(0):MFE_T2_A_upper_v_inserted",
+        "index": "241",
+        "id": "1372874114:0",
+        "label": "MMC_FAULT_EVIDENCE",
+        "dim": "1",
+        "unit": "kV",
+        "min": "-1000.0",
+        "max": "1000.0"
+      }
+    },
+    {
+      "channel_id": "MFE_T2_A_upper_v_cap",
+      "role": "v_cap",
+      "model_scope": "T2/A/upper",
+      "definition_name": "MFE_Pole_T2_A",
+      "owner_id": "1511643847",
+      "definition": "master:pgb",
+      "signal_source": {
+        "kind": "physical_measurement",
+        "owner_id": "488611367",
+        "definition": "MMC_fault:MmcObservedFullCell",
+        "parameter": "MmcCapSum",
+        "signal_name": "MmcVcTop",
+        "quantity": "sum_of_submodule_capacitor_voltages",
+        "expression": "SUM(Vc)",
+        "cell_count_expression": "$(NoCells1)",
+        "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T2[1268416470]/MFE_Pole_T2_A[662961074]/MmcObservedFullCell[488611367]"
+      },
+      "selector": {
+        "description": "MFE_T2_A_upper_v_cap",
+        "group": "MMC_FAULT_EVIDENCE",
+        "port": "Signl",
+        "owner_id": "1511643847",
+        "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T2[1268416470]/MFE_Pole_T2_A[662961074]"
+      },
+      "units": "kV",
+      "dimension": 1,
+      "polarity": null,
+      "nominal": 640.0,
+      "output_part": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault_25.out",
+      "metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.inf",
+      "sample_count": 20001,
+      "time_bounds_s": [
+        0.0,
+        5.0
+      ],
+      "hash": "7bdda5c264eeeccfc2f2f4d16307e16d18491f9c95962a0c2c31c288295d79e0",
+      "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T2[1268416470]/MFE_Pole_T2_A[662961074]",
+      "metadata_sha256": "3484778f759a552977821f99830bf991529d11fee53d8838757d50e9a73fe452",
+      "compiler_metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.infx",
+      "compiler_metadata_sha256": "9d1b1b165dc970545cddf931f80d506dea00ca7bcacd7a3ea368f4b365931c1a",
+      "call_id": 241,
+      "compiled_identity": {
+        "name": "Main(0)\\MFE_PWM_T2(0)\\MFE_Pole_T2_A(0):MFE_T2_A_upper_v_cap",
+        "index": "240",
+        "id": "1511643847:0",
+        "label": "MMC_FAULT_EVIDENCE",
+        "dim": "1",
+        "unit": "kV",
+        "min": "-1000.0",
+        "max": "1000.0"
+      }
+    },
+    {
+      "channel_id": "MFE_T2_A_upper_blocking_state",
+      "role": "blocking_state",
+      "model_scope": "T2/A/upper",
+      "definition_name": "MFE_Pole_T2_A",
+      "owner_id": "1584965821",
+      "definition": "master:pgb",
+      "signal_source": {
+        "kind": "physical_state",
+        "owner_id": "488611367",
+        "definition": "MMC_fault:MmcObservedFullCell",
+        "parameter": "MmcBlocked",
+        "signal_name": "MmcBlockTop",
+        "quantity": "firing_based_cell_group_blocked",
+        "expression": "Block_Finder_H result",
+        "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T2[1268416470]/MFE_Pole_T2_A[662961074]/MmcObservedFullCell[488611367]"
+      },
+      "selector": {
+        "description": "MFE_T2_A_upper_blocking_state",
+        "group": "MMC_FAULT_EVIDENCE",
+        "port": "Signl",
+        "owner_id": "1584965821",
+        "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T2[1268416470]/MFE_Pole_T2_A[662961074]"
+      },
+      "units": "1",
+      "dimension": 1,
+      "polarity": {
+        "inactive": 0,
+        "active": 1
+      },
+      "nominal": null,
+      "output_part": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault_24.out",
+      "metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.inf",
+      "sample_count": 20001,
+      "time_bounds_s": [
+        0.0,
+        5.0
+      ],
+      "hash": "af21645cb485cc88f3d5e1746079cc06b86e3bbfbde05cb1de8ccebbdfb8b5e2",
+      "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T2[1268416470]/MFE_Pole_T2_A[662961074]",
+      "metadata_sha256": "3484778f759a552977821f99830bf991529d11fee53d8838757d50e9a73fe452",
+      "compiler_metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.infx",
+      "compiler_metadata_sha256": "9d1b1b165dc970545cddf931f80d506dea00ca7bcacd7a3ea368f4b365931c1a",
+      "call_id": 233,
+      "compiled_identity": {
+        "name": "Main(0)\\MFE_PWM_T2(0)\\MFE_Pole_T2_A(0):MFE_T2_A_upper_blocking_state",
+        "index": "232",
+        "id": "1584965821:0",
+        "label": "MMC_FAULT_EVIDENCE",
+        "dim": "1",
+        "unit": "1",
+        "min": "-1000.0",
+        "max": "1000.0"
+      }
+    },
+    {
+      "channel_id": "MFE_T2_A_upper_i_arm",
+      "role": "i_arm",
+      "model_scope": "T2/A/upper",
+      "definition_name": "MFE_Pole_T2_A",
+      "owner_id": "1677641613",
+      "definition": "master:pgb",
+      "signal_source": {
+        "kind": "physical_measurement",
+        "owner_id": "1514910955",
+        "definition": "master:varrlc",
+        "parameter": "I",
+        "signal_name": "IaTop",
+        "quantity": "arm_inductor_current",
+        "direction": "original_varrlc_A_to_B",
+        "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T2[1268416470]/MFE_Pole_T2_A[662961074]/varrlc[1514910955]"
+      },
+      "selector": {
+        "description": "MFE_T2_A_upper_i_arm",
+        "group": "MMC_FAULT_EVIDENCE",
+        "port": "Signl",
+        "owner_id": "1677641613",
+        "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T2[1268416470]/MFE_Pole_T2_A[662961074]"
+      },
+      "units": "kA",
+      "dimension": 1,
+      "polarity": null,
+      "nominal": null,
+      "output_part": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault_23.out",
+      "metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.inf",
+      "sample_count": 20001,
+      "time_bounds_s": [
+        0.0,
+        5.0
+      ],
+      "hash": "277e0b6974c20b724fdce8d894f6fc5e8659ec5eb63d35d370ce9d4ade735aec",
+      "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T2[1268416470]/MFE_Pole_T2_A[662961074]",
+      "metadata_sha256": "3484778f759a552977821f99830bf991529d11fee53d8838757d50e9a73fe452",
+      "compiler_metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.infx",
+      "compiler_metadata_sha256": "9d1b1b165dc970545cddf931f80d506dea00ca7bcacd7a3ea368f4b365931c1a",
+      "call_id": 221,
+      "compiled_identity": {
+        "name": "Main(0)\\MFE_PWM_T2(0)\\MFE_Pole_T2_A(0):MFE_T2_A_upper_i_arm",
+        "index": "220",
+        "id": "1677641613:0",
+        "label": "MMC_FAULT_EVIDENCE",
+        "dim": "1",
+        "unit": "kA",
+        "min": "-1000.0",
+        "max": "1000.0"
+      }
+    },
+    {
+      "channel_id": "MFE_T2_A_lower_v_inserted",
+      "role": "v_inserted",
+      "model_scope": "T2/A/lower",
+      "definition_name": "MFE_Pole_T2_A",
+      "owner_id": "1976496277",
+      "definition": "master:pgb",
+      "signal_source": {
+        "kind": "physical_measurement",
+        "owner_id": "1215143890",
+        "definition": "MMC_fault:MmcObservedFullCell",
+        "parameter": "MmcInserted",
+        "signal_name": "MmcVBtm",
+        "quantity": "cell_group_terminal_voltage",
+        "positive_port": "Ntop",
+        "negative_port": "Nbtm",
+        "condition": {
+          "DTBP": "0"
+        },
+        "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T2[1268416470]/MFE_Pole_T2_A[662961074]/MmcObservedFullCell[1215143890]"
+      },
+      "selector": {
+        "description": "MFE_T2_A_lower_v_inserted",
+        "group": "MMC_FAULT_EVIDENCE",
+        "port": "Signl",
+        "owner_id": "1976496277",
+        "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T2[1268416470]/MFE_Pole_T2_A[662961074]"
+      },
+      "units": "kV",
+      "dimension": 1,
+      "polarity": null,
+      "nominal": null,
+      "output_part": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault_24.out",
+      "metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.inf",
+      "sample_count": 20001,
+      "time_bounds_s": [
+        0.0,
+        5.0
+      ],
+      "hash": "af21645cb485cc88f3d5e1746079cc06b86e3bbfbde05cb1de8ccebbdfb8b5e2",
+      "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T2[1268416470]/MFE_Pole_T2_A[662961074]",
+      "metadata_sha256": "3484778f759a552977821f99830bf991529d11fee53d8838757d50e9a73fe452",
+      "compiler_metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.infx",
+      "compiler_metadata_sha256": "9d1b1b165dc970545cddf931f80d506dea00ca7bcacd7a3ea368f4b365931c1a",
+      "call_id": 232,
+      "compiled_identity": {
+        "name": "Main(0)\\MFE_PWM_T2(0)\\MFE_Pole_T2_A(0):MFE_T2_A_lower_v_inserted",
+        "index": "231",
+        "id": "1976496277:0",
+        "label": "MMC_FAULT_EVIDENCE",
+        "dim": "1",
+        "unit": "kV",
+        "min": "-1000.0",
+        "max": "1000.0"
+      }
+    },
+    {
+      "channel_id": "MFE_T2_A_lower_v_cap",
+      "role": "v_cap",
+      "model_scope": "T2/A/lower",
+      "definition_name": "MFE_Pole_T2_A",
+      "owner_id": "1463097797",
+      "definition": "master:pgb",
+      "signal_source": {
+        "kind": "physical_measurement",
+        "owner_id": "1215143890",
+        "definition": "MMC_fault:MmcObservedFullCell",
+        "parameter": "MmcCapSum",
+        "signal_name": "MmcVcBtm",
+        "quantity": "sum_of_submodule_capacitor_voltages",
+        "expression": "SUM(Vc)",
+        "cell_count_expression": "$(NoCells1)",
+        "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T2[1268416470]/MFE_Pole_T2_A[662961074]/MmcObservedFullCell[1215143890]"
+      },
+      "selector": {
+        "description": "MFE_T2_A_lower_v_cap",
+        "group": "MMC_FAULT_EVIDENCE",
+        "port": "Signl",
+        "owner_id": "1463097797",
+        "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T2[1268416470]/MFE_Pole_T2_A[662961074]"
+      },
+      "units": "kV",
+      "dimension": 1,
+      "polarity": null,
+      "nominal": 640.0,
+      "output_part": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault_24.out",
+      "metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.inf",
+      "sample_count": 20001,
+      "time_bounds_s": [
+        0.0,
+        5.0
+      ],
+      "hash": "af21645cb485cc88f3d5e1746079cc06b86e3bbfbde05cb1de8ccebbdfb8b5e2",
+      "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T2[1268416470]/MFE_Pole_T2_A[662961074]",
+      "metadata_sha256": "3484778f759a552977821f99830bf991529d11fee53d8838757d50e9a73fe452",
+      "compiler_metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.infx",
+      "compiler_metadata_sha256": "9d1b1b165dc970545cddf931f80d506dea00ca7bcacd7a3ea368f4b365931c1a",
+      "call_id": 231,
+      "compiled_identity": {
+        "name": "Main(0)\\MFE_PWM_T2(0)\\MFE_Pole_T2_A(0):MFE_T2_A_lower_v_cap",
+        "index": "230",
+        "id": "1463097797:0",
+        "label": "MMC_FAULT_EVIDENCE",
+        "dim": "1",
+        "unit": "kV",
+        "min": "-1000.0",
+        "max": "1000.0"
+      }
+    },
+    {
+      "channel_id": "MFE_T2_A_lower_blocking_state",
+      "role": "blocking_state",
+      "model_scope": "T2/A/lower",
+      "definition_name": "MFE_Pole_T2_A",
+      "owner_id": "1438307356",
+      "definition": "master:pgb",
+      "signal_source": {
+        "kind": "physical_state",
+        "owner_id": "1215143890",
+        "definition": "MMC_fault:MmcObservedFullCell",
+        "parameter": "MmcBlocked",
+        "signal_name": "MmcBlockBtm",
+        "quantity": "firing_based_cell_group_blocked",
+        "expression": "Block_Finder_H result",
+        "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T2[1268416470]/MFE_Pole_T2_A[662961074]/MmcObservedFullCell[1215143890]"
+      },
+      "selector": {
+        "description": "MFE_T2_A_lower_blocking_state",
+        "group": "MMC_FAULT_EVIDENCE",
+        "port": "Signl",
+        "owner_id": "1438307356",
+        "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T2[1268416470]/MFE_Pole_T2_A[662961074]"
+      },
+      "units": "1",
+      "dimension": 1,
+      "polarity": {
+        "inactive": 0,
+        "active": 1
+      },
+      "nominal": null,
+      "output_part": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault_23.out",
+      "metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.inf",
+      "sample_count": 20001,
+      "time_bounds_s": [
+        0.0,
+        5.0
+      ],
+      "hash": "277e0b6974c20b724fdce8d894f6fc5e8659ec5eb63d35d370ce9d4ade735aec",
+      "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T2[1268416470]/MFE_Pole_T2_A[662961074]",
+      "metadata_sha256": "3484778f759a552977821f99830bf991529d11fee53d8838757d50e9a73fe452",
+      "compiler_metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.infx",
+      "compiler_metadata_sha256": "9d1b1b165dc970545cddf931f80d506dea00ca7bcacd7a3ea368f4b365931c1a",
+      "call_id": 223,
+      "compiled_identity": {
+        "name": "Main(0)\\MFE_PWM_T2(0)\\MFE_Pole_T2_A(0):MFE_T2_A_lower_blocking_state",
+        "index": "222",
+        "id": "1438307356:0",
+        "label": "MMC_FAULT_EVIDENCE",
+        "dim": "1",
+        "unit": "1",
+        "min": "-1000.0",
+        "max": "1000.0"
+      }
+    },
+    {
+      "channel_id": "MFE_T2_A_lower_i_arm",
+      "role": "i_arm",
+      "model_scope": "T2/A/lower",
+      "definition_name": "MFE_Pole_T2_A",
+      "owner_id": "1670449470",
+      "definition": "master:pgb",
+      "signal_source": {
+        "kind": "physical_measurement",
+        "owner_id": "1386643874",
+        "definition": "master:varrlc",
+        "parameter": "I",
+        "signal_name": "IaBtm",
+        "quantity": "arm_inductor_current",
+        "direction": "original_varrlc_A_to_B",
+        "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T2[1268416470]/MFE_Pole_T2_A[662961074]/varrlc[1386643874]"
+      },
+      "selector": {
+        "description": "MFE_T2_A_lower_i_arm",
+        "group": "MMC_FAULT_EVIDENCE",
+        "port": "Signl",
+        "owner_id": "1670449470",
+        "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T2[1268416470]/MFE_Pole_T2_A[662961074]"
+      },
+      "units": "kA",
+      "dimension": 1,
+      "polarity": null,
+      "nominal": null,
+      "output_part": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault_23.out",
+      "metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.inf",
+      "sample_count": 20001,
+      "time_bounds_s": [
+        0.0,
+        5.0
+      ],
+      "hash": "277e0b6974c20b724fdce8d894f6fc5e8659ec5eb63d35d370ce9d4ade735aec",
+      "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T2[1268416470]/MFE_Pole_T2_A[662961074]",
+      "metadata_sha256": "3484778f759a552977821f99830bf991529d11fee53d8838757d50e9a73fe452",
+      "compiler_metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.infx",
+      "compiler_metadata_sha256": "9d1b1b165dc970545cddf931f80d506dea00ca7bcacd7a3ea368f4b365931c1a",
+      "call_id": 222,
+      "compiled_identity": {
+        "name": "Main(0)\\MFE_PWM_T2(0)\\MFE_Pole_T2_A(0):MFE_T2_A_lower_i_arm",
+        "index": "221",
+        "id": "1670449470:0",
+        "label": "MMC_FAULT_EVIDENCE",
+        "dim": "1",
+        "unit": "kA",
+        "min": "-1000.0",
+        "max": "1000.0"
+      }
+    },
+    {
+      "channel_id": "MFE_T2_B_upper_v_inserted",
+      "role": "v_inserted",
+      "model_scope": "T2/B/upper",
+      "definition_name": "MFE_Pole_T2_B",
+      "owner_id": "1302309514",
+      "definition": "master:pgb",
+      "signal_source": {
+        "kind": "physical_measurement",
+        "owner_id": "488611367",
+        "definition": "MMC_fault:MmcObservedFullCell",
+        "parameter": "MmcInserted",
+        "signal_name": "MmcVTop",
+        "quantity": "cell_group_terminal_voltage",
+        "positive_port": "Ntop",
+        "negative_port": "Nbtm",
+        "condition": {
+          "DTBP": "0"
+        },
+        "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T2[1268416470]/MFE_Pole_T2_B[384065809]/MmcObservedFullCell[488611367]"
+      },
+      "selector": {
+        "description": "MFE_T2_B_upper_v_inserted",
+        "group": "MMC_FAULT_EVIDENCE",
+        "port": "Signl",
+        "owner_id": "1302309514",
+        "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T2[1268416470]/MFE_Pole_T2_B[384065809]"
+      },
+      "units": "kV",
+      "dimension": 1,
+      "polarity": null,
+      "nominal": null,
+      "output_part": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault_19.out",
+      "metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.inf",
+      "sample_count": 20001,
+      "time_bounds_s": [
+        0.0,
+        5.0
+      ],
+      "hash": "b6640542c269886f8e53a5c017428ca7b9164651100092cf1b5af551446898b8",
+      "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T2[1268416470]/MFE_Pole_T2_B[384065809]",
+      "metadata_sha256": "3484778f759a552977821f99830bf991529d11fee53d8838757d50e9a73fe452",
+      "compiler_metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.infx",
+      "compiler_metadata_sha256": "9d1b1b165dc970545cddf931f80d506dea00ca7bcacd7a3ea368f4b365931c1a",
+      "call_id": 186,
+      "compiled_identity": {
+        "name": "Main(0)\\MFE_PWM_T2(0)\\MFE_Pole_T2_B(0):MFE_T2_B_upper_v_inserted",
+        "index": "185",
+        "id": "1302309514:0",
+        "label": "MMC_FAULT_EVIDENCE",
+        "dim": "1",
+        "unit": "kV",
+        "min": "-1000.0",
+        "max": "1000.0"
+      }
+    },
+    {
+      "channel_id": "MFE_T2_B_upper_v_cap",
+      "role": "v_cap",
+      "model_scope": "T2/B/upper",
+      "definition_name": "MFE_Pole_T2_B",
+      "owner_id": "1249586942",
+      "definition": "master:pgb",
+      "signal_source": {
+        "kind": "physical_measurement",
+        "owner_id": "488611367",
+        "definition": "MMC_fault:MmcObservedFullCell",
+        "parameter": "MmcCapSum",
+        "signal_name": "MmcVcTop",
+        "quantity": "sum_of_submodule_capacitor_voltages",
+        "expression": "SUM(Vc)",
+        "cell_count_expression": "$(NoCells1)",
+        "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T2[1268416470]/MFE_Pole_T2_B[384065809]/MmcObservedFullCell[488611367]"
+      },
+      "selector": {
+        "description": "MFE_T2_B_upper_v_cap",
+        "group": "MMC_FAULT_EVIDENCE",
+        "port": "Signl",
+        "owner_id": "1249586942",
+        "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T2[1268416470]/MFE_Pole_T2_B[384065809]"
+      },
+      "units": "kV",
+      "dimension": 1,
+      "polarity": null,
+      "nominal": 640.0,
+      "output_part": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault_19.out",
+      "metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.inf",
+      "sample_count": 20001,
+      "time_bounds_s": [
+        0.0,
+        5.0
+      ],
+      "hash": "b6640542c269886f8e53a5c017428ca7b9164651100092cf1b5af551446898b8",
+      "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T2[1268416470]/MFE_Pole_T2_B[384065809]",
+      "metadata_sha256": "3484778f759a552977821f99830bf991529d11fee53d8838757d50e9a73fe452",
+      "compiler_metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.infx",
+      "compiler_metadata_sha256": "9d1b1b165dc970545cddf931f80d506dea00ca7bcacd7a3ea368f4b365931c1a",
+      "call_id": 185,
+      "compiled_identity": {
+        "name": "Main(0)\\MFE_PWM_T2(0)\\MFE_Pole_T2_B(0):MFE_T2_B_upper_v_cap",
+        "index": "184",
+        "id": "1249586942:0",
+        "label": "MMC_FAULT_EVIDENCE",
+        "dim": "1",
+        "unit": "kV",
+        "min": "-1000.0",
+        "max": "1000.0"
+      }
+    },
+    {
+      "channel_id": "MFE_T2_B_upper_blocking_state",
+      "role": "blocking_state",
+      "model_scope": "T2/B/upper",
+      "definition_name": "MFE_Pole_T2_B",
+      "owner_id": "1002666391",
+      "definition": "master:pgb",
+      "signal_source": {
+        "kind": "physical_state",
+        "owner_id": "488611367",
+        "definition": "MMC_fault:MmcObservedFullCell",
+        "parameter": "MmcBlocked",
+        "signal_name": "MmcBlockTop",
+        "quantity": "firing_based_cell_group_blocked",
+        "expression": "Block_Finder_H result",
+        "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T2[1268416470]/MFE_Pole_T2_B[384065809]/MmcObservedFullCell[488611367]"
+      },
+      "selector": {
+        "description": "MFE_T2_B_upper_blocking_state",
+        "group": "MMC_FAULT_EVIDENCE",
+        "port": "Signl",
+        "owner_id": "1002666391",
+        "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T2[1268416470]/MFE_Pole_T2_B[384065809]"
+      },
+      "units": "1",
+      "dimension": 1,
+      "polarity": {
+        "inactive": 0,
+        "active": 1
+      },
+      "nominal": null,
+      "output_part": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault_18.out",
+      "metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.inf",
+      "sample_count": 20001,
+      "time_bounds_s": [
+        0.0,
+        5.0
+      ],
+      "hash": "4fca98dc80a7a046a361f4e992e11b639a859ff127e2fc7c5cec75a88b96fb69",
+      "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T2[1268416470]/MFE_Pole_T2_B[384065809]",
+      "metadata_sha256": "3484778f759a552977821f99830bf991529d11fee53d8838757d50e9a73fe452",
+      "compiler_metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.infx",
+      "compiler_metadata_sha256": "9d1b1b165dc970545cddf931f80d506dea00ca7bcacd7a3ea368f4b365931c1a",
+      "call_id": 177,
+      "compiled_identity": {
+        "name": "Main(0)\\MFE_PWM_T2(0)\\MFE_Pole_T2_B(0):MFE_T2_B_upper_blocking_state",
+        "index": "176",
+        "id": "1002666391:0",
+        "label": "MMC_FAULT_EVIDENCE",
+        "dim": "1",
+        "unit": "1",
+        "min": "-1000.0",
+        "max": "1000.0"
+      }
+    },
+    {
+      "channel_id": "MFE_T2_B_upper_i_arm",
+      "role": "i_arm",
+      "model_scope": "T2/B/upper",
+      "definition_name": "MFE_Pole_T2_B",
+      "owner_id": "1247739393",
+      "definition": "master:pgb",
+      "signal_source": {
+        "kind": "physical_measurement",
+        "owner_id": "1514910955",
+        "definition": "master:varrlc",
+        "parameter": "I",
+        "signal_name": "IaTop",
+        "quantity": "arm_inductor_current",
+        "direction": "original_varrlc_A_to_B",
+        "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T2[1268416470]/MFE_Pole_T2_B[384065809]/varrlc[1514910955]"
+      },
+      "selector": {
+        "description": "MFE_T2_B_upper_i_arm",
+        "group": "MMC_FAULT_EVIDENCE",
+        "port": "Signl",
+        "owner_id": "1247739393",
+        "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T2[1268416470]/MFE_Pole_T2_B[384065809]"
+      },
+      "units": "kA",
+      "dimension": 1,
+      "polarity": null,
+      "nominal": null,
+      "output_part": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault_17.out",
+      "metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.inf",
+      "sample_count": 20001,
+      "time_bounds_s": [
+        0.0,
+        5.0
+      ],
+      "hash": "75197c5257b44724ced3570780f0cc13c7632ee629f5e564a7dd29c90bf36c4f",
+      "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T2[1268416470]/MFE_Pole_T2_B[384065809]",
+      "metadata_sha256": "3484778f759a552977821f99830bf991529d11fee53d8838757d50e9a73fe452",
+      "compiler_metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.infx",
+      "compiler_metadata_sha256": "9d1b1b165dc970545cddf931f80d506dea00ca7bcacd7a3ea368f4b365931c1a",
+      "call_id": 165,
+      "compiled_identity": {
+        "name": "Main(0)\\MFE_PWM_T2(0)\\MFE_Pole_T2_B(0):MFE_T2_B_upper_i_arm",
+        "index": "164",
+        "id": "1247739393:0",
+        "label": "MMC_FAULT_EVIDENCE",
+        "dim": "1",
+        "unit": "kA",
+        "min": "-1000.0",
+        "max": "1000.0"
+      }
+    },
+    {
+      "channel_id": "MFE_T2_B_lower_v_inserted",
+      "role": "v_inserted",
+      "model_scope": "T2/B/lower",
+      "definition_name": "MFE_Pole_T2_B",
+      "owner_id": "1994814888",
+      "definition": "master:pgb",
+      "signal_source": {
+        "kind": "physical_measurement",
+        "owner_id": "1215143890",
+        "definition": "MMC_fault:MmcObservedFullCell",
+        "parameter": "MmcInserted",
+        "signal_name": "MmcVBtm",
+        "quantity": "cell_group_terminal_voltage",
+        "positive_port": "Ntop",
+        "negative_port": "Nbtm",
+        "condition": {
+          "DTBP": "0"
+        },
+        "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T2[1268416470]/MFE_Pole_T2_B[384065809]/MmcObservedFullCell[1215143890]"
+      },
+      "selector": {
+        "description": "MFE_T2_B_lower_v_inserted",
+        "group": "MMC_FAULT_EVIDENCE",
+        "port": "Signl",
+        "owner_id": "1994814888",
+        "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T2[1268416470]/MFE_Pole_T2_B[384065809]"
+      },
+      "units": "kV",
+      "dimension": 1,
+      "polarity": null,
+      "nominal": null,
+      "output_part": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault_18.out",
+      "metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.inf",
+      "sample_count": 20001,
+      "time_bounds_s": [
+        0.0,
+        5.0
+      ],
+      "hash": "4fca98dc80a7a046a361f4e992e11b639a859ff127e2fc7c5cec75a88b96fb69",
+      "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T2[1268416470]/MFE_Pole_T2_B[384065809]",
+      "metadata_sha256": "3484778f759a552977821f99830bf991529d11fee53d8838757d50e9a73fe452",
+      "compiler_metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.infx",
+      "compiler_metadata_sha256": "9d1b1b165dc970545cddf931f80d506dea00ca7bcacd7a3ea368f4b365931c1a",
+      "call_id": 176,
+      "compiled_identity": {
+        "name": "Main(0)\\MFE_PWM_T2(0)\\MFE_Pole_T2_B(0):MFE_T2_B_lower_v_inserted",
+        "index": "175",
+        "id": "1994814888:0",
+        "label": "MMC_FAULT_EVIDENCE",
+        "dim": "1",
+        "unit": "kV",
+        "min": "-1000.0",
+        "max": "1000.0"
+      }
+    },
+    {
+      "channel_id": "MFE_T2_B_lower_v_cap",
+      "role": "v_cap",
+      "model_scope": "T2/B/lower",
+      "definition_name": "MFE_Pole_T2_B",
+      "owner_id": "1711924376",
+      "definition": "master:pgb",
+      "signal_source": {
+        "kind": "physical_measurement",
+        "owner_id": "1215143890",
+        "definition": "MMC_fault:MmcObservedFullCell",
+        "parameter": "MmcCapSum",
+        "signal_name": "MmcVcBtm",
+        "quantity": "sum_of_submodule_capacitor_voltages",
+        "expression": "SUM(Vc)",
+        "cell_count_expression": "$(NoCells1)",
+        "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T2[1268416470]/MFE_Pole_T2_B[384065809]/MmcObservedFullCell[1215143890]"
+      },
+      "selector": {
+        "description": "MFE_T2_B_lower_v_cap",
+        "group": "MMC_FAULT_EVIDENCE",
+        "port": "Signl",
+        "owner_id": "1711924376",
+        "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T2[1268416470]/MFE_Pole_T2_B[384065809]"
+      },
+      "units": "kV",
+      "dimension": 1,
+      "polarity": null,
+      "nominal": 640.0,
+      "output_part": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault_18.out",
+      "metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.inf",
+      "sample_count": 20001,
+      "time_bounds_s": [
+        0.0,
+        5.0
+      ],
+      "hash": "4fca98dc80a7a046a361f4e992e11b639a859ff127e2fc7c5cec75a88b96fb69",
+      "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T2[1268416470]/MFE_Pole_T2_B[384065809]",
+      "metadata_sha256": "3484778f759a552977821f99830bf991529d11fee53d8838757d50e9a73fe452",
+      "compiler_metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.infx",
+      "compiler_metadata_sha256": "9d1b1b165dc970545cddf931f80d506dea00ca7bcacd7a3ea368f4b365931c1a",
+      "call_id": 175,
+      "compiled_identity": {
+        "name": "Main(0)\\MFE_PWM_T2(0)\\MFE_Pole_T2_B(0):MFE_T2_B_lower_v_cap",
+        "index": "174",
+        "id": "1711924376:0",
+        "label": "MMC_FAULT_EVIDENCE",
+        "dim": "1",
+        "unit": "kV",
+        "min": "-1000.0",
+        "max": "1000.0"
+      }
+    },
+    {
+      "channel_id": "MFE_T2_B_lower_blocking_state",
+      "role": "blocking_state",
+      "model_scope": "T2/B/lower",
+      "definition_name": "MFE_Pole_T2_B",
+      "owner_id": "1994501771",
+      "definition": "master:pgb",
+      "signal_source": {
+        "kind": "physical_state",
+        "owner_id": "1215143890",
+        "definition": "MMC_fault:MmcObservedFullCell",
+        "parameter": "MmcBlocked",
+        "signal_name": "MmcBlockBtm",
+        "quantity": "firing_based_cell_group_blocked",
+        "expression": "Block_Finder_H result",
+        "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T2[1268416470]/MFE_Pole_T2_B[384065809]/MmcObservedFullCell[1215143890]"
+      },
+      "selector": {
+        "description": "MFE_T2_B_lower_blocking_state",
+        "group": "MMC_FAULT_EVIDENCE",
+        "port": "Signl",
+        "owner_id": "1994501771",
+        "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T2[1268416470]/MFE_Pole_T2_B[384065809]"
+      },
+      "units": "1",
+      "dimension": 1,
+      "polarity": {
+        "inactive": 0,
+        "active": 1
+      },
+      "nominal": null,
+      "output_part": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault_17.out",
+      "metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.inf",
+      "sample_count": 20001,
+      "time_bounds_s": [
+        0.0,
+        5.0
+      ],
+      "hash": "75197c5257b44724ced3570780f0cc13c7632ee629f5e564a7dd29c90bf36c4f",
+      "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T2[1268416470]/MFE_Pole_T2_B[384065809]",
+      "metadata_sha256": "3484778f759a552977821f99830bf991529d11fee53d8838757d50e9a73fe452",
+      "compiler_metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.infx",
+      "compiler_metadata_sha256": "9d1b1b165dc970545cddf931f80d506dea00ca7bcacd7a3ea368f4b365931c1a",
+      "call_id": 167,
+      "compiled_identity": {
+        "name": "Main(0)\\MFE_PWM_T2(0)\\MFE_Pole_T2_B(0):MFE_T2_B_lower_blocking_state",
+        "index": "166",
+        "id": "1994501771:0",
+        "label": "MMC_FAULT_EVIDENCE",
+        "dim": "1",
+        "unit": "1",
+        "min": "-1000.0",
+        "max": "1000.0"
+      }
+    },
+    {
+      "channel_id": "MFE_T2_B_lower_i_arm",
+      "role": "i_arm",
+      "model_scope": "T2/B/lower",
+      "definition_name": "MFE_Pole_T2_B",
+      "owner_id": "1979787736",
+      "definition": "master:pgb",
+      "signal_source": {
+        "kind": "physical_measurement",
+        "owner_id": "1386643874",
+        "definition": "master:varrlc",
+        "parameter": "I",
+        "signal_name": "IaBtm",
+        "quantity": "arm_inductor_current",
+        "direction": "original_varrlc_A_to_B",
+        "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T2[1268416470]/MFE_Pole_T2_B[384065809]/varrlc[1386643874]"
+      },
+      "selector": {
+        "description": "MFE_T2_B_lower_i_arm",
+        "group": "MMC_FAULT_EVIDENCE",
+        "port": "Signl",
+        "owner_id": "1979787736",
+        "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T2[1268416470]/MFE_Pole_T2_B[384065809]"
+      },
+      "units": "kA",
+      "dimension": 1,
+      "polarity": null,
+      "nominal": null,
+      "output_part": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault_17.out",
+      "metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.inf",
+      "sample_count": 20001,
+      "time_bounds_s": [
+        0.0,
+        5.0
+      ],
+      "hash": "75197c5257b44724ced3570780f0cc13c7632ee629f5e564a7dd29c90bf36c4f",
+      "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T2[1268416470]/MFE_Pole_T2_B[384065809]",
+      "metadata_sha256": "3484778f759a552977821f99830bf991529d11fee53d8838757d50e9a73fe452",
+      "compiler_metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.infx",
+      "compiler_metadata_sha256": "9d1b1b165dc970545cddf931f80d506dea00ca7bcacd7a3ea368f4b365931c1a",
+      "call_id": 166,
+      "compiled_identity": {
+        "name": "Main(0)\\MFE_PWM_T2(0)\\MFE_Pole_T2_B(0):MFE_T2_B_lower_i_arm",
+        "index": "165",
+        "id": "1979787736:0",
+        "label": "MMC_FAULT_EVIDENCE",
+        "dim": "1",
+        "unit": "kA",
+        "min": "-1000.0",
+        "max": "1000.0"
+      }
+    },
+    {
+      "channel_id": "MFE_T2_C_upper_v_inserted",
+      "role": "v_inserted",
+      "model_scope": "T2/C/upper",
+      "definition_name": "MFE_Pole_T2_C",
+      "owner_id": "1050136384",
+      "definition": "master:pgb",
+      "signal_source": {
+        "kind": "physical_measurement",
+        "owner_id": "488611367",
+        "definition": "MMC_fault:MmcObservedFullCell",
+        "parameter": "MmcInserted",
+        "signal_name": "MmcVTop",
+        "quantity": "cell_group_terminal_voltage",
+        "positive_port": "Ntop",
+        "negative_port": "Nbtm",
+        "condition": {
+          "DTBP": "0"
+        },
+        "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T2[1268416470]/MFE_Pole_T2_C[1675120167]/MmcObservedFullCell[488611367]"
+      },
+      "selector": {
+        "description": "MFE_T2_C_upper_v_inserted",
+        "group": "MMC_FAULT_EVIDENCE",
+        "port": "Signl",
+        "owner_id": "1050136384",
+        "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T2[1268416470]/MFE_Pole_T2_C[1675120167]"
+      },
+      "units": "kV",
+      "dimension": 1,
+      "polarity": null,
+      "nominal": null,
+      "output_part": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault_13.out",
+      "metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.inf",
+      "sample_count": 20001,
+      "time_bounds_s": [
+        0.0,
+        5.0
+      ],
+      "hash": "a6304c0792c202163e2729412876338361f8d7ee361c07e7dffde400eb92db7f",
+      "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T2[1268416470]/MFE_Pole_T2_C[1675120167]",
+      "metadata_sha256": "3484778f759a552977821f99830bf991529d11fee53d8838757d50e9a73fe452",
+      "compiler_metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.infx",
+      "compiler_metadata_sha256": "9d1b1b165dc970545cddf931f80d506dea00ca7bcacd7a3ea368f4b365931c1a",
+      "call_id": 130,
+      "compiled_identity": {
+        "name": "Main(0)\\MFE_PWM_T2(0)\\MFE_Pole_T2_C(0):MFE_T2_C_upper_v_inserted",
+        "index": "129",
+        "id": "1050136384:0",
+        "label": "MMC_FAULT_EVIDENCE",
+        "dim": "1",
+        "unit": "kV",
+        "min": "-1000.0",
+        "max": "1000.0"
+      }
+    },
+    {
+      "channel_id": "MFE_T2_C_upper_v_cap",
+      "role": "v_cap",
+      "model_scope": "T2/C/upper",
+      "definition_name": "MFE_Pole_T2_C",
+      "owner_id": "1966894934",
+      "definition": "master:pgb",
+      "signal_source": {
+        "kind": "physical_measurement",
+        "owner_id": "488611367",
+        "definition": "MMC_fault:MmcObservedFullCell",
+        "parameter": "MmcCapSum",
+        "signal_name": "MmcVcTop",
+        "quantity": "sum_of_submodule_capacitor_voltages",
+        "expression": "SUM(Vc)",
+        "cell_count_expression": "$(NoCells1)",
+        "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T2[1268416470]/MFE_Pole_T2_C[1675120167]/MmcObservedFullCell[488611367]"
+      },
+      "selector": {
+        "description": "MFE_T2_C_upper_v_cap",
+        "group": "MMC_FAULT_EVIDENCE",
+        "port": "Signl",
+        "owner_id": "1966894934",
+        "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T2[1268416470]/MFE_Pole_T2_C[1675120167]"
+      },
+      "units": "kV",
+      "dimension": 1,
+      "polarity": null,
+      "nominal": 640.0,
+      "output_part": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault_13.out",
+      "metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.inf",
+      "sample_count": 20001,
+      "time_bounds_s": [
+        0.0,
+        5.0
+      ],
+      "hash": "a6304c0792c202163e2729412876338361f8d7ee361c07e7dffde400eb92db7f",
+      "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T2[1268416470]/MFE_Pole_T2_C[1675120167]",
+      "metadata_sha256": "3484778f759a552977821f99830bf991529d11fee53d8838757d50e9a73fe452",
+      "compiler_metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.infx",
+      "compiler_metadata_sha256": "9d1b1b165dc970545cddf931f80d506dea00ca7bcacd7a3ea368f4b365931c1a",
+      "call_id": 129,
+      "compiled_identity": {
+        "name": "Main(0)\\MFE_PWM_T2(0)\\MFE_Pole_T2_C(0):MFE_T2_C_upper_v_cap",
+        "index": "128",
+        "id": "1966894934:0",
+        "label": "MMC_FAULT_EVIDENCE",
+        "dim": "1",
+        "unit": "kV",
+        "min": "-1000.0",
+        "max": "1000.0"
+      }
+    },
+    {
+      "channel_id": "MFE_T2_C_upper_blocking_state",
+      "role": "blocking_state",
+      "model_scope": "T2/C/upper",
+      "definition_name": "MFE_Pole_T2_C",
+      "owner_id": "1116633721",
+      "definition": "master:pgb",
+      "signal_source": {
+        "kind": "physical_state",
+        "owner_id": "488611367",
+        "definition": "MMC_fault:MmcObservedFullCell",
+        "parameter": "MmcBlocked",
+        "signal_name": "MmcBlockTop",
+        "quantity": "firing_based_cell_group_blocked",
+        "expression": "Block_Finder_H result",
+        "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T2[1268416470]/MFE_Pole_T2_C[1675120167]/MmcObservedFullCell[488611367]"
+      },
+      "selector": {
+        "description": "MFE_T2_C_upper_blocking_state",
+        "group": "MMC_FAULT_EVIDENCE",
+        "port": "Signl",
+        "owner_id": "1116633721",
+        "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T2[1268416470]/MFE_Pole_T2_C[1675120167]"
+      },
+      "units": "1",
+      "dimension": 1,
+      "polarity": {
+        "inactive": 0,
+        "active": 1
+      },
+      "nominal": null,
+      "output_part": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault_13.out",
+      "metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.inf",
+      "sample_count": 20001,
+      "time_bounds_s": [
+        0.0,
+        5.0
+      ],
+      "hash": "a6304c0792c202163e2729412876338361f8d7ee361c07e7dffde400eb92db7f",
+      "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T2[1268416470]/MFE_Pole_T2_C[1675120167]",
+      "metadata_sha256": "3484778f759a552977821f99830bf991529d11fee53d8838757d50e9a73fe452",
+      "compiler_metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.infx",
+      "compiler_metadata_sha256": "9d1b1b165dc970545cddf931f80d506dea00ca7bcacd7a3ea368f4b365931c1a",
+      "call_id": 121,
+      "compiled_identity": {
+        "name": "Main(0)\\MFE_PWM_T2(0)\\MFE_Pole_T2_C(0):MFE_T2_C_upper_blocking_state",
+        "index": "120",
+        "id": "1116633721:0",
+        "label": "MMC_FAULT_EVIDENCE",
+        "dim": "1",
+        "unit": "1",
+        "min": "-1000.0",
+        "max": "1000.0"
+      }
+    },
+    {
+      "channel_id": "MFE_T2_C_upper_i_arm",
+      "role": "i_arm",
+      "model_scope": "T2/C/upper",
+      "definition_name": "MFE_Pole_T2_C",
+      "owner_id": "1445373114",
+      "definition": "master:pgb",
+      "signal_source": {
+        "kind": "physical_measurement",
+        "owner_id": "1514910955",
+        "definition": "master:varrlc",
+        "parameter": "I",
+        "signal_name": "IaTop",
+        "quantity": "arm_inductor_current",
+        "direction": "original_varrlc_A_to_B",
+        "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T2[1268416470]/MFE_Pole_T2_C[1675120167]/varrlc[1514910955]"
+      },
+      "selector": {
+        "description": "MFE_T2_C_upper_i_arm",
+        "group": "MMC_FAULT_EVIDENCE",
+        "port": "Signl",
+        "owner_id": "1445373114",
+        "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T2[1268416470]/MFE_Pole_T2_C[1675120167]"
+      },
+      "units": "kA",
+      "dimension": 1,
+      "polarity": null,
+      "nominal": null,
+      "output_part": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault_11.out",
+      "metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.inf",
+      "sample_count": 20001,
+      "time_bounds_s": [
+        0.0,
+        5.0
+      ],
+      "hash": "c4b995d9c96d97309803dda39974e5edd32eb371d145b29c2a5707c39a7b4a77",
+      "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T2[1268416470]/MFE_Pole_T2_C[1675120167]",
+      "metadata_sha256": "3484778f759a552977821f99830bf991529d11fee53d8838757d50e9a73fe452",
+      "compiler_metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.infx",
+      "compiler_metadata_sha256": "9d1b1b165dc970545cddf931f80d506dea00ca7bcacd7a3ea368f4b365931c1a",
+      "call_id": 109,
+      "compiled_identity": {
+        "name": "Main(0)\\MFE_PWM_T2(0)\\MFE_Pole_T2_C(0):MFE_T2_C_upper_i_arm",
+        "index": "108",
+        "id": "1445373114:0",
+        "label": "MMC_FAULT_EVIDENCE",
+        "dim": "1",
+        "unit": "kA",
+        "min": "-1000.0",
+        "max": "1000.0"
+      }
+    },
+    {
+      "channel_id": "MFE_T2_C_lower_v_inserted",
+      "role": "v_inserted",
+      "model_scope": "T2/C/lower",
+      "definition_name": "MFE_Pole_T2_C",
+      "owner_id": "1819381826",
+      "definition": "master:pgb",
+      "signal_source": {
+        "kind": "physical_measurement",
+        "owner_id": "1215143890",
+        "definition": "MMC_fault:MmcObservedFullCell",
+        "parameter": "MmcInserted",
+        "signal_name": "MmcVBtm",
+        "quantity": "cell_group_terminal_voltage",
+        "positive_port": "Ntop",
+        "negative_port": "Nbtm",
+        "condition": {
+          "DTBP": "0"
+        },
+        "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T2[1268416470]/MFE_Pole_T2_C[1675120167]/MmcObservedFullCell[1215143890]"
+      },
+      "selector": {
+        "description": "MFE_T2_C_lower_v_inserted",
+        "group": "MMC_FAULT_EVIDENCE",
+        "port": "Signl",
+        "owner_id": "1819381826",
+        "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T2[1268416470]/MFE_Pole_T2_C[1675120167]"
+      },
+      "units": "kV",
+      "dimension": 1,
+      "polarity": null,
+      "nominal": null,
+      "output_part": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault_12.out",
+      "metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.inf",
+      "sample_count": 20001,
+      "time_bounds_s": [
+        0.0,
+        5.0
+      ],
+      "hash": "0569cc432e91ed04ebf89abf9307c4ae0b581024bdeab4088249167551d78f49",
+      "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T2[1268416470]/MFE_Pole_T2_C[1675120167]",
+      "metadata_sha256": "3484778f759a552977821f99830bf991529d11fee53d8838757d50e9a73fe452",
+      "compiler_metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.infx",
+      "compiler_metadata_sha256": "9d1b1b165dc970545cddf931f80d506dea00ca7bcacd7a3ea368f4b365931c1a",
+      "call_id": 120,
+      "compiled_identity": {
+        "name": "Main(0)\\MFE_PWM_T2(0)\\MFE_Pole_T2_C(0):MFE_T2_C_lower_v_inserted",
+        "index": "119",
+        "id": "1819381826:0",
+        "label": "MMC_FAULT_EVIDENCE",
+        "dim": "1",
+        "unit": "kV",
+        "min": "-1000.0",
+        "max": "1000.0"
+      }
+    },
+    {
+      "channel_id": "MFE_T2_C_lower_v_cap",
+      "role": "v_cap",
+      "model_scope": "T2/C/lower",
+      "definition_name": "MFE_Pole_T2_C",
+      "owner_id": "1269614595",
+      "definition": "master:pgb",
+      "signal_source": {
+        "kind": "physical_measurement",
+        "owner_id": "1215143890",
+        "definition": "MMC_fault:MmcObservedFullCell",
+        "parameter": "MmcCapSum",
+        "signal_name": "MmcVcBtm",
+        "quantity": "sum_of_submodule_capacitor_voltages",
+        "expression": "SUM(Vc)",
+        "cell_count_expression": "$(NoCells1)",
+        "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T2[1268416470]/MFE_Pole_T2_C[1675120167]/MmcObservedFullCell[1215143890]"
+      },
+      "selector": {
+        "description": "MFE_T2_C_lower_v_cap",
+        "group": "MMC_FAULT_EVIDENCE",
+        "port": "Signl",
+        "owner_id": "1269614595",
+        "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T2[1268416470]/MFE_Pole_T2_C[1675120167]"
+      },
+      "units": "kV",
+      "dimension": 1,
+      "polarity": null,
+      "nominal": 640.0,
+      "output_part": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault_12.out",
+      "metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.inf",
+      "sample_count": 20001,
+      "time_bounds_s": [
+        0.0,
+        5.0
+      ],
+      "hash": "0569cc432e91ed04ebf89abf9307c4ae0b581024bdeab4088249167551d78f49",
+      "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T2[1268416470]/MFE_Pole_T2_C[1675120167]",
+      "metadata_sha256": "3484778f759a552977821f99830bf991529d11fee53d8838757d50e9a73fe452",
+      "compiler_metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.infx",
+      "compiler_metadata_sha256": "9d1b1b165dc970545cddf931f80d506dea00ca7bcacd7a3ea368f4b365931c1a",
+      "call_id": 119,
+      "compiled_identity": {
+        "name": "Main(0)\\MFE_PWM_T2(0)\\MFE_Pole_T2_C(0):MFE_T2_C_lower_v_cap",
+        "index": "118",
+        "id": "1269614595:0",
+        "label": "MMC_FAULT_EVIDENCE",
+        "dim": "1",
+        "unit": "kV",
+        "min": "-1000.0",
+        "max": "1000.0"
+      }
+    },
+    {
+      "channel_id": "MFE_T2_C_lower_blocking_state",
+      "role": "blocking_state",
+      "model_scope": "T2/C/lower",
+      "definition_name": "MFE_Pole_T2_C",
+      "owner_id": "1054150763",
+      "definition": "master:pgb",
+      "signal_source": {
+        "kind": "physical_state",
+        "owner_id": "1215143890",
+        "definition": "MMC_fault:MmcObservedFullCell",
+        "parameter": "MmcBlocked",
+        "signal_name": "MmcBlockBtm",
+        "quantity": "firing_based_cell_group_blocked",
+        "expression": "Block_Finder_H result",
+        "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T2[1268416470]/MFE_Pole_T2_C[1675120167]/MmcObservedFullCell[1215143890]"
+      },
+      "selector": {
+        "description": "MFE_T2_C_lower_blocking_state",
+        "group": "MMC_FAULT_EVIDENCE",
+        "port": "Signl",
+        "owner_id": "1054150763",
+        "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T2[1268416470]/MFE_Pole_T2_C[1675120167]"
+      },
+      "units": "1",
+      "dimension": 1,
+      "polarity": {
+        "inactive": 0,
+        "active": 1
+      },
+      "nominal": null,
+      "output_part": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault_12.out",
+      "metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.inf",
+      "sample_count": 20001,
+      "time_bounds_s": [
+        0.0,
+        5.0
+      ],
+      "hash": "0569cc432e91ed04ebf89abf9307c4ae0b581024bdeab4088249167551d78f49",
+      "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T2[1268416470]/MFE_Pole_T2_C[1675120167]",
+      "metadata_sha256": "3484778f759a552977821f99830bf991529d11fee53d8838757d50e9a73fe452",
+      "compiler_metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.infx",
+      "compiler_metadata_sha256": "9d1b1b165dc970545cddf931f80d506dea00ca7bcacd7a3ea368f4b365931c1a",
+      "call_id": 111,
+      "compiled_identity": {
+        "name": "Main(0)\\MFE_PWM_T2(0)\\MFE_Pole_T2_C(0):MFE_T2_C_lower_blocking_state",
+        "index": "110",
+        "id": "1054150763:0",
+        "label": "MMC_FAULT_EVIDENCE",
+        "dim": "1",
+        "unit": "1",
+        "min": "-1000.0",
+        "max": "1000.0"
+      }
+    },
+    {
+      "channel_id": "MFE_T2_C_lower_i_arm",
+      "role": "i_arm",
+      "model_scope": "T2/C/lower",
+      "definition_name": "MFE_Pole_T2_C",
+      "owner_id": "1016034860",
+      "definition": "master:pgb",
+      "signal_source": {
+        "kind": "physical_measurement",
+        "owner_id": "1386643874",
+        "definition": "master:varrlc",
+        "parameter": "I",
+        "signal_name": "IaBtm",
+        "quantity": "arm_inductor_current",
+        "direction": "original_varrlc_A_to_B",
+        "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T2[1268416470]/MFE_Pole_T2_C[1675120167]/varrlc[1386643874]"
+      },
+      "selector": {
+        "description": "MFE_T2_C_lower_i_arm",
+        "group": "MMC_FAULT_EVIDENCE",
+        "port": "Signl",
+        "owner_id": "1016034860",
+        "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T2[1268416470]/MFE_Pole_T2_C[1675120167]"
+      },
+      "units": "kA",
+      "dimension": 1,
+      "polarity": null,
+      "nominal": null,
+      "output_part": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault_11.out",
+      "metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.inf",
+      "sample_count": 20001,
+      "time_bounds_s": [
+        0.0,
+        5.0
+      ],
+      "hash": "c4b995d9c96d97309803dda39974e5edd32eb371d145b29c2a5707c39a7b4a77",
+      "instance_path": "Station[1363114171]/Main[152486038]/MFE_PWM_T2[1268416470]/MFE_Pole_T2_C[1675120167]",
+      "metadata_sha256": "3484778f759a552977821f99830bf991529d11fee53d8838757d50e9a73fe452",
+      "compiler_metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.infx",
+      "compiler_metadata_sha256": "9d1b1b165dc970545cddf931f80d506dea00ca7bcacd7a3ea368f4b365931c1a",
+      "call_id": 110,
+      "compiled_identity": {
+        "name": "Main(0)\\MFE_PWM_T2(0)\\MFE_Pole_T2_C(0):MFE_T2_C_lower_i_arm",
+        "index": "109",
+        "id": "1016034860:0",
+        "label": "MMC_FAULT_EVIDENCE",
+        "dim": "1",
+        "unit": "kA",
+        "min": "-1000.0",
+        "max": "1000.0"
+      }
+    },
+    {
+      "channel_id": "MFE_T2_p_active",
+      "role": "p_active",
+      "model_scope": "T2",
+      "definition_name": "Main",
+      "owner_id": "1575116021",
+      "definition": "master:pgb",
+      "signal_source": {
+        "kind": "physical_measurement",
+        "owner_id": "1352871301",
+        "definition": "master:multimeter",
+        "parameter": "P",
+        "signal_name": "P2",
+        "quantity": "three_phase_active_power",
+        "direction": "meter_arrow",
+        "base_mva": "1.0 [MVA]",
+        "instance_path": "Station[1363114171]/Main[152486038]/multimeter[1352871301]"
+      },
+      "selector": {
+        "description": "MFE_T2_p_active",
+        "group": "MMC_FAULT_EVIDENCE",
+        "port": "Signl",
+        "owner_id": "1575116021",
+        "instance_path": "Station[1363114171]/Main[152486038]"
+      },
+      "units": "MW",
+      "dimension": 1,
+      "polarity": null,
+      "nominal": -900.0,
+      "output_part": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault_03.out",
+      "metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.inf",
+      "sample_count": 20001,
+      "time_bounds_s": [
+        0.0,
+        5.0
+      ],
+      "hash": "68c2a2a9dc5af32497802f0d5cb56e1bb9386d9ced507b5441c22db719f20434",
+      "nominal_role": "controlled_active_power",
+      "instance_path": "Station[1363114171]/Main[152486038]",
+      "metadata_sha256": "3484778f759a552977821f99830bf991529d11fee53d8838757d50e9a73fe452",
+      "compiler_metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.infx",
+      "compiler_metadata_sha256": "9d1b1b165dc970545cddf931f80d506dea00ca7bcacd7a3ea368f4b365931c1a",
+      "call_id": 28,
+      "compiled_identity": {
+        "name": "Main(0):MFE_T2_p_active",
+        "index": "27",
+        "id": "1575116021:0",
+        "label": "MMC_FAULT_EVIDENCE",
+        "dim": "1",
+        "unit": "MW",
+        "min": "-1000.0",
+        "max": "1000.0"
+      }
+    },
+    {
+      "channel_id": "MFE_T2_v_dc",
+      "role": "v_dc",
+      "model_scope": "T2",
+      "definition_name": "Main",
+      "owner_id": "1516192837",
+      "definition": "master:pgb",
+      "signal_source": {
+        "kind": "physical_measurement",
+        "owner_id": "964641709",
+        "definition": "master:voltmeter",
+        "parameter": "Name",
+        "signal_name": "Edc2",
+        "quantity": "dc_pole_to_pole_voltage",
+        "direction": "positive_pole_minus_negative_pole",
+        "instance_path": "Station[1363114171]/Main[152486038]/voltmeter[964641709]"
+      },
+      "selector": {
+        "description": "MFE_T2_v_dc",
+        "group": "MMC_FAULT_EVIDENCE",
+        "port": "Signl",
+        "owner_id": "1516192837",
+        "instance_path": "Station[1363114171]/Main[152486038]"
+      },
+      "units": "kV",
+      "dimension": 1,
+      "polarity": null,
+      "nominal": 640.0,
+      "output_part": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault_03.out",
+      "metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.inf",
+      "sample_count": 20001,
+      "time_bounds_s": [
+        0.0,
+        5.0
+      ],
+      "hash": "68c2a2a9dc5af32497802f0d5cb56e1bb9386d9ced507b5441c22db719f20434",
+      "instance_path": "Station[1363114171]/Main[152486038]",
+      "metadata_sha256": "3484778f759a552977821f99830bf991529d11fee53d8838757d50e9a73fe452",
+      "compiler_metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.infx",
+      "compiler_metadata_sha256": "9d1b1b165dc970545cddf931f80d506dea00ca7bcacd7a3ea368f4b365931c1a",
+      "call_id": 30,
+      "compiled_identity": {
+        "name": "Main(0):MFE_T2_v_dc",
+        "index": "29",
+        "id": "1516192837:0",
+        "label": "MMC_FAULT_EVIDENCE",
+        "dim": "1",
+        "unit": "kV",
+        "min": "-1000.0",
+        "max": "1000.0"
+      }
+    },
+    {
+      "channel_id": "MFE_T2_recovery_enable",
+      "role": "recovery_enable",
+      "model_scope": "T2",
+      "definition_name": "Main",
+      "owner_id": "1478113698",
+      "definition": "master:pgb",
+      "signal_source": {
+        "kind": "recovery_control",
+        "owner_id": "800413106",
+        "definition": "MMC_fault:MFE_VSC_T2",
+        "parameter": "Dblk",
+        "signal_name": "Dblk2P",
+        "quantity": "deblocking_enable",
+        "electrical_recovery_required": true,
+        "instance_path": "Station[1363114171]/Main[152486038]/MFE_VSC_T2[800413106]"
+      },
+      "selector": {
+        "description": "MFE_T2_recovery_enable",
+        "group": "MMC_FAULT_EVIDENCE",
+        "port": "Signl",
+        "owner_id": "1478113698",
+        "instance_path": "Station[1363114171]/Main[152486038]"
+      },
+      "units": "1",
+      "dimension": 1,
+      "polarity": {
+        "inactive": 0,
+        "active": 1
+      },
+      "nominal": null,
+      "output_part": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault_04.out",
+      "metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.inf",
+      "sample_count": 20001,
+      "time_bounds_s": [
+        0.0,
+        5.0
+      ],
+      "hash": "30ae81f695b8aef3acdb97d25cd4b10188a53605780e7e36d681a3aad9a666af",
+      "instance_path": "Station[1363114171]/Main[152486038]",
+      "metadata_sha256": "3484778f759a552977821f99830bf991529d11fee53d8838757d50e9a73fe452",
+      "compiler_metadata_file": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.gf42\\MMC_fault.infx",
+      "compiler_metadata_sha256": "9d1b1b165dc970545cddf931f80d506dea00ca7bcacd7a3ea368f4b365931c1a",
+      "call_id": 31,
+      "compiled_identity": {
+        "name": "Main(0):MFE_T2_recovery_enable",
+        "index": "30",
+        "id": "1478113698:0",
+        "label": "MMC_FAULT_EVIDENCE",
+        "dim": "1",
+        "unit": "1",
+        "min": "-1000.0",
+        "max": "1000.0"
+      }
+    }
+  ],
+  "instrumented_project_sha256": "c5b820defb259894e04267fcdd8fdf0238dd6bbff035593b706ec7cfc7b2683c",
+  "evidence": {
+    "acceptance_report": {
+      "path": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\acceptance-report.json",
+      "sha256": "aefd60fc798994b9b04d13f93fc91fc309933c01e9e776d55c475af05208fb19"
+    },
+    "steady": {
+      "case_report": {
+        "path": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\steady\\report.json",
+        "sha256": "9099b2d030bcfd318d758b16dfcaaae5b5479f5008f04287a540e4445c0eff92"
+      },
+      "channel_contract": {
+        "path": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\steady\\channels.json",
+        "sha256": "49fd4665ca243994e9827346cf449a0aafbcc5d08bd07876abd738de943a08df"
+      },
+      "output_index": {
+        "path": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\steady\\output-index.json",
+        "sha256": "421846da1337c4e12ff1d10d37f86add3ac9f767be9729fa0d7b6a40aab3242c"
+      },
+      "samples": {
+        "path": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\steady\\samples.json",
+        "sha256": "aec1111825d64164f61e2e9e1964c6c46ee16921dc98a05e61ca2da18ffe5a84"
+      },
+      "project": {
+        "path": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\steady\\MMC_steady.pscx",
+        "sha256": "bb5e1acf561ee3d113e51a44a63768e4dde6027621ae726c56214bbcbd7aa7d5"
+      }
+    },
+    "dc_fault": {
+      "case_report": {
+        "path": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\report.json",
+        "sha256": "cc4741071599451d7a51cf1ebf86a393c94dc25abcb15e20d5aa2e4f55a3099a"
+      },
+      "channel_contract": {
+        "path": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\channels.json",
+        "sha256": "31830df7bbd82232d48ca0c51c4938c1cc37de4955b57a0a96b14127ddbd2d47"
+      },
+      "output_index": {
+        "path": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\output-index.json",
+        "sha256": "b7469549b11a7729f683a8bbc7f739e408652388b5e63d2af52d46534b38f317"
+      },
+      "samples": {
+        "path": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\samples.json",
+        "sha256": "05efdc45c9d52bd696d003add6b68d36c27b1812d47a39ac5195b0724ef47c2b"
+      },
+      "project": {
+        "path": "D:\\PSCAD-Workspace\\mmc-fault-evidence\\fault-evidence-20260912T052440515065Z\\fault\\MMC_fault.pscx",
+        "sha256": "c5b820defb259894e04267fcdd8fdf0238dd6bbff035593b706ec7cfc7b2683c"
+      }
+    }
+  },
+  "validation": {
+    "steady": {
+      "verdict": "PASS",
+      "output_file_count": 51,
+      "sample_channel_count": 312,
+      "emtdc_elapsed_s": 191.10899999993853
+    },
+    "dc_fault": {
+      "verdict": "PASS",
+      "output_file_count": 51,
+      "sample_channel_count": 312,
+      "emtdc_elapsed_s": 190.5779999999795
+    }
+  }
+}

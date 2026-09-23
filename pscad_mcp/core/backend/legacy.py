@@ -14,6 +14,7 @@ import time
 import xml.etree.ElementTree as ET
 from collections.abc import Callable, Mapping, Sequence
 from collections.abc import Mapping as MappingABC
+from copy import deepcopy
 from decimal import Decimal, InvalidOperation
 from importlib.resources import as_file, files
 from pathlib import Path
@@ -63,6 +64,7 @@ from .base import (
     RunState,
     SimulationSetInfo,
     SimulationTaskInfo,
+    timed_control_provider_capabilities,
 )
 from .run_control import (
     STOPPED_RUN_STATUSES,
@@ -748,22 +750,16 @@ class LegacyBackend:
 
     async def get_timed_control_capabilities(self, project_name: str) -> dict[str, Any]:
         project = await self._project(project_name)
-        return {
-            "native_schedule": callable(
-                getattr(project, "schedule_timed_controls", None)
-            ),
-            "simulation_clock": callable(getattr(project, "get_simulation_time", None)),
-            "time_basis": "EMTDC",
-        }
+        return timed_control_provider_capabilities(project)
 
     async def schedule_timed_controls(
         self, project_name: str, events: Sequence[Mapping[str, Any]]
     ) -> list[dict[str, Any]]:
         project = await self._project(project_name)
         provider = getattr(project, "schedule_timed_controls", None)
-        if callable(provider):
+        if timed_control_provider_capabilities(project)["native_schedule"]:
             values = await self.executor.run_safe(
-                provider, [dict(event) for event in events]
+                provider, deepcopy([dict(event) for event in events])
             )
             if isinstance(values, (list, tuple)):
                 return [dict(item) for item in values if isinstance(item, MappingABC)]
@@ -778,7 +774,7 @@ class LegacyBackend:
     async def get_simulation_time(self, project_name: str) -> float:
         project = await self._project(project_name)
         provider = getattr(project, "get_simulation_time", None)
-        if callable(provider):
+        if timed_control_provider_capabilities(project)["simulation_clock"]:
             return float(await self.executor.run_safe(provider))
         raise BackendError(
             "CAPABILITY_UNAVAILABLE",
@@ -2898,6 +2894,40 @@ class LegacyBackend:
                 "definition_metadata",
                 {"path": str(path)},
             ) from error
+
+    async def get_master_library_identity(self) -> dict[str, Any]:
+        """Read the connected installation's Master without changing binding caches."""
+        self._require_app()
+        path = await self._discover_master_library()
+        if path is None or not path.is_file():
+            raise BackendError(
+                "MASTER_SOURCE_UNAVAILABLE",
+                "The connected PSCAD installation's Master library was not found.",
+                self.name,
+                "get_master_library_identity",
+            )
+        path = path.resolve()
+        if self._managed_executable:
+            executable = Path(self._managed_executable).resolve()
+            installed = next(
+                (parent / "master.pslx" for parent in executable.parents
+                 if (parent / "master.pslx").is_file()),
+                None,
+            )
+            if installed is None or installed.resolve() != path:
+                raise BackendError(
+                    "MASTER_SOURCE_CHANGED",
+                    "The discovered Master does not belong to the connected managed installation.",
+                    self.name,
+                    "get_master_library_identity",
+                    {"master_path": str(path), "managed_executable": self._managed_executable},
+                )
+        digest = await asyncio.to_thread(lambda: hashlib.sha256(path.read_bytes()).hexdigest())
+        return {
+            "master_path": str(path),
+            "master_sha256": digest,
+            "pscad_version": self.version,
+        }
 
     async def _discover_master_library(self) -> Path | None:
         if self.automation is None:

@@ -16,7 +16,6 @@ from .mappings import resolve_mappings
 from .scanner import scan_project
 from .timing import select_timing_mode
 
-
 _ENABLED_OUTPUT = {"out", "legacy", "1", "true", "yes"}
 _DISABLED_OUTPUT = {"none", "no", "0", "false", "off", ""}
 
@@ -39,8 +38,10 @@ async def ensure_output_ready(
     *,
     source_project: str,
     confirm: bool,
+    runtime_project_name: str | None = None,
 ) -> dict[str, Any]:
-    settings = await backend.get_project_settings(target_project)
+    runtime_project = runtime_project_name or target_project
+    settings = await backend.get_project_settings(runtime_project)
     if not isinstance(settings, Mapping) or "PlotType" not in settings:
         raise _error("HVDC_CAPABILITY_UNAVAILABLE", "Project settings do not expose PlotType.", project_name=target_project)
     previous = settings["PlotType"]
@@ -50,8 +51,8 @@ async def ensure_output_ready(
         raise _error("HVDC_CAPABILITY_UNAVAILABLE", "Output correction is forbidden on the source project.", project_name=target_project)
     if not confirm:
         raise _error("HVDC_CONFIRMATION_REQUIRED", "Output correction requires explicit confirmation.", project_name=target_project)
-    await backend.set_project_settings(target_project, {"PlotType": "OUT"})
-    read_back = await backend.get_project_settings(target_project)
+    await backend.set_project_settings(runtime_project, {"PlotType": "OUT"})
+    read_back = await backend.get_project_settings(runtime_project)
     if not isinstance(read_back, Mapping) or str(read_back.get("PlotType", "")).strip().casefold() != "out":
         raise _error(
             "HVDC_CAPABILITY_UNAVAILABLE",
@@ -192,6 +193,7 @@ async def preflight_scenario(
     normalized: Mapping[str, Any],
     *,
     confirm: bool,
+    runtime_project_name: str | None = None,
 ) -> dict[str, Any]:
     profile = normalized.get("profile_data") or normalized.get("profile")
     if not isinstance(profile, Mapping):
@@ -290,12 +292,13 @@ async def preflight_scenario(
             })
     else:
         commands = resolve_requested_commands(evidence, profile, requests) if requests else []
-    timing_mode = await select_timing_mode(service.backend_service, target_project) if normalized.get("events") else None
+    runtime_project = runtime_project_name or target_project
+    timing_mode = await select_timing_mode(service.backend_service, runtime_project) if normalized.get("events") else None
     requested_metrics = normalized.get("analysis", {}).get("metrics", [])
     selectors = required_result_selectors(profile, requested_metrics)
     selector_check = await verify_required_result_selectors(
         service.backend_service,
-        target_project,
+        runtime_project,
         profile,
         requested_metrics,
     )
@@ -306,6 +309,7 @@ async def preflight_scenario(
             target_project,
             source_project=source_project,
             confirm=confirm,
+            runtime_project_name=runtime_project,
         )
     elif profile.get("profile_version", 1) == 1:
         output = {"changed": False, "verified": False, "reason": "project_settings_unavailable"}
