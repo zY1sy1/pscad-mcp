@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "validated_commit": "d2af688909e061260846d61e6e9e6b5d6a4a2979",
+  "python": "3.12.14",
+  "offline_tests": {
+    "passed": 3974,
+    "skipped": 53,
+    "failed": 0,
+    "errors": 0,
+    "duration_seconds": 252.564
+  },
+  "installed_wheel_probe": "PASS including load_parametric_catalog",
+  "registered_tools": 105,
+  "inventory_integrity": {
+    "status": "INCOMPLETE",
+    "scope_counts": {
+      "VERIFIED": 12,
+      "NO_DURABLE_REPORT": 3
+    }
+  },
+  "release_complete": false,
+  "arrester_native_report": {
+    "path": "D:/PA/i26-yh/acceptance.json",
+    "commit": "ef033b9dc7f3722a271632f0b902f6f2bcde769b",
+    "status": "PASS",
+    "sha256": "1a4cd6a45e880cea93af543121c22b674495f6577c80488df39bcd9ed8923a97"
+  },
+  "evidence_files": {
+    "D:\\PSCAD-Workspace\\integration-20260926-2a9ed5b\\release-pytest.log": "ce1ede2248179dcd774ba980aea70b696b9db91b7701d877543b219879e3bb1c",
+    "D:\\PSCAD-Workspace\\integration-20260926-2a9ed5b\\release-pytest.xml": "5f49c59f6909e2faf4036647df57a7cc298e482ceee418f3a378c25e0ee47ef6",
+    "D:\\PSCAD-Workspace\\integration-20260926-2a9ed5b\\release-package.log": "9726b9ec6580c89f735e84a0b806d78ffb8b4205cd6a10f87b635c559e39deda",
+    "D:\\PSCAD-Workspace\\integration-20260926-2a9ed5b\\release-inventory.json": "8501d979f7c634f465171550772e507357a2983bdd0316b5c787558718002515",
+    "D:\\PSCAD-Workspace\\integration-20260926-2a9ed5b\\final-checks.json": "49000724f9d36dc31584837434d2c3f3539908a85d40a768bbfebaac87a73b79",
+    "D:\\PSCAD-Workspace\\integration-20260926-2a9ed5b\\lcc-power-artifact-audit.json": "a4c88e3b933f1c133b4a7dfcba6ff0e9e3a9273093cf88d7177153920e5301bb",
+    "D:\\PSCAD-Workspace\\integration-20260926-2a9ed5b\\corpus-prerequisites.json": "95795134239e28bf50f724c17d5c77b2858a69cb522ebc50d22944fbec103426"
+  },
+  "note": "Tests skipped by opt-in or missing external source are not physical acceptance. Reports retain original revisions. Remaining model scopes and corpus migration are incomplete."
+}

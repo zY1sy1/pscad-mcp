@@ -42,7 +42,10 @@ main 原有技能修改、避雷器能量脚本及其他未跟踪输出不属于
 - 最新 LCC 三个模板功率点诊断来自 `fb0b244`；本轮重新核对了三份报告和 27 个
   关联文件的哈希，全部有效。诊断明确保持 `model_accepted=false` 和
   `public_builder_accepted=false`，不冒充公开参数化构建器验收。
-- 最终合并版本的全量回归与打包结果在最终检查结束后登记。
+- 最终验证提交 `d2af688`：**3974 通过、53 跳过、0 失败**，252.60 秒。隔离安装的
+  wheel 通过固定 LCC、参数化 LCC catalog、MMC 资产及 105 个工具注册验证；代码正确性与
+  差异空白检查通过。结果及日志哈希见[机器记录](branch-integration-20260926.json)。
+  后续仅登记这些结果，没有再修改实现。
 
 离线记录目录：`D:/PSCAD-Workspace/integration-20260926-2a9ed5b`。
 主要文件为 `pytest.log`、`integrated-pytest.log`、`inventory-audit.json`、
