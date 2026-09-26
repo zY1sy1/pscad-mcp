@@ -170,3 +170,57 @@ def test_a_stopped_run_cannot_be_validated_from_existing_output(tmp_path):
         _run(plan, staging, service)
     assert exc.value.code == "LCC_BUILD_FAILED"
     assert "read_output_file" not in service.calls
+
+
+def test_new_output_uses_filesystem_clock_when_wall_clock_is_more_precise(tmp_path, monkeypatch):
+    import time
+    from types import SimpleNamespace
+    from pscad_mcp.hvdc.builders.lcc import parametric_executor as executor
+
+    # Python 3.13's precise Windows clock can be ahead of filesystem timestamps.
+    monkeypatch.setattr(executor, "time", SimpleNamespace(
+        monotonic=time.monotonic, time=lambda: time.time() + 1.0,
+    ))
+    plan, staging = _plan(tmp_path, lifecycle={"run_timeout_s": 0.05, "poll_interval_s": 0.001})
+    result = _run(plan, staging, FakePscadService())
+    assert result["state"] == "validated"
+
+
+def test_unchanged_existing_output_is_rejected_even_with_a_future_timestamp(tmp_path):
+    import os
+    import time
+
+    plan, staging = _plan(tmp_path, lifecycle={"run_timeout_s": 0.05, "poll_interval_s": 0.001})
+    staging.parent.mkdir(parents=True)
+    old = staging.with_suffix(".out")
+    old.write_bytes(b"old waveform")
+    future = time.time() + 3600
+    os.utime(old, (future, future))
+    with pytest.raises(BackendError) as exc:
+        _run(plan, staging, FakePscadService(write_output=False))
+    assert exc.value.code == "LCC_RUN_TIMED_OUT"
+
+
+def test_new_output_with_historical_timestamp_remains_rejected(tmp_path):
+    import os
+
+    plan, staging = _plan(tmp_path, lifecycle={"run_timeout_s": 0.05, "poll_interval_s": 0.001})
+
+    class HistoricalOutput(FakePscadService):
+        async def run_project(self, project_name):
+            response = await super().run_project(project_name)
+            os.utime(staging.with_suffix(".out"), (1, 1))
+            return response
+
+    with pytest.raises(BackendError) as exc:
+        _run(plan, staging, HistoricalOutput())
+    assert exc.value.code == "LCC_RUN_TIMED_OUT"
+
+
+def test_existing_output_rewritten_by_the_run_is_read(tmp_path):
+    plan, staging = _plan(tmp_path, lifecycle={"run_timeout_s": 0.05, "poll_interval_s": 0.001})
+    staging.parent.mkdir(parents=True)
+    staging.with_suffix(".out").write_bytes(b"old waveform with a different size")
+    result = _run(plan, staging, FakePscadService())
+    assert result["state"] == "validated"
+    assert staging.with_suffix(".out").read_bytes() == b"waveform"

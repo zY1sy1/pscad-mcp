@@ -342,9 +342,49 @@ def _status_value(response: Any) -> str | None:
     return None
 
 
+def _output_run_boundary(staging: Path) -> tuple[float, dict[Path, tuple[int, int, int]]]:
+    """Use one filesystem clock and retain identities of pre-run outputs."""
+    root = staging.parent.resolve()
+    previous: dict[Path, tuple[int, int, int]] = {}
+    visited: set[Path] = set()
+    scanned = 0
+    for directory, children, names in os.walk(root, followlinks=False):
+        resolved_directory = Path(directory).resolve()
+        if not resolved_directory.is_relative_to(root) or resolved_directory in visited:
+            children[:] = []
+            continue
+        visited.add(resolved_directory)
+        children[:] = sorted(name for name in children if not (Path(directory) / name).is_symlink())
+        scanned += len(children) + len(names)
+        if scanned > 10_000:
+            raise _error("LCC_OUTPUT_MISSING", "Pre-run output inventory exceeds its bound.", "execute_parametric_lcc_build", reason="output_inventory_limit")
+        for name in names:
+            path = Path(directory) / name
+            if path.suffix.casefold() not in {".out", ".psout"} or path.is_symlink():
+                continue
+            resolved = path.resolve()
+            if not resolved.is_relative_to(root) or not resolved.is_file():
+                continue
+            stat = resolved.stat()
+            previous[resolved] = (stat.st_size, stat.st_mtime_ns, stat.st_ino)
+            if len(previous) > 1000:
+                raise _error("LCC_OUTPUT_MISSING", "Pre-run output inventory exceeds its bound.", "execute_parametric_lcc_build", reason="output_inventory_limit")
+    # On Windows Python 3.13+, time.time() has finer precision than timestamps
+    # assigned to new files. Compare files with a closed file on the same volume,
+    # without a grace window that could silently admit older results.
+    with tempfile.NamedTemporaryFile(dir=root, prefix=".lcc-run-", suffix=".stamp", delete=False) as stream:
+        marker = Path(stream.name)
+        stream.write(b"run boundary\n")
+    try:
+        return marker.stat().st_mtime, previous
+    finally:
+        marker.unlink()
+
+
 def _output_candidates(
     staging: Path, explicit: Any, *, discovered: list[str] | None = None,
     started_after: float = 0.0,
+    previous_outputs: dict[Path, tuple[int, int, int]] | None = None,
 ) -> list[Path]:
     values: list[Any] = []
     if explicit is not None:
@@ -373,7 +413,10 @@ def _output_candidates(
             continue
         if not resolved.is_file() or resolved.suffix.casefold() not in {".out", ".psout"}:
             continue
-        if resolved.stat().st_mtime < started_after:
+        stat = resolved.stat()
+        if stat.st_mtime < started_after:
+            continue
+        if previous_outputs is not None and previous_outputs.get(resolved) == (stat.st_size, stat.st_mtime_ns, stat.st_ino):
             continue
         if resolved not in candidates:
             candidates.append(resolved)
@@ -442,8 +485,8 @@ async def execute_parametric_template(
             reason="compile_or_stage_failed",
             exception=type(error).__name__,
         ) from error
+    run_started_at, previous_outputs = _output_run_boundary(staging)
     started = time.monotonic()
-    run_started_at = time.time()
     try:
         run_call = (
             runner(project_name, simulation_set)
@@ -483,7 +526,7 @@ async def execute_parametric_template(
         discovered = None
         if callable(discovery):
             discovered = await discovery(str(staging), started_after=run_started_at, max_files=1000)
-        candidates = _output_candidates(staging, explicit_output, discovered=discovered, started_after=run_started_at)
+        candidates = _output_candidates(staging, explicit_output, discovered=discovered, started_after=run_started_at, previous_outputs=previous_outputs)
         if candidates:
             break
         if status in {"completed", "complete", "idle"}:
