@@ -36,7 +36,9 @@ it does not establish physical acceptance of a generated PSCAD project.
 
 The rated public LCC builder still needs audited physical parameter mappings
 and its own licensed matrix. Transformer AC secondary voltage is not DC pole
-voltage: an ideal series pair of six-pulse bridges has
+voltage. The two former direct `dc_voltage_kv -> V2` bindings have been removed
+from the reviewed catalog after a regression reproduced an executable direct
+500 kV DC-to-500 kV AC write. An ideal series pair of six-pulse bridges has
 `U_d0 = 2 * (3 sqrt(2) / pi) * U_LL`, before firing angle and commutation-drop
 effects. Source immutability, physical thresholds and independent-reference
 requirements remain applicable. Previous raw reports retain their original
