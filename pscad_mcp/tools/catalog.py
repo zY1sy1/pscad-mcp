@@ -237,7 +237,9 @@ COMPATIBILITY_TOOL_SPECS = MappingProxyType(
     {
         "get_local_pscad": _spec(
             "get_local_pscad",
-            "Attach to a running local PSCAD instance or launch a new one.",
+            "Launch a server-owned PSCAD instance; never attaches to an already-open "
+            "GUI (legacy 4.6.x refuses by default while another PSCAD process is "
+            "running).",
         ),
         "get_pscad_status": _spec(
             "get_pscad_status",

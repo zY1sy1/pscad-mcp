@@ -10,7 +10,8 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
 authors = [
-    {name = "LL0pez20", email = "luansantos@poli.ufrj.br"}
+    {name = "LL0pez20", email = "luansantos@poli.ufrj.br"},
+    {name = "zY1sy1", email = "224587865+zY1sy1@users.noreply.github.com"},
 ]
 dependencies = [
     "mcp>=1.29,<2",
@@ -40,6 +41,7 @@ include = ["pscad_mcp*"]
 pscad_mcp = [
     "assets/templates/*.pscx",
     "assets/templates/*.pslx",
+    "assets/lcc/*.json",
     "assets/lcc/*/*.json",
     "assets/lcc/*/*.md",
     "assets/lcc/*/library/*.pslx",

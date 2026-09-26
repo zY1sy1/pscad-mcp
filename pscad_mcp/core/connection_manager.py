@@ -90,7 +90,7 @@ class PSCADConnectionManager:
         return cls._instance
 
     async def attach_local(self) -> str:
-        """Robustly attach to any local PSCAD instance or launch a new one."""
+        """Launch a server-owned PSCAD instance through the selected backend."""
         try:
             result = await self.service.attach_local()
             backend = self.service.backend

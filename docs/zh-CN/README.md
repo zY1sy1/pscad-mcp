@@ -67,7 +67,7 @@ LCC/MMC 实现计划保留独立的历史基线
 
 ## 功能范围
 
-服务器固定注册 86 个工具，其中以下七组共 60 个通用工具：
+默认 `full` profile 下服务器注册 105 个工具（组成见上文），其中以下七组共 60 个通用工具：
 
 - 应用与文档 7 个：连接、状态、修复、退出、文档同步/列出/读取；
 - 工程与参数 12 个：加载、列出、运行、暂停、停止、运行状态、元件查询、参数读取/写入/校验、工程设置读取/写入；
@@ -76,14 +76,15 @@ LCC/MMC 实现计划保留独立的历史基线
 - 创建、保存与构建 7 个：新建算例/库、保存、另存、构建、全部构建、定义列表；
 - 画布 12 个：元件、导线、母线、连接、端口连接、注释、图框、控制框、对象列表、空位搜索、批量删除；
 - 元件操作 10 个：位置、旋转、镜像、克隆、端口、启用/禁用、删除。
-- 静默学习 3 个：`record_goal_failure`、`review_improvement_backlog`、`clear_learning_history`。
+
+此外还有静默学习工具 3 个（不计入上述 60 个通用工具）：`record_goal_failure`、`review_improvement_backlog`、`clear_learning_history`。
 
 ### 兼容发现、工具配置、分页和本地文档
 
 `full` 保持不变的默认值，并额外注册始终可用的
-`get_pscad_capabilities`。`PSCAD_MCP_TOOL_PROFILE` 可显式选择
-`core`、`hvdc`、`lcc`、`parametric_lcc` 和 `learning`；显式启用这些组，空值、未知组或其他
-非法值会导致启动失败。能力工具报告当前 profile、已注册工具、后端支持和
+`get_pscad_capabilities`。`PSCAD_MCP_TOOL_PROFILE` 可用逗号分隔，显式选择
+`core`、`topology`、`hvdc`、`lcc`、`parametric_lcc`、`mmc`、`blueprint` 和 `learning`
+中的若干组；空值、未知组或其他非法值会导致启动失败。能力工具报告当前 profile、已注册工具、后端支持和
 明确限制。
 
 分页是可选的，不改变既有默认返回；列表操作支持 `offset`、`limit`，
@@ -499,11 +500,13 @@ $env:PSCAD_MCP_ACCEPTANCE='1'
 唯一命令绑定，应在写参数前得到 `HVDC_TIMED_CONTROL_UNAVAILABLE` 或
 `HVDC_MAPPING_MISSING` 的安全拒绝。
 
-日常测试不会启动 PSCAD：
+日常测试不会启动 PSCAD。测试使用 pytest（与 CI 一致；许多测试模块定义的是
+普通 `test_*` 函数，`unittest discover` 不会收集），需先安装 `dev` 附加依赖：
 
 ```powershell
 Set-Location D:\pscad-mcp
-& .\.venv\Scripts\python.exe -m unittest discover tests -v
+& .\.venv\Scripts\python.exe -m pip install -e ".[dev]"
+& .\.venv\Scripts\python.exe -m pytest -q
 ```
 
 真实 PSCAD 4.6.2 x64 验收：
@@ -522,7 +525,7 @@ Set-Location D:\pscad-mcp
 ```powershell
 & .\.venv\Scripts\python.exe -m pip check
 & .\.venv\Scripts\python.exe -m compileall pscad_mcp
-& .\.venv\Scripts\python.exe -m unittest discover tests -v
+& .\.venv\Scripts\python.exe -m pytest -q
 & .\.venv\Scripts\python.exe -c "from pscad_mcp.main import create_server; t=create_server()._tool_manager.list_tools(); print(len(t), len({x.name for x in t}))"
 git diff --check
 git status --short --branch

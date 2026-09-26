@@ -45,7 +45,7 @@ The server is designed for Windows-based power-system workflows where you want C
 
 PSCAD automation is powerful, but the raw API is not especially friendly for conversational workflows. This project packages that API into structured MCP tools so Copilot CLI can:
 
-- launch a visible, owned PSCAD 4.6.x automation instance, or attach/launch through the modern backend
+- launch a server-owned PSCAD instance: a visible 4.6.x automation instance through the legacy backend, or a new 5.x process through the modern backend; neither backend attaches to an already-open GUI
 - inspect projects, simulation status, and output messages
 - update project settings and component parameters
 - create, place, wire, move, and delete components on the canvas
@@ -94,9 +94,10 @@ external process.
 ## Tool coverage
 
 The complete inventory is 105 = 60 generic tools, 2 topology tools, 10 HVDC
-tools, 3 learning tools, 8 LCC tools (including blank lifecycle), 6 parametric LCC tools,
-11 MMC tools (including blank lifecycle), 4 generic Blueprint Builder tools, and one always-on
-`get_pscad_capabilities` tool.
+tools, 3 learning tools, 8 LCC tools (4 fixed CIGRE LCC plus 4 blank LCC
+lifecycle tools), 6 parametric LCC tools, 11 MMC tools (7 parametric MMC plus
+4 blank MMC lifecycle tools), 4 generic Blueprint Builder tools, and one
+always-on `get_pscad_capabilities` tool.
 The generic 60-tool contract keeps its existing names and default return
 shapes.
 
@@ -116,7 +117,8 @@ The server currently exposes tool groups for:
 `full` remains the unchanged default for `PSCAD_MCP_TOOL_PROFILE`, so existing
 clients receive all compatibility/domain tools plus the always-on
 `get_pscad_capabilities` tool. Selecting a comma-separated subset of `core`,
-`hvdc`, `lcc`, `parametric_lcc`, and `learning` is opt-in. Empty, unknown, or
+`topology`, `hvdc`, `lcc`, `parametric_lcc`, `mmc`, `blueprint`, and
+`learning` is opt-in. Empty, unknown, or
 otherwise invalid profile values fail server startup instead of silently
 changing the exposed inventory. `get_pscad_capabilities` reports the active
 profile, registered tools, backend support, and explicit limitations.
@@ -686,10 +688,10 @@ repository:
 & (Join-Path $venvPath "Scripts\python.exe") -m pip install "C:\path\to\mhrc_automation-1.2.4-py3-none-any.whl"
 ```
 
-For non-Windows development tasks such as tests or documentation work, install base dependencies only:
+For non-Windows development tasks such as tests or documentation work, install base and test dependencies:
 
 ```powershell
-py -3 -m pip install -e .
+py -3 -m pip install -e ".[dev]"
 ```
 
 The repository includes a portable Codex template at
@@ -834,18 +836,23 @@ This project can generate PSCAD API reference snapshots that are easier for LLMs
 py -3 -m pscad_mcp.utils.doc_manager
 ```
 
-Generated files are written to:
+Generated files are written to local state, not to the repository. The default
+root is `%LOCALAPPDATA%\pscad-mcp\docs` (set `PSCAD_MCP_DOCUMENTATION_DIR` to
+an absolute path to override it), with:
 
-- `docs\raw` for raw extracted output
-- `docs\md` for enriched Markdown
+- `raw` for raw extracted output
+- `md` for enriched Markdown
 
 ### Run tests
 
 ```powershell
-py -3 -m unittest discover tests
+py -3 -m pip install -e ".[dev]"
+py -3 -m pytest -q
 ```
 
-Tests mock the PSCAD layer, so they can run without PSCAD installed.
+Tests mock the PSCAD layer, so they can run without PSCAD installed. Use
+pytest, as CI does: many test modules define plain `test_*` functions that
+`unittest discover` does not collect.
 
 Licensed PSCAD 4.6.2 acceptance is opt-in and works only on timestamped copies:
 
@@ -872,37 +879,35 @@ installation is available for end-to-end acceptance.
 
 ```text
 pscad_mcp\
+  main.py                 FastMCP server entry point and tool registration
+  runtime.py              server lifespan and ordered shutdown
   core\
-    backend\
-      legacy.py
-      modern.py
-      selector.py
+    backend\              base, legacy (4.6.x), modern (5.x), selector, run_control
     connection_manager.py
-    executor.py
-    service.py
-  hvdc\
-    models.py
-    scanner.py
-    classifier.py
-    mappings.py
-    profiles.py
-    scenarios.py
-    metrics.py
-    service.py
+    executor.py           single-worker PSCAD call executor with watchdog
+    path_policy.py        workspace-scoped file access
+    service.py            PscadService, the only entry point used by tools
   tools\
-    app_tools.py
-    project_tools.py
-    data_tools.py
-    simset_tools.py
-    creation_tools.py
-    canvas_tools.py
-    component_tools.py
-    hvdc_tools.py
+    catalog.py            tool groups, descriptions, and profile parsing
+    registration.py       profile-aware tool registration
+    app_tools.py  project_tools.py  data_tools.py  simset_tools.py
+    creation_tools.py  canvas_tools.py  component_tools.py
+    topology_tools.py  hvdc_tools.py  lcc_tools.py  lcc_parametric_tools.py
+    blank_builder_tools.py  mmc_tools.py  blueprint_tools.py
+    learning_tools.py  capability_tools.py  pagination.py  identifiers.py
+  topology\               canonical live/.pscx topology and diagnostics
+  hvdc\                   HVDC inspection, scenarios, and metrics
+    builders\             lcc, mmc, and shared builder infrastructure
+  builders\blueprint\     generic Blueprint Builder and corpus tooling
+  learning\               local silent-learning store and backlog
+  acceptance\             licensed acceptance baseline, evidence, promotion
+  workflows\sweep\        parameter-sweep manifest models (no tools yet)
+  assets\                 templates, LCC/MMC assets, blueprints, corpora
   utils\
     doc_manager.py
-  main.py
 tests\
 docs\
+scripts\
 ```
 
 ## Architecture notes
@@ -922,7 +927,7 @@ If Copilot CLI can see the server but tool calls fail:
 - verify the configured Python executable matches the environment where `pscad-mcp` is installed
 - confirm PSCAD is installed and licensed
 - rerun `py -3 mcp_installer.py`
-- run `py -3 -m unittest discover tests` to verify the Python package is still healthy
+- install the `dev` extra (`py -3 -m pip install -e ".[dev]"`) and run `py -3 -m pytest -q` to verify the Python package is still healthy
 
 If documentation tools return no modules, run the documentation sync command again.
 
