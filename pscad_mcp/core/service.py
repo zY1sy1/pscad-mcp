@@ -411,6 +411,12 @@ class PscadService:
                 f"legacy backend for PSCAD {info.version} ({architecture}); legacy "
                 "automation does not attach to an already-open GUI."
             )
+        if getattr(backend, "owns_process", False):
+            return (
+                f"Successfully launched a managed PSCAD instance using "
+                f"{info.backend} backend for PSCAD {info.version} ({architecture}); "
+                "it does not attach to an already-open GUI."
+            )
         return (
             f"Successfully attached using {info.backend} backend to "
             f"PSCAD {info.version} ({architecture})."

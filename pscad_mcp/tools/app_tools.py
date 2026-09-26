@@ -13,7 +13,7 @@ from .registration import register_tool
 path_policy = PathPolicy()
 
 async def get_local_pscad() -> str:
-    """Attach to a running local PSCAD instance or launch a new one."""
+    """Launch a server-owned PSCAD instance; never attaches to an already-open GUI (legacy 4.6.x refuses by default while another PSCAD process is running)."""
     return await pscad_manager.attach_local()
 
 async def get_pscad_status() -> dict[str, Any]:

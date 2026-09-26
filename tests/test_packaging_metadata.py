@@ -1,4 +1,5 @@
 from pathlib import Path
+import glob
 import importlib.metadata
 
 import pscad_mcp
@@ -24,10 +25,42 @@ def test_project_packages_recursive_lcc_asset_set():
     document = tomllib.loads(path.read_text(encoding="utf-8"))
     patterns = document["tool"]["setuptools"]["package-data"]["pscad_mcp"]
 
+    assert "assets/lcc/*.json" in patterns
     assert "assets/lcc/*/*.json" in patterns
     assert "assets/lcc/*/*.md" in patterns
     assert "assets/lcc/*/library/*.pslx" in patterns
     assert "assets/blueprints/*/*.json" in patterns
+
+
+def test_every_packaged_asset_file_matches_a_package_data_pattern():
+    root = Path(__file__).parents[1]
+    document = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
+    patterns = document["tool"]["setuptools"]["package-data"]["pscad_mcp"]
+    package = root / "pscad_mcp"
+    # Same expansion as setuptools build_py: recursive glob under the package.
+    packaged = {
+        Path(match).relative_to(package).as_posix()
+        for pattern in patterns
+        for match in glob.glob(str(package / pattern), recursive=True)
+    }
+    local_clutter = {"__pycache__", "Thumbs.db", "desktop.ini"}
+
+    candidates = [
+        path.relative_to(package)
+        for path in (package / "assets").rglob("*")
+        if path.is_file()
+    ]
+    unpackaged = sorted(
+        relative.as_posix()
+        for relative in candidates
+        if not any(
+            part in local_clutter or part.startswith(".") for part in relative.parts
+        )
+        and relative.as_posix() not in packaged
+    )
+
+    assert candidates
+    assert unpackaged == []
 
 
 def test_project_packages_blueprint_corpus_assets():

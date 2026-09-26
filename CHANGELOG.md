@@ -62,7 +62,8 @@ All notable changes to this project are documented here.
   fingerprints, and acceptance-report evidence are checked explicitly.
 - The compatibility inventory is 104 compatibility tools: 60 generic tools,
   two topology tools, ten HVDC tools, three learning tools, eight LCC tools,
-  six parametric LCC tools, and eleven MMC tools. With the always-on
+  six parametric LCC tools, eleven MMC tools, and four generic Blueprint
+  Builder tools. With the always-on
   `get_pscad_capabilities` discovery tool, the current total is 105.
 
 - Added the deterministic, privacy-filtered PSCAD Blueprint corpus and four
