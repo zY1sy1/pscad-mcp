@@ -56,6 +56,13 @@ main 原有技能修改、避雷器能量脚本及其他未跟踪输出不属于
 通过，并加强 `verify_package.ps1`，从隔离安装后的 wheel 真正加载和验证该 catalog；
 仅能构建 wheel 不再足以让这个缺陷漏过检查。
 
+首次远端 CI（`b2051a3`）进一步发现开发依赖漏声明 NumPy：干净 runner 中独立电缆
+电阻网络参考测试报 `ModuleNotFoundError`。本地原有 NumPy 掩盖了该问题。
+`dev` extra 现显式包含 NumPy 和避雷器数值回归所用 SciPy；不跳过失败测试，
+并用全新虚拟环境安装 `.[dev,windows]` 后验证，相关数值与打包测试 41 项通过，
+日志为 `clean-numerical-tests.log`。CI 原始日志保存在
+`ci-python312.log`，重新推送后复查五个 Python 版本。
+
 ## 新鲜的五避雷器实机复验
 
 代码版本：`ef033b9dc7f3722a271632f0b902f6f2bcde769b`。
