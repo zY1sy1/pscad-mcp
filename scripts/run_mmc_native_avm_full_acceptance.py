@@ -64,6 +64,22 @@ def main() -> int:
     if not args.workspace_root.is_absolute():
         parser.error("Workspace must be absolute")
     root = args.workspace_root / (time.strftime("suite-%Y%m%d-%H%M%S-") + uuid.uuid4().hex[:8])
+    # PSCAD 4.6's code generator still uses MAX_PATH, even on a host whose
+    # Python runtime supports long paths. Account for the longest fault name,
+    # candidate directory and PID-suffixed compiler batch file before launch.
+    project = "AVM_" + "0" * 12 + "_avm_0"
+    longest_generated_path = (
+        root / max(FAULT_KINDS, key=len) / "attempt-20000101-000000-00000000"
+        / "workspace" / ".mmc-candidates" / ("0" * 20) / "avm-0" / "model"
+        / (project + ".gf42") / (project + ".4294967295.bat")
+    )
+    path_units = len(str(longest_generated_path).encode("utf-16-le")) // 2
+    if path_units >= 260:
+        parser.error(
+            f"PSCAD 4.6 generated paths would require {path_units} UTF-16 units; "
+            "use a shorter --workspace-root (for example D:/PA/mmc). "
+            "No workspace or PSCAD process was created."
+        )
     root.mkdir(parents=True, exist_ok=False)
     report = {"scope": "native_avm_full_physical_suite", "status": "FAIL", "model_accepted": False, "reports": {}}
     records = {}

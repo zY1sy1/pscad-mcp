@@ -52,3 +52,24 @@ def test_suite_cannot_promote_partial_changed_or_uncleaned_evidence(mutation):
         replay["portable_copy"]["compiled_artifacts_copied"] = True
     result = verify_suite(records, replay)
     assert result["status"] == "FAIL" and result["model_accepted"] is False
+
+
+def test_legacy_path_overflow_is_refused_before_workspace_or_vendor_call(tmp_path, monkeypatch):
+    from scripts import run_mmc_native_avm_full_acceptance as runner
+
+    root = tmp_path / ("long-acceptance-root-" * 4)
+    calls = []
+    monkeypatch.setenv("PSCAD_MCP_ACCEPTANCE", "1")
+    monkeypatch.setenv("PSCAD_MCP_NATIVE_AVM_FULL_ACCEPTANCE", "1")
+    monkeypatch.setattr(runner.sys, "argv", ["suite", "--workspace-root", str(root)])
+
+    def vendor_call(*args, **kwargs):
+        calls.append(args)
+        raise RuntimeError("must not launch a vendor process")
+
+    monkeypatch.setattr(runner.subprocess, "run", vendor_call)
+    with pytest.raises(SystemExit) as exc:
+        runner.main()
+    assert exc.value.code == 2
+    assert calls == []
+    assert not root.exists()
