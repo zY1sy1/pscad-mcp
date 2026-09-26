@@ -600,6 +600,19 @@ def attempt(tmp_path, monkeypatch, *, source_code_drift=False, **session_options
     return module, result, session
 
 
+def test_compile_freshness_uses_filesystem_time_instead_of_precise_wall_clock(tmp_path, monkeypatch):
+    import time
+
+    module = runner()
+    monkeypatch.setattr(module, "time", SimpleNamespace(
+        time=lambda: time.time() + 60.0,
+        time_ns=lambda: time.time_ns() + 60_000_000_000,
+    ), raising=False)
+    monkeypatch.setitem(globals(), "runner", lambda: module)
+    _, report, _ = attempt(tmp_path, monkeypatch)
+    assert report["status"] == "PASS", report.get("error")
+
+
 def test_registry_complete_fixture_preserves_normalized_rx_and_scoped_evidence(
     tmp_path, monkeypatch
 ):

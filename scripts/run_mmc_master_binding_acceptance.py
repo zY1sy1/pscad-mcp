@@ -9,7 +9,7 @@ import os
 import re
 import shutil
 import sys
-import time
+import tempfile
 import uuid
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict
@@ -953,8 +953,18 @@ async def _compile_fixture(
         "A fresh fixture must not contain a pre-existing project executable",
     )
     record["started_at"] = _stamp()
-    record["started_after"] = time.time()
-    record["started_after_ns"] = time.time_ns()
+    # Windows' precise wall clock can run ahead of newly created file mtimes.
+    # Use the same filesystem as the compiler, keeping the empty-before-build
+    # requirement above and the unchanged nanosecond freshness gate below.
+    with tempfile.NamedTemporaryFile(dir=run_dir, prefix=".compile-", suffix=".stamp", delete=False) as stream:
+        marker = Path(stream.name)
+        stream.write(b"compile boundary\n")
+    try:
+        record["started_after_ns"] = marker.stat().st_mtime_ns
+    finally:
+        marker.unlink()
+    record["started_after"] = record["started_after_ns"] / 1_000_000_000
+    record["clock_basis"] = "filesystem"
     record["result"] = await bounded(service.build_project(project_name), timeout)
     record["messages"] = await bounded(
         service.get_project_output(project_name, structured=True)
