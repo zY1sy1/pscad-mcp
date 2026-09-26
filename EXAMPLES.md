@@ -40,7 +40,7 @@ Before using the prompts below, add the server in Copilot CLI with `/mcp add`, t
 **Copilot:**
 > I will first establish a connection to your local PSCAD instance and then proceed to load the requested project and locate the component.
 
-1.  **Tool Call:** `get_local_pscad()` → *Success (Attached to PSCAD v5.0.2)*
+1.  **Tool Call:** `get_local_pscad()` → *Success (Launched a managed PSCAD 5.0.2 instance)*
 2.  **Tool Call:** `load_projects(filenames=["C:\\Users\\Lua\\Documents\\Wind_Farm_Test.pscx"])` → *Success*
 3.  **Tool Call:** `find_components(project_name="Wind_Farm_Test", name="MainTransformer")` → *Success (Found 1 component, ID: 12345)*
 4.  **Tool Call:** `get_component_parameters(project_name="Wind_Farm_Test", component_id=12345)` → *Returns Parameters*

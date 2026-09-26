@@ -30,9 +30,9 @@ The user simply provides a goal to GitHub Copilot CLI:
 > "Launch PSCAD, load the vdiv project, set R1 to 100 ohms and run it. Summarize the output messages for me."
 
 **What happens behind the scenes (The MCP Advantage):**
-1. **Auto-Connection**: MCP uses `get_local_pscad` to find an existing instance (Saving 10s of startup time).
+1. **Managed Launch**: MCP uses `get_local_pscad` to launch a server-owned PSCAD instance; it never attaches to a GUI you opened yourself.
 2. **Watchdog Protection**: If `project.run()` takes too long to respond, the MCP Executor triggers a timeout instead of hanging the AI.
-3. **Contextual Knowledge**: The AI reads `docs/pydoc_mhi_pscad_project.txt` to know that `run_status` returns a tuple, something a human might forget.
+3. **Contextual Knowledge**: The AI reads the synced `mhi.pscad.project` module with `read_documentation` (stored in local state, not in the repository) to know that `run_status` returns a tuple, something a human might forget.
 4. **Data Translation**: The binary results are translated into a JSON summary automatically.
 
 ## Summary of Value

@@ -77,13 +77,22 @@ def install_package():
         logger.error("❌ Installation failed: %s", e)
         sys.exit(1)
 
+def _documentation_root():
+    """Return the directory the documentation sync writes to."""
+    try:
+        from pscad_mcp.utils.doc_manager import DocumentationManager
+
+        return str(DocumentationManager.from_environ(os.environ).base_dir)
+    except Exception:
+        return "the local PSCAD MCP documentation directory"
+
 def sync_docs():
     """Run the documentation sync utility."""
     logger.info("📚 Synchronizing PSCAD documentation for AI reference...")
     try:
         # Run via the new command point or module
         subprocess.check_call([sys.executable, "-m", "pscad_mcp.utils.doc_manager"])
-        logger.info("✅ Documentation synced in /docs.")
+        logger.info("✅ Documentation synced to %s.", _documentation_root())
     except Exception as e:
         logger.warning("⚠️ Doc sync failed (maybe PSCAD is not installed?). Skipping. Error: %s", e)
 
