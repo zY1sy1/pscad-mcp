@@ -128,6 +128,9 @@ class TestLegacyReliabilityAcceptance(LegacyAcceptanceCase):
     async def test_03_nonblocking_run_pause_resume_stop(self) -> None:
         path = self._timestamped_project_copy("reliability-run-control")
         project_name = await self._load_path(path)
+        await self.backend.set_settings(project_name, {
+            "time_duration": 1000, "time_step": 10, "sample_step": 100000,
+        })
 
         await asyncio.wait_for(self.backend.run_project(project_name), 10)
         started = await asyncio.wait_for(
@@ -145,6 +148,8 @@ class TestLegacyReliabilityAcceptance(LegacyAcceptanceCase):
         resumed = await asyncio.wait_for(
             self.backend.project_run_state(project_name), 10
         )
+        self.assertEqual(paused.status, "paused")
+        self.assertEqual(resumed.status, "running")
         await asyncio.wait_for(self.backend.stop_project(project_name), 10)
         stopped = await self._wait_for_terminal_state(project_name, 30)
         self.assertIn(stopped.status, {"completed", "stopped", "idle"})

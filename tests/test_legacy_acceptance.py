@@ -369,6 +369,11 @@ class TestLegacyAcceptance(LegacyAcceptanceCase):
         project_name = await self._load_project(
             "PSCAD_MCP_ACCEPTANCE_SIMULATION_PROJECT"
         )
+        # A 0.2 s divider can finish before a control command reaches it.
+        # Keep the solver active while bounding the saved output volume.
+        await self.backend.set_settings(project_name, {
+            "time_duration": 1000, "time_step": 10, "sample_step": 100000,
+        })
         await asyncio.wait_for(self.backend.run_project(project_name), 10)
         started = await asyncio.wait_for(
             self.backend.project_run_state(project_name), 10
@@ -382,6 +387,7 @@ class TestLegacyAcceptance(LegacyAcceptanceCase):
         paused = await asyncio.wait_for(
             self.backend.project_run_state(project_name), 10
         )
+        self.assertEqual(paused.status, "paused")
         await asyncio.wait_for(self.backend.stop_project(project_name), 10)
         stopped = await self._wait_for_terminal_state(project_name, 30)
         self.assertIn(stopped.status, {"completed", "stopped", "idle"})

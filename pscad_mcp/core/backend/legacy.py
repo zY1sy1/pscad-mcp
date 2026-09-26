@@ -12,7 +12,7 @@ import shutil
 import tempfile
 import time
 import xml.etree.ElementTree as ET
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from collections.abc import Mapping as MappingABC
 from copy import deepcopy
 from decimal import Decimal, InvalidOperation
@@ -786,6 +786,19 @@ class LegacyBackend:
 
     async def run_project(self, project_name: str) -> None:
         project = await self._project(project_name)
+        resuming = project_name in self._paused_projects
+        if resuming:
+            states = await self._case_run_states()
+            target = states.get(project_name)
+            if target is not None and target.status.casefold() == "paused":
+                require_single_active_target(project_name, states, backend=self.name, operation="run_project")
+                # The native Pause action toggles resume. A fresh project
+                # "run" command restarts a build instead of resuming the solver.
+                await self._run_control_command("ID_RIBBON_HOME_RUN_PAUSE", "run_project")
+                self._paused_projects.discard(project_name)
+                self._running_projects.add(project_name)
+                return
+            resuming = False
 
         def start() -> None:
             command = project.command("run")
@@ -794,10 +807,11 @@ class LegacyBackend:
         await self.executor.run_safe(start)
         self._paused_projects.discard(project_name)
         self._running_projects.add(project_name)
-        self._run_activity_seen.discard(project_name)
-        self._run_submitted_at[project_name] = time.monotonic()
-        self._run_last_active_at.pop(project_name, None)
-        self._run_last_active_status.pop(project_name, None)
+        if not resuming:
+            self._run_activity_seen.discard(project_name)
+            self._run_submitted_at[project_name] = time.monotonic()
+            self._run_last_active_at.pop(project_name, None)
+            self._run_last_active_status.pop(project_name, None)
 
     async def pause_project(self, project_name: str) -> None:
         target = await self._wait_for_pauseable_target(project_name)
@@ -813,18 +827,35 @@ class LegacyBackend:
 
     async def stop_project(self, project_name: str) -> None:
         states = await self._case_run_states()
-        require_single_active_target(
+        target = require_single_active_target(
             project_name,
             states,
             backend=self.name,
             operation="stop_project",
         )
-        await self._run_control_command("ID_RIBBON_HOME_RUN_STOP", "stop_project")
-        self._paused_projects.discard(project_name)
+        # The 4.6 solver may not consume Stop while paused. Resume only this
+        # already-validated target, then require an observed terminal state.
+        if target.status.casefold() == "paused":
+            await self.run_project(project_name)
+
+        async def request_stop() -> None:
+            current = await self._case_run_states()
+            observed = current.get(project_name)
+            if observed is not None and observed.status.casefold() in STOPPED_RUN_STATUSES:
+                return
+            # Native UI actions are asynchronous even after a successful
+            # response. Revalidate scope before every bounded retry so a new
+            # active case is never stopped by an application-wide command.
+            require_single_active_target(project_name, current, backend=self.name, operation="stop_project")
+            await self._run_control_command("ID_RIBBON_HOME_RUN_STOP", "stop_project")
+            self._paused_projects.discard(project_name)
+
+        await request_stop()
         await self._wait_for_project_state(
             project_name,
             STOPPED_RUN_STATUSES,
             "stop_project",
+            retry_command=request_stop,
         )
         self._running_projects.discard(project_name)
         self._run_activity_seen.discard(project_name)
@@ -872,6 +903,8 @@ class LegacyBackend:
         project_name: str,
         expected: frozenset[str],
         operation: str,
+        *,
+        retry_command: Callable[[], Awaitable[None]] | None = None,
     ) -> RunState:
         deadline = time.monotonic() + self.RUN_CONTROL_TIMEOUT
         last_state: RunState | None = None
@@ -894,6 +927,8 @@ class LegacyBackend:
                     },
                 )
             await asyncio.sleep(self.RUN_CONTROL_POLL_INTERVAL)
+            if retry_command is not None:
+                await retry_command()
 
     async def _run_control_command(self, command_id: str, operation: str) -> None:
         app = self._require_app()

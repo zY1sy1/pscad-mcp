@@ -323,6 +323,7 @@ class FakeLegacyApp:
         self.hidden_load_names = set()
         self.loaded_type_overrides = {}
         self.command_calls = []
+        self.paused = False
         self.command_responses = {
             "ID_RIBBON_HOME_RUN_PAUSE": ET.Element(
                 "response", {"success": "true"}
@@ -332,15 +333,14 @@ class FakeLegacyApp:
             ),
         }
         self.command_effects = {
-            "ID_RIBBON_HOME_RUN_PAUSE": lambda: self._set_all_run_states(
-                "paused"
-            ),
+            "ID_RIBBON_HOME_RUN_PAUSE": lambda: self._set_all_run_states("running" if self.paused else "paused"),
             "ID_RIBBON_HOME_RUN_STOP": lambda: self._set_all_run_states(
                 "stopped"
             ),
         }
 
     def _set_all_run_states(self, status):
+        self.paused = status == "paused"
         progress = 100.0 if status == "stopped" else 50.0
         for project in self.project_map.values():
             if project.type.casefold() == "case":
@@ -1039,8 +1039,65 @@ class TestLegacyRunControl(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(output.getvalue(), "")
         self.assertEqual(
             app.command_calls,
-            ["ID_RIBBON_HOME_RUN_PAUSE", "ID_RIBBON_HOME_RUN_STOP"],
+            ["ID_RIBBON_HOME_RUN_PAUSE", "ID_RIBBON_HOME_RUN_PAUSE", "ID_RIBBON_HOME_RUN_STOP"],
         )
+
+    async def test_stop_resumes_a_paused_solver_before_requiring_terminal_status(self):
+        backend, app, project = await self.make_backend()
+        await backend.pause_project("case")
+        paused = [True]
+        def resume_effect():
+            paused[0] = False
+            project.run_status_response = ("running", 25)
+        app.command_effects["ID_RIBBON_HOME_RUN_PAUSE"] = resume_effect
+
+        def stop_effect():
+            if not paused[0]:
+                project.run_status_response = ("stopped", 25)
+
+        app.command_effects["ID_RIBBON_HOME_RUN_STOP"] = stop_effect
+        with patch.object(LegacyBackend, "RUN_CONTROL_TIMEOUT", 0.02), patch.object(LegacyBackend, "RUN_CONTROL_POLL_INTERVAL", 0.001):
+            await backend.stop_project("case")
+        self.assertEqual((await backend.project_run_state("case")).status, "stopped")
+        self.assertFalse(paused[0])
+        self.assertEqual(project.run_command.execute_args, [])
+
+    async def test_resume_rejects_multiple_active_cases_before_global_toggle(self):
+        backend, app, project = await self.make_backend()
+        await backend.pause_project("case")
+        app.project_map["other"] = FakeProject("other")
+        with self.assertRaises(BackendError) as exc:
+            await backend.run_project("case")
+        self.assertEqual(exc.exception.code, "RUN_CONTROL_SCOPE_CONFLICT")
+        self.assertEqual(app.command_calls, ["ID_RIBBON_HOME_RUN_PAUSE"])
+        self.assertEqual(project.run_command.execute_args, [])
+
+    async def test_stop_retries_a_delayed_native_action_until_observed_terminal(self):
+        backend, app, project = await self.make_backend()
+        calls = []
+
+        def delayed_stop():
+            calls.append(True)
+            if len(calls) == 2:
+                project.run_status_response = ("stopped", 25)
+
+        app.command_effects["ID_RIBBON_HOME_RUN_STOP"] = delayed_stop
+        with patch.object(LegacyBackend, "RUN_CONTROL_TIMEOUT", 0.03), patch.object(LegacyBackend, "RUN_CONTROL_POLL_INTERVAL", 0.001):
+            await backend.stop_project("case")
+        self.assertEqual(len(calls), 2)
+        self.assertEqual((await backend.project_run_state("case")).status, "stopped")
+
+    async def test_stop_retry_rechecks_scope_if_another_case_becomes_active(self):
+        backend, app, project = await self.make_backend()
+        other = FakeProject("other")
+        other.run_status_response = ("idle", None)
+        app.project_map["other"] = other
+        app.command_effects["ID_RIBBON_HOME_RUN_STOP"] = lambda: setattr(other, "run_status_response", ("running", 0))
+        with patch.object(LegacyBackend, "RUN_CONTROL_TIMEOUT", 0.03), patch.object(LegacyBackend, "RUN_CONTROL_POLL_INTERVAL", 0.001):
+            with self.assertRaises(BackendError) as exc:
+                await backend.stop_project("case")
+        self.assertEqual(exc.exception.code, "RUN_CONTROL_SCOPE_CONFLICT")
+        self.assertEqual(app.command_calls, ["ID_RIBBON_HOME_RUN_STOP"])
 
     async def test_pause_rejects_two_active_projects_without_sending_command(self):
         backend, app, project = await self.make_backend()
@@ -1106,9 +1163,10 @@ class TestLegacyRunControl(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_run_and_terminal_status_clear_tracked_pause(self):
-        backend, _app, project = await self.make_backend()
+        backend, app, project = await self.make_backend()
         project.run_status_response = ("running", 25)
         backend._paused_projects.add("case")
+        app.paused = True
 
         await backend.run_project("case")
 
