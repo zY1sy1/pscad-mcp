@@ -1,0 +1,180 @@
+{
+  "schema_version": 1,
+  "integrity_status": "INCOMPLETE",
+  "licensed_acceptance_run": false,
+  "release_complete": false,
+  "checkout_commit": "2d9012f3b031a425081e32139f232e303a56095d",
+  "note": "File integrity only. Historical evidence retains its original scope and revision; no physical checks were rerun.",
+  "scopes": [
+    {
+      "scope": "legacy_core_462",
+      "recorded_licensed_status": "PASS",
+      "evidence_commit": "d7805e77045407a3f7f9ce8999e7d13a4cd34a7c",
+      "evidence_matches_checkout": false,
+      "integrity_status": "VERIFIED",
+      "verified_files": 2,
+      "errors": []
+    },
+    {
+      "scope": "unified_topology_462",
+      "recorded_licensed_status": "PASS",
+      "evidence_commit": "6ec6118f9fd0e979fb9a8a00202327dbf576e165",
+      "evidence_matches_checkout": false,
+      "integrity_status": "VERIFIED",
+      "verified_files": 1,
+      "errors": []
+    },
+    {
+      "scope": "fixed_cigre_lcc",
+      "recorded_licensed_status": "INCOMPLETE_ANALYSIS",
+      "evidence_commit": "85f9d84a974e6afae97ee74f4d510882d3cc743d",
+      "evidence_matches_checkout": false,
+      "integrity_status": "VERIFIED",
+      "verified_files": 9,
+      "errors": []
+    },
+    {
+      "scope": "parametric_lcc",
+      "recorded_licensed_status": "PARTIAL",
+      "evidence_commit": "dfaa0b020fba863dfe9bdd0ae2b65baec3f9654c",
+      "evidence_matches_checkout": false,
+      "integrity_status": "VERIFIED",
+      "verified_files": 8,
+      "errors": []
+    },
+    {
+      "scope": "hvdc_scenarios",
+      "recorded_licensed_status": "PARTIAL",
+      "evidence_commit": "5613ff7df46e671a9732384c445a99cf500c4559",
+      "evidence_matches_checkout": false,
+      "integrity_status": "VERIFIED",
+      "verified_files": 1,
+      "errors": []
+    },
+    {
+      "scope": "mmc_stage_a",
+      "recorded_licensed_status": "INCOMPLETE_ANALYSIS",
+      "evidence_commit": "8872a96f72c039ebca1925b8e6a6cfa8763e7d19",
+      "evidence_matches_checkout": false,
+      "integrity_status": "NO_DURABLE_REPORT",
+      "verified_files": 0,
+      "errors": []
+    },
+    {
+      "scope": "parametric_mmc",
+      "recorded_licensed_status": "PARTIAL",
+      "evidence_commit": "9cfe1d41dd2113cb4e72e3a285b1da00397a2b6b",
+      "evidence_matches_checkout": false,
+      "integrity_status": "VERIFIED",
+      "verified_files": 30,
+      "errors": []
+    },
+    {
+      "scope": "generic_blueprint_builder",
+      "recorded_licensed_status": "NOT_RUN_ON_INTEGRATED_COMMIT",
+      "evidence_commit": null,
+      "evidence_matches_checkout": false,
+      "integrity_status": "NO_DURABLE_REPORT",
+      "verified_files": 0,
+      "errors": []
+    },
+    {
+      "scope": "native_mmc_half_bridge_640kv",
+      "recorded_licensed_status": "PASS",
+      "evidence_commit": "9cfe1d41dd2113cb4e72e3a285b1da00397a2b6b",
+      "evidence_matches_checkout": false,
+      "integrity_status": "VERIFIED",
+      "verified_files": 28,
+      "errors": []
+    },
+    {
+      "scope": "mmc_full_bridge_joint_462",
+      "recorded_licensed_status": "PASS",
+      "evidence_commit": "5613ff7df46e671a9732384c445a99cf500c4559",
+      "evidence_matches_checkout": false,
+      "integrity_status": "VERIFIED",
+      "verified_files": 3,
+      "errors": []
+    },
+    {
+      "scope": "modern_core_5",
+      "recorded_licensed_status": "NOT_RUN_ON_INTEGRATED_COMMIT",
+      "evidence_commit": null,
+      "evidence_matches_checkout": false,
+      "integrity_status": "NO_DURABLE_REPORT",
+      "verified_files": 0,
+      "errors": []
+    },
+    {
+      "scope": "lcc_parametric_executor_462",
+      "recorded_licensed_status": "PASS",
+      "evidence_commit": "dfaa0b020fba863dfe9bdd0ae2b65baec3f9654c",
+      "evidence_matches_checkout": false,
+      "integrity_status": "VERIFIED",
+      "verified_files": 8,
+      "errors": []
+    },
+    {
+      "scope": "native_mmc_half_bridge_500kv_50hz",
+      "recorded_licensed_status": "PASS",
+      "evidence_commit": "9cfe1d41dd2113cb4e72e3a285b1da00397a2b6b",
+      "evidence_matches_checkout": false,
+      "integrity_status": "VERIFIED",
+      "verified_files": 28,
+      "errors": []
+    },
+    {
+      "scope": "native_mmc_half_bridge_640kv_q100",
+      "recorded_licensed_status": "PASS",
+      "evidence_commit": "9cfe1d41dd2113cb4e72e3a285b1da00397a2b6b",
+      "evidence_matches_checkout": false,
+      "integrity_status": "VERIFIED",
+      "verified_files": 28,
+      "errors": []
+    },
+    {
+      "scope": "native_average_arm_462",
+      "recorded_licensed_status": "PASS",
+      "evidence_commit": "9cfe1d41dd2113cb4e72e3a285b1da00397a2b6b",
+      "evidence_matches_checkout": false,
+      "integrity_status": "VERIFIED",
+      "verified_files": 5,
+      "errors": []
+    }
+  ],
+  "generated_at": "2026-09-26T17:59:38+08:00",
+  "inventory_path": "docs/acceptance-status.json",
+  "inventory_sha256": "3c0f2fcb713f945cf47ee1b484006c5ab32ae27fb3dce4dda12f36754ba61f2e",
+  "audit_source_commit": "2a9ed5b81bc48bd65cc62e2780a5f9ab17627603",
+  "audit_source_path": "scripts/audit_acceptance_inventory.py",
+  "audit_source_sha256": "99d71f352448aecc205b1531a341fbdc22a68ae14e049e74d87e0f9e989df205",
+  "merged_historical_evidence": {
+    "schema_version": 1,
+    "integrity_status": "VERIFIED",
+    "licensed_acceptance_run": false,
+    "release_complete": false,
+    "checkout_commit": "2d9012f3b031a425081e32139f232e303a56095d",
+    "note": "File integrity only. Historical evidence retains its original scope and revision; no physical checks were rerun.",
+    "scopes": [
+      {
+        "scope": "native_mmc_half_bridge_640kv_merged_historical",
+        "recorded_licensed_status": "PASS",
+        "evidence_commit": "5613ff7df46e671a9732384c445a99cf500c4559",
+        "evidence_matches_checkout": false,
+        "integrity_status": "VERIFIED",
+        "verified_files": 28,
+        "errors": []
+      },
+      {
+        "scope": "fixed_cigre_lcc_merged_historical",
+        "recorded_licensed_status": "INCOMPLETE_ANALYSIS",
+        "evidence_commit": "a2959fe47bfea0dfd38c75ea694e4c3e28e09ea5",
+        "evidence_matches_checkout": false,
+        "integrity_status": "VERIFIED",
+        "verified_files": 1,
+        "errors": []
+      }
+    ]
+  },
+  "integration_ancestry_verified": true
+}

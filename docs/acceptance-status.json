@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-09-26T13:15:24+08:00",
+  "updated_at": "2026-09-26T17:57:59+08:00",
   "policy": "Evidence belongs only to its named scope, exact request and tested commit. INTEGRATION_BRANCH records are not merged/deployed. PASS is never inherited by another builder, rating or later commit; offline integrity checks do not establish physical acceptance.",
   "scopes": [
     {
@@ -60,7 +60,8 @@
           "path": "D:\\PSCAD-Workspace\\acceptance\\completion-20260926\\legacy-130327.log",
           "sha256": "26e584f3c0f7e2284c954a3e40a1deb0dab484c16ce4ca2a6a8d84428d84c32f"
         }
-      ]
+      ],
+      "implementation_branch": "codex/complete-acceptance"
     },
     {
       "scope": "unified_topology_462",
@@ -202,7 +203,8 @@
           "path": "D:\\PA\\l26fixed\\fixed-lcc-20260926-035029-237\\fixed-lcc-acceptance-report.json",
           "sha256": "63003bafc9ab105d091bbc3836cacdd916b66cf7c12a79a18baf1fab674bb939"
         }
-      ]
+      ],
+      "implementation_branch": "codex/complete-acceptance"
     },
     {
       "scope": "parametric_lcc",
@@ -213,7 +215,7 @@
         "sha256": "bb358ba827788e2d1f99b492b71610f4302a6acd270a186c4a76adff77e610a9",
         "commit": "dfaa0b020fba863dfe9bdd0ae2b65baec3f9654c"
       },
-      "note": "Only the nominal-template low-level executor lifecycle has real load/save/run/output/cleanup evidence. The public rated builder remains blocked by 13 unresolved physical parameter mappings; per-pole versus total bipole power is awaiting clarification. No rating-matrix or model acceptance is claimed.",
+      "note": "Only the nominal-template low-level executor lifecycle has real load/save/run/output/cleanup evidence. The public rated builder still needs its physical parameter mappings and rating matrix. The user has resolved the power convention as total system MW, pole-to-ground kV and per-pole kA (bipolar P=2UI, monopolar P=UI); implementation and real validation continue on the completion branch. No rating-matrix or model acceptance is claimed.",
       "historical_attempts": [
         {
           "licensed_status": "NOT_RUN_ON_INTEGRATED_COMMIT",
@@ -280,7 +282,8 @@
           "path": "D:/PA/l26_lifecycle_probe.py",
           "sha256": "2482c321d4bf02ec77fa7d75fe98224bbafa29d6ee7ec6cb6a5727114e6038f7"
         }
-      ]
+      ],
+      "implementation_branch": "codex/complete-acceptance"
     },
     {
       "scope": "hvdc_scenarios",
@@ -416,7 +419,8 @@
           "path": "D:/PA/c26v3c/suite-20260926-121823-af3bb399/report.json",
           "sha256": "a72d96d6d040aaafd207c3f6c79c1c92b4469832275fbf8a4c7be3a1dafc274c"
         }
-      ]
+      ],
+      "implementation_branch": "codex/complete-acceptance"
     },
     {
       "scope": "generic_blueprint_builder",
@@ -490,7 +494,7 @@
         "switching_harmonics_not_modeled",
         "thermal_not_modeled"
       ],
-      "note": "Six-stage normal/four-fault/independent-reload suite passed at 9cfe1d4 for this exact request, with empty engineering overrides. No acceptance transfer to other ratings, full-bridge models, switching/thermal behavior or whole-program WP6.",
+      "note": "Six-stage normal/four-fault/independent-reload suite passed at 9cfe1d4 for this exact request, with empty engineering overrides. No acceptance transfer to other ratings, full-bridge models, switching/thermal behavior or whole-program WP6. The previously accepted main implementation at 5613ff7 is retained in historical_attempts; its six-stage PASS is not replaced by a claim that the new implementation is merged.",
       "historical_attempts": [
         {
           "licensed_status": "PASS",
@@ -519,7 +523,8 @@
           ],
           "note": "Normal operation, AC three-phase, AC single-line-ground, DC pole-pole, DC pole-ground and independent portable reload passed for this request at the recorded revision. Not whole-program WP6 or acceptance of other ratings."
         }
-      ]
+      ],
+      "implementation_branch": "codex/complete-acceptance"
     },
     {
       "scope": "mmc_full_bridge_joint_462",
@@ -651,7 +656,8 @@
           "sha256": "2482c321d4bf02ec77fa7d75fe98224bbafa29d6ee7ec6cb6a5727114e6038f7"
         }
       ],
-      "note": "Executor lifecycle probe only: original template at nominal frequency, five fresh OUT parts, immutable source/Master, owned cleanup. model_accepted=false; not the public rated builder or a physical/golden acceptance."
+      "note": "Executor lifecycle probe only: original template at nominal frequency, five fresh OUT parts, immutable source/Master, owned cleanup. model_accepted=false; not the public rated builder or a physical/golden acceptance.",
+      "implementation_branch": "codex/complete-acceptance"
     },
     {
       "scope": "native_mmc_half_bridge_500kv_50hz",
@@ -714,7 +720,8 @@
         "switching_harmonics_not_modeled",
         "thermal_not_modeled"
       ],
-      "note": "Six-stage normal/four-fault/independent-reload suite passed at 9cfe1d4 for this exact request, with empty engineering overrides. No acceptance transfer to other ratings, full-bridge models, switching/thermal behavior or whole-program WP6."
+      "note": "Six-stage normal/four-fault/independent-reload suite passed at 9cfe1d4 for this exact request, with empty engineering overrides. No acceptance transfer to other ratings, full-bridge models, switching/thermal behavior or whole-program WP6.",
+      "implementation_branch": "codex/complete-acceptance"
     },
     {
       "scope": "native_mmc_half_bridge_640kv_q100",
@@ -777,7 +784,8 @@
         "switching_harmonics_not_modeled",
         "thermal_not_modeled"
       ],
-      "note": "Six-stage normal/four-fault/independent-reload suite passed at 9cfe1d4 for this exact request, with empty engineering overrides. No acceptance transfer to other ratings, full-bridge models, switching/thermal behavior or whole-program WP6."
+      "note": "Six-stage normal/four-fault/independent-reload suite passed at 9cfe1d4 for this exact request, with empty engineering overrides. No acceptance transfer to other ratings, full-bridge models, switching/thermal behavior or whole-program WP6.",
+      "implementation_branch": "codex/complete-acceptance"
     },
     {
       "scope": "native_average_arm_462",
@@ -828,8 +836,17 @@
           "sha256": "48ba3e2048b6fda2988d0dccd7cee6717cffb7f0bac33b321ff7194e49cd6b81"
         }
       ],
-      "note": "Isolated native half-bridge average-arm charge/discharge/blocked behavior passed after the empty-capacitor coupling repair. Component acceptance only, not a complete converter or intrinsic DC fault blocking claim."
+      "note": "Isolated native half-bridge average-arm charge/discharge/blocked behavior passed after the empty-capacitor coupling repair. Component acceptance only, not a complete converter or intrinsic DC fault blocking claim.",
+      "implementation_branch": "codex/complete-acceptance"
     }
   ],
-  "program_baseline_note": "docs/acceptance/lcc-mmc-program-baseline.json is the frozen earlier program baseline. Later reports are indexed here without promoting that baseline or WP6."
+  "program_baseline_note": "docs/acceptance/lcc-mmc-program-baseline.json is the frozen earlier program baseline. Later reports are indexed here without promoting that baseline or WP6.",
+  "inventory_context": {
+    "main_head_at_review": "2d9012f3b031a425081e32139f232e303a56095d",
+    "merged_mmc_tested_commit": "5613ff7df46e671a9732384c445a99cf500c4559",
+    "completion_branch": "codex/complete-acceptance",
+    "completion_evidence_snapshot_commit": "2a9ed5b81bc48bd65cc62e2780a5f9ab17627603",
+    "summary_path": "docs/acceptance/current-status-20260926.md",
+    "note": "This index includes verified evidence from main and an unmerged completion branch. INTEGRATION_BRANCH describes the implementation that produced the latest report, not main. Historical baseline files remain frozen; documentation updates do not transfer acceptance to another revision."
+  }
 }
