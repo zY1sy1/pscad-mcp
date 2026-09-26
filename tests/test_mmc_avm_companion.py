@@ -458,3 +458,29 @@ if (sample == NINT(0.5 / DELT)) print *, (supplied - (0.5 * physical_capacitance
         residuals.append(abs(rows[0][0]))
     assert residuals[0] < 0.001  # < 1 kW; old coupling injects about 1 MW/arm
     assert residuals[1] < residuals[0] * 0.3
+
+
+def test_empty_native_capacitor_cannot_supply_reverse_clamp_current(library, tmp_path):
+    from tests.test_mmc_native_dq import _run_native_equations
+
+    definition = library[0].find("./definitions/Definition[@name='MMCAverageCoupling']")
+    rows = _run_native_equations(
+        tmp_path, "MMCAverageCoupling", definition=definition,
+        declarations="", initialize="PAR_C_eq_F = 0.00019\nPAR_P_nonohmic_MW = 0.0\nDELT = 0.00001",
+        loop="""SIG_BLOCK = 1.0
+SIG_M = 0.0
+SIG_INORMAL = 0.0
+SIG_VCAP = 0.0
+SIG_ICLAMP = -0.005
+if (sample == 2) SIG_ICLAMP = 0.005
+if (sample == 3) SIG_VCAP = 500.0
+""",
+        observations="print *, SIG_ISTORE, SIG_VEQ, SIG_W", steps=3,
+    )
+    # A reverse/leakage current from the delayed diode solve cannot draw
+    # charge from an empty stack. Charging and charged-stack discharge remain
+    # physical currents; the reported capacitor voltage is never clipped.
+    assert rows[0][0] == 0.0
+    assert rows[1][0] == pytest.approx(0.005)
+    assert rows[2][0] == pytest.approx(-0.005)
+    assert rows[2][1] == pytest.approx(250.0)

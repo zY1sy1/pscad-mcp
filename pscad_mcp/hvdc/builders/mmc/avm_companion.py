@@ -825,6 +825,12 @@ def _make_library(
 ! Pair it with the ratio that produced that solution, not the new command.
 ! Otherwise a varying insertion ratio creates first-order artificial power.
       $ISTORE = STORF(NSTORF) * $INORMAL + $ICLAMP - ILOSS
+! The delayed diode solution can briefly contain reverse clamp/leakage
+! current while the physical capacitor is empty. Bound the complete storage
+! sink by available charge, using the same eight-step reserve as the loss
+! sink above. This changes the injected current, never the measured voltage
+! or reported energy, and leaves ordinary charged-stack discharge unchanged.
+      $ISTORE = MAX($ISTORE, -0.25 * $C_eq_F * MAX(0.0, $VCAP) / (8.0 * DELT))
       VPREDICT = MAX(0.0, $VCAP + {CAPACITOR_FEEDBACK_ADVANCE_STEPS} * DELT * $ISTORE / (0.25 * $C_eq_F))
       $VNORMAL = NINSERT * VPREDICT
       $VCLAMP = VPREDICT
