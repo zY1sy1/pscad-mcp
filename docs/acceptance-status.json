@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-09-26T18:17:51+08:00",
+  "updated_at": "2026-09-26T19:10:15+08:00",
   "policy": "Evidence belongs only to its named scope, exact request and tested commit. INTEGRATION_BRANCH records are not merged/deployed. PASS is never inherited by another builder, rating or later commit; offline integrity checks do not establish physical acceptance.",
   "scopes": [
     {
@@ -213,11 +213,11 @@
       "implementation_status": "MERGED",
       "licensed_status": "PARTIAL",
       "evidence": {
-        "report_path": "D:/PA/l26/probe-114428/report.json",
-        "sha256": "bb358ba827788e2d1f99b492b71610f4302a6acd270a186c4a76adff77e610a9",
-        "commit": "dfaa0b020fba863dfe9bdd0ae2b65baec3f9654c"
+        "report_path": "D:\\PA\\i26lcctime\\probe-185837\\report.json",
+        "sha256": "baa78fb7351f9778c6e0a090f98be4eddb798f8a2fefa9ea9ad4107947107f02",
+        "commit": "1d1a4dabaff3b65a5ef92d2732e7ed4112e4531d"
       },
-      "note": "Only the nominal-template low-level executor lifecycle has real load/save/run/output/cleanup evidence. The public rated builder remains blocked by 13 unresolved physical parameter mappings; the power convention is resolved as total system MW, pole-to-ground kV and per-pole kA (bipolar P=2UI, monopolar P=UI). Three fresh 800/900/1000 MW template operating-point diagnostics at fb0b244 confirm the total-power interpretation; see docs/acceptance/lcc-rating-convention.md. No rating-matrix or model acceptance is claimed.",
+      "note": "Only the nominal-template low-level executor lifecycle has real load/save/run/output/cleanup evidence. The public rated builder remains blocked by 13 unresolved physical parameter mappings; the power convention is resolved as total system MW, pole-to-ground kV and per-pole kA (bipolar P=2UI, monopolar P=UI). Three fresh 800/900/1000 MW template operating-point diagnostics at fb0b244 confirm the total-power interpretation; see docs/acceptance/lcc-rating-convention.md. No rating-matrix or model acceptance is claimed. The executor clock repair was reverified on Python 3.13.15 at 1d1a4da: new five-part output, unchanged inputs/code and owned cleanup. This remains a lifecycle probe with model_accepted=false.",
       "historical_attempts": [
         {
           "licensed_status": "NOT_RUN_ON_INTEGRATED_COMMIT",
@@ -227,6 +227,71 @@
             "commit": "bea7b919970a1e323e2b7a14de55cc2f356f3545"
           },
           "note": "Parameterized execution is merged; the rating-specific licensed matrix and final independent-reference acceptance remain unverified. Fixed-case engineering PASS does not transfer to this path."
+        },
+        {
+          "licensed_status": "PARTIAL",
+          "evidence": {
+            "report_path": "D:/PA/l26/probe-114428/report.json",
+            "sha256": "bb358ba827788e2d1f99b492b71610f4302a6acd270a186c4a76adff77e610a9",
+            "commit": "dfaa0b020fba863dfe9bdd0ae2b65baec3f9654c"
+          },
+          "evidence_checks": [
+            {
+              "pointer": "/status",
+              "equals": "PASS"
+            },
+            {
+              "pointer": "/scope",
+              "equals": "lcc.parametric_executor_lifecycle_probe"
+            },
+            {
+              "pointer": "/model_accepted",
+              "equals": false
+            },
+            {
+              "pointer": "/source_inputs_immutable",
+              "equals": true
+            },
+            {
+              "pointer": "/source_code_immutable",
+              "equals": true
+            },
+            {
+              "pointer": "/cleanup/owned_process_cleaned",
+              "equals": true
+            }
+          ],
+          "linked_evidence": [
+            {
+              "path": "D:\\PA\\l26\\probe-114428\\LccLifecycle\\LccLifecycle.gf42\\LccLifecycle_01.out",
+              "sha256": "16a9e62126de61fe5fb05a2cedc584897fba6001d64959ae3f4543addd5d710a"
+            },
+            {
+              "path": "D:\\PA\\l26\\probe-114428\\LccLifecycle\\LccLifecycle.gf42\\LccLifecycle_02.out",
+              "sha256": "251968e956199c8b8dbb1ab0a2e0eb441bb52e817c20069b9bd1a4890b41f744"
+            },
+            {
+              "path": "D:\\PA\\l26\\probe-114428\\LccLifecycle\\LccLifecycle.gf42\\LccLifecycle_03.out",
+              "sha256": "6a414b67f94605e515efb6beb1145bf9bf236c2a72547e426755ca2cde1915d8"
+            },
+            {
+              "path": "D:\\PA\\l26\\probe-114428\\LccLifecycle\\LccLifecycle.gf42\\LccLifecycle_04.out",
+              "sha256": "c598d4dd970d8d02f17b5bde0bcedf5edc4c5a3051a2a89343dd786f9b6114f6"
+            },
+            {
+              "path": "D:\\PA\\l26\\probe-114428\\LccLifecycle\\LccLifecycle.gf42\\LccLifecycle_05.out",
+              "sha256": "5269ea6b479fd82044a9e54d334fe466fea6bcb045d2374621e8c78d0f4b45c6"
+            },
+            {
+              "path": "D:\\PA\\l26\\probe-114428\\parsed-output.json",
+              "sha256": "3f502e877e5a73b0aaedd79e9041d873835c4c48a33be235627db0914682df62"
+            },
+            {
+              "path": "D:/PA/l26_lifecycle_probe.py",
+              "sha256": "2482c321d4bf02ec77fa7d75fe98224bbafa29d6ee7ec6cb6a5727114e6038f7"
+            }
+          ],
+          "note": "Only the nominal-template low-level executor lifecycle has real load/save/run/output/cleanup evidence. The public rated builder remains blocked by 13 unresolved physical parameter mappings; the power convention is resolved as total system MW, pole-to-ground kV and per-pole kA (bipolar P=2UI, monopolar P=UI). Three fresh 800/900/1000 MW template operating-point diagnostics at fb0b244 confirm the total-power interpretation; see docs/acceptance/lcc-rating-convention.md. No rating-matrix or model acceptance is claimed."
         }
       ],
       "evidence_checks": [
@@ -257,36 +322,36 @@
       ],
       "linked_evidence": [
         {
-          "path": "D:\\PA\\l26\\probe-114428\\LccLifecycle\\LccLifecycle.gf42\\LccLifecycle_01.out",
+          "path": "D:\\PA\\i26lcctime\\probe-185837\\parsed-output.json",
+          "sha256": "a562d24b17dc2c6aebc790ed4c183b05b6b4c3f7595814e3c767b1d2f0497f23"
+        },
+        {
+          "path": "D:/PSCAD-Workspace/integration-20260926-2a9ed5b/lcc-clock-probe.py",
+          "sha256": "6a418406f5be6c6bfe7e09ede6ec163cd596a8ae242c1a91f411ad892efa5c36"
+        },
+        {
+          "path": "D:\\PA\\i26lcctime\\probe-185837\\LccLifecycle\\LccLifecycle.gf42\\LccLifecycle_01.out",
           "sha256": "16a9e62126de61fe5fb05a2cedc584897fba6001d64959ae3f4543addd5d710a"
         },
         {
-          "path": "D:\\PA\\l26\\probe-114428\\LccLifecycle\\LccLifecycle.gf42\\LccLifecycle_02.out",
+          "path": "D:\\PA\\i26lcctime\\probe-185837\\LccLifecycle\\LccLifecycle.gf42\\LccLifecycle_02.out",
           "sha256": "251968e956199c8b8dbb1ab0a2e0eb441bb52e817c20069b9bd1a4890b41f744"
         },
         {
-          "path": "D:\\PA\\l26\\probe-114428\\LccLifecycle\\LccLifecycle.gf42\\LccLifecycle_03.out",
+          "path": "D:\\PA\\i26lcctime\\probe-185837\\LccLifecycle\\LccLifecycle.gf42\\LccLifecycle_03.out",
           "sha256": "6a414b67f94605e515efb6beb1145bf9bf236c2a72547e426755ca2cde1915d8"
         },
         {
-          "path": "D:\\PA\\l26\\probe-114428\\LccLifecycle\\LccLifecycle.gf42\\LccLifecycle_04.out",
+          "path": "D:\\PA\\i26lcctime\\probe-185837\\LccLifecycle\\LccLifecycle.gf42\\LccLifecycle_04.out",
           "sha256": "c598d4dd970d8d02f17b5bde0bcedf5edc4c5a3051a2a89343dd786f9b6114f6"
         },
         {
-          "path": "D:\\PA\\l26\\probe-114428\\LccLifecycle\\LccLifecycle.gf42\\LccLifecycle_05.out",
+          "path": "D:\\PA\\i26lcctime\\probe-185837\\LccLifecycle\\LccLifecycle.gf42\\LccLifecycle_05.out",
           "sha256": "5269ea6b479fd82044a9e54d334fe466fea6bcb045d2374621e8c78d0f4b45c6"
-        },
-        {
-          "path": "D:\\PA\\l26\\probe-114428\\parsed-output.json",
-          "sha256": "3f502e877e5a73b0aaedd79e9041d873835c4c48a33be235627db0914682df62"
-        },
-        {
-          "path": "D:/PA/l26_lifecycle_probe.py",
-          "sha256": "2482c321d4bf02ec77fa7d75fe98224bbafa29d6ee7ec6cb6a5727114e6038f7"
         }
       ],
       "implementation_source_branch": "codex/complete-acceptance",
-      "implementation_integrated_snapshot": "76a0442"
+      "implementation_integrated_snapshot": "1d1a4dabaff3b65a5ef92d2732e7ed4112e4531d"
     },
     {
       "scope": "hvdc_scenarios",
@@ -601,9 +666,9 @@
       "implementation_status": "MERGED",
       "licensed_status": "PASS",
       "evidence": {
-        "report_path": "D:/PA/l26/probe-114428/report.json",
-        "sha256": "bb358ba827788e2d1f99b492b71610f4302a6acd270a186c4a76adff77e610a9",
-        "commit": "dfaa0b020fba863dfe9bdd0ae2b65baec3f9654c"
+        "report_path": "D:\\PA\\i26lcctime\\probe-185837\\report.json",
+        "sha256": "baa78fb7351f9778c6e0a090f98be4eddb798f8a2fefa9ea9ad4107947107f02",
+        "commit": "1d1a4dabaff3b65a5ef92d2732e7ed4112e4531d"
       },
       "evidence_checks": [
         {
@@ -633,37 +698,104 @@
       ],
       "linked_evidence": [
         {
-          "path": "D:\\PA\\l26\\probe-114428\\LccLifecycle\\LccLifecycle.gf42\\LccLifecycle_01.out",
+          "path": "D:\\PA\\i26lcctime\\probe-185837\\parsed-output.json",
+          "sha256": "a562d24b17dc2c6aebc790ed4c183b05b6b4c3f7595814e3c767b1d2f0497f23"
+        },
+        {
+          "path": "D:/PSCAD-Workspace/integration-20260926-2a9ed5b/lcc-clock-probe.py",
+          "sha256": "6a418406f5be6c6bfe7e09ede6ec163cd596a8ae242c1a91f411ad892efa5c36"
+        },
+        {
+          "path": "D:\\PA\\i26lcctime\\probe-185837\\LccLifecycle\\LccLifecycle.gf42\\LccLifecycle_01.out",
           "sha256": "16a9e62126de61fe5fb05a2cedc584897fba6001d64959ae3f4543addd5d710a"
         },
         {
-          "path": "D:\\PA\\l26\\probe-114428\\LccLifecycle\\LccLifecycle.gf42\\LccLifecycle_02.out",
+          "path": "D:\\PA\\i26lcctime\\probe-185837\\LccLifecycle\\LccLifecycle.gf42\\LccLifecycle_02.out",
           "sha256": "251968e956199c8b8dbb1ab0a2e0eb441bb52e817c20069b9bd1a4890b41f744"
         },
         {
-          "path": "D:\\PA\\l26\\probe-114428\\LccLifecycle\\LccLifecycle.gf42\\LccLifecycle_03.out",
+          "path": "D:\\PA\\i26lcctime\\probe-185837\\LccLifecycle\\LccLifecycle.gf42\\LccLifecycle_03.out",
           "sha256": "6a414b67f94605e515efb6beb1145bf9bf236c2a72547e426755ca2cde1915d8"
         },
         {
-          "path": "D:\\PA\\l26\\probe-114428\\LccLifecycle\\LccLifecycle.gf42\\LccLifecycle_04.out",
+          "path": "D:\\PA\\i26lcctime\\probe-185837\\LccLifecycle\\LccLifecycle.gf42\\LccLifecycle_04.out",
           "sha256": "c598d4dd970d8d02f17b5bde0bcedf5edc4c5a3051a2a89343dd786f9b6114f6"
         },
         {
-          "path": "D:\\PA\\l26\\probe-114428\\LccLifecycle\\LccLifecycle.gf42\\LccLifecycle_05.out",
+          "path": "D:\\PA\\i26lcctime\\probe-185837\\LccLifecycle\\LccLifecycle.gf42\\LccLifecycle_05.out",
           "sha256": "5269ea6b479fd82044a9e54d334fe466fea6bcb045d2374621e8c78d0f4b45c6"
-        },
-        {
-          "path": "D:\\PA\\l26\\probe-114428\\parsed-output.json",
-          "sha256": "3f502e877e5a73b0aaedd79e9041d873835c4c48a33be235627db0914682df62"
-        },
-        {
-          "path": "D:/PA/l26_lifecycle_probe.py",
-          "sha256": "2482c321d4bf02ec77fa7d75fe98224bbafa29d6ee7ec6cb6a5727114e6038f7"
         }
       ],
-      "note": "Executor lifecycle probe only: original template at nominal frequency, five fresh OUT parts, immutable source/Master, owned cleanup. model_accepted=false; not the public rated builder or a physical/golden acceptance.",
+      "note": "Executor lifecycle probe only: original template at nominal frequency, five fresh OUT parts, immutable source/Master, owned cleanup. model_accepted=false; not the public rated builder or a physical/golden acceptance. The executor clock repair was reverified on Python 3.13.15 at 1d1a4da: new five-part output, unchanged inputs/code and owned cleanup. This remains a lifecycle probe with model_accepted=false.",
       "implementation_source_branch": "codex/complete-acceptance",
-      "implementation_integrated_snapshot": "76a0442"
+      "implementation_integrated_snapshot": "1d1a4dabaff3b65a5ef92d2732e7ed4112e4531d",
+      "historical_attempts": [
+        {
+          "licensed_status": "PASS",
+          "evidence": {
+            "report_path": "D:/PA/l26/probe-114428/report.json",
+            "sha256": "bb358ba827788e2d1f99b492b71610f4302a6acd270a186c4a76adff77e610a9",
+            "commit": "dfaa0b020fba863dfe9bdd0ae2b65baec3f9654c"
+          },
+          "evidence_checks": [
+            {
+              "pointer": "/status",
+              "equals": "PASS"
+            },
+            {
+              "pointer": "/scope",
+              "equals": "lcc.parametric_executor_lifecycle_probe"
+            },
+            {
+              "pointer": "/model_accepted",
+              "equals": false
+            },
+            {
+              "pointer": "/source_inputs_immutable",
+              "equals": true
+            },
+            {
+              "pointer": "/source_code_immutable",
+              "equals": true
+            },
+            {
+              "pointer": "/cleanup/owned_process_cleaned",
+              "equals": true
+            }
+          ],
+          "linked_evidence": [
+            {
+              "path": "D:\\PA\\l26\\probe-114428\\LccLifecycle\\LccLifecycle.gf42\\LccLifecycle_01.out",
+              "sha256": "16a9e62126de61fe5fb05a2cedc584897fba6001d64959ae3f4543addd5d710a"
+            },
+            {
+              "path": "D:\\PA\\l26\\probe-114428\\LccLifecycle\\LccLifecycle.gf42\\LccLifecycle_02.out",
+              "sha256": "251968e956199c8b8dbb1ab0a2e0eb441bb52e817c20069b9bd1a4890b41f744"
+            },
+            {
+              "path": "D:\\PA\\l26\\probe-114428\\LccLifecycle\\LccLifecycle.gf42\\LccLifecycle_03.out",
+              "sha256": "6a414b67f94605e515efb6beb1145bf9bf236c2a72547e426755ca2cde1915d8"
+            },
+            {
+              "path": "D:\\PA\\l26\\probe-114428\\LccLifecycle\\LccLifecycle.gf42\\LccLifecycle_04.out",
+              "sha256": "c598d4dd970d8d02f17b5bde0bcedf5edc4c5a3051a2a89343dd786f9b6114f6"
+            },
+            {
+              "path": "D:\\PA\\l26\\probe-114428\\LccLifecycle\\LccLifecycle.gf42\\LccLifecycle_05.out",
+              "sha256": "5269ea6b479fd82044a9e54d334fe466fea6bcb045d2374621e8c78d0f4b45c6"
+            },
+            {
+              "path": "D:\\PA\\l26\\probe-114428\\parsed-output.json",
+              "sha256": "3f502e877e5a73b0aaedd79e9041d873835c4c48a33be235627db0914682df62"
+            },
+            {
+              "path": "D:/PA/l26_lifecycle_probe.py",
+              "sha256": "2482c321d4bf02ec77fa7d75fe98224bbafa29d6ee7ec6cb6a5727114e6038f7"
+            }
+          ],
+          "note": "Executor lifecycle probe only: original template at nominal frequency, five fresh OUT parts, immutable source/Master, owned cleanup. model_accepted=false; not the public rated builder or a physical/golden acceptance."
+        }
+      ]
     },
     {
       "scope": "native_mmc_half_bridge_500kv_50hz",
@@ -858,7 +990,7 @@
     "summary_path": "docs/acceptance/current-status-20260926.md",
     "note": "The completion implementation through 76a0442 is included in this integrated revision. All physical reports retain their original tested revisions and scopes; the historical baseline is unchanged. Integration and offline checks do not create new physical acceptance.",
     "integrated_completion_commit": "76a0442",
-    "integration_code_commit": "ff19d92",
+    "integration_code_commit": "468dfc75edb417a43ac56c6819613e1cf3a1f32e",
     "preserved_status_documentation_commit": "671cdf718fdd6571a040da0c12826edfa4409233"
   }
 }

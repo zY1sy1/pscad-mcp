@@ -34,5 +34,29 @@
     "D:\\PSCAD-Workspace\\integration-20260926-2a9ed5b\\lcc-power-artifact-audit.json": "a4c88e3b933f1c133b4a7dfcba6ff0e9e3a9273093cf88d7177153920e5301bb",
     "D:\\PSCAD-Workspace\\integration-20260926-2a9ed5b\\corpus-prerequisites.json": "95795134239e28bf50f724c17d5c77b2858a69cb522ebc50d22944fbec103426"
   },
-  "note": "Tests skipped by opt-in or missing external source are not physical acceptance. Reports retain original revisions. Remaining model scopes and corpus migration are incomplete."
+  "note": "Tests skipped by opt-in or missing external source are not physical acceptance. Reports retain original revisions. Remaining model scopes and corpus migration are incomplete.",
+  "python313_followup": {
+    "lcc_affected_tests_passed": 117,
+    "mmc_binding_tests_passed": 88,
+    "mmc_binding_tests_also_pass_on_python312": true,
+    "native_reports": [
+      {
+        "scope": "lcc.parametric_executor_lifecycle_probe",
+        "path": "D:\\PA\\i26lcctime\\probe-185837\\report.json",
+        "commit": "1d1a4dabaff3b65a5ef92d2732e7ed4112e4531d",
+        "sha256": "baa78fb7351f9778c6e0a090f98be4eddb798f8a2fefa9ea9ad4107947107f02",
+        "status": "PASS",
+        "model_accepted": false
+      },
+      {
+        "scope": "mmc_direct_master_binding_readback_compile",
+        "path": "D:\\PA\\i26mbclock\\mmc-master-binding-20260926T110804475250Z-621803\\report.json",
+        "commit": "468dfc75edb417a43ac56c6819613e1cf3a1f32e",
+        "sha256": "7f86c4a438569bae1ca96c7c58d5006d0cdecc0c7802885ba245cdddecdd400b",
+        "status": "PASS",
+        "model_accepted": false
+      }
+    ],
+    "note": "Full Python 3.13 attempt before the MMC clock repair had 3935 passes, 53 skips and 43 same-cause failures; all affected binding tests pass after the repair. Full remote matrix results belong to their GitHub Actions run."
+  }
 }

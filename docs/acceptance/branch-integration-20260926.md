@@ -2,7 +2,7 @@
 
 本轮把已经完成且仍适用的改动整合到 `codex/integrate-accepted`，通过最终检查后
 快进本地 main 并同步 origin/main。原 main 起点为 `2d9012f`；运行代码合并点为
-`ff19d92`。这次整合不代表全部模型族已经完成验收。
+`468dfc7`。这次整合不代表全部模型族已经完成验收。
 
 ## 纳入的成果
 
@@ -42,10 +42,10 @@ main 原有技能修改、避雷器能量脚本及其他未跟踪输出不属于
 - 最新 LCC 三个模板功率点诊断来自 `fb0b244`；本轮重新核对了三份报告和 27 个
   关联文件的哈希，全部有效。诊断明确保持 `model_accepted=false` 和
   `public_builder_accepted=false`，不冒充公开参数化构建器验收。
-- 最终验证提交 `d2af688`：**3974 通过、53 跳过、0 失败**，252.60 秒。隔离安装的
+- 首次完整通过的集成验证提交 `d2af688`：**3974 通过、53 跳过、0 失败**，252.60 秒。隔离安装的
   wheel 通过固定 LCC、参数化 LCC catalog、MMC 资产及 105 个工具注册验证；代码正确性与
   差异空白检查通过。结果及日志哈希见[机器记录](branch-integration-20260926.json)。
-  后续仅登记这些结果，没有再修改实现。
+  该次结果登记未修改实现；后续 CI 发现及修复见下文。
 
 离线记录目录：`D:/PSCAD-Workspace/integration-20260926-2a9ed5b`。
 主要文件为 `pytest.log`、`integrated-pytest.log`、`inventory-audit.json`、
@@ -130,3 +130,10 @@ Legacy 运行后端和元数据代码与该实机版本相同。打包分支另�
   草稿，未移动或提交为本轮验收成果。
 
 历史分支和其他聊天的工作区保持可恢复状态。本轮不会通过清理目录来掩盖未完成内容。
+
+MMC 元件读回／编译的新许可报告为
+`D:/PA/i26mbclock/mmc-master-binding-20260926T110804475250Z-621803/report.json`，
+提交 `468dfc7`，SHA-256
+`7f86c4a438569bae1ca96c7c58d5006d0cdecc0c7802885ba245cdddecdd400b`。
+Python 3.13 上 PASS，编译前无旧 exe、新产物时间及哈希检查通过，来源和交付文件
+不可变，所属 PID 32608 退出。`model_accepted=false`，仅覆盖直接 Master 绑定及编译。
