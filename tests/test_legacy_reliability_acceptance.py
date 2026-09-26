@@ -371,7 +371,11 @@ class TestLegacyReliabilityAcceptance(LegacyAcceptanceCase):
         self.owned_processes.update(new_processes)
         for pid, executable in new_processes.items():
             print(f"ACCEPTANCE_PID={pid};EXE={executable}", flush=True)
-        self.assertIn("launched a new PSCAD automation instance", result)
+        self.assertTrue(result)
+        status = await service.status()
+        self.assertTrue(status["connected"])
+        self.assertTrue(status["owns_process"])
+        self.assertIn(status["session"]["managed_pid"], new_processes)
         print(
             "ACCEPTANCE_RELIABILITY=owned-repair;PASS;"
             f"old_pids={sorted(old_pids)};new_pids={sorted(new_processes)}",
