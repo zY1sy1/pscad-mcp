@@ -153,6 +153,7 @@ release-gate 占位基线。
 工程检查，见[工程完成记录](../superpowers/specs/2026-09-02-lcc-wp1c-native-closure-completion.md)。
 独立 golden 和最终 `accepted` 仍待完成；补全分支的最新复验另见
 [当前验收说明](../acceptance/current-status-20260926.md)。
+通过工程检查仍不是 `accepted`，必须完成独立参考及最终验收。
 
 companion baseline-gates plan 保持 WP1B 与 WP1C 报告分离，并要求两份报告绑定
 同一 current commit 与 clean named checkout。下方 `wp1b_smoke` 和

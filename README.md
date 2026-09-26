@@ -249,6 +249,7 @@ passed disturbance, commutation-failure indication and recovery gates; see the
 [engineering completion record](docs/superpowers/specs/2026-09-02-lcc-wp1c-native-closure-completion.md).
 Independent golden and final `accepted` remain pending. The latest completion-branch
 rerun is indexed separately in [current status](docs/acceptance/current-status-20260926.md).
+It is not `accepted` until the independent-reference and final gates pass.
 
 The companion baseline-gates plan keeps WP1B and WP1C reports separate and
 requires both reports to own the same current commit and clean named checkout.
