@@ -7,6 +7,29 @@
 Release notes are tracked in [CHANGELOG.md](CHANGELOG.md). A portable stdio
 configuration template is available at [config.example.toml](config.example.toml).
 
+## Acceptance status (2026-09-26)
+
+Several named scopes have passed licensed acceptance; whole-project acceptance
+is still incomplete. The [current status and version boundaries](docs/acceptance/current-status-20260926.md)
+and [machine-readable inventory](docs/acceptance-status.json) distinguish:
+
+- **Merged into local main:** the native half-bridge default six-stage suite
+  and the published full-bridge joint scenario passed at `5613ff7`. The joint
+  first run and independent replay each passed 122 physical checks and strict timing.
+- **On `codex/complete-acceptance`, not merged:** three half-bridge AVM requests
+  passed all 18 stages at `9cfe1d4`; all 15 Legacy core/reliability checks passed
+  at `d7805e7`. Fixed LCC engineering passed at `85f9d84`, while independent
+  reviewed reference and final acceptance remain incomplete.
+- **Remaining work:** public parametric LCC physical mappings and its rating
+  matrix, other MMC model/rating scopes, generic Blueprint licensed acceptance,
+  and PSCAD 5.x real acceptance. The LCC power convention is now decided as total
+  system power; its implementation and validation continue on the completion branch.
+
+Each result retains its tested revision and model scope. An incomplete inventory
+does not mean every model failed. Historical failed attempts and the earlier
+LCC/MMC program baseline remain preserved; this documentation update merges no
+runtime fixes and creates no new physical PASS.
+
 The server is designed for Windows-based power-system workflows where you want Copilot to do more than explain code: it can connect to a live PSCAD session, open projects, edit parameters, build cases, run simulations, inspect outputs, and manipulate the canvas.
 
 ## Why this repo exists
@@ -134,7 +157,7 @@ mutating HVDC workflows, fixed or parametric LCC builders, MMC, PSCAD 5.x, or
 later-commit acceptance, and no acceptance status is inferred from the
 non-licensed contract suite.
 
-The LCC/MMC implementation program has a separate scoped current-truth
+The LCC/MMC implementation program retains a separate frozen historical
 baseline at `docs/acceptance/lcc-mmc-program-baseline.json`. It records the
 exact evidence commit, PSCAD/Master/compiler identities, official read-only
 sources, packaged assets, historical runs, and nine builder-owned scopes. It
@@ -180,8 +203,10 @@ operations, call `build_lcc_model(..., expected_plan_hash=..., confirm=true)`,
 poll with `get_lcc_build_status`, then call `validate_lcc_model` on the saved
 case. The four capability levels are `planned`, `built`, `simulated`, and
 `accepted`; structural success, compilation, or a mocked/synthetic waveform
-does not imply acceptance. `poles=2`, user-rated designs, PSCAD 5.x, fault or
-commutation-failure acceptance, and MMC construction are unavailable.
+does not imply acceptance. This fixed builder excludes `poles=2`, user-rated
+designs, PSCAD 5.x and MMC construction. Its WP1C profile has licensed fault and
+commutation-failure engineering evidence; final independent-reference acceptance
+remains pending.
 
 Planning fails closed unless the attached PSCAD service supplies live
 4.6.2 definition inventory; the packaged catalog is not treated as live
@@ -209,13 +234,15 @@ unchanged. Passing this compile-only gate demonstrates that the Master binding
 runtime is usable; it does not replace full CIGRE waveform or commutation-fault
 acceptance.
 
-The current program baseline records `lcc.fixed_autonomous` as
+The historical program baseline records `lcc.fixed_autonomous` as
 `simulated/PASS` from the licensed no-fault WP1B run on commit `3a09c8f`.
 That run compiled all six isolated companion fixtures, built and recompiled a
 blank-case full topology, simulated 0.1 s, and verified 2,001 samples with no
-remaining PSCAD process. It is historical. It is not `accepted`: WP1B smoke must
-run before WP1C dynamic evidence, while disturbance, commutation
-failure/recovery, independent golden, and final acceptance remain later gates.
+remaining PSCAD process. Later same-revision WP1B/WP1C evidence at `a2959fe`
+passed disturbance, commutation-failure indication and recovery gates; see the
+[engineering completion record](docs/superpowers/specs/2026-09-02-lcc-wp1c-native-closure-completion.md).
+Independent golden and final `accepted` remain pending. The latest completion-branch
+rerun is indexed separately in [current status](docs/acceptance/current-status-20260926.md).
 
 The companion baseline-gates plan keeps WP1B and WP1C reports separate and
 requires both reports to own the same current commit and clean named checkout.
@@ -296,7 +323,7 @@ Library. The source example is never modified. Builds retain numbered legacy
 OUT parts and their `.inf` metadata under `<project>.outputs` so a later
 `validate_blank_lcc_model` call can reread the same evidence.
 
-The blank/native LCC path has current-commit licensed simulation evidence only
+The blank/native LCC path has revision-scoped licensed simulation evidence only
 when `docs/acceptance/lcc-mmc-program-baseline.json` names an indexed PASS
 report for `lcc.blank_native`. This is `simulated`, not fixed-autonomous or final
 `accepted` evidence; independent-golden acceptance remains a WP6 gate.
@@ -336,7 +363,7 @@ The template audit records explicit native cell evidence. Official 4.6 examples
 that contain `FullCellR_n` with `FiringHBridge` are reported as
 `template_submodule_topology=full_bridge`; examples using half-cell controls
 report `half_bridge`. This declaration does not create a missing waveform
-channel: native DC-fault acceptance remains `INCOMPLETE_ANALYSIS` until an
+channel: a template without the required trace remains `INCOMPLETE_ANALYSIS` until an
 explicit `V_inserted` trace is present, and half-bridge projects never reuse the
 full-bridge blocking verdict.
 
@@ -345,6 +372,11 @@ the detected topology and compiler-object hashes. Its native fault runner keeps
 the derived scenario and output evidence when the template lacks an explicit
 `V_inserted` trace, returning `MMC_ACCEPTANCE_INCOMPLETE`; this is an intentional
 evidence boundary, not a half-bridge-to-full-bridge inference.
+
+The published full-bridge joint model with complete measured channels passed
+its named fault/timing/replay gates at `5613ff7`; see the
+[joint delivery record](docs/acceptance/mmc-timing-fault-integration/delivery.md).
+That result does not waive missing-channel checks for other template entry paths.
 
 ### Generic PSCAD Blueprint Builder
 

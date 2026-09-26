@@ -1,22 +1,71 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-08-28T16:08:37+08:00",
-  "policy": "A licensed PASS applies only to the named scope and commit. It must not be inherited by another builder, domain workflow, or later commit.",
+  "updated_at": "2026-09-26T17:57:59+08:00",
+  "policy": "Evidence belongs only to its named scope, exact request and tested commit. INTEGRATION_BRANCH records are not merged/deployed. PASS is never inherited by another builder, rating or later commit; offline integrity checks do not establish physical acceptance.",
   "scopes": [
     {
       "scope": "legacy_core_462",
-      "implementation_status": "MERGED",
-      "licensed_status": "PASS_HISTORICAL",
+      "implementation_status": "INTEGRATION_BRANCH",
+      "licensed_status": "PASS",
       "evidence": {
-        "report_path": null,
-        "sha256": null,
-        "commit": null
+        "report_path": "D:/PSCAD-Workspace/acceptance/completion-20260926/legacy-130327.json",
+        "sha256": "c3869dfa192319f03a4f842e6029c48cef26e44543874bb98ed60a9413b40d5e",
+        "commit": "d7805e77045407a3f7f9ce8999e7d13a4cd34a7c"
       },
-      "note": "The managed PSCAD 4.6.2 Legacy core workflow was accepted historically, but no single durable machine-readable report is committed. Rerun scripts/run_legacy_acceptance.ps1 for a release claim."
+      "note": "All 15 licensed Legacy core/reliability cases passed at d7805e7. Sources retain their hashes and all owned instances exited. Vendor-disabled layer membership remains an explicitly tested capability limitation.",
+      "historical_attempts": [
+        {
+          "licensed_status": "PASS_HISTORICAL",
+          "evidence": {
+            "report_path": null,
+            "sha256": null,
+            "commit": null
+          },
+          "note": "The managed PSCAD 4.6.2 Legacy core workflow was accepted historically, but no single durable machine-readable report is committed. Rerun scripts/run_legacy_acceptance.ps1 for a release claim."
+        },
+        {
+          "licensed_status": "FAIL",
+          "evidence": {
+            "report_path": "D:/PSCAD-Workspace/acceptance/completion-20260926/legacy-123458.json",
+            "sha256": "1f78eeb64c8539275f3638c1765858668c834794f7baa031c5bf93ba3509fb8e",
+            "commit": "9cfe1d41dd2113cb4e72e3a285b1da00397a2b6b"
+          },
+          "note": "Preserved attempt: unnamed PSOUT root, paused stop/resume behavior, workspace setup and stale response-text assertion; superseded by the current 15-case PASS."
+        }
+      ],
+      "evidence_checks": [
+        {
+          "pointer": "/status",
+          "equals": "PASS"
+        },
+        {
+          "pointer": "/scope",
+          "equals": "legacy_core_462"
+        },
+        {
+          "pointer": "/exit_code",
+          "equals": 0
+        },
+        {
+          "pointer": "/sources_immutable",
+          "equals": true
+        },
+        {
+          "pointer": "/remaining_owned_processes",
+          "equals": []
+        }
+      ],
+      "linked_evidence": [
+        {
+          "path": "D:\\PSCAD-Workspace\\acceptance\\completion-20260926\\legacy-130327.log",
+          "sha256": "26e584f3c0f7e2284c954a3e40a1deb0dab484c16ce4ca2a6a8d84428d84c32f"
+        }
+      ],
+      "implementation_branch": "codex/complete-acceptance"
     },
     {
       "scope": "unified_topology_462",
-      "implementation_status": "INTEGRATION_BRANCH",
+      "implementation_status": "MERGED",
       "licensed_status": "PASS",
       "pscad_version": "4.6.2",
       "rule_version": "generic+hvdc-v1",
@@ -29,95 +78,775 @@
         "truth_review_path": "D:/PSCAD-Workspace/topology-sources-unified-candidate/truth-review-unified-candidate.json",
         "truth_review_sha256": "2c4c0c3839ee10c8bb431d9ee9e0cde6cbe70dcff178beab968103ec4115fa0d"
       },
-      "note": "Licensed read-only unified topology acceptance passed for generic+hvdc-v1 on the named commit, including exact canonical HVDC/LCC diagnostic codes. This scope does not imply mutating HVDC workflows, fixed or parametric LCC builders, MMC, PSCAD 5.x, or later-commit acceptance."
+      "note": "Licensed read-only unified topology acceptance passed for generic+hvdc-v1 on the named commit, including exact canonical HVDC/LCC diagnostic codes. This scope does not imply mutating HVDC workflows, fixed or parametric LCC builders, MMC, PSCAD 5.x, or later-commit acceptance.",
+      "evidence_checks": [
+        {
+          "pointer": "/status",
+          "equals": "PASS"
+        },
+        {
+          "pointer": "/rule_version",
+          "equals": "generic+hvdc-v1"
+        }
+      ]
     },
     {
       "scope": "fixed_cigre_lcc",
-      "implementation_status": "MERGED",
+      "implementation_status": "INTEGRATION_BRANCH",
       "licensed_status": "INCOMPLETE_ANALYSIS",
       "evidence": {
-        "report_path": "D:/PSCAD-Workspace/lcc-integrated-acceptance/lcc-acceptance-20260824-220227-235894/lcc-acceptance-report.json",
-        "sha256": "163ce64248f4f57dc6576f3bcf60938881845126c6e55babdec46960ced5dc50",
-        "commit": null
+        "report_path": "D:/PA/l26fixed/run-20260926-115423-402/fixed-lcc-dynamic-report.json",
+        "sha256": "1f3da7f5245e06130b8f49200414487dd69dbd1afd4a21fbc2407ef44a17404b",
+        "commit": "85f9d84a974e6afae97ee74f4d510882d3cc743d"
       },
-      "attempt": {
-        "timestamp": "2026-08-24T22:02:27+08:00",
-        "failure_stage": "definition_inventory",
-        "failure_code": "LCC_DEFINITION_MISSING",
-        "missing_definition": "master:three_phase_source",
-        "template": "C:/Users/335/Desktop/moxing/HVDC_Bipolar_1000MW_500kV.pscx",
-        "build_evidence": false,
-        "output_evidence": false,
-        "project_hash": null,
-        "output_hash": null
-      },
-      "note": "The latest licensed attempt failed safely during definition inventory because the installed Master Library does not expose master:three_phase_source. No project write, build, or output evidence exists; this scope must not be reported as PASS."
+      "note": "WP1B and WP1C engineering passed at 85f9d84. Independent reviewed golden and final accepted remain incomplete; the earlier engineering and definition-inventory attempts are historical.",
+      "historical_attempts": [
+        {
+          "evidence": {
+            "report_path": "D:/PSCAD-Workspace/lcc-integrated-acceptance/lcc-acceptance-20260824-220227-235894/lcc-acceptance-report.json",
+            "sha256": "163ce64248f4f57dc6576f3bcf60938881845126c6e55babdec46960ced5dc50",
+            "commit": null
+          },
+          "attempt": {
+            "timestamp": "2026-08-24T22:02:27+08:00",
+            "failure_stage": "definition_inventory",
+            "failure_code": "LCC_DEFINITION_MISSING",
+            "missing_definition": "master:three_phase_source",
+            "template": "C:/Users/335/Desktop/moxing/HVDC_Bipolar_1000MW_500kV.pscx",
+            "build_evidence": false,
+            "output_evidence": false,
+            "project_hash": null,
+            "output_hash": null
+          },
+          "note": "The latest licensed attempt failed safely during definition inventory because the installed Master Library does not expose master:three_phase_source. No project write, build, or output evidence exists; this scope must not be reported as PASS."
+        },
+        {
+          "licensed_status": "INCOMPLETE_ANALYSIS",
+          "evidence": {
+            "report_path": "D:/PSCAD-Workspace/lcc-wp1c-native-closure/concurrent-model-20260908/run-20260908-175551-346/fixed-lcc-dynamic-report.json",
+            "sha256": "226cdd1120d113f7d79c0769df960bc97194d14d1af245f166052a79cedac165",
+            "commit": "a2959fe47bfea0dfd38c75ea694e4c3e28e09ea5"
+          },
+          "evidence_checks": [
+            {
+              "pointer": "/status",
+              "equals": "INCOMPLETE_ANALYSIS"
+            },
+            {
+              "pointer": "/engineering_verdict",
+              "equals": "PASS"
+            },
+            {
+              "pointer": "/golden_verdict",
+              "equals": "INCOMPLETE_ANALYSIS"
+            },
+            {
+              "pointer": "/scope",
+              "equals": "lcc.fixed_autonomous"
+            }
+          ],
+          "note": "WP1C dynamic and physical engineering gates passed at a2959fe; independent reviewed golden and final accepted remain pending. The earlier missing-definition attempt is preserved below; it is not the current engineering result.",
+          "engineering_verdict": "PASS",
+          "golden_verdict": "INCOMPLETE_ANALYSIS"
+        }
+      ],
+      "engineering_verdict": "PASS",
+      "golden_verdict": "INCOMPLETE_ANALYSIS",
+      "evidence_checks": [
+        {
+          "pointer": "/status",
+          "equals": "INCOMPLETE_ANALYSIS"
+        },
+        {
+          "pointer": "/engineering_verdict",
+          "equals": "PASS"
+        },
+        {
+          "pointer": "/golden_verdict",
+          "equals": "INCOMPLETE_ANALYSIS"
+        },
+        {
+          "pointer": "/scope",
+          "equals": "lcc.fixed_autonomous"
+        }
+      ],
+      "linked_evidence": [
+        {
+          "path": "D:\\PA\\l26fixed\\run-20260926-115423-402\\LCC26Dynamic_PUBLISHED.pscx",
+          "sha256": "f8eff71d33823ac8b5329434e1a3294457d8c2385c13e38fea25305ea8fc2077"
+        },
+        {
+          "path": "D:\\PA\\l26fixed\\run-20260926-115423-402\\.pscad-mcp\\libraries\\cigre_lcc_v1.pslx",
+          "sha256": "1b685a99200898dd733b72e44c04d12af96650dffa64ef1dae04f64434491c3c"
+        },
+        {
+          "path": "D:\\PA\\l26fixed\\run-20260926-115423-402\\normalized-samples.json",
+          "sha256": "5c43dd4a0ea99b6dd48e681a80e552db6a0c3387df57b737515d8b03422d3580"
+        },
+        {
+          "path": "D:\\PA\\l26fixed\\run-20260926-115423-402\\.pscad-mcp\\lcc-builds\\LCC26Dynamic.staging\\LCC26Dynamic.gf42\\LCC26Dynamic_01.out",
+          "sha256": "5828758d6368ec4a3d7910a9c03fee65d3ef2719cfcfc59754cdbd35fde04f24"
+        },
+        {
+          "path": "D:\\PA\\l26fixed\\run-20260926-115423-402\\.pscad-mcp\\lcc-builds\\LCC26Dynamic.staging\\LCC26Dynamic.gf42\\LCC26Dynamic_02.out",
+          "sha256": "d87a70e4d8073879b21e10551b6176ac1088f67cb409dcd1dedf7dc4b828be2f"
+        },
+        {
+          "path": "D:\\PA\\l26fixed\\run-20260926-115423-402\\.pscad-mcp\\lcc-builds\\LCC26Dynamic.staging\\LCC26Dynamic.gf42\\LCC26Dynamic.inf",
+          "sha256": "1bdceccaec3e7cc983ba39db95d99e20a52ee7cf67591cac3ae2b5c74fd1f886"
+        },
+        {
+          "path": "D:\\PA\\l26fixed\\run-20260926-115423-402\\.pscad-mcp\\lcc-builds\\LCC26Dynamic.staging\\LCC26Dynamic.gf42\\LCC26Dynamic.infx",
+          "sha256": "f833351bc83e3ff070bb5af38f14b4e9ce45b525d84b1efde9cbc57901cdf7ee"
+        },
+        {
+          "path": "D:\\PA\\l26fixed\\fixed-lcc-20260926-035029-237\\fixed-lcc-acceptance-report.json",
+          "sha256": "63003bafc9ab105d091bbc3836cacdd916b66cf7c12a79a18baf1fab674bb939"
+        }
+      ],
+      "implementation_branch": "codex/complete-acceptance"
     },
     {
       "scope": "parametric_lcc",
       "implementation_status": "INTEGRATION_BRANCH",
-      "licensed_status": "NOT_RUN_ON_INTEGRATED_COMMIT",
+      "licensed_status": "PARTIAL",
       "evidence": {
-        "report_path": null,
-        "sha256": null,
-        "commit": "bea7b919970a1e323e2b7a14de55cc2f356f3545"
+        "report_path": "D:/PA/l26/probe-114428/report.json",
+        "sha256": "bb358ba827788e2d1f99b492b71610f4302a6acd270a186c4a76adff77e610a9",
+        "commit": "dfaa0b020fba863dfe9bdd0ae2b65baec3f9654c"
       },
-      "note": "Real-template execution is integrated on codex/integrate-outstanding-work and has passed non-licensed regression only."
+      "note": "Only the nominal-template low-level executor lifecycle has real load/save/run/output/cleanup evidence. The public rated builder still needs its physical parameter mappings and rating matrix. The user has resolved the power convention as total system MW, pole-to-ground kV and per-pole kA (bipolar P=2UI, monopolar P=UI); implementation and real validation continue on the completion branch. No rating-matrix or model acceptance is claimed.",
+      "historical_attempts": [
+        {
+          "licensed_status": "NOT_RUN_ON_INTEGRATED_COMMIT",
+          "evidence": {
+            "report_path": null,
+            "sha256": null,
+            "commit": "bea7b919970a1e323e2b7a14de55cc2f356f3545"
+          },
+          "note": "Parameterized execution is merged; the rating-specific licensed matrix and final independent-reference acceptance remain unverified. Fixed-case engineering PASS does not transfer to this path."
+        }
+      ],
+      "evidence_checks": [
+        {
+          "pointer": "/status",
+          "equals": "PASS"
+        },
+        {
+          "pointer": "/scope",
+          "equals": "lcc.parametric_executor_lifecycle_probe"
+        },
+        {
+          "pointer": "/model_accepted",
+          "equals": false
+        },
+        {
+          "pointer": "/source_inputs_immutable",
+          "equals": true
+        },
+        {
+          "pointer": "/source_code_immutable",
+          "equals": true
+        },
+        {
+          "pointer": "/cleanup/owned_process_cleaned",
+          "equals": true
+        }
+      ],
+      "linked_evidence": [
+        {
+          "path": "D:\\PA\\l26\\probe-114428\\LccLifecycle\\LccLifecycle.gf42\\LccLifecycle_01.out",
+          "sha256": "16a9e62126de61fe5fb05a2cedc584897fba6001d64959ae3f4543addd5d710a"
+        },
+        {
+          "path": "D:\\PA\\l26\\probe-114428\\LccLifecycle\\LccLifecycle.gf42\\LccLifecycle_02.out",
+          "sha256": "251968e956199c8b8dbb1ab0a2e0eb441bb52e817c20069b9bd1a4890b41f744"
+        },
+        {
+          "path": "D:\\PA\\l26\\probe-114428\\LccLifecycle\\LccLifecycle.gf42\\LccLifecycle_03.out",
+          "sha256": "6a414b67f94605e515efb6beb1145bf9bf236c2a72547e426755ca2cde1915d8"
+        },
+        {
+          "path": "D:\\PA\\l26\\probe-114428\\LccLifecycle\\LccLifecycle.gf42\\LccLifecycle_04.out",
+          "sha256": "c598d4dd970d8d02f17b5bde0bcedf5edc4c5a3051a2a89343dd786f9b6114f6"
+        },
+        {
+          "path": "D:\\PA\\l26\\probe-114428\\LccLifecycle\\LccLifecycle.gf42\\LccLifecycle_05.out",
+          "sha256": "5269ea6b479fd82044a9e54d334fe466fea6bcb045d2374621e8c78d0f4b45c6"
+        },
+        {
+          "path": "D:\\PA\\l26\\probe-114428\\parsed-output.json",
+          "sha256": "3f502e877e5a73b0aaedd79e9041d873835c4c48a33be235627db0914682df62"
+        },
+        {
+          "path": "D:/PA/l26_lifecycle_probe.py",
+          "sha256": "2482c321d4bf02ec77fa7d75fe98224bbafa29d6ee7ec6cb6a5727114e6038f7"
+        }
+      ],
+      "implementation_branch": "codex/complete-acceptance"
     },
     {
       "scope": "hvdc_scenarios",
       "implementation_status": "MERGED",
       "licensed_status": "PARTIAL",
       "evidence": {
-        "report_path": null,
-        "sha256": null,
-        "commit": null
+        "report_path": "D:/PSCAD-Workspace/mmc-merge-0923-joint-continuation/.pscad-mcp/mmc-builds/19dc807ce0da42278e5b13e5db849f8c/journal.json",
+        "sha256": "95953d8f9e47bb91c48abfa628ebfddc37f458b17291ca263f3ef2ad7574d5fc",
+        "commit": "5613ff7df46e671a9732384c445a99cf500c4559"
       },
-      "note": "Real compile and output evidence exists for reference projects, while strict timed control remains fail-closed without approved writable command bindings and complete selector evidence."
+      "note": "PARTIAL across the HVDC family. The named full-bridge MMC joint scenario has strict EMTDC timing, fault and independent-replay PASS at 5613ff7; other projects still require verified command bindings and their own physical evidence.",
+      "evidence_checks": [
+        {
+          "pointer": "/status",
+          "equals": "PASS"
+        },
+        {
+          "pointer": "/physical_acceptance_verified",
+          "equals": true
+        },
+        {
+          "pointer": "/cleanup_pending",
+          "equals": false
+        },
+        {
+          "pointer": "/lease_retained",
+          "equals": false
+        },
+        {
+          "pointer": "/owned_process_cleaned",
+          "equals": true
+        }
+      ]
     },
     {
       "scope": "mmc_stage_a",
-      "implementation_status": "NOT_INTEGRATED",
-      "licensed_status": "NOT_INTEGRATED",
+      "implementation_status": "MERGED",
+      "licensed_status": "INCOMPLETE_ANALYSIS",
       "evidence": {
         "report_path": null,
         "sha256": null,
         "commit": "8872a96f72c039ebca1925b8e6a6cfa8763e7d19"
       },
-      "note": "MMC Stage A remains on codex/mmc-autonomous-builder and has no licensed acceptance claim."
+      "note": "Implementation is merged. This historical packaged-AVM scope has no separate complete licensed/golden acceptance; native half-bridge and full-bridge joint results are separate named scopes."
     },
     {
       "scope": "parametric_mmc",
       "implementation_status": "INTEGRATION_BRANCH",
-      "licensed_status": "INCOMPLETE_ANALYSIS",
+      "licensed_status": "PARTIAL",
       "evidence": {
-        "report_path": "D:/PSCAD-Workspace/mmc-parametric-acceptance/mmc-parametric-acceptance-20260828T080837223737Z/mmc-parametric-acceptance-report.json",
-        "sha256": "18975323c2b563d308a81d6e1743ef866bfb66d193be2de04cd4284917d5d4e5",
-        "commit": "aec74dd52f8f4e6d523aba652eff3eec1456198c"
+        "report_path": "D:/PA/c26v3a/suite-20260926-121407-e4d0b384/report.json",
+        "sha256": "2c3d7d158f5069e3358ad1427500cb2882844bfabcacb43a80a4732821db98c3",
+        "commit": "9cfe1d41dd2113cb4e72e3a285b1da00397a2b6b"
       },
-      "attempt": {
-        "timestamp": "2026-08-28T16:08:37+08:00",
-        "failure_stage": "scenario_preflight_and_avm_definition_inventory",
-        "failure_code": "HVDC_TIMED_CONTROL_UNAVAILABLE; LCC_DEFINITION_MISSING",
-        "blocking_dependency": "master:dc_bus",
-        "build_evidence": true,
-        "output_evidence": false,
-        "source_hashes_unchanged": true,
-        "preexisting_workspace_immutable": true,
-        "owned_process_cleaned": true
-      },
-      "note": "The opt-in PSCAD 4.6.2 Legacy matrix generated and verified public tline.exe line constants, staged and built the detailed-PWM candidate, then stopped safely because the Legacy backend does not expose strict EMTDC timed-control capability. The AVM child stopped during live definition inventory because installed master.pslx has no master:dc_bus. No licensed PASS is claimed."
+      "note": "Three native half-bridge cable AVM requests passed all 18 normal/fault/reload stages at 9cfe1d4: default 640 kV/1000 MW/60 Hz, +100 MVAr, and 500 kV/750 MW/50 Hz/-75 MVAr. This remains PARTIAL for the whole parametric family; full-bridge AVM, detailed-PWM rating matrices and arbitrary requests need separate evidence.",
+      "historical_attempts": [
+        {
+          "evidence": {
+            "report_path": "D:/PSCAD-Workspace/mmc-parametric-acceptance/mmc-parametric-acceptance-20260828T080837223737Z/mmc-parametric-acceptance-report.json",
+            "sha256": "18975323c2b563d308a81d6e1743ef866bfb66d193be2de04cd4284917d5d4e5",
+            "commit": "aec74dd52f8f4e6d523aba652eff3eec1456198c"
+          },
+          "attempt": {
+            "timestamp": "2026-08-28T16:08:37+08:00",
+            "failure_stage": "scenario_preflight_and_avm_definition_inventory",
+            "failure_code": "HVDC_TIMED_CONTROL_UNAVAILABLE; LCC_DEFINITION_MISSING",
+            "blocking_dependency": "master:dc_bus",
+            "build_evidence": true,
+            "output_evidence": false,
+            "source_hashes_unchanged": true,
+            "preexisting_workspace_immutable": true,
+            "owned_process_cleaned": true
+          },
+          "note": "The opt-in PSCAD 4.6.2 Legacy matrix generated and verified public tline.exe line constants, staged and built the detailed-PWM candidate, then stopped safely because the Legacy backend does not expose strict EMTDC timed-control capability. The AVM child stopped during live definition inventory because installed master.pslx has no master:dc_bus. No licensed PASS is claimed."
+        },
+        {
+          "licensed_status": "PARTIAL",
+          "evidence": {
+            "report_path": "D:/PSCAD-Workspace/mmc-merge-0923-native/suite-20260923-162524-9c8d4f0e/report.json",
+            "sha256": "ffb61ce075bc651036cc370364a76e1d83e63eaf31ba382c7771531cd488c9d2",
+            "commit": "5613ff7df46e671a9732384c445a99cf500c4559"
+          },
+          "evidence_checks": [
+            {
+              "pointer": "/status",
+              "equals": "PASS"
+            },
+            {
+              "pointer": "/model_accepted",
+              "equals": true
+            },
+            {
+              "pointer": "/scope",
+              "equals": "native_avm_full_physical_suite"
+            },
+            {
+              "pointer": "/intrinsic_dc_fault_blocking",
+              "equals": false
+            }
+          ],
+          "note": "The native half-bridge cable AVM default request passes its full normal/four-fault/reload suite at 5613ff7. Other parameter requests and detailed-PWM/full-bridge-AVM builder matrices require their own acceptance. Old timing/dc_bus failures are historical, not universal current blockers."
+        }
+      ],
+      "evidence_checks": [
+        {
+          "pointer": "/status",
+          "equals": "PASS"
+        },
+        {
+          "pointer": "/model_accepted",
+          "equals": true
+        },
+        {
+          "pointer": "/scope",
+          "equals": "native_avm_full_physical_suite"
+        },
+        {
+          "pointer": "/intrinsic_dc_fault_blocking",
+          "equals": false
+        }
+      ],
+      "accepted_subscopes": [
+        "native_mmc_half_bridge_640kv",
+        "native_mmc_half_bridge_500kv_50hz",
+        "native_mmc_half_bridge_640kv_q100"
+      ],
+      "linked_evidence": [
+        {
+          "path": "D:/PA/c26v3b/suite-20260926-121823-bfb0895a/report.json",
+          "sha256": "1f39ad43cc0a186d45762a226974e80fd6fbef2a60091b0751bdf965ac36ccf1"
+        },
+        {
+          "path": "D:/PA/c26v3c/suite-20260926-121823-af3bb399/report.json",
+          "sha256": "a72d96d6d040aaafd207c3f6c79c1c92b4469832275fbf8a4c7be3a1dafc274c"
+        }
+      ],
+      "implementation_branch": "codex/complete-acceptance"
     },
     {
       "scope": "generic_blueprint_builder",
-      "implementation_status": "INTEGRATION_BRANCH",
+      "implementation_status": "MERGED",
       "licensed_status": "NOT_RUN_ON_INTEGRATED_COMMIT",
       "evidence": {
         "report_path": null,
         "sha256": null,
         "commit": null
       },
-      "note": "The generic Blueprint Builder has passed offline and service-contract regression only; the opt-in licensed PSCAD acceptance test has not been run for this scope."
+      "note": "Builder implementation is merged; offline/service-contract regression does not establish licensed acceptance of its own generated projects."
+    },
+    {
+      "scope": "native_mmc_half_bridge_640kv",
+      "implementation_status": "INTEGRATION_BRANCH",
+      "licensed_status": "PASS",
+      "pscad_version": "4.6.2",
+      "evidence": {
+        "report_path": "D:/PA/c26v3a/suite-20260926-121407-e4d0b384/report.json",
+        "sha256": "2c3d7d158f5069e3358ad1427500cb2882844bfabcacb43a80a4732821db98c3",
+        "commit": "9cfe1d41dd2113cb4e72e3a285b1da00397a2b6b"
+      },
+      "evidence_checks": [
+        {
+          "pointer": "/status",
+          "equals": "PASS"
+        },
+        {
+          "pointer": "/model_accepted",
+          "equals": true
+        },
+        {
+          "pointer": "/scope",
+          "equals": "native_avm_full_physical_suite"
+        },
+        {
+          "pointer": "/intrinsic_dc_fault_blocking",
+          "equals": false
+        }
+      ],
+      "request": {
+        "active_power_mw": 1000.0,
+        "converter": "half_bridge",
+        "dc_link": {
+          "kind": "cable",
+          "length_km": 100.0
+        },
+        "dc_voltage_kv": 640.0,
+        "engineering_overrides": {},
+        "frequency_hz": 60.0,
+        "model_fidelity": "average_value",
+        "power_reversal_time_s": 1.0,
+        "reactive_power_mvar": 0.0,
+        "schema_version": 1,
+        "station_p": {
+          "ac_voltage_kv": 230.0,
+          "short_circuit_ratio": 5.0,
+          "x_over_r": 10.0
+        },
+        "station_vdc": {
+          "ac_voltage_kv": 230.0,
+          "short_circuit_ratio": 5.0,
+          "x_over_r": 10.0
+        },
+        "topology": "two_terminal_symmetrical_monopole"
+      },
+      "intrinsic_dc_fault_blocking": false,
+      "limitations": [
+        "individual_submodule_balance_not_modeled",
+        "switching_stress_not_modeled",
+        "switching_harmonics_not_modeled",
+        "thermal_not_modeled"
+      ],
+      "note": "Six-stage normal/four-fault/independent-reload suite passed at 9cfe1d4 for this exact request, with empty engineering overrides. No acceptance transfer to other ratings, full-bridge models, switching/thermal behavior or whole-program WP6. The previously accepted main implementation at 5613ff7 is retained in historical_attempts; its six-stage PASS is not replaced by a claim that the new implementation is merged.",
+      "historical_attempts": [
+        {
+          "licensed_status": "PASS",
+          "evidence": {
+            "report_path": "D:/PSCAD-Workspace/mmc-merge-0923-native/suite-20260923-162524-9c8d4f0e/report.json",
+            "sha256": "ffb61ce075bc651036cc370364a76e1d83e63eaf31ba382c7771531cd488c9d2",
+            "commit": "5613ff7df46e671a9732384c445a99cf500c4559"
+          },
+          "evidence_checks": [
+            {
+              "pointer": "/status",
+              "equals": "PASS"
+            },
+            {
+              "pointer": "/model_accepted",
+              "equals": true
+            },
+            {
+              "pointer": "/scope",
+              "equals": "native_avm_full_physical_suite"
+            },
+            {
+              "pointer": "/intrinsic_dc_fault_blocking",
+              "equals": false
+            }
+          ],
+          "note": "Normal operation, AC three-phase, AC single-line-ground, DC pole-pole, DC pole-ground and independent portable reload passed for this request at the recorded revision. Not whole-program WP6 or acceptance of other ratings."
+        }
+      ],
+      "implementation_branch": "codex/complete-acceptance"
+    },
+    {
+      "scope": "mmc_full_bridge_joint_462",
+      "implementation_status": "MERGED",
+      "licensed_status": "PASS",
+      "pscad_version": "4.6.2",
+      "evidence": {
+        "report_path": "D:/PSCAD-Workspace/mmc-merge-0923-joint-continuation/.pscad-mcp/mmc-builds/19dc807ce0da42278e5b13e5db849f8c/journal.json",
+        "sha256": "95953d8f9e47bb91c48abfa628ebfddc37f458b17291ca263f3ef2ad7574d5fc",
+        "commit": "5613ff7df46e671a9732384c445a99cf500c4559"
+      },
+      "evidence_checks": [
+        {
+          "pointer": "/status",
+          "equals": "PASS"
+        },
+        {
+          "pointer": "/scope",
+          "equals": "fresh_joint_after_publication"
+        },
+        {
+          "pointer": "/physical_acceptance_verified",
+          "equals": true
+        },
+        {
+          "pointer": "/owned_process_cleaned",
+          "equals": true
+        },
+        {
+          "pointer": "/cleanup_pending",
+          "equals": false
+        },
+        {
+          "pointer": "/lease_retained",
+          "equals": false
+        }
+      ],
+      "linked_evidence": [
+        {
+          "path": "D:\\PSCAD-Workspace\\mmc-merge-0923-joint-continuation\\joint\\accepted-preparation.json",
+          "sha256": "d044cef51f35abdcd6079b2976519c435f5cdb2532acfdd95a97460187097f8f"
+        },
+        {
+          "path": "D:\\PSCAD-Workspace\\mmc-merge-0923-joint-continuation\\joint\\JointFaultCase.pscx",
+          "sha256": "47e0437b993131be291fd1074a6dc0368c45a17a8487cd98443b4ae3a16d39c6"
+        }
+      ],
+      "note": "Published full-bridge model joint scenario: first run and independent replay each passed 122 physical checks and strict event timing at 5613ff7. This does not accept arbitrary detailed-PWM ratings, full-bridge AVM, or an unverified raw-template entry path."
+    },
+    {
+      "scope": "modern_core_5",
+      "implementation_status": "MERGED",
+      "licensed_status": "NOT_RUN_ON_INTEGRATED_COMMIT",
+      "evidence": {
+        "report_path": null,
+        "sha256": null,
+        "commit": null
+      },
+      "note": "Modern automation is installed, but vendor version enumeration returns only PSCAD 4.6.2 x86/x64. PSCAD 5.x real acceptance requires an installed 5.x application and usable licensed runtime. Contract tests do not replace that gate.",
+      "linked_evidence": [
+        {
+          "path": "D:/PA/c26-environment.json",
+          "sha256": "a856dba0c0ea4fde801529586f21e3ec273ab4ce394269f3243504b7a3293041"
+        }
+      ]
+    },
+    {
+      "scope": "lcc_parametric_executor_462",
+      "implementation_status": "INTEGRATION_BRANCH",
+      "licensed_status": "PASS",
+      "evidence": {
+        "report_path": "D:/PA/l26/probe-114428/report.json",
+        "sha256": "bb358ba827788e2d1f99b492b71610f4302a6acd270a186c4a76adff77e610a9",
+        "commit": "dfaa0b020fba863dfe9bdd0ae2b65baec3f9654c"
+      },
+      "evidence_checks": [
+        {
+          "pointer": "/status",
+          "equals": "PASS"
+        },
+        {
+          "pointer": "/scope",
+          "equals": "lcc.parametric_executor_lifecycle_probe"
+        },
+        {
+          "pointer": "/model_accepted",
+          "equals": false
+        },
+        {
+          "pointer": "/source_inputs_immutable",
+          "equals": true
+        },
+        {
+          "pointer": "/source_code_immutable",
+          "equals": true
+        },
+        {
+          "pointer": "/cleanup/owned_process_cleaned",
+          "equals": true
+        }
+      ],
+      "linked_evidence": [
+        {
+          "path": "D:\\PA\\l26\\probe-114428\\LccLifecycle\\LccLifecycle.gf42\\LccLifecycle_01.out",
+          "sha256": "16a9e62126de61fe5fb05a2cedc584897fba6001d64959ae3f4543addd5d710a"
+        },
+        {
+          "path": "D:\\PA\\l26\\probe-114428\\LccLifecycle\\LccLifecycle.gf42\\LccLifecycle_02.out",
+          "sha256": "251968e956199c8b8dbb1ab0a2e0eb441bb52e817c20069b9bd1a4890b41f744"
+        },
+        {
+          "path": "D:\\PA\\l26\\probe-114428\\LccLifecycle\\LccLifecycle.gf42\\LccLifecycle_03.out",
+          "sha256": "6a414b67f94605e515efb6beb1145bf9bf236c2a72547e426755ca2cde1915d8"
+        },
+        {
+          "path": "D:\\PA\\l26\\probe-114428\\LccLifecycle\\LccLifecycle.gf42\\LccLifecycle_04.out",
+          "sha256": "c598d4dd970d8d02f17b5bde0bcedf5edc4c5a3051a2a89343dd786f9b6114f6"
+        },
+        {
+          "path": "D:\\PA\\l26\\probe-114428\\LccLifecycle\\LccLifecycle.gf42\\LccLifecycle_05.out",
+          "sha256": "5269ea6b479fd82044a9e54d334fe466fea6bcb045d2374621e8c78d0f4b45c6"
+        },
+        {
+          "path": "D:\\PA\\l26\\probe-114428\\parsed-output.json",
+          "sha256": "3f502e877e5a73b0aaedd79e9041d873835c4c48a33be235627db0914682df62"
+        },
+        {
+          "path": "D:/PA/l26_lifecycle_probe.py",
+          "sha256": "2482c321d4bf02ec77fa7d75fe98224bbafa29d6ee7ec6cb6a5727114e6038f7"
+        }
+      ],
+      "note": "Executor lifecycle probe only: original template at nominal frequency, five fresh OUT parts, immutable source/Master, owned cleanup. model_accepted=false; not the public rated builder or a physical/golden acceptance.",
+      "implementation_branch": "codex/complete-acceptance"
+    },
+    {
+      "scope": "native_mmc_half_bridge_500kv_50hz",
+      "implementation_status": "INTEGRATION_BRANCH",
+      "licensed_status": "PASS",
+      "pscad_version": "4.6.2",
+      "evidence": {
+        "report_path": "D:/PA/c26v3b/suite-20260926-121823-bfb0895a/report.json",
+        "sha256": "1f39ad43cc0a186d45762a226974e80fd6fbef2a60091b0751bdf965ac36ccf1",
+        "commit": "9cfe1d41dd2113cb4e72e3a285b1da00397a2b6b"
+      },
+      "evidence_checks": [
+        {
+          "pointer": "/status",
+          "equals": "PASS"
+        },
+        {
+          "pointer": "/model_accepted",
+          "equals": true
+        },
+        {
+          "pointer": "/scope",
+          "equals": "native_avm_full_physical_suite"
+        },
+        {
+          "pointer": "/intrinsic_dc_fault_blocking",
+          "equals": false
+        }
+      ],
+      "request": {
+        "active_power_mw": 750.0,
+        "converter": "half_bridge",
+        "dc_link": {
+          "kind": "cable",
+          "length_km": 100.0
+        },
+        "dc_voltage_kv": 500.0,
+        "engineering_overrides": {},
+        "frequency_hz": 50.0,
+        "model_fidelity": "average_value",
+        "power_reversal_time_s": 1.0,
+        "reactive_power_mvar": -75.0,
+        "schema_version": 1,
+        "station_p": {
+          "ac_voltage_kv": 180.0,
+          "short_circuit_ratio": 5.0,
+          "x_over_r": 10.0
+        },
+        "station_vdc": {
+          "ac_voltage_kv": 190.0,
+          "short_circuit_ratio": 4.0,
+          "x_over_r": 8.0
+        },
+        "topology": "two_terminal_symmetrical_monopole"
+      },
+      "intrinsic_dc_fault_blocking": false,
+      "limitations": [
+        "individual_submodule_balance_not_modeled",
+        "switching_stress_not_modeled",
+        "switching_harmonics_not_modeled",
+        "thermal_not_modeled"
+      ],
+      "note": "Six-stage normal/four-fault/independent-reload suite passed at 9cfe1d4 for this exact request, with empty engineering overrides. No acceptance transfer to other ratings, full-bridge models, switching/thermal behavior or whole-program WP6.",
+      "implementation_branch": "codex/complete-acceptance"
+    },
+    {
+      "scope": "native_mmc_half_bridge_640kv_q100",
+      "implementation_status": "INTEGRATION_BRANCH",
+      "licensed_status": "PASS",
+      "pscad_version": "4.6.2",
+      "evidence": {
+        "report_path": "D:/PA/c26v3c/suite-20260926-121823-af3bb399/report.json",
+        "sha256": "a72d96d6d040aaafd207c3f6c79c1c92b4469832275fbf8a4c7be3a1dafc274c",
+        "commit": "9cfe1d41dd2113cb4e72e3a285b1da00397a2b6b"
+      },
+      "evidence_checks": [
+        {
+          "pointer": "/status",
+          "equals": "PASS"
+        },
+        {
+          "pointer": "/model_accepted",
+          "equals": true
+        },
+        {
+          "pointer": "/scope",
+          "equals": "native_avm_full_physical_suite"
+        },
+        {
+          "pointer": "/intrinsic_dc_fault_blocking",
+          "equals": false
+        }
+      ],
+      "request": {
+        "active_power_mw": 1000.0,
+        "converter": "half_bridge",
+        "dc_link": {
+          "kind": "cable",
+          "length_km": 100.0
+        },
+        "dc_voltage_kv": 640.0,
+        "engineering_overrides": {},
+        "frequency_hz": 60.0,
+        "model_fidelity": "average_value",
+        "power_reversal_time_s": 1.0,
+        "reactive_power_mvar": 100.0,
+        "schema_version": 1,
+        "station_p": {
+          "ac_voltage_kv": 230.0,
+          "short_circuit_ratio": 5.0,
+          "x_over_r": 10.0
+        },
+        "station_vdc": {
+          "ac_voltage_kv": 230.0,
+          "short_circuit_ratio": 5.0,
+          "x_over_r": 10.0
+        },
+        "topology": "two_terminal_symmetrical_monopole"
+      },
+      "intrinsic_dc_fault_blocking": false,
+      "limitations": [
+        "individual_submodule_balance_not_modeled",
+        "switching_stress_not_modeled",
+        "switching_harmonics_not_modeled",
+        "thermal_not_modeled"
+      ],
+      "note": "Six-stage normal/four-fault/independent-reload suite passed at 9cfe1d4 for this exact request, with empty engineering overrides. No acceptance transfer to other ratings, full-bridge models, switching/thermal behavior or whole-program WP6.",
+      "implementation_branch": "codex/complete-acceptance"
+    },
+    {
+      "scope": "native_average_arm_462",
+      "implementation_status": "INTEGRATION_BRANCH",
+      "licensed_status": "PASS",
+      "evidence": {
+        "report_path": "D:/PA/c26arm/attempt-20260926-121454-0c1f8eb6/report.json",
+        "sha256": "340f49f7ed5a9673ee7c131b17380d27f2f028902fd252744c2299a0880f07a4",
+        "commit": "9cfe1d41dd2113cb4e72e3a285b1da00397a2b6b"
+      },
+      "evidence_checks": [
+        {
+          "pointer": "/status",
+          "equals": "PASS"
+        },
+        {
+          "pointer": "/component_accepted",
+          "equals": true
+        },
+        {
+          "pointer": "/model_accepted",
+          "equals": false
+        },
+        {
+          "pointer": "/source_inputs_immutable",
+          "equals": true
+        },
+        {
+          "pointer": "/source_code_immutable",
+          "equals": true
+        }
+      ],
+      "linked_evidence": [
+        {
+          "path": "D:\\PA\\c26arm\\attempt-20260926-121454-0c1f8eb6\\before-run.exe",
+          "sha256": "23380233ff842467933022134d8d176156a4df6c9ece3f333e63a95916b4e7eb"
+        },
+        {
+          "path": "D:\\PA\\c26arm\\attempt-20260926-121454-0c1f8eb6\\model\\average_arm_fixture.gf42\\average_arm_fixture.exe",
+          "sha256": "23380233ff842467933022134d8d176156a4df6c9ece3f333e63a95916b4e7eb"
+        },
+        {
+          "path": "D:\\PA\\c26arm\\attempt-20260926-121454-0c1f8eb6\\model\\average_arm_fixture.pscx",
+          "sha256": "968d2e401989eb0df2ebf95e597407792fcfad28287088a52d66e6731cca2d04"
+        },
+        {
+          "path": "D:\\PA\\c26arm\\attempt-20260926-121454-0c1f8eb6\\model\\mmc_average_arm.pslx",
+          "sha256": "48ba3e2048b6fda2988d0dccd7cee6717cffb7f0bac33b321ff7194e49cd6b81"
+        }
+      ],
+      "note": "Isolated native half-bridge average-arm charge/discharge/blocked behavior passed after the empty-capacitor coupling repair. Component acceptance only, not a complete converter or intrinsic DC fault blocking claim.",
+      "implementation_branch": "codex/complete-acceptance"
     }
-  ]
+  ],
+  "program_baseline_note": "docs/acceptance/lcc-mmc-program-baseline.json is the frozen earlier program baseline. Later reports are indexed here without promoting that baseline or WP6.",
+  "inventory_context": {
+    "main_head_at_review": "2d9012f3b031a425081e32139f232e303a56095d",
+    "merged_mmc_tested_commit": "5613ff7df46e671a9732384c445a99cf500c4559",
+    "completion_branch": "codex/complete-acceptance",
+    "completion_evidence_snapshot_commit": "2a9ed5b81bc48bd65cc62e2780a5f9ab17627603",
+    "summary_path": "docs/acceptance/current-status-20260926.md",
+    "note": "This index includes verified evidence from main and an unmerged completion branch. INTEGRATION_BRANCH describes the implementation that produced the latest report, not main. Historical baseline files remain frozen; documentation updates do not transfer acceptance to another revision."
+  }
 }

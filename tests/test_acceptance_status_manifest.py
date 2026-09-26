@@ -20,8 +20,16 @@ def test_acceptance_status_manifest_separates_live_acceptance_scopes():
         "mmc_stage_a",
         "parametric_mmc",
         "generic_blueprint_builder",
+        "native_mmc_half_bridge_640kv",
+        "mmc_full_bridge_joint_462",
+        "modern_core_5",
+        "lcc_parametric_executor_462",
+        "native_mmc_half_bridge_500kv_50hz",
+        "native_mmc_half_bridge_640kv_q100",
+        "native_average_arm_462",
     }
-    assert scopes["legacy_core_462"]["licensed_status"] == "PASS_HISTORICAL"
+    assert scopes["legacy_core_462"]["licensed_status"] == "PASS"
+    assert scopes["legacy_core_462"]["implementation_status"] == "INTEGRATION_BRANCH"
     topology = scopes["unified_topology_462"]
     assert topology["licensed_status"] == "PASS"
     assert topology["pscad_version"] == "4.6.2"
@@ -38,17 +46,20 @@ def test_acceptance_status_manifest_separates_live_acceptance_scopes():
         "PASS",
         "FAIL",
         "INCOMPLETE_ANALYSIS",
+        "PARTIAL",
     }
     assert scopes["hvdc_scenarios"]["licensed_status"] == "PARTIAL"
-    assert scopes["mmc_stage_a"]["licensed_status"] == "NOT_INTEGRATED"
+    assert scopes["mmc_stage_a"]["implementation_status"] == "MERGED"
+    assert scopes["mmc_stage_a"]["licensed_status"] == "INCOMPLETE_ANALYSIS"
     assert scopes["parametric_mmc"]["implementation_status"] == "INTEGRATION_BRANCH"
     assert scopes["parametric_mmc"]["licensed_status"] in {
         "NOT_RUN_ON_INTEGRATED_COMMIT",
         "PASS",
         "FAIL",
         "INCOMPLETE_ANALYSIS",
+        "PARTIAL",
     }
-    assert scopes["generic_blueprint_builder"]["implementation_status"] == "INTEGRATION_BRANCH"
+    assert scopes["generic_blueprint_builder"]["implementation_status"] == "MERGED"
     assert scopes["generic_blueprint_builder"]["licensed_status"] == "NOT_RUN_ON_INTEGRATED_COMMIT"
 
 

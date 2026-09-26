@@ -1,5 +1,23 @@
 # PSCAD MCP 中文使用与验收说明
 
+## 最新验收范围（2026-09-26）
+
+已有多个明确范围通过实机验收，整体仍有待完成项。完整证据和版本边界见
+[当前验收说明](../acceptance/current-status-20260926.md)及[验收总表](../acceptance-status.json)。
+
+- **已合入本地 main：** `5613ff7` 上原生半桥 MMC 默认模型六阶段通过；已发布全桥
+  MMC 联合场景首轮及独立重放各 122 项物理检查通过，定时边沿误差为 0。
+- **补全分支已验收、尚未合入 main：** `9cfe1d4` 上三组半桥平均值请求共 18 个阶段
+  全部通过；`d7805e7` 上 Legacy 15 项实机检查通过。固定 LCC 在 `85f9d84` 上工程
+  检查通过，但独立 golden 与最终验收仍未完成。
+- **仍需完成：** 参数化 LCC 的物理映射和额定矩阵、其他 MMC 模型与参数范围、
+  通用 Blueprint 实机验收及 PSCAD 5.x 实机验收。LCC 额定功率已确定为系统总功率，
+  双极按 `P=2U极I极`；对应实现及验证在补全分支继续进行。
+
+总表的 `INCOMPLETE_ANALYSIS`、`PARTIAL` 或待运行状态必须按各自范围理解，不能
+解释为所有模型失败。文档更新不会把补全分支的运行修复合入 main，也不会产生新的
+实机 PASS；旧失败报告及历史基线继续保留。
+
 本项目把 PSCAD 自动化封装为 105 个 MCP 工具，其中原有通用服务契约保持 60 个工具，并增加只读拓扑诊断、HVDC、静默学习、blank LCC/MMC、固定 CIGRE LCC、参数化 LCC、参数化双引擎 MMC、通用 Blueprint Builder 与始终注册的能力工具，可供 Codex、GitHub Copilot CLI 等支持 stdio MCP 的客户端调用。项目采用双后端；PSCAD 5.x 当前为 contract-tested only：
 
 - PSCAD 4.6.x：`mhrc.automation`，当前已在本机 PSCAD 4.6.2 x64 许可环境做真实验收；
@@ -19,9 +37,9 @@ Legacy PSCAD 4.6.2 后端只支持启动新的受管 Automation 实例，不能�
 [`docs/acceptance-status.json`](../acceptance-status.json) 作为机器可读的范围状态表；
 每个 `PASS` 只对其中声明的 scope、代码提交和证据报告有效，不能继承给其他构建器、
 领域流程或更新后的提交。README 中“PSCAD 4.6.2 已做真实验收”特指通用 Legacy
-核心工作流，不表示 LCC 或 MMC 已取得最终实机 `PASS`。
+核心工作流；LCC 与 MMC 的证据以各自命名范围为准，不表示整个模型族通过。
 
-LCC/MMC 实现计划使用独立的当前真值基线
+LCC/MMC 实现计划保留独立的历史基线
 [`docs/acceptance/lcc-mmc-program-baseline.json`](../acceptance/lcc-mmc-program-baseline.json)。
 它登记 exact evidence commit、PSCAD/Master/compiler 身份、官方只读源、随包资产、
 历史运行和九个 builder-owned scope，不替代 topology 状态表。任何 `PASS` 都不能
@@ -114,7 +132,8 @@ LCC 领域提供四个工具：`plan_lcc_model`、`build_lcc_model`、
 `get_lcc_build_status` 轮询，最后用 `validate_lcc_model` 检查保存的工程。
 能力级别分别是 `planned`、`built`、`simulated`、`accepted`。结构验证、编译、
 模拟后端或 synthetic golden 都不等于真实验收。`poles=2`、用户额定设计、
-PSCAD 5.x、故障或换相失败验收、MMC 构建均不可用。
+PSCAD 5.x 和 MMC 构建不属于这个固定构建器；其 WP1C 已有故障与换相失败指示
+的实机工程证据，最终 golden 验收仍未完成。
 
 规划阶段如果连接的 PSCAD 服务没有提供实时的 4.6.2 definition inventory，
 会 fail closed；随包 catalog 不会被当作实时证据。WP1B 在完整编译成功后，
@@ -122,12 +141,13 @@ PSCAD 5.x、故障或换相失败验收、MMC 构建均不可用。
 OUT/INF 数据集验证。随包 `golden.json` 仍是等待独立授权参考运行生成的
 release-gate 占位基线。
 
-当前 program baseline 已把 `lcc.fixed_autonomous` 记录为提交 `3a09c8f` 上的
+历史 program baseline 把 `lcc.fixed_autonomous` 记录为提交 `3a09c8f` 上的
 `simulated/PASS`：六个独立 companion fixture 全部编译，通过空白工程完整拓扑
 构建与 final 重编译，完成 0.1 s、2,001 样本的无故障 smoke，退出后无 PSCAD
-残留进程。该报告属于历史 WP1B smoke；状态不是 `accepted`，必须先完成
-WP1B-before-WP1C 顺序，扰动、换相失败/恢复、independent golden 和最终验收
-仍属于后续门。
+残留进程。之后 `a2959fe` 上的同版本 WP1B/WP1C 已完成扰动、换相失败指示及恢复
+工程检查，见[工程完成记录](../superpowers/specs/2026-09-02-lcc-wp1c-native-closure-completion.md)。
+独立 golden 和最终 `accepted` 仍待完成；补全分支的最新复验另见
+[当前验收说明](../acceptance/current-status-20260926.md)。
 
 companion baseline-gates plan 保持 WP1B 与 WP1C 报告分离，并要求两份报告绑定
 同一 current commit 与 clean named checkout。下方 `wp1b_smoke` 和
@@ -236,6 +256,10 @@ template（官方模板只读），默认使用 `H_MMC_Mono_DC.pscx` 和 `interm
 `plan_blank_mmc_model` 可直接审计同一对官方 PSCX/PSLX 源文件，并记录编译对象树
 哈希。原生故障运行会保留派生场景和输出证据；官方模板缺少 `V_inserted` 时返回
 `MMC_ACCEPTANCE_INCOMPLETE`，而不是把半桥或不完整通道推断成全桥 `PASS`。
+
+具备完整实测通道的已发布全桥联合模型已在 `5613ff7` 上通过指定故障、定时及
+独立重放检查，见[联合交付记录](../acceptance/mmc-timing-fault-integration/delivery.md)。
+其他模板入口仍必须满足各自的通道及物理判据。
 
 ### 通用 PSCAD Blueprint Builder
 
