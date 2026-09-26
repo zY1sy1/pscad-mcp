@@ -1,4 +1,4 @@
-"""Generate a golden.json only from an explicitly confirmed reference output."""
+"""Generate golden.json from confirmed, independently reviewed reference output."""
 
 from __future__ import annotations
 
@@ -7,12 +7,12 @@ import hashlib
 import json
 import math
 import os
+import re
 import sys
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
-
 
 MAX_SAMPLES = 1_000_000
 
@@ -149,7 +149,105 @@ def _windowed_channel(name: str, channel: Any, units: str, window: tuple[float, 
     }
 
 
-def generate(reference_output: Path, blueprint: Path, library: Path, compiler: Path) -> Path:
+def _review_evidence(
+    review_record: Path | None,
+    *,
+    reference_output: Path,
+    reference_hash: str,
+    blueprint_hash: str,
+    acceptance_hash: str,
+    compiler: Path,
+    compiler_hash: str,
+    emtdc_time_step: float,
+    output_step: float,
+) -> tuple[dict[str, Any], str, dict[Path, str]]:
+    if review_record is None:
+        raise ValueError("an independent review record is required before golden generation")
+    review, review_hash = _read_json_with_hash(review_record, "independent review record")
+    required = {
+        "schema_version", "review_status", "review_id", "reviewer", "reviewed_at_utc",
+        "scope", "reference_kind", "independence_statement", "target_blueprint_sha256",
+        "acceptance_sha256", "normalized_output", "source_project", "source_libraries",
+        "raw_outputs", "output_metadata", "compiler", "emtdc_time_step_s", "output_step_s",
+    }
+    if not isinstance(review, dict) or set(review) != required:
+        raise ValueError("independent review record has an invalid field set")
+    if type(review["schema_version"]) is not int or review["schema_version"] != 1:
+        raise ValueError("independent review schema_version must be 1")
+    if review["review_status"] != "approved" or review["scope"] != "lcc.fixed_autonomous":
+        raise ValueError("independent review must approve the lcc.fixed_autonomous scope")
+    if not isinstance(review["reference_kind"], str) or review["reference_kind"] not in {
+        "official_reference", "independent_manual_assembly", "external_reviewed_output",
+    }:
+        raise ValueError("independent review requires an independent reference_kind")
+    for field in ("review_id", "reviewer", "independence_statement"):
+        if not isinstance(review[field], str) or not review[field].strip():
+            raise ValueError(f"independent review requires {field}")
+    timestamp = review["reviewed_at_utc"]
+    if not isinstance(timestamp, str) or re.fullmatch(
+        r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z", timestamp
+    ) is None:
+        raise ValueError("reviewed_at_utc must be a UTC RFC3339 timestamp")
+    reviewed_at = datetime.fromisoformat(timestamp[:-1] + "+00:00")
+    if reviewed_at > datetime.now(timezone.utc):
+        raise ValueError("reviewed_at_utc cannot be in the future")
+    if review["target_blueprint_sha256"] != blueprint_hash or review["acceptance_sha256"] != acceptance_hash:
+        raise ValueError("independent review blueprint/acceptance hash mismatch")
+    if (
+        _finite(review["emtdc_time_step_s"], "review.emtdc_time_step_s") != emtdc_time_step
+        or _finite(review["output_step_s"], "review.output_step_s") != output_step
+    ):
+        raise ValueError("independent review timestep differs from target blueprint")
+
+    snapshots = {review_record: review_hash}
+
+    def verify(item: Any, field: str, suffixes: set[str]) -> Path:
+        if not isinstance(item, dict) or set(item) != {"path", "sha256"}:
+            raise ValueError(f"review.{field} requires path and sha256")
+        if not isinstance(item["path"], str) or not item["path"]:
+            raise ValueError(f"review.{field}.path must be an absolute file path")
+        path = Path(item["path"])
+        if not path.is_absolute() or path.suffix.casefold() not in suffixes:
+            raise ValueError(f"review.{field} has an invalid absolute path or file type")
+        if any(parent.is_symlink() or getattr(parent, "is_junction", lambda: False)()
+               for parent in [path, *path.parents]):
+            raise ValueError(f"review.{field} cannot contain linked path components")
+        expected = item["sha256"]
+        if not isinstance(expected, str) or re.fullmatch(r"[0-9a-f]{64}", expected) is None:
+            raise ValueError(f"review.{field} requires a SHA-256 hash")
+        if _sha256(path) != expected:
+            raise ValueError(f"review.{field} source hash mismatch")
+        snapshots[path] = expected
+        return path
+
+    normalized = verify(review["normalized_output"], "normalized_output", {".json"})
+    if normalized.resolve() != reference_output.resolve() or review["normalized_output"]["sha256"] != reference_hash:
+        raise ValueError("independent review does not bind this reference output")
+    reviewed_compiler = verify(review["compiler"], "compiler", {".exe"})
+    if reviewed_compiler.resolve() != compiler.resolve() or review["compiler"]["sha256"] != compiler_hash:
+        raise ValueError("independent review does not bind this compiler")
+    verify(review["source_project"], "source_project", {".pscx"})
+    for field, suffixes in (
+        ("source_libraries", {".pslx"}),
+        ("raw_outputs", {".out", ".psout"}),
+        ("output_metadata", {".inf", ".infx"}),
+    ):
+        items = review[field]
+        if not isinstance(items, list) or not items:
+            raise ValueError(f"independent review requires nonempty {field}")
+        seen: set[Path] = set()
+        for index, item in enumerate(items):
+            path = verify(item, f"{field}[{index}]", suffixes).resolve()
+            if path in seen:
+                raise ValueError(f"independent review contains duplicate {field}")
+            seen.add(path)
+    return review, review_hash, snapshots
+
+
+def generate(
+    reference_output: Path, blueprint: Path, library: Path, compiler: Path,
+    *, review_record: Path | None = None,
+) -> Path:
     for path, label in ((reference_output, "reference output"), (blueprint, "blueprint"), (library, "library"), (compiler, "compiler")):
         if path.is_symlink() or not path.is_file():
             raise ValueError(f"{label} must be a regular file: {path}")
@@ -177,6 +275,17 @@ def generate(reference_output: Path, blueprint: Path, library: Path, compiler: P
     settings = blueprint_value.get("settings")
     emtdc_time_step = _time_step(settings, "time_step_s")
     output_step = _time_step(settings, "output_step_s")
+    review, review_hash, review_snapshots = _review_evidence(
+        review_record,
+        reference_output=reference_output,
+        reference_hash=reference_hash,
+        blueprint_hash=blueprint_hash,
+        acceptance_hash=acceptance_hash,
+        compiler=compiler,
+        compiler_hash=compiler_hash,
+        emtdc_time_step=emtdc_time_step,
+        output_step=output_step,
+    )
     selected_channels = {
         name: _windowed_channel(name, channels[name], units, comparison_window)
         for name, units in selectors.items()
@@ -184,6 +293,8 @@ def generate(reference_output: Path, blueprint: Path, library: Path, compiler: P
     payload = {
         "schema_version": 1,
         "source": {
+            "review_record_sha256": review_hash,
+            "review": review,
             "reference_output_sha256": reference_hash,
             "blueprint_sha256": blueprint_hash,
             "acceptance_sha256": acceptance_hash,
@@ -199,6 +310,7 @@ def generate(reference_output: Path, blueprint: Path, library: Path, compiler: P
         "channels": {name: selected_channels[name] for name in sorted(selected_channels)},
     }
     snapshots = {
+        **review_snapshots,
         reference_output: reference_hash,
         blueprint: blueprint_hash,
         acceptance_path: acceptance_hash,
@@ -210,6 +322,8 @@ def generate(reference_output: Path, blueprint: Path, library: Path, compiler: P
         if observed_hash != expected_hash:
             raise ValueError(f"input changed during golden generation: {path}")
     destination = blueprint.parent / "golden.json"
+    if destination.resolve() in {path.resolve() for path in snapshots}:
+        raise ValueError("golden destination cannot overwrite a reviewed source input")
     temporary: Path | None = None
     try:
         with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=destination.parent, prefix=".golden-", suffix=".tmp", delete=False) as stream:
@@ -242,12 +356,17 @@ def main() -> int:
     parser.add_argument("--blueprint", required=True, type=Path)
     parser.add_argument("--library", required=True, type=Path)
     parser.add_argument("--compiler", required=True, type=Path)
+    parser.add_argument("--review-record", required=True, type=Path)
     parser.add_argument("--confirm", action="store_true")
     args = parser.parse_args()
     if not args.confirm:
         parser.error("writing golden.json requires literal --confirm")
     try:
-        generate(args.reference_output.resolve(), args.blueprint.resolve(), args.library.resolve(), args.compiler.resolve())
+        generate(
+            args.reference_output.absolute(), args.blueprint.absolute(),
+            args.library.absolute(), args.compiler.absolute(),
+            review_record=args.review_record.absolute(),
+        )
     except (OSError, ValueError, json.JSONDecodeError) as error:
         print(f"generate_lcc_golden: {error}", file=sys.stderr)
         return 1

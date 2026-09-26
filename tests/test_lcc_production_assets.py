@@ -9,6 +9,7 @@ import pytest
 
 from pscad_mcp.hvdc.builders.lcc.assets import load_asset_set
 from pscad_mcp.hvdc.builders.lcc.validator import validate_companion_library
+from tests.test_lcc_golden_review import write_review
 
 ASSET_ROOT = Path(__file__).parents[1] / "pscad_mcp" / "assets" / "lcc" / "cigre_lcc_monopole_v1"
 
@@ -78,6 +79,7 @@ def test_confirmed_golden_generator_is_the_only_writer(tmp_path):
     compiler.write_text("compiler", encoding="utf-8")
     golden = tmp_path / "golden.json"
     golden.write_text("original", encoding="utf-8")
+    review = write_review(reference, blueprint, compiler)
 
     without_confirmation = subprocess.run(
         [
@@ -87,6 +89,7 @@ def test_confirmed_golden_generator_is_the_only_writer(tmp_path):
             "--blueprint", str(blueprint),
             "--library", str(library),
             "--compiler", str(compiler),
+            "--review-record", str(review),
         ],
         cwd=Path(__file__).parents[1],
         check=False,
@@ -104,6 +107,7 @@ def test_confirmed_golden_generator_is_the_only_writer(tmp_path):
             "--blueprint", str(blueprint),
             "--library", str(library),
             "--compiler", str(compiler),
+            "--review-record", str(review),
             "--confirm",
         ],
         cwd=Path(__file__).parents[1],
@@ -149,6 +153,7 @@ def test_golden_generator_rejects_input_mutation_before_replacing_output(tmp_pat
     compiler.write_text("compiler", encoding="utf-8")
     golden = tmp_path / "golden.json"
     golden.write_text("original", encoding="utf-8")
+    review = write_review(reference, blueprint, compiler)
 
     import scripts.generate_lcc_golden as generator
 
@@ -165,7 +170,7 @@ def test_golden_generator_rejects_input_mutation_before_replacing_output(tmp_pat
 
     monkeypatch.setattr(generator, "_sha256", hash_with_mutation)
     with pytest.raises(ValueError, match="changed"):
-        generator.generate(reference, blueprint, library, compiler)
+        generator.generate(reference, blueprint, library, compiler, review_record=review)
     assert golden.read_text(encoding="utf-8") == "original"
 
 
@@ -202,6 +207,7 @@ def test_golden_generator_rejects_units_and_window_contract_drift(tmp_path):
     compiler.write_text("compiler", encoding="utf-8")
     golden = tmp_path / "golden.json"
     golden.write_text("original", encoding="utf-8")
+    review = write_review(reference, blueprint, compiler)
 
     result = subprocess.run(
         [
@@ -211,6 +217,7 @@ def test_golden_generator_rejects_units_and_window_contract_drift(tmp_path):
             "--blueprint", str(blueprint),
             "--library", str(library),
             "--compiler", str(compiler),
+            "--review-record", str(review),
             "--confirm",
         ],
         cwd=Path(__file__).parents[1],
