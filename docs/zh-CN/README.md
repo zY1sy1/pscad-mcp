@@ -7,16 +7,18 @@
 
 - **已合入本地 main：** `5613ff7` 上原生半桥 MMC 默认模型六阶段通过；已发布全桥
   MMC 联合场景首轮及独立重放各 122 项物理检查通过，定时边沿误差为 0。
-- **补全分支已验收、尚未合入 main：** `9cfe1d4` 上三组半桥平均值请求共 18 个阶段
+- **已整合补全分支至 `76a0442`：** `9cfe1d4` 上三组半桥平均值请求共 18 个阶段
   全部通过；`d7805e7` 上 Legacy 15 项实机检查通过。固定 LCC 在 `85f9d84` 上工程
   检查通过，但独立 golden 与最终验收仍未完成。
 - **仍需完成：** 参数化 LCC 的物理映射和额定矩阵、其他 MMC 模型与参数范围、
   通用 Blueprint 实机验收及 PSCAD 5.x 实机验收。LCC 额定功率已确定为系统总功率，
-  双极按 `P=2U极I极`；对应实现及验证在补全分支继续进行。
+  双极按 `P=2U极I极`、单极按 `P=UI`；[口径修复及三个模板功率点的诊断](../acceptance/lcc-rating-convention.md)
+  已整合，但不能代替公开构建器仍缺的 13 类物理参数映射。
 
 总表的 `INCOMPLETE_ANALYSIS`、`PARTIAL` 或待运行状态必须按各自范围理解，不能
-解释为所有模型失败。文档更新不会把补全分支的运行修复合入 main，也不会产生新的
-实机 PASS；旧失败报告及历史基线继续保留。
+解释为所有模型失败。[分支整合记录](../acceptance/branch-integration-20260926.md)另列避雷器工具、
+Corpus v2 与并发文档的处理。合入实现不会把原报告升级为其他版本的实机 PASS；
+旧失败报告及历史基线继续保留。
 
 执行 `python scripts/audit_acceptance_inventory.py` 可离线复核已登记报告、子报告和
 声明交付文件的哈希。退出码 0 表示完整性齐备，1 表示证据无效，2 表示仍缺持久化报告；
@@ -296,8 +298,7 @@ Definition binding 使用可重复的
 ```powershell
 $bindings = @(
   '--definition-source', "master@4.6.2=$master462",
-  '--definition-source', "master@4.6.3=$master463",
-  '--definition-source', "vsc-mmc-lib@4.6.2=$vscMmc462"
+  '--definition-source', "master@4.6.3=$master463"
 )
 python scripts/build_blueprint_corpus.py propose-spec --source-root $sourceRoot --spec $v1Spec --proposal $v2Proposal @bindings
 python scripts/build_blueprint_corpus.py preflight --source-root $sourceRoot --spec $v2Proposal --output $proposedCorpus @bindings
@@ -307,10 +308,11 @@ python scripts/build_blueprint_corpus.py compare --source-root $sourceRoot --spe
 ```
 
 `propose-spec` 只写新的可移植候选，不覆盖已有 proposal 或 packaged spec；
-`preflight` 不写 corpus 或 Blueprint 输出。任一专有 definition source 缺失时，
-正式资产发布必须无部分改动地停止，并报告 `action: needs_evidence`、
-`missing: master@4.6.3 and/or vsc-mmc-lib@4.6.2` 与
-`assets_changed: false`。
+`preflight` 不写 corpus 或 Blueprint 输出。绑定必须与源工程实际引用的命名空间和版本
+完全一致。当前四个固定源工程需要 `master@4.6.2` 和 `master@4.6.3`，9 月 26 日预检
+只确认本机存在前者；正式迁移保留 `action: needs_evidence`、`missing: master@4.6.3`、
+`assets_changed: false`。其他源集合若实际引用 `vsc-mmc-lib@4.6.2` 等库，必须另行提供；
+不得用其他版本替代或虚构绑定。
 
 ### 参数化 LCC 真实模板执行边界
 

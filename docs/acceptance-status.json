@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-09-26T17:57:59+08:00",
+  "updated_at": "2026-09-26T18:17:51+08:00",
   "policy": "Evidence belongs only to its named scope, exact request and tested commit. INTEGRATION_BRANCH records are not merged/deployed. PASS is never inherited by another builder, rating or later commit; offline integrity checks do not establish physical acceptance.",
   "scopes": [
     {
       "scope": "legacy_core_462",
-      "implementation_status": "INTEGRATION_BRANCH",
+      "implementation_status": "MERGED",
       "licensed_status": "PASS",
       "evidence": {
         "report_path": "D:/PSCAD-Workspace/acceptance/completion-20260926/legacy-130327.json",
@@ -61,7 +61,8 @@
           "sha256": "26e584f3c0f7e2284c954a3e40a1deb0dab484c16ce4ca2a6a8d84428d84c32f"
         }
       ],
-      "implementation_branch": "codex/complete-acceptance"
+      "implementation_source_branch": "codex/complete-acceptance",
+      "implementation_integrated_snapshot": "76a0442"
     },
     {
       "scope": "unified_topology_462",
@@ -92,7 +93,7 @@
     },
     {
       "scope": "fixed_cigre_lcc",
-      "implementation_status": "INTEGRATION_BRANCH",
+      "implementation_status": "MERGED",
       "licensed_status": "INCOMPLETE_ANALYSIS",
       "evidence": {
         "report_path": "D:/PA/l26fixed/run-20260926-115423-402/fixed-lcc-dynamic-report.json",
@@ -204,11 +205,12 @@
           "sha256": "63003bafc9ab105d091bbc3836cacdd916b66cf7c12a79a18baf1fab674bb939"
         }
       ],
-      "implementation_branch": "codex/complete-acceptance"
+      "implementation_source_branch": "codex/complete-acceptance",
+      "implementation_integrated_snapshot": "76a0442"
     },
     {
       "scope": "parametric_lcc",
-      "implementation_status": "INTEGRATION_BRANCH",
+      "implementation_status": "MERGED",
       "licensed_status": "PARTIAL",
       "evidence": {
         "report_path": "D:/PA/l26/probe-114428/report.json",
@@ -283,7 +285,8 @@
           "sha256": "2482c321d4bf02ec77fa7d75fe98224bbafa29d6ee7ec6cb6a5727114e6038f7"
         }
       ],
-      "implementation_branch": "codex/complete-acceptance"
+      "implementation_source_branch": "codex/complete-acceptance",
+      "implementation_integrated_snapshot": "76a0442"
     },
     {
       "scope": "hvdc_scenarios",
@@ -331,7 +334,7 @@
     },
     {
       "scope": "parametric_mmc",
-      "implementation_status": "INTEGRATION_BRANCH",
+      "implementation_status": "MERGED",
       "licensed_status": "PARTIAL",
       "evidence": {
         "report_path": "D:/PA/c26v3a/suite-20260926-121407-e4d0b384/report.json",
@@ -420,7 +423,8 @@
           "sha256": "a72d96d6d040aaafd207c3f6c79c1c92b4469832275fbf8a4c7be3a1dafc274c"
         }
       ],
-      "implementation_branch": "codex/complete-acceptance"
+      "implementation_source_branch": "codex/complete-acceptance",
+      "implementation_integrated_snapshot": "76a0442"
     },
     {
       "scope": "generic_blueprint_builder",
@@ -435,7 +439,7 @@
     },
     {
       "scope": "native_mmc_half_bridge_640kv",
-      "implementation_status": "INTEGRATION_BRANCH",
+      "implementation_status": "MERGED",
       "licensed_status": "PASS",
       "pscad_version": "4.6.2",
       "evidence": {
@@ -524,7 +528,8 @@
           "note": "Normal operation, AC three-phase, AC single-line-ground, DC pole-pole, DC pole-ground and independent portable reload passed for this request at the recorded revision. Not whole-program WP6 or acceptance of other ratings."
         }
       ],
-      "implementation_branch": "codex/complete-acceptance"
+      "implementation_source_branch": "codex/complete-acceptance",
+      "implementation_integrated_snapshot": "76a0442"
     },
     {
       "scope": "mmc_full_bridge_joint_462",
@@ -593,7 +598,7 @@
     },
     {
       "scope": "lcc_parametric_executor_462",
-      "implementation_status": "INTEGRATION_BRANCH",
+      "implementation_status": "MERGED",
       "licensed_status": "PASS",
       "evidence": {
         "report_path": "D:/PA/l26/probe-114428/report.json",
@@ -657,11 +662,12 @@
         }
       ],
       "note": "Executor lifecycle probe only: original template at nominal frequency, five fresh OUT parts, immutable source/Master, owned cleanup. model_accepted=false; not the public rated builder or a physical/golden acceptance.",
-      "implementation_branch": "codex/complete-acceptance"
+      "implementation_source_branch": "codex/complete-acceptance",
+      "implementation_integrated_snapshot": "76a0442"
     },
     {
       "scope": "native_mmc_half_bridge_500kv_50hz",
-      "implementation_status": "INTEGRATION_BRANCH",
+      "implementation_status": "MERGED",
       "licensed_status": "PASS",
       "pscad_version": "4.6.2",
       "evidence": {
@@ -721,11 +727,12 @@
         "thermal_not_modeled"
       ],
       "note": "Six-stage normal/four-fault/independent-reload suite passed at 9cfe1d4 for this exact request, with empty engineering overrides. No acceptance transfer to other ratings, full-bridge models, switching/thermal behavior or whole-program WP6.",
-      "implementation_branch": "codex/complete-acceptance"
+      "implementation_source_branch": "codex/complete-acceptance",
+      "implementation_integrated_snapshot": "76a0442"
     },
     {
       "scope": "native_mmc_half_bridge_640kv_q100",
-      "implementation_status": "INTEGRATION_BRANCH",
+      "implementation_status": "MERGED",
       "licensed_status": "PASS",
       "pscad_version": "4.6.2",
       "evidence": {
@@ -785,11 +792,12 @@
         "thermal_not_modeled"
       ],
       "note": "Six-stage normal/four-fault/independent-reload suite passed at 9cfe1d4 for this exact request, with empty engineering overrides. No acceptance transfer to other ratings, full-bridge models, switching/thermal behavior or whole-program WP6.",
-      "implementation_branch": "codex/complete-acceptance"
+      "implementation_source_branch": "codex/complete-acceptance",
+      "implementation_integrated_snapshot": "76a0442"
     },
     {
       "scope": "native_average_arm_462",
-      "implementation_status": "INTEGRATION_BRANCH",
+      "implementation_status": "MERGED",
       "licensed_status": "PASS",
       "evidence": {
         "report_path": "D:/PA/c26arm/attempt-20260926-121454-0c1f8eb6/report.json",
@@ -837,7 +845,8 @@
         }
       ],
       "note": "Isolated native half-bridge average-arm charge/discharge/blocked behavior passed after the empty-capacitor coupling repair. Component acceptance only, not a complete converter or intrinsic DC fault blocking claim.",
-      "implementation_branch": "codex/complete-acceptance"
+      "implementation_source_branch": "codex/complete-acceptance",
+      "implementation_integrated_snapshot": "76a0442"
     }
   ],
   "program_baseline_note": "docs/acceptance/lcc-mmc-program-baseline.json is the frozen earlier program baseline. Later reports are indexed here without promoting that baseline or WP6.",
@@ -847,6 +856,9 @@
     "completion_branch": "codex/complete-acceptance",
     "completion_evidence_snapshot_commit": "2a9ed5b81bc48bd65cc62e2780a5f9ab17627603",
     "summary_path": "docs/acceptance/current-status-20260926.md",
-    "note": "This index includes verified evidence from main and an unmerged completion branch. INTEGRATION_BRANCH describes the implementation that produced the latest report, not main. Historical baseline files remain frozen; documentation updates do not transfer acceptance to another revision."
+    "note": "The completion implementation through 76a0442 is included in this integrated revision. All physical reports retain their original tested revisions and scopes; the historical baseline is unchanged. Integration and offline checks do not create new physical acceptance.",
+    "integrated_completion_commit": "76a0442",
+    "integration_code_commit": "a7ebf8c",
+    "preserved_status_documentation_commit": "671cdf718fdd6571a040da0c12826edfa4409233"
   }
 }

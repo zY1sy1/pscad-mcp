@@ -6,6 +6,11 @@ All notable changes to this project are documented here.
 
 ### Changed
 
+- Integrated the completed Legacy/MMC repairs, LCC total-power correction,
+  offline corpus v2 implementation and five-arrester study tools. Arrester
+  studies now require caller-provided licensed/concurrent opt-ins; importing
+  native preview creates no output and changes no acceptance environment.
+
 - Licensed completion work fixed native MMC fault recovery and empty-capacitor
   current coupling without relaxing physical limits. Three half-bridge cable
   requests passed all 18 normal/fault/reload stages at `9cfe1d4`.
@@ -33,8 +38,9 @@ All notable changes to this project are documented here.
   canonical confirmed nets, separate candidate/unresolved evidence, and
   `preflight`/`propose-spec`/`generate`/`verify`/`compare` CLI flows while
   retaining schema-v1 read compatibility. The formal four-project asset
-  migration remains `needs_evidence` until `master@4.6.3` and
-  `vsc-mmc-lib@4.6.2` are available; no partial assets or licensed acceptance
+  migration remains `needs_evidence` for missing versioned definitions; the
+  September 26 pinned-source preflight requires `master@4.6.3` locally.
+  No partial assets or licensed acceptance
   claim are included.
 
 - Blank LCC lifecycle tools now accept an audited official PSCAD 4.6 template,

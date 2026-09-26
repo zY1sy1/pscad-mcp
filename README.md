@@ -16,19 +16,22 @@ and [machine-readable inventory](docs/acceptance-status.json) distinguish:
 - **Merged into local main:** the native half-bridge default six-stage suite
   and the published full-bridge joint scenario passed at `5613ff7`. The joint
   first run and independent replay each passed 122 physical checks and strict timing.
-- **On `codex/complete-acceptance`, not merged:** three half-bridge AVM requests
+- **Completion fixes integrated through `76a0442`:** three half-bridge AVM requests
   passed all 18 stages at `9cfe1d4`; all 15 Legacy core/reliability checks passed
   at `d7805e7`. Fixed LCC engineering passed at `85f9d84`, while independent
   reviewed reference and final acceptance remain incomplete.
 - **Remaining work:** public parametric LCC physical mappings and its rating
   matrix, other MMC model/rating scopes, generic Blueprint licensed acceptance,
-  and PSCAD 5.x real acceptance. The LCC power convention is now decided as total
-  system power; its implementation and validation continue on the completion branch.
+  and PSCAD 5.x real acceptance. LCC ratings use total system power, pole-to-ground
+  voltage and per-pole current: bipolar `P=2UI`, monopolar `P=UI`.
+  The [rating correction and three template diagnostics](docs/acceptance/lcc-rating-convention.md)
+  do not complete the public builder's 13 unresolved physical mappings.
 
 Each result retains its tested revision and model scope. An incomplete inventory
 does not mean every model failed. Historical failed attempts and the earlier
-LCC/MMC program baseline remain preserved; this documentation update merges no
-runtime fixes and creates no new physical PASS.
+LCC/MMC program baseline remain preserved. [Integration and verification records](docs/acceptance/branch-integration-20260926.md)
+also cover the arrester tools, corpus v2 code and preserved concurrent documentation.
+Integrating an implementation does not create a new physical PASS for another revision.
 
 Run `python scripts/audit_acceptance_inventory.py` to check recorded reports,
 child reports and declared artifact hashes without starting PSCAD. Exit codes
@@ -419,8 +422,7 @@ review flow is:
 ```powershell
 $bindings = @(
   '--definition-source', "master@4.6.2=$master462",
-  '--definition-source', "master@4.6.3=$master463",
-  '--definition-source', "vsc-mmc-lib@4.6.2=$vscMmc462"
+  '--definition-source', "master@4.6.3=$master463"
 )
 python scripts/build_blueprint_corpus.py propose-spec --source-root $sourceRoot --spec $v1Spec --proposal $v2Proposal @bindings
 python scripts/build_blueprint_corpus.py preflight --source-root $sourceRoot --spec $v2Proposal --output $proposedCorpus @bindings
@@ -431,10 +433,12 @@ python scripts/build_blueprint_corpus.py compare --source-root $sourceRoot --spe
 
 `propose-spec` writes a new portable candidate and never overwrites an existing
 proposal or packaged spec. `preflight` writes no corpus or Blueprint output.
-Formal asset promotion stops without partial changes when either proprietary
-source is unavailable and is reported as `action: needs_evidence`,
-`missing: master@4.6.3 and/or vsc-mmc-lib@4.6.2`, and
-`assets_changed: false`.
+Bindings must exactly cover the versioned namespaces observed in the source
+projects. The four pinned projects currently require `master@4.6.2` and
+`master@4.6.3`; the September 26 preflight found only the former locally.
+Formal asset promotion remains `action: needs_evidence`, `missing: master@4.6.3`,
+`assets_changed: false`. Other source sets may additionally require libraries
+such as `vsc-mmc-lib@4.6.2`; do not substitute another version or invent bindings.
 
 Read-only HVDC inspection may scan an existing absolute `.pscx` source such as
 `C:\\PSCADFiles\\Breaker\\TEST1\\difforder_new.pscx`; all scenario mutations

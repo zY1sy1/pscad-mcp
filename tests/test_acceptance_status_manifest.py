@@ -28,7 +28,7 @@ def test_acceptance_status_manifest_separates_live_acceptance_scopes():
         "native_average_arm_462",
     }
     assert scopes["legacy_core_462"]["licensed_status"] == "PASS"
-    assert scopes["legacy_core_462"]["implementation_status"] == "INTEGRATION_BRANCH"
+    assert scopes["legacy_core_462"]["implementation_status"] == "MERGED"
     topology = scopes["unified_topology_462"]
     assert topology["licensed_status"] == "PASS"
     assert topology["pscad_version"] == "4.6.2"
@@ -50,7 +50,7 @@ def test_acceptance_status_manifest_separates_live_acceptance_scopes():
     assert scopes["hvdc_scenarios"]["licensed_status"] == "PARTIAL"
     assert scopes["mmc_stage_a"]["implementation_status"] == "MERGED"
     assert scopes["mmc_stage_a"]["licensed_status"] == "INCOMPLETE_ANALYSIS"
-    assert scopes["parametric_mmc"]["implementation_status"] == "INTEGRATION_BRANCH"
+    assert scopes["parametric_mmc"]["implementation_status"] == "MERGED"
     assert scopes["parametric_mmc"]["licensed_status"] in {
         "NOT_RUN_ON_INTEGRATED_COMMIT",
         "PASS",
