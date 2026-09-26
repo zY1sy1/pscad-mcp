@@ -150,10 +150,12 @@ fault clearing.
 
 - The public parametric LCC plan still has 13 unresolved logical parameters.
   Units and execution are now repaired, but physical mappings must not be
-  guessed. The original request contract computes `P=Vdc*Idc`, while the audited
-  template is bipolar. A question is pending to establish whether rated power
-  means per-pole power or total bipole power before completing the mappings and
-  rating matrix. The recorded plan and parameter inventory are in
+  guessed. The original contract incorrectly used `P=Vdc*Idc` for bipolar
+  requests. The user has resolved the basis using engineering convention:
+  total system power, pole-to-ground voltage, and per-pole current. The repaired
+  contract uses `P=2UI` for bipolar and `P=UI` for monopolar requests; see
+  [rating convention](lcc-rating-convention.md). The physical mappings and
+  licensed rating matrix remain unfinished. The historical plan and inventory are in
   `D:/PSCAD-Workspace/completion-licensed-20260926-r1/lcc-diagnosis`.
 - Fixed/native LCC final WP6 needs independently reviewed reference output;
   engineering PASS does not supply it.

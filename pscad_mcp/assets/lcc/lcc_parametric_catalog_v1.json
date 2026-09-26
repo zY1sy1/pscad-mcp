@@ -4,7 +4,7 @@
   "pscad_version": "4.6.2",
   "identity": "lcc_parametric_catalog_v1",
   "provenance_identity": "lcc_parametric_provenance_v1",
-  "provenance_sha256": "0affa8d88326ae44902ba36cb12f83e6eba05391b65ea1591199e5e023533e22",
+  "provenance_sha256": "3e3101e2afaf12f0a02384ab13aa3bf580cb533812a7852cc5ffe1b35f8d3a1c",
   "rating_contract_asset": "lcc_parametric_provenance_v1:rating_contract",
   "definitions": {},
   "template_role_contracts": {
@@ -90,8 +90,10 @@
     "dc_power_mw": {
       "units": "MW",
       "required": true,
-      "formula": "dc_voltage_kv * dc_current_ka",
-      "dependencies": ["dc_voltage_kv", "dc_current_ka"],
+      "formula": "pole_count * dc_voltage_kv * dc_current_ka",
+      "dependencies": ["topology", "dc_voltage_kv", "dc_current_ka"],
+      "pole_count_by_topology": {"monopolar": 1, "bipolar": 2},
+      "rating_basis": {"rated_power_mw": "total_system", "dc_voltage_kv": "pole_to_ground", "dc_current_ka": "per_pole"},
       "compared_to": "rated_power_mw",
       "asset": "lcc_parametric_provenance_v1:dimensional_identity",
       "comparison_asset": "lcc_parametric_provenance_v1:floating_point_comparison",

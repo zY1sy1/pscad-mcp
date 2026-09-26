@@ -50,8 +50,8 @@
     },
     "dimensional_identity": {
       "classification": "dimensional_identity",
-      "statement": "dc_power_mw = dc_voltage_kv * dc_current_ka because kV multiplied by kA yields MW.",
-      "machine_contract": {"formula": "dc_voltage_kv * dc_current_ka", "dependencies": ["dc_voltage_kv", "dc_current_ka"], "compared_to": "rated_power_mw"}
+      "statement": "Total system active power is the sum of pole powers. With pole-to-ground voltage magnitude and per-pole current, a balanced bipole has P = 2 U I and a monopole has P = U I; kV times kA yields MW. A single-pole operating mode does not change the bipole nameplate rating.",
+      "machine_contract": {"formula": "pole_count * dc_voltage_kv * dc_current_ka", "dependencies": ["topology", "dc_voltage_kv", "dc_current_ka"], "compared_to": "rated_power_mw", "pole_count_by_topology": {"monopolar": 1, "bipolar": 2}, "rating_basis": {"rated_power_mw": "total_system", "dc_voltage_kv": "pole_to_ground", "dc_current_ka": "per_pole"}}
     },
     "unit_conversions": {
       "classification": "dimensional_identity",

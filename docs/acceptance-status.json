@@ -213,7 +213,7 @@
         "sha256": "bb358ba827788e2d1f99b492b71610f4302a6acd270a186c4a76adff77e610a9",
         "commit": "dfaa0b020fba863dfe9bdd0ae2b65baec3f9654c"
       },
-      "note": "Only the nominal-template low-level executor lifecycle has real load/save/run/output/cleanup evidence. The public rated builder remains blocked by 13 unresolved physical parameter mappings; per-pole versus total bipole power is awaiting clarification. No rating-matrix or model acceptance is claimed.",
+      "note": "Only the nominal-template low-level executor lifecycle has real load/save/run/output/cleanup evidence. The public rated builder remains blocked by 13 unresolved physical parameter mappings; the power convention is resolved as total system MW, pole-to-ground kV and per-pole kA (bipolar P=2UI, monopolar P=UI). No rating-matrix or model acceptance is claimed.",
       "historical_attempts": [
         {
           "licensed_status": "NOT_RUN_ON_INTEGRATED_COMMIT",

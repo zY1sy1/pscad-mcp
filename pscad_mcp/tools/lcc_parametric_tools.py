@@ -16,11 +16,16 @@ ParametricLccInput = Annotated[
     Field(
         description=(
             'Keys topology, ratings, engineering_overrides, operation_modes, '
-            'return_path_assets, mode_requests, and template_mappings; example '
+            'return_path_assets, mode_requests, and template_mappings. '
+            'rated_power_mw is total system active power; dc_voltage_kv is '
+            'pole-to-ground magnitude and dc_current_ka is per-pole current. '
+            'Bipolar P=2UI; monopolar P=UI. Example '
             '{"topology":"bipolar","ratings":{"rated_power_mw":1000,'
-            '"dc_voltage_kv":500,"dc_current_ka":2,"ac_voltage_kv":230,'
+            '"dc_voltage_kv":500,"dc_current_ka":1,"ac_voltage_kv":230,'
             '"frequency_hz":50,"scr":3},"engineering_overrides":'
-            '{"base_mva":1000}}.'
+            '{"smoothing_reactor_mh":120,"filter_capacitance_uf":60,'
+            '"min_firing_angle_deg":5,"max_firing_angle_deg":45},'
+            '"return_path_assets":["neutral_bus"]}.'
         )
     ),
 ]

@@ -14,8 +14,9 @@
 - 固定 LCC：`85f9d84` 上 WP1B/WP1C 工程检查通过，独立 golden 未完成，最终仍为
   `INCOMPLETE_ANALYSIS`。参数化 LCC、其余 MMC 参数矩阵、通用 Blueprint 实机验收
   和 PSCAD 5.x 实机验收仍有缺口。
-- 参数化 LCC 的实际执行链已验证，但仍有 13 类物理参数绑定待补，额定功率的
-  每极／双极总量口径需要确定。详见[实机补全记录](../acceptance/completion-licensed-20260926.md)。
+- 参数化 LCC 的实际执行链已验证，但仍有 13 类物理参数绑定待补。额定功率已统一为
+  系统总有功功率，电压为极对地幅值，电流为每极电流；双极 `P=2UI`、单极 `P=UI`。
+  ±500 kV、总功率 1000 MW 对应每极 1 kA。详见[额定口径](../acceptance/lcc-rating-convention.md)。
 
 执行 `python scripts/audit_acceptance_inventory.py` 可离线复核已登记报告、子报告和
 声明交付文件的哈希。退出码 0 表示完整性齐备，1 表示证据无效，2 表示仍缺持久化报告；

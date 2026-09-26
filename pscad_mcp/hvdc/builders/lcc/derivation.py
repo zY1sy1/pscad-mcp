@@ -32,7 +32,7 @@ class _DerivationContext:
     declaration_contracts: dict[
         tuple[int, str], tuple[str, str, tuple[Mapping[str, Any], ...]]
     ] = field(default_factory=dict)
-    power_contract: tuple[str, str, str, float, float] | None = None
+    power_contract: tuple[str, str, str, float, float, Mapping[str, int]] | None = None
 
 
 def _summary_sha256(value: Any) -> str:
@@ -692,7 +692,7 @@ def _validate_rating_contract(context: _DerivationContext) -> None:
 
 def _power_declaration_contract(
     context: _DerivationContext,
-) -> tuple[str, str, str, float, float]:
+) -> tuple[str, str, str, float, float, Mapping[str, int]]:
     if context.power_contract is not None:
         return context.power_contract
     catalog = context.catalog
@@ -711,7 +711,7 @@ def _power_declaration_contract(
     units = declaration.get("units")
     asset = declaration.get("asset")
     required_rating_names = {"rated_power_mw", "dc_voltage_kv", "dc_current_ka"}
-    expected_dependencies = {"dc_voltage_kv", "dc_current_ka"}
+    expected_dependencies = {"topology", "dc_voltage_kv", "dc_current_ka"}
     dependency_value = declaration.get("dependencies")
     if (
         isinstance(dependency_value, (str, bytes, bytearray))
@@ -742,6 +742,8 @@ def _power_declaration_contract(
         "formula": formula,
         "dependencies": list(dependency_names),
         "compared_to": declaration.get("compared_to"),
+        "pole_count_by_topology": declaration.get("pole_count_by_topology"),
+        "rating_basis": declaration.get("rating_basis"),
     }
     _require_machine_contract(
         context,
@@ -750,7 +752,9 @@ def _power_declaration_contract(
         "dc_power_mw",
     )
     if (
-        formula != "dc_voltage_kv * dc_current_ka"
+        formula != "pole_count * dc_voltage_kv * dc_current_ka"
+        or declaration.get("pole_count_by_topology") != {"monopolar": 1, "bipolar": 2}
+        or any(type(count) is not int for count in declaration["pole_count_by_topology"].values())
         or not isinstance(units, str)
         or not isinstance(asset, str)
     ):
@@ -783,6 +787,7 @@ def _power_declaration_contract(
         asset,
         relative_tolerance,
         absolute_tolerance,
+        declaration["pole_count_by_topology"],
     )
     context.power_contract = result
     return result
@@ -830,22 +835,28 @@ def _rating_parameters(
 
 
 def _derived_power(
-    ratings: Mapping[str, float], context: _DerivationContext
+    ratings: Mapping[str, float], topology: str, context: _DerivationContext
 ) -> DerivedParameter:
-    formula, units, asset, relative_tolerance, absolute_tolerance = (
+    formula, units, asset, relative_tolerance, absolute_tolerance, pole_counts = (
         _power_declaration_contract(context)
     )
+    pole_count = pole_counts.get(topology)
+    if pole_count is None:
+        raise _error("LCC_RATING_INVALID", "Power requires a supported topology.", topology=topology)
     calculated = _finite_number(
-        ratings["dc_voltage_kv"] * ratings["dc_current_ka"],
+        pole_count * ratings["dc_voltage_kv"] * ratings["dc_current_ka"],
         parameter="dc_power_mw",
         code="LCC_RATING_INVALID",
     )
     if not math.isclose(ratings["rated_power_mw"], calculated, rel_tol=relative_tolerance, abs_tol=absolute_tolerance):
         raise _error(
             "LCC_RATING_INCONSISTENT",
-            "rated_power_mw must equal dc_voltage_kv * dc_current_ka.",
+            "Total rated_power_mw must equal pole_count * dc_voltage_kv * dc_current_ka; voltage is pole-to-ground and current is per pole.",
             rated_power_mw=ratings["rated_power_mw"],
             calculated_power_mw=calculated,
+            topology=topology,
+            pole_count=pole_count,
+            expected_dc_current_ka=(ratings["rated_power_mw"] / pole_count) / ratings["dc_voltage_kv"],
             formula=formula,
             asset=asset,
         )
@@ -855,7 +866,11 @@ def _derived_power(
         source="derived",
         formula=formula,
         units=units,
-        constraints=(f"relative_tolerance={relative_tolerance}", f"absolute_tolerance={absolute_tolerance}"),
+        constraints=(
+            f"topology={topology}", f"pole_count={pole_count}",
+            "power_basis=total_system", "voltage_basis=pole_to_ground", "current_basis=per_pole",
+            f"relative_tolerance={relative_tolerance}", f"absolute_tolerance={absolute_tolerance}",
+        ),
         asset=asset,
     )
 
@@ -1099,7 +1114,7 @@ def derive_lcc_parameters(request: ParametricLccRequest, catalog: Any = None) ->
         raise _error("LCC_PARAMETER_DERIVATION_FAILED", "request must be ParametricLccRequest")
     context = _derivation_context(catalog)
     rating_parameters, ratings = _rating_parameters(request, context)
-    derived_power = _derived_power(ratings, context)
+    derived_power = _derived_power(ratings, request.topology, context)
     engineering_parameters, engineering = _engineering_parameters(request, context)
     relationship_parameters = _validate_relationships(ratings, engineering, context)
     _validate_return_assets(request, context)

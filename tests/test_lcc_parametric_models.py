@@ -23,7 +23,7 @@ VALID_REQUEST = {
     "ratings": {
         "rated_power_mw": 1200.0,
         "dc_voltage_kv": 500.0,
-        "dc_current_ka": 2.4,
+        "dc_current_ka": 1.2,
         "ac_voltage_kv": 500.0,
         "frequency_hz": 50.0,
         "scr": 3.0,
@@ -55,7 +55,7 @@ def test_parametric_records_are_frozen_and_json_safe():
         ratings=LccRatings(
             rated_power_mw=1200.0,
             dc_voltage_kv=500.0,
-            dc_current_ka=2.4,
+            dc_current_ka=1.2,
             ac_voltage_kv=500.0,
             frequency_hz=50.0,
             scr=3.0,
@@ -68,7 +68,7 @@ def test_parametric_records_are_frozen_and_json_safe():
     payload = request.to_dict()
 
     assert payload["topology"] == "bipolar"
-    assert payload["ratings"]["dc_current_ka"] == 2.4
+    assert payload["ratings"]["dc_current_ka"] == 1.2
     assert payload["return_path_assets"] == ["neutral_bus", "earth_return"]
     assert json.loads(json.dumps(payload))["engineering_overrides"]["smoothing_reactor_mh"] == 120.0
 

@@ -26,7 +26,9 @@ coverage, full-bridge AVM, generic Blueprint real acceptance and PSCAD 5.x real
 acceptance are not complete. Average-value acceptance excludes switching stress,
 switching harmonics, individual submodule balance and thermal behavior.
 The parametric LCC executor has a real lifecycle probe, but 13 physical parameter
-bindings and the per-pole/total-bipole power contract remain unresolved.
+bindings remain unresolved. Parametric LCC ratings now use total system active
+power, pole-to-ground DC voltage and per-pole current: bipolar `P=2UI`, monopolar
+`P=UI`. See [the rating convention](docs/acceptance/lcc-rating-convention.md).
 
 Run `python scripts/audit_acceptance_inventory.py` to check recorded report,
 child-report and declared artifact hashes without starting PSCAD. It returns

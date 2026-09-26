@@ -114,6 +114,12 @@ def _require_text_tuple(value: Any, context: str) -> tuple[str, ...]:
 
 @dataclass(frozen=True)
 class LccRatings(_JsonRecord):
+    """Total system MW, pole-to-ground DC kV and per-pole DC kA.
+
+    Balanced bipolar ratings satisfy P = 2 U I; monopolar ratings satisfy
+    P = U I. Operating a bipole on one pole does not redefine its nameplate.
+    """
+
     rated_power_mw: float
     dc_voltage_kv: float
     dc_current_ka: float

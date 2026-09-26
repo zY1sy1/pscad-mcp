@@ -280,7 +280,7 @@ def test_parametric_topology_planner_is_deterministic_explicit_and_fail_closed()
 def test_parametric_topology_planner_maps_the_complete_derived_report_without_authorizing_writes():
     request = ParametricLccRequest(
         topology="bipolar",
-        ratings=LccRatings(1200.0, 500.0, 2.4, 500.0, 50.0, 3.0, 2.5),
+        ratings=LccRatings(1200.0, 500.0, 1.2, 500.0, 50.0, 3.0, 2.5),
         engineering_overrides={
             "smoothing_reactor_mh": 120.0,
             "filter_capacitance_uf": 60.0,
