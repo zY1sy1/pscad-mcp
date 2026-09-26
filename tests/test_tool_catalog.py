@@ -1,5 +1,6 @@
 from dataclasses import FrozenInstanceError
 import inspect
+import json
 from typing import Annotated, Any
 
 from mcp.server.fastmcp import FastMCP
@@ -322,7 +323,7 @@ def test_complex_inputs_have_model_facing_shape_examples():
         ("create_component", "parameters"): "parameter_name",
         ("create_bus", "parameters"): "parameter_name",
         ("run_hvdc_scenario", "scenario"): "changes",
-        ("derive_lcc_parameters", "request"): "base_mva",
+        ("derive_lcc_parameters", "request"): "engineering_overrides",
         ("plan_parametric_lcc_model", "request"): "rated_power_mw",
         ("build_parametric_lcc_model", "request"): "rated_power_mw",
         ("validate_lcc_operating_modes", "events"): "time_s",
@@ -333,3 +334,11 @@ def test_complex_inputs_have_model_facing_shape_examples():
         ]
         assert expected in description
         assert "{" in description and "}" in description
+        if tool_name in {"derive_lcc_parameters", "plan_parametric_lcc_model", "build_parametric_lcc_model"}:
+            from pscad_mcp.hvdc.builders.lcc.derivation import derive_lcc_parameters
+            from pscad_mcp.hvdc.builders.lcc.schema import parse_parametric_request
+
+            example, _ = json.JSONDecoder().raw_decode(description[description.index("{"):])
+            # Validate the advertised request, including total bipolar power;
+            # an obsolete/unknown override name must not be required by this test.
+            derive_lcc_parameters(parse_parametric_request(example))

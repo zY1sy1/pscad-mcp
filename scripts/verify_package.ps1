@@ -50,7 +50,7 @@ import importlib.metadata as metadata
 import pscad_mcp
 from pscad_mcp.main import create_server
 from pscad_mcp.tools.catalog import FULL_TOOL_NAMES
-from pscad_mcp.hvdc.builders.lcc.assets import load_packaged_asset_set
+from pscad_mcp.hvdc.builders.lcc.assets import load_packaged_asset_set, load_parametric_catalog
 from pscad_mcp.hvdc.builders.mmc.assets import load_packaged_asset_set as load_mmc_assets
 
 installed = metadata.version('pscad-mcp')
@@ -65,6 +65,9 @@ if assets.name != 'cigre_lcc_monopole_v1':
 if not assets.pscad_version.startswith('4.'):
     raise RuntimeError(f'Unexpected packaged asset PSCAD version: {assets.pscad_version!r}')
 mmc_assets = load_mmc_assets()
+parametric_catalog = load_parametric_catalog()
+if parametric_catalog['identity'] != 'lcc_parametric_catalog_v1':
+    raise RuntimeError('Installed parametric LCC catalog is missing or invalid')
 assert mmc_assets.name == 'cigre_b4_p2p_avm_v1'
 assert mmc_assets.pscad_version == assets.pscad_version
 assert len(mmc_assets.hashes) == 8

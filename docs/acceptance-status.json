@@ -858,7 +858,7 @@
     "summary_path": "docs/acceptance/current-status-20260926.md",
     "note": "The completion implementation through 76a0442 is included in this integrated revision. All physical reports retain their original tested revisions and scopes; the historical baseline is unchanged. Integration and offline checks do not create new physical acceptance.",
     "integrated_completion_commit": "76a0442",
-    "integration_code_commit": "a7ebf8c",
+    "integration_code_commit": "ff19d92",
     "preserved_status_documentation_commit": "671cdf718fdd6571a040da0c12826edfa4409233"
   }
 }
