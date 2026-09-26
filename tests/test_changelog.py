@@ -89,3 +89,17 @@ def test_readmes_document_the_fixed_lcc_builder_boundary():
         "不是 `accepted`",
     ):
         assert phrase in chinese
+
+
+def test_readme_describes_corpus_v2_relationship_boundaries():
+    root = Path(__file__).parents[1]
+    english = (root / "README.md").read_text(encoding="utf-8")
+    chinese = (root / "docs" / "zh-CN" / "README.md").read_text(encoding="utf-8")
+
+    for text in (english, chinese):
+        assert "pscad-xml-v2" in text
+        assert "confirmed" in text.casefold()
+        assert "candidate" in text.casefold()
+        assert "definition" in text.casefold()
+    assert "does not require PSCAD" in english
+    assert "不需要启动 PSCAD" in chinese

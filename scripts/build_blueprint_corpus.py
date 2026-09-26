@@ -3,19 +3,29 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
-from pathlib import Path
+import re
 import shutil
 import sys
 import tempfile
-from typing import Any, Sequence
+from collections.abc import Mapping, Sequence
+from dataclasses import replace
+from pathlib import Path
+from typing import Any
+from xml.etree import ElementTree as ET
 
 # Keep direct ``python scripts/build_blueprint_corpus.py`` invocation working.
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from pscad_mcp.builders.blueprint.corpus_extractor import extract_project
-from pscad_mcp.builders.blueprint.corpus_models import CorpusSpec, ProjectGraph
+from pscad_mcp.builders.blueprint.corpus_models import (
+    CorpusDefinitionSource,
+    CorpusSpec,
+    ProjectGraph,
+)
+from pscad_mcp.builders.blueprint.corpus_relations import build_relationship_truth
 from pscad_mcp.builders.blueprint.corpus_schema import parse_corpus_spec
 from pscad_mcp.builders.blueprint.corpus_verifier import (
     generate_blueprint_candidate,
@@ -27,9 +37,10 @@ from pscad_mcp.builders.blueprint.corpus_writer import (
     write_corpus_candidate,
 )
 from pscad_mcp.core.backend.base import BackendError
-
+from pscad_mcp.core.definition_metadata import parse_definition_metadata_source
 
 _MAX_SPEC_BYTES = 1024 * 1024
+_PORTABLE_NAME = re.compile(r"[a-z0-9][a-z0-9._-]*")
 
 
 def _error(code: str, message: str) -> BackendError:
@@ -39,11 +50,17 @@ def _error(code: str, message: str) -> BackendError:
 def parser() -> argparse.ArgumentParser:
     root = argparse.ArgumentParser(description="Build deterministic PSCAD Blueprint corpus proposals.")
     commands = root.add_subparsers(dest="command", required=True)
-    for name in ("generate", "verify", "compare"):
+    for name in ("generate", "verify", "compare", "preflight"):
         command = commands.add_parser(name)
         command.add_argument("--source-root", type=Path, required=True)
         command.add_argument("--spec", type=Path, required=True)
         command.add_argument("--output", type=Path, required=True)
+        command.add_argument("--definition-source", action="append", default=[])
+    proposal = commands.add_parser("propose-spec")
+    proposal.add_argument("--source-root", type=Path, required=True)
+    proposal.add_argument("--spec", type=Path, required=True)
+    proposal.add_argument("--proposal", type=Path, required=True)
+    proposal.add_argument("--definition-source", action="append", default=[])
     return root
 
 
@@ -98,12 +115,108 @@ def _resolve_boundaries(
     return source, destination, blueprints, shared_blueprint_root
 
 
-def _extract_graphs(source_root: Path, spec: CorpusSpec) -> tuple[ProjectGraph, ...]:
-    return tuple(extract_project(source_root, source) for source in spec.entry_points)
+def _definition_bindings(values: Sequence[str]) -> dict[tuple[str, str], Path]:
+    result = {}
+    for value in values:
+        identity, separator, raw_path = value.partition("=")
+        namespace, marker, version = identity.partition("@")
+        key = (namespace, version)
+        path = Path(raw_path)
+        if (
+            not separator
+            or not marker
+            or identity.count("@") != 1
+            or not namespace
+            or not version
+            or _PORTABLE_NAME.fullmatch(namespace) is None
+            or not path.is_absolute()
+            or key in result
+        ):
+            raise _error(
+                "CORPUS_DEFINITION_SOURCE_MISMATCH",
+                "Definition-source binding is invalid.",
+            )
+        result[key] = path
+    return result
+
+
+def _extract_graphs(
+    source_root: Path,
+    spec: CorpusSpec,
+    definition_bindings: Mapping[tuple[str, str], Path] | None = None,
+) -> tuple[ProjectGraph, ...]:
+    bindings = dict(definition_bindings or {})
+    raw = tuple(
+        extract_project(
+            source_root,
+            source,
+            schema_version=spec.schema_version,
+            normalization_profile=spec.normalization_profile,
+        )
+        for source in spec.entry_points
+    )
+    if spec.schema_version == 1:
+        if bindings:
+            raise _error(
+                "CORPUS_DEFINITION_SOURCE_MISMATCH",
+                "Schema-v1 generation does not accept definition sources.",
+            )
+        return raw
+    return tuple(
+        build_relationship_truth(graph, spec, bindings).graph for graph in raw
+    )
+
+
+def _required_definition_binding_keys(
+    source_root: Path,
+    spec: CorpusSpec,
+    graphs: Sequence[ProjectGraph],
+) -> set[tuple[str, str]]:
+    required: set[tuple[str, str]] = set()
+    for source, graph in zip(spec.entry_points, graphs, strict=True):
+        path = source_root / source.basename
+        try:
+            payload = path.read_bytes()
+        except OSError as error:
+            raise _error(
+                "CORPUS_DEFINITION_SOURCE_MISMATCH",
+                "Definition references could not be observed.",
+            ) from error
+        if (
+            len(payload) != source.byte_length
+            or hashlib.sha256(payload).hexdigest() != source.sha256
+        ):
+            raise _error(
+                "CORPUS_DEFINITION_SOURCE_MISMATCH",
+                "Definition references changed while being observed.",
+            )
+        try:
+            root = ET.fromstring(payload)
+        except ET.ParseError as error:
+            raise _error(
+                "CORPUS_DEFINITION_SOURCE_MISMATCH",
+                "Definition references are not valid XML.",
+            ) from error
+        for reference in root.findall("./definitions/Definition/references/using"):
+            namespace = reference.get("namespace") or ""
+            if _PORTABLE_NAME.fullmatch(namespace) is None:
+                raise _error(
+                    "CORPUS_DEFINITION_SOURCE_MISMATCH",
+                    "Definition reference namespace is invalid.",
+                )
+            required.add((namespace, graph.pscad_version))
+    return required
 
 
 def _expected_blueprint_names(spec: CorpusSpec) -> tuple[str, ...]:
-    return tuple(f"{source.project_id}-existing-v1" for source in spec.entry_points)
+    return tuple(
+        f"{source.project_id}-existing-v{spec.schema_version}"
+        for source in spec.entry_points
+    )
+
+
+def _summary_schema_version(spec: CorpusSpec) -> dict[str, int]:
+    return {"schema_version": 2} if spec.schema_version == 2 else {}
 
 
 def _write_blueprint_candidates(
@@ -247,9 +360,14 @@ def _remove_bundle_root(path: Path, destination: Path) -> None:
         shutil.rmtree(path)
 
 
-def generate_corpus(source_root: Path, spec: CorpusSpec, output: Path) -> dict[str, Any]:
+def generate_corpus(
+    source_root: Path,
+    spec: CorpusSpec,
+    output: Path,
+    definition_bindings: Mapping[tuple[str, str], Path] | None = None,
+) -> dict[str, Any]:
     source, destination, blueprint_destination, _ = _resolve_boundaries(source_root, output)
-    graphs = _extract_graphs(source, spec)
+    graphs = _extract_graphs(source, spec, definition_bindings)
     staging_root = _temporary_bundle_root(destination)
     try:
         corpus, blueprints, names = _build_staged_bundle(staging_root, spec, graphs)
@@ -260,18 +378,24 @@ def generate_corpus(source_root: Path, spec: CorpusSpec, output: Path) -> dict[s
         "command": "generate",
         "status": "generated",
         "corpus": spec.name,
+        **_summary_schema_version(spec),
         "projects": [graph.project_id for graph in graphs],
         "blueprints": list(names),
     }
 
 
-def verify_corpus(source_root: Path, spec: CorpusSpec, output: Path) -> dict[str, Any]:
+def verify_corpus(
+    source_root: Path,
+    spec: CorpusSpec,
+    output: Path,
+    definition_bindings: Mapping[tuple[str, str], Path] | None = None,
+) -> dict[str, Any]:
     source, destination, blueprint_destination, shared_blueprint_root = _resolve_boundaries(
         source_root,
         output,
         packaged_blueprints=True,
     )
-    graphs = _extract_graphs(source, spec)
+    graphs = _extract_graphs(source, spec, definition_bindings)
     validate_candidate(destination, spec)
     for graph in graphs:
         graph_path = destination / "graphs" / f"{graph.project_id}.json"
@@ -287,18 +411,24 @@ def verify_corpus(source_root: Path, spec: CorpusSpec, output: Path) -> dict[str
         "command": "verify",
         "status": "verified",
         "corpus": spec.name,
+        **_summary_schema_version(spec),
         "projects": [graph.project_id for graph in graphs],
         "blueprints": list(names),
     }
 
 
-def compare_corpus(source_root: Path, spec: CorpusSpec, output: Path) -> tuple[dict[str, Any], bool]:
+def compare_corpus(
+    source_root: Path,
+    spec: CorpusSpec,
+    output: Path,
+    definition_bindings: Mapping[tuple[str, str], Path] | None = None,
+) -> tuple[dict[str, Any], bool]:
     source, destination, blueprint_destination, _ = _resolve_boundaries(
         source_root,
         output,
         packaged_blueprints=True,
     )
-    graphs = _extract_graphs(source, spec)
+    graphs = _extract_graphs(source, spec, definition_bindings)
     staging_root = _temporary_bundle_root(destination)
     try:
         corpus, blueprints, names = _build_staged_bundle(staging_root, spec, graphs)
@@ -319,6 +449,7 @@ def compare_corpus(source_root: Path, spec: CorpusSpec, output: Path) -> tuple[d
             "command": "compare",
             "status": "identical" if identical else "different",
             "corpus": spec.name,
+            **_summary_schema_version(spec),
             "projects": [graph.project_id for graph in graphs],
             "blueprints": list(names),
         },
@@ -326,19 +457,186 @@ def compare_corpus(source_root: Path, spec: CorpusSpec, output: Path) -> tuple[d
     )
 
 
+def preflight_corpus(
+    source_root: Path,
+    spec: CorpusSpec,
+    output: Path,
+    definition_bindings: Mapping[tuple[str, str], Path] | None = None,
+) -> dict[str, Any]:
+    source, _destination, _blueprints, _ = _resolve_boundaries(source_root, output)
+    graphs = _extract_graphs(source, spec, definition_bindings)
+    blocking = [
+        item
+        for graph in graphs
+        for item in graph.unresolved_evidence
+        if item.classification == "blocking"
+    ]
+    if blocking:
+        raise _error(
+            "CORPUS_RELATION_INCOMPLETE",
+            "Corpus relationship preflight found blocking evidence.",
+        )
+    return {
+        "command": "preflight",
+        "status": "verified",
+        "corpus": spec.name,
+        "schema_version": spec.schema_version,
+        "projects": [
+            {
+                "project_id": graph.project_id,
+                "definitions": len(graph.definition_classifications),
+                "component_occurrences": len(graph.component_occurrences),
+                "instance_ports": len(graph.instance_ports),
+                "confirmed_nets": len(graph.confirmed_nets),
+                "memberships": len(graph.port_net_memberships),
+                "confirmed_relation_signature": graph.confirmed_relation_signature,
+                "definition_catalog_signature": graph.definition_catalog_signature,
+            }
+            for graph in graphs
+        ],
+    }
+
+
+def propose_spec(
+    source_root: Path,
+    spec: CorpusSpec,
+    proposal: Path,
+    definition_bindings: Mapping[tuple[str, str], Path],
+) -> dict[str, Any]:
+    if spec.schema_version != 1 or not definition_bindings:
+        raise _error(
+            "CORPUS_SPEC_INVALID",
+            "A schema-v1 specification and definition sources are required.",
+        )
+    try:
+        source = source_root.resolve(strict=True)
+        destination = proposal.resolve(strict=False)
+    except OSError as error:
+        raise _error(
+            "CORPUS_OUTPUT_UNSAFE",
+            "Proposal paths could not be resolved safely.",
+        ) from error
+    if (
+        not source.is_dir()
+        or _paths_overlap(source, destination)
+        or proposal.exists()
+        or proposal.is_symlink()
+    ):
+        raise _error(
+            "CORPUS_OUTPUT_UNSAFE",
+            "The proposal destination is unsafe or already exists.",
+        )
+
+    raw_graphs = _extract_graphs(source, spec)
+    if set(definition_bindings) != _required_definition_binding_keys(
+        source,
+        spec,
+        raw_graphs,
+    ):
+        raise _error(
+            "CORPUS_DEFINITION_SOURCE_MISMATCH",
+            "Definition-source bindings do not cover the observed references.",
+        )
+
+    definition_sources = []
+    for (namespace, version), raw_path in sorted(definition_bindings.items()):
+        if (
+            not raw_path.is_absolute()
+            or raw_path.is_symlink()
+            or not raw_path.is_file()
+        ):
+            raise _error(
+                "CORPUS_DEFINITION_SOURCE_MISMATCH",
+                "Definition source is missing or unsafe.",
+            )
+        payload = raw_path.read_bytes()
+        try:
+            parsed = parse_definition_metadata_source(payload)
+        except (ET.ParseError, TypeError, ValueError) as error:
+            raise _error(
+                "CORPUS_DEFINITION_SOURCE_MISMATCH",
+                "Definition source is invalid.",
+            ) from error
+        if parsed.version != version:
+            raise _error(
+                "CORPUS_DEFINITION_SOURCE_MISMATCH",
+                "Definition source PSCAD version does not match its binding.",
+            )
+        definition_sources.append(
+            CorpusDefinitionSource(
+                namespace=namespace,
+                basename=raw_path.name,
+                byte_length=len(payload),
+                sha256=hashlib.sha256(payload).hexdigest(),
+                pscad_versions=(version,),
+                policy="ports-and-classification-v1",
+            )
+        )
+    candidate = replace(
+        spec,
+        schema_version=2,
+        normalization_profile="pscad-xml-v2",
+        definition_sources=tuple(definition_sources),
+    )
+    serialized = canonical_json(candidate.to_dict())
+    parse_corpus_spec(json.loads(serialized.decode("ascii")))
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    with destination.open("xb") as handle:
+        handle.write(serialized)
+    return {
+        "command": "propose-spec",
+        "status": "proposed",
+        "corpus": candidate.name,
+        "schema_version": 2,
+        "definition_sources": len(candidate.definition_sources),
+    }
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = parser().parse_args(argv)
     try:
         spec = _load_spec(args.spec)
+        bindings = _definition_bindings(args.definition_source)
         if args.command == "generate":
-            summary = generate_corpus(args.source_root, spec, args.output)
+            summary = generate_corpus(
+                args.source_root,
+                spec,
+                args.output,
+                bindings,
+            )
             exit_code = 0
         elif args.command == "verify":
-            summary = verify_corpus(args.source_root, spec, args.output)
+            summary = verify_corpus(
+                args.source_root,
+                spec,
+                args.output,
+                bindings,
+            )
+            exit_code = 0
+        elif args.command == "compare":
+            summary, identical = compare_corpus(
+                args.source_root,
+                spec,
+                args.output,
+                bindings,
+            )
+            exit_code = 0 if identical else 1
+        elif args.command == "preflight":
+            summary = preflight_corpus(
+                args.source_root,
+                spec,
+                args.output,
+                bindings,
+            )
             exit_code = 0
         else:
-            summary, identical = compare_corpus(args.source_root, spec, args.output)
-            exit_code = 0 if identical else 1
+            summary = propose_spec(
+                args.source_root,
+                spec,
+                args.proposal,
+                bindings,
+            )
+            exit_code = 0
     except BackendError as error:
         summary = {"code": error.code, "status": "failed"}
         exit_code = 1

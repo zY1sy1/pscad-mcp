@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from collections import Counter
 import hashlib
-from importlib import resources
 import json
-from pathlib import PurePosixPath
 import re
+from collections import Counter
+from importlib import resources
+from pathlib import PurePosixPath
 from typing import Any
 
 from ...core.backend.base import BackendError
@@ -24,7 +24,6 @@ from .corpus_writer import (
 )
 from .models import Blueprint, FrozenDict, freeze
 from .schema import parse_blueprint
-
 
 _NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}\Z")
 
@@ -95,7 +94,13 @@ def load_packaged_corpus_graphs(manifest: CorpusManifest) -> tuple[ProjectGraph,
             or _sha256(content) != project.graph_sha256
             or graph.project_id != project.project_id
             or graph.source_sha256 != project.source_sha256
+            or graph.schema_version != manifest.schema_version
+            or graph.normalization_profile != manifest.normalization_profile
             or graph_signature(graph) != project.graph_signature
+            or project.confirmed_relation_signature
+            != graph.confirmed_relation_signature
+            or project.definition_catalog_signature
+            != graph.definition_catalog_signature
         ):
             raise _error("CORPUS_ASSET_INVALID", "Packaged graph does not match its manifest.", project_id=project.project_id)
         graphs.append(graph)
@@ -132,6 +137,7 @@ def _load_packaged_spec(manifest: CorpusManifest):
     spec = parse_corpus_spec(_json(content, "corpus source specification"))
     if (
         spec.name != manifest.name
+        or spec.schema_version != manifest.schema_version
         or spec.normalization_profile != manifest.normalization_profile
         or _sha256(content) != manifest.source_spec_sha256
         or content != canonical_json(spec.to_dict())
@@ -149,7 +155,7 @@ def load_corpus_blueprints(manifest: CorpusManifest) -> tuple[Blueprint, ...]:
     root = resources.files("pscad_mcp").joinpath("assets", "blueprints")
     blueprints: list[Blueprint] = []
     for project in manifest.projects:
-        name = f"{project.project_id}-existing-v1"
+        name = f"{project.project_id}-existing-v{manifest.schema_version}"
         content = _read(root.joinpath(name, "blueprint.json"), f"Blueprint {name}")
         value = _json(content, f"Blueprint {name}")
         blueprint = parse_blueprint(value)

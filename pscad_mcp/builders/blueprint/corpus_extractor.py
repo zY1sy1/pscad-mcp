@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import hashlib
 import json
-from pathlib import Path
 import re
-from typing import Any
 import unicodedata
 import xml.etree.ElementTree as ET
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
 
 from ...core.backend.base import BackendError
 from .corpus_models import (
@@ -26,7 +26,6 @@ from .corpus_models import (
     ProjectGraph,
 )
 from .models import freeze
-
 
 _ALLOWED_SETTINGS = {
     "time_duration",
@@ -198,10 +197,8 @@ def _bounded_parse(content: bytes, limits: ExtractionLimits, project_id: str) ->
         root = ET.fromstring(content)
     except ET.ParseError as error:
         raise _error("CORPUS_XML_MALFORMED", "PSCAD corpus XML is malformed.", project_id) from error
-    elements = 0
     text_chars = 0
-    for element in root.iter():
-        elements += 1
+    for elements, element in enumerate(root.iter(), start=1):
         text_chars += len(element.text or "") + len(element.tail or "")
         if elements > limits.max_elements or text_chars > limits.max_text_chars:
             raise _error(
@@ -248,6 +245,27 @@ def _unit(value: str | None) -> str:
     if normalized.casefold() in {"p.u.", "p.u", "per-unit", "per unit"}:
         return "pu"
     return normalized
+
+
+def _local_name(tag: str) -> str:
+    return str(tag).split("}")[-1].casefold()
+
+
+def _optional_boolean(value: str | None) -> bool | None:
+    if value is None:
+        return None
+    return value.strip().casefold() in {"1", "true", "yes", "on"}
+
+
+def _connection_namespace(value: str | None, tag: str) -> str:
+    normalized = str(value or "").strip().casefold()
+    if normalized in {"data", "signal", "digital"} or "data" in tag:
+        return "data"
+    if normalized in {"electrical", "power", "analog", "node"}:
+        return "electrical"
+    if tag in {"wire", "bus"}:
+        return "electrical"
+    return "unknown"
 
 
 def _safe_value(value: str | None) -> str | None:
@@ -336,38 +354,100 @@ def _definition_parameters(element: ET.Element, project_id: str) -> tuple[Defini
     return tuple(sorted(parameters, key=lambda item: (item.name.casefold(), item.name)))
 
 
-def _definition_ports(element: ET.Element, definition_key: str, project_id: str) -> tuple[DefinitionPort, ...]:
-    candidates: list[tuple[str, str, str, str, str, int, int]] = []
-    for port in element.findall("./svg/port"):
+def _definition_ports(
+    element: ET.Element,
+    definition_key: str,
+    project_id: str,
+    schema_version: int,
+) -> tuple[DefinitionPort, ...]:
+    if schema_version == 1:
+        port_elements = element.findall("./svg/port")
+    else:
+        port_elements = [
+            port
+            for svg in element
+            if _local_name(svg.tag) == "svg"
+            for port in svg.iter()
+            if port is not svg and _local_name(port.tag) == "port"
+        ]
+    candidates: list[dict[str, Any]] = []
+    for port in port_elements:
         name = port.get("name")
         if not name:
             raise _error("CORPUS_XML_INVALID", "Definition ports require names.", project_id)
+        model = (port.get("model") or "").strip().casefold()
+        port_type = (port.get("type") or "").strip().casefold()
         candidates.append(
-            (
-                name,
-                (port.get("model") or "").strip().casefold(),
-                (port.get("dim") or "1").strip(),
-                (port.get("mode") or "").strip().casefold(),
-                (port.get("type") or "").strip().casefold(),
-                _integer(port.get("x"), "port.x", project_id),
-                _integer(port.get("y"), "port.y", project_id),
+            {
+                "name": name,
+                "model": model,
+                "dimension": (port.get("dim") or "1").strip(),
+                "mode": (port.get("mode") or "").strip().casefold(),
+                "type": port_type,
+                "x": _integer(port.get("x"), "port.x", project_id),
+                "y": _integer(port.get("y"), "port.y", project_id),
+                "kind": (
+                    port.get("kind") or port.get("model") or port.get("type") or ""
+                )
+                .strip()
+                .casefold(),
+                "condition": (port.text or "").strip() or None,
+                "page": _optional_boolean(port.get("page")) is True,
+                "required": _optional_boolean(port.get("required")),
+            }
+        )
+    if schema_version == 1:
+        candidates.sort(
+            key=lambda item: (
+                item["name"].casefold(),
+                item["model"],
+                item["dimension"],
+                item["mode"],
+                item["type"],
+                item["x"],
+                item["y"],
             )
         )
-    candidates.sort(key=lambda item: (item[0].casefold(), item[1:]))
+    else:
+        candidates.sort(
+            key=lambda item: (
+                item["name"].casefold(),
+                item["name"],
+                item["model"],
+                item["dimension"],
+                item["mode"],
+                item["type"],
+                item["x"],
+                item["y"],
+                item["kind"],
+                item["condition"] or "",
+                item["page"],
+                item["required"] is True,
+            )
+        )
     ordinals: dict[str, int] = {}
+    occurrences: dict[str, int] = {}
     ports: list[DefinitionPort] = []
-    for name, model, dimension, mode, port_type, x, y in candidates:
+    for item in candidates:
+        name = item["name"]
         base = _slug(name)
         ordinals[base] = ordinals.get(base, 0) + 1
+        occurrence = occurrences.get(name, 0)
+        occurrences[name] = occurrence + 1
         ports.append(
             DefinitionPort(
                 key=f"{definition_key}/port:{base}#{ordinals[base]}",
                 name=name,
-                model=model,
-                dimension=dimension,
-                mode=mode,
-                type=port_type,
-                offset=(x, y),
+                model=item["model"],
+                dimension=item["dimension"],
+                mode=item["mode"],
+                type=item["type"],
+                offset=(item["x"], item["y"]),
+                occurrence=occurrence,
+                kind=item["kind"],
+                condition=item["condition"],
+                page=item["page"],
+                required=item["required"],
             )
         )
     return tuple(ports)
@@ -376,6 +456,7 @@ def _definition_ports(element: ET.Element, definition_key: str, project_id: str)
 def _definitions_and_canvases(
     root: ET.Element,
     project_id: str,
+    schema_version: int,
 ) -> tuple[tuple[CorpusDefinition, ...], tuple[CorpusCanvas, ...], dict[str, str], list[tuple[ET.Element, str]]]:
     elements = list(root.findall("./definitions/Definition"))
     local_definitions: dict[str, str] = {}
@@ -403,7 +484,7 @@ def _definitions_and_canvases(
                 name=name,
                 class_id=(element.get("classid") or "").strip().casefold(),
                 parameters=_definition_parameters(element, project_id),
-                ports=_definition_ports(element, key, project_id),
+                ports=_definition_ports(element, key, project_id, schema_version),
                 canvas_key=canvas_key,
             )
         )
@@ -522,6 +603,7 @@ def _wire_connections(
     local_definitions: dict[str, str],
     runtime_keys: dict[int, str],
     project_id: str,
+    schema_version: int,
 ) -> list[CorpusConnection]:
     candidates: list[dict[str, Any]] = []
     for schematic, canvas_key in schematic_elements:
@@ -552,6 +634,14 @@ def _wire_connections(
                     )
                 endpoint_keys.append(endpoint)
             kind = (wire.get("classid") or "wire").strip().casefold()
+            namespace = (
+                _connection_namespace(
+                    wire.get("namespace") or wire.get("kind") or wire.get("type"),
+                    "bus" if "bus" in kind else "wire",
+                )
+                if schema_version == 2
+                else "unknown"
+            )
             source_definition = None
             if wire.get("defn"):
                 builtin_stub = kind == "wirebranch" and wire.get("defn") == "STUB" and wire.find("./User") is not None
@@ -567,7 +657,15 @@ def _wire_connections(
                 "endpoints": endpoint_keys,
                 "source_definition": source_definition,
             }
-            candidates.append({**signature, "digest": _stable_hash(signature)[:16]})
+            if schema_version == 2:
+                signature["namespace"] = namespace
+            candidates.append(
+                {
+                    **signature,
+                    "namespace": namespace,
+                    "digest": _stable_hash(signature)[:16],
+                }
+            )
     candidates.sort(key=lambda item: (item["canvas"], item["kind"], item["digest"], item["vertices"]))
     ordinals: dict[str, int] = {}
     connections: list[CorpusConnection] = []
@@ -584,6 +682,7 @@ def _wire_connections(
                 endpoints=endpoints,
                 source_definition=item["source_definition"],
                 resolution="explicit" if endpoints else "geometry_only",
+                namespace=item["namespace"],
             )
         )
     return connections
@@ -711,9 +810,13 @@ def _normalize_graph(
     pre_hash: str,
     dependency_hashes: dict[str, str],
     limits: ExtractionLimits,
+    schema_version: int,
+    normalization_profile: str,
 ) -> ProjectGraph:
     project_name = root.get("name") or ""
-    definitions, canvases, local_definitions, schematic_elements = _definitions_and_canvases(root, source.project_id)
+    definitions, canvases, local_definitions, schematic_elements = (
+        _definitions_and_canvases(root, source.project_id, schema_version)
+    )
     components, runtime_keys = _components(
         schematic_elements,
         project_name,
@@ -726,6 +829,7 @@ def _normalize_graph(
         local_definitions,
         runtime_keys,
         source.project_id,
+        schema_version,
     )
     connections.extend(_hierarchy_connections(root, runtime_keys, source.project_id))
     connections.sort(key=lambda item: (item.kind, item.canvas_key or "", item.endpoints, item.vertices, item.key))
@@ -745,6 +849,8 @@ def _normalize_graph(
         connections=tuple(connections),
         output_channels=output_channels,
         warnings=(*_unknown_warnings(root, limits, source.project_id), *output_warnings),
+        schema_version=schema_version,
+        normalization_profile=normalization_profile,
     )
 
 
@@ -765,9 +871,21 @@ def extract_project(
     source_root: str | Path,
     source: CorpusSource,
     limits: ExtractionLimits | None = None,
+    *,
+    schema_version: int = 1,
+    normalization_profile: str = "pscad-xml-v1",
 ) -> ProjectGraph:
     """Extract a portable project header while proving admitted files did not change."""
 
+    if (schema_version, normalization_profile) not in {
+        (1, "pscad-xml-v1"),
+        (2, "pscad-xml-v2"),
+    }:
+        raise _error(
+            "CORPUS_XML_INVALID",
+            "Corpus schema and normalization profile do not match.",
+            source.project_id,
+        )
     configured_limits = limits or ExtractionLimits()
     try:
         root_directory = Path(source_root).resolve(strict=True)
@@ -830,4 +948,12 @@ def extract_project(
                 basename=dependency.basename,
             )
 
-    return _normalize_graph(root, source, pre_hash, dependency_hashes, configured_limits)
+    return _normalize_graph(
+        root,
+        source,
+        pre_hash,
+        dependency_hashes,
+        configured_limits,
+        schema_version,
+        normalization_profile,
+    )

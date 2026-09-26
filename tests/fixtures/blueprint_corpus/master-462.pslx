@@ -1,0 +1,20 @@
+<project name="master" version="4.6.2">
+  <definitions>
+    <Definition name="gain" classid="UserCmpDefn">
+      <form>
+        <parameter name="View" type="Integer"><value>0</value></parameter>
+      </form>
+      <svg>
+        <port name="IN" x="-18" y="0" dim="1" model="Transfer">true</port>
+        <port name="OUT" x="18" y="0" dim="1" model="Transfer">View==0</port>
+      </svg>
+    </Definition>
+    <Definition name="annotation" classid="UserCmpDefn"><svg /></Definition>
+    <Definition name="nodelabel" classid="UserCmpDefn">
+      <svg><port name="A" x="0" y="0" dim="1" kind="electrical">true</port></svg>
+    </Definition>
+    <Definition name="datalabel" classid="UserCmpDefn">
+      <svg><port name="A" x="0" y="0" dim="1" model="Transfer">true</port></svg>
+    </Definition>
+  </definitions>
+</project>

@@ -1,26 +1,31 @@
 from __future__ import annotations
 
-from dataclasses import replace
 import hashlib
 import json
-from pathlib import Path
 import shutil
+from dataclasses import replace
+from pathlib import Path
 
 import pytest
 
 from pscad_mcp.builders.blueprint.corpus_extractor import extract_project
-from pscad_mcp.builders.blueprint.corpus_models import CorpusSource, CorpusSpec
-from pscad_mcp.builders.blueprint.models import freeze
+from pscad_mcp.builders.blueprint.corpus_models import (
+    CorpusDefinitionSource,
+    CorpusSource,
+    CorpusSpec,
+)
 from pscad_mcp.builders.blueprint.corpus_writer import (
     KIND_ORDER,
+    KIND_ORDER_V2,
     canonical_json,
     canonical_jsonl,
     derive_records,
     validate_candidate,
     write_corpus_candidate,
 )
+from pscad_mcp.builders.blueprint.models import freeze
 from pscad_mcp.core.backend.base import BackendError
-
+from tests.test_blueprint_corpus_v2_models import relation_graph
 
 FIXTURES = Path(__file__).parent / "fixtures" / "blueprint_corpus"
 
@@ -202,4 +207,92 @@ def test_validation_failure_does_not_replace_existing_destination(tmp_path, monk
     with pytest.raises(BackendError):
         write_corpus_candidate(spec, [graph], destination)
 
+    assert tree_bytes(destination) == {"sentinel": b"old"}
+
+
+def v2_spec(graph):
+    definition_source = CorpusDefinitionSource(
+        namespace="master",
+        basename="master.pslx",
+        byte_length=1,
+        sha256="a" * 64,
+        pscad_versions=("4.6.2",),
+        policy="ports-and-classification-v1",
+    )
+    return CorpusSpec(
+        schema_version=2,
+        normalization_profile="pscad-xml-v2",
+        name="fixture_v2",
+        inclusion_policy="explicit-entry-points-v1",
+        exclusion_policy="no-backups-builds-results-v1",
+        entry_points=(
+            CorpusSource(
+                project_id=graph.project_id,
+                basename="fixture.pscx",
+                byte_length=1,
+                sha256=graph.source_sha256,
+                pscad_versions=(graph.pscad_version,),
+                dependencies=(),
+            ),
+        ),
+        definition_sources=(definition_source,),
+    )
+
+
+def test_v2_records_cover_every_relation_kind_in_stable_order():
+    graph = relation_graph()
+
+    records = derive_records("fixture_v2", "pscad-xml-v2", graph)
+
+    assert [record.kind for record in records] == sorted(
+        [record.kind for record in records],
+        key=KIND_ORDER_V2.__getitem__,
+    )
+    assert {
+        "definition_classification",
+        "component_occurrence",
+        "conductor_occurrence",
+        "label_occurrence",
+        "instance_port",
+        "confirmed_net",
+        "port_net_membership",
+        "hierarchy_relation",
+        "candidate_edge",
+        "unresolved_evidence",
+    } <= {record.kind for record in records}
+    assert all(record.schema_version == 2 for record in records)
+    candidate = next(record for record in records if record.kind == "candidate_edge")
+    assert candidate.resolved is False
+    assert candidate.verification_status == "candidate_only"
+
+
+def test_v2_manifest_cross_checks_confirmed_relation_signature(tmp_path):
+    graph = relation_graph()
+    spec = v2_spec(graph)
+
+    manifest = write_corpus_candidate(spec, (graph,), tmp_path / "candidate-v2")
+
+    project = manifest.projects[0]
+    assert project.confirmed_relation_signature == graph.confirmed_relation_signature
+    assert project.definition_catalog_signature == graph.definition_catalog_signature
+    assert validate_candidate(tmp_path / "candidate-v2", spec) == manifest
+
+
+def test_v2_invalid_relation_does_not_replace_existing_destination(tmp_path):
+    graph = relation_graph()
+    spec = v2_spec(graph)
+    broken = replace(
+        graph,
+        port_net_memberships=(
+            replace(graph.port_net_memberships[0], net_key="f" * 64),
+        ),
+    )
+    destination = tmp_path / "candidate-v2"
+    destination.mkdir()
+    (destination / "sentinel").write_bytes(b"old")
+
+    with pytest.raises(BackendError) as raised:
+        write_corpus_candidate(spec, (broken,), destination)
+
+    assert raised.value.code == "CORPUS_MANIFEST_INVALID"
     assert tree_bytes(destination) == {"sentinel": b"old"}

@@ -2,16 +2,18 @@
 
 from __future__ import annotations
 
-from collections import Counter
 import hashlib
 import json
 import math
-from pathlib import Path, PurePosixPath
 import re
 import shutil
 import tempfile
-from typing import Any, Iterable, Mapping, Sequence
 import unicodedata
+from collections import Counter, defaultdict
+from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import replace
+from pathlib import Path, PurePosixPath
+from typing import Any
 
 from ...core.backend.base import BackendError
 from .corpus_extractor import graph_signature
@@ -30,11 +32,22 @@ from .corpus_models import (
     DefinitionPort,
     ProjectGraph,
 )
+from .corpus_relation_models import (
+    CorpusCandidateEdge,
+    CorpusComponentOccurrence,
+    CorpusConductorOccurrence,
+    CorpusConfirmedNet,
+    CorpusDefinitionClassification,
+    CorpusHierarchyRelation,
+    CorpusInstancePort,
+    CorpusLabelOccurrence,
+    CorpusPortNetMembership,
+    CorpusUnresolvedEvidence,
+)
 from .corpus_schema import parse_corpus_spec
 from .models import freeze, json_safe
 
-
-KIND_ORDER = {
+KIND_ORDER_V1 = {
     "project": 0,
     "definition": 1,
     "component": 2,
@@ -43,6 +56,20 @@ KIND_ORDER = {
     "connection": 5,
     "project_setting": 6,
     "output_channel": 7,
+}
+KIND_ORDER = KIND_ORDER_V1
+KIND_ORDER_V2 = {
+    **KIND_ORDER_V1,
+    "definition_classification": 8,
+    "component_occurrence": 9,
+    "conductor_occurrence": 10,
+    "label_occurrence": 11,
+    "instance_port": 12,
+    "confirmed_net": 13,
+    "port_net_membership": 14,
+    "hierarchy_relation": 15,
+    "candidate_edge": 16,
+    "unresolved_evidence": 17,
 }
 _SHA256 = re.compile(r"[0-9a-f]{64}")
 _ABSOLUTE_PATH = re.compile(r"(?<![A-Za-z0-9])(?:[A-Za-z]:[\\/]|\\\\)")
@@ -91,7 +118,13 @@ def canonical_json(value: Any) -> bytes:
 
 
 def canonical_jsonl(records: Iterable[CorpusRecord]) -> bytes:
-    ordered = sorted(records, key=lambda record: (KIND_ORDER[record.kind], record.record_key))
+    values = tuple(records)
+    versions = {record.schema_version for record in values}
+    if len(versions) > 1:
+        raise _error("Corpus record schema versions cannot be mixed.")
+    version = next(iter(versions), 1)
+    order = KIND_ORDER_V2 if version == 2 else KIND_ORDER_V1
+    ordered = sorted(values, key=lambda record: (order[record.kind], record.record_key))
     return b"".join(canonical_json(record.to_dict()) for record in ordered)
 
 
@@ -128,9 +161,10 @@ def _record(
     record_key: str,
     payload: Mapping[str, Any],
     resolved: bool,
+    verification_status: str | None = None,
 ) -> CorpusRecord:
     return CorpusRecord(
-        schema_version=1,
+        schema_version=graph.schema_version,
         normalization_profile=normalization_profile,
         corpus_name=corpus_name,
         project_id=graph.project_id,
@@ -139,7 +173,8 @@ def _record(
         record_key=record_key,
         payload=freeze(payload),
         resolved=resolved,
-        verification_status="offline_extracted" if resolved else "unresolved",
+        verification_status=verification_status
+        or ("offline_confirmed" if graph.schema_version == 2 and resolved else "offline_extracted" if resolved else "unresolved"),
     )
 
 
@@ -148,6 +183,11 @@ def derive_records(corpus_name: str, normalization_profile: str, graph: ProjectG
 
     records: list[CorpusRecord] = []
     project_resolved = not any(warning.blocking for warning in graph.warnings)
+    if graph.schema_version == 2:
+        project_resolved = project_resolved and not any(
+            item.classification == "blocking"
+            for item in graph.unresolved_evidence
+        )
     records.append(
         _record(
             corpus_name,
@@ -163,13 +203,29 @@ def derive_records(corpus_name: str, normalization_profile: str, graph: ProjectG
                 "settings": json_safe(graph.settings),
                 "canvases": [canvas.to_dict() for canvas in graph.canvases],
                 "warnings": [warning.to_dict() for warning in graph.warnings],
+                **(
+                    {
+                        "confirmed_relation_signature": graph.confirmed_relation_signature,
+                        "definition_catalog_signature": graph.definition_catalog_signature,
+                    }
+                    if graph.schema_version == 2
+                    else {}
+                ),
             },
             project_resolved,
         )
     )
     for definition in graph.definitions:
         records.append(
-            _record(corpus_name, normalization_profile, graph, "definition", definition.key, definition.to_dict(), True)
+            _record(
+                corpus_name,
+                normalization_profile,
+                graph,
+                "definition",
+                definition.key,
+                definition.to_dict(graph.schema_version),
+                True,
+            )
         )
         parameter_parts = _unique_key_parts(parameter.name for parameter in definition.parameters)
         for parameter in definition.parameters:
@@ -192,7 +248,10 @@ def derive_records(corpus_name: str, normalization_profile: str, graph: ProjectG
                     graph,
                     "port",
                     port.key,
-                    {"definition_key": definition.key, **port.to_dict()},
+                    {
+                        "definition_key": definition.key,
+                        **port.to_dict(graph.schema_version),
+                    },
                     True,
                 )
             )
@@ -216,7 +275,15 @@ def derive_records(corpus_name: str, normalization_profile: str, graph: ProjectG
     for connection in graph.connections:
         resolved = connection.resolution in {"explicit", "geometry_only"}
         records.append(
-            _record(corpus_name, normalization_profile, graph, "connection", connection.key, connection.to_dict(), resolved)
+            _record(
+                corpus_name,
+                normalization_profile,
+                graph,
+                "connection",
+                connection.key,
+                connection.to_dict(graph.schema_version),
+                resolved,
+            )
         )
     setting_parts = _unique_key_parts(graph.settings)
     for name, value in graph.settings.items():
@@ -243,7 +310,66 @@ def derive_records(corpus_name: str, normalization_profile: str, graph: ProjectG
                 channel.resolved,
             )
         )
-    records.sort(key=lambda record: (KIND_ORDER[record.kind], record.record_key))
+    if graph.schema_version == 2:
+        relation_collections = (
+            ("definition_classification", graph.definition_classifications),
+            ("component_occurrence", graph.component_occurrences),
+            ("conductor_occurrence", graph.conductor_occurrences),
+            ("label_occurrence", graph.label_occurrences),
+            ("instance_port", graph.instance_ports),
+            ("confirmed_net", graph.confirmed_nets),
+            ("port_net_membership", graph.port_net_memberships),
+            ("hierarchy_relation", graph.hierarchy_relations),
+        )
+        for kind, collection in relation_collections:
+            for item in collection:
+                records.append(
+                    _record(
+                        corpus_name,
+                        normalization_profile,
+                        graph,
+                        kind,
+                        item.key,
+                        item.to_dict(),
+                        True,
+                    )
+                )
+        for item in graph.candidate_edges:
+            key = "candidate:" + hashlib.sha256(
+                f"{item.left}\0{item.right}".encode()
+            ).hexdigest()
+            records.append(
+                _record(
+                    corpus_name,
+                    normalization_profile,
+                    graph,
+                    "candidate_edge",
+                    key,
+                    item.to_dict(),
+                    False,
+                    "candidate_only",
+                )
+            )
+        for item in graph.unresolved_evidence:
+            key = "unresolved:" + hashlib.sha256(
+                canonical_json(
+                    {"code": item.code, "object_keys": list(item.object_keys)}
+                )
+            ).hexdigest()
+            records.append(
+                _record(
+                    corpus_name,
+                    normalization_profile,
+                    graph,
+                    "unresolved_evidence",
+                    key,
+                    item.to_dict(),
+                    False,
+                    "unresolved",
+                )
+            )
+    order = KIND_ORDER_V2 if graph.schema_version == 2 else KIND_ORDER_V1
+    records.sort(key=lambda record: (order[record.kind], record.record_key))
     keys = [(record.kind, record.record_key) for record in records]
     if len(set(keys)) != len(keys):
         raise _error("Derived record keys are not unique.")
@@ -334,13 +460,43 @@ def _point(value: Any, path: str) -> tuple[int, int]:
     return (_integer(items[0], f"{path}[0]", minimum=-2**63), _integer(items[1], f"{path}[1]", minimum=-2**63))
 
 
-def _parse_graph(value: Any) -> ProjectGraph:
+_GRAPH_V1_FIELDS = {
+    "project_id",
+    "source_sha256",
+    "dependency_hashes",
+    "name",
+    "pscad_version",
+    "target",
+    "settings",
+    "definitions",
+    "canvases",
+    "components",
+    "connections",
+    "output_channels",
+    "warnings",
+}
+_GRAPH_V2_FIELDS = _GRAPH_V1_FIELDS | {
+    "schema_version",
+    "normalization_profile",
+    "definition_classifications",
+    "component_occurrences",
+    "conductor_occurrences",
+    "label_occurrences",
+    "instance_ports",
+    "confirmed_nets",
+    "port_net_memberships",
+    "hierarchy_relations",
+    "candidate_edges",
+    "unresolved_evidence",
+    "confirmed_relation_signature",
+    "definition_catalog_signature",
+}
+
+
+def _parse_graph_v1(value: Any) -> ProjectGraph:
     record = _exact(
         value,
-        {
-            "project_id", "source_sha256", "dependency_hashes", "name", "pscad_version", "target", "settings",
-            "definitions", "canvases", "components", "connections", "output_channels", "warnings",
-        },
+        _GRAPH_V1_FIELDS,
         "graph",
     )
     definitions: list[CorpusDefinition] = []
@@ -501,10 +657,921 @@ def _parse_graph(value: Any) -> ProjectGraph:
     )
 
 
+def _strings(value: Any, path: str) -> tuple[str, ...]:
+    return tuple(
+        _string(item, f"{path}[{index}]")
+        for index, item in enumerate(_array(value, path))
+    )
+
+
+def _optional_integer(value: Any, path: str) -> int | None:
+    return None if value is None else _integer(value, path)
+
+
+def _finite_float(value: Any, path: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise _error("Artifact field must be numeric.", path=path)
+    result = float(value)
+    if not math.isfinite(result):
+        raise _error("Artifact number must be finite.", path=path)
+    return result
+
+
+def _unique_keys(values: Sequence[Any], path: str) -> None:
+    keys = [item.key for item in values]
+    if len(keys) != len(set(keys)):
+        raise _error("Artifact keys must be unique.", path=path)
+
+
+def _parse_definition_classifications(
+    value: Any,
+) -> tuple[CorpusDefinitionClassification, ...]:
+    result = []
+    for index, item in enumerate(_array(value, "graph.definition_classifications")):
+        path = f"graph.definition_classifications[{index}]"
+        record = _exact(
+            item,
+            {
+                "key",
+                "namespace",
+                "pscad_version",
+                "physical_name",
+                "classification",
+                "port_contract_keys",
+                "source_sha256",
+            },
+            path,
+        )
+        classification = _string(
+            record["classification"],
+            f"{path}.classification",
+        )
+        if classification not in {"port_bearing", "non_connective"}:
+            raise _error(
+                "Definition classification is unsupported.",
+                path=f"{path}.classification",
+            )
+        port_contract_keys = _strings(
+            record["port_contract_keys"],
+            f"{path}.port_contract_keys",
+        )
+        if (
+            len(port_contract_keys) != len(set(port_contract_keys))
+            or (classification == "port_bearing" and not port_contract_keys)
+            or (classification == "non_connective" and port_contract_keys)
+        ):
+            raise _error("Definition port contracts are invalid.", path=path)
+        result.append(
+            CorpusDefinitionClassification(
+                key=_string(record["key"], f"{path}.key"),
+                namespace=_string(record["namespace"], f"{path}.namespace"),
+                pscad_version=_string(
+                    record["pscad_version"],
+                    f"{path}.pscad_version",
+                ),
+                physical_name=_string(
+                    record["physical_name"],
+                    f"{path}.physical_name",
+                ),
+                classification=classification,
+                port_contract_keys=port_contract_keys,
+                source_sha256=_digest(
+                    record["source_sha256"],
+                    f"{path}.source_sha256",
+                ),
+            )
+        )
+    _unique_keys(result, "graph.definition_classifications")
+    return tuple(result)
+
+
+def _parse_component_occurrences(
+    value: Any,
+) -> tuple[CorpusComponentOccurrence, ...]:
+    result = []
+    for index, item in enumerate(_array(value, "graph.component_occurrences")):
+        path = f"graph.component_occurrences[{index}]"
+        record = _exact(
+            item,
+            {
+                "key",
+                "source_component_key",
+                "canvas_key",
+                "source_canvas_key",
+                "definition_key",
+                "hierarchy_path",
+                "name",
+                "location",
+                "orientation",
+                "parameters",
+            },
+            path,
+        )
+        result.append(
+            CorpusComponentOccurrence(
+                key=_string(record["key"], f"{path}.key"),
+                source_component_key=_string(
+                    record["source_component_key"],
+                    f"{path}.source_component_key",
+                ),
+                canvas_key=_string(
+                    record["canvas_key"],
+                    f"{path}.canvas_key",
+                ),
+                source_canvas_key=_string(
+                    record["source_canvas_key"],
+                    f"{path}.source_canvas_key",
+                ),
+                definition_key=_string(
+                    record["definition_key"],
+                    f"{path}.definition_key",
+                ),
+                hierarchy_path=_strings(
+                    record["hierarchy_path"],
+                    f"{path}.hierarchy_path",
+                ),
+                name=_string(record["name"], f"{path}.name"),
+                location=_point(record["location"], f"{path}.location"),
+                orientation=_integer(
+                    record["orientation"],
+                    f"{path}.orientation",
+                ),
+                parameters=freeze(
+                    _mapping(record["parameters"], f"{path}.parameters")
+                ),
+            )
+        )
+    _unique_keys(result, "graph.component_occurrences")
+    return tuple(result)
+
+
+def _parse_conductor_occurrences(
+    value: Any,
+) -> tuple[CorpusConductorOccurrence, ...]:
+    result = []
+    for index, item in enumerate(_array(value, "graph.conductor_occurrences")):
+        path = f"graph.conductor_occurrences[{index}]"
+        record = _exact(
+            item,
+            {
+                "key",
+                "source_connection_key",
+                "canvas_key",
+                "kind",
+                "namespace",
+                "vertices",
+            },
+            path,
+        )
+        kind = _string(record["kind"], f"{path}.kind")
+        namespace = _string(record["namespace"], f"{path}.namespace")
+        if kind not in {"wire", "bus"} or namespace not in {
+            "electrical",
+            "data",
+            "unknown",
+        }:
+            raise _error("Conductor contract is unsupported.", path=path)
+        vertices = tuple(
+            _point(vertex, f"{path}.vertices[{vertex_index}]")
+            for vertex_index, vertex in enumerate(
+                _array(record["vertices"], f"{path}.vertices")
+            )
+        )
+        if len(vertices) < 2:
+            raise _error("Conductor geometry is incomplete.", path=path)
+        result.append(
+            CorpusConductorOccurrence(
+                key=_string(record["key"], f"{path}.key"),
+                source_connection_key=_string(
+                    record["source_connection_key"],
+                    f"{path}.source_connection_key",
+                ),
+                canvas_key=_string(
+                    record["canvas_key"],
+                    f"{path}.canvas_key",
+                ),
+                kind=kind,
+                namespace=namespace,
+                vertices=vertices,
+            )
+        )
+    _unique_keys(result, "graph.conductor_occurrences")
+    return tuple(result)
+
+
+def _parse_label_occurrences(
+    value: Any,
+) -> tuple[CorpusLabelOccurrence, ...]:
+    result = []
+    for index, item in enumerate(_array(value, "graph.label_occurrences")):
+        path = f"graph.label_occurrences[{index}]"
+        record = _exact(
+            item,
+            {
+                "key",
+                "source_component_key",
+                "canvas_key",
+                "name",
+                "namespace",
+                "scope",
+                "location",
+            },
+            path,
+        )
+        namespace = _string(record["namespace"], f"{path}.namespace")
+        if namespace not in {"electrical", "data", "unknown"}:
+            raise _error("Label namespace is unsupported.", path=f"{path}.namespace")
+        result.append(
+            CorpusLabelOccurrence(
+                key=_string(record["key"], f"{path}.key"),
+                source_component_key=_string(
+                    record["source_component_key"],
+                    f"{path}.source_component_key",
+                ),
+                canvas_key=_string(
+                    record["canvas_key"],
+                    f"{path}.canvas_key",
+                ),
+                name=_string(record["name"], f"{path}.name"),
+                namespace=namespace,
+                scope=_string(record["scope"], f"{path}.scope"),
+                location=_point(record["location"], f"{path}.location"),
+            )
+        )
+    _unique_keys(result, "graph.label_occurrences")
+    return tuple(result)
+
+
+def _parse_instance_ports(value: Any) -> tuple[CorpusInstancePort, ...]:
+    result = []
+    for index, item in enumerate(_array(value, "graph.instance_ports")):
+        path = f"graph.instance_ports[{index}]"
+        record = _exact(
+            item,
+            {
+                "key",
+                "component_key",
+                "source_component_key",
+                "definition_port_key",
+                "name",
+                "occurrence",
+                "relative",
+                "absolute",
+                "namespace",
+                "dimension",
+                "active",
+                "source_sha256",
+            },
+            path,
+        )
+        namespace = _string(record["namespace"], f"{path}.namespace")
+        if namespace not in {"electrical", "data", "unknown"}:
+            raise _error("Port namespace is unsupported.", path=f"{path}.namespace")
+        result.append(
+            CorpusInstancePort(
+                key=_string(record["key"], f"{path}.key"),
+                component_key=_string(
+                    record["component_key"],
+                    f"{path}.component_key",
+                ),
+                source_component_key=_string(
+                    record["source_component_key"],
+                    f"{path}.source_component_key",
+                ),
+                definition_port_key=_string(
+                    record["definition_port_key"],
+                    f"{path}.definition_port_key",
+                ),
+                name=_string(record["name"], f"{path}.name"),
+                occurrence=_integer(
+                    record["occurrence"],
+                    f"{path}.occurrence",
+                ),
+                relative=_point(record["relative"], f"{path}.relative"),
+                absolute=_point(record["absolute"], f"{path}.absolute"),
+                namespace=namespace,
+                dimension=_optional_integer(
+                    record["dimension"],
+                    f"{path}.dimension",
+                ),
+                active=_boolean(record["active"], f"{path}.active"),
+                source_sha256=_digest(
+                    record["source_sha256"],
+                    f"{path}.source_sha256",
+                ),
+            )
+        )
+    _unique_keys(result, "graph.instance_ports")
+    return tuple(result)
+
+
+def _parse_confirmed_nets(value: Any) -> tuple[CorpusConfirmedNet, ...]:
+    result = []
+    for index, item in enumerate(_array(value, "graph.confirmed_nets")):
+        path = f"graph.confirmed_nets[{index}]"
+        record = _exact(
+            item,
+            {
+                "key",
+                "namespace",
+                "port_keys",
+                "conductor_keys",
+                "label_keys",
+                "junctions",
+            },
+            path,
+        )
+        namespace = _string(record["namespace"], f"{path}.namespace")
+        if namespace not in {"electrical", "data"}:
+            raise _error("Confirmed net namespace is unsupported.", path=path)
+        conductor_keys = _strings(
+            record["conductor_keys"],
+            f"{path}.conductor_keys",
+        )
+        if not conductor_keys:
+            raise _error("Confirmed net has no conductor evidence.", path=path)
+        result.append(
+            CorpusConfirmedNet(
+                key=_digest(record["key"], f"{path}.key"),
+                namespace=namespace,
+                port_keys=_strings(record["port_keys"], f"{path}.port_keys"),
+                conductor_keys=conductor_keys,
+                label_keys=_strings(record["label_keys"], f"{path}.label_keys"),
+                junctions=tuple(
+                    _point(point, f"{path}.junctions[{point_index}]")
+                    for point_index, point in enumerate(
+                        _array(record["junctions"], f"{path}.junctions")
+                    )
+                ),
+            )
+        )
+    _unique_keys(result, "graph.confirmed_nets")
+    return tuple(result)
+
+
+def _parse_memberships(value: Any) -> tuple[CorpusPortNetMembership, ...]:
+    result = []
+    for index, item in enumerate(_array(value, "graph.port_net_memberships")):
+        path = f"graph.port_net_memberships[{index}]"
+        record = _exact(
+            item,
+            {"key", "component_key", "port_key", "net_key", "namespace"},
+            path,
+        )
+        namespace = _string(record["namespace"], f"{path}.namespace")
+        if namespace not in {"electrical", "data"}:
+            raise _error("Membership namespace is unsupported.", path=path)
+        result.append(
+            CorpusPortNetMembership(
+                key=_string(record["key"], f"{path}.key"),
+                component_key=_string(
+                    record["component_key"],
+                    f"{path}.component_key",
+                ),
+                port_key=_string(record["port_key"], f"{path}.port_key"),
+                net_key=_digest(record["net_key"], f"{path}.net_key"),
+                namespace=namespace,
+            )
+        )
+    _unique_keys(result, "graph.port_net_memberships")
+    return tuple(result)
+
+
+def _parse_hierarchy_relations(value: Any) -> tuple[CorpusHierarchyRelation, ...]:
+    result = []
+    for index, item in enumerate(_array(value, "graph.hierarchy_relations")):
+        path = f"graph.hierarchy_relations[{index}]"
+        record = _exact(
+            item,
+            {
+                "key",
+                "parent_component_key",
+                "child_canvas_key",
+                "outer_port_key",
+                "inner_port_key",
+                "namespace",
+                "dimension",
+            },
+            path,
+        )
+        namespace = _string(record["namespace"], f"{path}.namespace")
+        if namespace not in {"electrical", "data"}:
+            raise _error("Hierarchy namespace is unsupported.", path=path)
+        result.append(
+            CorpusHierarchyRelation(
+                key=_string(record["key"], f"{path}.key"),
+                parent_component_key=_string(
+                    record["parent_component_key"],
+                    f"{path}.parent_component_key",
+                ),
+                child_canvas_key=_string(
+                    record["child_canvas_key"],
+                    f"{path}.child_canvas_key",
+                ),
+                outer_port_key=_string(
+                    record["outer_port_key"],
+                    f"{path}.outer_port_key",
+                ),
+                inner_port_key=_string(
+                    record["inner_port_key"],
+                    f"{path}.inner_port_key",
+                ),
+                namespace=namespace,
+                dimension=_optional_integer(
+                    record["dimension"],
+                    f"{path}.dimension",
+                ),
+            )
+        )
+    _unique_keys(result, "graph.hierarchy_relations")
+    return tuple(result)
+
+
+def _parse_candidate_edges(value: Any) -> tuple[CorpusCandidateEdge, ...]:
+    result = []
+    for index, item in enumerate(_array(value, "graph.candidate_edges")):
+        path = f"graph.candidate_edges[{index}]"
+        record = _exact(
+            item,
+            {
+                "left",
+                "right",
+                "confidence",
+                "reasons",
+                "counter_evidence",
+                "status",
+            },
+            path,
+        )
+        status = _string(record["status"], f"{path}.status")
+        confidence = _finite_float(record["confidence"], f"{path}.confidence")
+        if status != "candidate_only" or not 0.0 <= confidence <= 1.0:
+            raise _error("Candidate edge contract is invalid.", path=path)
+        result.append(
+            CorpusCandidateEdge(
+                left=_string(record["left"], f"{path}.left"),
+                right=_string(record["right"], f"{path}.right"),
+                confidence=confidence,
+                reasons=_strings(record["reasons"], f"{path}.reasons"),
+                counter_evidence=_strings(
+                    record["counter_evidence"],
+                    f"{path}.counter_evidence",
+                ),
+                status=status,
+            )
+        )
+    identities = [(item.left, item.right) for item in result]
+    if len(identities) != len(set(identities)):
+        raise _error("Candidate edge identities must be unique.", path="graph.candidate_edges")
+    return tuple(result)
+
+
+def _parse_unresolved(value: Any) -> tuple[CorpusUnresolvedEvidence, ...]:
+    result = []
+    for index, item in enumerate(_array(value, "graph.unresolved_evidence")):
+        path = f"graph.unresolved_evidence[{index}]"
+        record = _exact(
+            item,
+            {"code", "object_keys", "evidence", "classification"},
+            path,
+        )
+        classification = _string(
+            record["classification"],
+            f"{path}.classification",
+        )
+        if classification not in {"engineering", "blocking"}:
+            raise _error("Unresolved classification is unsupported.", path=path)
+        result.append(
+            CorpusUnresolvedEvidence(
+                code=_string(record["code"], f"{path}.code"),
+                object_keys=_strings(
+                    record["object_keys"],
+                    f"{path}.object_keys",
+                ),
+                evidence=_strings(record["evidence"], f"{path}.evidence"),
+                classification=classification,
+            )
+        )
+    identities = [(item.code, item.object_keys) for item in result]
+    if len(identities) != len(set(identities)):
+        raise _error("Unresolved evidence must be unique.", path="graph.unresolved_evidence")
+    return tuple(result)
+
+
+def _require_subset(
+    observed: Sequence[str],
+    available: set[str],
+    path: str,
+) -> None:
+    if len(observed) != len(set(observed)) or not set(observed).issubset(available):
+        raise _error("Artifact references are invalid.", path=path)
+
+
+def _validate_v2_relations(graph: ProjectGraph) -> None:
+    source_components = {item.key: item for item in graph.components}
+    source_canvases = {item.key for item in graph.canvases}
+    source_connections = {item.key for item in graph.connections}
+    components = {item.key: item for item in graph.component_occurrences}
+    conductors = {item.key: item for item in graph.conductor_occurrences}
+    labels = {item.key: item for item in graph.label_occurrences}
+    ports = {item.key: item for item in graph.instance_ports}
+    nets = {item.key: item for item in graph.confirmed_nets}
+    inner_port_owners = {
+        item.inner_port_key: f"boundary:{item.child_canvas_key}"
+        for item in graph.hierarchy_relations
+    }
+    occurrence_canvases = {
+        item.canvas_key
+        for collection in (
+            graph.component_occurrences,
+            graph.conductor_occurrences,
+            graph.label_occurrences,
+        )
+        for item in collection
+    }
+
+    if any(
+        item.source_component_key not in source_components
+        or item.source_canvas_key not in source_canvases
+        or source_components[item.source_component_key].canvas_key
+        != item.source_canvas_key
+        or source_components[item.source_component_key].definition_key
+        != item.definition_key
+        for item in graph.component_occurrences
+    ):
+        raise _error(
+            "Component occurrence references are invalid.",
+            path="graph.component_occurrences",
+        )
+    if any(
+        item.source_connection_key not in source_connections
+        for item in graph.conductor_occurrences
+    ):
+        raise _error(
+            "Conductor occurrence references are invalid.",
+            path="graph.conductor_occurrences",
+        )
+    if any(
+        item.source_component_key not in source_components
+        for item in graph.label_occurrences
+    ):
+        raise _error(
+            "Label occurrence references are invalid.",
+            path="graph.label_occurrences",
+        )
+    if any(
+        (
+            item.component_key in components
+            and item.source_component_key
+            != components[item.component_key].source_component_key
+        )
+        or (
+            item.component_key not in components
+            and inner_port_owners.get(item.key) != item.component_key
+        )
+        for item in graph.instance_ports
+    ):
+        raise _error(
+            "Instance-port references are invalid.",
+            path="graph.instance_ports",
+        )
+
+    classification_keys = {item.key for item in graph.definition_classifications}
+    referenced_definitions = {
+        item.definition_key for item in graph.component_occurrences
+    } | {
+        source_components[item.source_component_key].definition_key
+        for item in graph.label_occurrences
+    }
+    if not referenced_definitions.issubset(classification_keys):
+        raise _error(
+            "Occurrence definitions are not fully classified.",
+            path="graph.definition_classifications",
+        )
+
+    for net in graph.confirmed_nets:
+        _require_subset(net.port_keys, set(ports), "graph.confirmed_nets.port_keys")
+        _require_subset(
+            net.conductor_keys,
+            set(conductors),
+            "graph.confirmed_nets.conductor_keys",
+        )
+        _require_subset(net.label_keys, set(labels), "graph.confirmed_nets.label_keys")
+        if any(ports[key].namespace != net.namespace for key in net.port_keys):
+            raise _error("Net port namespace is inconsistent.", path="graph.confirmed_nets")
+        if any(
+            conductors[key].namespace != net.namespace for key in net.conductor_keys
+        ):
+            raise _error(
+                "Net conductor namespace is inconsistent.",
+                path="graph.confirmed_nets",
+            )
+        if any(labels[key].namespace != net.namespace for key in net.label_keys):
+            raise _error("Net label namespace is inconsistent.", path="graph.confirmed_nets")
+
+    for membership in graph.port_net_memberships:
+        port = ports.get(membership.port_key)
+        net = nets.get(membership.net_key)
+        if (
+            port is None
+            or net is None
+            or membership.component_key != port.component_key
+            or membership.port_key not in net.port_keys
+            or membership.namespace != port.namespace
+            or membership.namespace != net.namespace
+            or not port.active
+        ):
+            raise _error(
+                "Port-net membership references are invalid.",
+                path="graph.port_net_memberships",
+            )
+
+    expected_memberships = {
+        (port_key, net.key)
+        for net in graph.confirmed_nets
+        for port_key in net.port_keys
+    }
+    observed_memberships = {
+        (item.port_key, item.net_key) for item in graph.port_net_memberships
+    }
+    if expected_memberships != observed_memberships or len(observed_memberships) != len(
+        graph.port_net_memberships
+    ):
+        raise _error(
+            "Confirmed net memberships are incomplete or duplicated.",
+            path="graph.port_net_memberships",
+        )
+
+    net_keys_by_port = defaultdict(set)
+    for net in graph.confirmed_nets:
+        for port_key in net.port_keys:
+            net_keys_by_port[port_key].add(net.key)
+    for relation in graph.hierarchy_relations:
+        outer = ports.get(relation.outer_port_key)
+        inner = ports.get(relation.inner_port_key)
+        if (
+            relation.parent_component_key not in components
+            or relation.child_canvas_key not in occurrence_canvases
+            or outer is None
+            or inner is None
+            or outer.component_key != relation.parent_component_key
+            or (
+                inner.component_key in components
+                and components[inner.component_key].canvas_key
+                != relation.child_canvas_key
+            )
+            or (
+                inner.component_key not in components
+                and inner.component_key != f"boundary:{relation.child_canvas_key}"
+            )
+            or not outer.active
+            or not inner.active
+            or outer.namespace != relation.namespace
+            or inner.namespace != relation.namespace
+            or (
+                relation.dimension is not None
+                and (
+                    outer.dimension not in {None, relation.dimension}
+                    or inner.dimension not in {None, relation.dimension}
+                )
+            )
+        ):
+            raise _error(
+                "Hierarchy relation references are invalid.",
+                path="graph.hierarchy_relations",
+            )
+        if not (
+            net_keys_by_port[relation.outer_port_key]
+            & net_keys_by_port[relation.inner_port_key]
+        ):
+            raise _error(
+                "Hierarchy relation is not confirmed by one net.",
+                path="graph.hierarchy_relations",
+            )
+
+    for candidate in graph.candidate_edges:
+        conductor_key = candidate.left.partition("@")[0]
+        if conductor_key not in conductors or candidate.right not in ports:
+            raise _error(
+                "Candidate edge references are invalid.",
+                path="graph.candidate_edges",
+            )
+
+
+def _v1_graph_projection(record: Mapping[str, Any]) -> dict[str, Any]:
+    result = {key: record[key] for key in _GRAPH_V1_FIELDS}
+    result["definitions"] = [
+        {
+            **{key: value for key, value in definition.items() if key != "ports"},
+            "ports": [
+                {
+                    key: value
+                    for key, value in port.items()
+                    if key
+                    in {
+                        "key",
+                        "name",
+                        "model",
+                        "dimension",
+                        "mode",
+                        "type",
+                        "offset",
+                    }
+                }
+                for port in definition["ports"]
+            ],
+        }
+        for definition in record["definitions"]
+    ]
+    result["connections"] = [
+        {key: value for key, value in connection.items() if key != "namespace"}
+        for connection in record["connections"]
+    ]
+    return result
+
+
+def _parse_v2_definition_evidence(
+    value: Any,
+    base: tuple[CorpusDefinition, ...],
+) -> tuple[CorpusDefinition, ...]:
+    base_by_key = {item.key: item for item in base}
+    result = []
+    for index, item in enumerate(_array(value, "graph.definitions")):
+        path = f"graph.definitions[{index}]"
+        record = _exact(
+            item,
+            {"key", "name", "class_id", "parameters", "ports", "canvas_key"},
+            path,
+        )
+        key = _string(record["key"], f"{path}.key")
+        definition = base_by_key.get(key)
+        if definition is None:
+            raise _error("Definition evidence is inconsistent.", path=path)
+        base_ports = {port.key: port for port in definition.ports}
+        ports = []
+        for port_index, port_item in enumerate(
+            _array(record["ports"], f"{path}.ports")
+        ):
+            port_path = f"{path}.ports[{port_index}]"
+            port_record = _exact(
+                port_item,
+                {
+                    "key",
+                    "name",
+                    "model",
+                    "dimension",
+                    "mode",
+                    "type",
+                    "offset",
+                    "occurrence",
+                    "kind",
+                    "condition",
+                    "page",
+                    "required",
+                },
+                port_path,
+            )
+            port_key = _string(port_record["key"], f"{port_path}.key")
+            base_port = base_ports.get(port_key)
+            if base_port is None:
+                raise _error("Definition-port evidence is inconsistent.", path=port_path)
+            required = port_record["required"]
+            if required is not None:
+                required = _boolean(required, f"{port_path}.required")
+            ports.append(
+                replace(
+                    base_port,
+                    occurrence=_integer(
+                        port_record["occurrence"],
+                        f"{port_path}.occurrence",
+                    ),
+                    kind=_string(
+                        port_record["kind"],
+                        f"{port_path}.kind",
+                        empty=True,
+                    ),
+                    condition=_optional_string(
+                        port_record["condition"],
+                        f"{port_path}.condition",
+                    ),
+                    page=_boolean(port_record["page"], f"{port_path}.page"),
+                    required=required,
+                )
+            )
+        if set(base_ports) != {port.key for port in ports}:
+            raise _error("Definition-port evidence is incomplete.", path=path)
+        result.append(replace(definition, ports=tuple(ports)))
+    if set(base_by_key) != {item.key for item in result}:
+        raise _error("Definition evidence is incomplete.", path="graph.definitions")
+    return tuple(result)
+
+
+def _parse_v2_connection_evidence(
+    value: Any,
+    base: tuple[CorpusConnection, ...],
+) -> tuple[CorpusConnection, ...]:
+    base_by_key = {item.key: item for item in base}
+    result = []
+    for index, item in enumerate(_array(value, "graph.connections")):
+        path = f"graph.connections[{index}]"
+        record = _exact(
+            item,
+            {
+                "key",
+                "canvas_key",
+                "kind",
+                "vertices",
+                "endpoints",
+                "source_definition",
+                "resolution",
+                "namespace",
+            },
+            path,
+        )
+        key = _string(record["key"], f"{path}.key")
+        connection = base_by_key.get(key)
+        namespace = _string(record["namespace"], f"{path}.namespace")
+        if connection is None or namespace not in {"electrical", "data", "unknown"}:
+            raise _error("Connection evidence is inconsistent.", path=path)
+        result.append(replace(connection, namespace=namespace))
+    if set(base_by_key) != {item.key for item in result}:
+        raise _error("Connection evidence is incomplete.", path="graph.connections")
+    return tuple(result)
+
+
+def _parse_graph_v2(value: Any) -> ProjectGraph:
+    record = _exact(value, _GRAPH_V2_FIELDS, "graph")
+    if type(record["schema_version"]) is not int or record["schema_version"] != 2:
+        raise _error("Graph schema version is unsupported.", path="graph.schema_version")
+    if record["normalization_profile"] != "pscad-xml-v2":
+        raise _error(
+            "Graph normalization profile is unsupported.",
+            path="graph.normalization_profile",
+        )
+
+    base = _parse_graph_v1(_v1_graph_projection(record))
+    graph = replace(
+        base,
+        definitions=_parse_v2_definition_evidence(
+            record["definitions"],
+            base.definitions,
+        ),
+        connections=_parse_v2_connection_evidence(
+            record["connections"],
+            base.connections,
+        ),
+        schema_version=2,
+        normalization_profile="pscad-xml-v2",
+        definition_classifications=_parse_definition_classifications(
+            record["definition_classifications"]
+        ),
+        component_occurrences=_parse_component_occurrences(
+            record["component_occurrences"]
+        ),
+        conductor_occurrences=_parse_conductor_occurrences(
+            record["conductor_occurrences"]
+        ),
+        label_occurrences=_parse_label_occurrences(record["label_occurrences"]),
+        instance_ports=_parse_instance_ports(record["instance_ports"]),
+        confirmed_nets=_parse_confirmed_nets(record["confirmed_nets"]),
+        port_net_memberships=_parse_memberships(record["port_net_memberships"]),
+        hierarchy_relations=_parse_hierarchy_relations(
+            record["hierarchy_relations"]
+        ),
+        candidate_edges=_parse_candidate_edges(record["candidate_edges"]),
+        unresolved_evidence=_parse_unresolved(record["unresolved_evidence"]),
+        confirmed_relation_signature=_digest(
+            record["confirmed_relation_signature"],
+            "graph.confirmed_relation_signature",
+        ),
+        definition_catalog_signature=_digest(
+            record["definition_catalog_signature"],
+            "graph.definition_catalog_signature",
+        ),
+    )
+    _validate_v2_relations(graph)
+    return graph
+
+
 def parse_project_graph(value: Any) -> ProjectGraph:
     """Strictly reparse a committed normalized project graph."""
 
-    return _parse_graph(value)
+    if not isinstance(value, Mapping):
+        raise _error("Artifact graph must be an object.", path="graph")
+    version = value.get("schema_version", 1)
+    if type(version) is not int:
+        raise _error(
+            "Graph schema version must be an integer.",
+            path="graph.schema_version",
+        )
+    if version == 1:
+        return _parse_graph_v1(value)
+    if version == 2:
+        return _parse_graph_v2(value)
+    raise _error(
+        "Graph schema version is unsupported.",
+        path="graph.schema_version",
+    )
 
 
 def _parse_record(value: Any) -> CorpusRecord:
@@ -516,10 +1583,17 @@ def _parse_record(value: Any) -> CorpusRecord:
         },
         "record",
     )
-    if parsed["schema_version"] != 1 or parsed["kind"] not in KIND_ORDER:
+    version = parsed["schema_version"]
+    if type(version) is not int or version not in {1, 2}:
         raise _error("Record schema or kind is unsupported.", path="record")
+    order = KIND_ORDER_V2 if version == 2 else KIND_ORDER_V1
+    if parsed["kind"] not in order:
+        raise _error("Record schema or kind is unsupported.", path="record")
+    expected_profile = f"pscad-xml-v{version}"
+    if parsed["normalization_profile"] != expected_profile:
+        raise _error("Record normalization profile is unsupported.", path="record")
     return CorpusRecord(
-        1,
+        version,
         _string(parsed["normalization_profile"], "record.normalization_profile"),
         _string(parsed["corpus_name"], "record.corpus_name"),
         _string(parsed["project_id"], "record.project_id"),
@@ -544,17 +1618,33 @@ def _parse_manifest(value: Any) -> CorpusManifest:
         {"schema_version", "normalization_profile", "name", "source_spec_sha256", "project_count", "projects"},
         "manifest",
     )
-    if parsed["schema_version"] != 1:
+    version = parsed["schema_version"]
+    if type(version) is not int or version not in {1, 2}:
         raise _error("Manifest schema version is unsupported.", path="manifest.schema_version")
+    expected_profile = f"pscad-xml-v{version}"
+    if parsed["normalization_profile"] != expected_profile:
+        raise _error(
+            "Manifest normalization profile is unsupported.",
+            path="manifest.normalization_profile",
+        )
     projects: list[CorpusProjectManifest] = []
     for index, item in enumerate(_array(parsed["projects"], "manifest.projects")):
         path = f"manifest.projects[{index}]"
-        project = _exact(
-            item,
-            {
+        base_fields = {
                 "project_id", "source_sha256", "graph_path", "graph_sha256", "graph_byte_length", "graph_signature",
                 "records_path", "records_sha256", "records_byte_length", "record_count", "record_counts",
-            },
+        }
+        project = _exact(
+            item,
+            base_fields
+            | (
+                {
+                    "confirmed_relation_signature",
+                    "definition_catalog_signature",
+                }
+                if version == 2
+                else set()
+            ),
             path,
         )
         projects.append(
@@ -570,10 +1660,22 @@ def _parse_manifest(value: Any) -> CorpusManifest:
                 _integer(project["records_byte_length"], f"{path}.records_byte_length", minimum=1),
                 _integer(project["record_count"], f"{path}.record_count", minimum=1),
                 freeze(_mapping(project["record_counts"], f"{path}.record_counts")),
+                _digest(
+                    project["confirmed_relation_signature"],
+                    f"{path}.confirmed_relation_signature",
+                )
+                if version == 2
+                else None,
+                _digest(
+                    project["definition_catalog_signature"],
+                    f"{path}.definition_catalog_signature",
+                )
+                if version == 2
+                else None,
             )
         )
     return CorpusManifest(
-        1,
+        version,
         _string(parsed["normalization_profile"], "manifest.normalization_profile"),
         _string(parsed["name"], "manifest.name"),
         _digest(parsed["source_spec_sha256"], "manifest.source_spec_sha256"),
@@ -636,7 +1738,8 @@ def validate_candidate(root: str | Path, spec: CorpusSpec) -> CorpusManifest:
     if manifest_bytes != canonical_json(manifest.to_dict()):
         raise _error("Manifest is not canonical.", path="manifest.json")
     if (
-        manifest.name != spec.name
+        manifest.schema_version != spec.schema_version
+        or manifest.name != spec.name
         or manifest.normalization_profile != spec.normalization_profile
         or manifest.source_spec_sha256 != _sha256(source_bytes)
         or manifest.project_count != len(spec.entry_points)
@@ -654,15 +1757,33 @@ def validate_candidate(root: str | Path, spec: CorpusSpec) -> CorpusManifest:
         graph_path = _relative_file(directory, project.graph_path)
         graph_value, graph_bytes = _load_json(graph_path)
         _scan_privacy(graph_value, f"graph.{source.project_id}")
-        graph = _parse_graph(graph_value)
+        graph = parse_project_graph(graph_value)
         if graph_bytes != canonical_json(graph.to_dict()):
             raise _error("Project graph is not canonical.", path=project.graph_path)
         if (
             graph.project_id != source.project_id
             or graph.source_sha256 != source.sha256
+            or graph.schema_version != spec.schema_version
+            or graph.normalization_profile != spec.normalization_profile
             or _sha256(graph_bytes) != project.graph_sha256
             or len(graph_bytes) != project.graph_byte_length
             or graph_signature(graph) != project.graph_signature
+            or (
+                spec.schema_version == 2
+                and (
+                    project.confirmed_relation_signature
+                    != graph.confirmed_relation_signature
+                    or project.definition_catalog_signature
+                    != graph.definition_catalog_signature
+                )
+            )
+            or (
+                spec.schema_version == 1
+                and (
+                    project.confirmed_relation_signature is not None
+                    or project.definition_catalog_signature is not None
+                )
+            )
         ):
             raise _error("Project graph evidence does not match its manifest.", path=project.graph_path)
 
@@ -708,7 +1829,11 @@ def _write_candidate_files(directory: Path, spec: CorpusSpec, graphs: Sequence[P
     projects: list[CorpusProjectManifest] = []
     for source in spec.entry_points:
         graph = graph_map[source.project_id]
-        if graph.source_sha256 != source.sha256:
+        if (
+            graph.source_sha256 != source.sha256
+            or graph.schema_version != spec.schema_version
+            or graph.normalization_profile != spec.normalization_profile
+        ):
             raise _error("Graph source hash does not match the source specification.", path=source.project_id)
         graph_relative = f"graphs/{source.project_id}.json"
         records_relative = f"records/{source.project_id}.jsonl"
@@ -730,10 +1855,16 @@ def _write_candidate_files(directory: Path, spec: CorpusSpec, graphs: Sequence[P
                 records_byte_length=len(records_bytes),
                 record_count=len(records),
                 record_counts=freeze(dict(sorted(Counter(record.kind for record in records).items()))),
+                confirmed_relation_signature=graph.confirmed_relation_signature
+                if spec.schema_version == 2
+                else None,
+                definition_catalog_signature=graph.definition_catalog_signature
+                if spec.schema_version == 2
+                else None,
             )
         )
     manifest = CorpusManifest(
-        schema_version=1,
+        schema_version=spec.schema_version,
         normalization_profile=spec.normalization_profile,
         name=spec.name,
         source_spec_sha256=_sha256(source_bytes),

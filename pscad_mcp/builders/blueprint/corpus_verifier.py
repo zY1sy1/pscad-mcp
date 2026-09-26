@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import re
-from typing import Any, Mapping
 import unicodedata
+from collections.abc import Mapping
+from typing import Any
 
 from ...core.backend.base import BackendError
 from .corpus_extractor import graph_signature
@@ -20,13 +21,19 @@ from .inventory import InventorySnapshot, read_live_inventory
 from .models import freeze, json_safe
 from .schema import parse_blueprint
 
-
-_INSPECTION_PROFILE = "corpus-existing-project-v1"
 _EVIDENCE_FILES = ["plan.json", "validation-report.json", "manifest.json"]
 
 
 def _error(code: str, message: str, **details: Any) -> BackendError:
     return BackendError(code, message, "corpus", "verify_blueprint_candidate", details)
+
+
+def _blueprint_name(graph: ProjectGraph) -> str:
+    return f"{graph.project_id}-existing-v{graph.schema_version}"
+
+
+def _inspection_profile(graph: ProjectGraph) -> str:
+    return f"corpus-existing-project-v{graph.schema_version}"
 
 
 def _required_structure(graph: ProjectGraph) -> list[dict[str, Any]]:
@@ -93,6 +100,14 @@ def generate_blueprint_candidate(source: CorpusSource, graph: ProjectGraph) -> d
         or source.sha256 != graph.source_sha256
         or graph.pscad_version not in source.pscad_versions
         or observed_dependencies != expected_dependencies
+        or graph.schema_version not in {1, 2}
+        or (
+            graph.schema_version == 2
+            and (
+                graph.confirmed_relation_signature is None
+                or graph.definition_catalog_signature is None
+            )
+        )
     ):
         raise _error(
             "CORPUS_BLUEPRINT_MISMATCH",
@@ -102,9 +117,9 @@ def generate_blueprint_candidate(source: CorpusSource, graph: ProjectGraph) -> d
     return {
         "identity": {
             "schema_version": 1,
-            "name": f"{source.project_id}-existing-v1",
+            "name": _blueprint_name(graph),
             "supported_pscad_versions": list(source.pscad_versions),
-            "inspection_profile": _INSPECTION_PROFILE,
+            "inspection_profile": _inspection_profile(graph),
         },
         "source_package": {
             "entry_point": source.basename,
@@ -173,9 +188,16 @@ def verify_blueprint_candidate(
         )
     observed_required = json_safe(blueprint.source_package["required"])
     identity_matches = (
-        blueprint.identity.name == f"{graph.project_id}-existing-v1"
-        and blueprint.identity.inspection_profile == _INSPECTION_PROFILE
+        blueprint.identity.name == _blueprint_name(graph)
+        and blueprint.identity.inspection_profile == _inspection_profile(graph)
         and graph.pscad_version in blueprint.identity.supported_pscad_versions
+        and (
+            graph.schema_version == 1
+            or (
+                graph.confirmed_relation_signature is not None
+                and graph.definition_catalog_signature is not None
+            )
+        )
     )
     source_matches = source_identity_matches and observed_required == expected_required
     acceptance_matches = json_safe(blueprint.acceptance) == _expected_acceptance(graph)
@@ -197,6 +219,7 @@ def verify_blueprint_candidate(
         source_hash_verified=True,
         operations_empty=True,
         status="verified",
+        confirmed_relation_signature=graph.confirmed_relation_signature,
     )
 
 
@@ -407,7 +430,11 @@ async def verify_live_inventory(
     """Compare the immutable offline graph with a read-only live inventory snapshot."""
 
     service_status = await service.status()
-    snapshot = await read_live_inventory(service, project_name, _INSPECTION_PROFILE)
+    snapshot = await read_live_inventory(
+        service,
+        project_name,
+        _inspection_profile(graph),
+    )
     checks = _compare_live(graph, snapshot, project_name)
     matched = all(check.status == "matched" for check in checks)
     backend = service_status.get("backend")

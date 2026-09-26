@@ -5,6 +5,18 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from .corpus_relation_models import (
+    CorpusCandidateEdge,
+    CorpusComponentOccurrence,
+    CorpusConductorOccurrence,
+    CorpusConfirmedNet,
+    CorpusDefinitionClassification,
+    CorpusHierarchyRelation,
+    CorpusInstancePort,
+    CorpusLabelOccurrence,
+    CorpusPortNetMembership,
+    CorpusUnresolvedEvidence,
+)
 from .models import FrozenDict, json_safe
 
 
@@ -45,6 +57,30 @@ class CorpusSource:
 
 
 @dataclass(frozen=True)
+class CorpusDefinitionSource:
+    namespace: str
+    basename: str
+    byte_length: int
+    sha256: str
+    pscad_versions: tuple[str, ...]
+    policy: str
+
+    @property
+    def keys(self) -> tuple[tuple[str, str], ...]:
+        return tuple((self.namespace, version) for version in self.pscad_versions)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "namespace": self.namespace,
+            "basename": self.basename,
+            "byte_length": self.byte_length,
+            "sha256": self.sha256,
+            "pscad_versions": list(self.pscad_versions),
+            "policy": self.policy,
+        }
+
+
+@dataclass(frozen=True)
 class CorpusSpec:
     schema_version: int
     normalization_profile: str
@@ -52,9 +88,10 @@ class CorpusSpec:
     inclusion_policy: str
     exclusion_policy: str
     entry_points: tuple[CorpusSource, ...]
+    definition_sources: tuple[CorpusDefinitionSource, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        result = {
             "schema_version": self.schema_version,
             "normalization_profile": self.normalization_profile,
             "name": self.name,
@@ -62,6 +99,9 @@ class CorpusSpec:
             "exclusion_policy": self.exclusion_policy,
             "entry_points": [entry.to_dict() for entry in self.entry_points],
         }
+        if self.schema_version == 2:
+            result["definition_sources"] = [source.to_dict() for source in self.definition_sources]
+        return result
 
 
 @dataclass(frozen=True)
@@ -115,9 +155,14 @@ class DefinitionPort:
     mode: str
     type: str
     offset: tuple[int, int]
+    occurrence: int = 0
+    kind: str = ""
+    condition: str | None = None
+    page: bool = False
+    required: bool | None = None
 
-    def to_dict(self) -> dict[str, Any]:
-        return {
+    def to_dict(self, schema_version: int = 1) -> dict[str, Any]:
+        result = {
             "key": self.key,
             "name": self.name,
             "model": self.model,
@@ -126,6 +171,17 @@ class DefinitionPort:
             "type": self.type,
             "offset": list(self.offset),
         }
+        if schema_version == 2:
+            result.update(
+                {
+                    "occurrence": self.occurrence,
+                    "kind": self.kind,
+                    "condition": self.condition,
+                    "page": self.page,
+                    "required": self.required,
+                }
+            )
+        return result
 
 
 @dataclass(frozen=True)
@@ -137,13 +193,13 @@ class CorpusDefinition:
     ports: tuple[DefinitionPort, ...]
     canvas_key: str | None
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self, schema_version: int = 1) -> dict[str, Any]:
         return {
             "key": self.key,
             "name": self.name,
             "class_id": self.class_id,
             "parameters": [parameter.to_dict() for parameter in self.parameters],
-            "ports": [port.to_dict() for port in self.ports],
+            "ports": [port.to_dict(schema_version) for port in self.ports],
             "canvas_key": self.canvas_key,
         }
 
@@ -197,9 +253,10 @@ class CorpusConnection:
     endpoints: tuple[str, ...]
     source_definition: str | None
     resolution: str
+    namespace: str = "unknown"
 
-    def to_dict(self) -> dict[str, Any]:
-        return {
+    def to_dict(self, schema_version: int = 1) -> dict[str, Any]:
+        result = {
             "key": self.key,
             "canvas_key": self.canvas_key,
             "kind": self.kind,
@@ -208,6 +265,9 @@ class CorpusConnection:
             "source_definition": self.source_definition,
             "resolution": self.resolution,
         }
+        if schema_version == 2:
+            result["namespace"] = self.namespace
+        return result
 
 
 @dataclass(frozen=True)
@@ -253,9 +313,23 @@ class ProjectGraph:
     connections: tuple[CorpusConnection, ...] = ()
     output_channels: tuple[CorpusOutputChannel, ...] = ()
     warnings: tuple[CorpusWarning, ...] = ()
+    schema_version: int = 1
+    normalization_profile: str = "pscad-xml-v1"
+    definition_classifications: tuple[CorpusDefinitionClassification, ...] = ()
+    component_occurrences: tuple[CorpusComponentOccurrence, ...] = ()
+    conductor_occurrences: tuple[CorpusConductorOccurrence, ...] = ()
+    label_occurrences: tuple[CorpusLabelOccurrence, ...] = ()
+    instance_ports: tuple[CorpusInstancePort, ...] = ()
+    confirmed_nets: tuple[CorpusConfirmedNet, ...] = ()
+    port_net_memberships: tuple[CorpusPortNetMembership, ...] = ()
+    hierarchy_relations: tuple[CorpusHierarchyRelation, ...] = ()
+    candidate_edges: tuple[CorpusCandidateEdge, ...] = ()
+    unresolved_evidence: tuple[CorpusUnresolvedEvidence, ...] = ()
+    confirmed_relation_signature: str | None = None
+    definition_catalog_signature: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        result = {
             "project_id": self.project_id,
             "source_sha256": self.source_sha256,
             "dependency_hashes": json_safe(self.dependency_hashes),
@@ -263,13 +337,59 @@ class ProjectGraph:
             "pscad_version": self.pscad_version,
             "target": self.target,
             "settings": json_safe(self.settings),
-            "definitions": [definition.to_dict() for definition in self.definitions],
+            "definitions": [
+                definition.to_dict(self.schema_version)
+                for definition in self.definitions
+            ],
             "canvases": [canvas.to_dict() for canvas in self.canvases],
             "components": [component.to_dict() for component in self.components],
-            "connections": [connection.to_dict() for connection in self.connections],
+            "connections": [
+                connection.to_dict(self.schema_version)
+                for connection in self.connections
+            ],
             "output_channels": [channel.to_dict() for channel in self.output_channels],
             "warnings": [warning.to_dict() for warning in self.warnings],
         }
+        if self.schema_version == 2:
+            result.update(
+                {
+                    "schema_version": 2,
+                    "normalization_profile": self.normalization_profile,
+                    "definition_classifications": [
+                        item.to_dict() for item in self.definition_classifications
+                    ],
+                    "component_occurrences": [
+                        item.to_dict() for item in self.component_occurrences
+                    ],
+                    "conductor_occurrences": [
+                        item.to_dict() for item in self.conductor_occurrences
+                    ],
+                    "label_occurrences": [
+                        item.to_dict() for item in self.label_occurrences
+                    ],
+                    "instance_ports": [
+                        item.to_dict() for item in self.instance_ports
+                    ],
+                    "confirmed_nets": [
+                        item.to_dict() for item in self.confirmed_nets
+                    ],
+                    "port_net_memberships": [
+                        item.to_dict() for item in self.port_net_memberships
+                    ],
+                    "hierarchy_relations": [
+                        item.to_dict() for item in self.hierarchy_relations
+                    ],
+                    "candidate_edges": [
+                        item.to_dict() for item in self.candidate_edges
+                    ],
+                    "unresolved_evidence": [
+                        item.to_dict() for item in self.unresolved_evidence
+                    ],
+                    "confirmed_relation_signature": self.confirmed_relation_signature,
+                    "definition_catalog_signature": self.definition_catalog_signature,
+                }
+            )
+        return result
 
 
 @dataclass(frozen=True)
@@ -313,9 +433,11 @@ class CorpusProjectManifest:
     records_byte_length: int
     record_count: int
     record_counts: FrozenDict
+    confirmed_relation_signature: str | None = None
+    definition_catalog_signature: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        result = {
             "project_id": self.project_id,
             "source_sha256": self.source_sha256,
             "graph_path": self.graph_path,
@@ -328,6 +450,15 @@ class CorpusProjectManifest:
             "record_count": self.record_count,
             "record_counts": json_safe(self.record_counts),
         }
+        if self.confirmed_relation_signature is not None:
+            result["confirmed_relation_signature"] = (
+                self.confirmed_relation_signature
+            )
+        if self.definition_catalog_signature is not None:
+            result["definition_catalog_signature"] = (
+                self.definition_catalog_signature
+            )
+        return result
 
 
 @dataclass(frozen=True)
@@ -358,9 +489,10 @@ class BlueprintVerification:
     source_hash_verified: bool
     operations_empty: bool
     status: str
+    confirmed_relation_signature: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        result = {
             "project_id": self.project_id,
             "blueprint_name": self.blueprint_name,
             "graph_signature": self.graph_signature,
@@ -368,6 +500,11 @@ class BlueprintVerification:
             "operations_empty": self.operations_empty,
             "status": self.status,
         }
+        if self.confirmed_relation_signature is not None:
+            result["confirmed_relation_signature"] = (
+                self.confirmed_relation_signature
+            )
+        return result
 
 
 @dataclass(frozen=True)

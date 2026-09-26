@@ -10,7 +10,6 @@ import pytest
 from pscad_mcp.builders.blueprint.corpus_schema import parse_corpus_spec
 from scripts.build_blueprint_corpus import generate_corpus
 
-
 ROOT = Path(__file__).parents[1]
 SPEC_PATH = ROOT / "pscad_mcp" / "assets" / "corpora" / "moxing_v1" / "source-spec.json"
 PACKAGED_CORPUS = SPEC_PATH.parent

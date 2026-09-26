@@ -1,0 +1,1 @@
+{"entry_points":[{"basename":"minimal.pscx","byte_length":1,"dependencies":[],"project_id":"minimal","pscad_versions":["4.6.2"],"sha256":"0000000000000000000000000000000000000000000000000000000000000000"}],"exclusion_policy":"no-backups-builds-results-v1","inclusion_policy":"explicit-entry-points-v1","name":"fixture_v1","normalization_profile":"pscad-xml-v1","schema_version":1}

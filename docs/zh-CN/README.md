@@ -275,6 +275,42 @@ Blueprint Builder 新增 `plan_pscad_project_build`、`build_pscad_project`、
 发布。默认测试不等于 licensed acceptance，当前 packaged corpus 保持
 `live_verified=false`。
 
+#### 离线 corpus relationship truth v2
+
+`pscad-xml-v2` corpus 增加按哈希和 PSCAD 版本绑定的 definition source，
+以及 component、conductor、label、instance port、hierarchy、confirmed net
+和 net membership 记录。Schema v1 仍按原有形状和语义读取；v1 reader 不会
+得到伪造的空 v2 记录，也不会被声明为关系数据完整。
+
+关系证据严格分层：`confirmed` net 只能来自 canonical topology engine；
+`candidate` edge 只是待审查提示；`unresolved` record 保留 engineering 或
+blocking evidence。发布前必须把每个被引用的 definition 分类完成，并验证每个
+definition source 的 namespace、PSCAD version、byte length 与 SHA-256。
+整个离线流程不需要启动 PSCAD，也不会启动 PSCAD；PSCX/PSLX 输入在前后均做
+不变性检查，并且这里不增加 licensed acceptance 声明。
+
+Definition binding 使用可重复的
+`--definition-source namespace@version=ABSOLUTE_PATH` 参数。典型审查流程为：
+
+```powershell
+$bindings = @(
+  '--definition-source', "master@4.6.2=$master462",
+  '--definition-source', "master@4.6.3=$master463",
+  '--definition-source', "vsc-mmc-lib@4.6.2=$vscMmc462"
+)
+python scripts/build_blueprint_corpus.py propose-spec --source-root $sourceRoot --spec $v1Spec --proposal $v2Proposal @bindings
+python scripts/build_blueprint_corpus.py preflight --source-root $sourceRoot --spec $v2Proposal --output $proposedCorpus @bindings
+python scripts/build_blueprint_corpus.py generate --source-root $sourceRoot --spec $v2Proposal --output $proposedCorpus @bindings
+python scripts/build_blueprint_corpus.py verify --source-root $sourceRoot --spec $v2Proposal --output $proposedCorpus @bindings
+python scripts/build_blueprint_corpus.py compare --source-root $sourceRoot --spec $v2Proposal --output $proposedCorpus @bindings
+```
+
+`propose-spec` 只写新的可移植候选，不覆盖已有 proposal 或 packaged spec；
+`preflight` 不写 corpus 或 Blueprint 输出。任一专有 definition source 缺失时，
+正式资产发布必须无部分改动地停止，并报告 `action: needs_evidence`、
+`missing: master@4.6.3 and/or vsc-mmc-lib@4.6.2` 与
+`assets_changed: false`。
+
 ### 参数化 LCC 真实模板执行边界
 
 参数化 LCC 现在支持额定值推导、真实 PSCX 模板的只读绑定审核、确定性
