@@ -140,6 +140,7 @@ def audit_lcc_parameter_bindings(
         )
     _, payload = _read_template_once(path)
     root = _parse_template(payload)
+    parents = {child: parent for parent in root.iter() for child in parent}
     seen: set[str] = set()
     evidence: list[dict[str, Any]] = []
     for index, binding in enumerate(bindings):
@@ -198,7 +199,7 @@ def audit_lcc_parameter_bindings(
                 {"reason": "binding_not_unique", "selector": selector[:512], "matches": len(matches)},
             )
         element = matches[0]
-        observed_unit = _element_unit(element)
+        observed_unit = _binding_unit(root, element, parents)
         if observed_unit != binding["units"]:
             raise BackendError(
                 "LCC_PARAMETER_BINDING_UNAVAILABLE",
@@ -218,6 +219,44 @@ def audit_lcc_parameter_bindings(
         "bindings": evidence,
         "fingerprint": hashlib.sha256(payload).hexdigest(),
     }
+
+
+def _binding_unit(
+    root: ET.Element, element: ET.Element, parents: dict[ET.Element, ET.Element]
+) -> str | None:
+    """Resolve exact global substitutions through their unique declared unit.
+
+    PSCAD stores source/transformer frequency as ``$(Freq)`` in real cases.
+    That reference is not an untyped numeric constant. Expressions, missing
+    declarations, conflicting units and duplicate global names stay unresolved.
+    """
+    raw = element.get("value", element.text or "").strip()
+    if "$(" in raw:
+        match = re.fullmatch(r"\$\(([A-Za-z_][A-Za-z_0-9]{0,63})\)", raw)
+        if match is None:
+            return None
+        declarations = root.findall(
+            "./definitions/Definition[@name='Main']/form/"
+            "category[@name='Global Substitutions']/parameter"
+        )
+        declarations = [item for item in declarations if item.get("name") == match[1]]
+        if len(declarations) != 1:
+            return None
+        declaration = declarations[0]
+        values = declaration.findall("value")
+        if len(values) != 1 or "$(" in (values[0].text or ""):
+            return None
+        declared = _attr(declaration, "unit", "units").strip()
+        literal = _element_unit(values[0])
+        return declared if declared and (literal is None or literal == declared) else None
+    observed = _element_unit(element)
+    parent = parents.get(element)
+    if element.tag == "value" and parent is not None and parent.tag == "parameter":
+        declared = _attr(parent, "unit", "units").strip()
+        if declared and observed and declared != observed:
+            return None
+        return declared or observed
+    return observed
 
 
 def _element_unit(element: ET.Element) -> str | None:
