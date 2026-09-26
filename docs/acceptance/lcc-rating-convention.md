@@ -43,3 +43,67 @@ from the reviewed catalog after a regression reproduced an executable direct
 effects. Source immutability, physical thresholds and independent-reference
 requirements remain applicable. Previous raw reports retain their original
 request and revision; this correction does not relabel them as accepted.
+
+## Verification on 2026-09-26
+
+The formula correction is commit `79f9a49`; removal of the direct DC-to-AC
+binding is `fb0b244f390d38f6d9a6378f44e91159219de3d4`. The original formula was
+reproduced with four failing regressions before changing source. The separate
+binding regression reproduced a falsely executable monopolar voltage write.
+The final affected offline suite (`pytest tests -q -k lcc --tb=short`) passed
+1069 tests with 12 licensed tests skipped and 2822 unrelated tests deselected;
+the log is `D:/PA/l26-rating-regression.log`. These skips are not physical
+acceptance. The changed-file lint comparison introduced no new findings
+(18 pre-existing findings), and `git diff --check` passed.
+
+Three fresh public plans use 1000 MW / 500 kV / 1 kA,
+1200 MW / 500 kV / 1.2 kA, and 1600 MW / 400 kV / 2 kA. Their derivations
+succeed and record the explicit total-power convention; all remain
+`executable=false` because 13 physical mappings are unresolved. No staging
+workspace was created. This is an implementation gap, not a pending user
+decision or license failure. Hash-bound plans and the preflight record:
+`D:/PA/l26-rating-preflight-fb0b244/report.json`.
+
+Three separate owned PSCAD 4.6.2 instances then ran the immutable bipolar
+template at its existing 50 Hz frequency, changing only the power-order slider
+in a staged copy. These diagnostics use the existing controller's 1000 MW base;
+other requested engineering/rating values are explicitly **not applied**.
+
+| Total command (MW) | Positive pole (MW) | Negative pole (MW) | Measured total (MW) |
+| --- | --- | --- | --- |
+| 800 | 399.962150 | 399.957128 | 799.919278 |
+| 900 | 449.934410 | 449.929037 | 899.863447 |
+| 1000 | 499.956556 | 499.951010 | 999.907566 |
+
+The reported total is the mean of instantaneous `Vp*Ip - Vn*In` during
+4.0-5.0 s, accounting for the negative pole meter orientation. Output PGB
+scales (0.002 for voltage and 0.5 for current) are removed to recover kV and
+kA; their exact source component IDs are recorded. No absolute-value power
+rectification is used. All three cases satisfy the criteria fixed before the
+runs: correct voltage/current polarity, total-power tracking within 2%, and
+pole mean-current mismatch below 1%. The worst tracking error is 0.015173%.
+
+The reports, in table order, are:
+
+- `D:/PA/l26power/180222-800/report.json`, SHA-256
+  `697601717108eeffa7e44cc2829bb1910bf812819ea6240b47802055850ee1f9`
+- `D:/PA/l26power/180222-900/report.json`, SHA-256
+  `f5eaaa1c31bc6682113632c626b4bcde80b3517334359fb362555f835c96fef3`
+- `D:/PA/l26power/180222-1000/report.json`, SHA-256
+  `dd406d826d8addd84fa35893476eee0431197acc1a4cda6f088df2d57fbed1a4`
+
+All reports bind the clean `fb0b244` revision, diagnostic script hash, exact
+request, source/Master hashes, managed PID, output parts and metadata.
+All 27 declared artifacts passed a fresh hash check in
+`D:/PA/l26-power-integrity.json`. Source inputs and implementation remained
+unchanged; all three owned processes exited without cleanup errors.
+The reproducible diagnostic runner is `D:/PA/l26_power_basis_probe.py`.
+
+These results validate the total-power interpretation of the existing template
+at three operating points. They do **not** accept the public rated builder,
+voltage/frequency/SCR scaling, transformer/filter/reactor design, fault or
+return-mode behavior, or an independent golden. Every diagnostic report keeps
+`model_accepted=false` and `public_builder_accepted=false`. The outstanding
+external prerequisites remain an independently reviewed LCC reference and a
+usable licensed PSCAD 5.x installation; those do not replace the remaining
+parameterization implementation work.

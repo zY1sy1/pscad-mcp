@@ -157,6 +157,10 @@ fault clearing.
   [rating convention](lcc-rating-convention.md). The physical mappings and
   licensed rating matrix remain unfinished. The historical plan and inventory are in
   `D:/PSCAD-Workspace/completion-licensed-20260926-r1/lcc-diagnosis`.
+  Fresh corrected plans are in `D:/PA/l26-rating-preflight-fb0b244`; separate
+  800/900/1000 MW template operating-point diagnostics passed at `fb0b244` in
+  `D:/PA/l26power/180222-*`. All retain `model_accepted=false`; they verify the
+  total-power basis without substituting for rated-builder acceptance.
 - Fixed/native LCC final WP6 needs independently reviewed reference output;
   engineering PASS does not supply it.
 - Full-bridge AVM and detailed-device/switching/thermal coverage are separate
