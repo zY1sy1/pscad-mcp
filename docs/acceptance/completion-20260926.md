@@ -3,6 +3,29 @@
 工作分支：`codex/complete-acceptance`，起点 `2d9012f`。
 整体补全尚未完成；本记录不声明当前分支通过实机验收。
 
+## 本轮验证结果
+
+验证代码提交：`d9980e66ef7573a725fb61956570bf4b2c70ce6d`。
+
+- 完整离线测试：**3822 passed, 52 skipped**，227.01 秒。许可测试仍按原 opt-in
+  跳过，没有把这些跳过项视为验收成功。
+- 受影响的 golden、总表、完整性审计和文档回归：62 项通过。
+- 新增 Python 文件的 Ruff 全项检查通过；修改的既有文件通过
+  `E9,F63,F7,F82,I` 检查；Git 空白检查通过。
+- 原 golden 缺少独立审阅也能生成的失败回归已先行观察；修复后涵盖未批准审阅、
+  错误范围/合同/时间步、源输出改变、验证后输入改变和旧 golden 保留。
+- 静态预检 8/8 PASS；没有打开 PSCAD 或运行任何物理仿真。
+- 离线证据审计没有无效范围，整体为 INCOMPLETE，真实 CLI 退出码为 2。
+
+保存的检查报告：
+
+- `D:/PSCAD-Workspace/completion-offline-20260926-110106/static-preflight.json`
+- `D:/PSCAD-Workspace/completion-offline-20260926-110106/inventory-audit.json`
+
+这些报告绑定上述代码提交。后续仅更新本文的验证记录，不把它们升级为新版本的
+licensed acceptance。两个修复提交为 `5624305`（golden 审阅门）和
+`d9980e6`（范围登记与证据审计），尚未合并到 main。
+
 ## 已修复
 
 1. LCC golden 生成以前只要求确认写入，普通 JSON 波形可以直接生成非占位参考。
