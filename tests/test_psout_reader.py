@@ -63,6 +63,19 @@ class FakePsout:
     File = FakeFile
 
 
+class VirtualRootCall(FakeCall):
+    def __getitem__(self, key):
+        raise KeyError("No variable named 'Name' exists.")
+
+
+class VirtualRootFile(FakeFile):
+    root = VirtualRootCall(None, 0, [FakeCall("Voltage", 10, [FakeCall("PGB:Data", 1)])])
+
+
+class VirtualRootPsout:
+    File = VirtualRootFile
+
+
 class FailingValuesTrace:
     @property
     def data(self):
@@ -177,6 +190,13 @@ class UnidentifiedPsout:
 
 
 class TestPsoutReader(unittest.IsolatedAsyncioTestCase):
+    async def test_virtual_file_root_without_name_still_traverses_real_channels(self):
+        adapter = PscadAdapter(ImmediateExecutor(), psout_module=VirtualRootPsout)
+        result = await adapter.read_psout("fixture.psout", max_samples=2)
+        self.assertEqual([c["path"] for c in result["channels"]], ["Voltage/PGB:Data"])
+        self.assertEqual(result["channels"][0]["values"], [1.0, 3.0])
+        self.assertEqual(result["warnings"], [])
+
     def test_legacy_companion_must_resolve_inside_output_directory(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory).resolve()

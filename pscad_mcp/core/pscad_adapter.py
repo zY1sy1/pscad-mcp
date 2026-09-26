@@ -245,6 +245,7 @@ class PscadAdapter:
                 channel,
                 summary_only,
                 matched,
+                is_root=True,
             )
             if channel is not None and not matched[0]:
                 selector = str(channel)
@@ -474,9 +475,19 @@ class PscadAdapter:
         channel: str | None,
         summary_only: bool,
         matched: list[bool],
+        *,
+        is_root: bool = False,
     ) -> None:
         try:
             name = node["Name"]
+        except KeyError as error:
+            # mhi.psout's virtual File.root has no Name variable. It is a
+            # container, not a malformed channel; its children carry names.
+            if is_root:
+                name = None
+            else:
+                self._record_psout_skip(node, path, "identify", error, warnings, skipped_channels)
+                return
         except Exception as error:
             self._record_psout_skip(
                 node,
