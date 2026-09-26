@@ -85,3 +85,13 @@ def test_pass_without_report_or_verdict_assertion_is_invalid(inventory):
     payload["scopes"][0].pop("evidence_checks")
     write_json(manifest, payload)
     assert audit_inventory(manifest)["integrity_status"] == "INVALID"
+
+
+def test_component_report_revision_cannot_be_relabelled(inventory):
+    manifest, report = inventory
+    payload = json.loads(manifest.read_text())
+    payload["scopes"][0]["evidence"]["sha256"] = write_json(report, {
+        "status": "PASS", "code_before": {"commit": "b" * 40},
+    })
+    write_json(manifest, payload)
+    assert audit_inventory(manifest)["integrity_status"] == "INVALID"

@@ -103,7 +103,8 @@ def audit_inventory(manifest_path: Path, *, checkout_commit: str | None = None) 
                     expected = check["equals"]
                     if type(observed) is not type(expected) or observed != expected:
                         raise ValueError(f"report claim mismatch: {check['pointer']}")
-                if report.get("commit") and report["commit"] != evidence.get("commit"):
+                report_commit = report.get("commit") or report.get("code_before", {}).get("commit")
+                if report_commit and report_commit != evidence.get("commit"):
                     raise ValueError("report revision differs from recorded evidence commit")
                 for child in report.get("reports", {}).values():
                     child_report = _report(child["path"], child["sha256"], files)
