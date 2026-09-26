@@ -671,7 +671,8 @@ def validate_parametric_provenance_asset(value: Any, catalog: dict[str, Any] | N
     }
     power = catalog_value["derived_parameters"]["dc_power_mw"]
     expected_machines["dimensional_identity"] = {
-        key: power[key] for key in ("formula", "dependencies", "compared_to")
+        key: power.get(key)
+        for key in ("formula", "dependencies", "compared_to", "pole_count_by_topology", "rating_basis")
     }
     expected_machines["floating_point_comparison"] = {
         "values": {

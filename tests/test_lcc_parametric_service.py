@@ -25,7 +25,7 @@ FIXTURES = Path(__file__).parent / "fixtures" / "lcc_parametric"
 def request(topology="bipolar"):
     return ParametricLccRequest(
         topology=topology,
-        ratings=LccRatings(1200.0, 500.0, 2.4, 500.0, 50.0, 3.0),
+        ratings=LccRatings(1200.0, 500.0, 1.2 if topology == "bipolar" else 2.4, 500.0, 50.0, 3.0),
         engineering_overrides={
             "smoothing_reactor_mh": 120.0,
             "filter_capacitance_uf": 60.0,
@@ -233,7 +233,7 @@ def test_build_requires_confirmation_before_plan_and_configuration_checks(tmp_pa
 
 @pytest.mark.parametrize(
     "expected_plan_hash",
-    [None, 1, "", "a" * 63, "a" * 65, "A" * 64, "g" * 64, "é" * 64, "a" * 10000],
+    [None, 1, "", "a" * 63, "a" * 65, "A" * 64, "g" * 64, "茅" * 64, "a" * 10000],
 )
 def test_build_rejects_invalid_expected_hash_before_template_or_asset_revalidation(
     tmp_path, monkeypatch, expected_plan_hash

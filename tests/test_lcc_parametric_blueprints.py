@@ -280,7 +280,7 @@ def test_parametric_topology_planner_is_deterministic_explicit_and_fail_closed()
 def test_parametric_topology_planner_maps_the_complete_derived_report_without_authorizing_writes():
     request = ParametricLccRequest(
         topology="bipolar",
-        ratings=LccRatings(1200.0, 500.0, 2.4, 500.0, 50.0, 3.0, 2.5),
+        ratings=LccRatings(1200.0, 500.0, 1.2, 500.0, 50.0, 3.0, 2.5),
         engineering_overrides={
             "smoothing_reactor_mh": 120.0,
             "filter_capacitance_uf": 60.0,
@@ -298,6 +298,18 @@ def test_parametric_topology_planner_maps_the_complete_derived_report_without_au
     unresolved = {item["parameter"] for item in plan["unresolved_bindings"]}
     assert unresolved < {item.name for item in report.parameters}
     assert "frequency_hz" not in unresolved
+
+
+def test_dc_rating_cannot_be_written_directly_to_transformer_ac_secondary():
+    report = DerivedParameterReport(parameters=(
+        DerivedParameter(name="dc_voltage_kv", value=500.0, source="user", units="kV", formula="request.ratings.dc_voltage_kv"),
+    ), feasible=True)
+    plan = create_parametric_topology_plan(
+        load_parametric_blueprint("lcc_monopole_parametric_v1"), report
+    )
+    assert plan["executable"] is False
+    assert plan["bindings"] == []
+    assert {item["parameter"] for item in plan["unresolved_bindings"]} == {"dc_voltage_kv"}
 
 
 def test_reviewed_catalog_bindings_are_executable_and_hash_bound():

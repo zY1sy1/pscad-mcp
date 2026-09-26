@@ -4,7 +4,7 @@
   "pscad_version": "4.6.2",
   "identity": "lcc_parametric_catalog_v1",
   "provenance_identity": "lcc_parametric_provenance_v1",
-  "provenance_sha256": "0affa8d88326ae44902ba36cb12f83e6eba05391b65ea1591199e5e023533e22",
+  "provenance_sha256": "3e3101e2afaf12f0a02384ab13aa3bf580cb533812a7852cc5ffe1b35f8d3a1c",
   "rating_contract_asset": "lcc_parametric_provenance_v1:rating_contract",
   "definitions": {},
   "template_role_contracts": {
@@ -70,8 +70,6 @@
   },
   "template_bindings": [
     {"logical_parameter": "frequency_hz", "role": "main_control", "selector": "/project/definitions/Definition[@name='Main']/form/category[@name='Global Substitutions']/parameter[@name='Freq']/value", "attribute": "text", "units": "Hz", "binding_status": "reviewed"},
-    {"logical_parameter": "dc_voltage_kv", "role": "rectifier_valve_group", "selector": "/project/definitions/Definition[@name='RectPole']/schematic/User[@id='1601952104']/paramlist/param[@name='V2']", "attribute": "value", "units": "kV", "binding_status": "reviewed"},
-    {"logical_parameter": "dc_voltage_kv", "role": "inverter_valve_group", "selector": "/project/definitions/Definition[@name='InverterPole']/schematic/User[@id='723463851']/paramlist/param[@name='V2']", "attribute": "value", "units": "kV", "binding_status": "reviewed"},
     {"logical_parameter": "ac_voltage_kv", "role": "rectifier_valve_group", "selector": "/project/definitions/Definition[@name='RectPole']/schematic/User[@id='1601952104']/paramlist/param[@name='V1']", "attribute": "value", "units": "kV", "binding_status": "reviewed"},
     {"logical_parameter": "ac_voltage_kv", "role": "inverter_valve_group", "selector": "/project/definitions/Definition[@name='InverterPole']/schematic/User[@id='723463851']/paramlist/param[@name='V1']", "attribute": "value", "units": "kV", "binding_status": "reviewed"},
     {"logical_parameter": "frequency_hz", "role": "rectifier_valve_group", "selector": "/project/definitions/Definition[@name='RectPole']/schematic/User[@id='822897092']/paramlist/param[@name='FR']", "attribute": "value", "units": "Hz", "binding_status": "reviewed"},
@@ -90,8 +88,10 @@
     "dc_power_mw": {
       "units": "MW",
       "required": true,
-      "formula": "dc_voltage_kv * dc_current_ka",
-      "dependencies": ["dc_voltage_kv", "dc_current_ka"],
+      "formula": "pole_count * dc_voltage_kv * dc_current_ka",
+      "dependencies": ["topology", "dc_voltage_kv", "dc_current_ka"],
+      "pole_count_by_topology": {"monopolar": 1, "bipolar": 2},
+      "rating_basis": {"rated_power_mw": "total_system", "dc_voltage_kv": "pole_to_ground", "dc_current_ka": "per_pole"},
       "compared_to": "rated_power_mw",
       "asset": "lcc_parametric_provenance_v1:dimensional_identity",
       "comparison_asset": "lcc_parametric_provenance_v1:floating_point_comparison",

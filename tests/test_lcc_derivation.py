@@ -24,7 +24,7 @@ COMPLETE_ENGINEERING_VALUES = {
 def request(**changes):
     values = dict(
         topology="bipolar",
-        ratings=LccRatings(1200.0, 500.0, 2.4, 500.0, 50.0, 3.0, 2.5),
+        ratings=LccRatings(1200.0, 500.0, 1.2, 500.0, 50.0, 3.0, 2.5),
         engineering_overrides=COMPLETE_ENGINEERING_VALUES,
         operation_modes=("bipolar_run", "monopolar_earth_return"),
         return_path_assets=("neutral_bus", "earth_return"),
@@ -37,13 +37,52 @@ def _parameters(report):
     return {item.name: item for item in report.parameters}
 
 
+@pytest.mark.parametrize(
+    "topology,power,voltage,current",
+    [
+        ("bipolar", 1000.0, 500.0, 1.0),
+        ("bipolar", 1200.0, 500.0, 1.2),
+        ("bipolar", 1600.0, 400.0, 2.0),
+        ("monopolar", 1000.0, 500.0, 2.0),
+    ],
+)
+def test_total_system_power_uses_pole_voltage_and_per_pole_current(
+    topology, power, voltage, current
+):
+    result = derive_lcc_parameters(request(
+        topology=topology,
+        ratings=LccRatings(power, voltage, current, 345.0, 50.0, 3.0),
+        operation_modes=(),
+    ))
+    assert _parameters(result)["dc_power_mw"].value == pytest.approx(power)
+
+
+def test_bipolar_rating_rejects_old_per_pole_power_interpretation():
+    with pytest.raises(BackendError) as raised:
+        derive_lcc_parameters(request(
+            ratings=LccRatings(1000.0, 500.0, 2.0, 345.0, 50.0, 3.0)
+        ))
+    assert raised.value.code == "LCC_RATING_INCONSISTENT"
+    assert raised.value.details["calculated_power_mw"] == pytest.approx(2000.0)
+    assert raised.value.details["expected_dc_current_ka"] == pytest.approx(1.0)
+
+
+@pytest.mark.parametrize("count", [True, 1.0])
+def test_pole_count_requires_an_integer_not_python_numeric_equivalence(count):
+    catalog = copy.deepcopy(load_parametric_catalog())
+    catalog["derived_parameters"]["dc_power_mw"]["pole_count_by_topology"]["monopolar"] = count
+    with pytest.raises(BackendError) as raised:
+        derive_lcc_parameters(request(), catalog)
+    assert raised.value.code == "LCC_PARAMETER_DERIVATION_FAILED"
+
+
 def test_default_catalog_derives_power_and_preserves_catalog_evidence_for_user_override():
     report = derive_lcc_parameters(request())
     parameters = _parameters(report)
 
     assert parameters["dc_power_mw"].value == pytest.approx(1200.0)
     assert parameters["dc_power_mw"].source == "derived"
-    assert parameters["dc_power_mw"].formula == "dc_voltage_kv * dc_current_ka"
+    assert parameters["dc_power_mw"].formula == "pole_count * dc_voltage_kv * dc_current_ka"
     assert parameters["dc_power_mw"].units == "MW"
     assert parameters["dc_power_mw"].asset == "lcc_parametric_provenance_v1:dimensional_identity"
     assert parameters["smoothing_reactor_mh"].source == "user"
@@ -78,14 +117,14 @@ def test_override_units_are_normalized_only_by_catalog_conversion():
 def test_power_identity_is_catalog_driven():
     with pytest.raises(BackendError) as raised:
         derive_lcc_parameters(
-            request(ratings=LccRatings(1000.0, 500.0, 2.4, 500.0, 50.0, 3.0, 2.5))
+            request(ratings=LccRatings(1000.0, 500.0, 1.2, 500.0, 50.0, 3.0, 2.5))
         )
     assert raised.value.code == "LCC_RATING_INCONSISTENT"
 
 
 def test_scr_and_escr_do_not_gain_unreviewed_thresholds_or_ordering():
     report = derive_lcc_parameters(
-        request(ratings=LccRatings(1200.0, 500.0, 2.4, 500.0, 50.0, 0.5, 3.5))
+        request(ratings=LccRatings(1200.0, 500.0, 1.2, 500.0, 50.0, 0.5, 3.5))
     )
     parameters = _parameters(report)
     assert parameters["scr"].value == pytest.approx(0.5)
@@ -213,7 +252,7 @@ def test_catalog_controls_supported_names_ranges_and_required_values():
         (lambda catalog: catalog["rating_parameters"].pop("dc_current_ka"), ["dc_current_ka"]),
         (
             lambda catalog: catalog["derived_parameters"]["dc_power_mw"].update(
-                {"dependencies": ["dc_voltage_kv"]}
+                {"dependencies": ["topology", "dc_voltage_kv"]}
             ),
             ["dc_current_ka"],
         ),
@@ -237,6 +276,8 @@ def test_catalog_missing_power_inputs_or_formula_dependencies_fails_structured(c
         lambda catalog: catalog["engineering_parameters"]["filter_capacitance_uf"]["unit_multipliers"].update({"F": 999.0}),
         lambda catalog: catalog["engineering_parameters"]["overlap_angle_deg"]["unit_multipliers"].update({"rad": 57.0}),
         lambda catalog: catalog["feasibility_relationships"]["firing_angle_interval"].update({"left": "overlap_angle_deg"}),
+        lambda catalog: catalog["derived_parameters"]["dc_power_mw"]["pole_count_by_topology"].update({"bipolar": 1}),
+        lambda catalog: catalog["derived_parameters"]["dc_power_mw"]["rating_basis"].update({"rated_power_mw": "per_pole"}),
     ],
 )
 def test_catalog_contract_must_exactly_match_machine_provenance(tamper):

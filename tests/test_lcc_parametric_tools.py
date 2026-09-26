@@ -84,7 +84,7 @@ def _public_request():
     return {
         "topology": "bipolar",
         "ratings": {
-            "rated_power_mw": 1, "dc_voltage_kv": 1, "dc_current_ka": 1,
+            "rated_power_mw": 1, "dc_voltage_kv": 1, "dc_current_ka": 0.5,
             "ac_voltage_kv": 1, "frequency_hz": 50, "scr": 1,
         },
         "engineering_overrides": {
