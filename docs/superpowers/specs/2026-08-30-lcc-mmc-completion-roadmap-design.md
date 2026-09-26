@@ -2,7 +2,10 @@
 
 **日期：** 2026-08-30
 
-**状态：** 执行中；WP0、WP1A 与 WP1B 已完成，WP1C 已解锁
+**状态：** 执行中。2026-09-26 校正：WP1C 工程验收已完成；默认原生半桥 MMC
+及已发布全桥联合场景已有分范围实机 PASS。参数矩阵和 WP6 仍未整体完成。
+下文“当前可信基线”保留原设计时快照；最新登记见
+[`docs/acceptance-status.json`](../../acceptance-status.json)，不可从旧表推断当前阻塞。
 
 **主要读者：** 后续执行任务的 Codex 工程代理
 
@@ -1133,13 +1136,11 @@ Codex 不得在一个 turn 中同时实现两个 licensed 工作包，也不得�
 
 ## 22. 下一步
 
-下一步执行 WP1C fixed LCC 动态验收：先用真实 PSCAD 导出样本运行
-`run_fixed_lcc_dynamic_acceptance.ps1`，验证 inverter AC disturbance、换相失败指示、
-有界 DC 响应和恢复窗口。fixed 资产已经声明分相故障支路、计时器和命名输出，
-下一门是这些绑定的真实编译、原生 EMTDC 调度和动态样本证据；证据不完整时 runner
-必须持久化 `INCOMPLETE_ANALYSIS` 或 `FAIL`，不得把 WP1B 无故障 smoke 提升为动态
-PASS。独立 golden 和最终 `accepted` 仍由 WP6 负责；WP1C 完成后再进入 WP1D 参数化
-LCC。
+2026-09-26：WP1C 动态工程门已经通过，不再作为待首次执行项。下一步补齐 WP1D
+参数化 LCC 的额定值矩阵，并为 WP6 准备独立参考工程、原始输出与审阅记录。MMC
+按尚未覆盖的参数、模型路径分别验收；默认半桥和全桥联合场景的已有 PASS 不转移。
+具体依赖与本轮修复见
+[补全工作记录](../plans/2026-09-26-completion-closure.md)。
 
 在动态运行前，`wp1c_dynamic` planner profile 会先验证 fault timer、三相 fault
 shunt、`inverter_ac_bus` 和 `Fault/LCC Fault Active` 的唯一绑定；任一项缺失都返回

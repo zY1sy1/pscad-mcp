@@ -7,6 +7,28 @@
 Release notes are tracked in [CHANGELOG.md](CHANGELOG.md). A portable stdio
 configuration template is available at [config.example.toml](config.example.toml).
 
+### Verified scope and remaining work (2026-09-26)
+
+[The scope inventory](docs/acceptance-status.json) indexes the latest recorded
+evidence with its original tested revision. The native half-bridge cable AVM
+default (640 kV, 1000 MW, 60 Hz, Q=0, 100 km) passed normal operation, four fault
+cases and independent reload at `5613ff7`. The published full-bridge MMC joint
+scenario also passed physical, strict timing and independent-replay checks at
+that revision. See [merged evidence](docs/acceptance/mmc-timing-fault-integration/delivery.md).
+
+Fixed LCC WP1C has dynamic engineering PASS at `a2959fe`; its final status remains
+`INCOMPLETE_ANALYSIS` pending an independently reviewed golden. Parameter-family
+coverage, full-bridge AVM, generic Blueprint real acceptance and PSCAD 5.x real
+acceptance are not complete. Average-value acceptance excludes switching stress,
+switching harmonics, individual submodule balance and thermal behavior.
+
+Run `python scripts/audit_acceptance_inventory.py` to check recorded report,
+child-report and declared artifact hashes without starting PSCAD. It returns
+0 for complete file integrity, 1 for invalid evidence and 2 for missing durable
+reports. This audit does not run physical checks or promote a release. The older
+LCC/MMC program baseline is frozen historical evidence, not the latest inventory.
+Reference preparation now requires a [hash-bound independent review](docs/acceptance/lcc-independent-reference.md).
+
 The server is designed for Windows-based power-system workflows where you want Copilot to do more than explain code: it can connect to a live PSCAD session, open projects, edit parameters, build cases, run simulations, inspect outputs, and manipulate the canvas.
 
 ## Why this repo exists
@@ -62,8 +84,8 @@ external process.
 ## Tool coverage
 
 The complete inventory is 105 = 60 generic tools, 2 topology tools, 10 HVDC
-tools, 3 learning tools, 4 fixed CIGRE LCC tools, 6 parametric LCC tools,
-7 parametric MMC tools, 4 generic Blueprint Builder tools, and one always-on
+tools, 3 learning tools, 8 LCC tools (including blank lifecycle), 6 parametric LCC tools,
+11 MMC tools (including blank lifecycle), 4 generic Blueprint Builder tools, and one always-on
 `get_pscad_capabilities` tool.
 The generic 60-tool contract keeps its existing names and default return
 shapes.
@@ -134,7 +156,7 @@ mutating HVDC workflows, fixed or parametric LCC builders, MMC, PSCAD 5.x, or
 later-commit acceptance, and no acceptance status is inferred from the
 non-licensed contract suite.
 
-The LCC/MMC implementation program has a separate scoped current-truth
+The LCC/MMC implementation program has a separate frozen scoped
 baseline at `docs/acceptance/lcc-mmc-program-baseline.json`. It records the
 exact evidence commit, PSCAD/Master/compiler identities, official read-only
 sources, packaged assets, historical runs, and nine builder-owned scopes. It
@@ -180,8 +202,9 @@ operations, call `build_lcc_model(..., expected_plan_hash=..., confirm=true)`,
 poll with `get_lcc_build_status`, then call `validate_lcc_model` on the saved
 case. The four capability levels are `planned`, `built`, `simulated`, and
 `accepted`; structural success, compilation, or a mocked/synthetic waveform
-does not imply acceptance. `poles=2`, user-rated designs, PSCAD 5.x, fault or
-commutation-failure acceptance, and MMC construction are unavailable.
+does not imply acceptance. This fixed builder excludes `poles=2`, user-rated
+designs, PSCAD 5.x and MMC construction. Its WP1C profile has licensed fault and
+commutation-failure engineering evidence; final golden acceptance remains pending.
 
 Planning fails closed unless the attached PSCAD service supplies live
 4.6.2 definition inventory; the packaged catalog is not treated as live
@@ -209,13 +232,15 @@ unchanged. Passing this compile-only gate demonstrates that the Master binding
 runtime is usable; it does not replace full CIGRE waveform or commutation-fault
 acceptance.
 
-The current program baseline records `lcc.fixed_autonomous` as
+The historical program baseline records `lcc.fixed_autonomous` as
 `simulated/PASS` from the licensed no-fault WP1B run on commit `3a09c8f`.
 That run compiled all six isolated companion fixtures, built and recompiled a
 blank-case full topology, simulated 0.1 s, and verified 2,001 samples with no
-remaining PSCAD process. It is historical. It is not `accepted`: WP1B smoke must
-run before WP1C dynamic evidence, while disturbance, commutation
-failure/recovery, independent golden, and final acceptance remain later gates.
+remaining PSCAD process. Later WP1B/WP1C evidence at `a2959fe` passed the smoke,
+disturbance, commutation-failure indication and recovery gates. Independent
+golden and final acceptance remain pending; see the
+[WP1C completion record](docs/superpowers/specs/2026-09-02-lcc-wp1c-native-closure-completion.md).
+It is not `accepted` until the independent-reference and final gates pass.
 
 The companion baseline-gates plan keeps WP1B and WP1C reports separate and
 requires both reports to own the same current commit and clean named checkout.
@@ -296,7 +321,7 @@ Library. The source example is never modified. Builds retain numbered legacy
 OUT parts and their `.inf` metadata under `<project>.outputs` so a later
 `validate_blank_lcc_model` call can reread the same evidence.
 
-The blank/native LCC path has current-commit licensed simulation evidence only
+The blank/native LCC path has revision-scoped licensed simulation evidence only
 when `docs/acceptance/lcc-mmc-program-baseline.json` names an indexed PASS
 report for `lcc.blank_native`. This is `simulated`, not fixed-autonomous or final
 `accepted` evidence; independent-golden acceptance remains a WP6 gate.

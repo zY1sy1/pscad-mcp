@@ -1,7 +1,6 @@
 import json
 from pathlib import Path
 
-
 ROOT = Path(__file__).parents[1]
 MANIFEST = ROOT / "docs" / "acceptance-status.json"
 
@@ -20,6 +19,9 @@ def test_acceptance_status_manifest_separates_live_acceptance_scopes():
         "mmc_stage_a",
         "parametric_mmc",
         "generic_blueprint_builder",
+        "native_mmc_half_bridge_640kv",
+        "mmc_full_bridge_joint_462",
+        "modern_core_5",
     }
     assert scopes["legacy_core_462"]["licensed_status"] == "PASS_HISTORICAL"
     topology = scopes["unified_topology_462"]
@@ -40,16 +42,37 @@ def test_acceptance_status_manifest_separates_live_acceptance_scopes():
         "INCOMPLETE_ANALYSIS",
     }
     assert scopes["hvdc_scenarios"]["licensed_status"] == "PARTIAL"
-    assert scopes["mmc_stage_a"]["licensed_status"] == "NOT_INTEGRATED"
-    assert scopes["parametric_mmc"]["implementation_status"] == "INTEGRATION_BRANCH"
+    assert scopes["mmc_stage_a"]["implementation_status"] == "MERGED"
+    assert scopes["mmc_stage_a"]["licensed_status"] == "INCOMPLETE_ANALYSIS"
+    assert scopes["parametric_mmc"]["implementation_status"] == "MERGED"
     assert scopes["parametric_mmc"]["licensed_status"] in {
         "NOT_RUN_ON_INTEGRATED_COMMIT",
         "PASS",
         "FAIL",
         "INCOMPLETE_ANALYSIS",
+        "PARTIAL",
     }
-    assert scopes["generic_blueprint_builder"]["implementation_status"] == "INTEGRATION_BRANCH"
+    assert scopes["generic_blueprint_builder"]["implementation_status"] == "MERGED"
     assert scopes["generic_blueprint_builder"]["licensed_status"] == "NOT_RUN_ON_INTEGRATED_COMMIT"
+
+
+def test_latest_mmc_evidence_is_scoped_and_old_attempts_remain_historical():
+    payload = json.loads(MANIFEST.read_text(encoding="utf-8"))
+    scopes = {item["scope"]: item for item in payload["scopes"]}
+    native = scopes["native_mmc_half_bridge_640kv"]
+    assert native["licensed_status"] == "PASS"
+    assert native["evidence"]["sha256"] == (
+        "ffb61ce075bc651036cc370364a76e1d83e63eaf31ba382c7771531cd488c9d2"
+    )
+    assert native["intrinsic_dc_fault_blocking"] is False
+    assert scopes["parametric_mmc"]["licensed_status"] == "PARTIAL"
+    assert scopes["parametric_mmc"]["historical_attempts"][0]["attempt"]["failure_code"]
+    fixed = scopes["fixed_cigre_lcc"]
+    assert fixed["engineering_verdict"] == "PASS"
+    assert fixed["golden_verdict"] == "INCOMPLETE_ANALYSIS"
+    assert fixed["licensed_status"] == "INCOMPLETE_ANALYSIS"
+    assert fixed["historical_attempts"][0]["attempt"]["failure_code"] == "LCC_DEFINITION_MISSING"
+    assert scopes["modern_core_5"]["licensed_status"] == "NOT_RUN_ON_INTEGRATED_COMMIT"
 
 
 def test_live_pass_requires_durable_evidence_identity():

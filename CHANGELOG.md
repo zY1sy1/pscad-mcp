@@ -6,6 +6,16 @@ All notable changes to this project are documented here.
 
 ### Changed
 
+- LCC golden generation now requires an approved independent review record bound
+  to the target contract, normalized reference, original project/libraries,
+  raw outputs, metadata, compiler and timesteps. Missing or changed evidence
+  leaves the existing golden untouched; this does not complete WP6 acceptance.
+- Reconciled the 105-tool project's scope inventory with September LCC and MMC
+  evidence. Added separate default half-bridge MMC and full-bridge joint scopes,
+  preserved historical failures, and kept incomplete parameter/Modern coverage
+  explicit. `scripts/audit_acceptance_inventory.py` verifies evidence integrity
+  offline without creating a licensed acceptance claim.
+
 - Blank LCC lifecycle tools now accept an audited official PSCAD 4.6 template,
   extract its real converter definitions into a valid companion PSLX, preserve
   numbered legacy OUT evidence, and run a waveform-backed commutation-fault

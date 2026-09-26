@@ -234,10 +234,13 @@ def test_fail_report_with_minimal_sections_self_validates():
     assert validate_dynamic_lcc_acceptance_report(report)["status"] == "FAIL"
 
 
-def test_roadmap_names_wp1c_as_the_next_step():
+def test_roadmap_advances_completed_wp1c_to_parametric_and_golden_gates():
     roadmap = Path(__file__).parents[1] / "docs" / "superpowers" / "specs" / "2026-08-30-lcc-mmc-completion-roadmap-design.md"
     text = roadmap.read_text(encoding="utf-8")
-    assert "执行 WP1C fixed LCC 动态验收" in text
+    next_steps = text.split("## 22. 下一步", 1)[1]
+    assert "WP1C 动态工程门已经通过" in next_steps
+    assert "WP1D" in next_steps and "WP6" in next_steps
+    assert "独立参考工程、原始输出与审阅记录" in next_steps
     assert "先审阅并合并 WP0 分支" not in text
 
 
