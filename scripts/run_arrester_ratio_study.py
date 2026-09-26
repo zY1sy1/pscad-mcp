@@ -14,6 +14,20 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import accept_five_arresters as lifecycle
+
+
+def parse_arguments():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('mode', choices=['search', 'simulate'])
+    parser.add_argument('--output', type=Path, required=True)
+    return parser.parse_args()
+
+
+# Numerical packages are optional for the server. The licensed CLI must still
+# reject missing opt-ins before importing them or touching source models.
+if __name__ == '__main__' and parse_arguments().mode == 'simulate':
+    lifecycle.require_licensed_acceptance()
+
 import arrester_ratio_search as search_model
 import numpy as np
 import try_cumulative_arresters as cumulative
@@ -147,12 +161,12 @@ def plot_summary(root, candidates, measured):
 
 
 def simulate(root, search_report):
+    lifecycle.require_licensed_acceptance()
     candidates = search_report['search']['candidates']
     cases = root / 'models'
     run = root / 'runs' / datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%SZ')
     run.mkdir(parents=True, exist_ok=False)
-    os.environ.update(PSCAD_MCP_ACCEPTANCE='1', PSCAD_MCP_ACCEPTANCE_CONCURRENT='1',
-        PSCAD_MCP_BACKEND='legacy', PSCAD_MCP_VERSION='4.6.2', PSCAD_MCP_X64='true',
+    os.environ.update(PSCAD_MCP_BACKEND='legacy', PSCAD_MCP_VERSION='4.6.2', PSCAD_MCP_X64='true',
         PSCAD_MCP_WORKSPACE=str(run), PSCAD_MCP_LEGACY_MINIMIZE='true', PSCAD_MCP_LEGACY_EXISTING_POLICY='allow')
     lifecycle.CASES = {name: [1, 2, 3, 4, 5] for name in candidates}
     report = {'status': 'RUNNING', 'scope': 'Current-share optimization in copied cumulative-close models',
@@ -214,10 +228,9 @@ def simulate(root, search_report):
 def main():
     if not __debug__:
         raise RuntimeError('Optimized Python is not supported for this study')
-    parser = argparse.ArgumentParser()
-    parser.add_argument('mode', choices=['search', 'simulate'])
-    parser.add_argument('--output', type=Path, required=True)
-    args = parser.parse_args()
+    args = parse_arguments()
+    if args.mode == 'simulate':
+        lifecycle.require_licensed_acceptance()
     root = args.output.resolve()
     if args.mode == 'search':
         root.mkdir(parents=True, exist_ok=False)

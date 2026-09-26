@@ -13,27 +13,24 @@ import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from pathlib import Path
 
-from PIL import Image, ImageGrab
-
 REPOSITORY = Path(__file__).resolve().parents[1]
-SOURCE = Path(os.environ.get('ARRESTER_PREVIEW_SOURCE', 'C:/Users/335/Documents/PSCAD-MCP/five_arresters_20260908'))
-OUTPUT = SOURCE / 'native_preview' / datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%SZ')
-OUTPUT.mkdir(parents=True, exist_ok=False)
 sys.path.insert(0, str(REPOSITORY))
-os.environ.update(PSCAD_MCP_ACCEPTANCE='1', PSCAD_MCP_ACCEPTANCE_CONCURRENT='1',
-    PSCAD_MCP_WORKSPACE=str(OUTPUT), PSCAD_MCP_BACKEND='legacy', PSCAD_MCP_VERSION='4.6.2',
-    PSCAD_MCP_X64='true', PSCAD_MCP_LEGACY_MINIMIZE='true', PSCAD_MCP_LEGACY_EXISTING_POLICY='allow')
 
 from pscad_mcp.acceptance.process_scope import (
     remaining_acceptance_processes,
     require_acceptance_ownership,
 )
-from pscad_mcp.core.connection_manager import pscad_manager
 from pscad_mcp.core.process_inventory import list_pscad_processes
-from scripts.accept_five_arresters import copy_external_data_files, external_data_files
+from scripts.accept_five_arresters import (
+    copy_external_data_files,
+    external_data_files,
+    require_licensed_acceptance,
+)
 
 
 def save_clipboard(path):
+    from PIL import Image, ImageGrab
+
     bitmap = ImageGrab.grabclipboard()
     if not isinstance(bitmap, Image.Image):
         raise TypeError('Native PSCAD bitmap was not available on the clipboard')
@@ -44,15 +41,25 @@ def save_clipboard(path):
 
 
 async def main():
+    require_licensed_acceptance()
+    source = Path(os.environ.get('ARRESTER_PREVIEW_SOURCE', 'C:/Users/335/Documents/PSCAD-MCP/five_arresters_20260908'))
+    default_output = source / 'native_preview' / datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%SZ')
+    output = Path(os.environ.get('ARRESTER_PREVIEW_OUTPUT', str(default_output))).resolve()
+    output.mkdir(parents=True, exist_ok=False)
+    os.environ.update(PSCAD_MCP_WORKSPACE=str(output), PSCAD_MCP_BACKEND='legacy', PSCAD_MCP_VERSION='4.6.2',
+        PSCAD_MCP_X64='true', PSCAD_MCP_LEGACY_MINIMIZE='true', PSCAD_MCP_LEGACY_EXISTING_POLICY='allow')
+    # Construct the service only after its process-local workspace is scoped.
+    from pscad_mcp.core.connection_manager import pscad_manager
+
     name = os.environ.get('ARRESTER_PREVIEW_CASE', 'five_sa_sequential')
-    src = SOURCE / (name + '.pscx')
-    path = OUTPUT / src.name
+    src = source / (name + '.pscx')
+    path = output / src.name
     shutil.copy2(src, path)
-    data_files = external_data_files(SOURCE, [src])
-    copied_data_files = copy_external_data_files(SOURCE, OUTPUT, data_files)
+    data_files = external_data_files(source, [src])
+    copied_data_files = copy_external_data_files(source, output, data_files)
     report = {'status': 'RUNNING', 'source_sha256': hashlib.sha256(src.read_bytes()).hexdigest(),
               'external_data_files': {
-                  str(item.relative_to(OUTPUT)): hashlib.sha256(item.read_bytes()).hexdigest()
+                  str(item.relative_to(output)): hashlib.sha256(item.read_bytes()).hexdigest()
                   for item in copied_data_files
               }}
     service = pscad_manager.service
@@ -63,7 +70,7 @@ async def main():
         runtime = await service.status()
         require_acceptance_ownership(runtime)
         report['runtime'] = runtime
-        print('OWNED', runtime['session']['managed_pid'], 'OUTPUT', OUTPUT, flush=True)
+        print('OWNED', runtime['session']['managed_pid'], 'OUTPUT', output, flush=True)
         await service.load_projects([str(path)])
         project = await service.backend._project(name)
         await service.build_project(name)
@@ -89,11 +96,11 @@ async def main():
         frame_id = int(ET.parse(path).find('.//Frame[@classid="GraphFrame"]').get('id'))
         frame = await service.backend.executor.run_safe(project.graph_frame, 'Main', frame_id)
         await service.backend.executor.run_safe(frame.copy_as_bitmap)
-        report['native_graph'] = save_clipboard(OUTPUT / 'native_graph.png')
+        report['native_graph'] = save_clipboard(output / 'native_graph.png')
         canvas = await service.backend._canvas(name, 'Main')
         await service.backend.executor.run_safe(canvas.select_components, 72, 126, 1440, 900)
         await service.backend.executor.run_safe(canvas.copy_as_bitmap)
-        report['native_schematic'] = save_clipboard(OUTPUT / 'native_schematic.png')
+        report['native_schematic'] = save_clipboard(output / 'native_schematic.png')
         if hashlib.sha256(src.read_bytes()).hexdigest() != report['source_sha256']:
             raise RuntimeError('Source model changed during native preview')
         report['status'] = 'RENDERED'
@@ -111,8 +118,8 @@ async def main():
         finally:
             await pscad_manager.shutdown_executor()
             report['remaining_owned_pscad'] = remaining_acceptance_processes(runtime, list_pscad_processes) if runtime else []
-            (OUTPUT / 'preview_report.json').write_text(json.dumps(report, indent=2), encoding='utf-8')
-            print(json.dumps({'status': report['status'], 'output': str(OUTPUT),
+            (output / 'preview_report.json').write_text(json.dumps(report, indent=2), encoding='utf-8')
+            print(json.dumps({'status': report['status'], 'output': str(output),
                              'remaining_owned_pscad': report['remaining_owned_pscad']}, indent=2), flush=True)
 
 

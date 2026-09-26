@@ -16,6 +16,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import accept_five_arresters as lifecycle
+
+# Reject a CLI run before optional numerical dependencies or model access.
+if __name__ == '__main__':
+    lifecycle.require_licensed_acceptance()
+
 import numpy as np
 
 BASELINE = Path('C:/Users/335/Documents/PSCAD-MCP/five_arresters_20260908/delivery-v2')
@@ -155,6 +160,7 @@ def plot_comparison(destination, datasets):
 def main():
     if not __debug__:
         raise RuntimeError('Optimized Python is not supported for this experiment')
+    lifecycle.require_licensed_acceptance()
     parser = argparse.ArgumentParser()
     parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
@@ -162,8 +168,7 @@ def main():
     root.mkdir(parents=True, exist_ok=False)
     run = root / 'run'
     run.mkdir()
-    os.environ.update(PSCAD_MCP_ACCEPTANCE='1', PSCAD_MCP_ACCEPTANCE_CONCURRENT='1',
-        PSCAD_MCP_BACKEND='legacy', PSCAD_MCP_VERSION='4.6.2', PSCAD_MCP_X64='true',
+    os.environ.update(PSCAD_MCP_BACKEND='legacy', PSCAD_MCP_VERSION='4.6.2', PSCAD_MCP_X64='true',
         PSCAD_MCP_WORKSPACE=str(run), PSCAD_MCP_LEGACY_MINIMIZE='true', PSCAD_MCP_LEGACY_EXISTING_POLICY='allow')
     sources = [BASELINE / (name + '.pscx') for name in lifecycle.CASES]
     sources += [BASELINE / 'FiveArresters.pswx', BASELINE / 'analyze_results.py', lifecycle.MASTER, lifecycle.COMPILER]

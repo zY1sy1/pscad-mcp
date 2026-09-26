@@ -35,6 +35,11 @@ MASTER = Path('C:/Program Files (x86)/PSCAD46/master.pslx')
 COMPILER = Path('C:/Program Files (x86)/GFortran/4.2.1/bin/gfortran.exe')
 
 
+def require_licensed_acceptance():
+    if os.environ.get('PSCAD_MCP_ACCEPTANCE') != '1' or os.environ.get('PSCAD_MCP_ACCEPTANCE_CONCURRENT') != '1':
+        raise RuntimeError('PSCAD_MCP_ACCEPTANCE=1 and PSCAD_MCP_ACCEPTANCE_CONCURRENT=1 are required')
+
+
 def sha(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
@@ -226,8 +231,7 @@ def main():
     parser.add_argument('--source', required=True, type=Path)
     parser.add_argument('--output', required=True, type=Path)
     args = parser.parse_args()
-    if os.environ.get('PSCAD_MCP_ACCEPTANCE') != '1' or os.environ.get('PSCAD_MCP_ACCEPTANCE_CONCURRENT') != '1':
-        raise SystemExit('PSCAD_MCP_ACCEPTANCE=1 and PSCAD_MCP_ACCEPTANCE_CONCURRENT=1 are required')
+    require_licensed_acceptance()
     destination = args.output.resolve()
     destination.mkdir(parents=True, exist_ok=False)
     source = args.source.resolve()
