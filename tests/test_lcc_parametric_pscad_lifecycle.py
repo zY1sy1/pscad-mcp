@@ -123,3 +123,50 @@ def test_output_reader_failure_is_reported_as_missing_output(tmp_path):
         _run(plan, staging, service)
     assert raised.value.code == "LCC_OUTPUT_MISSING"
     assert staging.is_file()
+
+
+def test_legacy_numbered_dataset_is_read_only_after_terminal_run_state(tmp_path):
+    plan, staging = _plan(tmp_path, lifecycle={"run_timeout_s": 0.05, "poll_interval_s": 0.001})
+
+    class LegacyOutputs(FakePscadService):
+        async def run_project(self, name):
+            self._call("run_project", name)
+            self.output_dir = staging.parent / "StageProject.gf42"
+            self.output_dir.mkdir()
+            self.files = [self.output_dir / f"StageProject_{n:02d}.out" for n in (1, 2)]
+            for path in self.files:
+                path.write_text("fresh output", encoding="utf-8")
+            self.states = iter(("running", "completed"))
+            return "started"
+
+        async def get_run_status(self, name):
+            self._call("get_run_status", name)
+            return {"status": next(self.states)}
+
+        async def discover_output_files(self, name, *, started_after, max_files):
+            self._call("discover_output_files", name)
+            return [str(p) for p in self.files]
+
+        async def read_output_file(self, *args, **kwargs):
+            assert self.calls.count("get_run_status") == 2
+            return await super().read_output_file(*args, **kwargs)
+
+    service = LegacyOutputs()
+    result = _run(plan, staging, service)
+    assert result["state"] == "validated"
+    assert result["result"]["output_file"].endswith("StageProject_01.out")
+    assert result["result"]["output_parts"] == [str(p) for p in service.files]
+
+
+def test_a_stopped_run_cannot_be_validated_from_existing_output(tmp_path):
+    plan, staging = _plan(tmp_path)
+    service = FakePscadService()
+
+    async def stopped(name):
+        return {"status": "stopped"}
+
+    service.get_run_status = stopped
+    with pytest.raises(BackendError) as exc:
+        _run(plan, staging, service)
+    assert exc.value.code == "LCC_BUILD_FAILED"
+    assert "read_output_file" not in service.calls

@@ -99,7 +99,7 @@ def test_plan_binds_template_assets_roles_and_owned_targets_without_writes(tmp_p
         "name": "ParametricLcc",
         "folder": str((values["workspace"] / "models").resolve()),
         "target_path": str((values["workspace"] / "models" / "ParametricLcc.pscx").resolve()),
-        "staging_path": str((values["workspace"] / ".pscad-mcp" / "lcc-builds" / "ParametricLcc.staging.pscx").resolve()),
+        "staging_path": str((values["workspace"] / ".pscad-mcp" / "lcc-builds" / "ParametricLcc" / "ParametricLcc.pscx").resolve()),
     }
     assert source.read_bytes() == before_bytes
     assert source.stat().st_mtime_ns == before_mtime

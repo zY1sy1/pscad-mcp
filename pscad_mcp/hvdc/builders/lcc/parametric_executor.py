@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from ....core.backend.base import BackendError
+from ....core.backend.legacy_support import rewrite_template_identity
 
 
 _MAX_BINDINGS = 128
@@ -256,6 +257,11 @@ def apply_template_bindings(plan: dict[str, Any]) -> dict[str, Any]:
     """Copy a source PSCX and apply only explicit, unique XML bindings."""
 
     source, payload, staging, root, _updates, modified, read_back = _validated_binding_updates(plan)
+    project_name = plan.get("project", {}).get("name")
+    if project_name is not None and (
+        not isinstance(project_name, str) or re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,63}", project_name) is None
+    ):
+        raise _error("LCC_LAYOUT_INVALID", "The staged project identity is invalid.", "execute_parametric_lcc_build", reason="project_name_invalid")
     staging.parent.mkdir(parents=True, exist_ok=True)
     temporary: Path | None = None
     try:
@@ -266,6 +272,9 @@ def apply_template_bindings(plan: dict[str, Any]) -> dict[str, Any]:
             stream.flush()
             os.fsync(stream.fileno())
         os.replace(temporary, staging)
+        temporary = None
+        if project_name is not None:
+            rewrite_template_identity(staging, staging, project_name)
     except OSError as error:
         raise _error(
             "LCC_BUILD_FAILED",
@@ -333,14 +342,20 @@ def _status_value(response: Any) -> str | None:
     return None
 
 
-def _output_candidates(staging: Path, explicit: Any) -> list[Path]:
+def _output_candidates(
+    staging: Path, explicit: Any, *, discovered: list[str] | None = None,
+    started_after: float = 0.0,
+) -> list[Path]:
     values: list[Any] = []
     if explicit is not None:
         values.append(explicit)
     # PSCAD writes $(Namespace).out beside the loaded project.  Restrict
     # discovery to the builder-owned staging directory and bounded suffixes.
-    values.extend(sorted(staging.parent.glob("*.out"), key=lambda path: str(path).casefold()))
-    values.extend(sorted(staging.parent.glob("*.psout"), key=lambda path: str(path).casefold()))
+    if discovered is not None:
+        values.extend(discovered)
+    else:
+        values.extend(sorted(staging.parent.glob("*.out"), key=lambda path: str(path).casefold()))
+        values.extend(sorted(staging.parent.glob("*.psout"), key=lambda path: str(path).casefold()))
     candidates: list[Path] = []
     root = staging.parent.resolve()
     for value in values:
@@ -357,6 +372,8 @@ def _output_candidates(staging: Path, explicit: Any) -> list[Path]:
         except (OSError, ValueError):
             continue
         if not resolved.is_file() or resolved.suffix.casefold() not in {".out", ".psout"}:
+            continue
+        if resolved.stat().st_mtime < started_after:
             continue
         if resolved not in candidates:
             candidates.append(resolved)
@@ -426,6 +443,7 @@ async def execute_parametric_template(
             exception=type(error).__name__,
         ) from error
     started = time.monotonic()
+    run_started_at = time.time()
     try:
         run_call = (
             runner(project_name, simulation_set)
@@ -446,17 +464,40 @@ async def execute_parametric_template(
     status = _status_value(response)
     if status == "failed":
         raise _error("LCC_COMPILE_FAILED", "PSCAD reported a compile or run failure.", "execute_parametric_lcc_build", reason="compile_failed")
-    if status == "completed" and not _output_candidates(staging, explicit_output):
-        raise _error("LCC_OUTPUT_MISSING", "PSCAD completed without producing an output file.", "execute_parametric_lcc_build", reason="output_missing")
+    status_reader = getattr(pscad_service, "get_run_status", None)
+    discovery = getattr(pscad_service, "discover_output_files", None)
     while True:
-        candidates = _output_candidates(staging, explicit_output)
+        if callable(status_reader):
+            remaining = run_timeout - (time.monotonic() - started)
+            if remaining <= 0:
+                raise _error("LCC_RUN_TIMED_OUT", "PSCAD did not reach a terminal state.", "execute_parametric_lcc_build", reason="run_timeout")
+            try:
+                status = _status_value(await asyncio.wait_for(status_reader(project_name), timeout=remaining))
+            except asyncio.TimeoutError as error:
+                raise _error("LCC_RUN_TIMED_OUT", "PSCAD status read exceeded the run deadline.", "execute_parametric_lcc_build", reason="run_timeout") from error
+            if status in {"failed", "stopped", "interrupted"}:
+                raise _error("LCC_BUILD_FAILED", "PSCAD did not complete the requested run.", "execute_parametric_lcc_build", reason="run_not_completed", terminal_state=status)
+            if status not in {"completed", "complete", "idle"}:
+                await asyncio.sleep(min(poll_interval, 1.0))
+                continue
+        discovered = None
+        if callable(discovery):
+            discovered = await discovery(str(staging), started_after=run_started_at, max_files=1000)
+        candidates = _output_candidates(staging, explicit_output, discovered=discovered, started_after=run_started_at)
         if candidates:
             break
+        if status in {"completed", "complete", "idle"}:
+            raise _error("LCC_OUTPUT_MISSING", "PSCAD completed without producing fresh output.", "execute_parametric_lcc_build", reason="output_missing")
         if time.monotonic() - started >= run_timeout:
             raise _error("LCC_RUN_TIMED_OUT", "The PSCAD run did not produce output before the timeout.", "execute_parametric_lcc_build", reason="run_timeout", timeout_s=run_timeout)
         await asyncio.sleep(min(poll_interval, 1.0))
-    if len(candidates) != 1:
+    families = {
+        (path.parent, re.sub(r"_\d{2,}$", "", path.stem), path.suffix.casefold())
+        for path in candidates
+    }
+    if len(families) != 1:
         raise _error("LCC_OUTPUT_MISSING", "The staged PSCAD run did not produce one unambiguous output file.", "execute_parametric_lcc_build", reason="output_ambiguous", candidates=[str(path) for path in candidates])
+    candidates.sort(key=lambda path: path.name.casefold())
     output_file = candidates[0]
     try:
         output = await reader(str(output_file), max_samples=1_000_000, summary_only=False)
@@ -466,7 +507,7 @@ async def execute_parametric_template(
         "build_id": build_id,
         "state": "validated",
         "workspace": str(Path(workspace_root).expanduser().resolve()),
-        "result": {"template": evidence, "backend_loaded": True, "project_name": project_name, "output_file": str(output_file), "output": output, "run_response": response},
+        "result": {"template": evidence, "backend_loaded": True, "project_name": project_name, "output_file": str(output_file), "output_parts": [str(path) for path in candidates], "output": output, "run_response": response},
         "error": None,
     }
     if journal is not None:

@@ -1,4 +1,5 @@
 import hashlib
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 import pytest
@@ -58,6 +59,23 @@ def test_apply_template_bindings_replaces_one_explicit_attribute_and_preserves_s
             "value": "60.0 Hz",
         }
     ]
+
+
+def test_named_staging_rewrites_project_and_exact_self_namespace(tmp_path):
+    plan, source, staging = _plan(tmp_path, bindings=[{
+        "logical_parameter": "frequency_hz",
+        "selector": "/project/definitions/Definition/form/parameter[@name='Freq']",
+        "attribute": "value", "value": "60 Hz", "units": "Hz",
+    }])
+    source.write_text(TEMPLATE.replace("</project>", '<User defn="Fixture:Child"/><User defn="other:Child"/></project>'), encoding="utf-8")
+    original = source.read_bytes()
+    plan["template"]["fingerprint"] = hashlib.sha256(original).hexdigest()
+    plan["project"]["name"] = "NewCase"
+    apply_template_bindings(plan)
+    root = ET.parse(staging).getroot()
+    assert root.get("name") == "NewCase"
+    assert [x.get("defn") for x in root.findall("User")] == ["NewCase:Child", "other:Child"]
+    assert source.read_bytes() == original
 
 
 @pytest.mark.parametrize(

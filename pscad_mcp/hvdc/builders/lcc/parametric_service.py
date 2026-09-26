@@ -438,10 +438,10 @@ class ParametricLccBuilderService:
                 str(folder_path), f"{project_name}.pscx", suffixes={".pscx"}
             )
             staging_root = policy.resolve(
-                str(self.workspace_root / ".pscad-mcp" / "lcc-builds")
+                str(self.workspace_root / ".pscad-mcp" / "lcc-builds" / project_name)
             )
             staging = policy.resolve_child(
-                str(staging_root), f"{project_name}.staging.pscx", suffixes={".pscx"}
+                str(staging_root), f"{project_name}.pscx", suffixes={".pscx"}
             )
         except WorkspaceNotConfiguredError as error:
             raise _error(
