@@ -72,8 +72,14 @@ $environmentNames = @(
     "PSCAD_MCP_ACCEPTANCE_SIMULATION_PROJECT",
     "PSCAD_MCP_ACCEPTANCE_RELIABILITY_PROJECT",
     "PSCAD_MCP_ACCEPTANCE_WORKSPACE",
+    "PSCAD_MCP_WORKSPACE",
     "PSCAD_MCP_ACCEPTANCE_RESULT_FILE"
 )
+
+$previousEnvironment = @{}
+foreach ($name in $environmentNames) {
+    $previousEnvironment[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
+}
 
 $acceptanceFailure = $null
 $capturedOutput = @()
@@ -87,6 +93,7 @@ try {
     $env:PSCAD_MCP_ACCEPTANCE_SIMULATION_PROJECT = $simulationProject
     $env:PSCAD_MCP_ACCEPTANCE_RELIABILITY_PROJECT = $reliabilityProject
     $env:PSCAD_MCP_ACCEPTANCE_WORKSPACE = $Workspace
+    $env:PSCAD_MCP_WORKSPACE = $Workspace
     $env:PSCAD_MCP_ACCEPTANCE_RESULT_FILE = $resultFile.FullName
 
     Write-Output "ACCEPTANCE_WORKSPACE=$Workspace"
@@ -112,7 +119,11 @@ try {
     }
 } finally {
     foreach ($name in $environmentNames) {
-        Remove-Item -Path "Env:$name" -ErrorAction SilentlyContinue
+        if ($null -eq $previousEnvironment[$name]) {
+            Remove-Item -LiteralPath "Env:$name" -ErrorAction SilentlyContinue
+        } else {
+            [Environment]::SetEnvironmentVariable($name, $previousEnvironment[$name], 'Process')
+        }
     }
 }
 

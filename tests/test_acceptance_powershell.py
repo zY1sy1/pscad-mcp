@@ -15,6 +15,34 @@ SHELLS = [value for value in dict.fromkeys((shutil.which("powershell.exe"), shut
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows PowerShell runner coverage")
 @pytest.mark.parametrize("shell", SHELLS)
+def test_legacy_runner_scopes_and_restores_service_workspace(shell):
+    script = Path(__file__).resolve().parents[1] / "scripts" / "run_legacy_acceptance.ps1"
+    quoted = "'" + str(script).replace("'", "''") + "'"
+    command = (
+        "$ErrorActionPreference='Stop'; $tokens=$null; $errors=$null; "
+        f"$ast=[System.Management.Automation.Language.Parser]::ParseFile({quoted},[ref]$tokens,[ref]$errors); "
+        "$text=$ast.Extent.Text; "
+        "$env:PSCAD_MCP_WORKSPACE='C:\\original-workspace'; "
+        "$start=$text.IndexOf('$environmentNames = @('); $end=$text.IndexOf('$acceptanceFailure = $null'); "
+        ". ([scriptblock]::Create($text.Substring($start,$end-$start))); "
+        "$outer=$ast.Find({param($n) $n -is [System.Management.Automation.Language.TryStatementAst]},$false); "
+        "$Workspace='C:\\worker-workspace'; $Version='4.6.2'; $X64=$true; "
+        "$resultFile=[pscustomobject]@{FullName='fixture.psout'}; "
+        "$assign=$outer.Body.Statements | Where-Object {$_ -is [System.Management.Automation.Language.AssignmentStatementAst]}; "
+        ". ([scriptblock]::Create(($assign | ForEach-Object {$_.Extent.Text}) -join [Environment]::NewLine)); "
+        "$during=$env:PSCAD_MCP_WORKSPACE; "
+        ". ([scriptblock]::Create($outer.Finally.Extent.Text.Trim().TrimStart('{').TrimEnd('}'))); "
+        "[pscustomobject]@{during=$during;after=$env:PSCAD_MCP_WORKSPACE} | ConvertTo-Json -Compress"
+    )
+    env = {key: value for key, value in os.environ.items() if key.casefold() != "psmodulepath"}
+    result = subprocess.run([shell, "-NoProfile", "-Command", command], capture_output=True, text=True, timeout=30, env=env)
+    assert result.returncode == 0, result.stderr
+    values = json.loads(result.stdout.splitlines()[-1])
+    assert values == {"during": "C:\\worker-workspace", "after": "C:\\original-workspace"}
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows PowerShell runner coverage")
+@pytest.mark.parametrize("shell", SHELLS)
 @pytest.mark.parametrize("python_exit, expected", [(2, 2), (0, 1)])
 def test_dynamic_post_run_preserves_preflight_failure_without_pid(tmp_path, shell, python_exit, expected):
     script = Path(__file__).resolve().parents[1] / "scripts" / "run_fixed_lcc_dynamic_acceptance.ps1"
