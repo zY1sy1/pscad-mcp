@@ -256,7 +256,12 @@ def _engine_candidates(
             if disc > 0:
                 current = 2 * received / (vdc + math.sqrt(disc))
                 negative_conductance = 2 * line_r * current**2 / (vdc - 2 * line_r * current)
-                natural_frequency = 2 * math.pi * 2.0
+                # Restoration reapplies power over 0.2 s. A 2 Hz voltage loop
+                # has a roughly 0.375 s settling time and can retrip during
+                # that ramp at lower DC ratings. Keep the same 0.85 damping
+                # and loss compensation, with 4 Hz (20x below the 80 Hz inner
+                # current loop) to settle inside the restoration ramp.
+                natural_frequency = 2 * math.pi * 4.0
                 kp = 2 * 0.85 * natural_frequency * capacitance * vdc + negative_conductance
                 base_parameters["dc_voltage_control_kp"] = kp
                 base_parameters["dc_voltage_control_ti_s"] = kp / (capacitance * vdc * natural_frequency**2)

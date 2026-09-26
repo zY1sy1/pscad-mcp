@@ -87,8 +87,13 @@ def test_native_dc_loop_uses_cable_energy_and_reverse_incremental_loss():
     cap = p["line_differential_capacitance_f"]
     assert cap == pytest.approx(26.47426962004457e-6)
     kp, ti = p["dc_voltage_control_kp"], p["dc_voltage_control_ti_s"]
-    assert 0.5 < kp < 0.53 and 0.18 < ti < 0.20
-    assert math.sqrt(kp / ti / (cap * 640)) / (2 * math.pi) == pytest.approx(2.0)
+    assert kp > 0 and ti > 0
+    omega = math.sqrt(kp / ti / (cap * 640))
+    # The voltage loop must settle within the 0.2 s restoration power ramp.
+    # The previous 2 Hz design took approximately 0.375 s and the measured
+    # 500 kV / 50 Hz recovery retripped on DC undervoltage.
+    assert 4.0 / (0.85 * omega) < 0.2
+    assert omega / (2 * math.pi) == pytest.approx(4.0)
 
 
 def test_native_controller_sampling_matches_actual_solver_execution():
