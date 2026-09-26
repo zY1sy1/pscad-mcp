@@ -6,6 +6,18 @@ All notable changes to this project are documented here.
 
 ### Changed
 
+- Licensed completion work fixed native MMC fault recovery and empty-capacitor
+  current coupling without relaxing physical limits. Three half-bridge cable
+  requests passed all 18 normal/fault/reload stages at `9cfe1d4`.
+- Legacy PSOUT reading now traverses the unnamed virtual file root. Tracked
+  paused solvers resume through the native toggle, and Stop retries revalidate
+  the single-active-case scope before requiring an observed terminal state.
+  The Legacy runner scopes/restores its service workspace; 15 licensed cases
+  passed at `d7805e7`.
+- Parametric LCC staging now preserves correct project/self-namespace identity
+  and reads a fresh numbered dataset after terminal completion. A real lifecycle
+  probe passed; unresolved physical mappings still prevent rated-model acceptance.
+
 - LCC golden generation now requires an approved independent review record bound
   to the target contract, normalized reference, original project/libraries,
   raw outputs, metadata, compiler and timesteps. Missing or changed evidence

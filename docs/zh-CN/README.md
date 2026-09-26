@@ -4,13 +4,18 @@
 
 [验收总表](../acceptance-status.json)按实际测试提交登记最新证据：
 
-- 原生半桥 MMC 电缆平均值模型：640 kV、1000 MW、60 Hz、Q=0、100 km 默认请求，
-  在 `5613ff7` 上完成正常运行、四类故障和独立重载，`model_accepted=true`。
-- 已发布的全桥 MMC 联合场景：同一提交上首轮及独立重放各 122 项物理检查通过，
+- 原生半桥 MMC 电缆平均值模型：默认 640 kV／1000 MW／60 Hz、+100 MVAr 变体，
+  以及 500 kV／750 MW／50 Hz／-75 MVAr 三组请求，在 `9cfe1d4` 上完成全部
+  18 个正常／故障／独立重载阶段，三份完整报告均为 `model_accepted=true`。
+- 已发布的全桥 MMC 联合场景：`5613ff7` 上首轮及独立重放各 122 项物理检查通过，
   严格 EMTDC 定时通过；不代表任意参数、全桥 AVM 或原始模板入口全部通过。
-- 固定 LCC：`a2959fe` 上 WP1C 动态工程检查通过，独立 golden 未完成，最终仍为
+- 通用 Legacy：`d7805e7` 上 15 项实机核心／可靠性检查通过，包括 PSOUT 读取与
+  暂停、恢复、停止。修复仍在补全分支，尚未合并部署。
+- 固定 LCC：`85f9d84` 上 WP1B/WP1C 工程检查通过，独立 golden 未完成，最终仍为
   `INCOMPLETE_ANALYSIS`。参数化 LCC、其余 MMC 参数矩阵、通用 Blueprint 实机验收
   和 PSCAD 5.x 实机验收仍有缺口。
+- 参数化 LCC 的实际执行链已验证，但仍有 13 类物理参数绑定待补，额定功率的
+  每极／双极总量口径需要确定。详见[实机补全记录](../acceptance/completion-licensed-20260926.md)。
 
 执行 `python scripts/audit_acceptance_inventory.py` 可离线复核已登记报告、子报告和
 声明交付文件的哈希。退出码 0 表示完整性齐备，1 表示证据无效，2 表示仍缺持久化报告；

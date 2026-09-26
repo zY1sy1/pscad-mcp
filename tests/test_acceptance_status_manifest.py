@@ -22,8 +22,13 @@ def test_acceptance_status_manifest_separates_live_acceptance_scopes():
         "native_mmc_half_bridge_640kv",
         "mmc_full_bridge_joint_462",
         "modern_core_5",
+        "lcc_parametric_executor_462",
+        "native_mmc_half_bridge_500kv_50hz",
+        "native_mmc_half_bridge_640kv_q100",
+        "native_average_arm_462",
     }
-    assert scopes["legacy_core_462"]["licensed_status"] == "PASS_HISTORICAL"
+    assert scopes["legacy_core_462"]["licensed_status"] == "PASS"
+    assert scopes["legacy_core_462"]["implementation_status"] == "INTEGRATION_BRANCH"
     topology = scopes["unified_topology_462"]
     assert topology["licensed_status"] == "PASS"
     assert topology["pscad_version"] == "4.6.2"
@@ -40,11 +45,12 @@ def test_acceptance_status_manifest_separates_live_acceptance_scopes():
         "PASS",
         "FAIL",
         "INCOMPLETE_ANALYSIS",
+        "PARTIAL",
     }
     assert scopes["hvdc_scenarios"]["licensed_status"] == "PARTIAL"
     assert scopes["mmc_stage_a"]["implementation_status"] == "MERGED"
     assert scopes["mmc_stage_a"]["licensed_status"] == "INCOMPLETE_ANALYSIS"
-    assert scopes["parametric_mmc"]["implementation_status"] == "MERGED"
+    assert scopes["parametric_mmc"]["implementation_status"] == "INTEGRATION_BRANCH"
     assert scopes["parametric_mmc"]["licensed_status"] in {
         "NOT_RUN_ON_INTEGRATED_COMMIT",
         "PASS",
@@ -62,7 +68,7 @@ def test_latest_mmc_evidence_is_scoped_and_old_attempts_remain_historical():
     native = scopes["native_mmc_half_bridge_640kv"]
     assert native["licensed_status"] == "PASS"
     assert native["evidence"]["sha256"] == (
-        "ffb61ce075bc651036cc370364a76e1d83e63eaf31ba382c7771531cd488c9d2"
+        "2c3d7d158f5069e3358ad1427500cb2882844bfabcacb43a80a4732821db98c3"
     )
     assert native["intrinsic_dc_fault_blocking"] is False
     assert scopes["parametric_mmc"]["licensed_status"] == "PARTIAL"
@@ -73,6 +79,20 @@ def test_latest_mmc_evidence_is_scoped_and_old_attempts_remain_historical():
     assert fixed["licensed_status"] == "INCOMPLETE_ANALYSIS"
     assert fixed["historical_attempts"][0]["attempt"]["failure_code"] == "LCC_DEFINITION_MISSING"
     assert scopes["modern_core_5"]["licensed_status"] == "NOT_RUN_ON_INTEGRATED_COMMIT"
+
+
+def test_native_matrix_keeps_three_requests_and_component_only_scope_separate():
+    scopes = {s["scope"]: s for s in json.loads(MANIFEST.read_text())["scopes"]}
+    names = scopes["parametric_mmc"]["accepted_subscopes"]
+    assert len(names) == 3
+    cases = [scopes[name] for name in names]
+    assert {(s["request"]["dc_voltage_kv"], s["request"]["frequency_hz"], s["request"]["reactive_power_mvar"]) for s in cases} == {
+        (640.0, 60.0, 0.0), (640.0, 60.0, 100.0), (500.0, 50.0, -75.0),
+    }
+    assert {s["evidence"]["commit"] for s in cases} == {"9cfe1d41dd2113cb4e72e3a285b1da00397a2b6b"}
+    assert all(s["licensed_status"] == "PASS" and s["intrinsic_dc_fault_blocking"] is False for s in cases)
+    for name in ("native_average_arm_462", "lcc_parametric_executor_462"):
+        assert {"pointer": "/model_accepted", "equals": False} in scopes[name]["evidence_checks"]
 
 
 def test_live_pass_requires_durable_evidence_identity():

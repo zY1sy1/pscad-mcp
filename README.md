@@ -10,17 +10,23 @@ configuration template is available at [config.example.toml](config.example.toml
 ### Verified scope and remaining work (2026-09-26)
 
 [The scope inventory](docs/acceptance-status.json) indexes the latest recorded
-evidence with its original tested revision. The native half-bridge cable AVM
-default (640 kV, 1000 MW, 60 Hz, Q=0, 100 km) passed normal operation, four fault
-cases and independent reload at `5613ff7`. The published full-bridge MMC joint
+evidence with its original tested revision. Three native half-bridge cable AVM
+requests passed all 18 normal/fault/reload stages at `9cfe1d4`: the default
+640 kV / 1000 MW / 60 Hz case, its +100 MVAr variant, and a 500 kV / 750 MW /
+50 Hz / -75 MVAr case. Each has its own complete physical suite. These fixes
+remain on the completion branch. The published full-bridge MMC joint
 scenario also passed physical, strict timing and independent-replay checks at
-that revision. See [merged evidence](docs/acceptance/mmc-timing-fault-integration/delivery.md).
+`5613ff7`. See [merged evidence](docs/acceptance/mmc-timing-fault-integration/delivery.md)
+and the [September 26 licensed closure](docs/acceptance/completion-licensed-20260926.md).
 
-Fixed LCC WP1C has dynamic engineering PASS at `a2959fe`; its final status remains
+All 15 Legacy core/reliability cases passed at `d7805e7`, including PSOUT reading
+and pause/resume/stop. Fixed LCC WP1B/WP1C engineering passed at `85f9d84`; final status remains
 `INCOMPLETE_ANALYSIS` pending an independently reviewed golden. Parameter-family
 coverage, full-bridge AVM, generic Blueprint real acceptance and PSCAD 5.x real
 acceptance are not complete. Average-value acceptance excludes switching stress,
 switching harmonics, individual submodule balance and thermal behavior.
+The parametric LCC executor has a real lifecycle probe, but 13 physical parameter
+bindings and the per-pole/total-bipole power contract remain unresolved.
 
 Run `python scripts/audit_acceptance_inventory.py` to check recorded report,
 child-report and declared artifact hashes without starting PSCAD. It returns
