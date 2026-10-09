@@ -47,7 +47,7 @@ def divider_blueprint(source_hash: str) -> dict:
         rules.append({
             "rule_id": name, "kind": "window_summary", "channel": channel,
             "required": True, "source_class": "engineering_accepted", "physical": True,
-            "arguments": {"window": [0.05, 0.15], "metric": metric,
+            "arguments": {"window": [0.25, 0.75], "metric": metric,
                           "minimum": low, "maximum": high},
         })
     return {
