@@ -988,15 +988,16 @@ def _parse_confirmed_nets(value: Any) -> tuple[CorpusConfirmedNet, ...]:
             record["conductor_keys"],
             f"{path}.conductor_keys",
         )
-        if not conductor_keys:
-            raise _error("Confirmed net has no conductor evidence.", path=path)
+        label_keys = _strings(record["label_keys"], f"{path}.label_keys")
+        if not conductor_keys and not label_keys:
+            raise _error("Confirmed net has no conductor or label evidence.", path=path)
         result.append(
             CorpusConfirmedNet(
                 key=_digest(record["key"], f"{path}.key"),
                 namespace=namespace,
                 port_keys=_strings(record["port_keys"], f"{path}.port_keys"),
                 conductor_keys=conductor_keys,
-                label_keys=_strings(record["label_keys"], f"{path}.label_keys"),
+                label_keys=label_keys,
                 junctions=tuple(
                     _point(point, f"{path}.junctions[{point_index}]")
                     for point_index, point in enumerate(
