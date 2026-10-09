@@ -15,7 +15,7 @@ from .models import FrozenDict, freeze, json_safe
 _CANVAS_DECORATIONS = frozenset({
     "WireOrthogonal", "WireDiagonal", "WireBranch", "WireJumper",
     "GraphFrame", "PlotFrame", "PolyMeter", "Curve", "Group", "Overlay",
-    "ControlFrame", "Text",
+    "ControlFrame", "Text", "Sticky",
 })
 
 

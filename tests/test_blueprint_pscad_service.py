@@ -104,7 +104,8 @@ async def test_inventory_does_not_query_canvas_wires_as_component_proxies(tmp_pa
         async def list_canvas_components(self, project_name, canvas_name):
             return [*(await super().list_canvas_components(project_name, canvas_name)),
                     {"id": 99, "definition": "WireOrthogonal"},
-                    {"id": 100, "definition": "GraphFrame"}]
+                    {"id": 100, "definition": "GraphFrame"},
+                    {"id": 101, "definition": "Sticky"}]
 
         async def get_component_parameters(self, project_name, component_id):
             assert component_id == 7, "canvas decoration is not a UserCmp proxy"
