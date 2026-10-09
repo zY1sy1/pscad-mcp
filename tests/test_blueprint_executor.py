@@ -73,6 +73,59 @@ async def test_staged_project_rebinds_internal_identity_before_first_vendor_load
 
 
 @pytest.mark.asyncio
+async def test_executor_accepts_fresh_numbered_outputs_in_native_compiler_directory(tmp_path):
+    class NativeOutputService(RecordingBlueprintPscadService):
+        async def run_project(self, project_name):
+            result = await super().run_project(project_name)
+            directory = self.project_file.parent / f"{project_name}.gf42"
+            directory.mkdir()
+            for file in self.project_file.parent.glob(f"{project_name}*.*"):
+                if file.suffix in {".inf", ".out"}:
+                    file.replace(directory / file.name)
+            return result
+
+    record = await execute_build(plan(tmp_path), NativeOutputService(), tmp_path,
+                                 build_id="native-output", poll_interval_s=0, simulation_timeout_s=1)
+    assert record.state is BlueprintBuildState.ACCEPTANCE_PASSED, record.error
+
+
+@pytest.mark.asyncio
+async def test_rewritten_metadata_cannot_make_unchanged_waveform_samples_fresh(tmp_path):
+    class MetadataOnlyService(RecordingBlueprintPscadService):
+        async def build_project(self, project_name):
+            await super().build_project(project_name)
+            await super().run_project(project_name)
+            return "built"
+
+        async def run_project(self, project_name):
+            metadata = self.project_file.with_suffix(".inf")
+            metadata.write_text(metadata.read_text() + "\n", encoding="utf-8")
+            return "started"
+
+    record = await execute_build(plan(tmp_path), MetadataOnlyService(), tmp_path,
+                                 build_id="old-samples", poll_interval_s=0, simulation_timeout_s=1)
+    assert record.error["code"] == "BLUEPRINT_OUTPUT_STALE"
+
+
+@pytest.mark.asyncio
+async def test_locked_quarantine_preserves_original_failure_and_evidence_in_place(tmp_path, monkeypatch):
+    original = Path.replace
+
+    def locked(source, target):
+        if source.name == "staging" and Path(target).name == "quarantine":
+            raise PermissionError("owned vendor still has a directory handle")
+        return original(source, target)
+
+    monkeypatch.setattr(Path, "replace", locked)
+    record = await execute_build(plan(tmp_path), RecordingBlueprintPscadService(fail_on="build_project"), tmp_path,
+                                 build_id="locked-quarantine", poll_interval_s=0, simulation_timeout_s=1)
+    assert record.state is BlueprintBuildState.FAILED
+    assert record.error["details"]["exception"] == "RuntimeError"
+    assert "injected failure at build_project" in record.error["details"]["exception_message"]
+    assert (Path(record.staging_path) / "evidence" / "failure-report.json").is_file()
+
+
+@pytest.mark.asyncio
 async def test_executor_copies_before_write_applies_all_operations_and_validates_lifecycle(tmp_path):
     inventory = live_inventory()
     inventory["definitions"]["master:breaker"]["parameters"]["LogicalId"] = {"resolved": True, "units": None}

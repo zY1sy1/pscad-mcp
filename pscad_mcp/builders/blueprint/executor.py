@@ -22,7 +22,7 @@ from .models import (
     freeze,
     json_safe,
 )
-from .output import discover_output_dataset
+from .output import discover_output_dataset, target_output_paths
 from .validator import validate_staging, write_validation_report
 
 
@@ -317,13 +317,13 @@ def _normalize_messages(value: Any) -> list[dict[str, Any]]:
 
 
 def _output_snapshot(project_file: Path) -> dict[str, tuple[int, int, str]]:
-    candidates = [project_file.with_suffix(".inf"), *project_file.parent.glob(f"{project_file.stem}_*.out")]
+    candidates = target_output_paths(project_file)
     snapshot: dict[str, tuple[int, int, str]] = {}
     for path in sorted(candidates, key=lambda item: item.name.casefold()):
         if not path.is_file() or path.is_symlink():
             continue
         stat = path.stat()
-        snapshot[path.name] = (stat.st_mtime_ns, stat.st_size, sha256_file(path))
+        snapshot[path.relative_to(project_file.parent).as_posix()] = (stat.st_mtime_ns, stat.st_size, sha256_file(path))
     return snapshot
 
 
@@ -504,6 +504,13 @@ async def execute_build(
         run_messages = _normalize_messages(await service.get_project_output(plan.target_name, structured=True))
         messages = [*compile_messages, *run_messages]
         dataset = discover_output_dataset(staging, expected_metadata=project_file.with_suffix(".inf"))
+        metadata_parent = Path(dataset["metadata_file"]).parent
+        stale = [name for name in dataset["segments"]
+                 if output_before_run.get((metadata_parent / name).relative_to(project_file.parent).as_posix())
+                 == output_after_run.get((metadata_parent / name).relative_to(project_file.parent).as_posix())]
+        if stale:
+            raise _error("BLUEPRINT_OUTPUT_STALE", "Waveform segments did not change during this run.",
+                         "run_blueprint_project", stale_segments=stale)
         validation = validate_staging(
             plan,
             staging,

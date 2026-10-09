@@ -51,6 +51,23 @@ def test_read_output_dataset_combines_column_segments_with_shared_domain(tmp_pat
     assert dataset["segments"] == ["BuiltCase_01.out", "BuiltCase_02.out"]
 
 
+def test_output_reader_accepts_the_single_native_project_description_header(tmp_path):
+    inf = write_dataset(tmp_path, channels=1)
+    out = tmp_path / "BuiltCase_01.out"
+    out.write_text("Single Phase Voltage Divider\n" + out.read_text(), encoding="utf-8")
+    dataset = read_output_dataset(inf)
+    assert dataset["channels"]["Main/C1"]["domain"] == [0.0, 0.1, 0.2]
+    out.write_text(out.read_text().replace("0.1 101", "0.1 corrupt"), encoding="utf-8")
+    with pytest.raises(BackendError):
+        read_output_dataset(inf)
+
+
+def test_expected_target_metadata_can_be_in_its_native_compiler_directory(tmp_path):
+    inf = write_dataset(tmp_path / "BuiltCase.gf42", channels=1)
+    dataset = discover_output_dataset(tmp_path, expected_metadata=tmp_path / "BuiltCase.inf")
+    assert dataset["metadata_file"] == str(inf.resolve())
+
+
 @pytest.mark.parametrize("drift", ["missing_segment", "time", "columns", "nan", "duplicate_metadata"])
 def test_read_output_dataset_rejects_incomplete_or_non_finite_evidence(tmp_path, drift):
     inf = write_dataset(tmp_path)
