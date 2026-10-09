@@ -15,7 +15,7 @@ class SavedProject:
         return self.dirty
 
     def get_run_status(self, callback):
-        callback("idle", 0.0)
+        callback({"status": "idle", "progress": 0.0})
 
 
 class WorkspaceApplication:

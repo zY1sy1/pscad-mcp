@@ -62,7 +62,8 @@ def divider_blueprint(source_hash: str) -> dict:
             {"sequence": 2, "kind": "set_project_settings", "target": "project",
              "operation_id": "enable-fresh-output",
              "arguments": {"settings": {"time_duration": "0.2", "time_step": "50",
-                                         "sample_step": "50", "PlotType": "1"}}},
+                                         "sample_step": "50", "PlotType": "1",
+                                         "output_filename": "Divider.out"}}},
         ],
         "acceptance": {
             "required_structure": [{"logical_id": "Source1", "definition": "master:source_1"}],
@@ -89,9 +90,7 @@ async def run(workspace: Path, reference: Path) -> dict:
     shutil.copyfile(reference, source_root / "vdiv.pscx")
     master = Path("C:/Program Files (x86)/PSCAD46/master.pslx")
     compiler = Path("C:/Program Files (x86)/GFortran/4.6/bin/gfortran.exe")
-    before = {str(path): sha256(path) for path in (reference, master, compiler, source_root / "vdiv.pscx")}
-    blueprint = divider_blueprint(before[str(reference)])
-    (workspace / "blueprint.json").write_text(json.dumps(blueprint, indent=2) + "\n", encoding="utf-8")
+    before = {str(path): sha256(path) for path in (reference, master, compiler)}
     report = {
         "schema_version": 1, "scope": "generic_blueprint_builder",
         "status": "FAIL", "model_accepted": False,
@@ -113,6 +112,19 @@ async def run(workspace: Path, reference: Path) -> dict:
         runtime = await service.status()
         require_acceptance_ownership(runtime)
         report["runtime"] = runtime
+        # The official tutorial was authored in 4.5.4. Let the vendor convert
+        # the owned seed copy before freezing it as this builder's input.
+        seed = source_root / "vdiv.pscx"
+        await service.load_projects([str(seed)])
+        await service.save_project("vdiv", confirm=True)
+        before[str(seed)] = sha256(seed)
+        report["reference_preparation"] = {
+            "kind": "vendor_native_save_of_owned_copy",
+            "original_sha256": before[str(reference)],
+            "prepared_sha256": before[str(seed)],
+        }
+        blueprint = divider_blueprint(before[str(seed)])
+        (workspace / "blueprint.json").write_text(json.dumps(blueprint, indent=2) + "\n", encoding="utf-8")
         builder = BlueprintBuilderService(service, workspace_root=workspace)
         plan = await builder.plan_project(blueprint, str(source_root), "Divider")
         (workspace / "plan.json").write_text(json.dumps(plan, indent=2) + "\n", encoding="utf-8")
