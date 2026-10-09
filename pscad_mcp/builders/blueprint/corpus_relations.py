@@ -561,6 +561,7 @@ def materialize_instance_ports(
                     port.condition,
                     component.parameters,
                     defaults,
+                    case_insensitive=True,
                 )
             except ConditionUnresolved as error:
                 raise _port_error(

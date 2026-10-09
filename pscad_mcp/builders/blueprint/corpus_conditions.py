@@ -266,12 +266,30 @@ def evaluate_condition(
     expression: str | None,
     instance_values: Mapping[str, object],
     definition_defaults: Mapping[str, object],
+    *,
+    case_insensitive: bool = False,
 ) -> bool:
     """Evaluate one conditional-port expression under the closed grammar."""
 
     if expression is None or not expression.strip():
         return True
-    parser = _Parser(_tokens(expression.strip()))
+    tokens = _tokens(expression.strip())
+    if case_insensitive:
+        identifiers = {token.value for token in tokens if token.kind == "identifier"}
+
+        def aliases(values: Mapping[str, object]) -> dict[str, object]:
+            result = dict(values)
+            for name in identifiers:
+                matches = [value for key, value in values.items() if key.casefold() == name.casefold()]
+                if len(matches) > 1:
+                    raise ConditionUnresolved("conditional-port parameter identity is ambiguous")
+                if matches:
+                    result[name] = matches[0]
+            return result
+
+        instance_values = aliases(instance_values)
+        definition_defaults = aliases(definition_defaults)
+    parser = _Parser(tokens)
     tree = parser.parse_or()
     parser.require_end()
     return _as_boolean(_evaluate(tree, instance_values, definition_defaults))

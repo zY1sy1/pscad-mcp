@@ -110,3 +110,11 @@ def test_evaluate_condition_rejects_excessive_expression_complexity(expression):
 @pytest.mark.parametrize("expression", [None, "", "   "])
 def test_empty_condition_is_active(expression):
     assert evaluate_condition(expression, {}, {}) is True
+
+
+def test_vendor_case_matching_preserves_instance_override_and_rejects_ambiguous_names():
+    assert evaluate_condition("limit==1", {"LIMIT": "1"}, {"Limit": 0}, case_insensitive=True) is True
+    with pytest.raises(ConditionUnresolved):
+        evaluate_condition("limit==1", {"Limit": "0", "LIMIT": "1"}, {}, case_insensitive=True)
+    with pytest.raises(ConditionUnresolved):
+        evaluate_condition("Missing==1", {}, {"Limit": 0}, case_insensitive=True)
