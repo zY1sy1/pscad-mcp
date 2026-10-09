@@ -26,6 +26,32 @@ from tests.topology_fakes import (
 )
 
 
+def test_candidate_geometry_work_does_not_multiply_with_irrelevant_unconnected_ports(monkeypatch):
+    from pscad_mcp.topology.diagnostics import generic
+
+    base = topology_with_nearby_dangling_endpoint(grid_step=18)
+    extra = tuple(TopologyComponent(
+        key=f"far:{index}", canvas_key="Main", object_id=str(index), definition="test:load",
+        ports=(TopologyPort(key=f"far:{index}:P", component_key=f"far:{index}", name="P",
+                            absolute=(10000, index * 100), kind="electrical", dimension=1),),
+    ) for index in range(100))
+    enlarged = replace(base, components=(*base.components, *extra))
+    calls = 0
+    original = generic._point_on_segment
+
+    def measured(*args):
+        nonlocal calls
+        calls += 1
+        return original(*args)
+
+    monkeypatch.setattr(generic, "_point_on_segment", measured)
+    expected = infer_candidate_edges(base)
+    baseline_calls = calls
+    calls = 0
+    assert infer_candidate_edges(enlarged) == expected
+    assert calls <= 2 * baseline_calls
+
+
 def test_required_and_optional_unconnected_ports_have_distinct_severity():
     topology = topology_with_unconnected_ports(required=True, optional=True)
     findings = diagnose_generic(topology)

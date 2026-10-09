@@ -36,6 +36,7 @@ def infer_candidate_edges(
         key for net in topology.nets for key in net.port_keys
     }
     candidates = []
+    dangling = _dangling_endpoints(topology)
     for component, port in _active_ports(topology):
         if (
             port.key in connected_ports
@@ -43,17 +44,17 @@ def infer_candidate_edges(
             or port.kind not in _KNOWN_NAMESPACES
         ):
             continue
-        for conductor, point in _dangling_endpoints(topology):
+        for conductor, point in dangling:
             if component.canvas_key != conductor.canvas_key:
                 continue
             if port.kind != conductor.namespace:
-                continue
-            if not _dimension_compatible(topology, conductor.key, port):
                 continue
             distance = abs(port.absolute[0] - point[0]) + abs(
                 port.absolute[1] - point[1]
             )
             if distance <= 0 or distance > topology.grid_step:
+                continue
+            if not _dimension_compatible(topology, conductor.key, port):
                 continue
             candidates.append(
                 CandidateEdge(
