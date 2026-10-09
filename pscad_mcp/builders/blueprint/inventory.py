@@ -12,6 +12,13 @@ from .assets import canonical_json, sha256_bytes
 from .models import FrozenDict, freeze, json_safe
 
 
+_CANVAS_DECORATIONS = frozenset({
+    "WireOrthogonal", "WireDiagonal", "WireBranch", "WireJumper",
+    "GraphFrame", "PlotFrame", "PolyMeter", "Curve", "Group", "Overlay",
+    "ControlFrame", "Text",
+})
+
+
 def _error(message: str, **details: Any) -> BackendError:
     return BackendError("BLUEPRINT_INVENTORY_INVALID", message, "blueprint", "normalize_inventory", details)
 
@@ -119,6 +126,8 @@ async def read_live_inventory(service: Any, project_name: str, inspection_profil
     }
     normalized_components = []
     for component in components:
+        if component.get("definition") in _CANVAS_DECORATIONS:
+            continue
         component_id = int(component["id"])
         parameters = await service.get_component_parameters(project_name, component_id)
         observed_ports = await service.get_component_ports(project_name, component_id)
