@@ -37,6 +37,9 @@ from pscad_mcp.builders.blueprint.corpus_conditions import (
         ("1+2>2 && 0 || 1", {}, {}, True),
         ("true==1", {}, {}, True),
         ("0.25+0.75==1", {}, {}, True),
+        ("(NC>=2)&&(View==0)", {"NC": "3", "View": "0"}, {}, True),
+        ("NC>=2", {"NC": "2"}, {}, True),
+        ("NC>=2", {"NC": "1"}, {}, False),
         ("  View == 0  ", {"View": Decimal(0)}, {}, True),
     ],
 )

@@ -9,11 +9,11 @@ from decimal import Decimal, InvalidOperation
 from typing import TypeAlias
 
 _TOKEN = re.compile(
-    r"\s*(?:(?P<op>&&|\|\||==|!=|>|[!+()])|"
+    r"\s*(?:(?P<op>&&|\|\||==|!=|>=|>|[!+()])|"
     r"(?P<identifier>[A-Za-z_][A-Za-z0-9_]*)|"
     r"(?P<number>[0-9]+(?:\.[0-9]+)?))"
 )
-_COMPARISONS = frozenset({"==", "!=", ">"})
+_COMPARISONS = frozenset({"==", "!=", ">", ">="})
 _MAX_TOKENS = 256
 _MAX_NESTING = 64
 
@@ -259,6 +259,8 @@ def _evaluate(
         return equal if node.operator == "==" else not equal
     if node.operator == ">":
         return _as_number(left) > _as_number(right)
+    if node.operator == ">=":
+        return _as_number(left) >= _as_number(right)
     raise ConditionUnresolved("conditional-port operator is unsupported")
 
 
