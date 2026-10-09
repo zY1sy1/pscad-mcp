@@ -462,6 +462,27 @@ class LegacyBackend:
                     self.definition_paths[project_name] = path
                     self._loaded_project_files[path] = (project_name, hashlib.sha256(path.read_bytes()).hexdigest())
 
+    async def get_blueprint_inventory(self, project_name: str, inspection_profile: str | None = None) -> dict[str, Any]:
+        from ...builders.blueprint.legacy_inventory import inventory_from_saved_sources
+
+        path = self.definition_paths.get(project_name)
+        loaded = {item.name for item in await self.list_projects()}
+        cached = self._loaded_project_files.get(path) if path else None
+        if (project_name not in loaded or path is None or not path.is_file()
+                or cached != (project_name, hashlib.sha256(path.read_bytes()).hexdigest())):
+            raise BackendError("BLUEPRINT_SOURCE_HASH_MISMATCH", "The loaded input is not its current saved file.",
+                               self.name, "get_blueprint_inventory", {"project_name": project_name})
+        project = await self._project(project_name)
+        dirty = getattr(project, "is_dirty", None)
+        if not callable(dirty) or await self.executor.run_safe(dirty) is not False:
+            raise BackendError("BLUEPRINT_SOURCE_INVALID", "Save the input before inventorying a Legacy blueprint.",
+                               self.name, "get_blueprint_inventory", {"project_name": project_name})
+        master = await self._discover_master_library() if "master" not in self.definition_paths else self.definition_paths["master"]
+        paths = dict(self.definition_paths)
+        if master:
+            paths["master"] = master
+        return await asyncio.to_thread(inventory_from_saved_sources, path, paths, self.version)
+
     async def unload_project(self, project_name: str) -> None:
         project = await self._project(project_name)
         unloader = getattr(project, "unload", None)

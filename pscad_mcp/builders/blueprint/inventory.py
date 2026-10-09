@@ -115,6 +115,8 @@ def normalize_inventory(value: Any) -> InventorySnapshot:
 
 async def read_live_inventory(service: Any, project_name: str, inspection_profile: str | None = None) -> InventorySnapshot:
     bridge = getattr(service, "get_blueprint_inventory", None)
+    if not callable(bridge):
+        bridge = getattr(getattr(service, "backend", None), "get_blueprint_inventory", None)
     if callable(bridge):
         return normalize_inventory(await bridge(project_name, inspection_profile))
     components = await service.list_canvas_components(project_name, canvas_name="Main")
