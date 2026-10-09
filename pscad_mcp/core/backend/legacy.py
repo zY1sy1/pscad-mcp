@@ -457,13 +457,59 @@ class LegacyBackend:
             await self.executor.run_safe(app_unloader, project_name)
             self._clear_project_binding_state(project_name)
             return
-        raise BackendError(
-            "BLUEPRINT_RELOAD_UNAVAILABLE",
-            "The legacy backend cannot unload the project before reloading it.",
-            self.name,
-            "unload_project",
-            {"project_name": project_name},
-        )
+        await self._unload_from_saved_owned_workspace(project_name)
+
+    async def _unload_from_saved_owned_workspace(self, project_name: str) -> None:
+        """Use 4.6's workspace reset only when every project is saved and known."""
+        app = self._require_app()
+
+        def unavailable(reason: str, **details: Any) -> BackendError:
+            return BackendError(
+                "BLUEPRINT_RELOAD_UNAVAILABLE",
+                "A legacy workspace reset requires an owned idle instance and saved, traceable projects.",
+                self.name, "unload_project",
+                {"project_name": project_name, "reason": reason, **details},
+            )
+
+        reset = getattr(app, "new_workspace", None)
+        busy = getattr(app, "is_busy", None)
+        if not callable(reset) or not callable(busy):
+            raise unavailable("workspace_reset_unavailable")
+        if not self.owns_process or type(self._managed_pid) is not int or self._managed_pid <= 0:
+            raise unavailable("process_ownership_unverified")
+        if await self.executor.run_safe(busy) is not False or self._paused_projects:
+            raise unavailable("workspace_not_idle")
+        projects = await self.list_projects()
+        paths: dict[str, Path] = {}
+        hashes: dict[str, str] = {}
+        for info in projects:
+            if info.name.casefold() == "master":
+                continue
+            path = self.definition_paths.get(info.name)
+            if path is None or not path.is_file() or path.is_symlink():
+                raise unavailable("project_path_unverified", loaded_project=info.name)
+            proxy = await self._project(info.name)
+            dirty = getattr(proxy, "is_dirty", None)
+            if not callable(dirty) or await self.executor.run_safe(dirty) is not False:
+                raise unavailable("unsaved_project", loaded_project=info.name)
+            paths[info.name] = path
+            hashes[info.name] = hashlib.sha256(path.read_bytes()).hexdigest()
+        if project_name not in paths:
+            raise unavailable("target_not_loaded")
+        await self.executor.run_safe(reset)
+        remaining = [item.name for item in await self.list_projects() if item.name.casefold() != "master"]
+        if remaining:
+            raise unavailable("workspace_reset_unverified", remaining_projects=remaining)
+        for name, path in paths.items():
+            self._clear_project_binding_state(name)
+            if hashlib.sha256(path.read_bytes()).hexdigest() != hashes[name]:
+                raise unavailable("saved_project_changed", loaded_project=name)
+        retained = [str(path) for name, path in paths.items() if name != project_name]
+        if retained:
+            await self.load_projects(retained)
+        restored = {item.name for item in await self.list_projects() if item.name.casefold() != "master"}
+        if restored != set(paths) - {project_name}:
+            raise unavailable("retained_projects_not_restored", restored_projects=sorted(restored))
 
     def _clear_project_binding_state(self, project_name: str) -> None:
         for cache in (
