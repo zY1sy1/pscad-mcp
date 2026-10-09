@@ -459,6 +459,7 @@ def _resolve_definition(
         namespace,
         graph.pscad_version,
         physical_name,
+        logical_name=True,
     )
     return _ResolvedDefinition(
         key=key,
