@@ -17,6 +17,9 @@ class SavedProject:
     def get_run_status(self, callback):
         callback({"status": "idle", "progress": 0.0})
 
+    def save(self):
+        self.dirty = False
+
 
 class WorkspaceApplication:
     def __init__(self):
@@ -76,6 +79,18 @@ async def test_legacy_workspace_reload_reads_project_run_states_without_an_appli
     await backend.unload_project("BuiltCase")
     assert app.reset_count == 1
     assert set(app.projects) == {"Source"}
+
+
+@pytest.mark.asyncio
+async def test_repeated_load_of_same_unchanged_file_does_not_dirty_an_already_saved_project(tmp_path):
+    backend, app = arrange(tmp_path)
+    path = backend.definition_paths["Source"]
+    await backend.load_projects([str(path)])
+    await backend.load_projects([str(path)])
+    assert len(app.loads) == 1
+    path.write_text('<project name="Source"><changed/></project>', encoding="utf-8")
+    await backend.load_projects([str(path)])
+    assert len(app.loads) == 2
 
 
 @pytest.mark.asyncio
