@@ -134,7 +134,10 @@ async def read_live_inventory(service: Any, project_name: str, inspection_profil
         }
         location = await service.get_component_location(project_name, component_id)
         definition_name = str(component.get("definition") or "unresolved")
-        definition = normalized_definitions.get(definition_name)
+        definition = (
+            normalized_definitions.setdefault(definition_name, {"ports": {}, "parameters": {}})
+            if component.get("definition") else None
+        )
         parameter_metadata = {name: {"resolved": True, "units": None} for name in parameters}
         if definition is not None:
             definition["parameters"].update(parameter_metadata)

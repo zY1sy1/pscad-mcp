@@ -85,6 +85,20 @@ async def test_real_pscad_service_exposes_complete_blueprint_readback_contract(t
 
 
 @pytest.mark.asyncio
+async def test_inventory_includes_observed_master_definitions_when_project_lists_only_local_ones(tmp_path):
+    class LocalDefinitionsBackend(BlueprintBackend):
+        async def project_definitions(self, project_name):
+            return ["Main"]
+
+    inventory = await read_live_inventory(
+        _service(tmp_path, LocalDefinitionsBackend()), "Source", None,
+    )
+
+    assert inventory.definitions["master:breaker"]["parameters"]["Name"]["resolved"] is True
+    assert inventory.definitions["master:breaker"]["ports"]["A"]["dimension"] == 1
+
+
+@pytest.mark.asyncio
 async def test_real_pscad_service_reloads_and_verifies_declared_output_channels(tmp_path):
     backend = BlueprintBackend()
     service = _service(tmp_path, backend)
