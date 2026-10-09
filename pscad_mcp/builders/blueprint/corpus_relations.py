@@ -31,6 +31,7 @@ from ...topology.models import (
     TopologyPort,
 )
 from .corpus_conditions import ConditionUnresolved, evaluate_condition
+from .port_dimensions import declared_dimension
 from .corpus_models import CorpusSpec, ProjectGraph
 from .corpus_relation_models import (
     CorpusCandidateEdge,
@@ -487,8 +488,18 @@ def _port_namespace(port: PortMetadata) -> str:
     return "unknown"
 
 
-def _port_dimension(port: PortMetadata) -> int:
-    dimension = int(port.dim or 1)
+def _port_dimension(port: PortMetadata, instance: Mapping | None = None, defaults: Mapping | None = None,
+                    computations: str | None = None, *, active: bool = True) -> int | None:
+    if port.dim is None:
+        return None
+    if port.dim == 0:
+        _, separator, name = port.name.partition(":")
+        if separator:
+            if not active:
+                return None
+            return declared_dimension(name, instance or {}, defaults or {}, computations)
+        return 1 if _port_namespace(port) == "electrical" else None
+    dimension = int(port.dim)
     if dimension < 1:
         raise ValueError("port dimension must be positive")
     return dimension
@@ -581,13 +592,14 @@ def materialize_instance_ports(
                     port.name,
                 )
             try:
-                dimension = _port_dimension(port)
+                dimension = _port_dimension(port, component.parameters, defaults,
+                                            contract.definition.metadata.computations, active=active)
                 absolute = absolute_port(
                     component.location,
                     (port.x, port.y),
                     component.orientation,
                 )
-            except (GeometryError, TypeError, ValueError) as error:
+            except (GeometryError, TypeError, ValueError, KeyError, SyntaxError) as error:
                 raise _port_error(
                     "CORPUS_PORT_GEOMETRY_UNRESOLVED",
                     "Port geometry cannot be resolved.",

@@ -42,6 +42,7 @@ class DefinitionMetadata:
     parameters: dict[str, ParameterMetadata] = field(default_factory=dict)
     name: str = ""
     description: str | None = None
+    computations: str | None = field(default=None, repr=False)
 
 
 @dataclass(frozen=True)
@@ -221,6 +222,7 @@ def _metadata_from_definition(definition: ET.Element) -> DefinitionMetadata:
         parameters,
         str(definition.get("name", "")),
         description,
+        definition.findtext("./script/segment[@name='Computations']"),
     )
 
 
