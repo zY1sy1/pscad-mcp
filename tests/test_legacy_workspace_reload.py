@@ -14,6 +14,9 @@ class SavedProject:
     def is_dirty(self):
         return self.dirty
 
+    def get_run_status(self, callback):
+        callback("idle", 0.0)
+
 
 class WorkspaceApplication:
     def __init__(self):
@@ -64,6 +67,15 @@ async def test_legacy_unload_resets_owned_saved_workspace_and_restores_other_pro
     assert app.reset_count == 1
     assert set(app.projects) == {"Source"}
     assert all(path.read_bytes() == content for path, content in before.items())
+
+
+@pytest.mark.asyncio
+async def test_legacy_workspace_reload_reads_project_run_states_without_an_application_busy_api(tmp_path):
+    backend, app = arrange(tmp_path)
+    app.is_busy = None
+    await backend.unload_project("BuiltCase")
+    assert app.reset_count == 1
+    assert set(app.projects) == {"Source"}
 
 
 @pytest.mark.asyncio

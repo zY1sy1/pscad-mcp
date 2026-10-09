@@ -473,11 +473,11 @@ class LegacyBackend:
 
         reset = getattr(app, "new_workspace", None)
         busy = getattr(app, "is_busy", None)
-        if not callable(reset) or not callable(busy):
+        if not callable(reset):
             raise unavailable("workspace_reset_unavailable")
         if not self.owns_process or type(self._managed_pid) is not int or self._managed_pid <= 0:
             raise unavailable("process_ownership_unverified")
-        if await self.executor.run_safe(busy) is not False or self._paused_projects:
+        if (callable(busy) and await self.executor.run_safe(busy) is not False) or self._paused_projects:
             raise unavailable("workspace_not_idle")
         projects = await self.list_projects()
         paths: dict[str, Path] = {}
@@ -485,6 +485,10 @@ class LegacyBackend:
         for info in projects:
             if info.name.casefold() == "master":
                 continue
+            if not callable(busy):
+                state = await self.project_run_state(info.name)
+                if state.status.casefold() not in {"idle", "completed", "stopped"}:
+                    raise unavailable("workspace_not_idle", loaded_project=info.name, run_status=state.status)
             path = self.definition_paths.get(info.name)
             if path is None or not path.is_file() or path.is_symlink():
                 raise unavailable("project_path_unverified", loaded_project=info.name)
