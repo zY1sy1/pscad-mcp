@@ -13,7 +13,7 @@ from ..common.records import JsonRecord, freeze
 
 _FIDELITIES = {"detailed_pwm", "average_value", "both"}
 _TOPOLOGIES = {"two_terminal_symmetrical_monopole"}
-_CONVERTERS = {"half_bridge"}
+_CONVERTERS = {"half_bridge", "full_bridge"}
 _LINK_KINDS = {"overhead_line", "cable"}
 _UNITS = {
     "A", "F", "H", "Hz", "J", "V", "W", "kA", "kV", "kW", "km", "mH",
@@ -285,6 +285,9 @@ def parse_parametric_request(payload: Mapping[str, Any] | MmcParametricRequest) 
         raise _invalid("topology is unsupported.", field="topology", value=topology)
     if converter not in _CONVERTERS:
         raise _invalid("converter is unsupported.", field="converter", value=converter)
+    if converter == "full_bridge" and fidelity != "detailed_pwm":
+        raise _invalid("Full-bridge requests currently require the audited detailed PWM path.",
+                       field="model_fidelity", converter=converter, value=fidelity)
     return MmcParametricRequest(
         schema_version=1,
         model_fidelity=fidelity,

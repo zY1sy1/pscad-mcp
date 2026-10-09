@@ -252,6 +252,10 @@ def create_parametric_plan(
                 and isinstance(native_topology.get("declared"), str)
                 else "unknown"
             )
+            if declared_topology in {"half_bridge", "full_bridge"} and declared_topology != parsed.converter:
+                raise _error("MMC_TEMPLATE_TOPOLOGY_MISMATCH",
+                             "The requested converter differs from the verified template topology.",
+                             requested_converter=parsed.converter, template_converter=declared_topology)
             capabilities = {
                 "template_native_timing": native_timing,
                 "native_schedule": False,
