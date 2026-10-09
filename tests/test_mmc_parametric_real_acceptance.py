@@ -216,8 +216,16 @@ async def _run_standard_scenarios(
         str(item["engine"]): Path(str(item["final_path"])).resolve()
         for item in build["engines"]
     }
+    fidelity = request["model_fidelity"]
+    expected_engines = (
+        {"detailed_pwm", "average_value"} if fidelity == "both" else {fidelity}
+    )
+    if set(engine_paths) != expected_engines:
+        raise AssertionError("Published engines differ from the requested fidelity")
     results: list[dict[str, Any]] = []
     for engine in ("detailed_pwm", "average_value"):
+        if engine not in expected_engines:
+            continue
         final_project = engine_paths[engine]
         source_copy = case_root / f"{final_project.stem}_scenario_source.pscx"
         if not source_copy.is_file():
