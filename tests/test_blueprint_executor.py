@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import copy
 from pathlib import Path
+import xml.etree.ElementTree as ET
 
 import pytest
 
@@ -32,6 +33,43 @@ def full_blueprint() -> dict:
         {"sequence": 9, "kind": "declare_output_channel", "target": "brk-state", "arguments": {"path": "Main/BRK_STATE", "units": "state", "call_id": 1}, "operation_id": "op-009"},
     ]
     return value
+
+
+@pytest.mark.asyncio
+async def test_staged_project_rebinds_internal_identity_before_first_vendor_load(tmp_path):
+    source = write_source_package(tmp_path)
+    entry = source / "source.pscx"
+    entry.write_text(
+        '<project name="Source"><definitions><Definition name="Main">'
+        '<schematic><User defn="Source:Main"/>'
+        '<User defn="SourceExtra:External"/><User defn="master:breaker"/>'
+        '</schematic></Definition></definitions></project>',
+        encoding="utf-8",
+    )
+    before = hash_tree(source)
+    build_plan = create_plan(
+        load_blueprint_asset(valid_blueprint()), str(source), "BuiltCase",
+        normalize_inventory(live_inventory()), PathPolicy(str(tmp_path)),
+    )
+
+    class IdentityCheckingService(RecordingBlueprintPscadService):
+        async def load_projects(self, filenames):
+            target = next(Path(name) for name in filenames if Path(name).suffix == ".pscx")
+            root = ET.parse(target).getroot()
+            assert root.get("name") == target.stem == "BuiltCase"
+            if not self.calls:
+                assert [item.get("defn") for item in root.findall(".//User")] == [
+                    "BuiltCase:Main", "SourceExtra:External", "master:breaker",
+                ]
+            await super().load_projects(filenames)
+
+    record = await execute_build(
+        build_plan, IdentityCheckingService(), tmp_path,
+        build_id="renamed-source", poll_interval_s=0, simulation_timeout_s=1,
+    )
+
+    assert record.state is BlueprintBuildState.ACCEPTANCE_PASSED, record.error
+    assert hash_tree(source) == before
 
 
 @pytest.mark.asyncio

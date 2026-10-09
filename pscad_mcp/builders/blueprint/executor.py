@@ -10,6 +10,7 @@ import time
 from typing import Any, Mapping
 
 from ...core.backend.base import BackendError
+from ...core.backend.legacy_support import rewrite_template_identity
 from ...core.path_policy import PathPolicy
 from .assets import hash_tree, manifest_hash, resolve_companion_project_files, sha256_file
 from .journal import BuildJournal, next_state, write_json_atomic
@@ -445,6 +446,7 @@ async def execute_build(
             if project_file.exists() or project_file.is_symlink():
                 raise _error("BLUEPRINT_BUILD_CONFLICT", "The target project file already exists in staging.", "build_pscad_project")
             copied_entry.replace(project_file)
+        rewrite_template_identity(project_file, project_file, plan.target_name)
         companion_files = resolve_companion_project_files(plan.blueprint, staging, PathPolicy(str(workspace)))
         project_files = (project_file, *companion_files)
         context = _Context(
