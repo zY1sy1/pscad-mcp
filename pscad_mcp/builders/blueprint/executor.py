@@ -580,7 +580,21 @@ async def execute_build(
     active_journal.append("error", failure_event)
     quarantine = build_root / "quarantine"
     if staging.exists() and not quarantine.exists():
-        staging.replace(quarantine)
+        try:
+            staging.replace(quarantine)
+        except OSError as quarantine_error:
+            active_journal.append("quarantine_deferred", {"exception": type(quarantine_error).__name__,
+                                                          "message": str(quarantine_error)})
+            write_json_atomic(staging / "evidence" / "failure-report.json", {
+                "build_id": build_id, "plan_hash": plan.plan_hash,
+                "state": failure_state.value, "error": error.to_dict(),
+                "quarantine_pending": True,
+            })
+            return _record(build_id, failure_state, plan, history, bindings, staging,
+                           error=error.to_dict(), evidence={
+                               "failure_report": "evidence/failure-report.json",
+                               "journal": "../journal.jsonl", "quarantine_pending": True,
+                           })
     elif not quarantine.exists():
         quarantine.mkdir(parents=True, exist_ok=True)
     next_state(failure_state, BlueprintBuildState.QUARANTINED)
