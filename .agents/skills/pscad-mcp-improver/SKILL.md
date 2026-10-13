@@ -1,6 +1,6 @@
 ---
 name: pscad-mcp-improver
-description: Review PSCAD MCP improvement evidence and, only after explicit user approval, reproduce and remediate approved candidates with regression tests. Use for scheduled backlog review or user-requested MCP improvement.
+description: Use when reviewing the PSCAD-MCP improvement backlog or handling a user-requested MCP improvement.
 ---
 
 # PSCAD MCP Improver
