@@ -1,6 +1,6 @@
 # PSCAD MCP for Codex and GitHub Copilot CLI
 
-`pscad-mcp` is a Windows Model Context Protocol (MCP) server for PSCAD automation. It uses `mhrc.automation` for PSCAD 4.6.x and `mhi.pscad` for PSCAD 5.x behind one stable 60-tool generic service contract, plus read-only topology diagnostics, HVDC, silent-learning, blank LCC/MMC, fixed CIGRE LCC, parametric LCC, parametric MMC, and generic Blueprint Builder layers. The current inventory is 105 tools: 104 compatibility/domain tools plus one always-on capability tool.
+`pscad-mcp` is a Windows Model Context Protocol (MCP) server for PSCAD automation. It uses `mhrc.automation` for PSCAD 4.6.x and `mhi.pscad` for PSCAD 5.x behind one stable 60-tool generic service contract, plus read-only topology diagnostics, HVDC, silent-learning, blank LCC/MMC, fixed CIGRE LCC, parametric LCC, parametric MMC, and generic Blueprint Builder layers. The current inventory is 112 tools: 111 compatibility/domain tools plus one always-on capability tool.
 
 中文安装、配置、安全和验收说明：[docs/zh-CN/README.md](docs/zh-CN/README.md)
 
@@ -93,10 +93,11 @@ external process.
 
 ## Tool coverage
 
-The complete inventory is 105 = 60 generic tools, 2 topology tools, 10 HVDC
+The complete inventory is 112 = 60 generic tools, 2 topology tools, 10 HVDC
 tools, 3 learning tools, 8 LCC tools (4 fixed CIGRE LCC plus 4 blank LCC
 lifecycle tools), 6 parametric LCC tools, 11 MMC tools (7 parametric MMC plus
-4 blank MMC lifecycle tools), 4 generic Blueprint Builder tools, and one
+4 blank MMC lifecycle tools), 4 generic Blueprint Builder tools, 7 parameter-sweep
+tools, and one
 always-on `get_pscad_capabilities` tool.
 The generic 60-tool contract keeps its existing names and default return
 shapes.
@@ -111,14 +112,15 @@ The server currently exposes tool groups for:
 - simulation-set operations
 - project creation, save, and build tasks
 - simulation output capture and file parsing
+- durable parameter sweeps, cancellation/resume and constrained result ranking
 
 ### Compatible discovery, profiles, pagination, and documentation
 
 `full` remains the unchanged default for `PSCAD_MCP_TOOL_PROFILE`, so existing
 clients receive all compatibility/domain tools plus the always-on
 `get_pscad_capabilities` tool. Selecting a comma-separated subset of `core`,
-`topology`, `hvdc`, `lcc`, `parametric_lcc`, `mmc`, `blueprint`, and
-`learning` is opt-in. Empty, unknown, or
+`topology`, `hvdc`, `lcc`, `parametric_lcc`, `mmc`, `blueprint`, `learning`, and
+`sweep` is opt-in. Empty, unknown, or
 otherwise invalid profile values fail server startup instead of silently
 changing the exposed inventory. `get_pscad_capabilities` reports the active
 profile, registered tools, backend support, and explicit limitations.
@@ -132,6 +134,18 @@ Generated API documentation lives in local state and is created only when
 `sync_documentation` is called. On Windows the default root is
 `%LOCALAPPDATA%\\pscad-mcp\\docs`; `PSCAD_MCP_DOCUMENTATION_DIR` may override
 the root, but it must be an absolute path.
+
+### Parameter sweeps and constrained optimization
+
+Seven tools provide offline planning and immutable campaign creation, background
+serial execution, durable status, cancellation, explicit retry/resume, and
+baseline comparison with constrained ranking. Use `PSCAD_MCP_TOOL_PROFILE=sweep`
+or include `sweep` in a combined profile; `full` includes these tools.
+Every attempt uses a fresh source copy and its own managed Legacy instance and
+COM executor. Live orphan processes block recovery; completed attempts are
+retained when resuming. OUT/INF and PSOUT statistics describe bounded samples;
+optimization selects among evaluated scenarios. Licensed acceptance for this
+new workflow remains pending. See the [Chinese usage guide](docs/parameter-sweeps.md).
 
 The topology layer adds `inspect_project_topology` and
 `diagnose_project_topology`. Both tools are read-only. Diagnosis now defaults

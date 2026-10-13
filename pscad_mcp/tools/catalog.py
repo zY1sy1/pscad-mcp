@@ -166,6 +166,11 @@ TOOL_GROUPS = MappingProxyType(
                 "validate_blank_mmc_model",
             }
         ),
+        "sweep": frozenset({
+            "plan_parameter_sweep", "create_parameter_sweep", "run_parameter_sweep",
+            "get_parameter_sweep_status", "cancel_parameter_sweep",
+            "resume_parameter_sweep", "analyze_parameter_sweep",
+        }),
         "blueprint": frozenset(
             {
                 "plan_pscad_project_build",
@@ -235,6 +240,13 @@ def _spec(
 
 COMPATIBILITY_TOOL_SPECS = MappingProxyType(
     {
+        "plan_parameter_sweep": _spec("plan_parameter_sweep", "Validate an explicit sweep and bind its source hashes without launching PSCAD.", read_only=True, idempotent=True, open_world=False, backend_support=_SERVER_LOCAL),
+        "create_parameter_sweep": _spec("create_parameter_sweep", "Create an immutable sweep campaign after confirmation of the exact plan hash.", open_world=False, backend_support=_SERVER_LOCAL),
+        "run_parameter_sweep": _spec("run_parameter_sweep", "Start a confirmed background sweep using independent owned Legacy instances.", idempotent=True, backend_support=frozenset({"legacy"}), limitation_code="SWEEP_CAPABILITY_UNAVAILABLE"),
+        "get_parameter_sweep_status": _spec("get_parameter_sweep_status", "Read durable sweep progress and optionally paginated results without contacting PSCAD.", read_only=True, idempotent=True, open_world=False, backend_support=_SERVER_LOCAL),
+        "cancel_parameter_sweep": _spec("cancel_parameter_sweep", "Request confirmed cancellation and verified cleanup of only the sweep's owned instance.", destructive=True, idempotent=True, open_world=False, backend_support=_SERVER_LOCAL),
+        "resume_parameter_sweep": _spec("resume_parameter_sweep", "Resume a confirmed sweep, preserving completed results and retrying only named failed scenarios.", idempotent=True, backend_support=frozenset({"legacy"}), limitation_code="SWEEP_CAPABILITY_UNAVAILABLE"),
+        "analyze_parameter_sweep": _spec("analyze_parameter_sweep", "Compare retained channel statistics and rank evaluated scenarios under explicit constraints.", read_only=True, idempotent=True, open_world=False, backend_support=_SERVER_LOCAL),
         "get_local_pscad": _spec(
             "get_local_pscad",
             "Launch a server-owned PSCAD instance; never attaches to an already-open "

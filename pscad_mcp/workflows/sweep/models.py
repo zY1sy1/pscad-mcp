@@ -5,13 +5,13 @@ from __future__ import annotations
 import hashlib
 import math
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any, Mapping
+from typing import Any
 
 from ...core.path_policy import PathPolicy
-
 
 JsonScalar = None | bool | int | float | str
 
@@ -30,8 +30,8 @@ _PLUS_OR_PRODUCT_EXPRESSION = re.compile(
     rf"^\s*{_SIMPLE_OPERAND}(?:\s*(?:\+|\*|%|\*\*)\s*{_SIMPLE_OPERAND})+\s*$"
 )
 _DIVISION_EXPRESSION = re.compile(
-    rf"^\s*(?:\d+(?:\.\d*)?|\.\d+)\s*/\s*(?:\d+(?:\.\d*)?|\.\d+)\s*$"
-    rf"|^\s*[A-Za-z_]\w*\s+/\s+[A-Za-z_]\w*\s*$"
+    r"^\s*(?:\d+(?:\.\d*)?|\.\d+)\s*/\s*(?:\d+(?:\.\d*)?|\.\d+)\s*$"
+    r"|^\s*[A-Za-z_]\w*\s+/\s+[A-Za-z_]\w*\s*$"
 )
 _SUBTRACTION_EXPRESSION = re.compile(
     rf"^\s*(?:(?:\d+(?:\.\d*)?|\.\d+)\s*-\s*(?:\d+(?:\.\d*)?|\.\d+)"
@@ -231,7 +231,7 @@ class SweepSpec:
     filesystem_timestamp_tolerance_seconds: int | float = 2.0
 
     @classmethod
-    def parse(cls, raw: Any, path_policy: PathPolicy) -> "SweepSpec":
+    def parse(cls, raw: Any, path_policy: PathPolicy) -> SweepSpec:
         manifest = _mapping(raw, "Sweep specification")
         _reject_unknown(manifest, _TOP_LEVEL_FIELDS, "Sweep specification")
         _require_fields(
@@ -321,6 +321,8 @@ class SweepSpec:
     def _parse_scenarios(value: Any) -> tuple[SweepScenario, ...]:
         if not isinstance(value, list) or not value:
             raise ValueError("scenarios must be a non-empty ordered list.")
+        if len(value) > 1000:
+            raise ValueError("scenarios is limited to 1000 entries.")
 
         scenarios: list[SweepScenario] = []
         names: set[str] = set()
@@ -339,6 +341,8 @@ class SweepSpec:
             updates_value = scenario["updates"]
             if not isinstance(updates_value, list) or not updates_value:
                 raise ValueError(f"{label}.updates must be a non-empty list.")
+            if len(updates_value) > 128:
+                raise ValueError(f"{label}.updates is limited to 128 components.")
             updates: list[ParameterUpdate] = []
             targets: set[tuple[int, str]] = set()
             for update_index, update_value in enumerate(updates_value):
@@ -389,6 +393,8 @@ class SweepSpec:
     ) -> tuple[SweepOutput, ...]:
         if not isinstance(value, list) or not value:
             raise ValueError("outputs must be a non-empty list.")
+        if len(value) > 16:
+            raise ValueError("outputs is limited to 16 files.")
 
         outputs: list[SweepOutput] = []
         for index, output_value in enumerate(value):
@@ -408,6 +414,8 @@ class SweepSpec:
             channels_value = output["channels"]
             if not isinstance(channels_value, list) or not channels_value:
                 raise ValueError(f"{label}.channels must be a non-empty list.")
+            if len(channels_value) > 128:
+                raise ValueError(f"{label}.channels is limited to 128 selectors.")
             channels: list[str] = []
             for channel_index, channel_value in enumerate(channels_value):
                 channel = _channel_selector(
@@ -415,7 +423,11 @@ class SweepSpec:
                     f"{label}.channels[{channel_index}]",
                 )
                 channels.append(channel)
+            if len(channels) != len(set(channels)):
+                raise ValueError(f"{label}.channels must contain unique selectors.")
             outputs.append(SweepOutput(path, tuple(channels)))
+        if len(outputs) != len({output.path.casefold() for output in outputs}):
+            raise ValueError("outputs must contain unique paths.")
         return tuple(outputs)
 
     def to_dict(self) -> dict[str, Any]:

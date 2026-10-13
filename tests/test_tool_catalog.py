@@ -74,6 +74,11 @@ BLUEPRINT_TOOL_NAMES = frozenset({
     "plan_pscad_project_build", "build_pscad_project",
     "get_pscad_project_build_status", "validate_pscad_project_build",
 })
+SWEEP_TOOL_NAMES = frozenset({
+    "plan_parameter_sweep", "create_parameter_sweep", "run_parameter_sweep",
+    "get_parameter_sweep_status", "cancel_parameter_sweep", "resume_parameter_sweep",
+    "analyze_parameter_sweep",
+})
 
 
 def test_default_server_matches_the_full_tool_catalog():
@@ -101,9 +106,10 @@ def test_catalog_locks_group_boundaries_and_immutable_values():
         TOPOLOGY_TOOL_NAMES,
         MMC_TOOL_NAMES,
         BLUEPRINT_TOOL_NAMES,
+        SWEEP_TOOL_NAMES,
     )
 
-    assert set(TOOL_GROUPS) == {"core", "hvdc", "lcc", "parametric_lcc", "learning", "topology", "mmc", "blueprint"}
+    assert set(TOOL_GROUPS) == {"core", "hvdc", "lcc", "parametric_lcc", "learning", "topology", "mmc", "blueprint", "sweep"}
     assert {name: len(tools) for name, tools in TOOL_GROUPS.items()} == {
         "core": 60,
         "hvdc": 10,
@@ -113,6 +119,7 @@ def test_catalog_locks_group_boundaries_and_immutable_values():
         "topology": 2,
         "mmc": 11,
         "blueprint": 4,
+        "sweep": 7,
     }
     assert TOOL_GROUPS["hvdc"] == HVDC_TOOL_NAMES
     assert TOOL_GROUPS["lcc"] == LCC_TOOL_NAMES
@@ -121,6 +128,7 @@ def test_catalog_locks_group_boundaries_and_immutable_values():
     assert TOOL_GROUPS["topology"] == TOPOLOGY_TOOL_NAMES
     assert TOOL_GROUPS["mmc"] == MMC_TOOL_NAMES
     assert TOOL_GROUPS["blueprint"] == BLUEPRINT_TOOL_NAMES
+    assert TOOL_GROUPS["sweep"] == SWEEP_TOOL_NAMES
     assert TOOL_GROUPS["core"] == COMPATIBILITY_TOOL_NAMES - domain_tool_names
 
     with pytest.raises(TypeError):
@@ -180,7 +188,7 @@ def test_catalog_descriptions_match_registered_function_docstrings():
         for tool in create_server(environ={})._tool_manager.list_tools()
     }
 
-    assert len(by_name) == 105
+    assert len(by_name) == 112
     for name, spec in TOOL_SPECS.items():
         assert inspect.getdoc(by_name[name].fn) == spec.description, name
 

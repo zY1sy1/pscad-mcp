@@ -25,14 +25,14 @@ Corpus v2 与并发文档的处理。合入实现不会把原报告升级为其�
 它不运行 PSCAD，也不产生新版实机 PASS。LCC golden 生成必须提供
 [独立审阅及源文件记录](../acceptance/lcc-independent-reference.md)。
 
-本项目把 PSCAD 自动化封装为 105 个 MCP 工具，其中原有通用服务契约保持 60 个工具，并增加只读拓扑诊断、HVDC、静默学习、blank LCC/MMC、固定 CIGRE LCC、参数化 LCC、参数化双引擎 MMC、通用 Blueprint Builder 与始终注册的能力工具，可供 Codex、GitHub Copilot CLI 等支持 stdio MCP 的客户端调用。项目采用双后端；PSCAD 5.x 当前为 contract-tested only：
+本项目把 PSCAD 自动化封装为 112 个 MCP 工具，其中原有通用服务契约保持 60 个工具，并增加只读拓扑诊断、HVDC、静默学习、blank LCC/MMC、固定 CIGRE LCC、参数化 LCC、参数化双引擎 MMC、通用 Blueprint Builder 与始终注册的能力工具，可供 Codex、GitHub Copilot CLI 等支持 stdio MCP 的客户端调用。项目采用双后端；PSCAD 5.x 当前为 contract-tested only：
 
 - PSCAD 4.6.x：`mhrc.automation`，当前已在本机 PSCAD 4.6.2 x64 许可环境做真实验收；
 - PSCAD 5.x：`mhi.pscad` 3.1.x，当前完成契约测试，但由于本机没有 PSCAD 5.x，不能声称端到端真实验收通过；
 - 结果文件：`mhi.psout` 1.3.x。
 
-完整工具库存为 105 = 60 个通用工具 + 2 个拓扑工具 + 10 个 HVDC 工具 + 3 个学习工具 + 8 个 LCC 工具（含 blank 生命周期） + 6 个参数化 LCC 工具 + 11 个 MMC 工具（含 blank 生命周期） + 4 个通用 Blueprint Builder 工具 + 1 个始终注册的 `get_pscad_capabilities` 能力工具；原有 60 个通用工具的名称和默认返回形状保持不变。
-其中 104 个兼容/领域工具 + 1 个始终注册的能力工具。
+完整工具库存为 112 = 60 个通用工具 + 2 个拓扑工具 + 10 个 HVDC 工具 + 3 个学习工具 + 8 个 LCC 工具（含 blank 生命周期） + 6 个参数化 LCC 工具 + 11 个 MMC 工具（含 blank 生命周期） + 4 个通用 Blueprint Builder 工具 + 7 个参数扫描工具 + 1 个始终注册的 `get_pscad_capabilities` 能力工具；原有 60 个通用工具的名称和默认返回形状保持不变。
+其中 111 个兼容/领域工具 + 1 个始终注册的能力工具。
 
 Legacy PSCAD 4.6.2 后端只支持启动新的受管 Automation 实例，不能附加到用户普通方式打开的 GUI。受管窗口默认可见；默认检测到已有 PSCAD 进程时会在启动前返回 `EXTERNAL_PSCAD_PRESENT`。`repair_connection` 使用连接时缓存的进程归属：自有实例会先正常退出，外部进程不会被终止。
 
@@ -67,7 +67,7 @@ LCC/MMC 实现计划保留独立的历史基线
 
 ## 功能范围
 
-默认 `full` profile 下服务器注册 105 个工具（组成见上文），其中以下七组共 60 个通用工具：
+默认 `full` profile 下服务器注册 112 个工具（组成见上文），其中以下七组共 60 个通用工具：
 
 - 应用与文档 7 个：连接、状态、修复、退出、文档同步/列出/读取；
 - 工程与参数 12 个：加载、列出、运行、暂停、停止、运行状态、元件查询、参数读取/写入/校验、工程设置读取/写入；
@@ -79,11 +79,19 @@ LCC/MMC 实现计划保留独立的历史基线
 
 此外还有静默学习工具 3 个（不计入上述 60 个通用工具）：`record_goal_failure`、`review_improvement_backlog`、`clear_learning_history`。
 
+### 参数扫描与约束寻优
+
+新增 7 个工具覆盖计划、创建、后台串行运行、进度、取消、续跑和分析。
+每次尝试使用独立工程副本、Legacy 实例和 COM 执行器，保留原始工程哈希和输出证据。
+失败后仅在参数恢复、实例退出均核实后继续；旧实例仍存活时阻止恢复。
+统计基于明确标记的有界采样，寻优只在已经运行的工况中筛选。
+该新流程的许可实机验收尚未完成。[中文操作示例](../parameter-sweeps.md)。
+
 ### 兼容发现、工具配置、分页和本地文档
 
 `full` 保持不变的默认值，并额外注册始终可用的
 `get_pscad_capabilities`。`PSCAD_MCP_TOOL_PROFILE` 可用逗号分隔，显式选择
-`core`、`topology`、`hvdc`、`lcc`、`parametric_lcc`、`mmc`、`blueprint` 和 `learning`
+`core`、`topology`、`hvdc`、`lcc`、`parametric_lcc`、`mmc`、`blueprint`、`learning` 和 `sweep`
 中的若干组；空值、未知组或其他非法值会导致启动失败。能力工具报告当前 profile、已注册工具、后端支持和
 明确限制。
 
@@ -531,7 +539,7 @@ git diff --check
 git status --short --branch
 ```
 
-工具数量应输出 `105 105`。真实 PSCAD 5.x 必须在安装并运行对应版本后另做相同级别验收。
+工具数量应输出 `112 112`。真实 PSCAD 5.x 必须在安装并运行对应版本后另做相同级别验收。
 
 ## 常见故障
 

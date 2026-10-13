@@ -128,8 +128,10 @@ async def shutdown_domain_services(timeout_s: float = 5.0) -> None:
         shutdown_parametric_lcc_builder_service,
     )
     from .tools.lcc_tools import shutdown_lcc_builder_service
+    from .tools.sweep_tools import shutdown_sweep_service
 
     actions = (
+        ("sweep", shutdown_sweep_service),
         ("hvdc", shutdown_hvdc_service),
         ("fixed_lcc", shutdown_lcc_builder_service),
         ("parametric_lcc", shutdown_parametric_lcc_builder_service),

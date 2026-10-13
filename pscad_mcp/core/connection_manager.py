@@ -23,7 +23,7 @@ def _optional_import(module_name: str) -> Any:
         return None
 
 
-async def _default_backend_factory() -> Any:
+async def _default_backend_factory(executor: Any = robust_executor) -> Any:
     config = PscadLaunchConfig.from_environ(os.environ)
     legacy_module = _optional_import("mhrc.automation")
     modern_module = _optional_import("mhi.pscad")
@@ -31,7 +31,7 @@ async def _default_backend_factory() -> Any:
     legacy_installations = []
     if legacy_module is not None:
         try:
-            legacy_installations = await robust_executor.run_safe(
+            legacy_installations = await executor.run_safe(
                 lambda: legacy_module.controller().get_paramlist_names("pscad")
             )
         except Exception as exc:
@@ -40,7 +40,7 @@ async def _default_backend_factory() -> Any:
     modern_installations = []
     if modern_module is not None:
         try:
-            modern_installations = await robust_executor.run_safe(
+            modern_installations = await executor.run_safe(
                 modern_module.versions
             )
         except Exception as exc:
@@ -53,7 +53,7 @@ async def _default_backend_factory() -> Any:
     )
     if choice.backend == "legacy":
         return LegacyBackend(
-            robust_executor,
+            executor,
             version=choice.version,
             x64=choice.x64,
             automation_module=legacy_module if legacy_module is not None else False,
@@ -63,7 +63,7 @@ async def _default_backend_factory() -> Any:
             process_probe=list_pscad_processes,
         )
     return ModernBackend(
-        robust_executor,
+        executor,
         version=choice.version,
         x64=choice.x64,
         pscad_module=modern_module,

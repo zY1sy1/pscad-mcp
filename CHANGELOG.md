@@ -4,6 +4,11 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+### Added
+
+- Seven parameter-sweep tools in the new `sweep` profile: offline hash-bound planning and snapshots, background serial execution in dedicated owned instances, durable progress, cancellation, explicit retry/resume, baseline comparison and constrained ranking of evaluated scenarios.
+- Sweep records retain source and artifact hashes; ambiguous orphan sessions block recovery. Licensed acceptance is opt-in and has not yet been established for this feature.
+
 ### Changed
 
 - Integrated the completed Legacy/MMC repairs, LCC total-power correction,
@@ -97,11 +102,11 @@ All notable changes to this project are documented here.
 - LCC planning now fails closed without live PSCAD definition inventory;
   output-channel creation, final-project identity, waveform ownership, asset
   fingerprints, and acceptance-report evidence are checked explicitly.
-- The compatibility inventory is 104 compatibility tools: 60 generic tools,
+- The compatibility inventory is 111 compatibility tools: 60 generic tools,
   two topology tools, ten HVDC tools, three learning tools, eight LCC tools,
-  six parametric LCC tools, eleven MMC tools, and four generic Blueprint
-  Builder tools. With the always-on
-  `get_pscad_capabilities` discovery tool, the current total is 105.
+  six parametric LCC tools, eleven MMC tools, four generic Blueprint
+  Builder tools, and seven parameter-sweep tools. With the always-on
+  `get_pscad_capabilities` discovery tool, the current total is 112.
 
 - Added the deterministic, privacy-filtered PSCAD Blueprint corpus and four
   reviewed no-mutation Blueprint Builder tools. Builds require immutable plan

@@ -21,6 +21,7 @@ from .tools.learning_tools import register_learning_tools
 from .tools.mmc_tools import register_mmc_tools
 from .tools.project_tools import register_project_tools
 from .tools.simset_tools import register_simset_tools
+from .tools.sweep_tools import register_sweep_tools
 from .tools.topology_tools import register_topology_tools
 
 SERVER_INSTRUCTIONS = (
@@ -78,6 +79,7 @@ def create_server(environ: Mapping[str, str] | None = None) -> FastMCP:
     register_topology_tools(mcp)
     register_blueprint_tools(mcp)
     register_blank_builder_tools(mcp)
+    register_sweep_tools(mcp)
 
     logger.info("PSCAD MCP Server initialized with modular tools.")
     return mcp
