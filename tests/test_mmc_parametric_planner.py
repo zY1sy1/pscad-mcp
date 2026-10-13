@@ -9,6 +9,13 @@ from pscad_mcp.hvdc.builders.mmc.parametric_planner import create_parametric_pla
 from tests.mmc_parametric_fakes import avm_assets, pwm_audit, valid_request
 
 
+def test_full_bridge_average_plan_cannot_fall_back_to_packaged_half_bridge_assets(tmp_path):
+    with pytest.raises(BackendError) as error:
+        create_parametric_plan(valid_request(model_fidelity="average_value", converter="full_bridge"),
+                               "MMC_CASE", tmp_path, None, avm_assets())
+    assert error.value.code == "MMC_AVM_NATIVE_INPUT_MISSING"
+
+
 def test_pwm_plan_rejects_a_template_with_a_different_verified_converter_topology(tmp_path):
     audit = replace(pwm_audit(), submodule_topology={"declared": "full_bridge"})
     with pytest.raises(BackendError) as error:

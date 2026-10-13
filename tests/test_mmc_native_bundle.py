@@ -25,6 +25,19 @@ from pscad_mcp.hvdc.builders.mmc.native_bundle import (
 from tests.test_mmc_cable_constants import _fake_native_run
 
 
+def test_full_bridge_native_fixture_retains_bidirectional_arm_topology(constants_evidence, installed_sources, tmp_path):
+    donor, master = installed_sources
+    report = materialize_native_avm_fixture(tmp_path / "full-bridge", constants_evidence=constants_evidence,
+        source_project=donor, master_path=master, converter="full_bridge", control_kind="dq_current",
+        reversal_time_s=1.0, simulation_duration_s=3.9)
+    assert report["parameters"]["converter"] == "full_bridge"
+    assert report["library"]["converter"] == "full_bridge"
+    arm = ET.parse(report["library"]["library_path"]).find("./definitions/Definition[@name='MMCAverageArm']")
+    assert arm.find("./schematic/User[@name='negative_clamp']") is not None
+    assert arm.find("./schematic/User[@name='negative_bypass']") is None
+    assert report["topology"]["converter"] == "full_bridge"
+
+
 def test_native_dq_fixture_connects_measured_valve_signals_and_exports_internal_states(constants_evidence, installed_sources, tmp_path):
     from pscad_mcp.hvdc.builders.mmc.native_dq import DQ_NAME
     donor, master = installed_sources
@@ -392,6 +405,7 @@ def test_full_fixture_wires_twelve_two_terminal_arms_to_two_three_phase_stations
         == 2
     )
     assert report["topology"] == {
+        "converter": "half_bridge",
         "two_stations": True,
         "arm_count": 12,
         "phase_breakout_count": 2,

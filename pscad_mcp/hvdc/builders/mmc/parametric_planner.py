@@ -262,6 +262,8 @@ def create_parametric_plan(
                 "template_submodule_topology": declared_topology,
             }
         else:
+            if parsed.converter == "full_bridge" and not native_inputs.get("source_paths"):
+                raise _error("MMC_AVM_NATIVE_INPUT_MISSING", "Full-bridge AVM requires the native bidirectional arm producer and its immutable inputs.")
             bindings = ()
             dependencies = ()
             plan_source_paths = {

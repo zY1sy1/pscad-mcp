@@ -25,9 +25,9 @@ def test_full_bridge_detailed_request_preserves_converter_identity():
 
 
 @pytest.mark.parametrize("fidelity", ["average_value", "both"])
-def test_full_bridge_average_value_request_cannot_select_a_half_bridge_model(fidelity):
-    with pytest.raises(BackendError):
-        parse_parametric_request(valid_request(model_fidelity=fidelity, converter="full_bridge"))
+def test_full_bridge_average_value_request_preserves_converter_identity(fidelity):
+    request = parse_parametric_request(valid_request(model_fidelity=fidelity, converter="full_bridge"))
+    assert request.converter == "full_bridge"
 
 
 @pytest.mark.parametrize("field", ["dc_voltage_kv", "active_power_mw", "frequency_hz"])

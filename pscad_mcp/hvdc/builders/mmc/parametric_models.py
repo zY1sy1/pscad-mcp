@@ -285,9 +285,6 @@ def parse_parametric_request(payload: Mapping[str, Any] | MmcParametricRequest) 
         raise _invalid("topology is unsupported.", field="topology", value=topology)
     if converter not in _CONVERTERS:
         raise _invalid("converter is unsupported.", field="converter", value=converter)
-    if converter == "full_bridge" and fidelity != "detailed_pwm":
-        raise _invalid("Full-bridge requests currently require the audited detailed PWM path.",
-                       field="model_fidelity", converter=converter, value=fidelity)
     return MmcParametricRequest(
         schema_version=1,
         model_fidelity=fidelity,

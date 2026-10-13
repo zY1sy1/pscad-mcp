@@ -205,6 +205,7 @@ def _engine_candidates(
     impedance_scale = common["impedance_scale"]
     cell_count = math.ceil(float(reference["reference_cells_per_arm"]) * voltage_scale)
     base_parameters: dict[str, Any] = {
+        "converter": request.converter,
         "requested_dc_voltage_kv": request.dc_voltage_kv,
         "requested_active_power_mw": request.active_power_mw,
         "rated_dc_voltage_kv": request.dc_voltage_kv,

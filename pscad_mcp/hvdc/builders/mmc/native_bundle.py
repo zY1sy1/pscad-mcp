@@ -683,6 +683,7 @@ def materialize_native_avm_library(
     constants_evidence: str | Path,
     master_path: str | Path = DEFAULT_MASTER,
     source_project: str | Path = DEFAULT_DONOR,
+    converter: str = "half_bridge",
 ) -> dict:
     """Create the physical arm, modulator and cable in one native library."""
     target = Path(destination).resolve()
@@ -691,7 +692,7 @@ def materialize_native_avm_library(
     master = Path(master_path).resolve()
     source = Path(source_project).resolve()
     metadata, master_hash, defaults = _audit_master(master)
-    root, arm_writer = _make_library(metadata, defaults, scope=NATIVE_SCOPE)
+    root, arm_writer = _make_library(metadata, defaults, scope=NATIVE_SCOPE, converter=converter)
     _station_control(root)
     _station_measurements(root)
     append_precharge_readiness(root)
@@ -722,6 +723,7 @@ def materialize_native_avm_library(
     return {
         "schema_version": 1,
         "scope": "native_mmc_avm_library",
+        "converter": converter,
         "library_path": str(target),
         "library_sha256": library_hash,
         "master_path": str(master),
@@ -844,6 +846,7 @@ def materialize_native_avm_fixture(
     master_path: str | Path = DEFAULT_MASTER,
     source_project: str | Path = DEFAULT_DONOR,
     project_name: str = "mmc_native_avm_fixture",
+    converter: str = "half_bridge",
     frequency_hz: float = 60.0,
     ac_voltage_kv: float | None = None,
     station_p_ac_voltage_kv: float | None = None,
@@ -1038,6 +1041,7 @@ def materialize_native_avm_fixture(
         constants_evidence=constants_evidence,
         master_path=master_path,
         source_project=source_project,
+        converter=converter,
     )
     master_metadata, master_hash, master_defaults = _audit_master(
         Path(master_path).resolve()
@@ -1554,6 +1558,7 @@ def materialize_native_avm_fixture(
         "library": library_receipt,
         "master_sha256": master_hash,
         "parameters": {
+            "converter": converter,
             "frequency_hz": frequency_hz,
             "station_p_ac_voltage_kv": station_p_ac_voltage_kv,
             "station_vdc_ac_voltage_kv": station_vdc_ac_voltage_kv,
@@ -1739,6 +1744,9 @@ def audit_native_avm_fixture(
     ):
         raise ValueError("Native AVM DC poles are crossed")
     library = Path(receipt["library"]["library_path"])
+    converter = receipt["parameters"].get("converter", "half_bridge")
+    if converter not in {"half_bridge", "full_bridge"} or receipt["library"].get("converter", "half_bridge") != converter:
+        raise ValueError("Native AVM converter identity differs from its library")
     expected_library_sha256 = (
         receipt["library"]["library_sha256"]
         if finalized_library_sha256 is None
@@ -1746,9 +1754,17 @@ def audit_native_avm_fixture(
     )
     if _hash(library) != expected_library_sha256:
         raise ValueError("Native AVM companion library changed")
+    library_root = ET.parse(library)
+    arm = library_root.find("./definitions/Definition[@name='MMCAverageArm']")
+    if arm is None:
+        raise ValueError("Native AVM arm is missing")
+    has_reverse_clamp = arm.find("./schematic/User[@name='reverse_clamp_voltage']") is not None
+    has_bypass = arm.find("./schematic/User[@name='negative_bypass']") is not None
+    if has_reverse_clamp != (converter == "full_bridge") or has_bypass != (converter == "half_bridge"):
+        raise ValueError("Native AVM arm topology differs from the declared converter")
     definitions = {
         definition.get("name")
-        for definition in ET.parse(library).findall("./definitions/Definition")
+        for definition in library_root.findall("./definitions/Definition")
     }
     if (
         not {
@@ -1766,6 +1782,7 @@ def audit_native_avm_fixture(
     ):
         raise ValueError("Native AVM companion definitions are incomplete")
     return {
+        "converter": converter,
         "two_stations": True,
         "arm_count": 12,
         "phase_breakout_count": 2,
