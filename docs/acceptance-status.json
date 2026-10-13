@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-13T19:47:54.486174+08:00",
+  "updated_at": "2026-10-14T03:35:02.942245+08:00",
   "policy": "Evidence belongs only to its named scope, exact request and tested commit. INTEGRATION_BRANCH records are not merged/deployed. PASS is never inherited by another builder, rating or later commit; offline integrity checks do not establish physical acceptance.",
   "scopes": [
     {
@@ -1362,6 +1362,133 @@
         }
       ],
       "implementation_source_branch": "codex/acceptance-oct09"
+    },
+    {
+      "scope": "parameter_sweep_recovery_and_metrics_462",
+      "implementation_status": "INTEGRATION_BRANCH",
+      "licensed_status": "PASS",
+      "pscad_version": "4.6.2",
+      "evidence": {
+        "report_path": "D:\\PSCAD-Workspace\\sweep-recovery-metrics-20261014\\final-evidence-audit.json",
+        "sha256": "52e29bd00549c5ad0a8fc39fa75a828b1d70a1d21cb96fc4df638abb8bf0acbe",
+        "commit": "144ba5fba0eb20c77c26197cc53c95245cb3211e"
+      },
+      "evidence_checks": [
+        {
+          "pointer": "/status",
+          "equals": "PASS"
+        },
+        {
+          "pointer": "/model_accepted",
+          "equals": false
+        },
+        {
+          "pointer": "/tested_commit",
+          "equals": "144ba5fba0eb20c77c26197cc53c95245cb3211e"
+        },
+        {
+          "pointer": "/reports/recovery/status",
+          "equals": "PASS"
+        }
+      ],
+      "linked_evidence": [
+        {
+          "path": "D:\\PSCAD-Workspace\\sweep-recovery-metrics-20261014\\recovery-20261014-032834-b2210f2b\\report.json",
+          "sha256": "e52e90b68b54da61b0a44551af233ec6eff7d27efc267c5963ea66721a98339b"
+        },
+        {
+          "path": "D:\\PSCAD-Workspace\\sweep-recovery-metrics-20261014\\source-metadata-diagnosis.json",
+          "sha256": "a5beb7d54d302a290ef74bc2dac8a2f87a296c6415cf17642feddc19278140c9"
+        },
+        {
+          "path": "D:\\PSCAD-Workspace\\sweep-recovery-metrics-20261014\\request-v2.json",
+          "sha256": "cc54b51e9ecdf3468a54e67b5c0203b6257010ecad2527a98c2c6a68984fb208"
+        }
+      ],
+      "note": "Fresh three-scenario Legacy cancellation/cross-process restart and intentional crash/orphan guard pass all 62 checks. Independent audit passes 58 checks and binds 54 immutable files. Completed scenario result hashes are preserved, interrupted attempts remain recorded, only verified owned instances are cleaned, and all final instances exit. Energy/I2t/peak/threshold metrics retain bounded-sample scope and explicit units. The voltage-divider seed current PGB metadata is corrected only in a new source copy. Workflow scope only; no full electrical model acceptance.",
+      "implementation_source_branch": "codex/sweep-recovery-metrics",
+      "historical_attempts": [
+        {
+          "licensed_status": "FAIL",
+          "evidence": {
+            "report_path": "D:\\PSCAD-Workspace\\sweep-recovery-metrics-20261014\\recovery-20261014-031735-cd8aeeb8\\report.json",
+            "sha256": "8c621f193fee9f1eb3687b88e2333e0cee666f31a07f87ba9cb3812a08ec7695",
+            "commit": "aa2fcbef800787930258ca6c41ae7e9851b90583"
+          },
+          "note": "A requested unit conflicts with retained metadata. Preserved; superseded only by the fresh named workflow scope."
+        },
+        {
+          "licensed_status": "FAIL",
+          "evidence": {
+            "report_path": "D:\\PSCAD-Workspace\\sweep-recovery-metrics-20261014\\recovery-20261014-032030-c38cc200\\report.json",
+            "sha256": "53c7dcd24803c3d9c636f67e5541189dbdb78a6303a4f3c9947aaa85f5982a10",
+            "commit": "aa2fcbef800787930258ca6c41ae7e9851b90583"
+          },
+          "note": "A required artifact is missing. Preserved; superseded only by the fresh named workflow scope."
+        },
+        {
+          "licensed_status": "FAIL",
+          "evidence": {
+            "report_path": "D:\\PSCAD-Workspace\\sweep-recovery-metrics-20261014\\recovery-20261014-032426-3139517b\\report.json",
+            "sha256": "24d4d1ea86c070aa03935c463d1360bd487bf29c4752299a3cc36370cc396daa",
+            "commit": "faf66fded343bb32b2d27890629da2c3d0d2168e"
+          },
+          "note": "A child executable is outside the owned attempt; refusing termination. Preserved; superseded only by the fresh named workflow scope."
+        }
+      ]
+    },
+    {
+      "scope": "parameter_sweep_psout",
+      "implementation_status": "INTEGRATION_BRANCH",
+      "licensed_status": "PARTIAL",
+      "evidence": {
+        "report_path": "D:\\PSCAD-Workspace\\sweep-recovery-metrics-20261014\\psout-audit-20261014-032913-7a429b68\\report.json",
+        "sha256": "8f9a9e627fda222a415b9327f6246e7858d6e39a1b986817f62657bdf3714f2d",
+        "commit": "144ba5fba0eb20c77c26197cc53c95245cb3211e"
+      },
+      "evidence_checks": [
+        {
+          "pointer": "/status",
+          "equals": "PASS"
+        },
+        {
+          "pointer": "/psout_file_verified",
+          "equals": true
+        },
+        {
+          "pointer": "/workflow_accepted",
+          "equals": false
+        },
+        {
+          "pointer": "/model_accepted",
+          "equals": false
+        },
+        {
+          "pointer": "/fresh_simulation",
+          "equals": false
+        },
+        {
+          "pointer": "/unit_certification",
+          "equals": false
+        },
+        {
+          "pointer": "/tested_commit",
+          "equals": "144ba5fba0eb20c77c26197cc53c95245cb3211e"
+        }
+      ],
+      "linked_evidence": [
+        {
+          "path": "D:\\PSCAD-Workspace\\sweep-recovery-metrics-20261014\\psout-audit-20261014-032913-7a429b68\\attempts\\vendor-fixture\\outputs\\Cigre.psout",
+          "sha256": "e1773945d2e3d28bcc50537dbd8ab4587a729a5f9f42a49e9dc75dfbe863e56b"
+        },
+        {
+          "path": "D:\\PSCAD-Workspace\\sweep-recovery-metrics-20261014\\psout-prerequisites.json",
+          "sha256": "5cf12bb0c16f6a25b40788cd716e910fa68592bafe541bb6a504c2a15ed53b51"
+        }
+      ],
+      "remaining_work_class": "native_psout_generation_unavailable_in_current_backend_and_unverified_executor",
+      "note": "Vendor Cigre.psout file replay passes 10 independent checks: both selected channels retain all 2001 native samples and matching domains, energy/I2t agree with independent Simpson calculations, declarations and hashes remain intact. Explicit request units are not separately certified. This is existing-file reader evidence; fresh PSOUT-producing simulation and end-to-end PSOUT sweep remain unverified. Only 4.6.2 installations were observed and the current sweep executor requires Legacy. A native PSOUT-capable licensed installation, a verified executor and reviewed source are needed.",
+      "implementation_source_branch": "codex/sweep-recovery-metrics"
     }
   ],
   "program_baseline_note": "docs/acceptance/lcc-mmc-program-baseline.json is the frozen earlier program baseline. Later reports are indexed here without promoting that baseline or WP6.",

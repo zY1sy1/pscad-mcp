@@ -32,6 +32,8 @@ def test_acceptance_status_manifest_separates_live_acceptance_scopes():
         "parametric_mmc_detailed_pwm",
         "native_full_bridge_average_arm_462",
         "corpus_moxing_462_v2_subset",
+        "parameter_sweep_recovery_and_metrics_462",
+        "parameter_sweep_psout",
     }
     assert scopes["legacy_core_462"]["licensed_status"] == "PASS"
     assert scopes["legacy_core_462"]["implementation_status"] == "INTEGRATION_BRANCH"
@@ -64,8 +66,33 @@ def test_acceptance_status_manifest_separates_live_acceptance_scopes():
         "INCOMPLETE_ANALYSIS",
         "PARTIAL",
     }
-    assert scopes["generic_blueprint_builder"]["implementation_status"] == "INTEGRATION_BRANCH"
+    assert (
+        scopes["generic_blueprint_builder"]["implementation_status"]
+        == "INTEGRATION_BRANCH"
+    )
     assert scopes["generic_blueprint_builder"]["licensed_status"] == "PASS"
+
+
+def test_sweep_recovery_acceptance_does_not_promote_existing_psout_files_to_simulation():
+    scopes = {
+        item["scope"]: item
+        for item in json.loads(MANIFEST.read_text(encoding="utf-8"))["scopes"]
+    }
+    recovery = scopes["parameter_sweep_recovery_and_metrics_462"]
+    assert recovery["licensed_status"] == "PASS"
+    assert recovery["implementation_status"] == "INTEGRATION_BRANCH"
+    assert len(recovery["historical_attempts"]) == 3
+    assert all(
+        item["licensed_status"] == "FAIL" for item in recovery["historical_attempts"]
+    )
+    psout = scopes["parameter_sweep_psout"]
+    assert psout["licensed_status"] == "PARTIAL"
+    checks = {item["pointer"]: item["equals"] for item in psout["evidence_checks"]}
+    assert checks["/psout_file_verified"] is True
+    assert checks["/fresh_simulation"] is False
+    assert checks["/workflow_accepted"] is False
+    assert checks["/unit_certification"] is False
+    assert recovery["evidence"]["commit"] == psout["evidence"]["commit"]
 
 
 def test_latest_mmc_evidence_is_scoped_and_old_attempts_remain_historical():
@@ -83,7 +110,10 @@ def test_latest_mmc_evidence_is_scoped_and_old_attempts_remain_historical():
     assert fixed["engineering_verdict"] == "PASS"
     assert fixed["golden_verdict"] == "INCOMPLETE_ANALYSIS"
     assert fixed["licensed_status"] == "INCOMPLETE_ANALYSIS"
-    assert fixed["historical_attempts"][0]["attempt"]["failure_code"] == "LCC_DEFINITION_MISSING"
+    assert (
+        fixed["historical_attempts"][0]["attempt"]["failure_code"]
+        == "LCC_DEFINITION_MISSING"
+    )
     assert scopes["modern_core_5"]["licensed_status"] == "NOT_RUN_ON_INTEGRATED_COMMIT"
 
 
@@ -91,31 +121,75 @@ def test_native_matrix_keeps_three_requests_and_component_only_scope_separate():
     scopes = {s["scope"]: s for s in json.loads(MANIFEST.read_text())["scopes"]}
     names = scopes["parametric_mmc"]["accepted_subscopes"]
     assert len(names) == 6
-    cases = [scopes[name] for name in names if scopes[name]["request"]["converter"] == "half_bridge"]
+    cases = [
+        scopes[name]
+        for name in names
+        if scopes[name]["request"]["converter"] == "half_bridge"
+    ]
     assert len(cases) == 3
-    assert {(s["request"]["dc_voltage_kv"], s["request"]["frequency_hz"], s["request"]["reactive_power_mvar"]) for s in cases} == {
-        (640.0, 60.0, 0.0), (640.0, 60.0, 100.0), (500.0, 50.0, -75.0),
+    assert {
+        (
+            s["request"]["dc_voltage_kv"],
+            s["request"]["frequency_hz"],
+            s["request"]["reactive_power_mvar"],
+        )
+        for s in cases
+    } == {
+        (640.0, 60.0, 0.0),
+        (640.0, 60.0, 100.0),
+        (500.0, 50.0, -75.0),
     }
-    assert {s["evidence"]["commit"] for s in cases} == {"9cfe1d41dd2113cb4e72e3a285b1da00397a2b6b"}
-    assert all(s["licensed_status"] == "PASS" and s["intrinsic_dc_fault_blocking"] is False for s in cases)
-    full_bridge = [scopes[name] for name in names if scopes[name]["request"]["converter"] == "full_bridge"]
+    assert {s["evidence"]["commit"] for s in cases} == {
+        "9cfe1d41dd2113cb4e72e3a285b1da00397a2b6b"
+    }
+    assert all(
+        s["licensed_status"] == "PASS" and s["intrinsic_dc_fault_blocking"] is False
+        for s in cases
+    )
+    full_bridge = [
+        scopes[name]
+        for name in names
+        if scopes[name]["request"]["converter"] == "full_bridge"
+    ]
     assert len(full_bridge) == 3
-    assert {s["evidence"]["commit"] for s in full_bridge} == {"1d39dc9521e3f9c343e38a7bcddeb263da829ba1"}
-    assert {(s["request"]["dc_voltage_kv"], s["request"]["active_power_mw"], s["request"]["reactive_power_mvar"], s["request"]["frequency_hz"]) for s in full_bridge} == {
-        (640.0, 1000.0, 0.0, 60.0), (500.0, 750.0, 100.0, 60.0), (800.0, 1200.0, -120.0, 50.0),
+    assert {s["evidence"]["commit"] for s in full_bridge} == {
+        "1d39dc9521e3f9c343e38a7bcddeb263da829ba1"
     }
-    assert all(s["licensed_status"] == "PASS" and s["request"]["dc_link"] == {"kind": "cable", "length_km": 100.0} for s in full_bridge)
+    assert {
+        (
+            s["request"]["dc_voltage_kv"],
+            s["request"]["active_power_mw"],
+            s["request"]["reactive_power_mvar"],
+            s["request"]["frequency_hz"],
+        )
+        for s in full_bridge
+    } == {
+        (640.0, 1000.0, 0.0, 60.0),
+        (500.0, 750.0, 100.0, 60.0),
+        (800.0, 1200.0, -120.0, 50.0),
+    }
+    assert all(
+        s["licensed_status"] == "PASS"
+        and s["request"]["dc_link"] == {"kind": "cable", "length_km": 100.0}
+        for s in full_bridge
+    )
     assert scopes["modern_core_5"]["required_in_this_task"] is False
     assert scopes["corpus_moxing_462_v2_subset"]["licensed_status"] == "PARTIAL"
     for name in ("native_average_arm_462", "lcc_parametric_executor_462"):
-        assert {"pointer": "/model_accepted", "equals": False} in scopes[name]["evidence_checks"]
+        assert {"pointer": "/model_accepted", "equals": False} in scopes[name][
+            "evidence_checks"
+        ]
 
 
 def test_live_pass_requires_durable_evidence_identity():
     payload = json.loads(MANIFEST.read_text(encoding="utf-8"))
 
     for scope in payload["scopes"]:
-        assert scope["implementation_status"] in {"MERGED", "INTEGRATION_BRANCH", "NOT_INTEGRATED"}
+        assert scope["implementation_status"] in {
+            "MERGED",
+            "INTEGRATION_BRANCH",
+            "NOT_INTEGRATED",
+        }
         assert scope["licensed_status"] in {
             "PASS",
             "PASS_HISTORICAL",
