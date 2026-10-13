@@ -7,10 +7,10 @@
 Release notes are tracked in [CHANGELOG.md](CHANGELOG.md). A portable stdio
 configuration template is available at [config.example.toml](config.example.toml).
 
-## Acceptance status (2026-09-26)
+## Acceptance status (2026-10-14)
 
 Several named scopes have passed licensed acceptance; whole-project acceptance
-is still incomplete. The [current status and version boundaries](docs/acceptance/current-status-20260926.md)
+is still incomplete. The [main integration and version boundaries](docs/acceptance/current-status-20261014.md)
 and [machine-readable inventory](docs/acceptance-status.json) distinguish:
 
 - **Merged into local main:** the native half-bridge default six-stage suite
@@ -20,9 +20,13 @@ and [machine-readable inventory](docs/acceptance-status.json) distinguish:
   passed all 18 stages at `9cfe1d4`; all 15 Legacy core/reliability checks passed
   at `d7805e7`. Fixed LCC engineering passed at `85f9d84`, while independent
   reviewed reference and final acceptance remain incomplete.
+- **October scopes integrated:** the specified Blueprint divider, Legacy 15-case
+  regression, three full-bridge cable AVM ratings and reproducible Corpus subset
+  retain their [own tested revisions](docs/acceptance/current-status-20261013.md).
+  The merged serial sweep passed a fresh three-scenario, 42-check licensed run.
 - **Remaining work:** public parametric LCC physical mappings and its rating
-  matrix, other MMC model/rating scopes, generic Blueprint licensed acceptance,
-  and PSCAD 5.x real acceptance. LCC ratings use total system power, pole-to-ground
+  matrix, detailed PWM and other MMC model/rating scopes, broader Blueprint
+  coverage and PSCAD 5.x real acceptance. LCC ratings use total system power, pole-to-ground
   voltage and per-pole current: bipolar `P=2UI`, monopolar `P=UI`.
   The [rating correction and three template diagnostics](docs/acceptance/lcc-rating-convention.md)
   do not complete the public builder's 13 unresolved physical mappings.

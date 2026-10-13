@@ -1,24 +1,27 @@
 # PSCAD MCP 中文使用与验收说明
 
-## 最新验收范围（2026-09-26）
+## 最新验收范围（2026-10-14）
 
 已有多个明确范围通过实机验收，整体仍有待完成项。完整证据和版本边界见
-[当前验收说明](../acceptance/current-status-20260926.md)及[验收总表](../acceptance-status.json)。
+[当前集成与验收说明](../acceptance/current-status-20261014.md)及[验收总表](../acceptance-status.json)。
 
 - **已合入本地 main：** `5613ff7` 上原生半桥 MMC 默认模型六阶段通过；已发布全桥
   MMC 联合场景首轮及独立重放各 122 项物理检查通过，定时边沿误差为 0。
 - **已整合补全分支至 `76a0442`：** `9cfe1d4` 上三组半桥平均值请求共 18 个阶段
   全部通过；`d7805e7` 上 Legacy 15 项实机检查通过。固定 LCC 在 `85f9d84` 上工程
   检查通过，但独立 golden 与最终验收仍未完成。
-- **仍需完成：** 参数化 LCC 的物理映射和额定矩阵、其他 MMC 模型与参数范围、
-  通用 Blueprint 实机验收及 PSCAD 5.x 实机验收。LCC 额定功率已确定为系统总功率，
+- **十月已整合范围：** 指定 Blueprint 分压器、Legacy 15 项回归、三组全桥电缆 AVM
+  和 Corpus 可复现子集保留[各自测试提交](../acceptance/current-status-20261013.md)。
+  合并后的串行扫描另有新鲜三工况、42 项许可实机检查通过。
+- **仍需完成：** 参数化 LCC 的物理映射和额定矩阵、详细 PWM 与其他 MMC 参数范围、
+  更广的 Blueprint 覆盖及 PSCAD 5.x 实机验收。LCC 额定功率已确定为系统总功率，
   双极按 `P=2U极I极`、单极按 `P=UI`；[口径修复及三个模板功率点的诊断](../acceptance/lcc-rating-convention.md)
   已整合，但不能代替公开构建器仍缺的 13 类物理参数映射。
 
 总表的 `INCOMPLETE_ANALYSIS`、`PARTIAL` 或待运行状态必须按各自范围理解，不能
 解释为所有模型失败。[分支整合记录](../acceptance/branch-integration-20260926.md)另列避雷器工具、
 Corpus v2 与并发文档的处理。合入实现不会把原报告升级为其他版本的实机 PASS；
-旧失败报告及历史基线继续保留。
+旧失败报告及历史基线继续保留。[2026-10-14 main 集成与验证](../acceptance/current-status-20261014.md)。
 
 执行 `python scripts/audit_acceptance_inventory.py` 可离线复核已登记报告、子报告和
 声明交付文件的哈希。退出码 0 表示完整性齐备，1 表示证据无效，2 表示仍缺持久化报告；
