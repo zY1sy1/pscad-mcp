@@ -303,6 +303,15 @@ def compare(report: dict[str, Any], baseline_name: str | None) -> dict[str, Any]
 
 
 def _metric(raw: Any, extra: set[str]) -> dict[str, Any]:
+    if isinstance(raw, dict) and set(raw) == {"metric"} | extra:
+        if not isinstance(raw["metric"], str) or not re.fullmatch(
+            r"[A-Za-z][A-Za-z0-9_]{0,63}", raw["metric"]
+        ):
+            raise sweep_error(
+                "SWEEP_INVALID_ANALYSIS",
+                "A physical metric selector needs its exact defined name.",
+            )
+        return dict(raw)
     required = {"output_path", "channel", "statistic"} | extra
     if (
         not isinstance(raw, dict)
@@ -371,8 +380,39 @@ def rank(
             for channel in output["channels"]
             for name, value in channel["statistics"].items()
         }
+        physical = {item["name"]: item for item in scenario.get("metrics", [])}
+        requested = [*normalized, *([objective] if objective else [])]
+        unavailable = next(
+            (
+                item["metric"]
+                for item in requested
+                if "metric" in item
+                and item["metric"] in physical
+                and (
+                    physical[item["metric"]].get("status") != "available"
+                    or physical[item["metric"]].get("value") is None
+                )
+            ),
+            None,
+        )
+        if unavailable is not None:
+            excluded.append(
+                {
+                    "name": scenario["name"],
+                    "reason": "metric_unavailable",
+                    "metric": unavailable,
+                }
+            )
+            continue
 
-        def lookup(metric, metrics=metrics):
+        def lookup(metric, metrics=metrics, physical=physical):
+            if "metric" in metric:
+                if metric["metric"] not in physical:
+                    raise sweep_error(
+                        "SWEEP_INVALID_ANALYSIS",
+                        "A requested physical metric has not been defined.",
+                    )
+                return physical[metric["metric"]]["value"]
             key = (metric["output_path"], metric["channel"], metric["statistic"])
             if key not in metrics:
                 raise sweep_error(

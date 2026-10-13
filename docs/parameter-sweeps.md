@@ -85,6 +85,50 @@
 OUT 采样在达到上限时均匀保留首尾点；PSOUT 使用现有读取器的采样方式。
 基准比较给出绝对差和相对差；基准为零时相对差为 `null`，基准失败时明确标记不可比较。
 
+## 故障与能量指标
+
+`analyze_parameter_sweep` 可选参数 `metrics` 定义最多 32 项物理指标，
+只读取扫描已保留且哈希核实的输出和通道，不启动 PSCAD，也不改写扫描记录。
+每项必须提供唯一 `name`、`kind`、`output_path` 和以秒表示的 `window=[start,end]`。
+
+| kind | 输入 | 返回单位 |
+| --- | --- | --- |
+| `energy` | `voltage_channel`、`current_channel` | J |
+| `i2t` | `current_channel` | A²·s |
+| `peak_abs` | `channel` | 原通道单位，未知时为 null |
+| `threshold_crossing` | `channel`、`threshold`、`operator`（>= 或 <=） | s |
+
+能量和 I²t 必须具有 V/kV、A/kA 元数据；元数据缺失时可显式提供
+`voltage_units`、`current_units`，结果标记 `units_source=request`。
+声明与已有元数据冲突时拒绝分析。`energy` 的 `mode` 默认为 `signed`，
+`positive` 只累加正向功率，`absolute` 累加双向功率绝对值；
+`polarity=1/-1` 显式声明电压与电流的功率方向。
+
+下面按吸收能量最大化，并限制 I²t 不超过 2×10⁶ A²·s；
+请替换输出路径和已经采集的精确通道名。
+
+```json
+{
+  "campaign_id": "<返回的 campaign_id>",
+  "metrics": [
+    {"name": "mov_energy", "kind": "energy", "output_path": "case_01.out", "voltage_channel": "Main/MOV_V", "current_channel": "Main/MOV_I", "mode": "positive", "polarity": 1, "window": [0.1, 0.2]},
+    {"name": "current_stress", "kind": "i2t", "output_path": "case_01.out", "current_channel": "Main/MOV_I", "window": [0.1, 0.2]}
+  ],
+  "objective": {"metric": "mov_energy", "direction": "maximize"},
+  "constraints": [{"metric": "current_stress", "operator": "<=", "value": 2000000}]
+}
+```
+
+结果保留定义哈希、输出证据哈希、单位来源、时间窗、实际采样点数与最大采样间隔，
+并提供同名指标的基准差。指标声明 `bounded_sample_piecewise_linear`：
+在保留样本间线性插值，能量精确积分两个线性信号的乘积，I²t 精确积分线性电流的平方；
+这不证明原始连续波形中被采样遗漏的峰值或事件。时间窗必须被数据完整覆盖，不外推。
+能量的正向／绝对值积分会在电压和电流变号点分段。
+
+`threshold_crossing` 返回窗口内第一次满足条件的时间；窗口开始时已经满足条件则返回窗口起点。
+没有满足条件的样本时返回 `status=not_observed`、`value=null`。
+排序中需要该指标的工况明确排除为 `metric_unavailable`，不以零代替缺失事件。
+
 ## 恢复与证据
 
 记录保存在工作区 `.pscad-mcp/sweeps/<campaign_id>`，包括基线、追加的尝试目录、

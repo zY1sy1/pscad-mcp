@@ -154,6 +154,11 @@ and PSOUT retain offline coverage only. See the
 [acceptance record](docs/acceptance/parameter-sweep-20261013.md) and
 [Chinese usage guide](docs/parameter-sweeps.md).
 
+Sweep analysis also accepts named time-windowed energy, I²t, peak and threshold
+metrics from finalized, hash-verified outputs. Explicit units, power direction,
+sampling scope and evidence hashes accompany the results. Named metrics can be
+used in constraints and objectives alongside the original channel statistics.
+
 The topology layer adds `inspect_project_topology` and
 `diagnose_project_topology`. Both tools are read-only. Diagnosis now defaults
 to `generic+hvdc-auto`: generic rules run first, then deterministic HVDC rules

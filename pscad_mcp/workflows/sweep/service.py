@@ -26,6 +26,7 @@ from .store import (
     WorkspaceLease,
     atomic_json,
     contained,
+    digest,
     file_hash,
     process_alive,
     reject_link,
@@ -210,10 +211,22 @@ class SweepService:
         objective: dict[str, Any] | None = None,
         constraints: list[dict[str, Any]] | None = None,
         limit: int = 20,
+        metrics: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         manifest, checkpoint = self.store.load(campaign_id)
         report = self._report(campaign_id, manifest, checkpoint)
+        definitions = None
+        if metrics is not None:
+            from .retained_metrics import enrich_metrics
+
+            report, definitions = enrich_metrics(
+                report, metrics, manifest, self.store.campaign_path(campaign_id)
+            )
         result = rank(report, objective, constraints, limit)
+        if definitions is not None:
+            result["metric_definitions"] = definitions
+            result["metric_definitions_sha256"] = digest(definitions)
+            result["metrics_scope"] = "bounded_sample_piecewise_linear"
         result["report"]["scenarios"] = result["report"]["scenarios"][:limit]
         return result
 

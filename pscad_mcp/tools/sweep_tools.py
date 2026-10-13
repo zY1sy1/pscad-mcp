@@ -32,7 +32,8 @@ Objective = Annotated[
     Field(
         description=(
             "Optional objective {output_path,channel,statistic,direction}; statistic is min, "
-            "max, mean, first, last, rms or peak_abs; direction is minimize or maximize."
+            "max, mean, first, last, rms or peak_abs. Alternatively {metric,direction} selects "
+            "a named physical metric. Direction is minimize or maximize."
         )
     ),
 ]
@@ -41,7 +42,22 @@ Constraints = Annotated[
     Field(
         description=(
             "Up to 32 constraints [{output_path,channel,statistic,operator,value}]; "
-            "operator is <=, >= or == and value is a finite number."
+            "Alternatively {metric,operator,value} selects a named physical metric in its "
+            "returned units (J, A^2 s, s or channel units). Operator is <=, >= or ==."
+        )
+    ),
+]
+
+PhysicalMetrics = Annotated[
+    list[dict[str, Any]] | None,
+    Field(
+        description=(
+            "Up to 32 metrics with unique name, kind, output_path and window [start,end] in seconds. "
+            "Energy: voltage_channel,current_channel, optional voltage_units V/kV,current_units A/kA, "
+            "mode signed/positive/absolute, polarity +1/-1. I2t: current_channel, optional current_units. "
+            "Threshold_crossing: channel,threshold,operator >=/<=. Peak_abs: channel. "
+            "Only retained campaign channels are allowed; missing units require explicit declarations. "
+            "Integrals use piecewise linear bounded samples and are returned in J or A^2 s."
         )
     ),
 ]
@@ -149,6 +165,7 @@ async def analyze_parameter_sweep(
     objective: Objective = None,
     constraints: Constraints = None,
     limit: int = 20,
+    metrics: PhysicalMetrics = None,
 ) -> dict[str, Any]:
     """Compare retained channel statistics and rank evaluated scenarios under explicit constraints."""
     return await asyncio.to_thread(
@@ -157,6 +174,7 @@ async def analyze_parameter_sweep(
         objective=objective,
         constraints=constraints,
         limit=limit,
+        metrics=metrics,
     )
 
 
