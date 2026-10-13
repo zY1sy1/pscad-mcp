@@ -1,4 +1,20 @@
+import pytest
+
+from pscad_mcp.core.backend.base import BackendError
+from pscad_mcp.hvdc.bindings import resolve_requested_commands
 from pscad_mcp.hvdc.profiles import bind_profile_project, load_profile
+from tests.test_hvdc_bindings import _evidence
+
+
+def test_default_pwm_profile_requires_verified_workspace_command_bindings(tmp_path):
+    profile = load_profile("mmc_detailed_pwm_v2")
+    evidence = _evidence(tmp_path, stem="MMC_CASE_pwm", components="""
+        <component id='800413106' name='VSC T2' definition='project:VSCConverter'>
+          <parameter name='OnOff' value='0'/>
+        </component>""")
+    with pytest.raises(BackendError) as error:
+        resolve_requested_commands(evidence, profile, [{"target": "reset_command", "value": 0}])
+    assert error.value.details["reason"] == "command_binding_missing"
 
 
 def test_mmc_v2_profiles_use_project_qualified_exact_bindings() -> None:
@@ -11,7 +27,8 @@ def test_mmc_v2_profiles_use_project_qualified_exact_bindings() -> None:
         assert profile["project_fingerprints"] == [
             {"project_stem": project, "pscad_version": "4.6.2"}
         ]
-        assert profile["command_bindings"]
+        if name == "mmc_average_value_v2":
+            assert profile["command_bindings"]
         assert all(binding["component"] for binding in profile["command_bindings"])
         assert all(binding["parameter_name"] for binding in profile["command_bindings"])
         assert all(
@@ -26,14 +43,10 @@ def test_mmc_v2_profiles_use_project_qualified_exact_bindings() -> None:
         }
 
 
-def test_detailed_pwm_profile_uses_audited_official_component_parameters() -> None:
+def test_detailed_pwm_profile_does_not_use_orphan_parameters_or_configuration_flags_as_controls() -> None:
     profile = load_profile("mmc_detailed_pwm_v2")
-    bindings = {item["canonical"]: item for item in profile["command_bindings"]}
-
-    assert bindings["active_power_order"]["component"] == {"component_id": "800413106"}
-    assert bindings["active_power_order"]["parameter_name"] == "Pref"
-    assert bindings["ac_breaker_command"]["parameter_name"] == "ACBrkCtrl"
-    assert bindings["ac_fault_command"]["component"] == {"component_id": "326579344"}
+    assert profile["command_bindings"] == []
+    assert profile["result_channels"]
 
 
 def test_mmc_v2_profiles_bind_exact_custom_derived_project() -> None:
