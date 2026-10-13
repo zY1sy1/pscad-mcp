@@ -72,3 +72,16 @@ PSOUT 检查读取的是厂商已有二进制示例，`fresh_simulation=false`�
 `psout-prerequisites.json`。本轮已完成的已有文件读取和 Legacy 工作流不替代这一范围。
 
 固定/参数化 LCC、详细 PWM、其他 Blueprint 场景和整个项目的既有验收边界没有改变。
+
+## 最终验证
+
+`cc86cf6` 的完整离线回归为 **4126 passed、55 skipped**，321.74 s。
+许可跳过项不作为实机证据；实机与 PSOUT 已有文件的独立报告仍绑定 `144ba5f`。
+两个版本的 `pscad_mcp/` 与 `scripts/` 字节一致；后续记录提交只修改本验收文档。
+最终 wheel 在独立目录安装并检查了 112 个注册工具、新可选参数、五个关键运行文件哈希
+及解析积分例子；改变文件的 lint 与 Git 空白检查通过。
+
+验收总表为 21 个 VERIFIED、0 个 INVALID；原 `mmc_stage_a` 和 `modern_core_5`
+仍缺持久化报告，总体完整性保留 INCOMPLETE。当前运行中的 PSCAD 进程观测为空，
+每个本轮所属 PID 另有独立退出核实。最终测试日志、wheel 哈希、安装探针和范围说明
+保存在工作区 `verification-final.json`，没有将记录更新解释为新的全项目物理 PASS。
