@@ -35,6 +35,7 @@ from .native_dq import PLL_NAME, PLL_OUTPUTS, PLL_DEFAULTS, DQ_NAME, DQ_DEFAULTS
 from .native_protection import PROTECTION_NAME, PROTECTION_INPUTS, PROTECTION_OUTPUTS, PROTECTION_DEFAULTS, append_native_protection
 from .native_faults import FAULT_NAME, FAULT_KINDS, FAULT_OUTPUTS, FAULT_DEFAULTS, append_native_fault_protocol, fault_branches
 from .native_isolation import AC_ISOLATION, DC_ISOLATION, NEUTRAL_GROUNDING, ISOLATION_OUTPUTS, append_native_isolation
+from .native_aux_precharge import AUXILIARY_NAME, append_auxiliary_precharge
 
 NATIVE_SCOPE = "cigre_mmc_avm_v1"
 CONTROL_NAME = "MMCStationModulator"
@@ -692,7 +693,10 @@ def materialize_native_avm_library(
     master = Path(master_path).resolve()
     source = Path(source_project).resolve()
     metadata, master_hash, defaults = _audit_master(master)
-    root, arm_writer = _make_library(metadata, defaults, scope=NATIVE_SCOPE, converter=converter)
+    root, arm_writer = _make_library(metadata, defaults, scope=NATIVE_SCOPE, converter=converter,
+                                   auxiliary_precharge=converter == "full_bridge")
+    if converter == "full_bridge":
+        append_auxiliary_precharge(root, metadata, defaults)
     _station_control(root)
     _station_measurements(root)
     append_precharge_readiness(root)
@@ -1070,6 +1074,18 @@ def materialize_native_avm_fixture(
     main = root.find("./definitions/Definition[@name='Main']")
     hierarchy = root.find("./hierarchy/call/call")
     custom: list[tuple[ET.Element, str]] = []
+    auxiliary_sources = []
+
+    def auxiliary(role, positive, negative, supply_voltage):
+        resistance = supply_voltage / (0.08 * precharge_current_limit_ka)
+        element = writer.add(main, role + "_auxiliary", NATIVE_SCOPE + ":" + AUXILIARY_NAME,
+            {"Aux_Voltage_kV": supply_voltage, "Aux_Resistance_ohm": resistance},
+            {"POS": positive, "NEG": negative, "OPEN": "PRECHARGE_READY",
+             "CURRENT": role + "_AUX_CURRENT", "STATE": role + "_AUX_STATE"})
+        custom.append((element, AUXILIARY_NAME))
+        channels.update({role + "_AUX_CURRENT": "kA", role + "_AUX_STATE": "1"})
+        auxiliary_sources.append({"role": role, "voltage_kv": supply_voltage, "resistance_ohm": resistance,
+                                  "current_limit_ka": supply_voltage / resistance})
     arm_values = asdict(arm_parameters or AverageArmParameters(L_arm_H=0.1))
     writer.add(main, "normal_zero", "master:const", {"Name": "", "Value": "0.0"}, {"OUT": "NATIVE_ZERO"})
     restart_signal = "FAULT_RESTART" if fault_kind is not None else "NATIVE_ZERO"
@@ -1310,6 +1326,7 @@ def materialize_native_avm_fixture(
                         "OUT": inputs[1],
                         "M": prefix + f"_M_{phase}_{position}",
                         "BLOCK": prefix + "_BLOCK",
+                        **({"CHARGE_POS": role + "_CAP_AUX", "CHARGE_NEG": "GND"} if converter == "full_bridge" else {}),
                         **{
                             port: role + "_" + suffix
                             for suffix, (port, _) in ARM_OBSERVABLES.items()
@@ -1317,6 +1334,8 @@ def materialize_native_avm_fixture(
                     },
                 )
                 custom.append((arm, "MMCAverageArm"))
+                if converter == "full_bridge":
+                    auxiliary(role, role + "_CAP_AUX", "GND", vdc_order_kv)
             writer.add(
                 main,
                 prefix + "_phase_voltage_" + phase,
@@ -1326,6 +1345,9 @@ def materialize_native_avm_fixture(
             )
         if source is None or transformer is None:
             raise ValueError(f"Native station {station} instances were not authored")
+        if converter == "full_bridge":
+            auxiliary(prefix + "_DC_POS", prefix + "_DC_POS", "GND", 0.5 * vdc_order_kv)
+            auxiliary(prefix + "_DC_NEG", "GND", prefix + "_DC_NEG", 0.5 * vdc_order_kv)
         if control_kind == "dq_current":
             neutral = writer.add(main, prefix + "_neutral_grounding", NATIVE_SCOPE + ":" + NEUTRAL_GROUNDING,
                 {"Neutral_L_H": neutral_inductance_h, "Neutral_R_ohm": neutral_resistance_ohm,
@@ -1559,6 +1581,8 @@ def materialize_native_avm_fixture(
         "master_sha256": master_hash,
         "parameters": {
             "converter": converter,
+            "auxiliary_precharge": "current_limited_physical_sources_disconnected_when_ready" if auxiliary_sources else None,
+            "auxiliary_sources": auxiliary_sources,
             "frequency_hz": frequency_hz,
             "station_p_ac_voltage_kv": station_p_ac_voltage_kv,
             "station_vdc_ac_voltage_kv": station_vdc_ac_voltage_kv,
@@ -1663,6 +1687,8 @@ def audit_native_avm_fixture(
         required.update({f"{NATIVE_SCOPE}:{AC_ISOLATION}": 6, f"{NATIVE_SCOPE}:{DC_ISOLATION}": 4,
                          f"{NATIVE_SCOPE}:{NEUTRAL_GROUNDING}": 2,
                          f"{NATIVE_SCOPE}:{PROTECTION_NAME}": 1, "master:resistor": 10, "master:voltmeter": 24})
+    if receipt["parameters"].get("converter") == "full_bridge":
+        required[NATIVE_SCOPE + ":" + AUXILIARY_NAME] = 16
     if any(counts[name] != count for name, count in required.items()):
         raise ValueError("Native AVM fixture is missing a required physical component")
     nets = receipt["electrical_nets"]["Main"]

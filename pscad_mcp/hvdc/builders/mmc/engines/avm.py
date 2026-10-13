@@ -58,6 +58,7 @@ def _native_producer_hashes() -> dict[str, str]:
             "native_protection.py",
             "native_faults.py",
             "native_isolation.py",
+            "native_aux_precharge.py",
         )
     }
 

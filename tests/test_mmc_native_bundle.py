@@ -36,6 +36,11 @@ def test_full_bridge_native_fixture_retains_bidirectional_arm_topology(constants
     assert arm.find("./schematic/User[@name='negative_clamp']") is not None
     assert arm.find("./schematic/User[@name='negative_bypass']") is None
     assert report["topology"]["converter"] == "full_bridge"
+    project = ET.parse(report["project_path"])
+    auxiliary = project.findall(f"./definitions/Definition[@name='Main']/schematic/User[@defn='{NATIVE_SCOPE}:MMCAuxPrecharge']")
+    assert len(auxiliary) == 16
+    assert report["parameters"]["auxiliary_precharge"] == "current_limited_physical_sources_disconnected_when_ready"
+    assert "P_A_UPPER_AUX_CURRENT" in report["channels"]
 
 
 def test_native_dq_fixture_connects_measured_valve_signals_and_exports_internal_states(constants_evidence, installed_sources, tmp_path):

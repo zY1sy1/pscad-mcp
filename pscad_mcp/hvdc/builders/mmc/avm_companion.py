@@ -770,7 +770,7 @@ def _converter(converter: str) -> None:
 
 
 def _make_library(
-    master: dict, master_defaults: dict, *, scope: str = LIBRARY_SCOPE, converter: str = "half_bridge"
+    master: dict, master_defaults: dict, *, scope: str = LIBRARY_SCOPE, converter: str = "half_bridge", auxiliary_precharge: bool = False
 ) -> tuple[ET.Element, _Writer]:
     _converter(converter)
     root = _project(scope, library=True)
@@ -781,6 +781,11 @@ def _make_library(
         "M": (-90, 90, "Transfer", "Input"),
         "BLOCK": (-90, 126, "Transfer", "Input"),
     }
+    if auxiliary_precharge:
+        if converter != "full_bridge":
+            raise ValueError("Auxiliary capacitor terminals require a full-bridge arm")
+        arm_ports.update({"CHARGE_POS": (-90, 180, "Natural", "Electrical"),
+                          "CHARGE_NEG": (90, 180, "Natural", "Electrical")})
     arm_ports.update(
         {
             name: (144, -180 + index * 36, "Transfer", "Output")
@@ -805,6 +810,8 @@ def _make_library(
             )
         }
     )
+    if auxiliary_precharge:
+        coupling_ports["IAUX"] = (-72, 252, "Transfer", "Input")
     coupling = _definition(
         root,
         "MMCAverageCoupling",
@@ -831,7 +838,7 @@ def _make_library(
       $PSWITCH = ($VSTACK - STORF(NSTORF+1)) * $INORMAL
       $PSWITCH = $PSWITCH + ($VSTACK - STORF(NSTORF+2)) * $ICLAMP
       $PSWITCH = $PSWITCH {'+ (-$VSTACK - STORF(NSTORF+2)) * $IBYPASS' if converter == 'full_bridge' else '- $VSTACK * $IBYPASS'}
-      $PSWITCH = $PSWITCH + $VCAP * (STORF(NSTORF+3) - $ICAP)
+      $PSWITCH = $PSWITCH + $VCAP * ({'$IAUX + ' if auxiliary_precharge else ''}STORF(NSTORF+3) - $ICAP)
       $PLOSS = STORF(NSTORF+4) * $VCAP
       ILOSS = 0.0
       IF ($VCAP .GT. 0.0) THEN
@@ -962,6 +969,10 @@ def _make_library(
         {"DP": "GND", "DN": "CAP_POS"},
     )
     add("storage_ground", "ground", {}, {"A": "GND"})
+    if auxiliary_precharge:
+        add("auxiliary_capacitor_positive", "xnode", {"Name": "CHARGE_POS"}, {"N": "CAP_AUX_POS"})
+        add("auxiliary_capacitor_negative", "xnode", {"Name": "CHARGE_NEG"}, {"N": "GND"})
+        add("auxiliary_capacitor_current", "ammeter", {"Name": "AUX_CAP_I"}, {"N1": "CAP_AUX_POS", "N2": "CAP_POS"})
     add(
         "capacitor_voltage_meter",
         "voltmeter",
@@ -1002,6 +1013,7 @@ def _make_library(
             "VSTACK": "INSERTED_V",
             "IBYPASS": "BYPASS_I",
             "ICAP": "CAP_I",
+            **({"IAUX": "AUX_CAP_I"} if auxiliary_precharge else {}),
             "VNORMAL": "NORMAL_V",
             "ISTORE": "STORE_I",
             "W": "CAP_W",
