@@ -43,6 +43,11 @@ VALID_REQUEST = {
 }
 
 
+def test_parametric_request_can_roundtrip_its_serialized_optional_fields():
+    request = parse_parametric_request(copy.deepcopy(VALID_REQUEST))
+    assert parse_parametric_request(json.loads(json.dumps(request.to_dict()))) == request
+
+
 def _assert_request_invalid(candidate, code):
     with pytest.raises(BackendError) as raised:
         parse_parametric_request(candidate)

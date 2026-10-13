@@ -10,6 +10,7 @@ import time
 from typing import Any, Mapping
 
 from ...core.backend.base import BackendError
+from ...core.backend.legacy_support import rewrite_template_identity
 from ...core.path_policy import PathPolicy
 from .assets import hash_tree, manifest_hash, resolve_companion_project_files, sha256_file
 from .journal import BuildJournal, next_state, write_json_atomic
@@ -21,7 +22,7 @@ from .models import (
     freeze,
     json_safe,
 )
-from .output import discover_output_dataset
+from .output import discover_output_dataset, target_output_paths
 from .validator import validate_staging, write_validation_report
 
 
@@ -316,13 +317,13 @@ def _normalize_messages(value: Any) -> list[dict[str, Any]]:
 
 
 def _output_snapshot(project_file: Path) -> dict[str, tuple[int, int, str]]:
-    candidates = [project_file.with_suffix(".inf"), *project_file.parent.glob(f"{project_file.stem}_*.out")]
+    candidates = target_output_paths(project_file)
     snapshot: dict[str, tuple[int, int, str]] = {}
     for path in sorted(candidates, key=lambda item: item.name.casefold()):
         if not path.is_file() or path.is_symlink():
             continue
         stat = path.stat()
-        snapshot[path.name] = (stat.st_mtime_ns, stat.st_size, sha256_file(path))
+        snapshot[path.relative_to(project_file.parent).as_posix()] = (stat.st_mtime_ns, stat.st_size, sha256_file(path))
     return snapshot
 
 
@@ -445,6 +446,7 @@ async def execute_build(
             if project_file.exists() or project_file.is_symlink():
                 raise _error("BLUEPRINT_BUILD_CONFLICT", "The target project file already exists in staging.", "build_pscad_project")
             copied_entry.replace(project_file)
+        rewrite_template_identity(project_file, project_file, plan.target_name)
         companion_files = resolve_companion_project_files(plan.blueprint, staging, PathPolicy(str(workspace)))
         project_files = (project_file, *companion_files)
         context = _Context(
@@ -502,6 +504,13 @@ async def execute_build(
         run_messages = _normalize_messages(await service.get_project_output(plan.target_name, structured=True))
         messages = [*compile_messages, *run_messages]
         dataset = discover_output_dataset(staging, expected_metadata=project_file.with_suffix(".inf"))
+        metadata_parent = Path(dataset["metadata_file"]).parent
+        stale = [name for name in dataset["segments"]
+                 if output_before_run.get((metadata_parent / name).relative_to(project_file.parent).as_posix())
+                 == output_after_run.get((metadata_parent / name).relative_to(project_file.parent).as_posix())]
+        if stale:
+            raise _error("BLUEPRINT_OUTPUT_STALE", "Waveform segments did not change during this run.",
+                         "run_blueprint_project", stale_segments=stale)
         validation = validate_staging(
             plan,
             staging,
@@ -578,7 +587,21 @@ async def execute_build(
     active_journal.append("error", failure_event)
     quarantine = build_root / "quarantine"
     if staging.exists() and not quarantine.exists():
-        staging.replace(quarantine)
+        try:
+            staging.replace(quarantine)
+        except OSError as quarantine_error:
+            active_journal.append("quarantine_deferred", {"exception": type(quarantine_error).__name__,
+                                                          "message": str(quarantine_error)})
+            write_json_atomic(staging / "evidence" / "failure-report.json", {
+                "build_id": build_id, "plan_hash": plan.plan_hash,
+                "state": failure_state.value, "error": error.to_dict(),
+                "quarantine_pending": True,
+            })
+            return _record(build_id, failure_state, plan, history, bindings, staging,
+                           error=error.to_dict(), evidence={
+                               "failure_report": "evidence/failure-report.json",
+                               "journal": "../journal.jsonl", "quarantine_pending": True,
+                           })
     elif not quarantine.exists():
         quarantine.mkdir(parents=True, exist_ok=True)
     next_state(failure_state, BlueprintBuildState.QUARANTINED)

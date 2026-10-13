@@ -13,7 +13,7 @@ from ..common.records import JsonRecord, freeze
 
 _FIDELITIES = {"detailed_pwm", "average_value", "both"}
 _TOPOLOGIES = {"two_terminal_symmetrical_monopole"}
-_CONVERTERS = {"half_bridge"}
+_CONVERTERS = {"half_bridge", "full_bridge"}
 _LINK_KINDS = {"overhead_line", "cable"}
 _UNITS = {
     "A", "F", "H", "Hz", "J", "V", "W", "kA", "kV", "kW", "km", "mH",

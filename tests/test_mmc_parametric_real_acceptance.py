@@ -216,8 +216,16 @@ async def _run_standard_scenarios(
         str(item["engine"]): Path(str(item["final_path"])).resolve()
         for item in build["engines"]
     }
+    fidelity = request["model_fidelity"]
+    expected_engines = (
+        {"detailed_pwm", "average_value"} if fidelity == "both" else {fidelity}
+    )
+    if set(engine_paths) != expected_engines:
+        raise AssertionError("Published engines differ from the requested fidelity")
     results: list[dict[str, Any]] = []
     for engine in ("detailed_pwm", "average_value"):
+        if engine not in expected_engines:
+            continue
         final_project = engine_paths[engine]
         source_copy = case_root / f"{final_project.stem}_scenario_source.pscx"
         if not source_copy.is_file():
@@ -268,6 +276,7 @@ async def _run_case(
     from pscad_mcp.core.path_policy import PathPolicy
     from pscad_mcp.core.service import PscadService
     from pscad_mcp.hvdc.builders.mmc.parametric_service import ParametricMmcBuilderService
+    from pscad_mcp.hvdc.builders.mmc.engines.pwm import _copy_library_support
 
     case_root = acceptance_root / f"feasible-{index + 1}"
     case_root.mkdir()
@@ -277,12 +286,7 @@ async def _run_case(
     source_root.mkdir()
     staged_library = source_root / "intermediate.pslx"
     shutil.copy2(config["library"], staged_library)
-    support_source = config["library"].parent / "Obj_Files_2016_03_25"
-    if support_source.is_dir():
-        shutil.copytree(
-            support_source,
-            source_root / "Obj_Files_2016_03_25",
-        )
+    _copy_library_support(config["library"], source_root)
     staged_template = rebind_template_line_constants(
         config["template"], artifacts, source_root / "H_MMC_Mono_DC.pscx"
     )

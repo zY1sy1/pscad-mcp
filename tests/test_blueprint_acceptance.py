@@ -5,6 +5,7 @@ import math
 import pytest
 
 from pscad_mcp.builders.blueprint.acceptance import evaluate_acceptance, evaluate_rule
+from pscad_mcp.builders.blueprint.models import freeze
 from pscad_mcp.core.backend.base import BackendError
 
 
@@ -29,6 +30,16 @@ def test_evaluate_rule_supports_generic_rule_kinds(kind, arguments, values, doma
     result = evaluate_rule({"kind": kind, "arguments": arguments}, values, domain=domain)
     assert result["passed"] is passed
     assert result["kind"] == kind
+
+
+@pytest.mark.parametrize("kind,arguments,values,domain", [
+    ("window_summary", {"window": [0.25, 0.75], "metric": "mean", "minimum": 2, "maximum": 2},
+     [1, 2, 3], [0, 1, 2]),
+    ("exact_set", {"values": [0, 1]}, [0, 1], None),
+    ("allowed_states", {"values": [0, 1]}, [0, 1], None),
+])
+def test_array_rules_accept_the_immutable_parsed_blueprint_contract(kind, arguments, values, domain):
+    assert evaluate_rule(freeze({"kind": kind, "arguments": arguments}), values, domain=domain)["passed"] is True
 
 
 @pytest.mark.parametrize(

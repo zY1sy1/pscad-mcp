@@ -63,8 +63,18 @@ class DefinitionCatalog:
         namespace: str,
         version: str,
         name: str,
+        *,
+        logical_name: bool = False,
     ) -> CatalogDefinition:
         matches = self.definitions.get((namespace, version, name), ())
+        if logical_name:
+            # Graph keys use pscad-xml-v2 normalization; library identities do
+            # not. Resolve that exact normalization and reject collisions.
+            from .corpus_extractor import _slug
+
+            matches = tuple(item for (scope, release, physical), entries in self.definitions.items()
+                            if scope == namespace and release == version and _slug(physical) == name
+                            for item in entries)
         if not matches:
             raise _catalog_error(
                 "CORPUS_DEFINITION_UNRESOLVED",

@@ -190,6 +190,7 @@ class LegacyBackend:
             str(name): Path(path).resolve()
             for name, path in (definition_paths or {}).items()
         }
+        self._loaded_project_files: dict[Path, tuple[str, str]] = {}
         self._component_orientations: dict[tuple[str, int], int] = {}
         self._component_bindings: dict[
             tuple[str, int], ResolvedMasterComponent
@@ -362,6 +363,7 @@ class LegacyBackend:
         self.owns_process = False
         self._managed_pid = None
         self._managed_executable = None
+        self._loaded_project_files.clear()
         self._component_orientations.clear()
         self._component_bindings.clear()
         self._composite_components.clear()
@@ -432,7 +434,21 @@ class LegacyBackend:
         )
 
     async def load_projects(self, filenames: Any) -> None:
-        await self.executor.run_safe(self._require_app().load, *filenames)
+        app = self._require_app()
+        pending = list(filenames)
+        unchanged: dict[Path, tuple[str, str]] = {}
+        for filename in pending:
+            path = Path(filename).resolve()
+            cached = self._loaded_project_files.get(path)
+            if cached and path.is_file() and hashlib.sha256(path.read_bytes()).hexdigest() == cached[1]:
+                unchanged[path] = cached
+        if unchanged and callable(getattr(app, "list_projects", None)):
+            loaded = {self._project_info(item).name for item in await self.executor.run_safe(app.list_projects)}
+            pending = [filename for filename in pending
+                       if Path(filename).resolve() not in unchanged
+                       or unchanged[Path(filename).resolve()][0] not in loaded]
+        if pending:
+            await self.executor.run_safe(app.load, *pending)
         for filename in filenames:
             path = Path(filename).resolve()
             if path.suffix.lower() in {".pslx", ".pscx"}:
@@ -444,6 +460,28 @@ class LegacyBackend:
                     project_name = ""
                 if project_name:
                     self.definition_paths[project_name] = path
+                    self._loaded_project_files[path] = (project_name, hashlib.sha256(path.read_bytes()).hexdigest())
+
+    async def get_blueprint_inventory(self, project_name: str, inspection_profile: str | None = None) -> dict[str, Any]:
+        from ...builders.blueprint.legacy_inventory import inventory_from_saved_sources
+
+        path = self.definition_paths.get(project_name)
+        loaded = {item.name for item in await self.list_projects()}
+        cached = self._loaded_project_files.get(path) if path else None
+        if (project_name not in loaded or path is None or not path.is_file()
+                or cached != (project_name, hashlib.sha256(path.read_bytes()).hexdigest())):
+            raise BackendError("BLUEPRINT_SOURCE_HASH_MISMATCH", "The loaded input is not its current saved file.",
+                               self.name, "get_blueprint_inventory", {"project_name": project_name})
+        project = await self._project(project_name)
+        dirty = getattr(project, "is_dirty", None)
+        if not callable(dirty) or await self.executor.run_safe(dirty) is not False:
+            raise BackendError("BLUEPRINT_SOURCE_INVALID", "Save the input before inventorying a Legacy blueprint.",
+                               self.name, "get_blueprint_inventory", {"project_name": project_name})
+        master = await self._discover_master_library() if "master" not in self.definition_paths else self.definition_paths["master"]
+        paths = dict(self.definition_paths)
+        if master:
+            paths["master"] = master
+        return await asyncio.to_thread(inventory_from_saved_sources, path, paths, self.version)
 
     async def unload_project(self, project_name: str) -> None:
         project = await self._project(project_name)
@@ -457,13 +495,64 @@ class LegacyBackend:
             await self.executor.run_safe(app_unloader, project_name)
             self._clear_project_binding_state(project_name)
             return
-        raise BackendError(
-            "BLUEPRINT_RELOAD_UNAVAILABLE",
-            "The legacy backend cannot unload the project before reloading it.",
-            self.name,
-            "unload_project",
-            {"project_name": project_name},
-        )
+        await self._unload_from_saved_owned_workspace(project_name)
+
+    async def _unload_from_saved_owned_workspace(self, project_name: str) -> None:
+        """Use 4.6's workspace reset only when every project is saved and known."""
+        app = self._require_app()
+
+        def unavailable(reason: str, **details: Any) -> BackendError:
+            return BackendError(
+                "BLUEPRINT_RELOAD_UNAVAILABLE",
+                "A legacy workspace reset requires an owned idle instance and saved, traceable projects.",
+                self.name, "unload_project",
+                {"project_name": project_name, "reason": reason, **details},
+            )
+
+        reset = getattr(app, "new_workspace", None)
+        busy = getattr(app, "is_busy", None)
+        if not callable(reset):
+            raise unavailable("workspace_reset_unavailable")
+        if not self.owns_process or type(self._managed_pid) is not int or self._managed_pid <= 0:
+            raise unavailable("process_ownership_unverified")
+        if (callable(busy) and await self.executor.run_safe(busy) is not False) or self._paused_projects:
+            raise unavailable("workspace_not_idle")
+        projects = await self.list_projects()
+        paths: dict[str, Path] = {}
+        hashes: dict[str, str] = {}
+        for info in projects:
+            if info.name.casefold() == "master":
+                continue
+            if not callable(busy):
+                state = await self.project_run_state(info.name)
+                if state.status.casefold() not in {"idle", "completed", "stopped"}:
+                    raise unavailable("workspace_not_idle", loaded_project=info.name, run_status=state.status)
+            path = self.definition_paths.get(info.name)
+            if path is None or not path.is_file() or path.is_symlink():
+                raise unavailable("project_path_unverified", loaded_project=info.name)
+            proxy = await self._project(info.name)
+            dirty = getattr(proxy, "is_dirty", None)
+            if not callable(dirty) or await self.executor.run_safe(dirty) is not False:
+                raise unavailable("unsaved_project", loaded_project=info.name)
+            paths[info.name] = path
+            hashes[info.name] = hashlib.sha256(path.read_bytes()).hexdigest()
+        if project_name not in paths:
+            raise unavailable("target_not_loaded")
+        await self.executor.run_safe(reset)
+        self._loaded_project_files.clear()
+        remaining = [item.name for item in await self.list_projects() if item.name.casefold() != "master"]
+        if remaining:
+            raise unavailable("workspace_reset_unverified", remaining_projects=remaining)
+        for name, path in paths.items():
+            self._clear_project_binding_state(name)
+            if hashlib.sha256(path.read_bytes()).hexdigest() != hashes[name]:
+                raise unavailable("saved_project_changed", loaded_project=name)
+        retained = [str(path) for name, path in paths.items() if name != project_name]
+        if retained:
+            await self.load_projects(retained)
+        restored = {item.name for item in await self.list_projects() if item.name.casefold() != "master"}
+        if restored != set(paths) - {project_name}:
+            raise unavailable("retained_projects_not_restored", restored_projects=sorted(restored))
 
     def _clear_project_binding_state(self, project_name: str) -> None:
         for cache in (
@@ -666,6 +755,9 @@ class LegacyBackend:
     async def save_project(self, project_name: str) -> None:
         project = await self._project(project_name)
         await self.executor.run_safe(project.save)
+        path = self.definition_paths.get(project_name)
+        if path is not None and path.is_file():
+            self._loaded_project_files[path] = (project_name, hashlib.sha256(path.read_bytes()).hexdigest())
 
     async def save_project_as(
         self, project_name: str, filename: str, folder: str | None

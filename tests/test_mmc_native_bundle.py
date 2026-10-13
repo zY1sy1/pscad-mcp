@@ -25,6 +25,34 @@ from pscad_mcp.hvdc.builders.mmc.native_bundle import (
 from tests.test_mmc_cable_constants import _fake_native_run
 
 
+def test_full_bridge_native_fixture_retains_bidirectional_arm_topology(constants_evidence, installed_sources, tmp_path):
+    donor, master = installed_sources
+    report = materialize_native_avm_fixture(tmp_path / "full-bridge", constants_evidence=constants_evidence,
+        source_project=donor, master_path=master, converter="full_bridge", control_kind="dq_current",
+        reversal_time_s=1.0, simulation_duration_s=3.9)
+    assert report["parameters"]["converter"] == "full_bridge"
+    assert report["library"]["converter"] == "full_bridge"
+    arm = ET.parse(report["library"]["library_path"]).find("./definitions/Definition[@name='MMCAverageArm']")
+    assert arm.find("./schematic/User[@name='negative_clamp']") is not None
+    assert arm.find("./schematic/User[@name='negative_bypass']") is None
+    assert arm.find("./schematic/User[@name='storage_ground']") is None
+    assert report["topology"]["converter"] == "full_bridge"
+    project = ET.parse(report["project_path"])
+    auxiliary = project.findall(f"./definitions/Definition[@name='Main']/schematic/User[@defn='{NATIVE_SCOPE}:MMCAuxPrecharge']")
+    assert len(auxiliary) == 16
+    assert report["parameters"]["auxiliary_precharge"] == "current_limited_physical_sources_disconnected_when_ready"
+    assert "P_A_UPPER_AUX_CURRENT" in report["channels"]
+    auxiliary_definition = ET.parse(report["library"]["library_path"]).find("./definitions/Definition[@name='MMCAuxPrecharge']")
+    declared = {p.get("name") for p in auxiliary_definition.findall("./form/category/parameter")}
+    imported = {p.get("value") for p in auxiliary_definition.findall("./schematic/User[@defn='master:import']/paramlist/param[@name='Name']")}
+    assert declared <= imported
+    for terminal in arm.findall("./schematic/User[@defn='master:xnode']"):
+        name = terminal.find("./paramlist/param[@name='Name']").get("value")
+        routes = [route for route in report["library"]["arm_topology"]["routes"]
+                  if route["endpoints"][0]["component_id"] == terminal.get("id")]
+        assert len(routes) == 1 and routes[0]["signal"] == name
+
+
 def test_native_dq_fixture_connects_measured_valve_signals_and_exports_internal_states(constants_evidence, installed_sources, tmp_path):
     from pscad_mcp.hvdc.builders.mmc.native_dq import DQ_NAME
     donor, master = installed_sources
@@ -392,6 +420,7 @@ def test_full_fixture_wires_twelve_two_terminal_arms_to_two_three_phase_stations
         == 2
     )
     assert report["topology"] == {
+        "converter": "half_bridge",
         "two_stations": True,
         "arm_count": 12,
         "phase_breakout_count": 2,

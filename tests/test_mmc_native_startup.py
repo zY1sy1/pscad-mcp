@@ -43,6 +43,9 @@ def test_independent_precharge_audit_checks_waveforms_before_using_state_anchors
                   "precharge_current_limit_ka": 2.0, "reversal_time_s": 1.0, "reversal_duration_s": 1.0}
     result = analyze_precharge_trace(trace, parameters)
     assert result["status"] == "PASS" and result["model_accepted"] is False
+    missing_auxiliary = analyze_precharge_trace(trace, {**parameters, "converter": "full_bridge"})
+    assert missing_auxiliary["status"] == "FAIL"
+    assert "sixteen physical auxiliary sources" in missing_auxiliary["error"]
     assert result["operating_windows"]["forward"] == [0.75, 1.05]
     trace["P_A_UPPER_W"][230] = 5.0
     result = analyze_precharge_trace(trace, parameters)

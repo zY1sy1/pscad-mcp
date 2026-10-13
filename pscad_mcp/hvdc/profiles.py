@@ -33,19 +33,11 @@ def _mmc_v2_profile(project: str, fidelity: str) -> dict[str, Any]:
         ("diode_equivalent_current", "DIODE_EQ_CURRENT", "current", "kA"),
     )
     if fidelity == "detailed_pwm":
-        # These IDs and parameter names are pinned by the audited official
-        # H_MMC_Mono_DC template. PSCAD exposes the nested VSC converter as a
-        # top-level component while loading the staged copy.
-        commands = (
-            ("active_power_order", {"component_id": "800413106"}, "Pref", [-1.0, -0.8, 0.0, 0.8, 1.0]),
-            ("reactive_power_order", {"component_id": "800413106"}, "Qref", [-0.1, 0.0, 0.1]),
-            ("block_command", {"component_id": "800413106"}, "OnOff", [0, 1]),
-            ("reset_command", {"component_id": "800413106"}, "OnOff", [0, 1]),
-            ("ac_breaker_command", {"component_id": "800413106"}, "ACBrkCtrl", [0, 1]),
-            ("dc_breaker_command", {"component_id": "800413106"}, "Dblk", [0, 1]),
-            ("ac_fault_command", {"component_id": "326579344"}, "Value", [0, 1]),
-            ("dc_fault_command", {"component_id": "1897441875"}, "OpCur", [0, 1]),
-        )
+        # The installed template has no declared OnOff input; Dblk enables
+        # firing, and fault_sw.OpCur selects chopping behavior. They cannot
+        # establish reset, breaker or fault commands. Require a workspace
+        # profile backed by routed controls with verified units and polarity.
+        commands = ()
     else:
         control_component = "STATION_P.control"
         protection_component = "STATION_P.initialization"

@@ -85,6 +85,37 @@ async def test_real_pscad_service_exposes_complete_blueprint_readback_contract(t
 
 
 @pytest.mark.asyncio
+async def test_inventory_includes_observed_master_definitions_when_project_lists_only_local_ones(tmp_path):
+    class LocalDefinitionsBackend(BlueprintBackend):
+        async def project_definitions(self, project_name):
+            return ["Main"]
+
+    inventory = await read_live_inventory(
+        _service(tmp_path, LocalDefinitionsBackend()), "Source", None,
+    )
+
+    assert inventory.definitions["master:breaker"]["parameters"]["Name"]["resolved"] is True
+    assert inventory.definitions["master:breaker"]["ports"]["A"]["dimension"] == 1
+
+
+@pytest.mark.asyncio
+async def test_inventory_does_not_query_canvas_wires_as_component_proxies(tmp_path):
+    class DecoratedBackend(BlueprintBackend):
+        async def list_canvas_components(self, project_name, canvas_name):
+            return [*(await super().list_canvas_components(project_name, canvas_name)),
+                    {"id": 99, "definition": "WireOrthogonal"},
+                    {"id": 100, "definition": "GraphFrame"},
+                    {"id": 101, "definition": "Sticky"}]
+
+        async def get_component_parameters(self, project_name, component_id):
+            assert component_id == 7, "canvas decoration is not a UserCmp proxy"
+            return await super().get_component_parameters(project_name, component_id)
+
+    inventory = await read_live_inventory(_service(tmp_path, DecoratedBackend()), "Source", None)
+    assert [item["id"] for item in inventory.components] == [7]
+
+
+@pytest.mark.asyncio
 async def test_real_pscad_service_reloads_and_verifies_declared_output_channels(tmp_path):
     backend = BlueprintBackend()
     service = _service(tmp_path, backend)

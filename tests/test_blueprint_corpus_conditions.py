@@ -37,6 +37,9 @@ from pscad_mcp.builders.blueprint.corpus_conditions import (
         ("1+2>2 && 0 || 1", {}, {}, True),
         ("true==1", {}, {}, True),
         ("0.25+0.75==1", {}, {}, True),
+        ("(NC>=2)&&(View==0)", {"NC": "3", "View": "0"}, {}, True),
+        ("NC>=2", {"NC": "2"}, {}, True),
+        ("NC>=2", {"NC": "1"}, {}, False),
         ("  View == 0  ", {"View": Decimal(0)}, {}, True),
     ],
 )
@@ -110,3 +113,11 @@ def test_evaluate_condition_rejects_excessive_expression_complexity(expression):
 @pytest.mark.parametrize("expression", [None, "", "   "])
 def test_empty_condition_is_active(expression):
     assert evaluate_condition(expression, {}, {}) is True
+
+
+def test_vendor_case_matching_preserves_instance_override_and_rejects_ambiguous_names():
+    assert evaluate_condition("limit==1", {"LIMIT": "1"}, {"Limit": 0}, case_insensitive=True) is True
+    with pytest.raises(ConditionUnresolved):
+        evaluate_condition("limit==1", {"Limit": "0", "LIMIT": "1"}, {}, case_insensitive=True)
+    with pytest.raises(ConditionUnresolved):
+        evaluate_condition("Missing==1", {}, {"Limit": 0}, case_insensitive=True)

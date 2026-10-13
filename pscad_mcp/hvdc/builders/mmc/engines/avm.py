@@ -58,6 +58,7 @@ def _native_producer_hashes() -> dict[str, str]:
             "native_protection.py",
             "native_faults.py",
             "native_isolation.py",
+            "native_aux_precharge.py",
         )
     }
 
@@ -546,6 +547,7 @@ class AvmBlueprintEngine:
             master_path=source_paths["master"],
             source_project=source_paths["cable_donor"],
             project_name=candidate_project_name,
+            converter=str(values["converter"]),
             frequency_hz=float(values["frequency_hz"]),
             station_p_ac_voltage_kv=float(values["station_p_ac_voltage_kv"]),
             station_vdc_ac_voltage_kv=float(values["station_vdc_ac_voltage_kv"]),

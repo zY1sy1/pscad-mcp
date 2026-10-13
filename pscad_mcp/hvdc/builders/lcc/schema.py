@@ -652,7 +652,7 @@ def _parse_parametric_ratings(value: Any) -> LccRatings:
     payload: dict[str, Any] = {}
     for key in required:
         payload[key] = _parametric_number(ratings[key], f"ratings.{key}", "LCC_RATING_INVALID", positive=True)
-    if "escr" in ratings:
+    if ratings.get("escr") is not None:
         payload["escr"] = _parametric_number(ratings["escr"], "ratings.escr", "LCC_RATING_INVALID", positive=True)
     try:
         return LccRatings(**payload)

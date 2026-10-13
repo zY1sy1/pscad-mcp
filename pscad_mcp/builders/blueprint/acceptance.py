@@ -79,7 +79,7 @@ def evaluate_rule(rule: Mapping[str, Any], values: Iterable[Any], *, domain: Ite
         passed = all(value == arguments["value"] for value in samples)
     elif kind in {"exact_set", "allowed_states"}:
         allowed = arguments.get("values")
-        if not isinstance(allowed, list) or not allowed:
+        if not isinstance(allowed, (list, tuple)) or not allowed:
             raise _error(f"{kind} requires a non-empty values array.")
         passed = set(samples) == set(allowed) if kind == "exact_set" else set(samples) <= set(allowed)
     elif kind == "minimum":
@@ -119,7 +119,7 @@ def evaluate_rule(rule: Mapping[str, Any], values: Iterable[Any], *, domain: Ite
         if len(times) != len(numeric):
             raise _error("window_summary domain length must match samples.")
         window = arguments.get("window")
-        if not isinstance(window, list) or len(window) != 2:
+        if not isinstance(window, (list, tuple)) or len(window) != 2:
             raise _error("window_summary requires a relative two-value window.")
         start = _number(window[0], "window[0]")
         end = _number(window[1], "window[1]")

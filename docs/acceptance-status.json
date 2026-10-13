@@ -1,18 +1,18 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-09-26T19:10:15+08:00",
+  "updated_at": "2026-10-13T19:47:54.486174+08:00",
   "policy": "Evidence belongs only to its named scope, exact request and tested commit. INTEGRATION_BRANCH records are not merged/deployed. PASS is never inherited by another builder, rating or later commit; offline integrity checks do not establish physical acceptance.",
   "scopes": [
     {
       "scope": "legacy_core_462",
-      "implementation_status": "MERGED",
+      "implementation_status": "INTEGRATION_BRANCH",
       "licensed_status": "PASS",
       "evidence": {
-        "report_path": "D:/PSCAD-Workspace/acceptance/completion-20260926/legacy-130327.json",
-        "sha256": "c3869dfa192319f03a4f842e6029c48cef26e44543874bb98ed60a9413b40d5e",
-        "commit": "d7805e77045407a3f7f9ce8999e7d13a4cd34a7c"
+        "report_path": "D:\\PA\\o13legacy-report.json",
+        "sha256": "89a489b66fdfe6d0cd9bab0f7c7951d5a0e49044731af634fee52ee029b668b0",
+        "commit": "4a6d25344dc19e515bdbc2a188f2d606ed845ca3"
       },
-      "note": "All 15 licensed Legacy core/reliability cases passed at d7805e7. Sources retain their hashes and all owned instances exited. Vendor-disabled layer membership remains an explicitly tested capability limitation.",
+      "note": "All 15 real Legacy core and reliability tests passed in 92.370 s on the isolated branch; runner-owned processes exited. The JSON closure record indexes the complete unmodified run log and source-hash baseline.",
       "historical_attempts": [
         {
           "licensed_status": "PASS_HISTORICAL",
@@ -31,16 +31,21 @@
             "commit": "9cfe1d41dd2113cb4e72e3a285b1da00397a2b6b"
           },
           "note": "Preserved attempt: unnamed PSOUT root, paused stop/resume behavior, workspace setup and stale response-text assertion; superseded by the current 15-case PASS."
+        },
+        {
+          "licensed_status": "PASS",
+          "evidence": {
+            "report_path": "D:/PSCAD-Workspace/acceptance/completion-20260926/legacy-130327.json",
+            "sha256": "c3869dfa192319f03a4f842e6029c48cef26e44543874bb98ed60a9413b40d5e",
+            "commit": "d7805e77045407a3f7f9ce8999e7d13a4cd34a7c"
+          },
+          "note": "All 15 licensed Legacy core/reliability cases passed at d7805e7. Sources retain their hashes and all owned instances exited. Vendor-disabled layer membership remains an explicitly tested capability limitation."
         }
       ],
       "evidence_checks": [
         {
           "pointer": "/status",
           "equals": "PASS"
-        },
-        {
-          "pointer": "/scope",
-          "equals": "legacy_core_462"
         },
         {
           "pointer": "/exit_code",
@@ -57,12 +62,17 @@
       ],
       "linked_evidence": [
         {
-          "path": "D:\\PSCAD-Workspace\\acceptance\\completion-20260926\\legacy-130327.log",
-          "sha256": "26e584f3c0f7e2284c954a3e40a1deb0dab484c16ce4ca2a6a8d84428d84c32f"
+          "path": "D:\\PA\\o13legacy1.log",
+          "sha256": "5757d0baef62ef9873c03168d489eb89365b4bcd5766e6c002a58407f6c8f3e9"
+        },
+        {
+          "path": "D:\\PA\\o13b1\\report.json",
+          "sha256": "085188dfdba6c8d83131ea99337ba23b28cef348b1eaf4bc8c0fcdd622a9922c"
         }
       ],
-      "implementation_source_branch": "codex/complete-acceptance",
-      "implementation_integrated_snapshot": "76a0442"
+      "implementation_source_branch": "codex/acceptance-oct09",
+      "historical_implementation_source_branch": "codex/complete-acceptance",
+      "historical_implementation_integrated_snapshot": "76a0442"
     },
     {
       "scope": "unified_topology_462",
@@ -100,7 +110,7 @@
         "sha256": "1f3da7f5245e06130b8f49200414487dd69dbd1afd4a21fbc2407ef44a17404b",
         "commit": "85f9d84a974e6afae97ee74f4d510882d3cc743d"
       },
-      "note": "WP1B and WP1C engineering passed at 85f9d84. Independent reviewed golden and final accepted remain incomplete; the earlier engineering and definition-inventory attempts are historical.",
+      "note": "Historical WP1B/WP1C engineering remains PASS at its recorded revision. An official CIGRE reference independently ran at 1ec73c0, but stock source/transformer/smoothing parameters and required channels do not match the target. No approved compatible golden or final model acceptance exists.",
       "historical_attempts": [
         {
           "evidence": {
@@ -203,6 +213,14 @@
         {
           "path": "D:\\PA\\l26fixed\\fixed-lcc-20260926-035029-237\\fixed-lcc-acceptance-report.json",
           "sha256": "63003bafc9ab105d091bbc3836cacdd916b66cf7c12a79a18baf1fab674bb939"
+        },
+        {
+          "path": "D:\\PA\\o13lcc\\reference-qualification.json",
+          "sha256": "e9d59f7185a3e9442e2b1964c4ed9288dd404f6dcb2f25c542333c855097d8c1"
+        },
+        {
+          "path": "D:\\PA\\o09ref\\reference-probe.json",
+          "sha256": "ca996b9e21afc7f2661c22e450e45c877ad1efe945c5e4079a2d2215b25b6263"
         }
       ],
       "implementation_source_branch": "codex/complete-acceptance",
@@ -217,7 +235,7 @@
         "sha256": "baa78fb7351f9778c6e0a090f98be4eddb798f8a2fefa9ea9ad4107947107f02",
         "commit": "1d1a4dabaff3b65a5ef92d2732e7ed4112e4531d"
       },
-      "note": "Only the nominal-template low-level executor lifecycle has real load/save/run/output/cleanup evidence. The public rated builder remains blocked by 13 unresolved physical parameter mappings; the power convention is resolved as total system MW, pole-to-ground kV and per-pole kA (bipolar P=2UI, monopolar P=UI). Three fresh 800/900/1000 MW template operating-point diagnostics at fb0b244 confirm the total-power interpretation; see docs/acceptance/lcc-rating-convention.md. No rating-matrix or model acceptance is claimed. The executor clock repair was reverified on Python 3.13.15 at 1d1a4da: new five-part output, unchanged inputs/code and owned cleanup. This remains a lifecycle probe with model_accepted=false.",
+      "note": "Three rating plans are analytically feasible but retain thirteen unresolved physical mappings. Optional null ESCR now roundtrips. The 60 uF filter aggregation and 5-45 degree firing-angle side semantics await the user; no rated model acceptance is claimed.",
       "historical_attempts": [
         {
           "licensed_status": "NOT_RUN_ON_INTEGRATED_COMMIT",
@@ -348,6 +366,10 @@
         {
           "path": "D:\\PA\\i26lcctime\\probe-185837\\LccLifecycle\\LccLifecycle.gf42\\LccLifecycle_05.out",
           "sha256": "5269ea6b479fd82044a9e54d334fe466fea6bcb045d2374621e8c78d0f4b45c6"
+        },
+        {
+          "path": "D:\\PA\\o13lcc\\physical-binding-audit.json",
+          "sha256": "81b65a9e30c6fc88fefa51581f1ea4f70f96c2415984ffb7aa399d11ac2995fd"
         }
       ],
       "implementation_source_branch": "codex/complete-acceptance",
@@ -399,14 +421,14 @@
     },
     {
       "scope": "parametric_mmc",
-      "implementation_status": "MERGED",
+      "implementation_status": "INTEGRATION_BRANCH",
       "licensed_status": "PARTIAL",
       "evidence": {
         "report_path": "D:/PA/c26v3a/suite-20260926-121407-e4d0b384/report.json",
         "sha256": "2c3d7d158f5069e3358ad1427500cb2882844bfabcacb43a80a4732821db98c3",
         "commit": "9cfe1d41dd2113cb4e72e3a285b1da00397a2b6b"
       },
-      "note": "Three native half-bridge cable AVM requests passed all 18 normal/fault/reload stages at 9cfe1d4: default 640 kV/1000 MW/60 Hz, +100 MVAr, and 500 kV/750 MW/50 Hz/-75 MVAr. This remains PARTIAL for the whole parametric family; full-bridge AVM, detailed-PWM rating matrices and arbitrary requests need separate evidence.",
+      "note": "Three new full-bridge cable AVM requests pass all normal/four-fault/reload gates at 1d39dc9, in addition to the three named historical half-bridge requests. Detailed PWM control/rating/measurement integration and overhead-line AVM remain incomplete. Accepted cable requests do not substitute for overhead-line or both-fidelity requests.",
       "historical_attempts": [
         {
           "evidence": {
@@ -476,7 +498,10 @@
       "accepted_subscopes": [
         "native_mmc_half_bridge_640kv",
         "native_mmc_half_bridge_500kv_50hz",
-        "native_mmc_half_bridge_640kv_q100"
+        "native_mmc_half_bridge_640kv_q100",
+        "native_mmc_full_bridge_640kv",
+        "native_mmc_full_bridge_500kv_q100",
+        "native_mmc_full_bridge_800kv_50hz"
       ],
       "linked_evidence": [
         {
@@ -486,21 +511,71 @@
         {
           "path": "D:/PA/c26v3c/suite-20260926-121823-af3bb399/report.json",
           "sha256": "a72d96d6d040aaafd207c3f6c79c1c92b4469832275fbf8a4c7be3a1dafc274c"
+        },
+        {
+          "path": "D:\\PA\\o13fb-matrix-integrity.json",
+          "sha256": "1ca37c5aa3ab9b3aa1780ab84852963fc03ab3e097b1b35f3116b7188c8c1fe5"
         }
       ],
-      "implementation_source_branch": "codex/complete-acceptance",
-      "implementation_integrated_snapshot": "76a0442"
+      "implementation_source_branch": "codex/acceptance-oct09",
+      "historical_implementation_source_branch": "codex/complete-acceptance",
+      "historical_implementation_integrated_snapshot": "76a0442"
     },
     {
       "scope": "generic_blueprint_builder",
-      "implementation_status": "MERGED",
-      "licensed_status": "NOT_RUN_ON_INTEGRATED_COMMIT",
+      "implementation_status": "INTEGRATION_BRANCH",
+      "licensed_status": "PASS",
       "evidence": {
-        "report_path": null,
-        "sha256": null,
-        "commit": null
+        "report_path": "D:\\PA\\o13b1\\report.json",
+        "sha256": "085188dfdba6c8d83131ea99337ba23b28cef348b1eaf4bc8c0fcdd622a9922c",
+        "commit": "4a6d25344dc19e515bdbc2a188f2d606ed845ca3"
       },
-      "note": "Builder implementation is merged; offline/service-contract regression does not establish licensed acceptance of its own generated projects."
+      "note": "PSCAD 4.6.2 licensed divider scenario passed: parameter/settings changes, persisted readback, independent reload, compile, run, 4001 fresh samples and physical output checks. The original tutorial, frozen seed and Master remain immutable. All nine operation kinds and arbitrary circuits are not covered.",
+      "historical_attempts": [
+        {
+          "licensed_status": "NOT_RUN_ON_INTEGRATED_COMMIT",
+          "evidence": {
+            "report_path": null,
+            "sha256": null,
+            "commit": null
+          },
+          "note": "Builder implementation is merged; offline/service-contract regression does not establish licensed acceptance of its own generated projects."
+        },
+        {
+          "licensed_status": "PASS",
+          "evidence": {
+            "report_path": "D:\\PA\\o09b10\\report.json",
+            "sha256": "5121f803957704d9afe9d48428a7cdd135ac2ef119c7f988fb191e3f32c5f7ed",
+            "commit": "ffd3af4873237b09d9148414916d7edb73178aeb"
+          },
+          "note": "Initial independently accepted divider scenario; original failed attempts o09b1 through o09b9 remain on disk."
+        }
+      ],
+      "evidence_checks": [
+        {
+          "pointer": "/status",
+          "equals": "PASS"
+        },
+        {
+          "pointer": "/model_accepted",
+          "equals": true
+        },
+        {
+          "pointer": "/sources_immutable",
+          "equals": true
+        },
+        {
+          "pointer": "/remaining_owned_processes",
+          "equals": []
+        }
+      ],
+      "linked_evidence": [
+        {
+          "path": "D:\\PA\\o13b1.log",
+          "sha256": "23d147a5b1e7f78a515d5c5095b50b4e6d5261febd35ab914139c3e5d2f7e423"
+        }
+      ],
+      "implementation_source_branch": "codex/acceptance-oct09"
     },
     {
       "scope": "native_mmc_half_bridge_640kv",
@@ -653,13 +728,14 @@
         "sha256": null,
         "commit": null
       },
-      "note": "Modern automation is installed, but vendor version enumeration returns only PSCAD 4.6.2 x86/x64. PSCAD 5.x real acceptance requires an installed 5.x application and usable licensed runtime. Contract tests do not replace that gate.",
+      "note": "PSCAD 5.x acceptance was explicitly excluded by the user on 2026-10-13. Its historical untested status is retained.",
       "linked_evidence": [
         {
           "path": "D:/PA/c26-environment.json",
           "sha256": "a856dba0c0ea4fde801529586f21e3ec273ab4ce394269f3243504b7a3293041"
         }
-      ]
+      ],
+      "required_in_this_task": false
     },
     {
       "scope": "lcc_parametric_executor_462",
@@ -979,6 +1055,313 @@
       "note": "Isolated native half-bridge average-arm charge/discharge/blocked behavior passed after the empty-capacitor coupling repair. Component acceptance only, not a complete converter or intrinsic DC fault blocking claim.",
       "implementation_source_branch": "codex/complete-acceptance",
       "implementation_integrated_snapshot": "76a0442"
+    },
+    {
+      "scope": "native_mmc_full_bridge_640kv",
+      "implementation_status": "INTEGRATION_BRANCH",
+      "licensed_status": "PASS",
+      "pscad_version": "4.6.2",
+      "request": {
+        "active_power_mw": 1000.0,
+        "converter": "full_bridge",
+        "dc_link": {
+          "kind": "cable",
+          "length_km": 100.0
+        },
+        "dc_voltage_kv": 640.0,
+        "engineering_overrides": {},
+        "frequency_hz": 60.0,
+        "model_fidelity": "average_value",
+        "power_reversal_time_s": 1.0,
+        "reactive_power_mvar": 0.0,
+        "schema_version": 1,
+        "station_p": {
+          "ac_voltage_kv": 230.0,
+          "short_circuit_ratio": 5.0,
+          "x_over_r": 10.0
+        },
+        "station_vdc": {
+          "ac_voltage_kv": 230.0,
+          "short_circuit_ratio": 5.0,
+          "x_over_r": 10.0
+        },
+        "topology": "two_terminal_symmetrical_monopole"
+      },
+      "evidence": {
+        "report_path": "D:\\PA\\f13f\\suite-20261013-185011-6cf6dd58\\report.json",
+        "sha256": "4beea4f6fa3d343899935d7b0cfbcc632fbde4af16f21a416a650e497c574019",
+        "commit": "1d39dc9521e3f9c343e38a7bcddeb263da829ba1"
+      },
+      "evidence_checks": [
+        {
+          "pointer": "/status",
+          "equals": "PASS"
+        },
+        {
+          "pointer": "/model_accepted",
+          "equals": true
+        },
+        {
+          "pointer": "/scope",
+          "equals": "native_avm_full_physical_suite"
+        },
+        {
+          "pointer": "/request/converter",
+          "equals": "full_bridge"
+        }
+      ],
+      "accepted_project": "D:\\PA\\f13f\\suite-20261013-185011-6cf6dd58\\reload\\attempt-20261013-191022-691c8517\\model\\AVM_d759a4cc9498_avm_0.pscx",
+      "accepted_library": "D:\\PA\\f13f\\suite-20261013-185011-6cf6dd58\\reload\\attempt-20261013-191022-691c8517\\model\\cigre_mmc_avm_v1.pslx",
+      "intrinsic_dc_fault_blocking": false,
+      "note": "Full-bridge cable AVM: normal cold-start/steady/steps/reversal, four physical fault cases and portable independent reload passed. Physical bidirectional arm clamps and sixteen finite-resistance auxiliary precharge sources are present. Separate intrinsic blocking without external isolation is not certified; individual cell balance, device stress, switching harmonics and thermal behavior are not modeled.",
+      "implementation_source_branch": "codex/acceptance-oct09"
+    },
+    {
+      "scope": "native_mmc_full_bridge_500kv_q100",
+      "implementation_status": "INTEGRATION_BRANCH",
+      "licensed_status": "PASS",
+      "pscad_version": "4.6.2",
+      "request": {
+        "active_power_mw": 750.0,
+        "converter": "full_bridge",
+        "dc_link": {
+          "kind": "cable",
+          "length_km": 100.0
+        },
+        "dc_voltage_kv": 500.0,
+        "engineering_overrides": {},
+        "frequency_hz": 60.0,
+        "model_fidelity": "average_value",
+        "power_reversal_time_s": 0.5,
+        "reactive_power_mvar": 100.0,
+        "schema_version": 1,
+        "station_p": {
+          "ac_voltage_kv": 180.0,
+          "short_circuit_ratio": 4.0,
+          "x_over_r": 8.0
+        },
+        "station_vdc": {
+          "ac_voltage_kv": 180.0,
+          "short_circuit_ratio": 4.0,
+          "x_over_r": 8.0
+        },
+        "topology": "two_terminal_symmetrical_monopole"
+      },
+      "evidence": {
+        "report_path": "D:\\PA\\f13g\\suite-20261013-185504-c368baf9\\report.json",
+        "sha256": "6cbedfcbb5d009c7aa8ff29f1e44b5e991caaba6c2a5dea4dde430692a22da42",
+        "commit": "1d39dc9521e3f9c343e38a7bcddeb263da829ba1"
+      },
+      "evidence_checks": [
+        {
+          "pointer": "/status",
+          "equals": "PASS"
+        },
+        {
+          "pointer": "/model_accepted",
+          "equals": true
+        },
+        {
+          "pointer": "/scope",
+          "equals": "native_avm_full_physical_suite"
+        },
+        {
+          "pointer": "/request/converter",
+          "equals": "full_bridge"
+        }
+      ],
+      "accepted_project": "D:\\PA\\f13g\\suite-20261013-185504-c368baf9\\reload\\attempt-20261013-191401-1d959a28\\model\\AVM_bf86b6462ffa_avm_0.pscx",
+      "accepted_library": "D:\\PA\\f13g\\suite-20261013-185504-c368baf9\\reload\\attempt-20261013-191401-1d959a28\\model\\cigre_mmc_avm_v1.pslx",
+      "intrinsic_dc_fault_blocking": false,
+      "note": "Full-bridge cable AVM: normal cold-start/steady/steps/reversal, four physical fault cases and portable independent reload passed. Physical bidirectional arm clamps and sixteen finite-resistance auxiliary precharge sources are present. Separate intrinsic blocking without external isolation is not certified; individual cell balance, device stress, switching harmonics and thermal behavior are not modeled.",
+      "implementation_source_branch": "codex/acceptance-oct09"
+    },
+    {
+      "scope": "native_mmc_full_bridge_800kv_50hz",
+      "implementation_status": "INTEGRATION_BRANCH",
+      "licensed_status": "PASS",
+      "pscad_version": "4.6.2",
+      "request": {
+        "active_power_mw": 1200.0,
+        "converter": "full_bridge",
+        "dc_link": {
+          "kind": "cable",
+          "length_km": 100.0
+        },
+        "dc_voltage_kv": 800.0,
+        "engineering_overrides": {},
+        "frequency_hz": 50.0,
+        "model_fidelity": "average_value",
+        "power_reversal_time_s": 0.8,
+        "reactive_power_mvar": -120.0,
+        "schema_version": 1,
+        "station_p": {
+          "ac_voltage_kv": 287.0,
+          "short_circuit_ratio": 6.0,
+          "x_over_r": 12.0
+        },
+        "station_vdc": {
+          "ac_voltage_kv": 287.0,
+          "short_circuit_ratio": 6.0,
+          "x_over_r": 12.0
+        },
+        "topology": "two_terminal_symmetrical_monopole"
+      },
+      "evidence": {
+        "report_path": "D:\\PA\\f13h\\suite-20261013-185514-2ba8e35b\\report.json",
+        "sha256": "ae97fd29dc8bf49d95a3c235e792e314a93056f7416348668bc9b8e722e4b3b9",
+        "commit": "1d39dc9521e3f9c343e38a7bcddeb263da829ba1"
+      },
+      "evidence_checks": [
+        {
+          "pointer": "/status",
+          "equals": "PASS"
+        },
+        {
+          "pointer": "/model_accepted",
+          "equals": true
+        },
+        {
+          "pointer": "/scope",
+          "equals": "native_avm_full_physical_suite"
+        },
+        {
+          "pointer": "/request/converter",
+          "equals": "full_bridge"
+        }
+      ],
+      "accepted_project": "D:\\PA\\f13h\\suite-20261013-185514-2ba8e35b\\reload\\attempt-20261013-191419-b97a249b\\model\\AVM_63c82ad24947_avm_0.pscx",
+      "accepted_library": "D:\\PA\\f13h\\suite-20261013-185514-2ba8e35b\\reload\\attempt-20261013-191419-b97a249b\\model\\cigre_mmc_avm_v1.pslx",
+      "intrinsic_dc_fault_blocking": false,
+      "note": "Full-bridge cable AVM: normal cold-start/steady/steps/reversal, four physical fault cases and portable independent reload passed. Physical bidirectional arm clamps and sixteen finite-resistance auxiliary precharge sources are present. Separate intrinsic blocking without external isolation is not certified; individual cell balance, device stress, switching harmonics and thermal behavior are not modeled.",
+      "implementation_source_branch": "codex/acceptance-oct09"
+    },
+    {
+      "scope": "parametric_mmc_detailed_pwm",
+      "implementation_status": "INTEGRATION_BRANCH",
+      "licensed_status": "INCOMPLETE_ANALYSIS",
+      "evidence": {
+        "report_path": "D:\\PA\\o13pwm3\\diagnostic-case.json",
+        "sha256": "365534bbb266fe33d3eed1a94609458fe94210cd38a162a93318c5afdec9184e",
+        "commit": "a87efca8fe291e93f5e6e9dab0ea11872810afe6"
+      },
+      "evidence_checks": [
+        {
+          "pointer": "/status",
+          "equals": "INCOMPLETE_ANALYSIS"
+        },
+        {
+          "pointer": "/owned_process_cleaned",
+          "equals": true
+        },
+        {
+          "pointer": "/source_inputs_unchanged",
+          "equals": true
+        },
+        {
+          "pointer": "/error/code",
+          "equals": "HVDC_MAPPING_MISSING"
+        }
+      ],
+      "remaining_work_class": "unverified_model_control_interface_and_implementation",
+      "note": "Embedded timing setup is connected. Invalid default OnOff/Dblk/fault-option bindings were removed after real source inspection: OnOff is neither declared nor routed. All eleven scenarios remain required. A prepared PWM model with verified real command routing, rating changes, units/polarity and measurement bindings is required before licensed physical acceptance.",
+      "linked_evidence": [
+        {
+          "path": "D:\\PA\\o13pwm2\\diagnostic-case.json",
+          "sha256": "9fc06ac5cc102c38edb47de02e04828f2287cab504212647385617fc393de32c"
+        },
+        {
+          "path": "D:\\PA\\o13-toolchain-pwm-observations.json",
+          "sha256": "411ddde24aba0d502d8c9765ca90f0302e2b4f5f4a29d42543e3af8134c815fc"
+        },
+        {
+          "path": "D:\\PA\\o13vendor\\source-search.json",
+          "sha256": "0f28613f8d7a270f0678c7ee24d173b323d8b836a6c3126ddcb57cd643ec0db6"
+        }
+      ],
+      "implementation_source_branch": "codex/acceptance-oct09"
+    },
+    {
+      "scope": "native_full_bridge_average_arm_462",
+      "implementation_status": "INTEGRATION_BRANCH",
+      "licensed_status": "PASS",
+      "evidence": {
+        "report_path": "D:\\PA\\o13fb2\\attempt-20261013-181151-87715cd1\\report.json",
+        "sha256": "4df310f5e5adf78c07f6a05177f99af85a55d1f933c187304db3e7ac5113bd4d",
+        "commit": "ecae4782d5dcf37c88df5ef8bc7004c9f45e3d71"
+      },
+      "evidence_checks": [
+        {
+          "pointer": "/status",
+          "equals": "PASS"
+        },
+        {
+          "pointer": "/component_accepted",
+          "equals": true
+        },
+        {
+          "pointer": "/model_accepted",
+          "equals": false
+        },
+        {
+          "pointer": "/source_inputs_immutable",
+          "equals": true
+        },
+        {
+          "pointer": "/source_code_immutable",
+          "equals": true
+        },
+        {
+          "pointer": "/cleanup/owned_process_cleaned",
+          "equals": true
+        }
+      ],
+      "note": "Isolated native full-bridge arm passes six charge/discharge/block/negative-insertion windows with signed power and energy checks. This component-only record is distinct from the three complete converter suites.",
+      "implementation_source_branch": "codex/acceptance-oct09"
+    },
+    {
+      "scope": "corpus_moxing_462_v2_subset",
+      "implementation_status": "INTEGRATION_BRANCH",
+      "licensed_status": "PARTIAL",
+      "evidence": {
+        "report_path": "D:\\PA\\o13corpus\\verification-report.json",
+        "sha256": "d63218a6230fb5d37f76f2a28e6b742ca0ef089885b043812f14780b4b8c2052",
+        "commit": "bbb3a81448cb85affacabd93d20b1ac256bf4e18"
+      },
+      "evidence_checks": [
+        {
+          "pointer": "/status",
+          "equals": "PARTIAL"
+        },
+        {
+          "pointer": "/migration_complete",
+          "equals": false
+        },
+        {
+          "pointer": "/sources_immutable",
+          "equals": true
+        },
+        {
+          "pointer": "/verification/status",
+          "equals": "verified"
+        },
+        {
+          "pointer": "/regeneration/status",
+          "equals": "identical"
+        }
+      ],
+      "note": "Three 4.6.2 projects generated, verified and byte-identically regenerated; the zipped subset and file-hash index remain outside package assets. Full four-project migration requires immutable master@4.6.3; no source-version substitution or partial package promotion was made.",
+      "linked_evidence": [
+        {
+          "path": "D:\\PA\\o13corpus\\artifact-index.json",
+          "sha256": "bc166c62c5a68a728a7a234eca3dd7886e7dee0ec30113196d667a2683a5495f"
+        },
+        {
+          "path": "D:\\PA\\o13corpus\\moxing_462_v2_subset.zip",
+          "sha256": "bc6a1e9d448099017a5de70ea38cba1f42783f82e0152e9e9741c85f4df0574b"
+        }
+      ],
+      "implementation_source_branch": "codex/acceptance-oct09"
     }
   ],
   "program_baseline_note": "docs/acceptance/lcc-mmc-program-baseline.json is the frozen earlier program baseline. Later reports are indexed here without promoting that baseline or WP6.",
@@ -992,5 +1375,11 @@
     "integrated_completion_commit": "76a0442",
     "integration_code_commit": "468dfc75edb417a43ac56c6819613e1cf3a1f32e",
     "preserved_status_documentation_commit": "671cdf718fdd6571a040da0c12826edfa4409233"
+  },
+  "task_scope": {
+    "pscad_5x": "excluded_by_user",
+    "branch": "codex/acceptance-oct09",
+    "merged": false,
+    "release_complete": false
   }
 }

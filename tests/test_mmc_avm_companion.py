@@ -44,6 +44,45 @@ def _parameters(element):
     }
 
 
+def test_full_bridge_library_has_capacitor_insertion_in_both_blocked_directions(companion, master, tmp_path):
+    report = companion.materialize_average_arm_library(
+        tmp_path / "mmc_average_arm.pslx", master_path=master, converter="full_bridge"
+    )
+    root = ET.parse(report["library_path"]).getroot()
+    arm = root.find("./definitions/Definition[@name='MMCAverageArm']")
+    roles = {item.get("name"): item for item in arm.findall("./schematic/User")}
+    assert "negative_bypass" not in roles
+    assert roles["negative_clamp"].get("defn") == "master:peswitch"
+    assert roles["reverse_clamp_voltage"].get("defn") == "master:source_1"
+    nets = report["electrical_nets"]["MMCAverageArm"]
+    assert {"negative_clamp:DN", "reverse_clamp_voltage:NA"} <= set(nets["REVERSE_CLAMP_POS"])
+    assert "reverse_clamp_voltage:NB" in nets["STACK_IN"]
+    assert report["blocked_state_path"] == "full_bridge_bidirectional_capacitor_insertion"
+    code = root.find("./definitions/Definition[@name='MMCAverageCoupling']/script/segment[@name='Fortran']").text
+    assert "MIN(1.0, MAX(-1.0, $M))" in code
+    assert "+ $IBYPASS - ILOSS" in code
+    assert "(-$VSTACK - STORF(NSTORF+2)) * $IBYPASS" in code
+    # Static materialization cannot grant dynamic converter acceptance.
+    assert report["intrinsic_dc_fault_blocking"] is False
+
+
+@pytest.mark.parametrize("current", [-0.2, 0.2])
+def test_full_bridge_reference_charges_and_opposes_both_blocked_current_polarities(companion, current):
+    result = companion.average_arm_reference(v_cap_total_kv=10.0, i_arm_ka=current,
+        insertion=-0.5, blocked=True, parameters=companion.AverageArmParameters(), converter="full_bridge")
+    assert result["i_cap_ka"] == 0.2
+    assert result["v_inserted_ideal_kv"] == math.copysign(10.0, current)
+    assert result["p_cap_mw"] == 2.0
+
+
+def test_full_bridge_reference_accepts_negative_insertion_and_keeps_signed_energy(companion):
+    result = companion.average_arm_reference(v_cap_total_kv=10.0, i_arm_ka=0.2,
+        insertion=-0.5, blocked=False, parameters=companion.AverageArmParameters(), converter="full_bridge")
+    assert result["i_cap_ka"] == -0.1
+    assert result["v_inserted_ideal_kv"] == -5.0
+    assert result["p_cap_mw"] == -1.0
+
+
 @pytest.fixture
 def library(companion, master, tmp_path):
     before = hashlib.sha256(master.read_bytes()).hexdigest()

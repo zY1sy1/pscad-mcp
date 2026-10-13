@@ -79,10 +79,18 @@ def _read_segment(path: Path, expected_columns: int) -> tuple[list[float], list[
         lines = path.read_text(encoding="utf-8").splitlines()
     except (OSError, UnicodeError) as error:
         raise _error("BLUEPRINT_OUTPUT_INVALID", "An OUT segment could not be read.", path=str(path)) from error
+    first_nonblank = True
     for line_number, line in enumerate(lines, start=1):
         if not line.strip():
             continue
         fields = line.split()
+        if first_nonblank:
+            first_nonblank = False
+            try:
+                float(fields[0])
+            except ValueError:
+                if fields[0][0].isalpha():
+                    continue  # Native OUT optionally begins with the project description.
         if len(fields) != expected_columns + 1:
             raise _error(
                 "BLUEPRINT_OUTPUT_INVALID",
@@ -139,6 +147,19 @@ def read_output_dataset(path: str | Path) -> dict[str, Any]:
     }
 
 
+def target_output_paths(project_file: str | Path) -> tuple[Path, ...]:
+    project = Path(project_file).expanduser().resolve()
+    directories = [project.parent]
+    for directory in sorted(project.parent.glob(f"{project.stem}.*")):
+        if directory.is_symlink():
+            raise _error("BLUEPRINT_OUTPUT_INVALID", "A target build directory is linked.", path=str(directory))
+        if directory.is_dir():
+            directories.append(directory)
+    return tuple(path for directory in directories
+                 for path in [directory / f"{project.stem}.inf", *directory.glob(f"{project.stem}_*.out")]
+                 if path.exists())
+
+
 def discover_output_dataset(
     staging_root: str | Path,
     *,
@@ -149,13 +170,19 @@ def discover_output_dataset(
         raise _error("BLUEPRINT_OUTPUT_INVALID", "Output staging path must be a directory.", path=str(root))
     if expected_metadata is not None:
         candidate = Path(expected_metadata).expanduser().resolve()
-        if root not in candidate.parents or candidate.is_symlink() or not candidate.is_file():
+        if root not in candidate.parents or candidate.is_symlink():
             raise _error(
                 "BLUEPRINT_OUTPUT_INVALID",
                 "The expected target output metadata is missing or unsafe.",
                 path=str(candidate),
             )
-        return read_output_dataset(candidate)
+        matches = [path for path in target_output_paths(candidate.with_suffix(".pscx"))
+                   if path.suffix.casefold() == ".inf"]
+        if len(matches) != 1:
+            raise _error("BLUEPRINT_OUTPUT_AMBIGUOUS" if matches else "BLUEPRINT_OUTPUT_INVALID",
+                         "Expected target metadata must identify one contained output dataset.",
+                         candidates=[str(path) for path in matches])
+        return read_output_dataset(matches[0])
     candidates: list[Path] = []
     for path in sorted(root.rglob("*.inf"), key=lambda item: item.as_posix()):
         if path.is_symlink() or root not in path.resolve().parents:

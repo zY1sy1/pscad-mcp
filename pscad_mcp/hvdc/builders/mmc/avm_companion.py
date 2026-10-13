@@ -1,4 +1,4 @@
-"""Repository-authored native PSCAD averaged half-bridge arm and isolated fixture.
+"""Repository-authored native PSCAD averaged arms and isolated fixtures.
 
 The public equivalent voltage is half the physical stack voltage. Consequently
 Cphysical = C_eq_F / 4 and W[MJ] = C_eq_F * V_CAP_EQ[kV]**2 / 2.
@@ -41,6 +41,14 @@ OPERATING_WINDOWS = {
     "discharge": (0.075, 0.085),
     "blocked_charge": (0.11, 0.13),
     "blocked_bypass": (0.16, 0.18),
+}
+FULL_BRIDGE_OPERATING_WINDOWS = {
+    "charge": (0.025, 0.055),
+    "discharge": (0.075, 0.085),
+    "blocked_charge": (0.11, 0.13),
+    "blocked_reverse": (0.16, 0.18),
+    "negative_insertion_discharge": (0.21, 0.23),
+    "negative_insertion_charge": (0.28, 0.30),
 }
 MIN_SWITCH_ON_RESISTANCE_OHM = 1e-3
 CAPACITOR_FEEDBACK_ADVANCE_STEPS = 2.0
@@ -98,13 +106,15 @@ def average_arm_reference(
     insertion: float,
     blocked: bool,
     parameters: AverageArmParameters,
+    converter: str = "half_bridge",
 ) -> dict[str, float]:
     """Ideal continuous-time reference, never a substitute for native evidence."""
     if any(not math.isfinite(value) for value in (v_cap_total_kv, i_arm_ka, insertion)):
         raise ValueError("Physical reference inputs must be finite")
-    if v_cap_total_kv < 0 or not 0 <= insertion <= 1 or not isinstance(blocked, bool):
+    _converter(converter)
+    if v_cap_total_kv < 0 or not (-1 if converter == "full_bridge" else 0) <= insertion <= 1 or not isinstance(blocked, bool):
         raise ValueError("Physical reference inputs are outside their operating domain")
-    ratio = (1.0 if i_arm_ka > 0 else 0.0) if blocked else insertion
+    ratio = (1.0 if i_arm_ka > 0 else -1.0 if converter == "full_bridge" and i_arm_ka < 0 else 0.0) if blocked else insertion
     loss_current = (
         parameters.P_nonohmic_MW / max(v_cap_total_kv, parameters.V_loss_floor_kV)
         if v_cap_total_kv > 0
@@ -754,9 +764,15 @@ class _Writer:
                     )
 
 
+def _converter(converter: str) -> None:
+    if converter not in {"half_bridge", "full_bridge"}:
+        raise ValueError("A native averaged arm requires half_bridge or full_bridge")
+
+
 def _make_library(
-    master: dict, master_defaults: dict, *, scope: str = LIBRARY_SCOPE
+    master: dict, master_defaults: dict, *, scope: str = LIBRARY_SCOPE, converter: str = "half_bridge", auxiliary_precharge: bool = False
 ) -> tuple[ET.Element, _Writer]:
+    _converter(converter)
     root = _project(scope, library=True)
     defaults = asdict(AverageArmParameters())
     arm_ports = {
@@ -765,6 +781,11 @@ def _make_library(
         "M": (-90, 90, "Transfer", "Input"),
         "BLOCK": (-90, 126, "Transfer", "Input"),
     }
+    if auxiliary_precharge:
+        if converter != "full_bridge":
+            raise ValueError("Auxiliary capacitor terminals require a full-bridge arm")
+        arm_ports.update({"CHARGE_POS": (-90, 180, "Natural", "Electrical"),
+                          "CHARGE_NEG": (90, 180, "Natural", "Electrical")})
     arm_ports.update(
         {
             name: (144, -180 + index * 36, "Transfer", "Output")
@@ -789,6 +810,8 @@ def _make_library(
             )
         }
     )
+    if auxiliary_precharge:
+        coupling_ports["IAUX"] = (-72, 252, "Transfer", "Input")
     coupling = _definition(
         root,
         "MMCAverageCoupling",
@@ -802,7 +825,7 @@ def _make_library(
 #LOCAL REAL NINSERT
 #LOCAL REAL ILOSS
 #LOCAL REAL VPREDICT
-      NINSERT = MIN(1.0, MAX(0.0, $M))
+      NINSERT = MIN(1.0, MAX({'-1.0' if converter == 'full_bridge' else '0.0'}, $M))
       IF (TIMEZERO) THEN
         STORF(NSTORF) = NINSERT
         STORF(NSTORF+1) = 0.0
@@ -813,8 +836,9 @@ def _make_library(
 ! Native branch drops and currents come from the same preceding solution.
 ! Include the disconnect, positive diode, bypass diode and capacitor clamp.
       $PSWITCH = ($VSTACK - STORF(NSTORF+1)) * $INORMAL
-      $PSWITCH = $PSWITCH + ($VSTACK - STORF(NSTORF+2)) * $ICLAMP - $VSTACK * $IBYPASS
-      $PSWITCH = $PSWITCH + $VCAP * (STORF(NSTORF+3) - $ICAP)
+      $PSWITCH = $PSWITCH + ($VSTACK - STORF(NSTORF+2)) * $ICLAMP
+      $PSWITCH = $PSWITCH {'+ (-$VSTACK - STORF(NSTORF+2)) * $IBYPASS' if converter == 'full_bridge' else '- $VSTACK * $IBYPASS'}
+      $PSWITCH = $PSWITCH + $VCAP * ({'$IAUX + ' if auxiliary_precharge else ''}STORF(NSTORF+3) - $ICAP)
       $PLOSS = STORF(NSTORF+4) * $VCAP
       ILOSS = 0.0
       IF ($VCAP .GT. 0.0) THEN
@@ -824,7 +848,7 @@ def _make_library(
 ! The measured branch current belongs to the preceding network solution.
 ! Pair it with the ratio that produced that solution, not the new command.
 ! Otherwise a varying insertion ratio creates first-order artificial power.
-      $ISTORE = STORF(NSTORF) * $INORMAL + $ICLAMP - ILOSS
+      $ISTORE = STORF(NSTORF) * $INORMAL + $ICLAMP {'+ $IBYPASS ' if converter == 'full_bridge' else ''}- ILOSS
 ! The delayed diode solution can briefly contain reverse clamp/leakage
 ! current while the physical capacitor is empty. Bound the complete storage
 ! sink by available charge, using the same eight-step reserve as the loss
@@ -847,6 +871,7 @@ def _make_library(
 """,
     )
     writer = _Writer(root, master, master_defaults)
+    capacitor_ground = "CHARGE_NEG" if auxiliary_precharge else "GND"
     add = lambda role, name, parameters, bindings: writer.add(
         arm, role, "master:" + name, parameters, bindings
     )
@@ -912,16 +937,19 @@ def _make_library(
         {"NA": "CLAMP_POS", "NB": "OUT", "Mag": "CLAMP_V"},
     )
     add(
-        "negative_bypass",
+        "negative_clamp" if converter == "full_bridge" else "negative_bypass",
         "peswitch",
         {**_DIODE_PARAMETERS, "I": "BYPASS_I"},
-        {"DP": "OUT", "DN": "STACK_IN"},
+        {"DP": "OUT", "DN": "REVERSE_CLAMP_POS" if converter == "full_bridge" else "STACK_IN"},
     )
+    if converter == "full_bridge":
+        add("reverse_clamp_voltage", "source_1", _SOURCE_PARAMETERS,
+            {"NA": "REVERSE_CLAMP_POS", "NB": "STACK_IN", "Mag": "CLAMP_V"})
     add(
         "storage_current",
         "src_ccin_1",
         {"Name": "", "Cntrl": "1"},
-        {"A": "CAP_POS", "B": "GND", "Mag": "STORE_I"},
+        {"A": "CAP_POS", "B": capacitor_ground, "Mag": "STORE_I"},
     )
     add(
         "capacitor_current_meter",
@@ -933,20 +961,27 @@ def _make_library(
         "storage_capacitor",
         "varrlc",
         {"RLC": "2", "C": "CAP_C_UF", "E": "0.0 [kV]", "dLdC": "0", "I": ""},
-        {"A": "CAP_MEASURE", "B": "GND"},
+        {"A": "CAP_MEASURE", "B": capacitor_ground},
     )
     add(
         "capacitor_reverse_clamp",
         "peswitch",
         {**_DIODE_PARAMETERS, "EFVD": "0.0 [kV]"},
-        {"DP": "GND", "DN": "CAP_POS"},
+        {"DP": capacitor_ground, "DN": "CAP_POS"},
     )
-    add("storage_ground", "ground", {}, {"A": "GND"})
+    # Auxiliary arms return through their parent CHARGE_NEG terminal. A local
+    # Ground would force the compiler's GND name onto that distinct port.
+    if not auxiliary_precharge:
+        add("storage_ground", "ground", {}, {"A": capacitor_ground})
+    if auxiliary_precharge:
+        add("auxiliary_capacitor_positive", "xnode", {"Name": "CHARGE_POS"}, {"N": "CHARGE_POS"})
+        add("auxiliary_capacitor_negative", "xnode", {"Name": "CHARGE_NEG"}, {"N": "CHARGE_NEG"})
+        add("auxiliary_capacitor_current", "ammeter", {"Name": "AUX_CAP_I"}, {"N1": "CHARGE_POS", "N2": "CAP_POS"})
     add(
         "capacitor_voltage_meter",
         "voltmeter",
         {"Name": "CAP_V"},
-        {"N1": "CAP_MEASURE", "N2": "GND"},
+        {"N1": "CAP_MEASURE", "N2": capacitor_ground},
     )
     add(
         "inserted_voltage_meter",
@@ -982,6 +1017,7 @@ def _make_library(
             "VSTACK": "INSERTED_V",
             "IBYPASS": "BYPASS_I",
             "ICAP": "CAP_I",
+            **({"IAUX": "AUX_CAP_I"} if auxiliary_precharge else {}),
             "VNORMAL": "NORMAL_V",
             "ISTORE": "STORE_I",
             "W": "CAP_W",
@@ -1024,14 +1060,14 @@ def _write_new(path: Path, root: ET.Element) -> str:
 
 
 def materialize_average_arm_library(
-    destination: str | Path, *, master_path: str | Path
+    destination: str | Path, *, master_path: str | Path, converter: str = "half_bridge"
 ) -> dict[str, Any]:
     """Write a new native library after checking immutable installed metadata."""
     target, source = Path(destination), Path(master_path)
     if target.exists() or target.is_symlink() or target.resolve() == source.resolve():
         raise FileExistsError("Native arm output must be new and distinct from Master")
     master, before, defaults = _audit_master(source)
-    root, writer = _make_library(master, defaults)
+    root, writer = _make_library(master, defaults, converter=converter)
     after = _sha(source.read_bytes())
     if before != after:
         raise ValueError("Master changed while authoring the native arm")
@@ -1044,7 +1080,8 @@ def materialize_average_arm_library(
         "master_sha256_after": after,
         "voltage_convention": VOLTAGE_CONVENTION,
         "initialization": "physical_charge_from_zero_or_pscad_snapshot",
-        "blocked_state_path": "half_bridge_diode_equivalent",
+        "converter": converter,
+        "blocked_state_path": "full_bridge_bidirectional_capacitor_insertion" if converter == "full_bridge" else "half_bridge_diode_equivalent",
         "intrinsic_dc_fault_blocking": False,
         "nonohmic_loss": "P_nonohmic_MW excludes physical R_arm_ohm and native semiconductor losses; reduced below V_loss_floor_kV",
         "electrical_nets": {name: dict(nets) for name, nets in writer.nets.items()},
@@ -1059,6 +1096,7 @@ def materialize_average_arm_fixture(
     *,
     master_path: str | Path,
     parameters: AverageArmParameters | None = None,
+    converter: str = "half_bridge",
 ) -> dict[str, Any]:
     """Create a source-driven one-arm case with measured charge/discharge/block phases."""
     folder, source = Path(destination), Path(master_path)
@@ -1066,13 +1104,13 @@ def materialize_average_arm_fixture(
         raise FileExistsError("Native arm fixture directory must be new")
     parameters = parameters or AverageArmParameters()
     master, before, defaults = _audit_master(source)
-    library, library_writer = _make_library(master, defaults)
+    library, library_writer = _make_library(master, defaults, converter=converter)
     library_metadata = read_definition_metadata_document(ET.tostring(library))
     project_name = "average_arm_fixture"
     root = _project(project_name, library=False)
     settings = root.find("./paramlist[@name='Settings']")
     values = {
-        "time_duration": "0.19",
+        "time_duration": "0.31" if converter == "full_bridge" else "0.19",
         "time_step": "2",
         "sample_step": "20",
         "PlotType": "1",
@@ -1116,7 +1154,15 @@ def materialize_average_arm_fixture(
       ELSE
         $I = -0.2
       ENDIF
-""",
+""" + ("""      IF (TIME .GE. 0.19 .AND. TIME .LT. 0.20) $I = -0.2 + 40.0 * (TIME - 0.19)
+      IF (TIME .GE. 0.20) THEN
+        $BLOCK = 0.0
+        $M = -0.5
+        $I = 0.2
+        IF (TIME .GE. 0.25 .AND. TIME .LT. 0.26) $I = 0.2 - 40.0 * (TIME - 0.25)
+        IF (TIME .GE. 0.26) $I = -0.2
+      ENDIF
+""" if converter == "full_bridge" else ""),
     )
     writer = _Writer(root, master, defaults, {LIBRARY_SCOPE: library_metadata})
     main = root.find("./definitions/Definition[@name='Main']")
@@ -1204,7 +1250,8 @@ def materialize_average_arm_fixture(
         "master_sha256_after": _sha(source.read_bytes()),
         "parameters": asdict(parameters),
         "voltage_convention": VOLTAGE_CONVENTION,
-        "operating_windows": OPERATING_WINDOWS,
+        "converter": converter,
+        "operating_windows": FULL_BRIDGE_OPERATING_WINDOWS if converter == "full_bridge" else OPERATING_WINDOWS,
         "channels": channels,
         "routes": writer.routes,
         "library_routes": library_writer.routes,

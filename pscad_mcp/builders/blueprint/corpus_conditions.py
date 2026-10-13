@@ -9,11 +9,11 @@ from decimal import Decimal, InvalidOperation
 from typing import TypeAlias
 
 _TOKEN = re.compile(
-    r"\s*(?:(?P<op>&&|\|\||==|!=|>|[!+()])|"
+    r"\s*(?:(?P<op>&&|\|\||==|!=|>=|>|[!+()])|"
     r"(?P<identifier>[A-Za-z_][A-Za-z0-9_]*)|"
     r"(?P<number>[0-9]+(?:\.[0-9]+)?))"
 )
-_COMPARISONS = frozenset({"==", "!=", ">"})
+_COMPARISONS = frozenset({"==", "!=", ">", ">="})
 _MAX_TOKENS = 256
 _MAX_NESTING = 64
 
@@ -259,6 +259,8 @@ def _evaluate(
         return equal if node.operator == "==" else not equal
     if node.operator == ">":
         return _as_number(left) > _as_number(right)
+    if node.operator == ">=":
+        return _as_number(left) >= _as_number(right)
     raise ConditionUnresolved("conditional-port operator is unsupported")
 
 
@@ -266,12 +268,30 @@ def evaluate_condition(
     expression: str | None,
     instance_values: Mapping[str, object],
     definition_defaults: Mapping[str, object],
+    *,
+    case_insensitive: bool = False,
 ) -> bool:
     """Evaluate one conditional-port expression under the closed grammar."""
 
     if expression is None or not expression.strip():
         return True
-    parser = _Parser(_tokens(expression.strip()))
+    tokens = _tokens(expression.strip())
+    if case_insensitive:
+        identifiers = {token.value for token in tokens if token.kind == "identifier"}
+
+        def aliases(values: Mapping[str, object]) -> dict[str, object]:
+            result = dict(values)
+            for name in identifiers:
+                matches = [value for key, value in values.items() if key.casefold() == name.casefold()]
+                if len(matches) > 1:
+                    raise ConditionUnresolved("conditional-port parameter identity is ambiguous")
+                if matches:
+                    result[name] = matches[0]
+            return result
+
+        instance_values = aliases(instance_values)
+        definition_defaults = aliases(definition_defaults)
+    parser = _Parser(tokens)
     tree = parser.parse_or()
     parser.require_end()
     return _as_boolean(_evaluate(tree, instance_values, definition_defaults))

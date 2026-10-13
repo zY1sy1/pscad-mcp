@@ -19,6 +19,17 @@ def test_parse_dual_engine_request_is_finite_and_immutable() -> None:
     assert json.loads(json.dumps(request.to_dict()))["station_vdc"]["ac_voltage_kv"] == 230.0
 
 
+def test_full_bridge_detailed_request_preserves_converter_identity():
+    request = parse_parametric_request(valid_request(model_fidelity="detailed_pwm", converter="full_bridge"))
+    assert request.to_dict()["converter"] == "full_bridge"
+
+
+@pytest.mark.parametrize("fidelity", ["average_value", "both"])
+def test_full_bridge_average_value_request_preserves_converter_identity(fidelity):
+    request = parse_parametric_request(valid_request(model_fidelity=fidelity, converter="full_bridge"))
+    assert request.converter == "full_bridge"
+
+
 @pytest.mark.parametrize("field", ["dc_voltage_kv", "active_power_mw", "frequency_hz"])
 def test_request_rejects_non_finite_values(field: str) -> None:
     payload = valid_request()

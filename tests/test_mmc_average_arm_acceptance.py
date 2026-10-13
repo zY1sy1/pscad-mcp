@@ -22,7 +22,7 @@ def runner():
     return importlib.import_module(name)
 
 
-def _physical_trace():
+def _physical_trace(converter="half_bridge"):
     parameters = AverageArmParameters()
     trace = {
         name: []
@@ -46,7 +46,7 @@ def _physical_trace():
         )
     }
     step, vcap, previous_cap_current = 2e-5, 0.0, 0.0
-    for index in range(9501):
+    for index in range(15501 if converter == "full_bridge" else 9501):
         time = index * step
         if time < 0.01:
             current, derivative = 20 * time, 20.0
@@ -65,7 +65,19 @@ def _physical_trace():
         else:
             current, derivative = -0.2, 0.0
         blocked = time >= 0.095
-        ratio = (1.0 if current > 0 else 0.0) if blocked else 0.5
+        modulation = 0.5
+        if converter == "full_bridge" and time >= 0.19:
+            if time < 0.20:
+                current, derivative = -0.2 + 40 * (time - 0.19), 40.0
+            elif time < 0.25:
+                current, derivative = 0.2, 0.0
+            elif time < 0.26:
+                current, derivative = 0.2 - 40 * (time - 0.25), -40.0
+            else:
+                current, derivative = -0.2, 0.0
+            if time >= 0.20:
+                blocked, modulation = False, -0.5
+        ratio = (1.0 if current > 0 else -1.0 if converter == "full_bridge" else 0.0) if blocked else modulation
         cap_current = ratio * current
         if index:
             vcap += (
@@ -78,7 +90,7 @@ def _physical_trace():
         inserted = ratio * vcap + parameters.R_on_ohm * current
         row = {
             "time": time,
-            "M": 0.5,
+            "M": modulation,
             "BLOCK": float(blocked),
             "CURRENT_COMMAND": current,
             "I_ARM": current,
@@ -99,6 +111,22 @@ def _physical_trace():
         for name, value in row.items():
             trace[name].append(value)
     return trace
+
+
+def test_full_bridge_gate_checks_reverse_blocking_and_negative_insertion(runner):
+    trace = _physical_trace("full_bridge")
+    parameters = AverageArmParameters()
+    accepted = runner.analyze_arm_trace(trace, parameters, converter="full_bridge")
+    assert accepted["status"] == "PASS"
+    assert set(accepted["windows"]) == {"charge", "discharge", "blocked_charge", "blocked_reverse",
+        "negative_insertion_charge", "negative_insertion_discharge"}
+    poisoned = deepcopy(trace)
+    for index, instant in enumerate(trace["time"]):
+        if 0.16 <= instant <= 0.18:
+            poisoned["V_INSERTED"][index] = 0.0
+    rejected = runner.analyze_arm_trace(poisoned, parameters, converter="full_bridge")
+    assert rejected["status"] == "FAIL"
+    assert rejected["checks"]["blocked_reverse:inserted_voltage"] is False
 
 
 def test_physical_reference_trace_satisfies_all_component_checks(runner):

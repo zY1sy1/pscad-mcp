@@ -12,6 +12,13 @@ from .assets import canonical_json, sha256_bytes
 from .models import FrozenDict, freeze, json_safe
 
 
+_CANVAS_DECORATIONS = frozenset({
+    "WireOrthogonal", "WireDiagonal", "WireBranch", "WireJumper",
+    "GraphFrame", "PlotFrame", "PolyMeter", "Curve", "Group", "Overlay",
+    "ControlFrame", "Text", "Sticky",
+})
+
+
 def _error(message: str, **details: Any) -> BackendError:
     return BackendError("BLUEPRINT_INVENTORY_INVALID", message, "blueprint", "normalize_inventory", details)
 
@@ -108,6 +115,8 @@ def normalize_inventory(value: Any) -> InventorySnapshot:
 
 async def read_live_inventory(service: Any, project_name: str, inspection_profile: str | None = None) -> InventorySnapshot:
     bridge = getattr(service, "get_blueprint_inventory", None)
+    if not callable(bridge):
+        bridge = getattr(getattr(service, "backend", None), "get_blueprint_inventory", None)
     if callable(bridge):
         return normalize_inventory(await bridge(project_name, inspection_profile))
     components = await service.list_canvas_components(project_name, canvas_name="Main")
@@ -119,6 +128,8 @@ async def read_live_inventory(service: Any, project_name: str, inspection_profil
     }
     normalized_components = []
     for component in components:
+        if component.get("definition") in _CANVAS_DECORATIONS:
+            continue
         component_id = int(component["id"])
         parameters = await service.get_component_parameters(project_name, component_id)
         observed_ports = await service.get_component_ports(project_name, component_id)
@@ -134,7 +145,10 @@ async def read_live_inventory(service: Any, project_name: str, inspection_profil
         }
         location = await service.get_component_location(project_name, component_id)
         definition_name = str(component.get("definition") or "unresolved")
-        definition = normalized_definitions.get(definition_name)
+        definition = (
+            normalized_definitions.setdefault(definition_name, {"ports": {}, "parameters": {}})
+            if component.get("definition") else None
+        )
         parameter_metadata = {name: {"resolved": True, "units": None} for name in parameters}
         if definition is not None:
             definition["parameters"].update(parameter_metadata)

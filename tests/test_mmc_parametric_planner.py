@@ -9,6 +9,21 @@ from pscad_mcp.hvdc.builders.mmc.parametric_planner import create_parametric_pla
 from tests.mmc_parametric_fakes import avm_assets, pwm_audit, valid_request
 
 
+def test_full_bridge_average_plan_cannot_fall_back_to_packaged_half_bridge_assets(tmp_path):
+    with pytest.raises(BackendError) as error:
+        create_parametric_plan(valid_request(model_fidelity="average_value", converter="full_bridge"),
+                               "MMC_CASE", tmp_path, None, avm_assets())
+    assert error.value.code == "MMC_AVM_NATIVE_INPUT_MISSING"
+
+
+def test_pwm_plan_rejects_a_template_with_a_different_verified_converter_topology(tmp_path):
+    audit = replace(pwm_audit(), submodule_topology={"declared": "full_bridge"})
+    with pytest.raises(BackendError) as error:
+        create_parametric_plan(parse_parametric_request(valid_request(model_fidelity="detailed_pwm")),
+                               "MMC_CASE", tmp_path, audit, avm_assets())
+    assert error.value.code == "MMC_TEMPLATE_TOPOLOGY_MISMATCH"
+
+
 def test_parent_plan_is_deterministic_and_contains_two_independent_children(tmp_path: Path) -> None:
     request = parse_parametric_request(valid_request(model_fidelity="both"))
     before = list(tmp_path.iterdir())
@@ -76,7 +91,7 @@ def test_planner_preserves_explicit_template_native_timing_evidence(tmp_path: Pa
 
 
 def test_planner_preserves_native_submodule_topology_evidence(tmp_path: Path) -> None:
-    request = valid_request(model_fidelity="detailed_pwm")
+    request = valid_request(model_fidelity="detailed_pwm", converter="full_bridge")
     audit = pwm_audit()
     report = audit.to_dict()
     report["submodule_topology"] = {

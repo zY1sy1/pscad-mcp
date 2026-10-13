@@ -25,6 +25,23 @@ from pscad_mcp.builders.blueprint.corpus_relation_models import (
 from pscad_mcp.builders.blueprint.corpus_writer import parse_project_graph
 from pscad_mcp.builders.blueprint.models import freeze
 from pscad_mcp.core.backend.base import BackendError
+from pscad_mcp.builders.blueprint.corpus_relations import confirmed_relation_signature
+
+
+def test_confirmed_named_label_net_does_not_require_a_physical_wire():
+    original = relation_graph()
+    graph = replace(original, confirmed_nets=(replace(original.confirmed_nets[0], conductor_keys=()),))
+    graph = replace(graph, confirmed_relation_signature=confirmed_relation_signature(graph))
+    parsed = parse_project_graph(graph.to_dict())
+    assert parsed.confirmed_nets[0].label_keys == ("occurrence:label",)
+
+
+def test_confirmed_net_still_requires_conductor_or_explicit_label_evidence():
+    original = relation_graph()
+    graph = replace(original, confirmed_nets=(replace(original.confirmed_nets[0], conductor_keys=(), label_keys=()),))
+    graph = replace(graph, confirmed_relation_signature=confirmed_relation_signature(graph))
+    with pytest.raises(BackendError):
+        parse_project_graph(graph.to_dict())
 
 
 def relation_graph() -> ProjectGraph:

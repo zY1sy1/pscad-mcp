@@ -199,6 +199,16 @@ def analyze_precharge_trace(trace: dict, parameters: dict) -> dict:
     if parameters.get("neutral_grounded"):
         required.update(f"{s}_CABLE_V{p}" for s in ("P", "V") for p in ("POS", "NEG"))
     required.update(arm + suffix for arm in arms for suffix in ("_I", "_VCAP", "_W"))
+    auxiliary = parameters.get("auxiliary_sources", [])
+    if parameters.get("converter") == "full_bridge":
+        expected = {*arms, *(s + "_DC_" + pole for s in ("P", "V") for pole in ("POS", "NEG"))}
+        if (not isinstance(auxiliary, list) or len(auxiliary) != 16
+                or {item.get("role") for item in auxiliary if isinstance(item, dict)} != expected
+                or any(not isinstance(item, dict) or any(isinstance(item.get(key), bool) or not isinstance(item.get(key), (int, float))
+                    or not math.isfinite(item[key]) or item[key] <= 0 for key in ("voltage_kv", "resistance_ohm", "current_limit_ka")) for item in auxiliary)):
+            result["error"] = "Full-bridge precharge requires all sixteen physical auxiliary sources"
+            return result
+        required.update(item["role"] + suffix for item in auxiliary for suffix in ("_AUX_CURRENT", "_AUX_STATE"))
     time = trace.get("time", ())
     if not required <= trace.keys() or len(time) < 2 or any(
         len(trace[name]) != len(time) or any(isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) for v in trace[name])
@@ -240,6 +250,20 @@ def analyze_precharge_trace(trace: dict, parameters: dict) -> dict:
     metrics = {"peak_current_ka": peak, "ready_peak_current_ka": ready_peak,
                "minimum_equivalent_capacitor_voltage_kv": minimum_cap, "minimum_dc_bus_voltage_kv": minimum_bus,
                "hold_window_s": [time[indexes[0]], time[indexes[-1]]], "energy_excursion_fraction": {}}
+    if parameters.get("converter") == "full_bridge":
+        energies = {}
+        checks["initial_capacitors_empty"] = max(abs(trace[arm + "_VCAP"][0]) for arm in arms) <= 0.001 * voltage
+        for item in auxiliary:
+            role = item["role"]
+            currents = trace[role + "_AUX_CURRENT"]
+            energies[role] = sum(0.5 * item["voltage_kv"] * (currents[a] + currents[b]) * (time[b] - time[a])
+                                 for a, b in zip(precharge, precharge[1:]))
+            checks[role + ":auxiliary_current_limited"] = max(abs(currents[i]) for i in precharge) <= 1.05 * item["current_limit_ka"]
+            checks[role + ":auxiliary_disconnected"] = all(
+                trace[role + "_AUX_STATE"][i] >= 0.5 and abs(currents[i]) <= 1e-4
+                for i, instant in enumerate(time) if start + 2.1 * step <= instant <= start + 3.1 * step)
+        checks["auxiliary_sources_supply_charge_energy"] = all(value > 0 for value in energies.values())
+        metrics["auxiliary_source_energy_mj"] = energies
     for s in ("P", "V"):
         energy = [sum(trace[f"{s}_{p}_{q}_W"][i] for p in "ABC" for q in ("UPPER", "LOWER")) for i in indexes]
         mean = fmean(energy)
