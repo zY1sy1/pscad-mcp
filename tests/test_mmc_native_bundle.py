@@ -35,6 +35,7 @@ def test_full_bridge_native_fixture_retains_bidirectional_arm_topology(constants
     arm = ET.parse(report["library"]["library_path"]).find("./definitions/Definition[@name='MMCAverageArm']")
     assert arm.find("./schematic/User[@name='negative_clamp']") is not None
     assert arm.find("./schematic/User[@name='negative_bypass']") is None
+    assert arm.find("./schematic/User[@name='storage_ground']") is None
     assert report["topology"]["converter"] == "full_bridge"
     project = ET.parse(report["project_path"])
     auxiliary = project.findall(f"./definitions/Definition[@name='Main']/schematic/User[@defn='{NATIVE_SCOPE}:MMCAuxPrecharge']")

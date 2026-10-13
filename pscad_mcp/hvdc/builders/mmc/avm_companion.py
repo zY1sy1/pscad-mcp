@@ -969,7 +969,10 @@ def _make_library(
         {**_DIODE_PARAMETERS, "EFVD": "0.0 [kV]"},
         {"DP": capacitor_ground, "DN": "CAP_POS"},
     )
-    add("storage_ground", "ground", {}, {"A": capacitor_ground})
+    # Auxiliary arms return through their parent CHARGE_NEG terminal. A local
+    # Ground would force the compiler's GND name onto that distinct port.
+    if not auxiliary_precharge:
+        add("storage_ground", "ground", {}, {"A": capacitor_ground})
     if auxiliary_precharge:
         add("auxiliary_capacitor_positive", "xnode", {"Name": "CHARGE_POS"}, {"N": "CHARGE_POS"})
         add("auxiliary_capacitor_negative", "xnode", {"Name": "CHARGE_NEG"}, {"N": "CHARGE_NEG"})
