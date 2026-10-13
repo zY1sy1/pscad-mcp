@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 from pathlib import Path
 
 import pytest
@@ -67,6 +68,55 @@ def test_both_engines_publish_only_after_independent_acceptance(tmp_path: Path) 
         ("detailed_pwm", "pwm-0"),
         ("average_value", "avm-0"),
     ]
+
+
+def test_legacy_pwm_parent_supplies_hash_verified_embedded_timing(tmp_path: Path) -> None:
+    service = make_parametric_service(tmp_path)
+    master = tmp_path / "master.pslx"
+    master.write_bytes(b"installed Master fixture")
+    identity = {
+        "pscad_version": "4.6.2",
+        "master_path": str(master),
+        "master_sha256": hashlib.sha256(master.read_bytes()).hexdigest(),
+    }
+
+    async def installed_master():
+        return dict(identity)
+
+    captured = []
+    execute = service.pwm_engine.execute_candidate
+
+    async def capture(*args, **kwargs):
+        captured.extend(kwargs["scenarios"])
+        return await execute(*args, **kwargs)
+
+    service.pscad_service.get_master_library_identity = installed_master
+    service.pwm_engine.execute_candidate = capture
+    _, terminal = _build(service, tmp_path, valid_request(model_fidelity="detailed_pwm"))
+
+    assert terminal["state"] == "published"
+    assert len(captured) == 11
+    assert all(item["events"] for item in captured)
+    for scenario in captured:
+        assert scenario["timed_control_options"] == {
+            "master_path": str(master.resolve()),
+            "max_timing_error_s": scenario["time_step_s"] + scenario["output_step_s"],
+        }
+
+
+def test_legacy_pwm_parent_rejects_changed_installed_master(tmp_path: Path) -> None:
+    service = make_parametric_service(tmp_path)
+    master = tmp_path / "master.pslx"
+    master.write_bytes(b"different installed Master")
+
+    async def installed_master():
+        return {"pscad_version": "4.6.2", "master_path": str(master), "master_sha256": "0" * 64}
+
+    service.pscad_service.get_master_library_identity = installed_master
+    _, terminal = _build(service, tmp_path, valid_request(model_fidelity="detailed_pwm"))
+    assert terminal["state"] == "failed"
+    assert service.recorded_engine_calls == []
+    assert terminal["engines"][0]["attempts"][0]["error"]["code"] == "MASTER_SOURCE_CHANGED"
 
 
 def test_one_engine_failure_keeps_parent_unpublished_but_runs_other_child(

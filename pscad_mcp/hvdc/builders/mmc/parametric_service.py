@@ -366,6 +366,32 @@ class ParametricMmcBuilderService:
     def _engine_for(self, name: str) -> Any:
         return self.pwm_engine if name == "detailed_pwm" else self.avm_engine
 
+    async def _prepare_pwm_timing(self, scenarios: list[dict[str, Any]]) -> None:
+        reader = getattr(self.pscad_service, "get_master_library_identity", None)
+        if not callable(reader):
+            return
+        identity = await reader()
+        if not isinstance(identity, Mapping) or identity.get("pscad_version") != "4.6.2":
+            return
+        master = Path(str(identity.get("master_path", ""))).expanduser()
+        if (
+            not master.is_absolute()
+            or master.is_symlink()
+            or not master.is_file()
+            or _sha256(master) != identity.get("master_sha256")
+        ):
+            raise _error(
+                "MASTER_SOURCE_CHANGED",
+                "The installed Master differs from its connected identity.",
+                "build_parametric_mmc_model",
+                identity=dict(identity),
+            )
+        for scenario in scenarios:
+            scenario["timed_control_options"] = {
+                "master_path": str(master.resolve()),
+                "max_timing_error_s": scenario["time_step_s"] + scenario["output_step_s"],
+            }
+
     async def _execute_child(
         self, plan: MmcParentPlan, child: Any
     ) -> dict[str, Any]:
@@ -385,6 +411,7 @@ class ParametricMmcBuilderService:
                         item.to_dict()["scenario"]
                         for item in recommend_scenarios(design)
                     ]
+                    await self._prepare_pwm_timing(scenarios)
                     result = await engine.execute_candidate(
                         child,
                         self.pscad_service,
