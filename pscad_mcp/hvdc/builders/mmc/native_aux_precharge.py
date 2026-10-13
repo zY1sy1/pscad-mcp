@@ -17,7 +17,8 @@ def append_auxiliary_precharge(root, master, defaults):
     for name in ("POS", "NEG"):
         add("terminal_" + name, "xnode", {"Name": name}, {"N": name})
     add("open_command", "import", {"Name": "OPEN"}, {"N": "OPEN"})
-    add("voltage_order", "const", {"Name": "", "Value": "Aux_Voltage_kV"}, {"OUT": "SUPPLY_V"})
+    add("voltage_order", "import", {"Name": "Aux_Voltage_kV"}, {"N": "SUPPLY_V"})
+    add("resistance_order", "import", {"Name": "Aux_Resistance_ohm"}, {"N": "Aux_Resistance_ohm"})
     add("physical_supply", "source_1", _SOURCE_PARAMETERS,
         {"NA": "SUPPLY_POS", "NB": "NEG", "Mag": "SUPPLY_V"})
     add("current_limiter", "varrlc", {"RLC": "0", "R": "Aux_Resistance_ohm", "E": "0.0 [kV]", "dLdC": "0", "I": ""},

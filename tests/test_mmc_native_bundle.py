@@ -41,6 +41,10 @@ def test_full_bridge_native_fixture_retains_bidirectional_arm_topology(constants
     assert len(auxiliary) == 16
     assert report["parameters"]["auxiliary_precharge"] == "current_limited_physical_sources_disconnected_when_ready"
     assert "P_A_UPPER_AUX_CURRENT" in report["channels"]
+    auxiliary_definition = ET.parse(report["library"]["library_path"]).find("./definitions/Definition[@name='MMCAuxPrecharge']")
+    declared = {p.get("name") for p in auxiliary_definition.findall("./form/category/parameter")}
+    imported = {p.get("value") for p in auxiliary_definition.findall("./schematic/User[@defn='master:import']/paramlist/param[@name='Name']")}
+    assert declared <= imported
 
 
 def test_native_dq_fixture_connects_measured_valve_signals_and_exports_internal_states(constants_evidence, installed_sources, tmp_path):
