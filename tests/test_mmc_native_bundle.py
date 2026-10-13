@@ -45,6 +45,11 @@ def test_full_bridge_native_fixture_retains_bidirectional_arm_topology(constants
     declared = {p.get("name") for p in auxiliary_definition.findall("./form/category/parameter")}
     imported = {p.get("value") for p in auxiliary_definition.findall("./schematic/User[@defn='master:import']/paramlist/param[@name='Name']")}
     assert declared <= imported
+    for terminal in arm.findall("./schematic/User[@defn='master:xnode']"):
+        name = terminal.find("./paramlist/param[@name='Name']").get("value")
+        routes = [route for route in report["library"]["arm_topology"]["routes"]
+                  if route["endpoints"][0]["component_id"] == terminal.get("id")]
+        assert len(routes) == 1 and routes[0]["signal"] == name
 
 
 def test_native_dq_fixture_connects_measured_valve_signals_and_exports_internal_states(constants_evidence, installed_sources, tmp_path):

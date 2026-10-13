@@ -871,6 +871,7 @@ def _make_library(
 """,
     )
     writer = _Writer(root, master, master_defaults)
+    capacitor_ground = "CHARGE_NEG" if auxiliary_precharge else "GND"
     add = lambda role, name, parameters, bindings: writer.add(
         arm, role, "master:" + name, parameters, bindings
     )
@@ -948,7 +949,7 @@ def _make_library(
         "storage_current",
         "src_ccin_1",
         {"Name": "", "Cntrl": "1"},
-        {"A": "CAP_POS", "B": "GND", "Mag": "STORE_I"},
+        {"A": "CAP_POS", "B": capacitor_ground, "Mag": "STORE_I"},
     )
     add(
         "capacitor_current_meter",
@@ -960,24 +961,24 @@ def _make_library(
         "storage_capacitor",
         "varrlc",
         {"RLC": "2", "C": "CAP_C_UF", "E": "0.0 [kV]", "dLdC": "0", "I": ""},
-        {"A": "CAP_MEASURE", "B": "GND"},
+        {"A": "CAP_MEASURE", "B": capacitor_ground},
     )
     add(
         "capacitor_reverse_clamp",
         "peswitch",
         {**_DIODE_PARAMETERS, "EFVD": "0.0 [kV]"},
-        {"DP": "GND", "DN": "CAP_POS"},
+        {"DP": capacitor_ground, "DN": "CAP_POS"},
     )
-    add("storage_ground", "ground", {}, {"A": "GND"})
+    add("storage_ground", "ground", {}, {"A": capacitor_ground})
     if auxiliary_precharge:
-        add("auxiliary_capacitor_positive", "xnode", {"Name": "CHARGE_POS"}, {"N": "CAP_AUX_POS"})
-        add("auxiliary_capacitor_negative", "xnode", {"Name": "CHARGE_NEG"}, {"N": "GND"})
-        add("auxiliary_capacitor_current", "ammeter", {"Name": "AUX_CAP_I"}, {"N1": "CAP_AUX_POS", "N2": "CAP_POS"})
+        add("auxiliary_capacitor_positive", "xnode", {"Name": "CHARGE_POS"}, {"N": "CHARGE_POS"})
+        add("auxiliary_capacitor_negative", "xnode", {"Name": "CHARGE_NEG"}, {"N": "CHARGE_NEG"})
+        add("auxiliary_capacitor_current", "ammeter", {"Name": "AUX_CAP_I"}, {"N1": "CHARGE_POS", "N2": "CAP_POS"})
     add(
         "capacitor_voltage_meter",
         "voltmeter",
         {"Name": "CAP_V"},
-        {"N1": "CAP_MEASURE", "N2": "GND"},
+        {"N1": "CAP_MEASURE", "N2": capacitor_ground},
     )
     add(
         "inserted_voltage_meter",
