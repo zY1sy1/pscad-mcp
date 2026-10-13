@@ -138,17 +138,30 @@ def terminate_owned_instance(record, work):
     ):
         raise RuntimeError("Owned PSCAD identity or executable did not verify.")
     work = work.resolve(strict=True)
-    children = []
-    for child in instance.children(recursive=True):
-        try:
-            executable = Path(child.exe()).resolve(strict=True)
-            if work not in executable.parents:
-                raise RuntimeError(
-                    "A child executable is outside the owned attempt; refusing termination."
-                )
-            children.append((child, child.create_time(), str(executable)))
-        except psutil.NoSuchProcess:
-            continue
+    wait_started = time.monotonic()
+    deadline = wait_started + 15
+    while True:
+        if not process_alive(identity):
+            return {"identity": identity, "session_absent": True, "terminated": []}
+        children, unresolved = [], []
+        for child in instance.children(recursive=True):
+            try:
+                executable = Path(child.exe()).resolve(strict=True)
+                if work not in executable.parents:
+                    unresolved.append(str(executable))
+                else:
+                    children.append((child, child.create_time(), str(executable)))
+            except psutil.NoSuchProcess:
+                continue
+        if not unresolved:
+            break
+        if time.monotonic() >= deadline:
+            raise RuntimeError(
+                "Child executables outside the owned attempt have not exited; refusing termination: "
+                + ", ".join(unresolved)
+            )
+        # Let native shell/console helpers finish; do not extend ownership to them.
+        time.sleep(0.05)
     terminated = []
     for child, created, executable in reversed(children):
         try:
@@ -172,6 +185,7 @@ def terminate_owned_instance(record, work):
         "identity": identity,
         "terminated": [*terminated, {"pid": pid, "exe": record["exe"]}],
         "session_absent": True,
+        "waited_for_children_seconds": time.monotonic() - wait_started,
     }
 
 

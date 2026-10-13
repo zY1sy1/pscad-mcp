@@ -64,3 +64,41 @@ def test_owned_attempt_directory_rejects_missing_files_and_escape(tmp_path, kind
         relative = "../foreign"
     with pytest.raises(BackendError):
         gate.attempt_work_directory(tmp_path, {"path": relative})
+
+
+def test_cleanup_waits_for_native_launcher_exit_without_terminating_it(
+    tmp_path, monkeypatch
+):
+    helper_file = tmp_path / "cmd.exe"
+    helper_file.write_text("system helper")
+    work = tmp_path / "attempt/work"
+    work.mkdir(parents=True)
+    alive = True
+    snapshots = 0
+    terminated = []
+
+    def descendants(recursive):
+        nonlocal snapshots
+        snapshots += 1
+        return [SimpleNamespace(exe=lambda: str(helper_file))] if snapshots == 1 else []
+
+    def terminate():
+        nonlocal alive
+        alive = False
+        terminated.append(123)
+
+    instance = SimpleNamespace(
+        create_time=lambda: 1,
+        exe=lambda: "pscad.exe",
+        name=lambda: "PSCAD.exe",
+        children=descendants,
+        terminate=terminate,
+        wait=lambda timeout: None,
+    )
+    monkeypatch.setattr(gate, "process_alive", lambda identity: alive)
+    monkeypatch.setattr(gate.psutil, "Process", lambda pid: instance)
+    result = gate.terminate_owned_instance(
+        {"vendor_pid": 123, "create_time": 1, "exe": "pscad.exe"}, work
+    )
+    assert result["session_absent"]
+    assert snapshots >= 2 and terminated == [123]
