@@ -31,6 +31,7 @@ from pscad_mcp.workflows.sweep.store import (
     contained,
     file_hash,
     process_alive,
+    sweep_error,
     tree_inventory,
 )
 
@@ -112,6 +113,15 @@ async def worker(workspace, cid, directory, mode, retries):
         )
     finally:
         await service.shutdown(timeout_s=30)
+
+
+def attempt_work_directory(campaign_root, attempt):
+    work = contained(campaign_root, attempt["path"] + "/work")
+    if not work.is_dir():
+        raise sweep_error(
+            "SWEEP_OUTPUT_MISSING", "The owned attempt work directory is missing."
+        )
+    return work
 
 
 def terminate_owned_instance(record, work):
@@ -354,10 +364,8 @@ def run_acceptance(workspace, contract_path):
                     and owned["create_time"] == identity_record["create_time"],
                 )
                 atomic_json(directory / "blocked-status.json", service.status(cid))
-                work = contained(
-                    service.store.campaign_path(cid),
-                    blocked["active_attempt"]["path"] + "/work",
-                    must_exist=True,
+                work = attempt_work_directory(
+                    service.store.campaign_path(cid), blocked["active_attempt"]
                 )
                 atomic_json(
                     directory / "owned-orphan-cleanup.json",
@@ -568,10 +576,8 @@ def run_acceptance(workspace, contract_path):
                             raise RuntimeError(
                                 "No vendor observation verifies the remaining owned instance."
                             )
-                        work = contained(
-                            service.store.campaign_path(cid),
-                            attempt["path"] + "/work",
-                            must_exist=True,
+                        work = attempt_work_directory(
+                            service.store.campaign_path(cid), attempt
                         )
                         atomic_json(
                             directory / "failure-orphan-cleanup.json",

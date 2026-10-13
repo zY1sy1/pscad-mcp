@@ -40,3 +40,27 @@ def test_independent_simpson_calculator_matches_analytic_quadratic():
     assert gate.independent_integral(
         [0, 0.25, 1], [0, 0.25, 1], [0, 0.25, 1]
     ) == pytest.approx(1 / 3)
+
+
+def test_owned_attempt_work_is_a_directory_not_a_required_output_file(tmp_path):
+    directory = tmp_path / "attempts/scenario/attempt-1/work"
+    directory.mkdir(parents=True)
+    assert (
+        gate.attempt_work_directory(tmp_path, {"path": "attempts/scenario/attempt-1"})
+        == directory
+    )
+
+
+@pytest.mark.parametrize("kind", ["missing", "file", "escape"])
+def test_owned_attempt_directory_rejects_missing_files_and_escape(tmp_path, kind):
+    from pscad_mcp.core.backend.base import BackendError
+
+    relative = "attempts/scenario/attempt-1"
+    if kind == "file":
+        path = tmp_path / relative / "work"
+        path.parent.mkdir(parents=True)
+        path.write_text("not a directory")
+    elif kind == "escape":
+        relative = "../foreign"
+    with pytest.raises(BackendError):
+        gate.attempt_work_directory(tmp_path, {"path": relative})
