@@ -7,7 +7,7 @@ All notable changes to this project are documented here.
 ### Added
 
 - Seven parameter-sweep tools in the new `sweep` profile: offline hash-bound planning and snapshots, background serial execution in dedicated owned instances, durable progress, cancellation, explicit retry/resume, baseline comparison and constrained ranking of evaluated scenarios.
-- Sweep records retain source and artifact hashes; ambiguous orphan sessions block recovery. Licensed acceptance is opt-in and has not yet been established for this feature.
+- Sweep records retain source and artifact hashes; ambiguous orphan sessions block recovery. The opt-in vdiv three-scenario Legacy scope passed licensed acceptance at `a2aaa33`; cancellation, restart and PSOUT real acceptance remain outside that result.
 
 ### Changed
 

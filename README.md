@@ -144,8 +144,11 @@ or include `sweep` in a combined profile; `full` includes these tools.
 Every attempt uses a fresh source copy and its own managed Legacy instance and
 COM executor. Live orphan processes block recovery; completed attempts are
 retained when resuming. OUT/INF and PSOUT statistics describe bounded samples;
-optimization selects among evaluated scenarios. Licensed acceptance for this
-new workflow remains pending. See the [Chinese usage guide](docs/parameter-sweeps.md).
+optimization selects among evaluated scenarios. The vdiv three-scenario Legacy
+scope passed licensed acceptance at `a2aaa33`; cancellation, restart recovery
+and PSOUT retain offline coverage only. See the
+[acceptance record](docs/acceptance/parameter-sweep-20261013.md) and
+[Chinese usage guide](docs/parameter-sweeps.md).
 
 The topology layer adds `inspect_project_topology` and
 `diagnose_project_topology`. Both tools are read-only. Diagnosis now defaults
