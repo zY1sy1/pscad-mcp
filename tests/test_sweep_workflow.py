@@ -9,6 +9,7 @@ import pytest
 
 from pscad_mcp.core.backend.base import BackendError
 from pscad_mcp.core.path_policy import PathPolicy
+from pscad_mcp.core.service import ConfirmationRequired
 from pscad_mcp.workflows.sweep.service import SweepService
 from pscad_mcp.workflows.sweep.store import WorkspaceLease, atomic_json, tree_inventory
 
@@ -71,8 +72,9 @@ class FakeSession:
         self.writes.append((component_id, dict(parameters)))
         self.parameters[component_id].update({k: str(v) for k, v in parameters.items()})
 
-    async def save_project(self, name):
-        pass
+    async def save_project(self, name, *, confirm=False):
+        if confirm is not True:
+            raise ConfirmationRequired("save_project")
 
     async def build_project(self, name):
         if self.fail_build:

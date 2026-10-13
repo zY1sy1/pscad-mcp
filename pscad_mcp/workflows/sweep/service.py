@@ -647,7 +647,7 @@ class SweepService:
                         "SWEEP_READBACK_FAILED",
                         "A parameter write did not read back correctly.",
                     )
-            await session.save_project(spec.project_name)
+            await session.save_project(spec.project_name, confirm=True)
             self._check_cancel(cid, event)
             self._checkpoint_phase(cid, checkpoint, index, "building")
             await session.build_project(spec.project_name)
@@ -760,7 +760,7 @@ class SweepService:
                                 "Original parameters did not read back after restoration.",
                             )
                     if changed:
-                        await session.save_project(spec.project_name)
+                        await session.save_project(spec.project_name, confirm=True)
                     result["cleanup"]["parameters_restored"] = True
                 except BaseException as error:  # noqa: BLE001 - cancellation must not hide incomplete restoration
                     cleanup_ok = False
