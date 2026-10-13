@@ -36,6 +36,7 @@ from pscad_mcp.core.pscad_adapter import (
 )
 from pscad_mcp.hvdc.builders.mmc.avm_companion import (
     LIBRARY_SCOPE,
+    FULL_BRIDGE_OPERATING_WINDOWS,
     OPERATING_WINDOWS,
     OUTPUT_UNITS,
     AverageArmParameters,
@@ -220,7 +221,7 @@ def read_arm_trace(files: dict, owners: dict[str, str], *, channel_units=None) -
     return {"samples": trace, "channel_sources": records}
 
 
-def analyze_arm_trace(trace: dict, parameters: AverageArmParameters) -> dict:
+def analyze_arm_trace(trace: dict, parameters: AverageArmParameters, *, converter: str = "half_bridge") -> dict:
     """Apply fixed physical tolerances to measured native quantities."""
     result: dict[str, Any] = {
         "status": "FAIL",
@@ -229,12 +230,16 @@ def analyze_arm_trace(trace: dict, parameters: AverageArmParameters) -> dict:
         "windows": {},
     }
     checks = result["checks"]
+    if converter not in {"half_bridge", "full_bridge"}:
+        raise ValueError("Unsupported average-arm converter")
+    full_bridge = converter == "full_bridge"
+    windows = FULL_BRIDGE_OPERATING_WINDOWS if full_bridge else OPERATING_WINDOWS
     required = {"time", *CHANNEL_UNITS}
     if not required <= set(trace):
         result["missing_channels"] = sorted(required - set(trace))
         return result
     domain = trace["time"]
-    if len(domain) < 9500 or any(
+    if len(domain) < (15500 if full_bridge else 9500) or any(
         len(trace[name]) != len(domain)
         or any(
             not isinstance(v, (int, float)) or not math.isfinite(v) for v in trace[name]
@@ -245,7 +250,7 @@ def analyze_arm_trace(trace: dict, parameters: AverageArmParameters) -> dict:
         return result
     checks["time_coverage"] = (
         domain[0] <= 2e-5
-        and domain[-1] >= 0.18998
+        and domain[-1] >= (0.30998 if full_bridge else 0.18998)
         and all(0 < b - a <= 2.2e-5 for a, b in pairwise(domain))
     )
     if not checks["time_coverage"]:
@@ -290,16 +295,17 @@ def analyze_arm_trace(trace: dict, parameters: AverageArmParameters) -> dict:
         len(inductance) >= 200
         and abs(fmean(inductance) - parameters.L_arm_H) <= 0.05 * parameters.L_arm_H
     )
-    for window, (start, stop) in OPERATING_WINDOWS.items():
+    for window, (start, stop) in windows.items():
         indexes = [
             index for index, instant in enumerate(domain) if start <= instant <= stop
         ]
         if len(indexes) < 400:
             checks[window + ":coverage"] = False
             continue
-        positive = window in {"charge", "blocked_charge"}
+        positive = window in {"charge", "blocked_charge", "negative_insertion_discharge"}
         blocked = window.startswith("blocked_")
-        ratio = (1.0 if positive else 0.0) if blocked else 0.5
+        modulation = -0.5 if window.startswith("negative_insertion_") else 0.5
+        ratio = (1.0 if positive else -1.0 if full_bridge else 0.0) if blocked else modulation
         mean = lambda name, selected=indexes: fmean(
             trace[name][index] for index in selected
         )
@@ -346,7 +352,7 @@ def analyze_arm_trace(trace: dict, parameters: AverageArmParameters) -> dict:
         )
         check(
             "modulation_and_block",
-            max(abs(trace["M"][i] - 0.5) for i in indexes) <= 1e-6
+            max(abs(trace["M"][i] - modulation) for i in indexes) <= 1e-6
             and max(abs(trace["BLOCK"][i] - float(blocked)) for i in indexes) <= 1e-6,
         )
         check(
@@ -364,9 +370,9 @@ def analyze_arm_trace(trace: dict, parameters: AverageArmParameters) -> dict:
         check(
             "energy_direction",
             change > 1e-5
-            if positive
+            if ratio * expected_current > 0
             else change < -1e-5
-            if not blocked
+            if ratio * expected_current < 0
             else abs(change) <= max(1e-5, 0.005 * trace["ENERGY"][first]),
         )
         check(
@@ -407,8 +413,9 @@ def analyze_arm_trace(trace: dict, parameters: AverageArmParameters) -> dict:
             max(
                 abs(
                     trace["I_CAP"][i]
-                    - 0.5 * trace["I_NORMAL"][i]
+                    - modulation * trace["I_NORMAL"][i]
                     - trace["I_CLAMP"][i]
+                    - (trace["I_BYPASS"][i] if full_bridge else 0.0)
                     + trace["P_NONOHMIC"][i] / trace["V_CAP_TOTAL"][i]
                 )
                 for i in indexes
@@ -478,10 +485,12 @@ def _require_no_errors(messages: Any) -> None:
 
 async def run_attempt(args, run_dir: Path, *, service_factory=_service) -> dict:
     _optins()
+    converter = getattr(args, "converter", "half_bridge")
     report_path = run_dir / "report.json"
     report: dict[str, Any] = {
         "schema_version": 1,
-        "scope": SCOPE,
+        "scope": "native_full_bridge_average_arm_physical_acceptance" if converter == "full_bridge" else SCOPE,
+        "converter": converter,
         "status": "FAIL",
         "component_accepted": False,
         "model_accepted": False,
@@ -527,7 +536,7 @@ async def run_attempt(args, run_dir: Path, *, service_factory=_service) -> dict:
         report["processes_before"] = list_pscad_processes()
         begin("materialize")
         receipt = materialize_average_arm_fixture(
-            run_dir / "authored", master_path=args.master
+            run_dir / "authored", master_path=args.master, converter=converter
         )
         report["fixture"] = receipt
         model_dir = run_dir / "model"
@@ -676,7 +685,7 @@ async def run_attempt(args, run_dir: Path, *, service_factory=_service) -> dict:
         _write_report(trace_path, observed["samples"])
         report["trace"] = {"path": str(trace_path), "sha256": _sha256(trace_path)}
         report["analysis"] = analyze_arm_trace(
-            observed["samples"], AverageArmParameters(**receipt["parameters"])
+            observed["samples"], AverageArmParameters(**receipt["parameters"]), converter=converter
         )
         report["output_hashes_before_read"] = hashes
         report["output_hashes_after_read"] = {
@@ -783,6 +792,7 @@ async def run_attempt(args, run_dir: Path, *, service_factory=_service) -> dict:
 
 def main(argv=None, *, service_factory=_service) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--converter", choices=("half_bridge", "full_bridge"), default="half_bridge")
     parser.add_argument("--workspace-root", type=Path, required=True)
     parser.add_argument(
         "--master",
