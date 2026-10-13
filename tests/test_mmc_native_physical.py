@@ -61,6 +61,21 @@ def test_neutral_reactor_current_must_be_observed_in_phase_kcl():
     assert evaluate(trace, neutral_grounded=True)["status"] == "FAIL"
 
 
+def test_kcl_accounts_for_each_measured_auxiliary_dc_precharge_branch():
+    trace = balanced_measurements()
+    for station in ("P", "V"):
+        for pole, meter, current in (("POS", "IDC", 0.02), ("NEG", "IDC_NEG", -0.03)):
+            trace[f"{station}_DC_{pole}_AUX_CURRENT"] = [abs(current)] * len(trace["time"])
+            for name in (f"{station}_{meter}", f"{station}_KCL_{meter}"):
+                trace[name] = [value + current for value in trace[name]]
+    assert evaluate(trace)["status"] == "FAIL"
+    accepted = evaluate(trace, auxiliary_precharge=True)
+    assert accepted["status"] == "PASS"
+    assert accepted["limits"]["current_residual_ka"] == 1e-9
+    trace["P_DC_POS_AUX_CURRENT"][0] = 0.0
+    assert evaluate(trace, auxiliary_precharge=True)["status"] == "FAIL"
+
+
 @pytest.mark.parametrize("signal, value, failed", [
     ("P_KCL_VALVE_I_A", 1.0, "P:A:phase_kcl"),
     ("V_KCL_IDC_NEG", 1.0, "V:negative_pole_kcl_max_residual_ka"),

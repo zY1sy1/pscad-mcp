@@ -21,6 +21,7 @@ def evaluate_native_network_identities(
     windows: Mapping[str, tuple[float, float]],
     neutral_grounded: bool = False, neutral_resistance_ohm: float = 350.0,
     neutral_phase_resistance_ohm: float = 0.0,
+    auxiliary_precharge: bool = False,
 ) -> dict:
     result = {
         "scope": "native_network_identities_and_physical_diagnostics",
@@ -33,12 +34,16 @@ def evaluate_native_network_identities(
                                     "pll", "protection", "reversal", "fault_recovery"],
     }
     parameters = (capacitance_f, grounding_resistance_ohm, valve_grounding_resistance_ohm, voltage_kv, frequency_hz)
+    if not isinstance(auxiliary_precharge, bool):
+        raise ValueError("Auxiliary precharge must identify the physical branch contract")
     if not isinstance(neutral_grounded, bool) or (neutral_grounded and (isinstance(neutral_resistance_ohm, bool) or not isinstance(neutral_resistance_ohm, (int, float)) or not math.isfinite(neutral_resistance_ohm) or neutral_resistance_ohm <= 0)):
         raise ValueError("Neutral grounding requires a positive physical resistance")
     if any(isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) or v <= 0 for v in parameters):
         raise ValueError("Network identity parameters must be finite and positive")
     required = {"time"}
     for station in ("P", "V"):
+        if auxiliary_precharge:
+            required.update(f"{station}_DC_{pole}_AUX_CURRENT" for pole in ("POS", "NEG"))
         required.update(f"{station}_{s}" for s in ("VDC", "VDC_POS", "VDC_NEG", "IDC", "IDC_NEG"))
         required.update(f"{station}_KCL_{s}" for s in ("VDC_POS", "VDC_NEG", "IDC", "IDC_NEG"))
         for phase in "ABC":
@@ -103,9 +108,11 @@ def evaluate_native_network_identities(
                 result["checks"][prefix + ":modulation_clip"] = clip_error <= result["limits"]["modulation_clip_error"]
         upper_sum = [math.fsum(trace[f"{station}_{phase}_UPPER_INET"][i] for phase in "ABC") for i in range(len(time))]
         lower_sum = [math.fsum(trace[f"{station}_{phase}_LOWER_INET"][i] for phase in "ABC") for i in range(len(time))]
+        auxiliary_positive = trace[f"{station}_DC_POS_AUX_CURRENT"] if auxiliary_precharge else [0.0] * len(time)
+        auxiliary_negative = trace[f"{station}_DC_NEG_AUX_CURRENT"] if auxiliary_precharge else [0.0] * len(time)
         metrics = {
-            "positive_pole_kcl_max_residual_ka": max(abs(u + i + v / grounding_resistance_ohm) for u, i, v in zip(upper_sum, trace[station + "_KCL_IDC"], trace[station + "_KCL_VDC_POS"])),
-            "negative_pole_kcl_max_residual_ka": max(abs(l - i - v / grounding_resistance_ohm) for l, i, v in zip(lower_sum, trace[station + "_KCL_IDC_NEG"], trace[station + "_KCL_VDC_NEG"])),
+            "positive_pole_kcl_max_residual_ka": max(abs(u + i + v / grounding_resistance_ohm - auxiliary) for u, i, v, auxiliary in zip(upper_sum, trace[station + "_KCL_IDC"], trace[station + "_KCL_VDC_POS"], auxiliary_positive)),
+            "negative_pole_kcl_max_residual_ka": max(abs(l - i - v / grounding_resistance_ohm - auxiliary) for l, i, v, auxiliary in zip(lower_sum, trace[station + "_KCL_IDC_NEG"], trace[station + "_KCL_VDC_NEG"], auxiliary_negative)),
             "voltage_max_residual_kv": max(abs(p - n - d) for p, n, d in zip(vpos, vneg, vdc)),
             "phases": phases, "arms": arms,
         }
