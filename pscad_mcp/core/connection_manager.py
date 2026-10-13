@@ -31,8 +31,14 @@ async def _default_backend_factory(executor: Any = robust_executor) -> Any:
     legacy_installations = []
     if legacy_module is not None:
         try:
+            controller_source = legacy_module.controller
+            controller_factory = (
+                controller_source
+                if callable(controller_source)
+                else controller_source.Controller
+            )
             legacy_installations = await executor.run_safe(
-                lambda: legacy_module.controller().get_paramlist_names("pscad")
+                lambda: controller_factory().get_paramlist_names("pscad")
             )
         except Exception as exc:
             logger.warning("Legacy PSCAD discovery failed: %s", exc)
