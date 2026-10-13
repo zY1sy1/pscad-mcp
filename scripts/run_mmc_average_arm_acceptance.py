@@ -560,7 +560,7 @@ async def run_attempt(args, run_dir: Path, *, service_factory=_service) -> dict:
         await bounded(service.load_projects([str(library), str(project)]))
         await bounded(service.save_project(LIBRARY_SCOPE, confirm=True))
         requested_settings = {
-            "time_duration": "0.19",
+            "time_duration": "0.31" if converter == "full_bridge" else "0.19",
             "time_step": "2",
             "sample_step": "20",
             "StartType": "0",
