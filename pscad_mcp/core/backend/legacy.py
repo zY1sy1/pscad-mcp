@@ -2140,6 +2140,14 @@ class LegacyBackend:
         # that only project/definition are sent.  Keep the old path for test
         # doubles and older library variants which do not expose that scope.
         response = await self._legacy_scoped_list_components(canvas)
+        if isinstance(response, ET.Element) and response.get("success") == "false":
+            raise BackendError(
+                "PSCAD_COMMAND_FAILED",
+                "PSCAD rejected the canvas component inventory request.",
+                self.name,
+                "list_components",
+                {"project": project_name, "canvas": canvas_name},
+            )
         user_cmp = getattr(canvas, "user_cmp", None)
         if isinstance(response, ET.Element) and callable(user_cmp):
             components = []
@@ -2182,6 +2190,26 @@ class LegacyBackend:
     async def _component_proxy(
         self, project_name: str, component_id: int
     ) -> tuple[Any, Any]:
+        canvas = await self._canvas(project_name)
+        lookup = getattr(canvas, "user_cmp", None)
+        if callable(lookup):
+            # 4.6.2 can reject repeated list-components even while direct
+            # component queries remain valid. Verify the live target location
+            # rather than interpreting a failed inventory as a missing target.
+            component = await self.executor.run_safe(lookup, component_id)
+            if self._is_user_component(component):
+                location = await self.executor.run_safe(component.get_location)
+                if (
+                    isinstance(location, (tuple, list))
+                    and len(location) == 2
+                    and all(isinstance(value, int) and not isinstance(value, bool) for value in location)
+                ):
+                    return canvas, component
+            raise BackendError(
+                "NOT_FOUND", f"Component {component_id} was not found.",
+                self.name, "component",
+                {"project": project_name, "component_id": component_id},
+            )
         canvas, components = await self._legacy_components(project_name)
         for component in components:
             if self._component_id(component) == component_id:

@@ -1,5 +1,8 @@
 import xml.etree.ElementTree as ET
 
+import pytest
+
+from pscad_mcp.core.backend.base import BackendError
 from pscad_mcp.core.backend.legacy import LegacyBackend
 from tests.backend_fakes import ImmediateExecutor
 
@@ -109,5 +112,72 @@ def test_legacy_component_enumeration_uses_scope_without_canvas_component_id():
         assert [item.id for item in found] == [7]
         command = canvas._pscad.commands[0]
         assert command.find("scope/component") is None
+
+    asyncio.run(run())
+
+
+def test_targeted_parameter_reads_do_not_depend_on_repeated_canvas_enumeration():
+    """The real 4.6.2 canvas list can fail after its first successful response."""
+    import asyncio
+
+    class OneShotCommand(_Command):
+        def execute(self):
+            if self.recorder:
+                self.recorder.append(self.root)
+                return ET.fromstring('<response success="false"><error/></response>')
+            return super().execute()
+
+    class OneShotPscad(_Pscad):
+        def command(self, name):
+            command = OneShotCommand(self.commands)
+            command.root.set("name", name)
+            return command
+
+    async def run():
+        canvas = _Canvas()
+        canvas._pscad = OneShotPscad()
+        backend = await _make_backend(canvas)
+        first = await backend.get_component_parameters("case", 7)
+        second = await backend.get_component_parameters("case", 7)
+        assert first == second == {"Name": "V1"}
+
+    asyncio.run(run())
+
+
+def test_direct_lookup_verifies_target_existence_before_reading_parameters():
+    import asyncio
+
+    class MissingComponent(_Component):
+        def get_location(self):
+            return None
+
+        def get_parameters(self):
+            raise AssertionError("A missing target must not reach the parameter reader.")
+
+    async def run():
+        canvas = _Canvas()
+        canvas.component = MissingComponent()
+        backend = await _make_backend(canvas)
+        with pytest.raises(BackendError) as error:
+            await backend.get_component_parameters("case", 7)
+        assert error.value.code == "NOT_FOUND"
+
+    asyncio.run(run())
+
+
+def test_rejected_inventory_is_not_reported_as_an_empty_canvas():
+    import asyncio
+
+    class RejectedCommand(_Command):
+        def execute(self):
+            return ET.fromstring('<response success="false"><error/></response>')
+
+    async def run():
+        canvas = _Canvas()
+        canvas._pscad.command = lambda name: RejectedCommand([])
+        backend = await _make_backend(canvas)
+        with pytest.raises(BackendError) as error:
+            await backend.find_components("case", "Main", None, None)
+        assert error.value.code == "PSCAD_COMMAND_FAILED"
 
     asyncio.run(run())
