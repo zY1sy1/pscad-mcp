@@ -122,11 +122,14 @@ def test_licensed_parameter_sweep():
             for channel in output["channels"]:
                 index = entries.index(channel["path"])
                 part = metadata.with_name(f"{metadata.stem}_{index // 10 + 1:02d}.out")
-                rows = [
-                    list(map(float, line.split()))
-                    for line in part.read_text().splitlines()
-                    if line.strip()
-                ]
+                lines = [line for line in part.read_text().splitlines() if line.strip()]
+                # The independent calculator handles PSCAD's optional title
+                # before converting every data row with ordinary float().
+                try:
+                    float(lines[0].split()[0])
+                except ValueError:
+                    lines = lines[1:]
+                rows = [list(map(float, line.split())) for line in lines]
                 n = min(len(rows), spec.get("max_samples", 10000))
                 indices = (
                     [0]

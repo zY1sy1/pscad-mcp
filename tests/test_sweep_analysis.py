@@ -54,6 +54,17 @@ def test_native_empty_groups_and_undeclared_units_are_preserved(tmp_path):
     assert channel["units"] is None
 
 
+def test_native_out_description_header_does_not_hide_numeric_data_errors(tmp_path):
+    dataset(tmp_path, channels=1, count=5)
+    part = tmp_path / "case_01.out"
+    part.write_text("PSCAD example output\n" + part.read_text())
+    payload = read_legacy(tmp_path, "case_01.out", ("Main/V1",), 10)
+    assert payload["channels"][0]["values"] == [0, 1, 2, 3, 4]
+    part.write_text("PSCAD example output\n0 corrupted\n0.01 1\n")
+    with pytest.raises(BackendError):
+        read_legacy(tmp_path, "case_01.out", ("Main/V1",), 10)
+
+
 @pytest.mark.parametrize(
     "mutation", ["time", "missing", "unexpected", "nonfinite", "width"]
 )

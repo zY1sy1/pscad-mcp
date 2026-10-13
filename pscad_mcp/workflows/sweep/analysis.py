@@ -6,10 +6,11 @@ import hashlib
 import math
 import re
 from copy import deepcopy
-from itertools import pairwise
+from itertools import chain, pairwise
 from pathlib import Path
 from typing import Any
 
+from ...core.pscad_adapter import _legacy_first_numeric_row
 from .store import contained, sweep_error
 
 STATISTICS = frozenset({"min", "max", "mean", "first", "last", "rms", "peak_abs"})
@@ -84,7 +85,13 @@ def legacy_dataset_paths(work: Path, relative: str) -> tuple[Path, list[Path]]:
 def _rows(path: Path, width: int):
     with path.open("r", encoding="utf-8") as stream:
         previous = None
-        for line in stream:
+        try:
+            first = _legacy_first_numeric_row(stream)
+        except ValueError as error:
+            raise sweep_error(
+                "SWEEP_OUTPUT_INVALID", "OUT contains invalid numeric data."
+            ) from error
+        for line in chain([first], stream):
             if not line.strip():
                 continue
             try:
