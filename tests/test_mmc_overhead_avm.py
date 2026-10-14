@@ -97,6 +97,8 @@ def test_native_overhead_artifacts_and_module_are_verified_before_any_simulation
     result = asyncio.run(engine.execute_candidate(plan, service))
     fixture = result["fixture"]
     library_root = ET.parse(fixture["library"]["library_path"])
+    configuration = library_root.find("./definitions/Definition[@name='MMCOverheadLink']/schematic/Wire[@classid='TLine']/User")
+    assert configuration.find("./paramlist/param[@name='Mode']").get("value") == "0"
     for interface in library_root.findall("./definitions/Definition[@name='MMCOverheadLink']/schematic/User[@defn='master:tline_interface']"):
         assert interface.get("q") == "4"
         assert interface.find("paramlist").get("name") == ""

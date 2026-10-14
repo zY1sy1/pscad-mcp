@@ -51,7 +51,7 @@ def append_native_overhead_link(root, *, constants_evidence, source_project, mas
     wrapper = line.find("User")
     wrapper.attrib.update(name=scope + ":DCTL", defn=scope + ":DCTL")
     for name, value in {"Name": constants["segment"], "Length": f"{constants['length_km']:.15g} [km]",
-                        "const_path": str(Path(local_constants).resolve()), "gen_cnst": "0"}.items():
+                        "const_path": str(Path(local_constants).resolve()), "gen_cnst": "0", "Mode": "0"}.items():
         _set_parameter(wrapper, name, value)
     module.find("schematic").append(line)
     return {"model": model, "constants": constants, "files": files, "input_hashes": hashes,
@@ -93,7 +93,7 @@ def audit_native_overhead_link(library, receipt):
             raise ValueError("Native overhead pole connection or conductor ordering changed")
     values = _parameters(configurations[0].find("User"))
     if (configurations[0].get("defn") != root.get("name") + ":DCTL"
-            or values.get("Name") != receipt["link_name"] or values.get("Dim") != "2"
+            or values.get("Name") != receipt["link_name"] or values.get("Dim") != "2" or values.get("Mode") != "0"
             or values.get("gen_cnst") != "0" or Path(values.get("const_path", "")).resolve() != Path(receipt["constants_path"]).resolve()):
         raise ValueError("Native overhead configuration differs from its frozen constants")
     return {"coupled_overhead_count": 1, "conductor_order_verified": True}
