@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import math
 import shutil
 import subprocess
 import tempfile
@@ -22,6 +23,7 @@ from ....acceptance.process_scope import (
 from ....core.process_inventory import list_pscad_processes
 from . import timed_control
 from .engines.pwm import _copy_library_support
+from .fault_channels import _metadata
 from .line_constants import (
     generate_public_line_constants,
     rebind_template_line_constants,
@@ -32,6 +34,49 @@ ROOT = Path(__file__).resolve().parents[4]
 
 def _hash(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def complete_output_paths(
+    directory, namespace, *, started_after, duration_s, output_step_s
+):
+    """Require a fresh final-domain row in every part declared by the INF file."""
+    for folder in directory.glob(namespace + ".*"):
+        metadata_file = folder / (namespace + ".inf")
+        if not metadata_file.is_file():
+            continue
+        try:
+            metadata = _metadata(metadata_file)
+            if not metadata:
+                continue
+            count = (max(item["call_id"] for item in metadata) - 1) // 10 + 1
+            paths = [
+                folder / f"{namespace}_{number:02d}.out"
+                for number in range(1, count + 1)
+            ]
+            for path in paths:
+                if not path.is_file() or path.stat().st_mtime < started_after:
+                    break
+                with path.open("rb") as stream:
+                    stream.seek(0, 2)
+                    stream.seek(max(0, stream.tell() - 8192))
+                    lines = stream.read().splitlines()
+                if not lines:
+                    break
+                row = lines[-1].split()
+                if len(row) < 2:
+                    break
+                final_time = float(row[0].replace(b"D", b"E").replace(b"d", b"e"))
+                if (
+                    not math.isfinite(final_time)
+                    or abs(final_time - duration_s) > output_step_s * 1.001
+                ):
+                    break
+            else:
+                return paths
+        except (OSError, ValueError):
+            # A writer may still be flushing the final row after an idle read.
+            continue
+    return []
 
 
 def write_report(path: Path, report: dict) -> None:
@@ -265,12 +310,13 @@ async def run(args, report, checkpoint, *, service=None):
                 status = str(state.get("status", "")).casefold()
                 activity_seen = activity_seen or status in {"running", "paused"}
                 if status in {"completed", "complete", "idle"}:
-                    fresh = [
-                        p
-                        for p in directory.glob(f"{project.stem}.*/*.out")
-                        if p.name.startswith(project.stem + "_")
-                        and p.stat().st_mtime >= report["run_started_after"]
-                    ]
+                    fresh = complete_output_paths(
+                        directory,
+                        project.stem,
+                        started_after=report["run_started_after"],
+                        duration_s=args.duration,
+                        output_step_s=0.00005,
+                    )
                     if fresh:
                         pending = False
                         break
