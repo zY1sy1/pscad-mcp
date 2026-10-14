@@ -896,6 +896,114 @@ def materialize_pwm_command_interface(
             "wire_owner": ac_wires[0].get("id"),
         }
     )
+    observed_ac = editor.clone_observed_switch(
+        "McpPwmAcFault",
+        "tpflt",
+        "MAX("
+        + ",".join(
+            f"1-E_BtoI(OPENBR($Br{branch},$SS))"
+            for branch in ("AB", "BC", "CA", "AG", "BG", "CG")
+        )
+        + ")",
+    )
+    ac_fault.set("defn", editor.namespace + ":McpPwmAcFault")
+    _set(ac_fault, "McpClosed", "McpAcFaultClosed")
+    editor.probe(
+        main,
+        "McpAcFaultClosed",
+        "MCP_AC_FAULT_CLOSED",
+        "1",
+        source={
+            "kind": "physical_switch_state",
+            "switch_owner": ac_fault.get("id"),
+            "expression": "MAX(1-OPENBR)",
+            "quantity": "fault_branch_closed",
+        },
+    )
+    segment = observed_ac.find("./script/segment[@name='Dsout']")
+    category = observed_ac.find("./form/category")
+    for branch in ("AB", "BC", "CA", "AG", "BG", "CG"):
+        parameter = ET.SubElement(
+            category,
+            "parameter",
+            {
+                "name": "McpClosed" + branch,
+                "type": "Text",
+                "desc": "Measured fault branch",
+                "content_type": "Literal",
+            },
+        )
+        ET.SubElement(parameter, "value").text = ""
+        segment.text += (
+            f"\n#OUTPUT REAL McpClosed{branch} {{1-E_BtoI(OPENBR($Br{branch},$SS))}}\n"
+        )
+        signal = "McpAcFaultClosed" + branch
+        _set(ac_fault, "McpClosed" + branch, signal)
+        editor.probe(
+            main,
+            signal,
+            "MCP_AC_FAULT_CLOSED_" + branch,
+            "1",
+            source={
+                "kind": "physical_switch_state",
+                "switch_owner": ac_fault.get("id"),
+                "expression": f"1-OPENBR(Br{branch})",
+                "quantity": "fault_branch_closed",
+            },
+        )
+    for phase, parameter in (("A", "Ifla"), ("B", "Iflb"), ("C", "Iflc")):
+        signal = "McpAcFaultCurrent" + phase
+        _set(ac_fault, parameter, signal)
+        editor.probe(
+            main,
+            signal,
+            "MCP_AC_FAULT_CURRENT_" + phase,
+            "kA",
+            source={
+                "kind": "physical_measurement",
+                "owner": ac_fault.get("id"),
+                "parameter": parameter,
+                "quantity": "physical_fault_branch_current",
+            },
+        )
+    editor.clone_observed_switch(
+        "McpPwmPgFault", "fault_sw", "1-E_BtoI(OPENBR($NBR,$SS))"
+    )
+    pg_switches = [
+        u
+        for u in main.findall("User")
+        if u.get("defn") == "master:fault_sw"
+        and _params(u).get("Name") == "McpDcPgFault"
+    ]
+    if len(pg_switches) != 1:
+        raise _error("The physical pole-to-ground fault branch is not unique.")
+    pg = pg_switches[0]
+    pg.set("defn", editor.namespace + ":McpPwmPgFault")
+    _set(pg, "McpClosed", "McpDcPgFaultClosed")
+    editor.probe(
+        main,
+        "McpDcPgFaultClosed",
+        "MCP_DC_PG_FAULT_CLOSED",
+        "1",
+        source={
+            "kind": "physical_switch_state",
+            "switch_owner": pg.get("id"),
+            "expression": "1-OPENBR",
+            "quantity": "fault_branch_closed",
+        },
+    )
+    editor.probe(
+        main,
+        _params(pg)["Iflt"],
+        "MCP_DC_PG_FAULT_CURRENT",
+        "kA",
+        source={
+            "kind": "physical_measurement",
+            "owner": pg.get("id"),
+            "parameter": "Iflt",
+            "quantity": "physical_fault_branch_current",
+        },
+    )
     for number in ("1", "2"):
         for field, signal, units in (
             ("P", "P" + number, "MW"),

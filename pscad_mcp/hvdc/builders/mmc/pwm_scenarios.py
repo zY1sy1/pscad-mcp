@@ -84,7 +84,16 @@ def prepare_routed_scenario_source(
                 "hvdc",
                 "prepare_pwm_scenario",
             )
-        _set(control, "Value", 1 if name == "ac_single_line_ground_fault" else 0)
+        fault_type = 1 if name == "ac_single_line_ground_fault" else 0
+        changes.append(
+            {
+                "owner": control.get("id"),
+                "parameter": "Value",
+                "before": _params(control)["Value"],
+                "after": fault_type,
+            }
+        )
+        _set(control, "Value", fault_type)
     ground = [
         u
         for u in main.findall("User")
@@ -98,7 +107,16 @@ def prepare_routed_scenario_source(
             "hvdc",
             "prepare_pwm_scenario",
         )
-    _set(ground[0], "Value", 1 if name == "dc_pole_to_ground_fault" else 0)
+    ground_type = 1 if name == "dc_pole_to_ground_fault" else 0
+    changes.append(
+        {
+            "owner": ground[0].get("id"),
+            "parameter": "Value",
+            "before": _params(ground[0])["Value"],
+            "after": ground_type,
+        }
+    )
+    _set(ground[0], "Value", ground_type)
     if name != "startup":
         for event in result["events"]:
             event["time_s"] += warmup_s
