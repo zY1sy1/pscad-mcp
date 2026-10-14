@@ -583,6 +583,8 @@ def materialize_pwm_command_interface(
     library: str | Path,
     rated_power_mw: float,
     reactive_power_mvar: float = 0.0,
+    power_reversal_time_s: float = 0.5,
+    dc_link_length_km: float | None = None,
 ) -> dict[str, Any]:
     original, master_path, library_path = (
         _regular(source),
@@ -620,6 +622,31 @@ def materialize_pwm_command_interface(
         raise _error(
             "PWM command scaling requires finite power values with positive rated MW."
         )
+    if (
+        isinstance(power_reversal_time_s, bool)
+        or not math.isfinite(power_reversal_time_s)
+        or power_reversal_time_s <= 0
+    ):
+        raise _error("The requested reversal duration must be finite and positive.")
+    if dc_link_length_km is not None:
+        if (
+            isinstance(dc_link_length_km, bool)
+            or not math.isfinite(dc_link_length_km)
+            or dc_link_length_km <= 0
+        ):
+            raise _error("The DC route length must be finite and positive.")
+        segments = root.findall(".//Wire[@classid='TLine']")
+        if len(segments) != 2:
+            raise _error(
+                "The audited two-terminal route must have two physical line segments."
+            )
+        for segment in segments:
+            fields = {
+                p.get("name"): p for p in segment.findall("./User/paramlist/param")
+            }
+            if "Length" not in fields:
+                raise _error("A physical line length is not declared.")
+            fields["Length"].set("value", str(dc_link_length_km / 2.0))
     main = definitions["Main"].find("schematic")
     if main is None:
         raise _error("The source has no physical Main schematic.")
@@ -758,6 +785,11 @@ def materialize_pwm_command_interface(
         _set(converter, "Qref", "McpQRef")
         if mode == "1":
             _set(converter, "Pref", "McpPRef")
+            _set(
+                converter,
+                "PrefRate",
+                format(2.0 * rated_power_mw / power_reversal_time_s, ".15g"),
+            )
         point = absolute_port(
             (int(converter.get("x")), int(converter.get("y"))),
             (-90, -72),
@@ -938,5 +970,7 @@ def materialize_pwm_command_interface(
         "dc_fault_type_owner": selector.get("id"),
         "rated_power_mw": rated_power_mw,
         "reactive_power_mvar": reactive_power_mvar,
+        "power_reversal_time_s": power_reversal_time_s,
+        "dc_link_length_km": dc_link_length_km,
         "requires_physical_acceptance": True,
     }
