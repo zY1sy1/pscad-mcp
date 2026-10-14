@@ -80,7 +80,7 @@ def test_sweep_recovery_acceptance_does_not_promote_existing_psout_files_to_simu
     }
     recovery = scopes["parameter_sweep_recovery_and_metrics_462"]
     assert recovery["licensed_status"] == "PASS"
-    assert recovery["implementation_status"] == "INTEGRATION_BRANCH"
+    assert recovery["implementation_status"] == "MERGED"
     assert len(recovery["historical_attempts"]) == 3
     assert all(
         item["licensed_status"] == "FAIL" for item in recovery["historical_attempts"]

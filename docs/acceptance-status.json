@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-14T03:35:02.942245+08:00",
+  "updated_at": "2026-10-14T10:17:25.108534+08:00",
   "policy": "Evidence belongs only to its named scope, exact request and tested commit. INTEGRATION_BRANCH records are not merged/deployed. PASS is never inherited by another builder, rating or later commit; offline integrity checks do not establish physical acceptance.",
   "scopes": [
     {
@@ -1365,7 +1365,7 @@
     },
     {
       "scope": "parameter_sweep_recovery_and_metrics_462",
-      "implementation_status": "INTEGRATION_BRANCH",
+      "implementation_status": "MERGED",
       "licensed_status": "PASS",
       "pscad_version": "4.6.2",
       "evidence": {
@@ -1435,11 +1435,13 @@
           },
           "note": "A child executable is outside the owned attempt; refusing termination. Preserved; superseded only by the fresh named workflow scope."
         }
-      ]
+      ],
+      "implementation_integrated_from_commit": "dd5638ca27679d1f8fdc212c619a6cdf416b8f75",
+      "implementation_integrated_into": "local main"
     },
     {
       "scope": "parameter_sweep_psout",
-      "implementation_status": "INTEGRATION_BRANCH",
+      "implementation_status": "MERGED",
       "licensed_status": "PARTIAL",
       "evidence": {
         "report_path": "D:\\PSCAD-Workspace\\sweep-recovery-metrics-20261014\\psout-audit-20261014-032913-7a429b68\\report.json",
@@ -1488,7 +1490,9 @@
       ],
       "remaining_work_class": "native_psout_generation_unavailable_in_current_backend_and_unverified_executor",
       "note": "Vendor Cigre.psout file replay passes 10 independent checks: both selected channels retain all 2001 native samples and matching domains, energy/I2t agree with independent Simpson calculations, declarations and hashes remain intact. Explicit request units are not separately certified. This is existing-file reader evidence; fresh PSOUT-producing simulation and end-to-end PSOUT sweep remain unverified. Only 4.6.2 installations were observed and the current sweep executor requires Legacy. A native PSOUT-capable licensed installation, a verified executor and reviewed source are needed.",
-      "implementation_source_branch": "codex/sweep-recovery-metrics"
+      "implementation_source_branch": "codex/sweep-recovery-metrics",
+      "implementation_integrated_from_commit": "dd5638ca27679d1f8fdc212c619a6cdf416b8f75",
+      "implementation_integrated_into": "local main"
     }
   ],
   "program_baseline_note": "docs/acceptance/lcc-mmc-program-baseline.json is the frozen earlier program baseline. Later reports are indexed here without promoting that baseline or WP6.",
