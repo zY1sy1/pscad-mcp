@@ -24,7 +24,7 @@ from ...scanner import scan_project
 from .adjustment import choose_next_candidate
 from .assets import load_packaged_asset_set
 from .derivation import derive_mmc_parameters
-from .engines.avm import AvmBlueprintEngine, discover_native_avm_sources
+from .engines.avm import AvmBlueprintEngine
 from .engines.pwm import PwmTemplateEngine
 from .inspection import inspect_mmc_evidence
 from .journal import AtomicJournal, WorkspaceBuildLease
@@ -118,7 +118,7 @@ class ParametricMmcBuilderService:
         self.pwm_engine = PwmTemplateEngine() if pwm_engine is None else pwm_engine
         self.avm_engine = (
             AvmBlueprintEngine(
-                native_sources=discover_native_avm_sources(),
+                discover_sources=True,
                 native_required=True,
             )
             if avm_engine is None

@@ -106,11 +106,13 @@ def _constraint(name: str, passed: bool, value: float | int, limit: float | int 
     return MmcConstraintResult(name, passed, value, limit, units, None if passed else message)
 
 
-def _native_cable_line_parameters(request: MmcParametricRequest, profile: Mapping[str, Any]) -> dict[str, Any]:
+def _native_cable_line_parameters(request: MmcParametricRequest, profile: Mapping[str, Any], *, overhead: bool = False) -> dict[str, Any]:
     if not isinstance(profile, Mapping):
         raise _error("MMC_AVM_CABLE_PROFILE_INVALID", "Native cable profile must be a structured record.")
-    resistances = profile.get("core_dc_resistance_ohm_per_km", ())
-    if (request.dc_link.kind != "cable" or profile.get("schema_version") != 1
+    kind = "overhead_line" if overhead else "cable"
+    resistances = profile.get("conductor_dc_resistance_ohm_per_km" if overhead else "core_dc_resistance_ohm_per_km", ())
+    if (request.dc_link.kind != kind or profile.get("schema_version") != 1
+            or (overhead and profile.get("dc_link_kind") != kind)
             or profile.get("conductors") != 2 or not isinstance(resistances, (list, tuple))
             or len(resistances) != 2
             or any(isinstance(value, bool) or not isinstance(value, (float, int))
@@ -122,7 +124,8 @@ def _native_cable_line_parameters(request: MmcParametricRequest, profile: Mappin
         "line_resistance_ohm": resistance,
         "line_drop_kv": drop,
         "line_drop_pu": drop / request.dc_voltage_kv,
-        "native_cable_profile_hash": content_hash(profile),
+        "native_link_profile_hash": content_hash(profile),
+        **({"native_cable_profile_hash": content_hash(profile)} if not overhead else {}),
     }
     capacitances = profile.get("core_sheath_capacitance_f_per_km")
     if capacitances is not None:
@@ -231,8 +234,10 @@ def _engine_candidates(
         "line_resistance_ohm": common["line_resistance_ohm"],
         "loss_per_arm_mw": common["loss_budget_mw"] / 12.0,
     }
-    if "native_cable_profile_hash" in common:
-        base_parameters["native_cable_profile_hash"] = common["native_cable_profile_hash"]
+    if "native_link_profile_hash" in common:
+        base_parameters["native_link_profile_hash"] = common["native_link_profile_hash"]
+        if "native_cable_profile_hash" in common:
+            base_parameters["native_cable_profile_hash"] = common["native_cable_profile_hash"]
         base_parameters["dc_grounding_resistance_ohm"] = 1e6
         base_parameters["valve_grounding_resistance_ohm"] = 1e6
         # This is a complete averaged arm, not one individual Master switch.
@@ -267,7 +272,7 @@ def _engine_candidates(
                 base_parameters["dc_voltage_control_kp"] = kp
                 base_parameters["dc_voltage_control_ti_s"] = kp / (capacitance * vdc * natural_frequency**2)
     for name, override in request.engineering_overrides.items():
-        if "native_cable_profile_hash" in common and name == "control_sample_time_s":
+        if "native_link_profile_hash" in common and name == "control_sample_time_s":
             raise _error("MMC_CONTROL_INFEASIBLE", "Native controls execute on every EMTDC step; a separate controller sampling interval is unsupported.", field="engineering_overrides.control_sample_time_s")
         if name == _CAPACITOR_VOLTAGE_TARGET:
             raise _error(
@@ -297,7 +302,7 @@ def _engine_candidates(
         capacitance_supplied="equivalent_arm_capacitance_f" in request.engineering_overrides,
         energy_supplied="stored_energy_mj" in request.engineering_overrides,
     )
-    if "native_cable_profile_hash" in common:
+    if "native_link_profile_hash" in common:
         _size_native_candidate(base_parameters, request)
         _synchronize_arm_energy(base_parameters, capacitor_voltage_target_kv)
         valve_voltage = float(base_parameters["base_modulation_index"]) * request.dc_voltage_kv * math.sqrt(3.0 / 8.0)
@@ -306,7 +311,7 @@ def _engine_candidates(
     switching_frequency = float(reference.get("switching_frequency_hz", 0.0))
     control_sample = float(reference["control_sample_time_s"])
     nominal_step = min(control_sample / 5.0, 1.0 / switching_frequency / 40.0) if switching_frequency else control_sample / 2.0
-    if "native_cable_profile_hash" in common:
+    if "native_link_profile_hash" in common:
         # The nonlinear isolation/MOV network needs the demonstrated 10 us
         # energy accuracy; shorter lines also retain the propagation bound.
         nominal_step = min(control_sample / 10.0, request.dc_link.length_km / 300_000.0 / 20.0)
@@ -324,14 +329,14 @@ def _engine_candidates(
     )
     result: list[MmcCandidate] = []
     for index, (purpose, parameter_changes, setting_changes) in enumerate(variants):
-        if "native_cable_profile_hash" in common and purpose == "energy_balance" and {"stored_energy_mj", "equivalent_arm_capacitance_f"} & request.engineering_overrides.keys():
+        if "native_link_profile_hash" in common and purpose == "energy_balance" and {"stored_energy_mj", "equivalent_arm_capacitance_f"} & request.engineering_overrides.keys():
             parameter_changes = {}  # An explicit storage value is a constraint.
         parameters = {**base_parameters, **parameter_changes}
         _synchronize_arm_energy(parameters, capacitor_voltage_target_kv)
         settings = {**base_settings, **setting_changes}
-        if "native_cable_profile_hash" in common:
+        if "native_link_profile_hash" in common:
             settings["control_sample_time_s"] = settings["time_step_s"]
-        candidate_constraints = constraints + (_native_sizing_constraints(parameters) if "native_cable_profile_hash" in common else ())
+        candidate_constraints = constraints + (_native_sizing_constraints(parameters) if "native_link_profile_hash" in common else ())
         result.append(_candidate(engine, index, purpose, parameters, settings, candidate_constraints))
     return tuple(result)
 
@@ -342,8 +347,12 @@ def derive_mmc_parameters(
     pwm_reference: Mapping[str, Any] | None = None,
     avm_reference: Mapping[str, Any] | None = None,
     avm_cable_profile: Mapping[str, Any] | None = None,
+    avm_overhead_profile: Mapping[str, Any] | None = None,
 ) -> MmcDerivedParameters:
     parsed = parse_parametric_request(request)
+    if avm_cable_profile is not None and avm_overhead_profile is not None:
+        raise _error("MMC_AVM_LINK_PROFILE_INVALID", "One AVM request requires exactly one physical DC-link profile.")
+    native_profile = avm_overhead_profile if avm_overhead_profile is not None else avm_cable_profile
     voltage_scale = parsed.dc_voltage_kv / 640.0
     power_scale = parsed.active_power_mw / 1000.0
     impedance_scale = voltage_scale**2 / power_scale
@@ -399,8 +408,8 @@ def derive_mmc_parameters(
         reference = (pwm_reference or _PWM_REFERENCE) if engine == "detailed_pwm" else (avm_reference or _AVM_REFERENCE)
         engine_common = dict(common)
         engine_constraints = constraints
-        if engine == "average_value" and avm_cable_profile is not None:
-            engine_common.update(_native_cable_line_parameters(parsed, avm_cable_profile))
+        if engine == "average_value" and native_profile is not None:
+            engine_common.update(_native_cable_line_parameters(parsed, native_profile, overhead=avm_overhead_profile is not None))
             drop = engine_common["line_drop_pu"]
             engine_constraints = tuple(
                 _constraint("line_drop", drop <= 0.15, drop, 0.15, "pu", "Physical native cable DC line drop exceeds the bound.")
@@ -413,11 +422,11 @@ def derive_mmc_parameters(
         candidates.extend(engine_candidates)
         engine_constraints = engine_candidates[0].constraints
         for item in engine_constraints:
-            if item.name == "line_drop" and len(requested_engines) > 1 and avm_cable_profile is not None:
+            if item.name == "line_drop" and len(requested_engines) > 1 and native_profile is not None:
                 all_constraints.append(replace(item, name=f"{engine}:line_drop"))
             elif item not in all_constraints:
                 all_constraints.append(item)
-    if avm_cable_profile is not None and "average_value" in requested_engines:
+    if native_profile is not None and "average_value" in requested_engines:
         if len(requested_engines) == 1:
             common.update(engine_line_parameters["average_value"])
             common.pop("modulation_index", None)

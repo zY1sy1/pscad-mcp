@@ -30,6 +30,7 @@ from .cable_companion import (
     DEFAULT_MASTER,
     append_native_cable_link,
 )
+from .overhead_companion import append_native_overhead_link, audit_native_overhead_link
 from .native_startup import STARTUP_NAME, STARTUP_INPUTS, STARTUP_OUTPUTS, STARTUP_DEFAULTS, append_precharge_readiness
 from .native_dq import PLL_NAME, PLL_OUTPUTS, PLL_DEFAULTS, DQ_NAME, DQ_DEFAULTS, DQ_INPUTS, DQ_OUTPUTS, append_native_pll_and_dq
 from .native_protection import PROTECTION_NAME, PROTECTION_INPUTS, PROTECTION_OUTPUTS, PROTECTION_DEFAULTS, append_native_protection
@@ -685,6 +686,7 @@ def materialize_native_avm_library(
     master_path: str | Path = DEFAULT_MASTER,
     source_project: str | Path = DEFAULT_DONOR,
     converter: str = "half_bridge",
+    dc_link_kind: str = "cable",
 ) -> dict:
     """Create the physical arm, modulator and cable in one native library."""
     target = Path(destination).resolve()
@@ -713,7 +715,9 @@ def materialize_native_avm_library(
         json.loads(evidence.read_text(encoding="utf-8"))["constants_path"]
     ).name
     constants_path = target.parent / "constants" / constants_name
-    added = append_native_cable_link(
+    if dc_link_kind not in {"cable", "overhead_line"}:
+        raise ValueError("Native AVM DC-link kind is unsupported")
+    added = (append_native_overhead_link if dc_link_kind == "overhead_line" else append_native_cable_link)(
         root,
         constants_evidence=evidence,
         source_project=source,
@@ -728,6 +732,17 @@ def materialize_native_avm_library(
         "schema_version": 1,
         "scope": "native_mmc_avm_library",
         "converter": converter,
+        "dc_link_kind": dc_link_kind,
+        "link_definition": "MMCOverheadLink" if dc_link_kind == "overhead_line" else "MMCCableLink",
+        "geometry_definition": "DCTL" if dc_link_kind == "overhead_line" else "Cable2",
+        "link_name": added["constants"]["segment"],
+        "link_length_km": added["constants"]["length_km"],
+        "link_configuration_id": added["configuration"].get("id"),
+        "link_topology": {
+            "module_wires": added["module_wires"],
+            "source_definition_receipts": added["source_definition_receipts"],
+            "geometry_semantics_sha256": added["geometry_semantics_sha256"],
+        },
         "library_path": str(target),
         "library_sha256": library_hash,
         "master_path": str(master),
@@ -849,6 +864,7 @@ def materialize_native_avm_fixture(
     constants_evidence: str | Path,
     master_path: str | Path = DEFAULT_MASTER,
     source_project: str | Path = DEFAULT_DONOR,
+    dc_link_kind: str = "cable",
     project_name: str = "mmc_native_avm_fixture",
     converter: str = "half_bridge",
     frequency_hz: float = 60.0,
@@ -1046,14 +1062,18 @@ def materialize_native_avm_fixture(
         master_path=master_path,
         source_project=source_project,
         converter=converter,
+        dc_link_kind=dc_link_kind,
     )
     master_metadata, master_hash, master_defaults = _audit_master(
         Path(master_path).resolve()
     )
     library_metadata = read_definition_metadata_document(library.read_bytes())
     cable_evidence = json.loads(Path(constants_evidence).read_text(encoding="utf-8"))
-    capacitances = [float(c["core_sheath_capacitance_f_per_km"]) for c in cable_evidence["configuration"]["cables"]]
-    dc_link_capacitance_f = float(cable_evidence["length_km"]) / math.fsum(1.0 / c for c in capacitances)
+    if dc_link_kind == "overhead_line":
+        dc_link_capacitance_f = float(cable_evidence["length_km"]) * float(cable_evidence["differential_capacitance_f_per_km"])
+    else:
+        capacitances = [float(c["core_sheath_capacitance_f_per_km"]) for c in cable_evidence["configuration"]["cables"]]
+        dc_link_capacitance_f = float(cable_evidence["length_km"]) / math.fsum(1.0 / c for c in capacitances)
     root = _project(project_name, library=False)
     settings = root.find("./paramlist[@name='Settings']")
     for name, value in {
@@ -1385,7 +1405,7 @@ def materialize_native_avm_fixture(
     cable = writer.add(
         main,
         "DC_CABLE",
-        f"{NATIVE_SCOPE}:MMCCableLink",
+        f"{NATIVE_SCOPE}:" + library_receipt["link_definition"],
         {},
         {
             "SEND_POS": "P_CABLE_POS",
@@ -1394,7 +1414,7 @@ def materialize_native_avm_fixture(
             "RECV_NEG": "V_CABLE_NEG",
         },
     )
-    custom.append((cable, "MMCCableLink"))
+    custom.append((cable, library_receipt["link_definition"]))
     if fault_kind is not None:
         writer.add(main, "fault_protocol", NATIVE_SCOPE + ":" + FAULT_NAME,
                    {**FAULT_DEFAULTS, "Fault_Delay_s": reversal_time_s - deblock_time_s + reversal_duration_s + 1.0},
@@ -1552,13 +1572,13 @@ def materialize_native_avm_fixture(
                 else 1 if component.get("name") == "V_controller" else 0
             ),
         )
-        if definition == "MMCCableLink":
+        if definition == library_receipt["link_definition"]:
             ET.SubElement(
                 call,
                 "call",
                 {
                     "link": library_receipt["cable_configuration_id"],
-                    "name": f"{NATIVE_SCOPE}:Cable2",
+                    "name": f"{NATIVE_SCOPE}:" + library_receipt["geometry_definition"],
                     "z": "-1",
                     "view": "false",
                     "instance": "0",
@@ -1629,6 +1649,8 @@ def materialize_native_avm_fixture(
             "time_step_s": time_step_s,
             "output_step_s": output_step_s,
             "cable_length_km": library_receipt["cable_length_km"],
+            "dc_link_kind": dc_link_kind,
+            "dc_link_length_km": library_receipt["link_length_km"],
             "arm": arm_values,
         },
         "electrical_nets": {name: dict(nets) for name, nets in writer.nets.items()},
@@ -1669,7 +1691,7 @@ def audit_native_avm_fixture(
         f"{NATIVE_SCOPE}:MMCAverageArm": 12,
         f"{NATIVE_SCOPE}:{control_definition}": 2,
         f"{NATIVE_SCOPE}:{MEASUREMENT_NAME}": 2,
-        f"{NATIVE_SCOPE}:MMCCableLink": 1,
+        f"{NATIVE_SCOPE}:" + receipt["library"].get("link_definition", "MMCCableLink"): 1,
         f"{NATIVE_SCOPE}:{STARTUP_NAME}": 1,
         f"{NATIVE_SCOPE}:{PLL_NAME}": 2,
         f"{NATIVE_SCOPE}:{SAMPLE_NAME}": 2 * len(KCL_MEASUREMENTS),
@@ -1801,18 +1823,22 @@ def audit_native_avm_fixture(
             "MMCControlErrors",
             "MMCModulationSynthesis",
             MEASUREMENT_NAME,
-            "MMCCableLink",
-            "Cable2",
+            receipt["library"].get("link_definition", "MMCCableLink"),
+            receipt["library"].get("geometry_definition", "Cable2"),
         }
         <= definitions
     ):
         raise ValueError("Native AVM companion definitions are incomplete")
+    overhead = receipt["parameters"].get("dc_link_kind", "cable") == "overhead_line"
+    if overhead:
+        audit_native_overhead_link(library, receipt["library"])
     return {
         "converter": converter,
+        **({"dc_link_kind": "overhead_line", "coupled_overhead_count": 1} if overhead else {}),
         "two_stations": True,
         "arm_count": 12,
         "phase_breakout_count": 2,
-        "coupled_cable_count": 1,
+        "coupled_cable_count": 0 if overhead else 1,
         "control_kind": receipt["control_kind"],
         "physical_power_control_closed": receipt["control_kind"] != "scheduled_open_loop",
     }

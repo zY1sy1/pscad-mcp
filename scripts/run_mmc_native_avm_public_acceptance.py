@@ -1,4 +1,4 @@
-"""Licensed public-lifecycle gate for the native cable MMC AVM assembly."""
+"""Licensed public-lifecycle gate for native cable or overhead MMC AVM."""
 
 from __future__ import annotations
 
@@ -19,21 +19,31 @@ sys.path.insert(0, str(REPOSITORY))
 
 from pscad_mcp.acceptance.executable_finalization import verify_executable_relink
 from pscad_mcp.acceptance.process_scope import concurrent_acceptance_enabled
-from pscad_mcp.core.process_inventory import list_pscad_processes
 from pscad_mcp.core.backend.base import BackendError
+from pscad_mcp.core.process_inventory import list_pscad_processes
 from pscad_mcp.hvdc.builders.mmc.cable_companion import DEFAULT_DONOR, DEFAULT_MASTER
 from pscad_mcp.hvdc.builders.mmc.engines.avm import (
     AvmBlueprintEngine,
     discover_native_avm_sources,
 )
 from pscad_mcp.hvdc.builders.mmc.native_bundle import FIXTURE_CHANNELS, NATIVE_SCOPE
+from pscad_mcp.hvdc.builders.mmc.native_control_checks import (
+    evaluate_native_dq_controls,
+)
+from pscad_mcp.hvdc.builders.mmc.native_dynamic_checks import (
+    evaluate_native_dynamic_envelope,
+)
 from pscad_mcp.hvdc.builders.mmc.native_energy import diagnose_native_arm_energy
 from pscad_mcp.hvdc.builders.mmc.native_envelope import evaluate_native_steady_envelope
-from pscad_mcp.hvdc.builders.mmc.native_physical import evaluate_native_network_identities
+from pscad_mcp.hvdc.builders.mmc.native_faults import (
+    FAULT_KINDS,
+    evaluate_native_fault_trace,
+)
+from pscad_mcp.hvdc.builders.mmc.native_physical import (
+    evaluate_native_network_identities,
+)
 from pscad_mcp.hvdc.builders.mmc.native_startup import analyze_precharge_trace
-from pscad_mcp.hvdc.builders.mmc.native_control_checks import evaluate_native_dq_controls
-from pscad_mcp.hvdc.builders.mmc.native_dynamic_checks import evaluate_native_dynamic_envelope
-from pscad_mcp.hvdc.builders.mmc.native_faults import FAULT_KINDS, evaluate_native_fault_trace
+from pscad_mcp.hvdc.builders.mmc.overhead_constants import DEFAULT_OVERHEAD_DONOR
 from pscad_mcp.hvdc.builders.mmc.parametric_models import parse_parametric_request
 from pscad_mcp.hvdc.builders.mmc.parametric_service import ParametricMmcBuilderService
 from scripts.run_mmc_average_arm_acceptance import (
@@ -125,7 +135,7 @@ def _require_public_plan(
     capabilities = child.get("capabilities", {})
     if (
         capabilities.get("native_physical_assembly") is not True
-        or capabilities.get("native_cable_constants") is not True
+        or capabilities.get("native_overhead_constants" if "overhead_donor" in sources else "native_cable_constants") is not True
         or capabilities.get("control_kind") != control_kind
         or capabilities.get("model_accepted") is not False
         or capabilities.get("native_fault_kind") != fault_kind
@@ -202,14 +212,22 @@ async def run_attempt(
 
     try:
         begin("inputs")
+        request_path = getattr(args, "request_json", None)
+        request = parse_parametric_request(
+            json.loads(request_path.read_text(encoding="utf-8")) if request_path is not None else REQUEST
+        ).to_dict()
+        kind = request["dc_link"]["kind"]
+        donor_key = "overhead_donor" if kind == "overhead_line" else "cable_donor"
+        source_project = args.source_project or (DEFAULT_OVERHEAD_DONOR if kind == "overhead_line" else DEFAULT_DONOR)
+        if kind == "overhead_line":
+            report["scope"] = "public_native_overhead_avm_assembly"
         paths = {
             "master": args.master.resolve(),
-            "cable_donor": args.source_project.resolve(),
+            donor_key: source_project.resolve(),
             "tline": args.tline.resolve(),
             "compiler_configuration": args.compiler_configuration.resolve(),
             "compiler_executable": args.compiler_executable.resolve(),
         }
-        request_path = getattr(args, "request_json", None)
         if request_path is not None:
             paths["request_json"] = request_path.resolve()
         for path in paths.values():
@@ -218,10 +236,6 @@ async def run_attempt(
         source_hashes = {name: _sha256(path) for name, path in paths.items()}
         report["source_paths"] = {name: str(path) for name, path in paths.items()}
         report["source_hashes_before"] = source_hashes
-        request = parse_parametric_request(
-            json.loads(paths["request_json"].read_text(encoding="utf-8"))
-            if request_path is not None else REQUEST
-        ).to_dict()
         report["request"] = request
         report["code_before"] = code_before = _code_snapshot()
         if code_before["working_tree_status"]:
@@ -241,7 +255,7 @@ async def run_attempt(
         begin("plan")
         control_kind = getattr(args, "control_kind", "dq_current")
         fault_kind = getattr(args, "fault_kind", None)
-        native_sources = discover_native_avm_sources(master_path=args.master, source_project=args.source_project, executable=args.tline)
+        native_sources = discover_native_avm_sources(master_path=args.master, source_project=source_project, executable=args.tline, dc_link_kind=kind)
         builder = builder_factory(service, workspace_root=workspace,
             avm_engine=AvmBlueprintEngine(native_sources=native_sources, native_required=True,
                                           native_control_kind=control_kind, native_fault_kind=fault_kind))
@@ -253,7 +267,7 @@ async def run_attempt(
         report["plan"] = plan
         child = _require_public_plan(
             plan,
-            {name: source_hashes[name] for name in ("master", "cable_donor", "tline")},
+            {name: source_hashes[name] for name in ("master", donor_key, "tline")},
             control_kind=control_kind,
             fault_kind=fault_kind,
         )
@@ -566,7 +580,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--workspace-root", type=Path, required=True)
     parser.add_argument("--request-json", type=Path, help="Immutable complete parameterized AVM request; included in source hashes")
     parser.add_argument("--master", type=Path, default=DEFAULT_MASTER)
-    parser.add_argument("--source-project", type=Path, default=DEFAULT_DONOR)
+    parser.add_argument("--source-project", type=Path, help="Immutable installed geometry donor; defaults to the requested medium")
     parser.add_argument("--diagnostic-time-step-us", type=float)
     parser.add_argument(
         "--control-kind",

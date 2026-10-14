@@ -100,6 +100,9 @@ async def run_attempt(args, directory: Path) -> dict:
         fixture["project_path"] = str(project)
         fixture["library"]["library_path"] = str(library)
         fixture["library"]["library_sha256"] = _sha256(library)
+        for relocation in copied["dependency_relocations"]:
+            if relocation["before"] == fixture["library"]["constants_path"]:
+                fixture["library"]["constants_path"] = relocation["after"]
         report["fixture"] = fixture
         report["processes_before"] = list_pscad_processes()
         service = _service(directory)

@@ -11,17 +11,20 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
-from .....core.backend.base import BackendError
 from .....acceptance.project_finalization import (
     GENERATED_MODULE_POLICY,
     compare_project_finalization,
     snapshot_project_semantics,
 )
+from .....core.backend.base import BackendError
+from ...common.serialization import content_hash
 from ..assets import load_packaged_asset_set
 from ..avm_companion import AverageArmParameters
 from ..cable_companion import DEFAULT_DONOR, DEFAULT_MASTER
-from ...common.serialization import content_hash
-from ..cable_constants import extract_cable_configuration, generate_public_cable_constants
+from ..cable_constants import (
+    extract_cable_configuration,
+    generate_public_cable_constants,
+)
 from ..master_bindings import (
     context_from_inventory,
     load_mmc_master_registry,
@@ -29,6 +32,11 @@ from ..master_bindings import (
 )
 from ..models import MmcBlueprint, MmcBuildState
 from ..native_bundle import audit_native_avm_fixture, materialize_native_avm_fixture
+from ..overhead_constants import (
+    DEFAULT_OVERHEAD_DONOR,
+    extract_overhead_configuration,
+    generate_public_overhead_constants,
+)
 from ..parametric_models import MmcCandidate, MmcEnginePlan
 
 _LIMITATIONS = {
@@ -51,6 +59,7 @@ def _native_producer_hashes() -> dict[str, str]:
         for name in (
             "engines/avm.py", "native_bundle.py", "avm_companion.py",
             "cable_companion.py", "cable_constants.py",
+            "overhead_companion.py", "overhead_constants.py", "line_constants.py",
             "derivation.py", "parametric_planner.py",
             "native_startup.py",
             "native_dq.py",
@@ -66,31 +75,37 @@ def _native_producer_hashes() -> dict[str, str]:
 def discover_native_avm_sources(
     *,
     master_path: str | Path = DEFAULT_MASTER,
-    source_project: str | Path = DEFAULT_DONOR,
+    source_project: str | Path | None = None,
     executable: str | Path | None = None,
+    dc_link_kind: str = "cable",
 ) -> dict[str, str] | None:
     """Return installed immutable inputs when the native cable AVM is available."""
 
     master = Path(master_path).expanduser().resolve()
-    donor = Path(source_project).expanduser().resolve()
+    if dc_link_kind not in {"cable", "overhead_line"}:
+        raise ValueError("Native DC-link kind is unsupported")
+    donor = Path(source_project or (DEFAULT_OVERHEAD_DONOR if dc_link_kind == "overhead_line" else DEFAULT_DONOR)).expanduser().resolve()
     tline = Path(executable).expanduser().resolve() if executable else (
         master.parent / "bin" / "win" / "tline.exe"
     ).resolve()
-    paths = {"master": master, "cable_donor": donor, "tline": tline}
+    paths = {"master": master, "overhead_donor" if dc_link_kind == "overhead_line" else "cable_donor": donor, "tline": tline}
     if any(path.is_symlink() or not path.is_file() for path in paths.values()):
         return None
     return {name: str(path) for name, path in paths.items()}
 
 
 def _native_input_record(
-    paths: Mapping[str, str], *, control_kind: str = "dq_current"
+    paths: Mapping[str, str], *, control_kind: str = "dq_current", dc_link_kind: str = "cable"
 ) -> dict[str, object]:
-    if set(paths) != _NATIVE_SOURCE_KEYS:
+    overhead = dc_link_kind == "overhead_line"
+    donor_key = "overhead_donor" if overhead else "cable_donor"
+    required_keys = {"master", donor_key, "tline"}
+    if set(paths) != required_keys:
         raise _error(
             "MMC_AVM_NATIVE_INPUT_MISSING",
             "The native AVM requires Master, cable donor and tline inputs.",
-            missing=sorted(_NATIVE_SOURCE_KEYS - set(paths)),
-            unexpected=sorted(set(paths) - _NATIVE_SOURCE_KEYS),
+            missing=sorted(required_keys - set(paths)),
+            unexpected=sorted(set(paths) - required_keys),
         )
     resolved = {name: Path(value).expanduser().resolve() for name, value in paths.items()}
     for name, path in resolved.items():
@@ -102,8 +117,8 @@ def _native_input_record(
                 path=str(path),
             )
     source_hashes = {name: _sha256(path) for name, path in resolved.items()}
-    configuration = extract_cable_configuration(resolved["cable_donor"], master_path=resolved["master"])
-    if (configuration.project_sha256 != source_hashes["cable_donor"]
+    configuration = (extract_overhead_configuration if overhead else extract_cable_configuration)(resolved[donor_key], master_path=resolved["master"])
+    if (configuration.project_sha256 != source_hashes[donor_key]
             or configuration.master_sha256 != source_hashes["master"]
             or source_hashes != {name: _sha256(path) for name, path in resolved.items()}):
         raise _error("MMC_SOURCE_CHANGED", "Native AVM sources changed while reading the cable geometry.")
@@ -112,11 +127,12 @@ def _native_input_record(
         "source_hashes": source_hashes,
         "capabilities": {
             "native_physical_assembly": True,
-            "native_cable_constants": True,
+            "native_overhead_constants" if overhead else "native_cable_constants": True,
+            "native_dc_link_kind": dc_link_kind,
             "control_kind": control_kind,
             "model_accepted": False,
             "native_producer_hashes": _native_producer_hashes(),
-            "native_cable_profile": configuration.dc_profile(),
+            "native_overhead_profile" if overhead else "native_cable_profile": configuration.dc_profile(),
         },
     }
 
@@ -345,12 +361,13 @@ class AvmBlueprintEngine:
         allow_test_double: bool = False,
         native_sources: Mapping[str, str] | None = None,
         native_required: bool = False,
-        constants_generator: Any = generate_public_cable_constants,
+        constants_generator: Any = None,
         fixture_builder: Any = materialize_native_avm_fixture,
         fixture_auditor: Any = audit_native_avm_fixture,
         operation_timeout_s: float = 600.0,
         native_control_kind: str = "dq_current",
         native_fault_kind: str | None = None,
+        discover_sources: bool = False,
     ) -> None:
         self.asset_set = load_packaged_asset_set() if asset_set is None else asset_set
         self.inventory = inventory
@@ -359,6 +376,7 @@ class AvmBlueprintEngine:
             None if native_sources is None else dict(native_sources)
         )
         self.native_required = native_required
+        self.discover_sources = discover_sources
         self.constants_generator = constants_generator
         self.fixture_builder = fixture_builder
         self.fixture_auditor = fixture_auditor
@@ -376,21 +394,24 @@ class AvmBlueprintEngine:
     def planning_inputs(self, request: object) -> dict[str, object] | None:
         link = getattr(request, "dc_link", None)
         kind = getattr(link, "kind", None)
-        if self.native_sources is None:
+        sources = self.native_sources
+        if sources is None and self.discover_sources:
+            sources = discover_native_avm_sources(dc_link_kind=kind)
+        if sources is None:
             if self.native_required:
                 raise _error(
                     "MMC_AVM_NATIVE_INPUT_MISSING",
                     "Installed native AVM source inputs are required for production builds.",
                 )
             return None
-        if kind != "cable":
+        if kind not in {"cable", "overhead_line"} or (kind == "overhead_line" and "overhead_donor" not in sources):
             raise _error(
                 "MMC_AVM_LINK_UNSUPPORTED",
                 "The native average-value path currently requires a cable DC link.",
                 dc_link_kind=kind,
             )
         record = _native_input_record(
-            self.native_sources, control_kind=self.native_control_kind
+            sources, control_kind=self.native_control_kind, dc_link_kind=kind
         )
         if self.native_fault_kind is not None:
             record["capabilities"]["native_fault_kind"] = self.native_fault_kind
@@ -447,10 +468,12 @@ class AvmBlueprintEngine:
         candidate_id: str | None,
     ) -> dict[str, object]:
         selected = _candidate(plan, candidate_id)
+        kind = selected.parameters["dc_link_kind"]
+        overhead = kind == "overhead_line"
         if plan.capabilities.get("native_fault_kind") != self.native_fault_kind:
             raise _error("MMC_PLAN_STALE", "Native fault scenario differs from its immutable plan.")
         inputs = _native_input_record(
-            plan.source_paths, control_kind=self.native_control_kind
+            plan.source_paths, control_kind=self.native_control_kind, dc_link_kind=kind
         )
         if dict(plan.source_hashes) != inputs["source_hashes"]:
             raise _error(
@@ -465,14 +488,16 @@ class AvmBlueprintEngine:
                 "The native AVM producer changed after the immutable child plan was created.",
             )
         values = selected.parameters
-        actual_profile = inputs["capabilities"]["native_cable_profile"]
-        planned_profile = plan.capabilities.get("native_cable_profile")
-        expected_resistance = math.fsum(actual_profile["core_dc_resistance_ohm_per_km"]) * float(values["dc_link_length_km"])
+        profile_key = "native_overhead_profile" if overhead else "native_cable_profile"
+        resistance_key = "conductor_dc_resistance_ohm_per_km" if overhead else "core_dc_resistance_ohm_per_km"
+        actual_profile = inputs["capabilities"][profile_key]
+        planned_profile = plan.capabilities.get(profile_key)
+        expected_resistance = math.fsum(actual_profile[resistance_key]) * float(values["dc_link_length_km"])
         if (content_hash(actual_profile) != content_hash(planned_profile)
-                or values.get("native_cable_profile_hash") != content_hash(actual_profile)
+                or values.get("native_link_profile_hash") != content_hash(actual_profile)
                 or not math.isclose(float(values["line_resistance_ohm"]), expected_resistance, rel_tol=1e-12)):
             raise _error("MMC_PLAN_STALE", "Native AVM candidate cable resistance differs from its frozen geometry.")
-        if values.get("dc_link_kind") != "cable":
+        if values.get("dc_link_kind") not in {"cable", "overhead_line"} or plan.capabilities.get("native_dc_link_kind") != kind:
             raise _error(
                 "MMC_AVM_LINK_UNSUPPORTED",
                 "The native average-value candidate requires a cable DC link.",
@@ -490,14 +515,14 @@ class AvmBlueprintEngine:
         candidate_root.mkdir(parents=True, exist_ok=False)
         source_paths = {name: Path(path) for name, path in plan.source_paths.items()}
         constants = await asyncio.to_thread(
-            self.constants_generator,
-            source_paths["cable_donor"],
+            self.constants_generator or (generate_public_overhead_constants if overhead else generate_public_cable_constants),
+            source_paths["overhead_donor" if overhead else "cable_donor"],
             candidate_root / "line-constants",
             master_path=source_paths["master"],
             executable=source_paths["tline"],
             lengths_km=(float(values["dc_link_length_km"]),),
             reference_frequency_hz=float(values["frequency_hz"]),
-            fitting_profile="dc_corrected_v1",
+            **({} if overhead else {"fitting_profile": "dc_corrected_v1"}),
         )
         if len(constants) != 1:
             raise _error(
@@ -507,7 +532,7 @@ class AvmBlueprintEngine:
             )
         if (not math.isclose(constants[0].loop_dc_resistance_ohm, expected_resistance, rel_tol=1e-12)
                 or not math.isclose(constants[0].length_km, float(values["dc_link_length_km"]), rel_tol=1e-12)
-                or tuple(constants[0].core_dc_resistance_ohm_per_km) != tuple(actual_profile["core_dc_resistance_ohm_per_km"])):
+                or tuple(getattr(constants[0], resistance_key)) != tuple(actual_profile[resistance_key])):
             raise _error("MMC_AVM_CONSTANTS_INVALID", "Generated cable constants differ from the planned physical profile.",
                          expected_loop_resistance_ohm=expected_resistance,
                          observed_loop_resistance_ohm=constants[0].loop_dc_resistance_ohm)
@@ -545,7 +570,8 @@ class AvmBlueprintEngine:
             candidate_root / "model",
             constants_evidence=Path(constants[0].evidence_path),
             master_path=source_paths["master"],
-            source_project=source_paths["cable_donor"],
+            source_project=source_paths["overhead_donor" if overhead else "cable_donor"],
+            dc_link_kind=kind,
             project_name=candidate_project_name,
             converter=str(values["converter"]),
             frequency_hz=float(values["frequency_hz"]),
