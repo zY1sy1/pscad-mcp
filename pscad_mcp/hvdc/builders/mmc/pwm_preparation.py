@@ -12,16 +12,16 @@ from .fault_channels import _new_target, _regular, _write_new_xml
 from .pwm_commands import _params, _set
 
 
-def materialize_pwm_power_response(source, destination, *, integral_time_s=0.02):
+def materialize_pwm_power_response(source, destination, *, integral_time_s=0.002):
     """Remove the observed 0.2 s outer-power integrator lag; retain current bounds."""
     original = _regular(source)
     target = _new_target(destination, (original,))
     if (
         isinstance(integral_time_s, bool)
         or not math.isfinite(integral_time_s)
-        or not 0.005 <= integral_time_s <= 0.2
+        or not 0.001 <= integral_time_s <= 0.2
     ):
-        raise ValueError("The outer-power integral time must be between 5 and 200 ms")
+        raise ValueError("The active-power integral time must be between 1 and 200 ms")
     digest = hashlib.sha256(original.read_bytes()).hexdigest()
     root = ET.parse(original).getroot()
     controllers = root.findall("./definitions/Definition[@name='Main']/schematic/User")
@@ -40,6 +40,17 @@ def materialize_pwm_power_response(source, destination, *, integral_time_s=0.02)
         )
     changes = []
     for controller in controllers:
+        if _params(controller).get("Kp_P") != "0.25":
+            raise RuntimeError("The audited active-power proportional gain differs")
+        _set(controller, "Kp_P", 2.0)
+        changes.append(
+            {
+                "owner": controller.get("id"),
+                "parameter": "Kp_P",
+                "before": 0.25,
+                "after": 2.0,
+            }
+        )
         for parameter in ("Ti_P", "Ti_Q"):
             if _params(controller).get(parameter) != "0.2":
                 raise BackendError(
@@ -48,13 +59,14 @@ def materialize_pwm_power_response(source, destination, *, integral_time_s=0.02)
                     "hvdc",
                     "prepare_pwm_response",
                 )
-            _set(controller, parameter, integral_time_s)
+            selected_time = integral_time_s if parameter == "Ti_P" else 0.02
+            _set(controller, parameter, selected_time)
             changes.append(
                 {
                     "owner": controller.get("id"),
                     "parameter": parameter,
                     "before_s": 0.2,
-                    "after_s": integral_time_s,
+                    "after_s": selected_time,
                 }
             )
     _write_new_xml(root, target)
@@ -102,6 +114,7 @@ def prepare_routed_pwm_case(source, library, master, workspace):
         ("dc_integral", physical.materialize_voltage_control_integral_time, {}),
         ("power_integral", materialize_pwm_power_response, {}),
         ("dynamic_headroom", materialize_pwm_dynamic_headroom, {}),
+        ("fault_protection", materialize_pwm_fault_protection, {}),
     )
     for name, producer, kwargs in stages:
         target = directory / (name + ".pscx")
@@ -211,6 +224,7 @@ def materialize_pwm_dynamic_headroom(source, destination):
     root = ET.parse(original).getroot()
     main = root.find("./definitions/Definition[@name='Main']/schematic")
     power = main.find("User[@id='800413106']")
+    voltage = main.find("User[@id='976600655']")
     integral = main.find("User[@id='1520814881']")
     if (
         power is None
@@ -224,6 +238,9 @@ def materialize_pwm_dynamic_headroom(source, destination):
             "The audited current headroom or active DC integral setting differs"
         )
     _set(power, "Imax", 1.1)
+    if voltage is None or _params(voltage).get("Imax") != "1.1":
+        raise RuntimeError("The active voltage-control current headroom differs")
+    _set(voltage, "Imax", 1.18)
     _set(integral, "Value", 0.02)
     _write_new_xml(root, target)
     return {
@@ -239,6 +256,12 @@ def materialize_pwm_dynamic_headroom(source, destination):
                 "after": "1.1",
             },
             {
+                "owner": voltage.get("id"),
+                "parameter": "Imax",
+                "before": "1.1",
+                "after": "1.18",
+            },
+            {
                 "owner": integral.get("id"),
                 "parameter": "Value",
                 "before": "0.04",
@@ -247,4 +270,52 @@ def materialize_pwm_dynamic_headroom(source, destination):
         ],
         "arm_acceptance_peak_ka": 3.0,
         "acceptance_bounds_unchanged": True,
+    }
+
+
+def materialize_pwm_fault_protection(source, destination):
+    """Detect physical current/voltage faults before the observed millisecond peaks."""
+    original = _regular(source)
+    target = _new_target(destination, (original,))
+    root = ET.parse(original).getroot()
+    arms = [
+        u
+        for u in root.findall("./definitions/Definition[@name='Main']/schematic/User")
+        if u.get("defn", "").endswith(":MMC_Hb_PWM")
+    ]
+    if len(arms) != 2:
+        raise RuntimeError("The physical PWM protection instances are unavailable")
+    changes = []
+    for arm in arms:
+        parameters = _params(arm)
+        if (
+            parameters.get("IvlMax") != "3.0 [kA]"
+            or parameters.get("VdcDrop") != "0.4 [pu]"
+            or parameters.get("FltPkT") != "100 [us]"
+        ):
+            raise RuntimeError("The audited physical protection settings differ")
+        for key, value in {
+            "IvlMax": "2.2 [kA]",
+            "VdcDrop": "0.9 [pu]",
+            "FltPkT": "20 [us]",
+        }.items():
+            changes.append(
+                {
+                    "owner": arm.get("id"),
+                    "parameter": key,
+                    "before": parameters[key],
+                    "after": value,
+                }
+            )
+            _set(arm, key, value)
+    _write_new_xml(root, target)
+    return {
+        "source": str(original),
+        "source_sha256": hashlib.sha256(original.read_bytes()).hexdigest(),
+        "destination": str(target),
+        "destination_sha256": hashlib.sha256(target.read_bytes()).hexdigest(),
+        "changes": changes,
+        "acceptance_arm_peak_ka": 3.0,
+        "acceptance_dc_peak_pu": 2.0,
+        "physical_fault_sensors_retained": True,
     }

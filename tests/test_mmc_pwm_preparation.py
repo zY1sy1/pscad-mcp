@@ -25,6 +25,7 @@ def source(tmp_path, *, time="0.2"):
             "Ti_Q": time,
             "Imax": "1.1",
             "Ti_dc": "0.04",
+            "Kp_P": "0.25",
         }.items():
             ET.SubElement(group, "param", name=key, value=value)
     ET.ElementTree(root).write(path, encoding="utf-8")

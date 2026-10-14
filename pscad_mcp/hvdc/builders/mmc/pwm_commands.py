@@ -547,7 +547,14 @@ class _Editor:
                     },
                 )
                 self.label(main, arm_net, (x - 36, y), electrical=True)
-                self.label(main, line_net, (x + 36, y), electrical=True)
+                reactor_net = f"McpDcReactor{station}_{pole}"
+                self.label(main, reactor_net, (x + 36, y), electrical=True)
+                reactor_x = 10800
+                reactor = self.user(
+                    main, "master:inductor", reactor_x, y, {"L": "0.1 [H]"}
+                )
+                self.label(main, reactor_net, (reactor_x, y), electrical=True)
+                self.label(main, line_net, (reactor_x + 36, y), electrical=True)
                 self.routes.append(
                     {
                         "role": "dc_breaker_command",
@@ -560,6 +567,8 @@ class _Editor:
                         "state_signal": state,
                         "state_expression": "1-OPENBR",
                         "removed_wire": wire.get("id"),
+                        "dc_reactor_owner": reactor.get("id"),
+                        "dc_reactor_inductance_h": 0.1,
                     }
                 )
                 self.probe(
@@ -671,6 +680,10 @@ def materialize_pwm_command_interface(
         "ENABLE_T1",
         "ENABLE_T2",
         "DC_GROUND",
+        "IDC_T1",
+        "IDC_T2",
+        "PN_CLOSED",
+        "PG_CLOSED",
     ]
     outputs = {
         "P_REF": "McpPRef",
@@ -683,6 +696,8 @@ def materialize_pwm_command_interface(
         "AC_FAULT_OUT": "McpAcFault",
         "DC_PN_FAULT": "McpDcPnFault",
         "DC_PG_FAULT": "McpDcPgFault",
+        "TRIP_T1": "McpDcTripT1",
+        "TRIP_T2": "McpDcTripT2",
     }
     ports = {
         name: (-72, -180 + index * 36, "Transfer", "Input")
@@ -715,13 +730,36 @@ def materialize_pwm_command_interface(
     _script(
         definition,
         "Dsdyn",
-        f"""      $P_REF = -{rated_power_mw:.15g} * $P_ORDER
+        f"""#STORAGE INTEGER:2
+      IF (TIMEZERO) THEN
+        STORI(NSTORI) = 0
+        STORI(NSTORI+1) = 0
+      ENDIF
+      IF ($RESET_CMD .GE. 0.5 .OR. $BLOCK_CMD .GE. 0.5) THEN
+        STORI(NSTORI) = 0
+        STORI(NSTORI+1) = 0
+      ELSE
+        IF ($PN_CLOSED .GE. 0.5 .OR. $PG_CLOSED .GE. 0.5) THEN
+          IF ($ENABLE_T1 .NE. 0 .AND. ABS($IDC_T1) .GE. 1.75) STORI(NSTORI) = 1
+          IF ($ENABLE_T2 .NE. 0 .AND. ABS($IDC_T2) .GE. 1.75) STORI(NSTORI+1) = 1
+        ELSE
+          IF ($ENABLE_T1 .NE. 0 .AND. ABS($IDC_T1) .GE. 2.5) STORI(NSTORI) = 1
+          IF ($ENABLE_T2 .NE. 0 .AND. ABS($IDC_T2) .GE. 2.5) STORI(NSTORI+1) = 1
+        ENDIF
+      ENDIF
+      $TRIP_T1 = FLOAT(STORI(NSTORI))
+      $TRIP_T2 = FLOAT(STORI(NSTORI+1))
+      $P_REF = -{rated_power_mw:.15g} * $P_ORDER
       $Q_REF = {reactive_power_mvar:.15g} + {rated_power_mw:.15g} * $Q_ORDER
       $RESET_OUT = $RESET_CMD
       $AC_OPEN = 1.0 - $AC_CLOSE
       $DC_OPEN = 1.0 - $DC_CLOSE
       $E_T1 = $ENABLE_T1
       $E_T2 = $ENABLE_T2
+      IF (STORI(NSTORI) .NE. 0 .OR. STORI(NSTORI+1) .NE. 0) THEN
+        $E_T1 = 0
+        $E_T2 = 0
+      ENDIF
       IF ($RESET_CMD .GE. 0.5 .OR. $BLOCK_CMD .GE. 0.5 .OR. $AC_CLOSE .LT. 0.5 .OR. $DC_CLOSE .LT. 0.5) THEN
         $E_T1 = 0
         $E_T2 = 0
@@ -729,6 +767,7 @@ def materialize_pwm_command_interface(
       $AC_FAULT_OUT = NINT($AC_FAULT)
       $DC_PN_FAULT = NINT($DC_FAULT * (1.0-$DC_GROUND))
       $DC_PG_FAULT = NINT($DC_FAULT * $DC_GROUND)
+      NSTORI = NSTORI + 2
 """,
     )
     adapter = editor.user(main, editor.namespace + ":McpPwmCommands", 7200, 360, {})
@@ -766,6 +805,13 @@ def materialize_pwm_command_interface(
         )
     for port, signal in (("ENABLE_T1", "Dblk1P"), ("ENABLE_T2", "Dblk2P")):
         editor.label(main, signal, (7128, 180 + inputs.index(port) * 36))
+    for port, signal in (("IDC_T1", "Idc1"), ("IDC_T2", "Idc2")):
+        editor.label(main, signal, (7128, 180 + inputs.index(port) * 36))
+    for port, signal in (
+        ("PN_CLOSED", "MmcFaultClosed"),
+        ("PG_CLOSED", "McpDcPgFaultClosed"),
+    ):
+        editor.label(main, signal, (7128, 180 + inputs.index(port) * 36))
     selector = editor.user(
         main,
         "master:const",
@@ -777,6 +823,19 @@ def materialize_pwm_command_interface(
     editor.label(main, "McpDcGroundCase", (7128, 540))
     for name, signal in outputs.items():
         editor.label(main, signal, (7272, 180 + list(outputs).index(name) * 36))
+        if name.startswith("TRIP_"):
+            editor.probe(
+                main,
+                signal,
+                "MCP_DC_PROTECTION_" + name[-2:],
+                "1",
+                source={
+                    "kind": "physical_current_protection",
+                    "adapter_owner": adapter.get("id"),
+                    "inputs": ["Idc1", "Idc2"],
+                    "latch_reset": "actual reset or block command",
+                },
+            )
     for converter in converters:
         mode = _params(converter)["dmode"]
         station = "T1" if mode == "0" else "T2"
@@ -1081,4 +1140,8 @@ def materialize_pwm_command_interface(
         "power_reversal_time_s": power_reversal_time_s,
         "dc_link_length_km": dc_link_length_km,
         "requires_physical_acceptance": True,
+        "dc_current_trip_fault_ka": 1.75,
+        "dc_current_trip_nominal_ka": 2.5,
+        "dc_current_trip_source": "actual Main Idc1/Idc2 ammeters",
+        "dc_reactor_inductance_per_pole_h": 0.1,
     }
