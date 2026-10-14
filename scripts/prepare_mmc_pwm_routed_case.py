@@ -11,6 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from pscad_mcp.hvdc.builders.mmc.derivation import derive_mmc_parameters
+from pscad_mcp.hvdc.builders.mmc.pwm_channels import routed_pwm_profile
 from pscad_mcp.hvdc.builders.mmc.pwm_preparation import prepare_routed_pwm_case
 from pscad_mcp.hvdc.builders.mmc.pwm_routed_engine import require_supported_request
 from pscad_mcp.hvdc.builders.mmc.pwm_scenarios import prepare_routed_scenario_source
@@ -18,7 +19,7 @@ from pscad_mcp.hvdc.builders.mmc.scenarios import (
     prepare_timed_scenario,
     recommend_scenarios,
 )
-from pscad_mcp.hvdc.profiles import load_profile, register_profile
+from pscad_mcp.hvdc.profiles import register_profile
 
 
 def main():
@@ -35,14 +36,7 @@ def main():
     prepared = prepare_routed_pwm_case(
         args.source, args.library, args.master, directory
     )
-    profile = load_profile("mmc_detailed_pwm_v2")
-    profile.update(
-        extends="mmc_detailed_pwm_v2",
-        command_bindings=prepared["routing"]["command_bindings"],
-        project_fingerprints=[
-            {"project_stem": "H_MMC_Mono_DC", "pscad_version": "4.6.2"}
-        ],
-    )
+    profile = routed_pwm_profile(prepared)
     profile_file = directory / "profile.json"
     profile_file.write_text(json.dumps(profile, indent=2), encoding="utf-8")
     profile_name = "mmc_pwm_routed_640kv_v1"

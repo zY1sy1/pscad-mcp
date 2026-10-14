@@ -1025,6 +1025,30 @@ def materialize_pwm_command_interface(
                 "quantity": "physical_fault_branch_current",
             },
         )
+    grid = main.find("User[@id='2102734538']")
+    grid_script = editor.master.find(
+        "./definitions/Definition[@name='source_3']/script/segment[@name='Dsout']"
+    )
+    if grid is None or grid.get("defn") != "master:source_3" or grid_script is None:
+        raise _error("The terminal-2 grid current source is unavailable.")
+    for phase in "ABC":
+        parameter = "I" + phase
+        if f"#OUTPUT REAL {parameter} {{$CBR:B{phase}}}" not in grid_script.text:
+            raise _error("The grid-source branch current output is not audited.")
+        signal = "McpGridCurrent" + phase
+        _set(grid, parameter, signal)
+        editor.probe(
+            main,
+            signal,
+            "MCP_AC_GRID_CURRENT_" + phase,
+            "kA",
+            source={
+                "kind": "physical_measurement",
+                "owner": grid.get("id"),
+                "parameter": parameter,
+                "quantity": "grid_source_branch_current",
+            },
+        )
     editor.clone_observed_switch(
         "McpPwmPgFault", "fault_sw", "1-E_BtoI(OPENBR($NBR,$SS))"
     )

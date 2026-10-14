@@ -291,7 +291,7 @@ def evaluate_routed_pwm_samples(
         current_traces = grouped[current_role]
         # The 20 kA contract governs the DC fault switch. AC source crests
         # depend on requested short-circuit MVA and the worst DC offset.
-        current_limit_ka = (
+        grid_limit_ka = (
             2
             * math.sqrt(2)
             * grid_short_circuit_ratio
@@ -300,6 +300,55 @@ def evaluate_routed_pwm_samples(
             if ac
             else 20.0
         )
+        current_limit_ka = grid_limit_ka
+        current_basis = (
+            "2*sqrt(2)*SCR*Prated/(sqrt(3)*Vac)"
+            if ac
+            else "original DC fault-switch contract"
+        )
+        if ac:
+            grid_traces = grouped["ac_grid_current"]
+            check(
+                "complete_grid_branch_currents",
+                len(grid_traces) == 3,
+                len(grid_traces),
+                3,
+            )
+            for binding, times, values in grid_traces:
+                peak = max(abs(v) for v in window(times, values, onset, cleared))
+                check(
+                    "physical_grid_current_" + binding["model_scope"],
+                    peak <= grid_limit_ka,
+                    peak,
+                    grid_limit_ka,
+                )
+        if name == "ac_single_line_ground_fault":
+            network = contract.get("ac_fault_network")
+            if not network or network.get("topology") != "grounded_Y_delta":
+                check(
+                    "audited_ac_sequence_network",
+                    False,
+                    network,
+                    "connected grounded Y/delta topology and impedances",
+                )
+                return {
+                    "status": "INCOMPLETE_ANALYSIS",
+                    "checks": checks,
+                    "model_accepted": False,
+                }
+            zg = complex(network["grid_resistance_ohm"], network["grid_reactance_ohm"])
+            zt = complex(0, network["transformer_zero_sequence_reactance_ohm"])
+            z0 = zg * zt / (zg + zt)
+            current_limit_ka = (
+                2
+                * math.sqrt(2)
+                * 3
+                * network["voltage_kv"]
+                / (math.sqrt(3) * abs(2 * zg + z0))
+            )
+            current_basis = (
+                "2*sqrt(2)*3*Vphase/abs(Z1+Z2+Z0); Z1=Z2=Zgrid; Z0=Zgrid||Ztransformer"
+            )
         check(
             "complete_fault_branch_currents",
             len(current_traces) == (3 if ac else 1),
@@ -320,9 +369,7 @@ def evaluate_routed_pwm_samples(
                 peak,
                 {
                     "maximum_ka": current_limit_ka,
-                    "basis": "2*sqrt(2)*SCR*Prated/(sqrt(3)*Vac)"
-                    if ac
-                    else "original DC fault-switch contract",
+                    "basis": current_basis,
                     "minimum_active_ka": 0.01,
                     "conducting": conducting,
                 },

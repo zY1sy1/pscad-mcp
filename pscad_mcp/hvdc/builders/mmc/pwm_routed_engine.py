@@ -10,7 +10,8 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from ....core.backend.base import BackendError
-from ...profiles import load_profile, register_profile
+from ...profiles import register_profile
+from .pwm_channels import routed_pwm_profile
 from .pwm_output import digest, read_routed_pwm_run
 from .pwm_physical import evaluate_routed_pwm_samples
 from .pwm_preparation import prepare_routed_pwm_case
@@ -79,14 +80,7 @@ async def execute_routed_pwm_candidate(plan, service, candidate, scenarios):
     prepared = prepare_routed_pwm_case(
         sources["project"], sources["library"], master, stage / "prepared"
     )
-    profile = load_profile("mmc_detailed_pwm_v2")
-    profile.update(
-        extends="mmc_detailed_pwm_v2",
-        command_bindings=prepared["routing"]["command_bindings"],
-    )
-    profile["project_fingerprints"] = [
-        {"project_stem": "H_MMC_Mono_DC", "pscad_version": "4.6.2"}
-    ]
+    profile = routed_pwm_profile(prepared)
     profile_file = stage / "routed-profile.json"
     profile_file.write_text(json.dumps(profile, indent=2), encoding="utf-8")
     profile_name = "mmc_pwm_routed_" + plan.plan_hash[:12]
@@ -271,12 +265,27 @@ async def execute_routed_pwm_candidate(plan, service, candidate, scenarios):
         "model_accepted": True,
         "scenario_results": results,
         "delivery": delivered,
-        "original_inputs": plan.source_hashes,
+        "original_inputs": {
+            **{str(sources[key]): value for key, value in plan.source_hashes.items()},
+            str(master): identity["master_sha256"],
+        },
         "project_sha256": digest(delivered["project"]),
+        "baseline_channel_contract": str(stage / "prepared/channels.json"),
+        "evidence_files": {
+            str(path): digest(path)
+            for path in [
+                stage / "prepared/channels.json",
+                stage / "prepared/H_MMC_Mono_DC.pscx",
+                *[Path(p) for p in written if Path(p).suffix == ".json"],
+                reload_directory / "report.json",
+                reload_physical_file,
+            ]
+        },
         "independent_reload": {
             "report": str(reload_directory / "report.json"),
             "physical_report": str(reload_physical_file),
             "status": "PASS",
+            "project": str(reload_directory / (reload_name + ".pscx")),
         },
     }
     manifest_file = stage / "routed-acceptance.json"
@@ -307,4 +316,5 @@ async def execute_routed_pwm_candidate(plan, service, candidate, scenarios):
         },
         "command_profile": profile_name,
         "independent_reload_accepted": True,
+        "routed_physical_acceptance": True,
     }

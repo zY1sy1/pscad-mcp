@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import math
 from copy import deepcopy
 from pathlib import Path
 from xml.etree import ElementTree as ET
@@ -15,6 +16,65 @@ from .fault_channels import (
     verify_fault_instrumentation,
 )
 from .pwm_commands import _params
+
+
+def routed_pwm_profile(prepared):
+    """Expose only exact, unit-declared channels present in this derived circuit."""
+    from ...profiles import load_profile
+
+    profile = load_profile("mmc_detailed_pwm_v2")
+    profile.pop("extends", None)
+    profile["command_bindings"] = prepared["routing"]["command_bindings"]
+    profile["project_fingerprints"] = [{"pscad_version": "4.6.2"}]
+    profile["mappings"], profile["result_channels"], profile["metric_roles"] = (
+        [],
+        [],
+        {},
+    )
+    aliases = {
+        ("p_active", "T2"): "station_p_active_power",
+        ("p_active", "T1"): "station_vdc_active_power",
+        ("q_reactive", "T2"): "station_p_reactive_power",
+        ("q_reactive", "T1"): "station_vdc_reactive_power",
+        ("v_dc", "T1"): "dc_voltage",
+        ("i_dc_station", "T1"): "dc_current",
+    }
+    contract = prepared["channels"]
+    for binding in contract["channels"] + contract["diagnostic_channels"]:
+        role, scope, units = binding["role"], binding["model_scope"], binding["units"]
+        canonical = aliases.get((role, scope), binding["channel_id"].lower())
+        description = binding["selector"]["description"]
+        family = {
+            "kV": "voltage",
+            "kA": "current",
+            "MW": "power",
+            "MVAr": "power",
+            "MJ": "energy",
+            "s": "time",
+        }.get(units, "ratio")
+        profile["mappings"].append(
+            {
+                "canonical": canonical,
+                "aliases": [description],
+                "source_kinds": ["measurement"],
+                "unit_family": family,
+                "direction": "measurement",
+                "units": units,
+            }
+        )
+        profile["result_channels"].append(
+            {
+                "canonical": canonical,
+                "path": description,
+                "units": units,
+                "location": binding["definition_name"],
+                "role": role,
+                "model_scope": scope,
+            }
+        )
+        profile["metric_roles"][canonical] = canonical
+    profile["requires_frozen_channel_contract"] = True
+    return profile
 
 
 def compose_pwm_channel_contract(project, contract):
@@ -58,6 +118,8 @@ def compose_pwm_channel_contract(project, contract):
                 )
             elif channel_id.startswith("MCP_AC_FAULT_CURRENT_"):
                 role, scope = "ac_fault_current", channel_id[-1]
+            elif channel_id.startswith("MCP_AC_GRID_CURRENT_"):
+                role, scope = "ac_grid_current", channel_id[-1]
             elif channel_id == "MCP_DC_PG_FAULT_CLOSED":
                 role, scope = "pg_fault_state", "DC_T2_PG"
             elif channel_id == "MCP_DC_PG_FAULT_CURRENT":
@@ -127,8 +189,76 @@ def compose_pwm_channel_contract(project, contract):
                         "vertices": [dict(v.attrib) for v in wire.findall("vertex")],
                     }
                 )
+    result["ac_fault_network"] = audited_ac_fault_network(root)
+    transformer_definition = root.find("./definitions/Definition[@name='MFE_VSC_T2']")
+    for component in transformer_definition.findall("./schematic/User"):
+        if component.get("id") not in {"247869978", "1805502023"}:
+            continue
+        if (transformer_definition.get("name"), component.get("id")) not in existing:
+            result["readback_components"].append(
+                {
+                    "definition_name": transformer_definition.get("name"),
+                    "owner_id": component.get("id"),
+                    "definition": component.get("defn"),
+                    "parameters": _params(component),
+                    "position": {
+                        key: component.get(key) for key in ("x", "y", "orient")
+                    },
+                }
+            )
     result["readback"] = verify_fault_instrumentation(project, result)
     return result
+
+
+def audited_ac_fault_network(root):
+    """Use the connected grid and grounded Y/delta transformer's sequence path."""
+    main = root.find("./definitions/Definition[@name='Main']/schematic")
+    grid = main.find("User[@id='2102734538']")
+    station = main.find("User[@id='800413106']")
+    winding = root.find(
+        "./definitions/Definition[@name='MFE_VSC_T2']/schematic/User[@id='247869978']"
+    )
+    ground = root.find(
+        "./definitions/Definition[@name='MFE_VSC_T2']/schematic/User[@id='1805502023']"
+    )
+    if any(x is None for x in (grid, station, winding, ground)):
+        raise RuntimeError("The AC sequence network has no audited connected owners")
+    g, s, w = _params(grid), _params(station), _params(winding)
+    if (
+        grid.get("defn") != "master:source_3"
+        or g["Type"] != "3"
+        or g["Grnd"] != "1"
+        or float(g["C"].split()[0]) != 0
+        or w["YD1"] != "0"
+        or w["YD2"] != "1"
+        or w["Xl"] != "Xt"
+        or w["Tmva"] != "Sbase"
+        or w["V1"] != "Vtr_1"
+        or ground.get("defn") != "master:ground"
+        or (int(ground.get("x")), int(ground.get("y"))) != (270, 288)
+        or (int(winding.get("x")), int(winding.get("y")), winding.get("orient"))
+        != (288, 252, "0")
+    ):
+        raise RuntimeError("The grounded Y/delta zero-sequence network differs")
+    voltage = float(s["Vtr_1"].split()[0])
+    main_instances = root.findall(".//User[@id='152486038']")
+    if len(main_instances) != 1:
+        raise RuntimeError("The actual Main frequency instance is ambiguous")
+    frequency = float(_params(main_instances[0])["Freq"])
+    return {
+        "voltage_kv": voltage,
+        "grid_resistance_ohm": float(g["R_"].split()[0]),
+        "grid_reactance_ohm": 2 * math.pi * frequency * float(g["L"].split()[0]),
+        "transformer_zero_sequence_reactance_ohm": float(s["Xt"])
+        * voltage**2
+        / float(s["Sbase"].split()[0]),
+        "topology": "grounded_Y_delta",
+        "grid_owner": grid.get("id"),
+        "station_owner": station.get("id"),
+        "transformer_owner": winding.get("id"),
+        "ground_owner": ground.get("id"),
+        "sequence_equations": "Z1=Z2=Zgrid; Z0=Zgrid || j*Xt*Vac^2/Sbase; If=3*Vphase/(Z1+Z2+Z0)",
+    }
 
 
 def compose_pwm_scenario_contract(contract, scenario, namespace):

@@ -178,10 +178,10 @@ def test_a_trace_missing_from_the_declared_contract_is_incomplete():
     assert result["status"] == "INCOMPLETE_ANALYSIS"
 
 
-def test_ac_fault_current_uses_the_grid_short_circuit_envelope():
+def ac_fault_samples(*, single_phase=False, fault_current=32.0, grid_current=29.7):
     samples, contract, scenario = complete_samples()
     scenario.update(
-        name="ac_three_phase_fault",
+        name="ac_single_line_ground_fault" if single_phase else "ac_three_phase_fault",
         events=[
             {
                 "event_id": "fault",
@@ -198,7 +198,7 @@ def test_ac_fault_current_uses_the_grid_short_circuit_envelope():
 
     def add(role, scope, value):
         channel_id = role + "_" + scope
-        units = "kA" if role == "ac_fault_current" else "1"
+        units = "kA" if role in {"ac_fault_current", "ac_grid_current"} else "1"
         contract["channels"].append(
             {
                 "channel_id": channel_id,
@@ -220,16 +220,70 @@ def test_ac_fault_current_uses_the_grid_short_circuit_envelope():
         add(
             "ac_fault_branch_state",
             branch,
-            1 if branch in {"any", "AG", "BG", "CG"} else 0,
+            1
+            if branch in ({"any", "AG"} if single_phase else {"any", "AG", "BG", "CG"})
+            else 0,
         )
     for phase in "ABC":
-        add("ac_fault_current", phase, 32.0)
+        add(
+            "ac_fault_current",
+            phase,
+            fault_current if not single_phase or phase == "A" else 0,
+        )
+        add("ac_grid_current", phase, grid_current)
     for channel in samples["channels"]:
         if channel["channel_id"].startswith("blocking_state_"):
             channel["values"] = [1 if 0.3 <= t < 0.5 else 0 for t in times]
-    result = evaluate_routed_pwm_samples(samples, contract, scenario)
+    contract["ac_fault_network"] = {
+        "voltage_kv": 230.0,
+        "grid_resistance_ohm": 1.0527493472421685,
+        "grid_reactance_ohm": 10.527493472421686,
+        "transformer_zero_sequence_reactance_ohm": 5.29,
+        "topology": "grounded_Y_delta",
+    }
+    return samples, contract, scenario
+
+
+def test_ac_fault_current_uses_the_grid_short_circuit_envelope():
+    result = evaluate_routed_pwm_samples(*ac_fault_samples())
     current_checks = [
         c for c in result["checks"] if c["name"].startswith("physical_fault_current_")
     ]
     assert len(current_checks) == 3
     assert all(c["passed"] for c in current_checks)
+
+
+def test_single_phase_fault_includes_the_passive_transformer_zero_sequence_path():
+    # Independent sequence-network calculation: Z1=Z2=Zg, Z0=Zg || j*5.29.
+    # 3*Vphase / |Z1+Z2+Z0| = 16.125 kA RMS, crest < 45.61 kA.
+    result = evaluate_routed_pwm_samples(
+        *ac_fault_samples(single_phase=True, fault_current=39.82)
+    )
+    check = next(c for c in result["checks"] if c["name"] == "physical_fault_current_A")
+    assert check["passed"] is True
+    assert 45.5 < check["limit"]["maximum_ka"] < 45.7
+    too_large = evaluate_routed_pwm_samples(
+        *ac_fault_samples(single_phase=True, fault_current=47.0)
+    )
+    assert not next(
+        c for c in too_large["checks"] if c["name"] == "physical_fault_current_A"
+    )["passed"]
+
+
+def test_single_phase_fault_still_checks_the_original_grid_source_crest():
+    result = evaluate_routed_pwm_samples(
+        *ac_fault_samples(single_phase=True, fault_current=39.82, grid_current=36.0)
+    )
+    assert any(
+        c["name"].startswith("physical_grid_current_") and not c["passed"]
+        for c in result["checks"]
+    )
+
+
+def test_single_phase_fault_requires_an_audited_sequence_network():
+    samples, contract, scenario = ac_fault_samples(
+        single_phase=True, fault_current=39.82
+    )
+    del contract["ac_fault_network"]
+    result = evaluate_routed_pwm_samples(samples, contract, scenario)
+    assert result["status"] == "INCOMPLETE_ANALYSIS"
