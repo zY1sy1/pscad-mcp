@@ -118,7 +118,10 @@ def compose_pwm_channel_contract(project, contract):
                     {
                         "definition_name": name,
                         "owner_id": wire.get("id"),
-                        "attributes": dict(wire.attrib),
+                        "attributes": {
+                            key: wire.get(key)
+                            for key in ("classid", "x", "y", "orient")
+                        },
                         "vertices": [dict(v.attrib) for v in wire.findall("vertex")],
                     }
                 )
@@ -166,6 +169,27 @@ def compose_pwm_scenario_contract(contract, scenario, namespace):
         )
         expected["definition"] = component.get("defn")
         expected["parameters"] = _params(component)
+    result["wire_layout_normalization"] = []
+    for expected in result["readback_wires"]:
+        wire = definitions[expected["definition_name"]].find(
+            f"./schematic/Wire[@id='{expected['owner_id']}']"
+        )
+        # Vendor first-save recomputes drawing bounds; electrical connections
+        # are identified by class, origin, orientation and every exact vertex.
+        layout = {
+            key: value
+            for key, value in expected["attributes"].items()
+            if key in ("w", "h")
+        }
+        if layout:
+            result["wire_layout_normalization"].append(
+                {"owner": expected["owner_id"], "original_bounds": layout}
+            )
+        expected["attributes"] = {
+            key: wire.get(key)
+            for key in expected["attributes"]
+            if key not in ("w", "h")
+        }
     original_namespace = observed.get("name")
     for binding in result["channels"] + result["diagnostic_channels"]:
         definition = binding["signal_source"]["definition"]

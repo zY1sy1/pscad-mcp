@@ -42,4 +42,137 @@ def test_incorrect_units_are_rejected_before_any_electrical_verdict():
         },
     )
     assert result["status"] == "INCOMPLETE_ANALYSIS"
-    assert result["checks"][0]["passed"] is False
+    assert (
+        next(c for c in result["checks"] if c["name"] == "trace_dc")["passed"] is False
+    )
+
+
+def complete_samples():
+    times = [i / 100 for i in range(121)]
+    bindings, channels = [], []
+
+    def add(role, scope, value, units):
+        channel_id = role + "_" + scope
+        bindings.append(
+            {
+                "channel_id": channel_id,
+                "role": role,
+                "model_scope": scope,
+                "units": units,
+            }
+        )
+        channels.append(
+            {
+                "channel_id": channel_id,
+                "units": units,
+                "domain": times,
+                "values": [value] * len(times),
+            }
+        )
+
+    for station in ("T1", "T2"):
+        for role, value, units in (
+            ("v_dc", 640, "kV"),
+            ("p_active", 1030 if station == "T1" else -1000, "MW"),
+            ("i_dc_station", 1.6, "kA"),
+            ("q_reactive", 0, "MVAr"),
+            ("ac_breaker_state", 1, "1"),
+        ):
+            add(role, station, value, units)
+        for pole in ("P", "N"):
+            add("dc_breaker_state", station + pole, 1, "1")
+        for phase in "ABC":
+            for arm in ("upper", "lower"):
+                for role, value, units in (
+                    ("v_cap", 640, "kV"),
+                    ("i_arm", 1.6, "kA"),
+                    ("blocking_state", 0, "1"),
+                    ("modulation_request", 1.5, "pu"),
+                ):
+                    add(role, station + "/" + phase + "/" + arm, value, units)
+    scenario = {
+        "name": "forward_steady",
+        "duration_s": 1.2,
+        "time_step_s": 0.001,
+        "output_step_s": 0.01,
+        "events": [],
+        "analysis": {
+            "thresholds": {
+                "dc_voltage_deviation_pu": 0.1,
+                "dc_current_peak_pu": 1.25,
+                "modulation_margin_min_pu": 0.02,
+                "recovery_time_s": 0.5,
+            }
+        },
+    }
+    return {"channels": channels}, {"channels": bindings}, scenario
+
+
+def test_flat_power_trace_cannot_pass_a_requested_step():
+    samples, contract, scenario = complete_samples()
+    scenario.update(
+        name="active_power_step",
+        events=[
+            {
+                "event_id": "lower",
+                "target": "active_power_order",
+                "time_s": 0.1,
+                "end_time_s": 0.5,
+                "value": 0.8,
+                "before_value": 1,
+                "after_value": 0.8,
+            },
+            {
+                "event_id": "raise",
+                "target": "active_power_order",
+                "time_s": 0.5,
+                "end_time_s": 1.2,
+                "value": 1,
+                "before_value": 0.8,
+                "after_value": 1,
+            },
+        ],
+    )
+    result = evaluate_routed_pwm_samples(samples, contract, scenario)
+    assert result["status"] == "FAIL"
+    assert (
+        next(c for c in result["checks"] if c["name"] == "step_response_lower_T2")[
+            "passed"
+        ]
+        is False
+    )
+
+
+def test_good_final_power_cannot_replace_real_fault_and_recovery_evidence():
+    samples, contract, scenario = complete_samples()
+    scenario.update(
+        name="dc_pole_to_pole_fault",
+        events=[
+            {
+                "event_id": "fault",
+                "target": "dc_fault_command",
+                "time_s": 0.3,
+                "end_time_s": 0.5,
+                "value": 1,
+                "before_value": 0,
+                "after_value": 1,
+            }
+        ],
+    )
+    result = evaluate_routed_pwm_samples(samples, contract, scenario)
+    assert result["status"] != "PASS"
+    assert (
+        next(
+            c for c in result["checks"] if c["name"] == "complete_fault_branch_states"
+        )["passed"]
+        is False
+    )
+
+
+def test_a_trace_missing_from_the_declared_contract_is_incomplete():
+    samples, contract, scenario = complete_samples()
+    contract["channels"].append(
+        {"channel_id": "fault_current", "role": "i_dc_fault", "units": "kA"}
+    )
+    result = evaluate_routed_pwm_samples(samples, contract, scenario)
+    assert result["status"] == "INCOMPLETE_ANALYSIS"
