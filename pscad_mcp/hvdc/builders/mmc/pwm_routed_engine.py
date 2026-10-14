@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+import shutil
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -207,85 +210,57 @@ async def execute_routed_pwm_candidate(plan, service, candidate, scenarios):
     forward = next(s for s in scenarios if s["name"] == "forward_steady")
     delivered = await execute(forward, 11, timed=False)
     reload_directory = stage / "independent-reload"
-    reload_directory.mkdir()
     reload_name = "PWM_RELOAD_" + plan.plan_hash[:10]
     delivery_directory = Path(delivered["project"]).parent
     delivery_report = json.loads((delivery_directory / "report.json").read_text())
     delivery_scene = json.loads((delivery_directory / "scenario.json").read_text())
-    reload_report = {
-        "schema_version": 1,
-        "status": "FAIL",
-        "stage": "prepare",
-        "model_accepted": False,
-        "scope": "mmc.detailed_pwm.independent_reload",
-        "plan_hash": plan.plan_hash,
+    reload_job = {
+        "source": delivered["project"],
+        "source_sha256": digest(delivered["project"]),
+        "library": str(sources["library"]),
+        "master": str(master),
+        "workspace": str(reload_directory),
+        "case_name": reload_name,
+        "scenario": delivery_scene,
+        "channel_contract": prepared["channels"],
+        "parent_managed_pid": delivery_report["runtime"]["session"]["managed_pid"],
     }
-
-    def reload_checkpoint():
-        write_report(reload_directory / "report.json", reload_report)
-
-    reload_args = SimpleNamespace(
-        source=Path(delivered["project"]),
-        library=sources["library"],
-        master=master,
-        workspace=reload_directory,
-        case_name=reload_name,
-        duration=delivery_scene["duration_s"],
-        scenario=None,
-        simulate=True,
-        timeout=900,
-        startup_timeout=30,
+    job_file = stage / "independent-reload-job.json"
+    job_file.write_text(json.dumps(reload_job, indent=2), encoding="utf-8")
+    worker = await asyncio.create_subprocess_exec(
+        sys.executable,
+        "-m",
+        "pscad_mcp.hvdc.builders.mmc.pwm_reload",
+        "--job",
+        str(job_file),
+        cwd=Path(__file__).resolve().parents[4],
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
     )
-    try:
-        await run(reload_args, reload_report, reload_checkpoint)
-        reload_report["stage"] = "finished"
-        reload_checkpoint()
-    except BaseException as error:
-        reload_report["status"] = "FAIL"
-        reload_report["stage"] = "finished"
-        reload_report["error"] = {"type": type(error).__name__, "message": str(error)}
-        reload_checkpoint()
-        raise
-    if (
-        reload_report["runtime"]["session"]["managed_pid"]
-        == delivery_report["runtime"]["session"]["managed_pid"]
-    ):
-        raise RuntimeError(
-            "Independent PWM reload must use a different owned PSCAD process"
-        )
-    reload_samples, reload_contract = await read_routed_pwm_run(
-        reload_report,
-        reload_directory / (reload_name + ".pscx"),
-        delivery_scene,
-        prepared["channels"],
-    )
-    reload_physical = evaluate_routed_pwm_samples(
-        reload_samples, reload_contract, delivery_scene
-    )
-    reload_physical_file = reload_directory / "physical.json"
-    reload_physical_file.write_text(
+    stdout, stderr = await worker.communicate()
+    (stage / "independent-reload-worker.json").write_text(
         json.dumps(
             {
-                "physical": reload_physical,
-                "dataset": reload_samples["identity"],
-                "channel_contract": reload_contract,
+                "returncode": worker.returncode,
+                "stdout": stdout.decode(errors="replace"),
+                "stderr": stderr.decode(errors="replace"),
             },
             indent=2,
         ),
         encoding="utf-8",
     )
-    if (
-        reload_physical["status"] != "PASS"
-        or reload_report.get("remaining_owned_processes")
-        or not reload_report["sources_immutable"]
-    ):
+    reload_physical_file = reload_directory / "physical.json"
+    if worker.returncode != 0:
         raise BackendError(
             "MMC_PHYSICAL_ACCEPTANCE_FAILED",
-            "Independent PWM reload did not satisfy the physical contract.",
+            "Independent PWM reload failed in its isolated worker.",
             "hvdc",
             "execute_pwm_candidate",
-            {"physical_report": str(reload_physical_file)},
+            {"report": str(reload_directory / "report.json")},
         )
+    reload_physical = json.loads(reload_physical_file.read_text())["physical"]
+    if reload_physical["status"] != "PASS":
+        raise RuntimeError("Independent PWM reload has no passing physical evidence")
     _verify_sources(plan, sources)
     library = Path(delivered["project"]).parent / "intermediate.pslx"
     manifest = {
@@ -306,12 +281,20 @@ async def execute_routed_pwm_candidate(plan, service, candidate, scenarios):
     }
     manifest_file = stage / "routed-acceptance.json"
     manifest_file.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    publication_directory = stage / "publication"
+    publication_directory.mkdir()
+    publication_project = publication_directory / (plan.target_name + ".pscx")
+    shutil.copy2(delivered["project"], publication_project)
+    if digest(publication_project) != manifest["project_sha256"]:
+        raise RuntimeError(
+            "The publication copy differs from the frozen measured model"
+        )
     return {
         "state": "accepted",
         "engine": "detailed_pwm",
         "candidate_id": candidate.candidate_id,
         "candidate_path": str(stage),
-        "project_path": delivered["project"],
+        "project_path": str(publication_project),
         "library_path": str(library),
         "library_support_path": str(library.parent / "Obj_Files_2016_03_25"),
         "model_accepted": True,
