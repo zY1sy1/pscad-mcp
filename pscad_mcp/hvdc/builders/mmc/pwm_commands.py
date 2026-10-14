@@ -547,14 +547,7 @@ class _Editor:
                     },
                 )
                 self.label(main, arm_net, (x - 36, y), electrical=True)
-                reactor_net = f"McpDcReactor{station}_{pole}"
-                self.label(main, reactor_net, (x + 36, y), electrical=True)
-                reactor_x = 10800
-                reactor = self.user(
-                    main, "master:inductor", reactor_x, y, {"L": "0.1 [H]"}
-                )
-                self.label(main, reactor_net, (reactor_x, y), electrical=True)
-                self.label(main, line_net, (reactor_x + 36, y), electrical=True)
+                self.label(main, line_net, (x + 36, y), electrical=True)
                 self.routes.append(
                     {
                         "role": "dc_breaker_command",
@@ -567,8 +560,6 @@ class _Editor:
                         "state_signal": state,
                         "state_expression": "1-OPENBR",
                         "removed_wire": wire.get("id"),
-                        "dc_reactor_owner": reactor.get("id"),
-                        "dc_reactor_inductance_h": 0.1,
                     }
                 )
                 self.probe(
@@ -684,6 +675,7 @@ def materialize_pwm_command_interface(
         "IDC_T2",
         "PN_CLOSED",
         "PG_CLOSED",
+        "P_T2",
     ]
     outputs = {
         "P_REF": "McpPRef",
@@ -698,6 +690,7 @@ def materialize_pwm_command_interface(
         "DC_PG_FAULT": "McpDcPgFault",
         "TRIP_T1": "McpDcTripT1",
         "TRIP_T2": "McpDcTripT2",
+        "DC_FF": "McpDcPowerFeedforward",
     }
     ports = {
         name: (-72, -180 + index * 36, "Transfer", "Input")
@@ -750,6 +743,7 @@ def materialize_pwm_command_interface(
       $TRIP_T1 = FLOAT(STORI(NSTORI))
       $TRIP_T2 = FLOAT(STORI(NSTORI+1))
       $P_REF = -{rated_power_mw:.15g} * $P_ORDER
+      $DC_FF = -$P_T2
       $Q_REF = {reactive_power_mvar:.15g} + {rated_power_mw:.15g} * $Q_ORDER
       $RESET_OUT = $RESET_CMD
       $AC_OPEN = 1.0 - $AC_CLOSE
@@ -812,6 +806,7 @@ def materialize_pwm_command_interface(
         ("PG_CLOSED", "McpDcPgFaultClosed"),
     ):
         editor.label(main, signal, (7128, 180 + inputs.index(port) * 36))
+    editor.label(main, "P2", (7128, 180 + inputs.index("P_T2") * 36))
     selector = editor.user(
         main,
         "master:const",
@@ -849,6 +844,9 @@ def materialize_pwm_command_interface(
                 "PrefRate",
                 format(2.0 * rated_power_mw / power_reversal_time_s, ".15g"),
             )
+        else:
+            _set(converter, "Pref", "McpDcPowerFeedforward")
+            _set(converter, "PrefRate", "1e9")
         point = absolute_port(
             (int(converter.get("x")), int(converter.get("y"))),
             (-90, -72),
@@ -1143,5 +1141,4 @@ def materialize_pwm_command_interface(
         "dc_current_trip_fault_ka": 1.75,
         "dc_current_trip_nominal_ka": 2.5,
         "dc_current_trip_source": "actual Main Idc1/Idc2 ammeters",
-        "dc_reactor_inductance_per_pole_h": 0.1,
     }

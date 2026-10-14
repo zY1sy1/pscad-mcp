@@ -115,6 +115,7 @@ def prepare_routed_pwm_case(source, library, master, workspace):
         ("power_integral", materialize_pwm_power_response, {}),
         ("dynamic_headroom", materialize_pwm_dynamic_headroom, {}),
         ("fault_protection", materialize_pwm_fault_protection, {}),
+        ("power_feedforward", materialize_pwm_dc_power_feedforward, {"master": master}),
     )
     for name, producer, kwargs in stages:
         target = directory / (name + ".pscx")
@@ -318,4 +319,65 @@ def materialize_pwm_fault_protection(source, destination):
         "acceptance_arm_peak_ka": 3.0,
         "acceptance_dc_peak_pu": 2.0,
         "physical_fault_sensors_retained": True,
+    }
+
+
+def materialize_pwm_dc_power_feedforward(source, destination, *, master):
+    """Feed measured remote MW into the DC-control current before its real limiter."""
+    from .pwm_commands import _Editor
+
+    original, master_path = _regular(source), _regular(master)
+    target = _new_target(destination, (original, master_path))
+    root = ET.parse(original).getroot()
+    definition = root.find("./definitions/Definition[@name='VSCControl2']")
+    canvas = definition.find("schematic")
+    branch = canvas.find("Wire[@id='1148815714']")
+    points = (
+        [
+            (
+                int(branch.get("x")) + int(v.get("x")),
+                int(branch.get("y")) + int(v.get("y")),
+            )
+            for v in branch.findall("vertex")
+        ]
+        if branch is not None
+        else []
+    )
+    if points != [(1926, 2124), (2088, 2124), (2088, 1944), (2124, 1944)]:
+        raise RuntimeError("The audited DC PI-to-selector connection differs")
+    canvas.remove(branch)
+    editor = _Editor(root, ET.parse(master_path).getroot())
+    editor.label(canvas, "McpDcFeedbackCurrent", (1926, 2124))
+    editor.label(canvas, "McpDcFeedforwardCurrent", (2124, 1944))
+    x, y = 8208, 2700
+    editor.user(
+        canvas,
+        "master:sumjct",
+        x,
+        y,
+        {
+            "DPath": "1",
+            "A": "0",
+            "B": "1",
+            "C": "0",
+            "D": "1",
+            "E": "0",
+            "F": "0",
+            "G": "0",
+        },
+    )
+    editor.label(canvas, "McpDcFeedbackCurrent", (x - 36, y))
+    editor.label(canvas, "Pref_pu", (x, y - 36))
+    editor.label(canvas, "McpDcFeedforwardCurrent", (x + 36, y))
+    _write_new_xml(root, target)
+    return {
+        "source": str(original),
+        "source_sha256": hashlib.sha256(original.read_bytes()).hexdigest(),
+        "destination": str(target),
+        "destination_sha256": hashlib.sha256(target.read_bytes()).hexdigest(),
+        "equation": "dc_mode_id = voltage_PI + measured_remote_power_pu",
+        "current_limiter_retained": True,
+        "removed_wire": "1148815714",
+        "voltage_selector_input": [2124, 1944],
+        "master_sha256": hashlib.sha256(master_path.read_bytes()).hexdigest(),
     }
