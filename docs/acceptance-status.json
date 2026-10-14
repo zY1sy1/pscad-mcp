@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-14T10:17:25.108534+08:00",
+  "updated_at": "2026-10-15T01:02:25.356464+08:00",
   "policy": "Evidence belongs only to its named scope, exact request and tested commit. INTEGRATION_BRANCH records are not merged/deployed. PASS is never inherited by another builder, rating or later commit; offline integrity checks do not establish physical acceptance.",
   "scopes": [
     {
@@ -1239,16 +1239,20 @@
     {
       "scope": "parametric_mmc_detailed_pwm",
       "implementation_status": "INTEGRATION_BRANCH",
-      "licensed_status": "INCOMPLETE_ANALYSIS",
+      "licensed_status": "PARTIAL",
       "evidence": {
-        "report_path": "D:\\PA\\o13pwm3\\diagnostic-case.json",
-        "sha256": "365534bbb266fe33d3eed1a94609458fe94210cd38a162a93318c5afdec9184e",
-        "commit": "a87efca8fe291e93f5e6e9dab0ea11872810afe6"
+        "report_path": "D:\\PA\\p15\\closure-status.json",
+        "sha256": "b2417c8780d72bbf296ce75439a4512c0ff3e4c404d22c0f1120e1f60b2835ee",
+        "commit": "8bf57ea5f88b25cb09d0bb4ce548d8d023725b43"
       },
       "evidence_checks": [
         {
           "pointer": "/status",
           "equals": "INCOMPLETE_ANALYSIS"
+        },
+        {
+          "pointer": "/model_accepted",
+          "equals": false
         },
         {
           "pointer": "/owned_process_cleaned",
@@ -1259,12 +1263,12 @@
           "equals": true
         },
         {
-          "pointer": "/error/code",
-          "equals": "HVDC_MAPPING_MISSING"
+          "pointer": "/single_fault_diagnostic/physical_status",
+          "equals": "PASS"
         }
       ],
-      "remaining_work_class": "unverified_model_control_interface_and_implementation",
-      "note": "Embedded timing setup is connected. Invalid default OnOff/Dblk/fault-option bindings were removed after real source inspection: OnOff is neither declared nor routed. All eleven scenarios remain required. A prepared PWM model with verified real command routing, rating changes, units/polarity and measurement bindings is required before licensed physical acceptance.",
+      "remaining_work_class": "serial_licensed_matrix_pending",
+      "note": "Isolated PWM closure implementation, measured AC overcurrent isolation and exact measurement bindings are available. SLG diagnostic passed 484 checks at 903c243; it is not complete converter acceptance. A fresh full suite at 79dbb62 was interrupted only in this task after observing another active chat running the same PWM suite, to satisfy the user-required serial EMTDC execution. All eleven scenes, standalone delivery and independent reload remain required. The supported audited request is FB 640 kV/1000 MW/Q0/60 Hz/230 kV grids SCR5 X/R10/200 km overhead/reversal0.5s; other rating mappings remain explicitly unsupported.",
       "linked_evidence": [
         {
           "path": "D:\\PA\\o13pwm2\\diagnostic-case.json",
@@ -1277,9 +1281,51 @@
         {
           "path": "D:\\PA\\o13vendor\\source-search.json",
           "sha256": "0f28613f8d7a270f0678c7ee24d173b323d8b836a6c3126ddcb57cd643ec0db6"
+        },
+        {
+          "path": "D:\\PA\\p15\\slg2-analysis\\physical-checks.json",
+          "sha256": "3d03099d6527d20e7a3240e9f490c98468d1c1abbe766313f94c97df965b4b8a"
+        },
+        {
+          "path": "D:\\PA\\p15\\s1-interruption-cleanup.json",
+          "sha256": "4171dbf737124621f49479661b1bfd864e17b1ff1d012793c47c9a8ae37a279f"
+        },
+        {
+          "path": "D:\\PA\\p15\\physical-binding-audit.json",
+          "sha256": "7ea4ee31466c7d14dd8177225f451bbc68063c08da042cdc8540c34620bc3848"
         }
       ],
-      "implementation_source_branch": "codex/acceptance-oct09"
+      "implementation_source_branch": "codex/mmc-pwm-closure",
+      "historical_attempts": [
+        {
+          "licensed_status": "INCOMPLETE_ANALYSIS",
+          "evidence": {
+            "report_path": "D:\\PA\\o13pwm3\\diagnostic-case.json",
+            "sha256": "365534bbb266fe33d3eed1a94609458fe94210cd38a162a93318c5afdec9184e",
+            "commit": "a87efca8fe291e93f5e6e9dab0ea11872810afe6"
+          },
+          "evidence_checks": [
+            {
+              "pointer": "/status",
+              "equals": "INCOMPLETE_ANALYSIS"
+            },
+            {
+              "pointer": "/owned_process_cleaned",
+              "equals": true
+            },
+            {
+              "pointer": "/source_inputs_unchanged",
+              "equals": true
+            },
+            {
+              "pointer": "/error/code",
+              "equals": "HVDC_MAPPING_MISSING"
+            }
+          ],
+          "remaining_work_class": "unverified_model_control_interface_and_implementation",
+          "note": "Embedded timing setup is connected. Invalid default OnOff/Dblk/fault-option bindings were removed after real source inspection: OnOff is neither declared nor routed. All eleven scenarios remain required. A prepared PWM model with verified real command routing, rating changes, units/polarity and measurement bindings is required before licensed physical acceptance."
+        }
+      ]
     },
     {
       "scope": "native_full_bridge_average_arm_462",
