@@ -317,6 +317,7 @@ def _engine_candidates(
         "switching_frequency_hz": switching_frequency,
     }
     if reference.get("native_pwm_timing"):
+        base_parameters["transformer_rating_mva"] = reference["transformer_rating_mva"]
         base_settings.update(time_step_s=reference["time_step_s"], output_step_s=reference["output_step_s"],
                              control_sample_time_s=reference["time_step_s"])
     variants = (
@@ -402,6 +403,18 @@ def derive_mmc_parameters(
         reference = (pwm_reference or _PWM_REFERENCE) if engine == "detailed_pwm" else (avm_reference or _AVM_REFERENCE)
         engine_common = dict(common)
         engine_constraints = constraints
+        if reference.get("native_pwm_timing"):
+            actual_cells = math.ceil(float(reference["reference_cells_per_arm"]) * voltage_scale)
+            mean_dc_arm_loading = dc_current_ka / (3.0 * actual_cells)
+            engine_constraints = tuple(
+                _constraint("energy_ripple", mean_dc_arm_loading <= 0.02, mean_dc_arm_loading, 0.02,
+                            "kA_per_cell", "Mean DC loading per cell in each of three parallel phase arms exceeds the planning proxy bound.")
+                if c.name == "energy_ripple" else
+                _constraint("cell_count", actual_cells > 0, actual_cells, "> 0", "count", "Derived cell count is not positive.")
+                if c.name == "cell_count" else
+                _constraint("resource_limit", 12 * actual_cells <= 20000, 12 * actual_cells, 20000, "instances", "Detailed model resource limit is exceeded.")
+                if c.name == "resource_limit" else c for c in constraints
+            )
         if engine == "average_value" and avm_cable_profile is not None:
             engine_common.update(_native_cable_line_parameters(parsed, avm_cable_profile))
             drop = engine_common["line_drop_pu"]

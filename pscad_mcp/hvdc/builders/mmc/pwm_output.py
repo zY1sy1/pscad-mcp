@@ -21,9 +21,16 @@ def digest(path):
 
 
 async def read_routed_pwm_run(report, project, scenario, contract):
-    if (report["status"] != "PASS" or report.get("stage") != "finished" or report.get("sources_immutable") is not True
-            or report.get("remaining_owned_processes") or (report.get("cleanup_mode") != "caller_retains_owned_instance"
-            and report.get("remaining_owned_processes") != [])):
+    if (
+        report["status"] != "PASS"
+        or report.get("stage") != "finished"
+        or report.get("sources_immutable") is not True
+        or report.get("remaining_owned_processes")
+        or (
+            report.get("cleanup_mode") != "caller_retains_owned_instance"
+            and report.get("remaining_owned_processes") != []
+        )
+    ):
         raise RuntimeError("Complete, cleaned-up PWM runs are required")
     project = Path(project)
     if digest(project) != report["saved_project_sha256"]:

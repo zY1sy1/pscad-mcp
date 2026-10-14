@@ -211,9 +211,23 @@ def create_parametric_plan(
     if "detailed_pwm" in requested_engines:
         if audit.get("compatible") is not True:
             raise _error("MMC_TEMPLATE_INCOMPATIBLE", "The audited PWM template is not compatible.")
+        routed_reference = audit.get("physical_reference", {}).get("available") is True
+        generated_dependencies = []
+        if routed_reference:
+            from .line_constants import extract_tline_segments
+            segments = extract_tline_segments(source_paths["project"])
+            if {s.name for s in segments} != {"TL12a", "TL12b"}:
+                raise _error("MMC_PWM_PARAMETER_UNSUPPORTED", "The routed PWM source requires both audited overhead-line geometries.")
+            generated_dependencies = [
+                {**dict(item), "repair_policy": "generate_from_audited_geometry",
+                 "source_project_sha256": source_hashes["project"],
+                 "generator": "installed_pscad_tline", "fresh_artifacts_required": True}
+                if item.get("kind") == "line_constants" else dict(item)
+                for item in audit.get("absolute_paths", ())
+            ]
         unresolved = [
             item
-            for item in audit.get("absolute_paths", ())
+            for item in (generated_dependencies if routed_reference else audit.get("absolute_paths", ()))
             if isinstance(item, Mapping) and item.get("repair_policy") == "requires_verified_rebind"
         ]
         if unresolved:
@@ -243,7 +257,7 @@ def create_parametric_plan(
         candidates = _candidate_group(derived.candidates, engine)
         if engine == "detailed_pwm":
             bindings = tuple(dict(item) for item in (*audit.get("role_bindings", ()), *audit.get("writable_parameter_bindings", ())))
-            dependencies = tuple(dict(item) for item in audit.get("absolute_paths", ()))
+            dependencies = tuple(generated_dependencies) if routed_reference else tuple(dict(item) for item in audit.get("absolute_paths", ()))
             plan_source_paths, plan_source_hashes, plan_asset_hashes = source_paths, source_hashes, support_hashes
             native_timing = bool(
                 isinstance(audit.get("template_native_controls"), Mapping)

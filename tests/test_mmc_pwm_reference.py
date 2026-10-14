@@ -23,6 +23,7 @@ def test_instantiated_dimension_overrides_the_form_default():
             "RSOn": "0.005 [ohm]",
             "VdcBase": "640 [kV]",
             "Cfreq": carrier,
+            "Sbase": "1000",
         }.items():
             ET.SubElement(group, "param", name=key, value=value)
     reference = audit_pwm_physical_reference(root)

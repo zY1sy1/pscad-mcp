@@ -56,6 +56,7 @@ def audit_pwm_physical_reference(root: ET.Element) -> dict:
                 "arm_inductance_h": scalar(p["Lsmth"], "mH") * 1e-3,
                 "switch_on_resistance_ohm": scalar(p["RSOn"], "ohm"),
                 "rated_dc_voltage_kv": scalar(p["VdcBase"], "kV"),
+                "transformer_rating_mva": scalar(p["Sbase"], "MVA"),
                 "carrier_ratio": scalar(p["Cfreq"]),
             }
         )
@@ -64,6 +65,7 @@ def audit_pwm_physical_reference(root: ET.Element) -> dict:
         "arm_inductance_h",
         "switch_on_resistance_ohm",
         "rated_dc_voltage_kv",
+        "transformer_rating_mva",
     )
     if any(ratings[0][key] != ratings[1][key] for key in shared):
         return {
@@ -85,6 +87,7 @@ def audit_pwm_physical_reference(root: ET.Element) -> dict:
         "arm_resistance_ohm": 2 * count * arm["switch_on_resistance_ohm"],
         "stored_energy_mj": 12 * 0.5 * capacitance * voltage**2 / 1e6,
         "equivalent_arm_capacitance_f": capacitance,
+        "transformer_rating_mva": arm["transformer_rating_mva"],
         "equivalent_capacitor_voltage_target_kv": arm["rated_dc_voltage_kv"],
         "switching_frequency_hz": max(s["carrier_ratio"] * frequency for s in ratings),
         "source_time_step_s": float(
