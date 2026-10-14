@@ -537,7 +537,7 @@ class _Editor:
                     x,
                     y,
                     {
-                        "NAME": "McpDcClose",
+                        "NAME": "McpDcOpen",
                         "ENAB": "0",
                         "OPCUR": "1",
                         "RON": "0.005 [ohm]",
@@ -651,8 +651,8 @@ def materialize_pwm_command_interface(
         "RESET_OUT": "McpResetCommand",
         "E_T1": "McpEnableT1",
         "E_T2": "McpEnableT2",
-        "AC_CLOSED": "McpAcClose",
-        "DC_CLOSED": "McpDcClose",
+        "AC_OPEN": "McpAcOpen",
+        "DC_OPEN": "McpDcOpen",
         "AC_FAULT_OUT": "McpAcFault",
         "DC_PN_FAULT": "McpDcPnFault",
         "DC_PG_FAULT": "McpDcPgFault",
@@ -691,8 +691,8 @@ def materialize_pwm_command_interface(
         f"""      $P_REF = -{rated_power_mw:.15g} * $P_ORDER
       $Q_REF = {reactive_power_mvar:.15g} + {rated_power_mw:.15g} * $Q_ORDER
       $RESET_OUT = $RESET_CMD
-      $AC_CLOSED = $AC_CLOSE
-      $DC_CLOSED = $DC_CLOSE
+      $AC_OPEN = 1.0 - $AC_CLOSE
+      $DC_OPEN = 1.0 - $DC_CLOSE
       $E_T1 = $ENABLE_T1
       $E_T2 = $ENABLE_T2
       IF ($RESET_CMD .GE. 0.5 .OR. $BLOCK_CMD .GE. 0.5 .OR. $AC_CLOSE .LT. 0.5 .OR. $DC_CLOSE .LT. 0.5) THEN
@@ -783,7 +783,7 @@ def materialize_pwm_command_interface(
         u for u in main.findall("User") if u.get("defn") == "master:breaker3"
     ]:
         breaker.set("defn", editor.namespace + ":McpPwmAcBreaker")
-        _set(breaker, "NAME", "McpAcClose")
+        _set(breaker, "NAME", "McpAcOpen")
         _set(breaker, "OPCUR", "1")
         state = "McpAcClosed" + breaker.get("id")
         _set(breaker, "McpClosed", state)
