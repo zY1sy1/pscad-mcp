@@ -24,6 +24,10 @@ and [machine-readable inventory](docs/acceptance-status.json) distinguish:
   regression, three full-bridge cable AVM ratings and reproducible Corpus subset
   retain their [own tested revisions](docs/acceptance/current-status-20261013.md).
   The merged serial sweep passed a fresh three-scenario, 42-check licensed run.
+- **New isolated overhead AVM scope:** three full-bridge 200 km overhead requests
+  passed all 18 normal/fault/independent-reload stages at `7432030`.
+  The [accepted requests and portable projects](docs/acceptance/mmc-overhead-avm-20261014.md)
+  remain on `codex/mmc-overhead-avm`, unmerged into main.
 - **Remaining work:** public parametric LCC physical mappings and its rating
   matrix, detailed PWM and other MMC model/rating scopes, broader Blueprint
   coverage and PSCAD 5.x real acceptance. LCC ratings use total system power, pole-to-ground

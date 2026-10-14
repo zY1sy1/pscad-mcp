@@ -34,6 +34,9 @@ def test_acceptance_status_manifest_separates_live_acceptance_scopes():
         "corpus_moxing_462_v2_subset",
         "parameter_sweep_recovery_and_metrics_462",
         "parameter_sweep_psout",
+        "native_mmc_full_bridge_overhead_640kv",
+        "native_mmc_full_bridge_overhead_500kv_q100",
+        "native_mmc_full_bridge_overhead_800kv_50hz",
     }
     assert scopes["legacy_core_462"]["licensed_status"] == "PASS"
     assert scopes["legacy_core_462"]["implementation_status"] == "INTEGRATION_BRANCH"
@@ -120,7 +123,7 @@ def test_latest_mmc_evidence_is_scoped_and_old_attempts_remain_historical():
 def test_native_matrix_keeps_three_requests_and_component_only_scope_separate():
     scopes = {s["scope"]: s for s in json.loads(MANIFEST.read_text())["scopes"]}
     names = scopes["parametric_mmc"]["accepted_subscopes"]
-    assert len(names) == 6
+    assert len(names) == 9
     cases = [
         scopes[name]
         for name in names
@@ -150,6 +153,7 @@ def test_native_matrix_keeps_three_requests_and_component_only_scope_separate():
         scopes[name]
         for name in names
         if scopes[name]["request"]["converter"] == "full_bridge"
+        and scopes[name]["request"]["dc_link"]["kind"] == "cable"
     ]
     assert len(full_bridge) == 3
     assert {s["evidence"]["commit"] for s in full_bridge} == {
@@ -172,6 +176,39 @@ def test_native_matrix_keeps_three_requests_and_component_only_scope_separate():
         s["licensed_status"] == "PASS"
         and s["request"]["dc_link"] == {"kind": "cable", "length_km": 100.0}
         for s in full_bridge
+    )
+    overhead = [
+        scopes[name]
+        for name in names
+        if scopes[name]["request"]["dc_link"]["kind"] == "overhead_line"
+    ]
+    assert len(overhead) == 3
+    assert {s["evidence"]["commit"] for s in overhead} == {
+        "743203006a60333c02dfdd13216cd13756f68f84"
+    }
+    assert {
+        (
+            s["request"]["dc_voltage_kv"],
+            s["request"]["active_power_mw"],
+            s["request"]["reactive_power_mvar"],
+            s["request"]["frequency_hz"],
+        )
+        for s in overhead
+    } == {
+        (640.0, 1000.0, 0.0, 60.0),
+        (500.0, 750.0, 100.0, 60.0),
+        (800.0, 1200.0, -120.0, 50.0),
+    }
+    assert all(
+        s["licensed_status"] == "PASS"
+        and s["implementation_status"] == "INTEGRATION_BRANCH"
+        and s["implementation_source_branch"] == "codex/mmc-overhead-avm"
+        and s["request"]["converter"] == "full_bridge"
+        and s["request"]["model_fidelity"] == "average_value"
+        and s["request"]["dc_link"] == {"kind": "overhead_line", "length_km": 200.0}
+        and s["intrinsic_dc_fault_blocking"] is False
+        and {"pointer": "/request", "equals": s["request"]} in s["evidence_checks"]
+        for s in overhead
     )
     assert scopes["modern_core_5"]["required_in_this_task"] is False
     assert scopes["corpus_moxing_462_v2_subset"]["licensed_status"] == "PARTIAL"

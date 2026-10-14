@@ -6,6 +6,11 @@ All notable changes to this project are documented here.
 
 ### Added
 
+- Native parametric MMC overhead AVM planning/building with audited flat-tower
+  geometry, fresh frequency-dependent phase constants, explicit four-terminal
+  interfaces and physical series RC common-mode damping. Three full-bridge
+  200 km requests passed all 18 normal/fault/independent-reload stages at
+  `7432030` on `codex/mmc-overhead-avm`; the feature branch remains unmerged.
 - Seven parameter-sweep tools in the new `sweep` profile: offline hash-bound planning and snapshots, background serial execution in dedicated owned instances, durable progress, cancellation, explicit retry/resume, baseline comparison and constrained ranking of evaluated scenarios.
 - Sweep records retain source and artifact hashes; ambiguous orphan sessions block recovery. The opt-in vdiv three-scenario Legacy scope passed licensed acceptance at `a2aaa33`; cancellation, restart and PSOUT real acceptance remain outside that result.
 
