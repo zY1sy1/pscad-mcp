@@ -918,6 +918,8 @@ def materialize_native_avm_fixture(
     neutral_inductance_h: float | None = None,
     neutral_resistance_ohm: float | None = None,
     neutral_phase_resistance_ohm: float | None = None,
+    station_dc_filter_resistance_ohm: float = 0.0,
+    station_dc_filter_capacitance_f: float = 0.0,
 ) -> dict:
     """Create a complete two-station, twelve-arm native integration fixture."""
     folder = Path(destination).resolve()
@@ -967,6 +969,9 @@ def materialize_native_avm_fixture(
     if control_kind not in {"scheduled_open_loop", "closed_loop", "dq_current"}:
         raise ValueError("control_kind must be scheduled_open_loop, closed_loop or dq_current")
     channels = {**FIXTURE_CHANNELS}
+    if dc_link_kind == "overhead_line":
+        channels.update({f"{s}_DC_FILTER_{q}_{pole}": unit for s in ("P", "V")
+                         for pole in ("POS", "NEG") for q, unit in (("I", "kA"), ("V", "kV"))})
     if fault_kind is not None and (fault_kind not in FAULT_KINDS or control_kind != "dq_current"):
         raise ValueError("Native fault injection requires a supported dq fault scenario")
     if control_kind == "dq_current":
@@ -1070,7 +1075,10 @@ def materialize_native_avm_fixture(
     library_metadata = read_definition_metadata_document(library.read_bytes())
     cable_evidence = json.loads(Path(constants_evidence).read_text(encoding="utf-8"))
     if dc_link_kind == "overhead_line":
+        station_dc_filter_resistance_ohm = _number(station_dc_filter_resistance_ohm, "station_dc_filter_resistance_ohm", positive=True)
+        station_dc_filter_capacitance_f = _number(station_dc_filter_capacitance_f, "station_dc_filter_capacitance_f", positive=True)
         dc_link_capacitance_f = float(cable_evidence["length_km"]) * float(cable_evidence["differential_capacitance_f_per_km"])
+        dc_link_capacitance_f += station_dc_filter_capacitance_f
     else:
         capacitances = [float(c["core_sheath_capacitance_f_per_km"]) for c in cable_evidence["configuration"]["cables"]]
         dc_link_capacitance_f = float(cable_evidence["length_km"]) / math.fsum(1.0 / c for c in capacitances)
@@ -1402,6 +1410,18 @@ def materialize_native_avm_fixture(
                            {"Name": prefix + "_CABLE_V" + pole}, {"N1": prefix + "_CABLE_" + pole, "N2": "GND"})
             writer.add(main, prefix + "_cable_voltage", "master:voltmeter", {"Name": prefix + "_CABLE_VDC"},
                        {"N1": prefix + "_CABLE_POS", "N2": prefix + "_CABLE_NEG"})
+    if dc_link_kind == "overhead_line":
+        for prefix in ("P", "V"):
+            for pole in ("POS", "NEG"):
+                role = prefix + "_dc_filter_" + pole
+                writer.add(main, role + "_meter", "master:ammeter", {"Name": prefix + "_DC_FILTER_I_" + pole},
+                           {"N1": prefix + "_CABLE_" + pole, "N2": role + "_R_IN"})
+                writer.add(main, role + "_resistor", "master:resistor", {"R": f"{station_dc_filter_resistance_ohm:.15g} [ohm]"},
+                           {"A": role + "_R_IN", "B": role + "_C_IN"})
+                writer.add(main, role + "_capacitor", "master:capacitor", {"C": f"{station_dc_filter_capacitance_f * 1e6:.15g} [uF]"},
+                           {"A": role + "_C_IN", "B": "GND"})
+                writer.add(main, role + "_voltage", "master:voltmeter", {"Name": prefix + "_DC_FILTER_V_" + pole},
+                           {"N1": role + "_C_IN", "N2": "GND"})
     cable = writer.add(
         main,
         "DC_CABLE",
@@ -1651,6 +1671,8 @@ def materialize_native_avm_fixture(
             "cable_length_km": library_receipt["cable_length_km"],
             "dc_link_kind": dc_link_kind,
             "dc_link_length_km": library_receipt["link_length_km"],
+            "station_dc_filter_resistance_ohm": station_dc_filter_resistance_ohm,
+            "station_dc_filter_capacitance_f": station_dc_filter_capacitance_f,
             "arm": arm_values,
         },
         "electrical_nets": {name: dict(nets) for name, nets in writer.nets.items()},
@@ -1709,6 +1731,11 @@ def audit_native_avm_fixture(
         required.update({f"{NATIVE_SCOPE}:{AC_ISOLATION}": 6, f"{NATIVE_SCOPE}:{DC_ISOLATION}": 4,
                          f"{NATIVE_SCOPE}:{NEUTRAL_GROUNDING}": 2,
                          f"{NATIVE_SCOPE}:{PROTECTION_NAME}": 1, "master:resistor": 10, "master:voltmeter": 24})
+    if receipt["parameters"].get("dc_link_kind") == "overhead_line":
+        required["master:resistor"] += 4
+        required["master:ammeter"] += 4
+        required["master:voltmeter"] += 4
+        required["master:capacitor"] = 4
     if receipt["parameters"].get("converter") == "full_bridge":
         required[NATIVE_SCOPE + ":" + AUXILIARY_NAME] = 16
     if any(counts[name] != count for name, count in required.items()):
@@ -1750,6 +1777,13 @@ def audit_native_avm_fixture(
         for pole in ("POS", "NEG"):
             if f"{prefix}_pole_ground_{pole}:A" not in nets[prefix + "_DC_" + pole] or f"{prefix}_pole_ground_{pole}:B" not in nets["GND"]:
                 raise ValueError("Native AVM symmetric high-impedance grounding is incomplete")
+            if receipt["parameters"].get("dc_link_kind") == "overhead_line":
+                role = prefix + "_dc_filter_" + pole
+                if (role + "_meter:N1" not in nets[prefix + "_CABLE_" + pole]
+                        or set(nets[role + "_R_IN"]) != {role + "_meter:N2", role + "_resistor:A"}
+                        or set(nets[role + "_C_IN"]) != {role + "_resistor:B", role + "_capacitor:A", role + "_voltage:N1"}
+                        or role + "_capacitor:B" not in nets["GND"]):
+                    raise ValueError("Native overhead RC damping branch is disconnected or bypassed")
         if isolated and f"{prefix}_neutral_grounding:G" not in nets["GND"]:
             raise ValueError("Native neutral resistor is not grounded")
         for phase in "ABC":

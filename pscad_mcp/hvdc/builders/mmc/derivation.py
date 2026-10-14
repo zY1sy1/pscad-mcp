@@ -128,6 +128,16 @@ def _native_cable_line_parameters(request: MmcParametricRequest, profile: Mappin
         **({"native_cable_profile_hash": content_hash(profile)} if not overhead else {}),
     }
     capacitances = profile.get("core_sheath_capacitance_f_per_km")
+    if overhead:
+        # Each pole's series RC branch blocks DC. Its initial discharge current
+        # is bounded by nameplate DC current; its corner is f_grid/4 so it
+        # damps the third-harmonic common mode of the low-capacitance overhead
+        # link. Four branches have one branch C of differential capacitance.
+        filter_r = request.dc_voltage_kv**2 / (2 * request.active_power_mw)
+        filter_c = 4 / (2 * math.pi * request.frequency_hz * filter_r)
+        result.update(station_dc_filter_resistance_ohm=filter_r,
+                      station_dc_filter_capacitance_f=filter_c,
+                      dc_voltage_control_capacitance_f=filter_c)
     if capacitances is not None:
         if (not isinstance(capacitances, (list, tuple)) or len(capacitances) != 2
                 or any(isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) or v <= 0 for v in capacitances)):
@@ -252,9 +262,11 @@ def _engine_candidates(
         base_parameters["maximum_precharge_time_s"] = 1.0
         base_parameters["startup_charge_time_s"] = 0.5
         base_parameters["maximum_conditioning_time_s"] = 1.5
-        if "line_differential_capacitance_f" in common:
-            capacitance = float(common["line_differential_capacitance_f"])
-            base_parameters["line_differential_capacitance_f"] = capacitance
+        for key in ("station_dc_filter_resistance_ohm", "station_dc_filter_capacitance_f", "dc_voltage_control_capacitance_f", "line_differential_capacitance_f"):
+            if key in common:
+                base_parameters[key] = common[key]
+        if "line_differential_capacitance_f" in common or "dc_voltage_control_capacitance_f" in common:
+            capacitance = float(common.get("dc_voltage_control_capacitance_f", common.get("line_differential_capacitance_f")))
             vdc = request.dc_voltage_kv
             line_r = common["line_resistance_ohm"]
             received = request.active_power_mw + common["loss_budget_mw"] / 2

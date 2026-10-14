@@ -61,6 +61,11 @@ def test_authored_overhead_profile_is_bound_to_the_public_plan_without_native_la
     inputs = engine.planning_inputs(request)
     plan = create_parametric_plan(request, "AUTHORED", tmp_path, None, avm_assets(), avm_native_inputs=inputs)
     assert plan.engine_plans[0].candidates[0].parameters["line_resistance_ohm"] == pytest.approx(6.0)
+    parameters = plan.engine_plans[0].candidates[0].parameters
+    resistance = parameters["station_dc_filter_resistance_ohm"]
+    capacitance = parameters["station_dc_filter_capacitance_f"]
+    assert request.dc_voltage_kv / (2 * resistance) == pytest.approx(request.active_power_mw / request.dc_voltage_kv)
+    assert 1 / (2 * 3.141592653589793 * resistance * capacitance) == pytest.approx(request.frequency_hz / 4)
     assert not (tmp_path / ".mmc-candidates").exists()
 
 
@@ -96,6 +101,11 @@ def test_native_overhead_artifacts_and_module_are_verified_before_any_simulation
     service = SimpleNamespace(load_projects=no_op, save_project=no_op, build_project=no_op, get_project_output=no_op)
     result = asyncio.run(engine.execute_candidate(plan, service))
     fixture = result["fixture"]
+    case_root = ET.parse(result["project_path"])
+    filters = case_root.findall("./definitions/Definition[@name='Main']/schematic/User[@defn='master:capacitor']")
+    assert len(filters) == 4
+    assert case_root.find("./paramlist/param[@name='StartType']").get("value") == "0"
+    assert all(c.find("./paramlist/param[@name='Vinit']") is None for c in filters)
     library_root = ET.parse(fixture["library"]["library_path"])
     configuration = library_root.find("./definitions/Definition[@name='MMCOverheadLink']/schematic/Wire[@classid='TLine']/User")
     assert configuration.find("./paramlist/param[@name='Mode']").get("value") == "0"
@@ -109,7 +119,9 @@ def test_native_overhead_artifacts_and_module_are_verified_before_any_simulation
     receipt = fixture["library"]["constants_receipt"]
     _, record, _, _ = verify_overhead_constants_receipt(receipt, sources["overhead_donor"], sources["master"])
     assert record["coefficient_structure"]["delay_groups"] == 2
-    assert fixture["parameters"]["dc_link_capacitance_f"] == pytest.approx(200 * record["differential_capacitance_f_per_km"])
+    assert fixture["parameters"]["dc_link_capacitance_f"] == pytest.approx(
+        200 * record["differential_capacitance_f_per_km"] + fixture["parameters"]["station_dc_filter_capacitance_f"]
+    )
     # A changed endpoint must be rejected even when the mutated library hash is supplied.
     library = Path(fixture["library"]["library_path"])
     tree = ET.parse(library)

@@ -181,6 +181,7 @@ _MASTER_PORTS = {
     # Retained for the cable-loop fixture and existing LCC companion users;
     # the average arm itself uses the audited variable R/L/C primitive.
     "resistor": {"A": (0, 0, "Natural", 0), "B": (36, 0, "Natural", 0)},
+    "capacitor": {"A": (0, 0, "Natural", 0), "B": (36, 0, "Natural", 0)},
     "gain": {"IN:Dim": (-36, 0, "Transfer", 0), "OUT:Dim": (36, 0, "Transfer", 0)},
     "pi_ctlr": {"IN": (-36, 0, "Transfer", 0), "OUT": (36, 0, "Transfer", 0)},
     "realpole": {

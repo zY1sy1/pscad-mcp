@@ -572,6 +572,8 @@ class AvmBlueprintEngine:
             master_path=source_paths["master"],
             source_project=source_paths["overhead_donor" if overhead else "cable_donor"],
             dc_link_kind=kind,
+            station_dc_filter_resistance_ohm=float(values.get("station_dc_filter_resistance_ohm", 0.0)),
+            station_dc_filter_capacitance_f=float(values.get("station_dc_filter_capacitance_f", 0.0)),
             project_name=candidate_project_name,
             converter=str(values["converter"]),
             frequency_hz=float(values["frequency_hz"]),
