@@ -255,7 +255,7 @@ def test_ac_fault_current_uses_the_grid_short_circuit_envelope():
 
 def test_single_phase_fault_includes_the_passive_transformer_zero_sequence_path():
     # Independent sequence-network calculation: Z1=Z2=Zg, Z0=Zg || j*5.29.
-    # 3*Vphase / |Z1+Z2+Z0| = 16.125 kA RMS, crest < 45.61 kA.
+    # 3*Vphase / |Z1+Z2+Z0| = 16.13894 kA RMS, crest = 45.64781 kA.
     result = evaluate_routed_pwm_samples(
         *ac_fault_samples(single_phase=True, fault_current=39.82)
     )

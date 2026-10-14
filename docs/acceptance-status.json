@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-10-14T10:17:25.108534+08:00",
+  "updated_at": "2026-10-15T02:28:50.247134+08:00",
   "policy": "Evidence belongs only to its named scope, exact request and tested commit. INTEGRATION_BRANCH records are not merged/deployed. PASS is never inherited by another builder, rating or later commit; offline integrity checks do not establish physical acceptance.",
   "scopes": [
     {
@@ -428,7 +428,7 @@
         "sha256": "2c3d7d158f5069e3358ad1427500cb2882844bfabcacb43a80a4732821db98c3",
         "commit": "9cfe1d41dd2113cb4e72e3a285b1da00397a2b6b"
       },
-      "note": "Three new full-bridge cable AVM requests pass all normal/four-fault/reload gates at 1d39dc9, in addition to the three named historical half-bridge requests. Detailed PWM control/rating/measurement integration and overhead-line AVM remain incomplete. Accepted cable requests do not substitute for overhead-line or both-fidelity requests.",
+      "note": "Six named cable AVM reference requests retain their exact evidence. The named full-bridge detailed-PWM 640 kV/1000 MW/60 Hz/200 km overhead reference now passes its eleven-scene/delivery/reload/publication scope on codex/mmc-detailed-pwm. Broader rating matrices, overhead-line AVM and both-fidelity requests require separate qualification.",
       "historical_attempts": [
         {
           "evidence": {
@@ -501,7 +501,8 @@
         "native_mmc_half_bridge_640kv_q100",
         "native_mmc_full_bridge_640kv",
         "native_mmc_full_bridge_500kv_q100",
-        "native_mmc_full_bridge_800kv_50hz"
+        "native_mmc_full_bridge_800kv_50hz",
+        "parametric_mmc_detailed_pwm"
       ],
       "linked_evidence": [
         {
@@ -1239,32 +1240,64 @@
     {
       "scope": "parametric_mmc_detailed_pwm",
       "implementation_status": "INTEGRATION_BRANCH",
-      "licensed_status": "INCOMPLETE_ANALYSIS",
+      "licensed_status": "PASS",
       "evidence": {
-        "report_path": "D:\\PA\\o13pwm3\\diagnostic-case.json",
-        "sha256": "365534bbb266fe33d3eed1a94609458fe94210cd38a162a93318c5afdec9184e",
-        "commit": "a87efca8fe291e93f5e6e9dab0ea11872810afe6"
+        "report_path": "D:\\PA\\pwm14\\public-v6\\report.json",
+        "sha256": "bf099c66d2c7b6ec2a074f6b3a9f0b117ddddf05b54269fb1dac18c604724136",
+        "commit": "95655d1e06c45eda820b4ba22d2fefded55e1e39"
       },
       "evidence_checks": [
         {
           "pointer": "/status",
-          "equals": "INCOMPLETE_ANALYSIS"
+          "equals": "PASS"
         },
         {
-          "pointer": "/owned_process_cleaned",
+          "pointer": "/scope",
+          "equals": "mmc.detailed_pwm.routed_reference.public_builder"
+        },
+        {
+          "pointer": "/stage",
+          "equals": "finished"
+        },
+        {
+          "pointer": "/model_accepted",
           "equals": true
         },
         {
-          "pointer": "/source_inputs_unchanged",
+          "pointer": "/parent_status/state",
+          "equals": "published"
+        },
+        {
+          "pointer": "/parent_status/engines/0/candidate_result/validation/scenario_count",
+          "equals": 11
+        },
+        {
+          "pointer": "/independent_validation/accepted",
           "equals": true
         },
         {
-          "pointer": "/error/code",
-          "equals": "HVDC_MAPPING_MISSING"
+          "pointer": "/published_normal/status",
+          "equals": "PASS"
+        },
+        {
+          "pointer": "/sources_immutable",
+          "equals": true
+        },
+        {
+          "pointer": "/published_project_immutable",
+          "equals": true
+        },
+        {
+          "pointer": "/published_support_immutable",
+          "equals": true
+        },
+        {
+          "pointer": "/remaining_owned_processes",
+          "equals": []
         }
       ],
-      "remaining_work_class": "unverified_model_control_interface_and_implementation",
-      "note": "Embedded timing setup is connected. Invalid default OnOff/Dblk/fault-option bindings were removed after real source inspection: OnOff is neither declared nor routed. All eleven scenarios remain required. A prepared PWM model with verified real command routing, rating changes, units/polarity and measurement bindings is required before licensed physical acceptance.",
+      "remaining_work_class": "other_parameter_requests_require_separate_qualification",
+      "note": "The explicit 640 kV/1000 MW/Q0/60 Hz/230 kV/SCR5/XR10/200 km overhead full-bridge detailed-PWM reference passes eleven scenes, untimed editable delivery and independent saved-model reload (5698 checks), plus a fresh direct run of the published file (404 checks). The unchanged electrical matrix is hash-checked and re-evaluated for a publication-only repair. All 337 real channels, twelve arms, actual isolation/fault branches, 0.5 s recovery, copied compiler inputs, saved-file identities and owned cleanup are verified. Other ratings and engineering overrides are rejected; this does not certify both-fidelity requests or intrinsic blocking without external isolation.",
       "linked_evidence": [
         {
           "path": "D:\\PA\\o13pwm2\\diagnostic-case.json",
@@ -1277,9 +1310,89 @@
         {
           "path": "D:\\PA\\o13vendor\\source-search.json",
           "sha256": "0f28613f8d7a270f0678c7ee24d173b323d8b836a6c3126ddcb57cd643ec0db6"
+        },
+        {
+          "path": "D:\\PA\\pwm14\\public-v6\\MMC_PWM_pwm_acceptance.json",
+          "sha256": "018bc4e66d16f49f2974028ffcafcf45ab201e884c8ff3b7f316d34f186f89a4"
+        },
+        {
+          "path": "D:\\PA\\pwm14\\final-evidence-20261015.json",
+          "sha256": "5162dc354a3904817ca83a4683d24f102da7ea60a0ea0b767d49d761fe46063c"
+        },
+        {
+          "path": "D:\\PA\\pwm14\\package-v3\\verification.json",
+          "sha256": "59fb5ba9f35e12fb8294b188aef59eb94d13aba5a305b213b6cb4ca4e45fc125"
         }
       ],
-      "implementation_source_branch": "codex/acceptance-oct09"
+      "implementation_source_branch": "codex/mmc-detailed-pwm",
+      "historical_attempts": [
+        {
+          "licensed_status": "INCOMPLETE_ANALYSIS",
+          "evidence": {
+            "report_path": "D:\\PA\\o13pwm3\\diagnostic-case.json",
+            "sha256": "365534bbb266fe33d3eed1a94609458fe94210cd38a162a93318c5afdec9184e",
+            "commit": "a87efca8fe291e93f5e6e9dab0ea11872810afe6"
+          },
+          "evidence_checks": [
+            {
+              "pointer": "/status",
+              "equals": "INCOMPLETE_ANALYSIS"
+            },
+            {
+              "pointer": "/owned_process_cleaned",
+              "equals": true
+            },
+            {
+              "pointer": "/source_inputs_unchanged",
+              "equals": true
+            },
+            {
+              "pointer": "/error/code",
+              "equals": "HVDC_MAPPING_MISSING"
+            }
+          ],
+          "note": "Embedded timing setup is connected. Invalid default OnOff/Dblk/fault-option bindings were removed after real source inspection: OnOff is neither declared nor routed. All eleven scenarios remain required. A prepared PWM model with verified real command routing, rating changes, units/polarity and measurement bindings is required before licensed physical acceptance.",
+          "remaining_work_class": "unverified_model_control_interface_and_implementation"
+        },
+        {
+          "licensed_status": "FAIL",
+          "evidence": {
+            "report_path": "D:\\PA\\pwm14\\public-v5\\report.json",
+            "sha256": "49581aea4b1018e3ef3dbf446a88e43b858b5cd7d711852647e63caf58068d6b",
+            "commit": "d0e547d7fe694d6d733c113b34a7f1623536ffe4"
+          },
+          "note": "All eleven scenes, untimed delivery and independent reload passed 5698 physical checks; final publication safely refused to reset an unsaved runtime project. Frozen models kept their hashes after owned cleanup. Superseded by the independent publication at the named revision."
+        }
+      ],
+      "request": {
+        "schema_version": 1,
+        "model_fidelity": "detailed_pwm",
+        "topology": "two_terminal_symmetrical_monopole",
+        "converter": "full_bridge",
+        "dc_voltage_kv": 640.0,
+        "active_power_mw": 1000.0,
+        "reactive_power_mvar": 0.0,
+        "frequency_hz": 60.0,
+        "station_p": {
+          "ac_voltage_kv": 230.0,
+          "short_circuit_ratio": 5.0,
+          "x_over_r": 10.0
+        },
+        "station_vdc": {
+          "ac_voltage_kv": 230.0,
+          "short_circuit_ratio": 5.0,
+          "x_over_r": 10.0
+        },
+        "dc_link": {
+          "kind": "overhead_line",
+          "length_km": 200.0
+        },
+        "power_reversal_time_s": 0.5,
+        "engineering_overrides": {}
+      },
+      "intrinsic_dc_fault_blocking": false,
+      "electrical_producer_commit": "d0e547d7fe694d6d733c113b34a7f1623536ffe4",
+      "publication_producer_commit": "95655d1e06c45eda820b4ba22d2fefded55e1e39"
     },
     {
       "scope": "native_full_bridge_average_arm_462",

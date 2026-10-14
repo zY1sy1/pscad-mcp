@@ -119,7 +119,13 @@ def test_latest_mmc_evidence_is_scoped_and_old_attempts_remain_historical():
 
 def test_native_matrix_keeps_three_requests_and_component_only_scope_separate():
     scopes = {s["scope"]: s for s in json.loads(MANIFEST.read_text())["scopes"]}
-    names = scopes["parametric_mmc"]["accepted_subscopes"]
+    accepted = scopes["parametric_mmc"]["accepted_subscopes"]
+    assert len(accepted) == 7
+    names = [
+        name
+        for name in accepted
+        if scopes[name].get("request", {}).get("model_fidelity") != "detailed_pwm"
+    ]
     assert len(names) == 6
     cases = [
         scopes[name]
@@ -203,6 +209,29 @@ def test_live_pass_requires_durable_evidence_identity():
             assert scope["evidence"]["report_path"]
             assert len(scope["evidence"]["sha256"]) == 64
             assert scope["evidence"]["commit"]
+
+
+def test_detailed_pwm_pass_is_limited_to_its_measured_reference_and_publication():
+    scopes = {s["scope"]: s for s in json.loads(MANIFEST.read_text())["scopes"]}
+    pwm = scopes["parametric_mmc_detailed_pwm"]
+    assert pwm["licensed_status"] == "PASS"
+    assert pwm["implementation_source_branch"] == "codex/mmc-detailed-pwm"
+    assert pwm["request"]["model_fidelity"] == "detailed_pwm"
+    assert pwm["request"]["dc_voltage_kv"] == 640
+    assert pwm["request"]["active_power_mw"] == 1000
+    assert pwm["request"]["dc_link"] == {"kind": "overhead_line", "length_km": 200}
+    assert pwm["intrinsic_dc_fault_blocking"] is False
+    checks = pwm["evidence_checks"]
+    for pointer in (
+        "/model_accepted",
+        "/independent_validation/accepted",
+        "/sources_immutable",
+        "/published_project_immutable",
+        "/published_support_immutable",
+    ):
+        assert {"pointer": pointer, "equals": True} in checks
+    assert {"pointer": "/remaining_owned_processes", "equals": []} in checks
+    assert pwm["historical_attempts"][-1]["licensed_status"] == "FAIL"
 
 
 def test_readme_points_to_the_scoped_status_manifest():

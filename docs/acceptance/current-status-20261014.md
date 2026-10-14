@@ -68,3 +68,14 @@ recoverable. Their applicable inventory/output/planner/replay behavior already
 has current implementations; the remaining older interfaces and unverified
 measurement drafts are not reapplied over the accepted code. Generated output,
 temporary and spreadsheet directories retain their local contents.
+
+## Later detailed-PWM branch qualification
+
+The isolated `codex/mmc-detailed-pwm` branch completes the explicit full-bridge
+640 kV/1000 MW/60 Hz/200 km overhead reference. Its eleven scenes, untimed
+delivery and independent reload pass 5698 physical checks; the actual published
+file passes another 404 checks. Electrical waveforms belong to `d0e547d` and
+the independently verified publication repair to `95655d1`. Source/model/library
+identities and all owned cleanup pass. This branch is not merged into the
+historical main integration described above. See the
+[scoped evidence and limitations](mmc-detailed-pwm-20261015.md).
