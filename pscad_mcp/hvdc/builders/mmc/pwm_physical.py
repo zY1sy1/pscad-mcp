@@ -17,6 +17,8 @@ def evaluate_routed_pwm_samples(
     *,
     rated_power_mw: float = 1000.0,
     rated_dc_voltage_kv: float = 640.0,
+    rated_ac_voltage_kv: float = 230.0,
+    grid_short_circuit_ratio: float = 5.0,
 ) -> dict[str, Any]:
     """Keep the original voltage/current/margin/recovery requirements explicit.
 
@@ -287,6 +289,17 @@ def evaluate_routed_pwm_samples(
                 {"onset_s": onset, "cleared_s": cleared, "tolerance_s": tolerance},
             )
         current_traces = grouped[current_role]
+        # The 20 kA contract governs the DC fault switch. AC source crests
+        # depend on requested short-circuit MVA and the worst DC offset.
+        current_limit_ka = (
+            2
+            * math.sqrt(2)
+            * grid_short_circuit_ratio
+            * rated_power_mw
+            / (math.sqrt(3) * rated_ac_voltage_kv)
+            if ac
+            else 20.0
+        )
         check(
             "complete_fault_branch_currents",
             len(current_traces) == (3 if ac else 1),
@@ -302,10 +315,14 @@ def evaluate_routed_pwm_samples(
             )
             check(
                 "physical_fault_current_" + binding["model_scope"],
-                (peak > 0.01 if conducting else peak < 0.01) and peak <= 20.0,
+                (peak > 0.01 if conducting else peak < 0.01)
+                and peak <= current_limit_ka,
                 peak,
                 {
-                    "maximum_ka": 20.0,
+                    "maximum_ka": current_limit_ka,
+                    "basis": "2*sqrt(2)*SCR*Prated/(sqrt(3)*Vac)"
+                    if ac
+                    else "original DC fault-switch contract",
                     "minimum_active_ka": 0.01,
                     "conducting": conducting,
                 },

@@ -176,3 +176,60 @@ def test_a_trace_missing_from_the_declared_contract_is_incomplete():
     )
     result = evaluate_routed_pwm_samples(samples, contract, scenario)
     assert result["status"] == "INCOMPLETE_ANALYSIS"
+
+
+def test_ac_fault_current_uses_the_grid_short_circuit_envelope():
+    samples, contract, scenario = complete_samples()
+    scenario.update(
+        name="ac_three_phase_fault",
+        events=[
+            {
+                "event_id": "fault",
+                "target": "ac_fault_command",
+                "time_s": 0.3,
+                "end_time_s": 0.5,
+                "value": 1,
+                "before_value": 0,
+                "after_value": 1,
+            }
+        ],
+    )
+    times = samples["channels"][0]["domain"]
+
+    def add(role, scope, value):
+        channel_id = role + "_" + scope
+        units = "kA" if role == "ac_fault_current" else "1"
+        contract["channels"].append(
+            {
+                "channel_id": channel_id,
+                "role": role,
+                "model_scope": scope,
+                "units": units,
+            }
+        )
+        samples["channels"].append(
+            {
+                "channel_id": channel_id,
+                "units": units,
+                "domain": times,
+                "values": [value if 0.3 <= t < 0.5 else 0 for t in times],
+            }
+        )
+
+    for branch in ("any", "AG", "BG", "CG", "AB", "BC", "CA"):
+        add(
+            "ac_fault_branch_state",
+            branch,
+            1 if branch in {"any", "AG", "BG", "CG"} else 0,
+        )
+    for phase in "ABC":
+        add("ac_fault_current", phase, 32.0)
+    for channel in samples["channels"]:
+        if channel["channel_id"].startswith("blocking_state_"):
+            channel["values"] = [1 if 0.3 <= t < 0.5 else 0 for t in times]
+    result = evaluate_routed_pwm_samples(samples, contract, scenario)
+    current_checks = [
+        c for c in result["checks"] if c["name"].startswith("physical_fault_current_")
+    ]
+    assert len(current_checks) == 3
+    assert all(c["passed"] for c in current_checks)
