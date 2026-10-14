@@ -25,7 +25,7 @@ from .adjustment import choose_next_candidate
 from .assets import load_packaged_asset_set
 from .derivation import derive_mmc_parameters
 from .engines.avm import AvmBlueprintEngine, discover_native_avm_sources
-from .engines.pwm import PwmTemplateEngine
+from .engines.pwm import PwmTemplateEngine, library_support_files
 from .inspection import inspect_mmc_evidence
 from .journal import AtomicJournal, WorkspaceBuildLease
 from .parametric_models import (
@@ -56,6 +56,59 @@ def _path_key(value: str | Path) -> str:
 
 def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _publish_compiler_support(source, directory, created, *, expected=None):
+    items = library_support_files(source)
+    if (
+        expected is not None
+        and {i["relative_path"]: i["sha256"] for i in items} != expected
+    ):
+        raise _error(
+            "MMC_POSTCONDITION_FAILED",
+            "The staged compiler support differs from its immutable plan.",
+            "build_parametric_mmc_model",
+        )
+    result = []
+    for item in items:
+        target = directory / item["relative_path"]
+        if directory.resolve() not in target.resolve().parents or any(
+            p.is_symlink()
+            for p in (target, *target.parents)
+            if p != directory and directory in p.parents
+        ):
+            raise _error(
+                "MMC_BUILD_CONFLICT",
+                "Compiler support escapes its publication directory.",
+                "build_parametric_mmc_model",
+            )
+        if target.exists():
+            if not target.is_file() or _sha256(target) != item["sha256"]:
+                raise _error(
+                    "MMC_BUILD_CONFLICT",
+                    "Existing compiler support has a different identity.",
+                    "build_parametric_mmc_model",
+                    target=str(target),
+                )
+        else:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with target.open("xb") as stream:
+                created.append(target)
+                with Path(item["path"]).open("rb") as original:
+                    shutil.copyfileobj(original, stream)
+        if (
+            _sha256(Path(item["path"])) != item["sha256"]
+            or _sha256(target) != item["sha256"]
+        ):
+            raise _error(
+                "MMC_POSTCONDITION_FAILED",
+                "Compiler support changed during publication.",
+                "build_parametric_mmc_model",
+            )
+        result.append(
+            {"source": item["path"], "path": str(target), "sha256": item["sha256"]}
+        )
+    return result
 
 
 def _run_coroutine_sync(factory: Callable[[], Any]) -> Any:
@@ -716,6 +769,7 @@ class ParametricMmcBuilderService:
         scenario_sources: list[Path] = []
         acceptance_manifests: list[Path] = []
         created_libraries: list[Path] = []
+        created_support: list[Path] = []
         existing_library_backups: list[tuple[Path, Path]] = []
         try:
             for record, engine_plan in zip(engines, engine_plans):
@@ -745,6 +799,10 @@ class ParametricMmcBuilderService:
                     else None
                 )
                 published_by_save_as = isinstance(publication_name, str)
+                routed_pwm = (
+                    isinstance(candidate_result, Mapping)
+                    and candidate_result.get("routed_physical_acceptance") is True
+                )
                 if published_by_save_as:
                     if target.exists() or target.is_symlink():
                         raise _error(
@@ -806,6 +864,26 @@ class ParametricMmcBuilderService:
                         )
                     record["final_library_path"] = str(library_target)
                     load_paths.insert(0, str(library_target))
+                    if engine_plan.engine == "detailed_pwm":
+                        original = library_support_files(
+                            Path(engine_plan.source_paths["library"])
+                        )
+                        if {i["path"]: i["sha256"] for i in original} != dict(
+                            engine_plan.asset_hashes
+                        ):
+                            raise _error(
+                                "MMC_POSTCONDITION_FAILED",
+                                "Original compiler support changed after planning.",
+                                "build_parametric_mmc_model",
+                            )
+                        record["final_library_support"] = _publish_compiler_support(
+                            source_library,
+                            target.parent,
+                            created_support,
+                            expected={
+                                i["relative_path"]: i["sha256"] for i in original
+                            },
+                        )
                 if published_by_save_as:
                     if library_target is not None:
                         await self.pscad_service.load_projects([str(library_target)])
@@ -843,31 +921,27 @@ class ParametricMmcBuilderService:
                         "output_filename": expected_output
                     }
                 else:
-                    if (
-                        isinstance(candidate_result, Mapping)
-                        and candidate_result.get("routed_physical_acceptance") is True
-                    ):
-                        reloader = getattr(self.pscad_service, "reload_project", None)
-                        if not callable(reloader):
-                            raise _error(
-                                "MMC_BUILD_UNAVAILABLE",
-                                "Final PWM publication requires unloading and reloading its exact saved file.",
-                                "build_parametric_mmc_model",
-                            )
-                        if library_target is not None:
-                            await self.pscad_service.load_projects(
-                                [str(library_target)]
-                            )
-                        record["publication_reload"] = await reloader(
-                            target.stem, str(target)
+                    if routed_pwm:
+                        from .publication_recovery import verify_publication_in_worker
+
+                        record[
+                            "publication_verification"
+                        ] = await verify_publication_in_worker(
+                            self.pscad_service,
+                            target,
+                            library_target,
+                            Path(candidate_result["validation"]["physical_evidence"]),
+                            self.workspace_root,
+                            record.get("final_library_support", []),
+                        )
+                        record["publication_reload"] = (
+                            "independent_owned_publication_worker"
                         )
                     else:
                         await self.pscad_service.load_projects(load_paths)
-                await self.pscad_service.build_project(target.stem)
-                if (
-                    isinstance(candidate_result, Mapping)
-                    and candidate_result.get("routed_physical_acceptance") is True
-                ):
+                if not routed_pwm:
+                    await self.pscad_service.build_project(target.stem)
+                if routed_pwm:
                     manifest = json.loads(
                         Path(
                             candidate_result["validation"]["physical_evidence"]
@@ -879,9 +953,8 @@ class ParametricMmcBuilderService:
                             "The published PWM file differs from its frozen measured model.",
                             "build_parametric_mmc_model",
                         )
-                    messages = await self.pscad_service.get_project_output(
-                        target.stem, structured=True
-                    )
+                    verification = record["publication_verification"]
+                    messages = verification["build_messages"]
                     if any(
                         str(m.get("severity", "")).casefold() in {"error", "fatal"}
                         for m in messages
@@ -897,7 +970,22 @@ class ParametricMmcBuilderService:
                         "project_sha256": _sha256(target),
                         "reload": record["publication_reload"],
                         "build_messages": messages,
+                        "compiler_support": record.get("final_library_support", []),
+                        "verification": verification,
                     }
+                    manifest["original_inputs"].update(dict(engine_plan.asset_hashes))
+                    manifest["evidence_files"].update(
+                        {
+                            i["path"]: i["sha256"]
+                            for i in record.get("final_library_support", [])
+                        }
+                    )
+                    for file in (
+                        verification["report"],
+                        verification["normal"]["report"],
+                        verification["normal"]["physical_report"],
+                    ):
+                        manifest["evidence_files"][file] = _sha256(Path(file))
                     manifest_file = target.with_name(target.stem + "_acceptance.json")
                     with manifest_file.open("x", encoding="utf-8") as stream:
                         acceptance_manifests.append(manifest_file)
@@ -968,6 +1056,11 @@ class ParametricMmcBuilderService:
                     library.unlink(missing_ok=True)
                 except OSError:
                     rollback_failures.append(str(library))
+            for support in reversed(created_support):
+                try:
+                    support.unlink(missing_ok=True)
+                except OSError:
+                    rollback_failures.append(str(support))
             for target, backup in reversed(existing_library_backups):
                 try:
                     os.replace(backup, target)

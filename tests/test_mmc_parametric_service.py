@@ -2,6 +2,7 @@ import asyncio
 import hashlib
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -253,7 +254,9 @@ def test_pwm_reader_pass_without_bound_physical_evidence_is_incomplete(tmp_path)
     assert result["acceptance"]["verdict"] == "INCOMPLETE_ANALYSIS"
 
 
-def test_routed_pwm_publication_reloads_the_final_file_and_keeps_its_identity(tmp_path):
+def test_routed_pwm_publication_reloads_the_final_file_and_keeps_its_identity(
+    tmp_path, monkeypatch
+):
     service = make_parametric_service(tmp_path)
     execute = service.pwm_engine.execute_candidate
     reloaded = []
@@ -266,7 +269,9 @@ def test_routed_pwm_publication_reloads_the_final_file_and_keeps_its_identity(tm
                 {
                     "project_sha256": hashlib.sha256(
                         Path(result["project_path"]).read_bytes()
-                    ).hexdigest()
+                    ).hexdigest(),
+                    "original_inputs": {},
+                    "evidence_files": {},
                 }
             )
         )
@@ -277,9 +282,27 @@ def test_routed_pwm_publication_reloads_the_final_file_and_keeps_its_identity(tm
         return result
 
     async def reload(project, filename):
-        assert Path(filename).is_file()
-        reloaded.append((project, filename))
-        return "reloaded exact final file"
+        raise AssertionError("The waveform session must not be reset")
+
+    async def verify(service, project, library, manifest, root, support):
+        assert project.is_file()
+        reloaded.append((project.stem, str(project)))
+        worker_report = tmp_path / "worker-report.json"
+        worker_report.write_text('{"status":"PASS"}')
+        return {
+            "status": "PASS",
+            "build_messages": [],
+            "report": str(worker_report),
+            "normal": {
+                "status": "PASS",
+                "report": str(worker_report),
+                "physical_report": str(worker_report),
+            },
+        }
+
+    from pscad_mcp.hvdc.builders.mmc import publication_recovery
+
+    monkeypatch.setattr(publication_recovery, "verify_publication_in_worker", verify)
 
     async def messages(*args, **kwargs):
         return []
@@ -297,6 +320,41 @@ def test_routed_pwm_publication_reloads_the_final_file_and_keeps_its_identity(tm
     assert (
         manifest["publication"]["project_sha256"]
         == hashlib.sha256(Path(record["final_path"]).read_bytes()).hexdigest()
+    )
+
+
+def test_pwm_publication_copies_the_librarys_referenced_compiler_inputs(tmp_path):
+    service = make_parametric_service(tmp_path)
+    candidate = tmp_path / "candidate"
+    candidate.mkdir()
+    project = candidate / "PWM.pscx"
+    project.write_text('<project name="PWM"><definitions/></project>')
+    library = candidate / "intermediate.pslx"
+    library.write_text(
+        '<library><paramlist name="Libs"><param name="1" value="lib/$(Compiler)/intermediate.lib"/></paramlist><definitions/></library>'
+    )
+    binary = candidate / "lib/gf42/intermediate.lib"
+    binary.parent.mkdir(parents=True)
+    binary.write_bytes(b"immutable compiler input")
+    plan = SimpleNamespace(
+        engine="detailed_pwm",
+        source_paths={"library": str(library)},
+        source_hashes={"library": hashlib.sha256(library.read_bytes()).hexdigest()},
+        asset_hashes={str(binary): hashlib.sha256(binary.read_bytes()).hexdigest()},
+    )
+    record = {
+        "engine": "detailed_pwm",
+        "final_path": str(tmp_path / "PWM.pscx"),
+        "candidate_result": {
+            "project_path": str(project),
+            "library_path": str(library),
+        },
+    }
+    asyncio.run(service._publish([record], [plan]))
+    assert (tmp_path / "lib/gf42/intermediate.lib").read_bytes() == binary.read_bytes()
+    assert (
+        record["final_library_support"][0]["sha256"]
+        == hashlib.sha256(binary.read_bytes()).hexdigest()
     )
 
 

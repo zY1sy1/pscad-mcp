@@ -6,6 +6,7 @@ import argparse
 import asyncio
 import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -26,7 +27,23 @@ from pscad_mcp.hvdc.builders.mmc.pwm_runtime import write_report
 
 async def accept(args, report, checkpoint):
     workspace = args.workspace.resolve()
-    service = _service(workspace)
+    configured_root = workspace
+    recovery = None
+    if args.resume_report is not None:
+        from pscad_mcp.hvdc.builders.mmc.publication_recovery import (
+            FrozenPwmPublicationEngine,
+        )
+
+        recovery = FrozenPwmPublicationEngine(
+            args.resume_report,
+            lambda results: recovery_progress(report, checkpoint, results),
+        )
+        configured_root = Path(
+            os.path.commonpath([workspace, Path(recovery.report["plan"]["workspace"])])
+        )
+        report["recovered_matrix_report"] = str(recovery.report_file)
+        report["recovered_matrix_report_sha256"] = recovery.report_hash
+    service = _service(configured_root)
     runtime = None
     try:
         await service.attach_local()
@@ -35,7 +52,9 @@ async def accept(args, report, checkpoint):
         report["runtime"] = runtime
         checkpoint()
         request = json.loads(args.request.read_text())
-        builder = ParametricMmcBuilderService(service, workspace_root=workspace)
+        builder = ParametricMmcBuilderService(
+            service, workspace_root=configured_root, pwm_engine=recovery
+        )
         plan = builder.plan_model(request, args.project_name, workspace)
         report["plan"] = plan
         report["original_inputs"] = {
@@ -44,6 +63,10 @@ async def accept(args, report, checkpoint):
             for path in child["source_paths"].values()
         }
         report["original_inputs"][str(args.request.resolve())] = digest(args.request)
+        for child in plan["engine_plans"]:
+            report["original_inputs"].update(child["asset_hashes"])
+        if recovery is not None:
+            report["original_inputs"][str(recovery.report_file)] = recovery.report_hash
         master = await service.get_master_library_identity()
         report["original_inputs"][master["master_path"]] = master["master_sha256"]
         checkpoint()
@@ -80,6 +103,9 @@ async def accept(args, report, checkpoint):
             raise RuntimeError(
                 "The public validation API did not confirm frozen PWM physical evidence"
             )
+        report["published_normal"] = status["engines"][0]["publication_verification"][
+            "normal"
+        ]
         report["delivered_project_sha256"] = digest(final_project)
         report["acceptance_manifest_sha256"] = digest(
             status["engines"][0]["acceptance_manifest"]
@@ -103,6 +129,19 @@ async def accept(args, report, checkpoint):
             digest(path) == expected
             for path, expected in report.get("original_inputs", {}).items()
         )
+        if "delivered_project_sha256" in report:
+            report["published_project_immutable"] = (
+                digest(final_project) == report["delivered_project_sha256"]
+            )
+            report["published_support_immutable"] = all(
+                digest(item["path"]) == item["sha256"]
+                for item in manifest["publication"].get("compiler_support", [])
+            )
+            report["sources_immutable"] = (
+                report["sources_immutable"]
+                and report["published_project_immutable"]
+                and report["published_support_immutable"]
+            )
         if runtime:
             report["remaining_owned_processes"] = remaining_acceptance_processes(
                 runtime, list_pscad_processes
@@ -114,11 +153,17 @@ async def accept(args, report, checkpoint):
         checkpoint()
 
 
+def recovery_progress(report, checkpoint, results):
+    report["matrix_revalidation"] = results
+    checkpoint()
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--workspace", type=Path, required=True)
     parser.add_argument("--request", type=Path, required=True)
     parser.add_argument("--project-name", default="MMC_PWM")
+    parser.add_argument("--resume-report", type=Path)
     args = parser.parse_args()
     for name in ("PSCAD_MCP_ACCEPTANCE", "PSCAD_MCP_MMC_ACCEPTANCE"):
         if os.getenv(name) != "1":
@@ -130,6 +175,17 @@ def main():
         "stage": "running",
         "model_accepted": False,
         "scope": "mmc.detailed_pwm.routed_reference.public_builder",
+        "tested_commit": subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True
+        ).strip(),
+        "publication_producer_hashes": {
+            str(p.relative_to(ROOT)): digest(p)
+            for p in (
+                Path(__file__),
+                ROOT / "pscad_mcp/hvdc/builders/mmc/parametric_service.py",
+                ROOT / "pscad_mcp/hvdc/builders/mmc/publication_recovery.py",
+            )
+        },
     }
 
     def checkpoint():
@@ -137,6 +193,11 @@ def main():
 
     try:
         asyncio.run(accept(args, report, checkpoint))
+    except Exception as error:  # noqa: BLE001 - preserve rejected recovery input
+        report["status"], report["stage"] = "FAIL", "finished"
+        report["model_accepted"] = False
+        report["error"] = {"type": type(error).__name__, "message": str(error)}
+        checkpoint()
     finally:
         robust_executor.shutdown()
     print(
