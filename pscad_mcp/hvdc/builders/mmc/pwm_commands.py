@@ -736,6 +736,8 @@ def materialize_pwm_command_interface(
           IF ($ENABLE_T1 .NE. 0 .AND. ABS($IDC_T1) .GE. 1.75) STORI(NSTORI) = 1
           IF ($ENABLE_T2 .NE. 0 .AND. ABS($IDC_T2) .GE. 1.75) STORI(NSTORI+1) = 1
         ELSE
+          IF (ABS($IDC_T1) .LT. 2.0) STORI(NSTORI) = 0
+          IF (ABS($IDC_T2) .LT. 2.0) STORI(NSTORI+1) = 0
           IF ($ENABLE_T1 .NE. 0 .AND. ABS($IDC_T1) .GE. 2.5) STORI(NSTORI) = 1
           IF ($ENABLE_T2 .NE. 0 .AND. ABS($IDC_T2) .GE. 2.5) STORI(NSTORI+1) = 1
         ENDIF
