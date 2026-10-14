@@ -64,7 +64,7 @@ async def run(args, report, checkpoint):
     constants = generate_public_line_constants(source, directory / "line-constants")
     report["line_constants"] = [c.to_dict() for c in constants]
     project = rebind_template_line_constants(
-        source, constants, directory / "H_MMC_Mono_DC.pscx"
+        source, constants, directory / f"{args.case_name}.pscx"
     )
     shutil.copy2(library, directory / "intermediate.pslx")
     _copy_library_support(library, directory)
@@ -102,7 +102,7 @@ async def run(args, report, checkpoint):
         "StartType": "0",
         "startup_filename": "",
         "PlotType": "1",
-        "output_filename": "H_MMC_Mono_DC.out",
+        "output_filename": f"{args.case_name}.out",
         "time_duration": str(args.duration),
         "time_step": "10",
         "sample_step": "50",
@@ -172,8 +172,15 @@ async def run(args, report, checkpoint):
                 checkpoint()
                 status = str(state.get("status", "")).casefold()
                 if status in {"completed", "complete", "idle"}:
-                    pending = False
-                    break
+                    fresh = [
+                        p
+                        for p in directory.glob(f"{project.stem}.*/*.out")
+                        if p.name.startswith(project.stem + "_")
+                        and p.stat().st_mtime >= report["run_started_after"]
+                    ]
+                    if fresh:
+                        pending = False
+                        break
                 if status in {"failed", "stopped", "interrupted"}:
                     raise RuntimeError(f"Simulation ended with {status}")
                 if time.monotonic() > deadline:
@@ -181,9 +188,9 @@ async def run(args, report, checkpoint):
                 await asyncio.sleep(0.5)
             outputs = [
                 p
-                for p in directory.rglob("*.out")
+                for p in directory.glob(f"{project.stem}.*/*.out")
                 if p.stat().st_mtime >= report["run_started_after"]
-                and "line-constants" not in p.parts
+                and p.name.startswith(project.stem + "_")
             ]
             if not outputs:
                 raise RuntimeError("No fresh PWM OUT files")
@@ -232,6 +239,7 @@ def main():
     parser.add_argument("--workspace", type=Path, required=True)
     parser.add_argument("--simulate", action="store_true")
     parser.add_argument("--scenario", type=Path)
+    parser.add_argument("--case-name", default="H_MMC_Mono_DC")
     parser.add_argument("--duration", type=float, default=0.8)
     parser.add_argument("--timeout", type=float, default=300.0)
     args = parser.parse_args()
