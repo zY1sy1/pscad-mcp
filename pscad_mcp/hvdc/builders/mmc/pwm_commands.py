@@ -676,6 +676,8 @@ def materialize_pwm_command_interface(
         "PN_CLOSED",
         "PG_CLOSED",
         "P_T2",
+        "IAC_T1",
+        "IAC_T2",
     ]
     outputs = {
         "P_REF": "McpPRef",
@@ -691,6 +693,8 @@ def materialize_pwm_command_interface(
         "TRIP_T1": "McpDcTripT1",
         "TRIP_T2": "McpDcTripT2",
         "DC_FF": "McpDcPowerFeedforward",
+        "AC_TRIP": "McpAcTrip",
+        "AC_CURRENT": "McpAcProtectionCurrent",
     }
     ports = {
         name: (-72, -180 + index * 36, "Transfer", "Input")
@@ -715,6 +719,8 @@ def materialize_pwm_command_interface(
     for port in definition.findall("./svg/port"):
         if port.get("name") in integer_names:
             port.set("type", "Integer")
+        if port.get("name") in {"IAC_T1", "IAC_T2"}:
+            port.set("dim", "3")
     _set(
         definition,
         "Description",
@@ -723,11 +729,19 @@ def materialize_pwm_command_interface(
     _script(
         definition,
         "Dsdyn",
-        f"""#STORAGE INTEGER:2
+        f"""#STORAGE INTEGER:3
       IF (TIMEZERO) THEN
         STORI(NSTORI) = 0
         STORI(NSTORI+1) = 0
+        STORI(NSTORI+2) = 0
       ENDIF
+      $AC_CURRENT = MAX(MAXVAL(ABS($IAC_T1)), MAXVAL(ABS($IAC_T2)))
+      IF ($AC_CLOSE .LT. 0.5) THEN
+        STORI(NSTORI+2) = 0
+      ELSEIF ($AC_CURRENT .GE. 7.5) THEN
+        STORI(NSTORI+2) = 1
+      ENDIF
+      $AC_TRIP = FLOAT(STORI(NSTORI+2))
       IF ($RESET_CMD .GE. 0.5 .OR. $BLOCK_CMD .GE. 0.5) THEN
         STORI(NSTORI) = 0
         STORI(NSTORI+1) = 0
@@ -748,7 +762,7 @@ def materialize_pwm_command_interface(
       $DC_FF = -$P_T2
       $Q_REF = {reactive_power_mvar:.15g} + {rated_power_mw:.15g} * $Q_ORDER
       $RESET_OUT = $RESET_CMD
-      $AC_OPEN = 1.0 - $AC_CLOSE
+      $AC_OPEN = MAX(1.0 - $AC_CLOSE, $AC_TRIP)
       $DC_OPEN = 1.0 - $DC_CLOSE
       $E_T1 = $ENABLE_T1
       $E_T2 = $ENABLE_T2
@@ -756,14 +770,14 @@ def materialize_pwm_command_interface(
         $E_T1 = 0
         $E_T2 = 0
       ENDIF
-      IF ($RESET_CMD .GE. 0.5 .OR. $BLOCK_CMD .GE. 0.5 .OR. $AC_CLOSE .LT. 0.5 .OR. $DC_CLOSE .LT. 0.5) THEN
+      IF ($RESET_CMD .GE. 0.5 .OR. $BLOCK_CMD .GE. 0.5 .OR. $AC_CLOSE .LT. 0.5 .OR. $DC_CLOSE .LT. 0.5 .OR. $AC_TRIP .GE. 0.5) THEN
         $E_T1 = 0
         $E_T2 = 0
       ENDIF
       $AC_FAULT_OUT = NINT($AC_FAULT)
       $DC_PN_FAULT = NINT($DC_FAULT * (1.0-$DC_GROUND))
       $DC_PG_FAULT = NINT($DC_FAULT * $DC_GROUND)
-      NSTORI = NSTORI + 2
+      NSTORI = NSTORI + 3
 """,
     )
     adapter = editor.user(main, editor.namespace + ":McpPwmCommands", 7200, 360, {})
@@ -809,6 +823,11 @@ def materialize_pwm_command_interface(
     ):
         editor.label(main, signal, (7128, 180 + inputs.index(port) * 36))
     editor.label(main, "P2", (7128, 180 + inputs.index("P_T2") * 36))
+    for station in ("T1", "T2"):
+        editor.label(
+            main, "I_AC" + station[-1],
+            (7128, 180 + inputs.index("IAC_" + station) * 36),
+        )
     selector = editor.user(
         main,
         "master:const",
@@ -831,6 +850,19 @@ def materialize_pwm_command_interface(
                     "adapter_owner": adapter.get("id"),
                     "inputs": ["Idc1", "Idc2"],
                     "latch_reset": "actual reset or block command",
+                },
+            )
+        if name in {"AC_TRIP", "AC_CURRENT"}:
+            editor.probe(
+                main, signal,
+                "MCP_AC_PROTECTION" + ("_CURRENT" if name == "AC_CURRENT" else ""),
+                "kA" if name == "AC_CURRENT" else "1",
+                source={
+                    "kind": "physical_current_protection",
+                    "adapter_owner": adapter.get("id"),
+                    "inputs": ["I_AC1", "I_AC2"],
+                    "pickup_ka": 7.5,
+                    "latch_reset": "explicit AC open command",
                 },
             )
     for converter in converters:

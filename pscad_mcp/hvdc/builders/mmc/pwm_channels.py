@@ -39,6 +39,10 @@ def compose_pwm_channel_contract(project, contract):
             role, scope = None, None
             if channel_id.startswith("MCP_Q_T"):
                 role, scope = "q_reactive", channel_id[-2:]
+            elif channel_id == "MCP_AC_PROTECTION":
+                role, scope = "ac_protection_trip", "both"
+            elif channel_id == "MCP_AC_PROTECTION_CURRENT":
+                role, scope = "ac_protection_current", "both"
             elif channel_id.startswith("MCP_DC_PROTECTION_T"):
                 role, scope = "dc_protection_trip", channel_id[-2:]
             elif channel_id.startswith("MCP_AC_CLOSED_"):
