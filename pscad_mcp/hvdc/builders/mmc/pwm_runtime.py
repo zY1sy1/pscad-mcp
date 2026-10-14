@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import math
 import shutil
 import subprocess
 import tempfile
@@ -22,6 +23,7 @@ from ....acceptance.process_scope import (
 from ....core.process_inventory import list_pscad_processes
 from . import timed_control
 from .engines.pwm import _copy_library_support
+from .fault_channels import _metadata
 from .line_constants import (
     generate_public_line_constants,
     rebind_template_line_constants,
@@ -32,6 +34,24 @@ ROOT = Path(__file__).resolve().parents[4]
 
 def _hash(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def outputs_cover_duration(paths, duration_s, output_step_s):
+    """Read bounded file tails only; full aligned traces are checked afterwards."""
+    if not paths:
+        return False
+    for path in paths:
+        try:
+            with Path(path).open("rb") as stream:
+                stream.seek(0, 2)
+                stream.seek(max(0, stream.tell() - 4096))
+                rows = stream.read().splitlines()
+            last = float(rows[-1].split()[0].replace(b"D", b"E"))
+        except (OSError, ValueError, IndexError):
+            return False
+        if not math.isfinite(last) or last < duration_s - output_step_s - 1e-12:
+            return False
+    return True
 
 
 def write_report(path: Path, report: dict) -> None:
@@ -271,7 +291,13 @@ async def run(args, report, checkpoint, *, service=None):
                         if p.name.startswith(project.stem + "_")
                         and p.stat().st_mtime >= report["run_started_after"]
                     ]
-                    if fresh:
+                    inf = fresh[0].parent / (project.stem + ".inf") if fresh else None
+                    metadata = _metadata(inf) if inf is not None and inf.is_file() else []
+                    expected_parts = (max(m["call_id"] for m in metadata) + 9) // 10 if metadata else 0
+                    complete_parts = {p.name for p in fresh} == {
+                        f"{project.stem}_{part:02d}.out" for part in range(1, expected_parts + 1)
+                    }
+                    if complete_parts and outputs_cover_duration(fresh, args.duration, 50e-6):
                         pending = False
                         break
                 if status in {"failed", "stopped", "interrupted"}:
