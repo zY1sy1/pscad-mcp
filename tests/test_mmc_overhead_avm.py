@@ -64,8 +64,11 @@ def test_authored_overhead_profile_is_bound_to_the_public_plan_without_native_la
     parameters = plan.engine_plans[0].candidates[0].parameters
     resistance = parameters["station_dc_filter_resistance_ohm"]
     capacitance = parameters["station_dc_filter_capacitance_f"]
+    # The existing reclose/reset interval is 0.13 s. Reserve twenty RC time
+    # constants for passive recharging; the deadline itself is unchanged.
+    assert 20 * resistance * capacitance <= 0.13
     assert request.dc_voltage_kv / (2 * resistance) == pytest.approx(request.active_power_mw / request.dc_voltage_kv)
-    assert 1 / (2 * 3.141592653589793 * resistance * capacitance) == pytest.approx(request.frequency_hz / 4)
+    assert 1 / (2 * 3.141592653589793 * resistance * capacitance) == pytest.approx(request.frequency_hz / 2)
     assert not (tmp_path / ".mmc-candidates").exists()
 
 

@@ -130,11 +130,11 @@ def _native_cable_line_parameters(request: MmcParametricRequest, profile: Mappin
     capacitances = profile.get("core_sheath_capacitance_f_per_km")
     if overhead:
         # Each pole's series RC branch blocks DC. Its initial discharge current
-        # is bounded by nameplate DC current; its corner is f_grid/4 so it
+        # is bounded by nameplate DC current; its corner is f_grid/2 so it
         # damps the third-harmonic common mode of the low-capacitance overhead
         # link. Four branches have one branch C of differential capacitance.
         filter_r = request.dc_voltage_kv**2 / (2 * request.active_power_mw)
-        filter_c = 4 / (2 * math.pi * request.frequency_hz * filter_r)
+        filter_c = 2 / (2 * math.pi * request.frequency_hz * filter_r)
         result.update(station_dc_filter_resistance_ohm=filter_r,
                       station_dc_filter_capacitance_f=filter_c,
                       dc_voltage_control_capacitance_f=filter_c)
