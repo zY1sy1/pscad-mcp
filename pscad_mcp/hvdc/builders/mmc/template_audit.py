@@ -433,13 +433,14 @@ def build_template_audit(project: Path, library: Path) -> MmcTemplateAudit:
     station_roles: set[str] = set()
     hierarchy_calls = _hierarchy_call_names(project_root)
     converter_names = {"vscconverter", "mfe_vsc_t1", "mfe_vsc_t2"}
+    arm_names = {"mmc_hb_pwm", "mfe_mmc_t1", "mfe_mmc_t2"}
     writable_links = {
         _text(element.attrib.get("link"))
         for element in project_root.iter()
         if _name(element.tag) == "call"
         and _text(element.attrib.get("link"))
         and _text(element.attrib.get("name")).rsplit(":", 1)[-1].casefold()
-        in converter_names | {"dctl"}
+        in converter_names | arm_names | {"dctl"}
     }
     has_station_hierarchy = (
         sum(name.rsplit(":", 1)[-1].casefold() == "station" for name in hierarchy_calls)
