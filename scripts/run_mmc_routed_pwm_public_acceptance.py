@@ -6,6 +6,7 @@ import argparse
 import asyncio
 import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -14,14 +15,12 @@ sys.path.insert(0, str(ROOT))
 
 from pscad_mcp.acceptance.preflight_cli import _service
 from pscad_mcp.acceptance.process_scope import (
-    remaining_acceptance_processes,
     require_acceptance_ownership,
 )
 from pscad_mcp.core.executor import robust_executor
-from pscad_mcp.core.process_inventory import list_pscad_processes
 from pscad_mcp.hvdc.builders.mmc.parametric_service import ParametricMmcBuilderService
 from pscad_mcp.hvdc.builders.mmc.pwm_output import digest
-from pscad_mcp.hvdc.builders.mmc.pwm_runtime import write_report
+from pscad_mcp.hvdc.builders.mmc.pwm_runtime import cleanup_owned, write_report
 
 
 async def accept(args, report, checkpoint):
@@ -46,6 +45,10 @@ async def accept(args, report, checkpoint):
         report["original_inputs"][str(args.request.resolve())] = digest(args.request)
         master = await service.get_master_library_identity()
         report["original_inputs"][master["master_path"]] = master["master_sha256"]
+        compiler = Path("C:/Program Files (x86)/GFortran/4.2.1/bin")
+        for name in ("gfortran.exe", "gf42vars.bat"):
+            path = compiler / name
+            report["original_inputs"][str(path)] = digest(path)
         checkpoint()
         started = await builder.build_model(
             request, plan["plan_hash"], args.project_name, workspace, confirm=True
@@ -65,6 +68,18 @@ async def accept(args, report, checkpoint):
             raise RuntimeError(
                 "The public PWM builder has no complete passing acceptance"
             )
+        report["stage"] = "independent_physical_reevaluation"
+        checkpoint()
+        delivered = status["engines"][0]["candidate_result"]["routed_evidence_index"]
+        manifest = json.loads(Path(delivered["manifest"]).read_text())
+        delivery_run = manifest["runs"][-2]
+        outputs = json.loads(Path(delivery_run["report"]).read_text())["output_files"]
+        report["validation"] = await asyncio.to_thread(
+            builder.validate_model, status["result"]["final_paths"][0],
+            "detailed_pwm", list(outputs), "full",
+        )
+        if report["validation"].get("accepted") is not True:
+            raise RuntimeError("Independent public PWM validation is incomplete")
         report["model_accepted"] = True
         report["status"] = "PASS"
     except Exception as error:  # noqa: BLE001 - preserve the public attempt verdict
@@ -72,24 +87,17 @@ async def accept(args, report, checkpoint):
         report["model_accepted"] = False
         report["error"] = {"type": type(error).__name__, "message": str(error)}
     finally:
-        report["stage"] = "cleanup"
-        checkpoint()
-        try:
-            report["quit_result"] = await service.quit_pscad(confirm=True)
-        except Exception as error:  # noqa: BLE001 - retain owned cleanup evidence
-            report["quit_error"] = str(error)
-            report["status"] = "FAIL"
-            report["model_accepted"] = False
-        report["sources_immutable"] = all(
-            digest(path) == expected
-            for path, expected in report.get("original_inputs", {}).items()
+        await cleanup_owned(
+            service, None, runtime, report.get("original_inputs", {}),
+            report, checkpoint, False,
         )
-        if runtime:
-            report["remaining_owned_processes"] = remaining_acceptance_processes(
-                runtime, list_pscad_processes
-            )
-        if not report["sources_immutable"] or report.get("remaining_owned_processes"):
+        report["code_immutable"] = all(
+            digest(ROOT / path) == expected
+            for path, expected in report["frozen_code"].items()
+        )
+        if not report["code_immutable"]:
             report["status"] = "FAIL"
+        if report["status"] != "PASS":
             report["model_accepted"] = False
         report["stage"] = "finished"
         checkpoint()
@@ -105,12 +113,23 @@ def main():
         if os.getenv(name) != "1":
             raise SystemExit(name + "=1 is required")
     args.workspace.resolve().mkdir(parents=True, exist_ok=False)
+    if subprocess.check_output(
+        ["git", "status", "--porcelain", "--untracked-files=no"], cwd=ROOT, text=True,
+    ).strip():
+        raise SystemExit("Freeze and commit the producer before licensed acceptance")
+    tracked = subprocess.check_output(
+        ["git", "ls-files", "pscad_mcp", "scripts"], cwd=ROOT, text=True,
+    ).splitlines()
     report = {
         "schema_version": 1,
         "status": "FAIL",
         "stage": "running",
         "model_accepted": False,
         "scope": "mmc.detailed_pwm.routed_reference.public_builder",
+        "tested_revision": subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True,
+        ).strip(),
+        "frozen_code": {path: digest(ROOT / path) for path in tracked if path.endswith(".py")},
     }
 
     def checkpoint():
