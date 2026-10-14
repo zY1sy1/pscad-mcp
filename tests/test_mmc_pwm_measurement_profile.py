@@ -1,6 +1,8 @@
 """Public measurement names must identify the physical probes and exact units."""
 
 from pscad_mcp.hvdc.builders.mmc import pwm_channels
+from pscad_mcp.hvdc.profiles import bind_profile_project
+from pscad_mcp.hvdc.results import resolve_result_channels
 
 
 def test_routed_profile_replaces_uninstantiated_placeholder_channels():
@@ -10,7 +12,7 @@ def test_routed_profile_replaces_uninstantiated_placeholder_channels():
             "channels": [{
                 "channel_id": "MFE_T2_p_active", "role": "p_active",
                 "model_scope": "T2", "units": "MW", "dimension": 1,
-                "selector": {"description": "MFE_T2_p_active", "owner_id": "42"},
+                "selector": {"description": "MFE_T2_p_active", "group": "MMC_FAULT_EVIDENCE", "owner_id": "42"},
                 "signal_source": {"kind": "physical_state", "polarity": "station_import"},
             }],
             "diagnostic_channels": [],
@@ -24,3 +26,10 @@ def test_routed_profile_replaces_uninstantiated_placeholder_channels():
     assert result["selector"]["owner_id"] == "42"
     assert profile["mappings"][0]["aliases"] == ["MFE_T2_p_active"]
     assert "extends" not in profile
+    rebound = bind_profile_project(profile, "PWM_RENAMED.pscx")
+    resolved = resolve_result_channels({"channels": [{
+        "path": "MMC_FAULT_EVIDENCE/MFE_T2_p_active", "units": "MW",
+        "domain": [0, 1], "values": [-1000, -1000],
+    }]}, rebound)
+    assert len(resolved["resolved_channels"]) == 1
+    assert resolved["warnings"] == []

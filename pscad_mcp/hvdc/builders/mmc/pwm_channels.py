@@ -33,7 +33,7 @@ def routed_pwm_profile(prepared):
     } for binding in bindings]
     profile["result_channels"] = [{
         "canonical": binding["channel_id"].lower(),
-        "path": "H_MMC_Mono_DC/" + binding["channel_id"],
+        "path": binding["selector"]["group"] + "/" + binding["selector"]["description"],
         "units": binding["units"], "location": binding["model_scope"],
         "quantity": binding["role"], "dimension": binding["dimension"],
         "selector": deepcopy(binding["selector"]),
@@ -41,7 +41,8 @@ def routed_pwm_profile(prepared):
     } for binding in bindings]
     profile["metric_roles"] = {binding["channel_id"].lower(): binding["role"] for binding in bindings}
     profile["command_bindings"] = deepcopy(prepared["routing"]["command_bindings"])
-    profile["project_fingerprints"] = [{"project_stem": "H_MMC_Mono_DC", "pscad_version": "4.6.2"}]
+    profile.pop("project_binding", None)
+    profile["project_fingerprints"] = [{"pscad_version": "4.6.2", "definitions": ["McpPwmCommands"]}]
     return profile
 
 
