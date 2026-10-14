@@ -84,6 +84,7 @@ def prepare_routed_pwm_case(source, library, master, workspace):
     current = Path(source).resolve()
     lineage = []
     stages = (
+        ("ratings", materialize_pwm_reference_ratings, {"master": master}),
         ("charging", physical.materialize_terminal_two_charging, {}),
         (
             "headroom",
@@ -100,6 +101,7 @@ def prepare_routed_pwm_case(source, library, master, workspace):
         ("sorting", physical.materialize_complete_arm_sorting, {"library": library}),
         ("dc_integral", physical.materialize_voltage_control_integral_time, {}),
         ("power_integral", materialize_pwm_power_response, {}),
+        ("dynamic_headroom", materialize_pwm_dynamic_headroom, {}),
     )
     for name, producer, kwargs in stages:
         target = directory / (name + ".pscx")
@@ -137,4 +139,112 @@ def prepare_routed_pwm_case(source, library, master, workspace):
         "channels": contract,
         "lineage": lineage,
         "model_accepted": False,
+    }
+
+
+def materialize_pwm_reference_ratings(source, destination, *, master):
+    """Bind both 230 kV grids to SCR=5, X/R=10 through real series R/L branches."""
+    original, master_path = _regular(source), _regular(master)
+    target = _new_target(destination, (original, master_path))
+    root, masters = ET.parse(original).getroot(), ET.parse(master_path).getroot()
+    implementation = masters.find(
+        "./definitions/Definition[@name='source_3']/script/segment[@name='Dsdyn']"
+    )
+    if (
+        implementation is None
+        or "E_BRANCH_CFG($BA,$SS,1,IVD1_1,IVD1_2,$R_,$L,$C)" not in implementation.text
+        or "IF ($C .LE. 1.0E-38) IVD1_2 = 0" not in implementation.text
+    ):
+        raise RuntimeError(
+            "The installed series R/L grid-source implementation is not audited"
+        )
+    main = root.find("./definitions/Definition[@name='Main']/schematic")
+    grids = [u for u in main.findall("User") if u.get("defn") == "master:source_3"]
+    if {u.get("id") for u in grids} != {"2102734538", "1387181349"}:
+        raise RuntimeError("The audited physical grids are unavailable")
+    impedance = 230.0**2 / (1000.0 * 5.0)
+    resistance = impedance / math.sqrt(1 + 10.0**2)
+    inductance = 10.0 * resistance / (2 * math.pi * 60.0)
+    changes = []
+    for grid in grids:
+        for key, value in {
+            "Type": 3,
+            "Vm": 230.0,
+            "Vbase": "230 [kV]",
+            "f": "$(Freq)",
+            "R_": f"{resistance:.17g} [ohm]",
+            "L": f"{inductance:.17g} [H]",
+            "C": "0.0 [uF]",
+        }.items():
+            changes.append(
+                {
+                    "owner": grid.get("id"),
+                    "parameter": key,
+                    "before": _params(grid)[key],
+                    "after": str(value),
+                }
+            )
+            _set(grid, key, value)
+    _write_new_xml(root, target)
+    return {
+        "source": str(original),
+        "source_sha256": hashlib.sha256(original.read_bytes()).hexdigest(),
+        "master_sha256": hashlib.sha256(master_path.read_bytes()).hexdigest(),
+        "destination": str(target),
+        "destination_sha256": hashlib.sha256(target.read_bytes()).hexdigest(),
+        "changes": changes,
+        "station_grid": {
+            "voltage_kv": 230.0,
+            "scr": 5.0,
+            "x_over_r": 10.0,
+            "rated_power_mw": 1000.0,
+            "resistance_ohm": resistance,
+            "inductance_h": inductance,
+        },
+    }
+
+
+def materialize_pwm_dynamic_headroom(source, destination):
+    """Avoid observed reverse-power current clipping and DC-energy lag."""
+    original = _regular(source)
+    target = _new_target(destination, (original,))
+    root = ET.parse(original).getroot()
+    main = root.find("./definitions/Definition[@name='Main']/schematic")
+    power = main.find("User[@id='800413106']")
+    integral = main.find("User[@id='1520814881']")
+    if (
+        power is None
+        or _params(power).get("dmode") != "1"
+        or _params(power).get("Imax") != "1"
+        or integral is None
+        or _params(integral).get("Name") != "TiDCRec"
+        or _params(integral).get("Value") != "0.04"
+    ):
+        raise RuntimeError(
+            "The audited current headroom or active DC integral setting differs"
+        )
+    _set(power, "Imax", 1.1)
+    _set(integral, "Value", 0.02)
+    _write_new_xml(root, target)
+    return {
+        "source": str(original),
+        "source_sha256": hashlib.sha256(original.read_bytes()).hexdigest(),
+        "destination": str(target),
+        "destination_sha256": hashlib.sha256(target.read_bytes()).hexdigest(),
+        "changes": [
+            {
+                "owner": power.get("id"),
+                "parameter": "Imax",
+                "before": "1",
+                "after": "1.1",
+            },
+            {
+                "owner": integral.get("id"),
+                "parameter": "Value",
+                "before": "0.04",
+                "after": "0.02",
+            },
+        ],
+        "arm_acceptance_peak_ka": 3.0,
+        "acceptance_bounds_unchanged": True,
     }
