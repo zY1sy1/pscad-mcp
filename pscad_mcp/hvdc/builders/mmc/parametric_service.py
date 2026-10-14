@@ -793,6 +793,25 @@ class ParametricMmcBuilderService:
                     elif library_backup is not None:
                         existing_library_backups.append((library_target, library_backup))
                     record["final_library_path"] = str(library_target)
+                    if engine_plan.engine == "detailed_pwm" and engine_plan.asset_hashes:
+                        from .engines.pwm import _copy_library_support, library_support_files
+
+                        original_parent = Path(engine_plan.source_paths["library"]).parent
+                        expected_support = {
+                            str(source_library.parent / Path(path).relative_to(original_parent)): expected
+                            for path, expected in engine_plan.asset_hashes.items()
+                        }
+                        support = library_support_files(source_library)
+                        _copy_library_support(
+                            source_library, target.parent, expected_hashes=expected_support,
+                        )
+                        for dependency in support:
+                            created_projects.append(target.parent / dependency["relative_path"])
+                        created_projects.append(target.parent / "compiler-support-inputs.json")
+                        record["final_compiler_support"] = {
+                            str(target.parent / dependency["relative_path"]): dependency["sha256"]
+                            for dependency in support
+                        }
                     load_paths.insert(0, str(library_target))
                 if published_by_save_as:
                     if library_target is not None:
