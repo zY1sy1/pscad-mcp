@@ -1,0 +1,26 @@
+"""Public measurement names must identify the physical probes and exact units."""
+
+from pscad_mcp.hvdc.builders.mmc import pwm_channels
+
+
+def test_routed_profile_replaces_uninstantiated_placeholder_channels():
+    prepared = {
+        "routing": {"command_bindings": []},
+        "channels": {
+            "channels": [{
+                "channel_id": "MFE_T2_p_active", "role": "p_active",
+                "model_scope": "T2", "units": "MW", "dimension": 1,
+                "selector": {"description": "MFE_T2_p_active", "owner_id": "42"},
+                "signal_source": {"kind": "physical_state", "polarity": "station_import"},
+            }],
+            "diagnostic_channels": [],
+        },
+    }
+    profile = pwm_channels.routed_pwm_profile(prepared)
+    assert len(profile["result_channels"]) == 1
+    result = profile["result_channels"][0]
+    assert result["path"].endswith("/MFE_T2_p_active")
+    assert result["units"] == "MW"
+    assert result["selector"]["owner_id"] == "42"
+    assert profile["mappings"][0]["aliases"] == ["MFE_T2_p_active"]
+    assert "extends" not in profile

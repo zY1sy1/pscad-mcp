@@ -17,6 +17,34 @@ from .fault_channels import (
 from .pwm_commands import _params
 
 
+def routed_pwm_profile(prepared):
+    """Expose every actual probe without aliasing whole arm sets to one value."""
+    from ...profiles import load_profile
+
+    profile = load_profile("mmc_detailed_pwm_v2")
+    bindings = prepared["channels"]["channels"] + prepared["channels"]["diagnostic_channels"]
+    families = {"1": "boolean", "pu": "ratio", "kV": "voltage", "kA": "current",
+                "MW": "power", "MVAr": "power", "MJ": "energy", "s": "time"}
+    profile["mappings"] = [{
+        "canonical": binding["channel_id"].lower(),
+        "aliases": [binding["selector"]["description"]],
+        "source_kinds": ["measurement"], "direction": "measurement",
+        "units": binding["units"], "unit_family": families[binding["units"]],
+    } for binding in bindings]
+    profile["result_channels"] = [{
+        "canonical": binding["channel_id"].lower(),
+        "path": "H_MMC_Mono_DC/" + binding["channel_id"],
+        "units": binding["units"], "location": binding["model_scope"],
+        "quantity": binding["role"], "dimension": binding["dimension"],
+        "selector": deepcopy(binding["selector"]),
+        "signal_source": deepcopy(binding["signal_source"]),
+    } for binding in bindings]
+    profile["metric_roles"] = {binding["channel_id"].lower(): binding["role"] for binding in bindings}
+    profile["command_bindings"] = deepcopy(prepared["routing"]["command_bindings"])
+    profile["project_fingerprints"] = [{"project_stem": "H_MMC_Mono_DC", "pscad_version": "4.6.2"}]
+    return profile
+
+
 def compose_pwm_channel_contract(project, contract):
     root = ET.parse(project).getroot()
     result = deepcopy(contract)
