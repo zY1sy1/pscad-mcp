@@ -847,6 +847,20 @@ class ParametricMmcBuilderService:
                             observed_sha256=observed_library_hash,
                         )
                     record["final_library_sha256"] = observed_library_hash
+                if isinstance(candidate_result, Mapping) and candidate_result.get("routed_evidence_index"):
+                    from .pwm_validation import evidence_index_path
+
+                    index = candidate_result["routed_evidence_index"]
+                    if _sha256(target) != index["project_sha256"]:
+                        raise _error(
+                            "MMC_POSTCONDITION_FAILED",
+                            "The published PWM model differs from its frozen measured input.",
+                            "build_parametric_mmc_model",
+                        )
+                    index_path = evidence_index_path(target)
+                    with index_path.open("x", encoding="utf-8") as stream:
+                        created_projects.append(index_path)
+                        json.dump(index, stream, indent=2)
                 scenario_source = _scenario_source_path(target)
                 try:
                     with target.open("rb") as source_stream, scenario_source.open(
@@ -1182,6 +1196,21 @@ class ParametricMmcBuilderService:
             },
         }
         if not output_files:
+            return result
+        if model_fidelity == "detailed_pwm":
+            from .pwm_validation import evidence_index_path, validate_routed_pwm
+
+            if not evidence_index_path(project).is_file():
+                result["acceptance"] = {
+                    "status": "not_evaluated",
+                    "reason": "frozen_routed_pwm_evidence_required",
+                }
+                return result
+            result["acceptance"] = _run_coroutine_sync(
+                lambda: validate_routed_pwm(project, output_files)
+            )
+            result["accepted"] = True
+            result["capability_level"] = "accepted"
             return result
         reader = getattr(self.pscad_service, "read_output_file", None)
         if not callable(reader):

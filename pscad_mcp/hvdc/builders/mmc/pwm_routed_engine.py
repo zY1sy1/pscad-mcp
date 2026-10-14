@@ -263,6 +263,23 @@ async def execute_routed_pwm_candidate(plan, service, candidate, scenarios):
         raise RuntimeError("Independent PWM reload has no passing physical evidence")
     _verify_sources(plan, sources)
     library = Path(delivered["project"]).parent / "intermediate.pslx"
+    run_index = []
+    for result in [*results, delivered]:
+        folder = Path(result["project"]).parent
+        run_index.append({
+            "name": "delivery" if result is delivered else result["name"],
+            "project": result["project"],
+            "scenario": str(folder / "scenario.json"),
+            "report": str(folder / "report.json"),
+            "physical_report": str(folder / "physical.json"),
+        })
+    run_index.append({
+        "name": "independent_reload",
+        "project": str(reload_directory / (reload_name + ".pscx")),
+        "scenario": str(delivery_directory / "scenario.json"),
+        "report": str(reload_directory / "report.json"),
+        "physical_report": str(reload_physical_file),
+    })
     manifest = {
         "schema_version": 1,
         "scope": "mmc.detailed_pwm.routed_reference",
@@ -273,6 +290,9 @@ async def execute_routed_pwm_candidate(plan, service, candidate, scenarios):
         "delivery": delivered,
         "original_inputs": plan.source_hashes,
         "project_sha256": digest(delivered["project"]),
+        "tested_commit": delivery_report["tested_commit"],
+        "channel_contract": str(stage / "prepared" / "channels.json"),
+        "runs": run_index,
         "independent_reload": {
             "report": str(reload_directory / "report.json"),
             "physical_report": str(reload_physical_file),
@@ -281,6 +301,9 @@ async def execute_routed_pwm_candidate(plan, service, candidate, scenarios):
     }
     manifest_file = stage / "routed-acceptance.json"
     manifest_file.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    from .pwm_validation import freeze_routed_manifest
+
+    evidence_index = freeze_routed_manifest(manifest_file)
     publication_directory = stage / "publication"
     publication_directory.mkdir()
     publication_project = publication_directory / (plan.target_name + ".pscx")
@@ -298,6 +321,7 @@ async def execute_routed_pwm_candidate(plan, service, candidate, scenarios):
         "library_path": str(library),
         "library_support_path": str(library.parent / "Obj_Files_2016_03_25"),
         "model_accepted": True,
+        "routed_evidence_index": evidence_index,
         "scenario_results": results,
         "written_paths": tuple(written),
         "validation": {

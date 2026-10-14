@@ -221,6 +221,23 @@ def test_validation_without_outputs_cannot_claim_acceptance(tmp_path: Path) -> N
     assert validation["acceptance"]["status"] == "not_evaluated"
 
 
+def test_pwm_validation_does_not_trust_a_reader_pass_without_physical_evidence(tmp_path):
+    service = make_parametric_service(tmp_path)
+    _, terminal = _build(service, tmp_path, valid_request(model_fidelity="detailed_pwm"))
+    output = tmp_path / "finite.out"
+    output.write_text("0 1\n1 1\n")
+
+    async def finite_reader(*args, **kwargs):
+        return {"verdict": "PASS", "channels": [{"values": [1, 1]}]}
+
+    service.pscad_service.read_output_file = finite_reader
+    result = service.validate_model(
+        terminal["engines"][0]["final_path"], "detailed_pwm", [str(output)],
+    )
+    assert result["accepted"] is False
+    assert result["acceptance"]["reason"] == "frozen_routed_pwm_evidence_required"
+
+
 def test_compiled_native_candidate_stays_staged_until_dynamic_acceptance(tmp_path):
     service = make_parametric_service(tmp_path)
     execute = service.avm_engine.execute_candidate
