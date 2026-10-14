@@ -24,6 +24,7 @@ def routed_pwm_profile(prepared):
 
     profile = load_profile("mmc_detailed_pwm_v2")
     profile.pop("extends", None)
+    profile.pop("project_binding", None)
     profile["command_bindings"] = prepared["routing"]["command_bindings"]
     profile["project_fingerprints"] = [{"pscad_version": "4.6.2"}]
     profile["mappings"], profile["result_channels"], profile["metric_roles"] = (
