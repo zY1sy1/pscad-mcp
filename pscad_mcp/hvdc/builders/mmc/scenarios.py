@@ -73,6 +73,8 @@ def _timing(
         and "native_cable_profile_hash" in candidate["parameters"]
     ):
         return float(settings["time_step_s"]), float(settings["output_step_s"])
+    if engine == "detailed_pwm" and candidate["parameters"]["reference_evidence"].startswith("audited-instantiated-arms:"):
+        return float(settings["time_step_s"]), float(settings["output_step_s"])
     control_sample = float(settings["control_sample_time_s"])
     if engine == "detailed_pwm":
         switching = float(settings["switching_frequency_hz"])

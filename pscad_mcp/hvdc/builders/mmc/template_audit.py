@@ -104,6 +104,7 @@ class MmcTemplateAudit:
     template_native_controls: dict[str, object] = field(default_factory=dict)
     submodule_topology: dict[str, object] = field(default_factory=dict)
     instance_bindings: tuple[dict[str, object], ...] = ()
+    physical_reference: dict[str, object] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -532,6 +533,8 @@ def build_template_audit(project: Path, library: Path) -> MmcTemplateAudit:
     compiler_support = _compiler_support(library)
     template_native_controls = _template_native_controls(project_root)
     submodule_topology = _submodule_topology(project_root, library_root)
+    from .pwm_reference import audit_pwm_physical_reference
+    physical_reference = audit_pwm_physical_reference(project_root)
     if compiler_support["required"] and not compiler_support["present"]:
         warnings.append("The sibling compiler object tree is missing.")
         compatible = False
@@ -560,6 +563,7 @@ def build_template_audit(project: Path, library: Path) -> MmcTemplateAudit:
         template_native_controls=template_native_controls,
         submodule_topology=submodule_topology,
         instance_bindings=tuple(instances),
+        physical_reference=physical_reference,
     )
 
 

@@ -290,7 +290,7 @@ def _engine_candidates(
             )
         base_parameters[name] = override["value"] * unit_factors[unit]
     # Preserve the existing half-normalized capacitor-voltage convention.
-    capacitor_voltage_target_kv = request.dc_voltage_kv / 2.0
+    capacitor_voltage_target_kv = request.dc_voltage_kv if reference.get("native_pwm_timing") else request.dc_voltage_kv / 2.0
     _synchronize_arm_energy(
         base_parameters,
         capacitor_voltage_target_kv,
@@ -316,6 +316,9 @@ def _engine_candidates(
         "control_sample_time_s": control_sample,
         "switching_frequency_hz": switching_frequency,
     }
+    if reference.get("native_pwm_timing"):
+        base_settings.update(time_step_s=reference["time_step_s"], output_step_s=reference["output_step_s"],
+                             control_sample_time_s=reference["time_step_s"])
     variants = (
         ("nominal", {}, {}),
         ("numerical_stability", {"arm_inductance_h": base_parameters["arm_inductance_h"] * 1.10}, {"time_step_s": nominal_step * 0.5}),
