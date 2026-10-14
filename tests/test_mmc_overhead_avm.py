@@ -96,6 +96,11 @@ def test_native_overhead_artifacts_and_module_are_verified_before_any_simulation
     service = SimpleNamespace(load_projects=no_op, save_project=no_op, build_project=no_op, get_project_output=no_op)
     result = asyncio.run(engine.execute_candidate(plan, service))
     fixture = result["fixture"]
+    library_root = ET.parse(fixture["library"]["library_path"])
+    for interface in library_root.findall("./definitions/Definition[@name='MMCOverheadLink']/schematic/User[@defn='master:tline_interface']"):
+        assert interface.get("q") == "4"
+        assert interface.find("paramlist").get("name") == ""
+        assert interface.find("paramlist").get("link") == "-1"
     assert result["model_accepted"] is False
     assert fixture["topology"]["coupled_overhead_count"] == 1
     assert fixture["topology"]["coupled_cable_count"] == 0

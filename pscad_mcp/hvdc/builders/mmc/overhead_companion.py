@@ -36,9 +36,9 @@ def append_native_overhead_link(root, *, constants_evidence, source_project, mas
     defaults = {p.get("name"): (p.findtext("value") or "").strip() for p in interface_definition.findall("./form//parameter")}
     prototypes = []
     for end in range(2):
-        interface = ET.Element("User", {"classid": "UserCmp", "defn": "master:tline_interface", "id": str(end)})
+        interface = ET.Element("User", {"classid": "UserCmp", "defn": "master:tline_interface", "id": str(end), "q": "4", "link": "-1"})
         _paramlist(interface, {**defaults, "Name": constants["segment"], "NC": "2", "View": "0",
-                              "send_recv": str(end + 1), "dim_s": "0", "dim_r": "0", "alien": "2"})
+                              "send_recv": str(end + 1), "dim_s": "0", "dim_r": "0", "alien": "2"}, name="", link="-1", crc="0")
         prototypes.append(interface)
     original_hash = _xml_sha(row)
     row = copy.deepcopy(row)
