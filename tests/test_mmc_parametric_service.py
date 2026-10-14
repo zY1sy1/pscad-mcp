@@ -1,13 +1,14 @@
 import asyncio
 import hashlib
+import json
 from pathlib import Path
 
 import pytest
 
 from pscad_mcp.core.backend.base import BackendError
 from pscad_mcp.core.service import ConfirmationRequired
-from pscad_mcp.hvdc.builders.mmc import parametric_service as parametric_service_module
 from pscad_mcp.hvdc.builders.lcc.journal import WorkspaceBuildLease as LccLease
+from pscad_mcp.hvdc.builders.mmc import parametric_service as parametric_service_module
 from tests.mmc_parametric_fakes import (
     make_parametric_service,
     valid_request,
@@ -16,9 +17,7 @@ from tests.mmc_parametric_fakes import (
 
 
 def _build(service, tmp_path: Path, request: dict):
-    plan = service.plan_model(
-        request, project_name="MMC_CASE", folder=str(tmp_path)
-    )
+    plan = service.plan_model(request, project_name="MMC_CASE", folder=str(tmp_path))
     started = asyncio.run(
         service.build_model(
             request,
@@ -32,18 +31,17 @@ def _build(service, tmp_path: Path, request: dict):
 
 
 def test_both_engines_publish_only_after_independent_acceptance(tmp_path: Path) -> None:
-    service = make_parametric_service(
-        tmp_path, pwm_verdict="PASS", avm_verdict="PASS"
-    )
+    service = make_parametric_service(tmp_path, pwm_verdict="PASS", avm_verdict="PASS")
     request = valid_request(model_fidelity="both")
 
     plan, terminal = _build(service, tmp_path, request)
 
     assert terminal["state"] == "published"
     assert terminal["plan_hash"] == plan["plan_hash"]
-    assert [
-        item["capability_level"] for item in terminal["engines"]
-    ] == ["accepted", "accepted"]
+    assert [item["capability_level"] for item in terminal["engines"]] == [
+        "accepted",
+        "accepted",
+    ]
     assert (tmp_path / "MMC_CASE_pwm.pscx").is_file()
     assert (tmp_path / "MMC_CASE_avm.pscx").is_file()
     assert (tmp_path / "MMC_CASE_pwm_scenario_source.pscx").read_bytes() == (
@@ -54,23 +52,27 @@ def test_both_engines_publish_only_after_independent_acceptance(tmp_path: Path) 
     ).read_bytes()
     published_library = tmp_path / "intermediate.pslx"
     assert published_library.is_file()
-    assert published_library.read_bytes() == (
-        Path(plan["engine_plans"][0]["source_paths"]["library"])
-    ).read_bytes()
+    assert (
+        published_library.read_bytes()
+        == (Path(plan["engine_plans"][0]["source_paths"]["library"])).read_bytes()
+    )
     assert terminal["engines"][0]["final_library_path"] == str(published_library)
-    Path(
-        terminal["engines"][0]["candidate_result"]["library_path"]
-    ).write_text("candidate changed after publication", encoding="utf-8")
-    assert published_library.read_bytes() == (
-        Path(plan["engine_plans"][0]["source_paths"]["library"])
-    ).read_bytes()
+    Path(terminal["engines"][0]["candidate_result"]["library_path"]).write_text(
+        "candidate changed after publication", encoding="utf-8"
+    )
+    assert (
+        published_library.read_bytes()
+        == (Path(plan["engine_plans"][0]["source_paths"]["library"])).read_bytes()
+    )
     assert service.recorded_engine_calls == [
         ("detailed_pwm", "pwm-0"),
         ("average_value", "avm-0"),
     ]
 
 
-def test_legacy_pwm_parent_supplies_hash_verified_embedded_timing(tmp_path: Path) -> None:
+def test_legacy_pwm_parent_supplies_hash_verified_embedded_timing(
+    tmp_path: Path,
+) -> None:
     service = make_parametric_service(tmp_path)
     master = tmp_path / "master.pslx"
     master.write_bytes(b"installed Master fixture")
@@ -92,7 +94,9 @@ def test_legacy_pwm_parent_supplies_hash_verified_embedded_timing(tmp_path: Path
 
     service.pscad_service.get_master_library_identity = installed_master
     service.pwm_engine.execute_candidate = capture
-    _, terminal = _build(service, tmp_path, valid_request(model_fidelity="detailed_pwm"))
+    _, terminal = _build(
+        service, tmp_path, valid_request(model_fidelity="detailed_pwm")
+    )
 
     assert terminal["state"] == "published"
     assert len(captured) == 11
@@ -110,13 +114,22 @@ def test_legacy_pwm_parent_rejects_changed_installed_master(tmp_path: Path) -> N
     master.write_bytes(b"different installed Master")
 
     async def installed_master():
-        return {"pscad_version": "4.6.2", "master_path": str(master), "master_sha256": "0" * 64}
+        return {
+            "pscad_version": "4.6.2",
+            "master_path": str(master),
+            "master_sha256": "0" * 64,
+        }
 
     service.pscad_service.get_master_library_identity = installed_master
-    _, terminal = _build(service, tmp_path, valid_request(model_fidelity="detailed_pwm"))
+    _, terminal = _build(
+        service, tmp_path, valid_request(model_fidelity="detailed_pwm")
+    )
     assert terminal["state"] == "failed"
     assert service.recorded_engine_calls == []
-    assert terminal["engines"][0]["attempts"][0]["error"]["code"] == "MASTER_SOURCE_CHANGED"
+    assert (
+        terminal["engines"][0]["attempts"][0]["error"]["code"]
+        == "MASTER_SOURCE_CHANGED"
+    )
 
 
 def test_one_engine_failure_keeps_parent_unpublished_but_runs_other_child(
@@ -221,6 +234,72 @@ def test_validation_without_outputs_cannot_claim_acceptance(tmp_path: Path) -> N
     assert validation["acceptance"]["status"] == "not_evaluated"
 
 
+def test_pwm_reader_pass_without_bound_physical_evidence_is_incomplete(tmp_path):
+    service = make_parametric_service(tmp_path)
+
+    async def finite_reader(*args, **kwargs):
+        return {"verdict": "PASS", "channels": [{"values": [640.0, 640.0]}]}
+
+    service.pscad_service.read_output_file = finite_reader
+    _, terminal = _build(
+        service, tmp_path, valid_request(model_fidelity="detailed_pwm")
+    )
+    output = tmp_path / "unrelated.out"
+    output.write_text("0 640\n0.1 640\n")
+    result = service.validate_model(
+        terminal["engines"][0]["final_path"], "detailed_pwm", output_files=[str(output)]
+    )
+    assert result["accepted"] is False
+    assert result["acceptance"]["verdict"] == "INCOMPLETE_ANALYSIS"
+
+
+def test_routed_pwm_publication_reloads_the_final_file_and_keeps_its_identity(tmp_path):
+    service = make_parametric_service(tmp_path)
+    execute = service.pwm_engine.execute_candidate
+    reloaded = []
+
+    async def routed(*args, **kwargs):
+        result = await execute(*args, **kwargs)
+        manifest = Path(result["project_path"]).with_name("routed-acceptance.json")
+        manifest.write_text(
+            json.dumps(
+                {
+                    "project_sha256": hashlib.sha256(
+                        Path(result["project_path"]).read_bytes()
+                    ).hexdigest()
+                }
+            )
+        )
+        result.update(
+            routed_physical_acceptance=True,
+            validation={"physical_evidence": str(manifest)},
+        )
+        return result
+
+    async def reload(project, filename):
+        assert Path(filename).is_file()
+        reloaded.append((project, filename))
+        return "reloaded exact final file"
+
+    async def messages(*args, **kwargs):
+        return []
+
+    service.pwm_engine.execute_candidate = routed
+    service.pscad_service.reload_project = reload
+    service.pscad_service.get_project_output = messages
+    _, terminal = _build(
+        service, tmp_path, valid_request(model_fidelity="detailed_pwm")
+    )
+    assert terminal["state"] == "published"
+    record = terminal["engines"][0]
+    assert reloaded == [("MMC_CASE_pwm", record["final_path"])]
+    manifest = json.loads(Path(record["acceptance_manifest"]).read_text())
+    assert (
+        manifest["publication"]["project_sha256"]
+        == hashlib.sha256(Path(record["final_path"]).read_bytes()).hexdigest()
+    )
+
+
 def test_compiled_native_candidate_stays_staged_until_dynamic_acceptance(tmp_path):
     service = make_parametric_service(tmp_path)
     execute = service.avm_engine.execute_candidate
@@ -231,13 +310,21 @@ def test_compiled_native_candidate_stays_staged_until_dynamic_acceptance(tmp_pat
         return result
 
     service.avm_engine.execute_candidate = compiled_only
-    _, terminal = _build(service, tmp_path, valid_request(model_fidelity="average_value"))
+    _, terminal = _build(
+        service, tmp_path, valid_request(model_fidelity="average_value")
+    )
     assert terminal["state"] == "built"
     assert terminal["result"]["model_accepted"] is False
-    assert terminal["result"]["publication_pending"] == "required_dynamic_physical_acceptance"
+    assert (
+        terminal["result"]["publication_pending"]
+        == "required_dynamic_physical_acceptance"
+    )
     assert not (tmp_path / "MMC_CASE_avm.pscx").exists()
     assert all(Path(path).is_file() for path in terminal["result"]["staged_projects"])
-    assert not any(call[0] in {"load_projects", "save_project_as"} for call in service.pscad_service.calls)
+    assert not any(
+        call[0] in {"load_projects", "save_project_as"}
+        for call in service.pscad_service.calls
+    )
 
 
 def test_native_avm_publication_uses_pscad_save_as_for_distinct_candidate_name(
@@ -250,7 +337,9 @@ def test_native_avm_publication_uses_pscad_save_as_for_distinct_candidate_name(
 
         async def execute_candidate(self, plan, _service, *, candidate_id=None):
             selected = candidate_id or plan.candidates[0].candidate_id
-            candidate_name = plan.target_name + "_candidate_" + selected.replace("-", "_")
+            candidate_name = (
+                plan.target_name + "_candidate_" + selected.replace("-", "_")
+            )
             root = tmp_path / ".native-candidate"
             root.mkdir()
             project = root / (candidate_name + ".pscx")
@@ -277,14 +366,14 @@ def test_native_avm_publication_uses_pscad_save_as_for_distinct_candidate_name(
     assert terminal["state"] == "published"
     engine = terminal["engines"][0]
     assert engine["publication_method"] == "pscad_save_as"
-    assert engine["publication_settings"] == {
-        "output_filename": "MMC_CASE_avm.out"
-    }
+    assert engine["publication_settings"] == {"output_filename": "MMC_CASE_avm.out"}
     assert engine["capability_level"] == "built"
     final = tmp_path / "MMC_CASE_avm.pscx"
     assert final.is_file()
     assert "name='MMC_CASE_avm'" in final.read_text(encoding="utf-8")
-    assert (tmp_path / ".native-candidate" / "MMC_CASE_avm_candidate_avm_0.pscx").is_file()
+    assert (
+        tmp_path / ".native-candidate" / "MMC_CASE_avm_candidate_avm_0.pscx"
+    ).is_file()
     save_as = [
         call for call in service.pscad_service.calls if call[0] == "save_project_as"
     ]
@@ -301,23 +390,18 @@ def test_project_aware_recommendations_bind_cached_derived_project(
 ) -> None:
     service = make_parametric_service(tmp_path)
     request = valid_request(model_fidelity="average_value")
-    plan = service.plan_model(
-        request, project_name="CUSTOM_CASE", folder=str(tmp_path)
-    )
+    plan = service.plan_model(request, project_name="CUSTOM_CASE", folder=str(tmp_path))
     target = plan["engine_plans"][0]["target_path"]
 
     result = service.recommend_simulation(target)
 
-    assert {item["engine"] for item in result["recommendations"]} == {
-        "average_value"
-    }
+    assert {item["engine"] for item in result["recommendations"]} == {"average_value"}
     assert all(
         item["scenario"]["derived_project"] == target
         for item in result["recommendations"]
     )
     assert all(
-        item["scenario"]["project"] != target
-        for item in result["recommendations"]
+        item["scenario"]["project"] != target for item in result["recommendations"]
     )
 
 

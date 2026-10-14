@@ -20,6 +20,11 @@ def _component_record(component: HvdcComponentRecord) -> dict[str, object]:
     station = "STATION_P" if "station_p" in text or re.search(r"\bp\b", component.name.casefold()) else "STATION_VDC" if "station_vdc" in text or " v " in f" {component.name.casefold()} " else None
     phase = next((phase.upper() for phase in ("a", "b", "c") if re.search(rf"\b{phase}\b", component.name.casefold())), None)
     position = "upper" if "upper" in text else "lower" if "lower" in text else None
+    scope = re.fullmatch(r"MFE_Pole_(T[12])_([ABC])", component.source.canvas_name or "")
+    if scope and component.definition.endswith(":MmcObservedFullCell"):
+        station = "STATION_VDC" if scope[1] == "T1" else "STATION_P"
+        phase = scope[2]
+        position = {"MmcVTop": "upper", "MmcVBtm": "lower"}.get(component.parameters.get("MmcInserted"))
     return {
         "component_id": component.component_id,
         "name": component.name,
@@ -49,15 +54,23 @@ def inspect_mmc_evidence(evidence: HvdcProjectEvidence) -> dict[str, object]:
         ],
         key=lambda item: (0 if item.name.casefold() == "station_p" else 1, item.name),
     )
+    native_stations = [c for c in evidence.components if c.definition.rsplit(":", 1)[-1] in {"MFE_PWM_T1", "MFE_PWM_T2"}]
+    native_cells = [c for c in evidence.components if c.definition.endswith(":MmcObservedFullCell") and re.fullmatch(r"MFE_Pole_T[12]_[ABC]", c.source.canvas_name or "")]
+    if not stations and native_stations:
+        stations = sorted(native_stations, key=lambda c: c.definition)
     arms = [
         component
         for component in evidence.components
         if component.definition.rsplit(":", 1)[-1].casefold().endswith("arm")
         and not any(term in component.definition.casefold() for term in ("measurement", "current", "control"))
     ]
+    if native_cells:
+        arms = native_cells
     controls = _items(evidence, ("control", "carrier", "firing"))
     protection = _items(evidence, ("protection", "breaker", "fault"))
     measurements = _items(evidence, ("measurement", "meter"))
+    if native_cells:
+        measurements.extend(c for c in evidence.components if c.definition == "master:pgb" and c.parameters.get("Name", "").startswith("MFE_"))
     structural_text = " ".join(
         [*evidence.definitions, *(f"{item.name} {item.definition}" for item in evidence.components)]
     ).casefold()
@@ -74,6 +87,8 @@ def inspect_mmc_evidence(evidence: HvdcProjectEvidence) -> dict[str, object]:
         else "unknown"
     )
     converter = "half_bridge" if "halfbridge" in structural_text or "half bridge" in structural_text else "unknown"
+    if native_cells:
+        converter = "full_bridge"
 
     positive = _conductor_endpoints(evidence, "positive")
     negative = _conductor_endpoints(evidence, "negative")
@@ -88,7 +103,7 @@ def inspect_mmc_evidence(evidence: HvdcProjectEvidence) -> dict[str, object]:
         unresolved.append("MMC positive and negative conductors do not prove one shared two-station link.")
     if len(arms) != 12:
         unresolved.append(f"MMC inspection found {len(arms)} of 12 required station arms.")
-    arm_measurements = [item for item in measurements if "armcurrent" in _description(item) or "arm current" in _description(item)]
+    arm_measurements = [item for item in measurements if "armcurrent" in _description(item) or "arm current" in _description(item) or (item.parameters.get("Name", "").endswith("_i_arm") and item.parameters.get("Units") == "kA")]
     if len(arm_measurements) != 12:
         unresolved.append(f"MMC inspection found {len(arm_measurements)} of 12 required arm-current measurements.")
     if model_fidelity == "unknown":

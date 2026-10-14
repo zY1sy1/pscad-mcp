@@ -65,6 +65,25 @@ async def accept(args, report, checkpoint):
             raise RuntimeError(
                 "The public PWM builder has no complete passing acceptance"
             )
+        final_project = status["engines"][0]["final_path"]
+        manifest = json.loads(
+            Path(status["engines"][0]["acceptance_manifest"]).read_text()
+        )
+        report["independent_validation"] = await asyncio.to_thread(
+            builder.validate_model,
+            final_project,
+            "detailed_pwm",
+            list(manifest["delivery"]["outputs"]),
+            "full",
+        )
+        if report["independent_validation"]["accepted"] is not True:
+            raise RuntimeError(
+                "The public validation API did not confirm frozen PWM physical evidence"
+            )
+        report["delivered_project_sha256"] = digest(final_project)
+        report["acceptance_manifest_sha256"] = digest(
+            status["engines"][0]["acceptance_manifest"]
+        )
         report["model_accepted"] = True
         report["status"] = "PASS"
     except Exception as error:  # noqa: BLE001 - preserve the public attempt verdict

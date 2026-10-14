@@ -12,10 +12,10 @@ import shutil
 import tempfile
 import threading
 import uuid
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import replace
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from ....core.backend.base import BackendError
 from ....core.path_policy import PathPolicy
@@ -37,7 +37,6 @@ from .parametric_models import (
 from .parametric_planner import create_parametric_plan
 from .scenarios import recommend_scenarios
 from .template_audit import audit_mmc_template
-
 
 _CACHE_MAX = 64
 _TERMINAL = {"built", "published", "failed", "interrupted"}
@@ -128,9 +127,7 @@ class ParametricMmcBuilderService:
         self._statuses: dict[str, dict[str, Any]] = {}
         self._tasks: dict[str, asyncio.Task[Any]] = {}
         self._leases: dict[str, WorkspaceBuildLease] = {}
-        self._published_projects: dict[
-            str, tuple[MmcParametricRequest, str, str]
-        ] = {}
+        self._published_projects: dict[str, tuple[MmcParametricRequest, str, str]] = {}
 
     def _workspace(self, folder: str | Path, operation: str) -> Path:
         if self.workspace_root is None:
@@ -139,7 +136,10 @@ class ParametricMmcBuilderService:
                 "A configured workspace is required for parametric MMC planning.",
                 operation,
             )
-        if not isinstance(folder, (str, Path)) or not Path(folder).expanduser().is_absolute():
+        if (
+            not isinstance(folder, (str, Path))
+            or not Path(folder).expanduser().is_absolute()
+        ):
             raise _error(
                 "MMC_LAYOUT_INVALID",
                 "folder must be an absolute path inside the configured workspace.",
@@ -371,7 +371,10 @@ class ParametricMmcBuilderService:
         if not callable(reader):
             return
         identity = await reader()
-        if not isinstance(identity, Mapping) or identity.get("pscad_version") != "4.6.2":
+        if (
+            not isinstance(identity, Mapping)
+            or identity.get("pscad_version") != "4.6.2"
+        ):
             return
         master = Path(str(identity.get("master_path", ""))).expanduser()
         if (
@@ -389,12 +392,11 @@ class ParametricMmcBuilderService:
         for scenario in scenarios:
             scenario["timed_control_options"] = {
                 "master_path": str(master.resolve()),
-                "max_timing_error_s": scenario["time_step_s"] + scenario["output_step_s"],
+                "max_timing_error_s": scenario["time_step_s"]
+                + scenario["output_step_s"],
             }
 
-    async def _execute_child(
-        self, plan: MmcParentPlan, child: Any
-    ) -> dict[str, Any]:
+    async def _execute_child(self, plan: MmcParentPlan, child: Any) -> dict[str, Any]:
         engine = self._engine_for(child.engine)
         attempted: list[str] = []
         attempts: list[dict[str, Any]] = []
@@ -423,7 +425,10 @@ class ParametricMmcBuilderService:
                     result = await engine.execute_candidate(
                         child, self.pscad_service, candidate_id=candidate_id
                     )
-                if not isinstance(result, Mapping) or result.get("state") not in {"built", "accepted"}:
+                if not isinstance(result, Mapping) or result.get("state") not in {
+                    "built",
+                    "accepted",
+                }:
                     raise _error(
                         "MMC_ACCEPTANCE_FAILED",
                         "An MMC engine returned a non-accepted candidate record.",
@@ -433,9 +438,7 @@ class ParametricMmcBuilderService:
                     )
                 result_dict = copy.deepcopy(dict(result))
                 candidate_state = str(result_dict["state"])
-                capability_level = str(
-                    result_dict.get("capability_level", "accepted")
-                )
+                capability_level = str(result_dict.get("capability_level", "accepted"))
                 attempts.append(
                     {
                         "candidate_id": candidate_id,
@@ -538,7 +541,9 @@ class ParametricMmcBuilderService:
         source = Path(value).expanduser().resolve()
         if self.workspace_root is None:
             raise _error(
-                "MMC_LAYOUT_INVALID", "MMC workspace is unavailable.", "build_parametric_mmc_model"
+                "MMC_LAYOUT_INVALID",
+                "MMC workspace is unavailable.",
+                "build_parametric_mmc_model",
             )
         try:
             source.relative_to(self.workspace_root)
@@ -576,7 +581,9 @@ class ParametricMmcBuilderService:
         expected_hash = (
             engine_plan.source_hashes.get("library")
             if engine_plan.engine == "detailed_pwm"
-            else result.get("library_sha256") if isinstance(result, Mapping) else None
+            else result.get("library_sha256")
+            if isinstance(result, Mapping)
+            else None
         )
         if engine_plan.engine == "average_value" and value is None:
             return None
@@ -707,6 +714,7 @@ class ParametricMmcBuilderService:
         created_projects: list[Path] = []
         published_targets: list[Path] = []
         scenario_sources: list[Path] = []
+        acceptance_manifests: list[Path] = []
         created_libraries: list[Path] = []
         existing_library_backups: list[tuple[Path, Path]] = []
         try:
@@ -716,7 +724,9 @@ class ParametricMmcBuilderService:
                 target = Path(str(record["final_path"])).resolve()
                 if self.workspace_root is None:
                     raise _error(
-                        "MMC_LAYOUT_INVALID", "MMC workspace is unavailable.", "build_parametric_mmc_model"
+                        "MMC_LAYOUT_INVALID",
+                        "MMC workspace is unavailable.",
+                        "build_parametric_mmc_model",
                     )
                 try:
                     target.relative_to(self.workspace_root)
@@ -791,7 +801,9 @@ class ParametricMmcBuilderService:
                     if library_created:
                         created_libraries.append(library_target)
                     elif library_backup is not None:
-                        existing_library_backups.append((library_target, library_backup))
+                        existing_library_backups.append(
+                            (library_target, library_backup)
+                        )
                     record["final_library_path"] = str(library_target)
                     load_paths.insert(0, str(library_target))
                 if published_by_save_as:
@@ -831,8 +843,67 @@ class ParametricMmcBuilderService:
                         "output_filename": expected_output
                     }
                 else:
-                    await self.pscad_service.load_projects(load_paths)
+                    if (
+                        isinstance(candidate_result, Mapping)
+                        and candidate_result.get("routed_physical_acceptance") is True
+                    ):
+                        reloader = getattr(self.pscad_service, "reload_project", None)
+                        if not callable(reloader):
+                            raise _error(
+                                "MMC_BUILD_UNAVAILABLE",
+                                "Final PWM publication requires unloading and reloading its exact saved file.",
+                                "build_parametric_mmc_model",
+                            )
+                        if library_target is not None:
+                            await self.pscad_service.load_projects(
+                                [str(library_target)]
+                            )
+                        record["publication_reload"] = await reloader(
+                            target.stem, str(target)
+                        )
+                    else:
+                        await self.pscad_service.load_projects(load_paths)
                 await self.pscad_service.build_project(target.stem)
+                if (
+                    isinstance(candidate_result, Mapping)
+                    and candidate_result.get("routed_physical_acceptance") is True
+                ):
+                    manifest = json.loads(
+                        Path(
+                            candidate_result["validation"]["physical_evidence"]
+                        ).read_text()
+                    )
+                    if _sha256(target) != manifest["project_sha256"]:
+                        raise _error(
+                            "MMC_POSTCONDITION_FAILED",
+                            "The published PWM file differs from its frozen measured model.",
+                            "build_parametric_mmc_model",
+                        )
+                    messages = await self.pscad_service.get_project_output(
+                        target.stem, structured=True
+                    )
+                    if any(
+                        str(m.get("severity", "")).casefold() in {"error", "fatal"}
+                        for m in messages
+                    ):
+                        raise _error(
+                            "MMC_POSTCONDITION_FAILED",
+                            "The final PWM reload did not compile.",
+                            "build_parametric_mmc_model",
+                            messages=messages,
+                        )
+                    manifest["publication"] = {
+                        "project": str(target),
+                        "project_sha256": _sha256(target),
+                        "reload": record["publication_reload"],
+                        "build_messages": messages,
+                    }
+                    manifest_file = target.with_name(target.stem + "_acceptance.json")
+                    with manifest_file.open("x", encoding="utf-8") as stream:
+                        acceptance_manifests.append(manifest_file)
+                        json.dump(manifest, stream, indent=2)
+                    record["acceptance_manifest"] = str(manifest_file)
+                    record["acceptance_manifest_sha256"] = _sha256(manifest_file)
                 if library_target is not None and expected_library_hash is not None:
                     observed_library_hash = _sha256(library_target)
                     if not hmac.compare_digest(
@@ -849,9 +920,10 @@ class ParametricMmcBuilderService:
                     record["final_library_sha256"] = observed_library_hash
                 scenario_source = _scenario_source_path(target)
                 try:
-                    with target.open("rb") as source_stream, scenario_source.open(
-                        "xb"
-                    ) as target_stream:
+                    with (
+                        target.open("rb") as source_stream,
+                        scenario_source.open("xb") as target_stream,
+                    ):
                         scenario_sources.append(scenario_source)
                         shutil.copyfileobj(source_stream, target_stream)
                 except FileExistsError as error:
@@ -868,6 +940,11 @@ class ParametricMmcBuilderService:
             return [str(target) for target in published_targets]
         except BaseException:
             rollback_failures: list[str] = []
+            for manifest_file in reversed(acceptance_manifests):
+                try:
+                    manifest_file.unlink(missing_ok=True)
+                except OSError:
+                    rollback_failures.append(str(manifest_file))
             for scenario_source in reversed(scenario_sources):
                 try:
                     scenario_source.unlink(missing_ok=True)
@@ -939,7 +1016,9 @@ class ParametricMmcBuilderService:
                     ],
                     "publication_pending": "required_dynamic_physical_acceptance",
                 }
-                record["history"].append({"state": "built", "reason": "dynamic_acceptance_pending"})
+                record["history"].append(
+                    {"state": "built", "reason": "dynamic_acceptance_pending"}
+                )
             else:
                 final_paths = await self._publish(engines, plan.engine_plans)
                 for child, engine_record, final_path in zip(
@@ -1056,9 +1135,7 @@ class ParametricMmcBuilderService:
         recommendations = []
         for fidelity in fidelities:
             design = derive_mmc_parameters(replace(request, model_fidelity=fidelity))
-            for item in recommend_scenarios(
-                design, derived_project=derived_project
-            ):
+            for item in recommend_scenarios(design, derived_project=derived_project):
                 if not selected_names or item.name in selected_names:
                     recommendations.append(item.to_dict())
         return {
@@ -1183,6 +1260,19 @@ class ParametricMmcBuilderService:
         }
         if not output_files:
             return result
+        if model_fidelity == "detailed_pwm":
+            from .pwm_validation import validate_routed_pwm_evidence
+
+            result["acceptance"] = _run_coroutine_sync(
+                lambda: validate_routed_pwm_evidence(
+                    project, output_files, acceptance_scope, self.workspace_root
+                )
+            )
+            result["accepted"] = result["acceptance"]["verdict"] == "PASS"
+            result["capability_level"] = (
+                "accepted" if result["accepted"] else "simulated"
+            )
+            return result
         reader = getattr(self.pscad_service, "read_output_file", None)
         if not callable(reader):
             raise _error(
@@ -1214,8 +1304,7 @@ class ParametricMmcBuilderService:
             )
             outputs.append(payload)
         passed = bool(outputs) and all(
-            isinstance(item, Mapping)
-            and str(item.get("verdict", "")).upper() == "PASS"
+            isinstance(item, Mapping) and str(item.get("verdict", "")).upper() == "PASS"
             for item in outputs
         )
         result["capability_level"] = "accepted" if passed else "simulated"
