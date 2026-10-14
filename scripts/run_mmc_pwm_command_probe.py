@@ -11,12 +11,16 @@ import asyncio
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 from xml.etree import ElementTree as ET
+
+import psutil
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -39,6 +43,77 @@ from pscad_mcp.hvdc.builders.mmc.line_constants import (
 
 def _hash(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def write_report(path: Path, report: dict) -> None:
+    """Retry transient Windows sharing locks while retaining atomic publication."""
+    with tempfile.NamedTemporaryFile(
+        mode="w", encoding="utf-8", dir=path.parent, suffix=".tmp", delete=False
+    ) as stream:
+        json.dump(report, stream, indent=2, ensure_ascii=True)
+        temporary = Path(stream.name)
+    try:
+        for attempt in range(8):
+            try:
+                temporary.replace(path)
+                return
+            except PermissionError:
+                if attempt == 7:
+                    raise
+                time.sleep(0.05 * (attempt + 1))
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def owned_children(runtime: dict | None) -> list[dict]:
+    if runtime is None:
+        return []
+    pid = runtime["session"]["managed_pid"]
+    try:
+        children = psutil.Process(pid).children(recursive=True)
+    except psutil.NoSuchProcess:
+        return []
+    records = []
+    for child in children:
+        try:
+            records.append({"pid": child.pid, "name": child.name(), "exe": child.exe()})
+        except psutil.NoSuchProcess:
+            continue
+    return records
+
+
+async def cleanup_owned(service, name, runtime, originals, report, checkpoint, pending):
+    """A failed report checkpoint must never bypass owned process cleanup."""
+    if pending and name is not None:
+        try:
+            report["stop_result"] = await service.stop_simulation(name)
+        except Exception as error:  # noqa: BLE001 - retain the actual stop failure
+            report["stop_error"] = str(error)
+    report["stage"] = "cleanup"
+    try:
+        checkpoint()
+    except OSError as error:
+        report.setdefault("checkpoint_errors", []).append(str(error))
+        report["status"] = "FAIL"
+    try:
+        report["quit_result"] = await service.quit_pscad(confirm=True)
+    except Exception as error:  # noqa: BLE001 - retain owned cleanup evidence
+        report["quit_error"] = str(error)
+        report["status"] = "FAIL"
+    report["sources_immutable"] = all(
+        _hash(Path(path)) == digest for path, digest in originals.items()
+    )
+    if runtime is not None:
+        report["remaining_owned_processes"] = remaining_acceptance_processes(
+            runtime, list_pscad_processes
+        )
+    if not report["sources_immutable"] or report.get("remaining_owned_processes"):
+        report["status"] = "FAIL"
+    try:
+        checkpoint()
+    except OSError as error:
+        report.setdefault("checkpoint_errors", []).append(str(error))
+        report["status"] = "FAIL"
 
 
 async def run(args, report, checkpoint):
@@ -115,6 +190,7 @@ async def run(args, report, checkpoint):
     report["prepared_input_sha256"] = _hash(project)
     service = _service(directory)
     runtime = None
+    name = None
     pending = False
     try:
         report["stage"] = "attach"
@@ -166,11 +242,14 @@ async def run(args, report, checkpoint):
             pending = True
             report["run_result"] = await service.run_project(name)
             deadline = time.monotonic() + args.timeout
+            startup_deadline = time.monotonic() + args.startup_timeout
+            activity_seen = False
             while True:
                 state = await service.get_run_status(name)
                 report["run_state"] = state
                 checkpoint()
                 status = str(state.get("status", "")).casefold()
+                activity_seen = activity_seen or status in {"running", "paused"}
                 if status in {"completed", "complete", "idle"}:
                     fresh = [
                         p
@@ -183,6 +262,10 @@ async def run(args, report, checkpoint):
                         break
                 if status in {"failed", "stopped", "interrupted"}:
                     raise RuntimeError(f"Simulation ended with {status}")
+                if not activity_seen and time.monotonic() > startup_deadline:
+                    raise RuntimeError(
+                        "Owned PWM solver did not start or produce output"
+                    )
                 if time.monotonic() > deadline:
                     raise TimeoutError("Owned PWM simulation timed out")
                 await asyncio.sleep(0.5)
@@ -203,33 +286,21 @@ async def run(args, report, checkpoint):
                     started_after=report["run_started_after"],
                 )
         report["status"] = "PASS"
-    finally:
-        if pending:
+    except Exception:
+        if name is not None:
             try:
-                report["stop_result"] = await service.stop_project(name)
-            except Exception as error:  # noqa: BLE001 - preserve the owned stop failure
-                report["stop_error"] = str(error)
-        report["stage"] = "cleanup"
-        checkpoint()
-        try:
-            report["quit_result"] = await service.quit_pscad(confirm=True)
-        except Exception as error:  # noqa: BLE001 - preserve the owned cleanup failure
-            report["quit_error"] = str(error)
-            report["status"] = "FAIL"
-        report["sources_immutable"] = all(
-            _hash(Path(p)) == digest for p, digest in originals.items()
+                report["post_run_messages"] = await service.get_project_output(
+                    name, structured=True
+                )
+                report["post_run_runtime"] = await service.status()
+                report["owned_children"] = owned_children(runtime)
+            except Exception as error:  # noqa: BLE001 - preserve diagnostics failure
+                report["diagnostic_error"] = str(error)
+        raise
+    finally:
+        await cleanup_owned(
+            service, name, runtime, originals, report, checkpoint, pending
         )
-        if runtime is not None:
-            report["remaining_owned_processes"] = remaining_acceptance_processes(
-                runtime, list_pscad_processes
-            )
-        if (
-            not report["sources_immutable"]
-            or report.get("remaining_owned_processes")
-            or report.get("quit_error")
-        ):
-            report["status"] = "FAIL"
-        checkpoint()
 
 
 def main():
@@ -242,7 +313,12 @@ def main():
     parser.add_argument("--case-name", default="H_MMC_Mono_DC")
     parser.add_argument("--duration", type=float, default=0.8)
     parser.add_argument("--timeout", type=float, default=300.0)
+    parser.add_argument("--startup-timeout", type=float, default=30.0)
     args = parser.parse_args()
+    if re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,29}", args.case_name) is None:
+        parser.error(
+            "--case-name must be a valid EMTDC namespace of at most 30 characters"
+        )
     for name in ("PSCAD_MCP_ACCEPTANCE", "PSCAD_MCP_MMC_ACCEPTANCE"):
         if os.getenv(name) != "1":
             raise SystemExit(f"{name}=1 is required")
@@ -259,11 +335,7 @@ def main():
     }
 
     def checkpoint():
-        temporary = report_path.with_suffix(".tmp")
-        temporary.write_text(
-            json.dumps(report, indent=2, ensure_ascii=True), encoding="utf-8"
-        )
-        temporary.replace(report_path)
+        write_report(report_path, report)
 
     checkpoint()
     try:
