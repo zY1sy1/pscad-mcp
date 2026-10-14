@@ -29,6 +29,7 @@ from pscad_mcp.acceptance.process_scope import (
 from pscad_mcp.core.backend.base import BackendError
 from pscad_mcp.core.executor import robust_executor
 from pscad_mcp.core.process_inventory import list_pscad_processes
+from pscad_mcp.hvdc.builders.mmc import timed_control
 from pscad_mcp.hvdc.builders.mmc.engines.pwm import _copy_library_support
 from pscad_mcp.hvdc.builders.mmc.line_constants import (
     generate_public_line_constants,
@@ -44,10 +45,14 @@ async def run(args, report, checkpoint):
     source, library = args.source.resolve(), args.library.resolve()
     directory = args.workspace.resolve()
     inputs = [source, library, Path(r"C:\Program Files (x86)\PSCAD46\master.pslx")]
+    if args.scenario is not None:
+        inputs.append(args.scenario.resolve())
     originals = {str(p): _hash(p) for p in inputs}
     report["original_inputs"] = originals
-    report["tested_commit"] = subprocess.check_output(
-        ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True
+    report["tested_commit"] = (
+        await asyncio.to_thread(
+            subprocess.check_output, ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True
+        )
     ).strip()
     report["producer_hashes"] = {
         str(p.relative_to(ROOT)): _hash(p)
@@ -64,6 +69,34 @@ async def run(args, report, checkpoint):
     shutil.copy2(library, directory / "intermediate.pslx")
     _copy_library_support(library, directory)
     tree = ET.parse(project)
+    schedule = None
+    if args.scenario is not None:
+        scenario = json.loads(args.scenario.read_text(encoding="utf-8"))
+        schedule = scenario["timed_control"]
+        if Path(schedule["scenario_source"]["path"]).resolve() != source or schedule[
+            "scenario_source"
+        ]["sha256"] != _hash(source):
+            raise RuntimeError("The schedule does not bind the supplied source")
+        if args.duration != schedule["duration_s"]:
+            raise RuntimeError("Simulation duration differs from the schedule")
+        tree = ET.ElementTree(timed_control._render(schedule, project.stem))
+        for constant in constants:
+            found = 0
+            for wire in tree.getroot().findall(".//Wire[@classid='TLine']"):
+                fields = {
+                    p.get("name"): p for p in wire.findall("./User/paramlist/param")
+                }
+                if (
+                    fields.get("Name") is not None
+                    and fields["Name"].get("value") == constant.segment
+                ):
+                    fields["const_path"].set("value", constant.constants_path)
+                    found += 1
+            if found != 1:
+                raise RuntimeError(
+                    "The timed case has no unique line constants binding"
+                )
+        report["schedule_sha256"] = schedule["schedule_sha256"]
     parameters = tree.getroot().find("paramlist")
     for name, value in {
         "StartType": "0",
@@ -107,6 +140,10 @@ async def run(args, report, checkpoint):
             raise RuntimeError(f"Expected one owned case, observed {cases}")
         name = cases[0]["name"]
         await service.save_project(name, confirm=True)
+        if schedule is not None:
+            report["timed_readback"] = timed_control.verify_embedded_control(
+                schedule, project
+            )
         report["saved_project_sha256"] = _hash(project)
         report["stage"] = "compile"
         checkpoint()
@@ -151,18 +188,25 @@ async def run(args, report, checkpoint):
             if not outputs:
                 raise RuntimeError("No fresh PWM OUT files")
             report["output_files"] = {str(p): _hash(p) for p in outputs}
+            if schedule is not None:
+                report["timing_evidence"] = timed_control.read_event_evidence(
+                    schedule,
+                    project,
+                    outputs,
+                    started_after=report["run_started_after"],
+                )
         report["status"] = "PASS"
     finally:
         if pending:
             try:
                 report["stop_result"] = await service.stop_project(name)
-            except Exception as error:
+            except Exception as error:  # noqa: BLE001 - preserve the owned stop failure
                 report["stop_error"] = str(error)
         report["stage"] = "cleanup"
         checkpoint()
         try:
             report["quit_result"] = await service.quit_pscad(confirm=True)
-        except Exception as error:
+        except Exception as error:  # noqa: BLE001 - preserve the owned cleanup failure
             report["quit_error"] = str(error)
             report["status"] = "FAIL"
         report["sources_immutable"] = all(
@@ -187,6 +231,7 @@ def main():
     parser.add_argument("--library", type=Path, required=True)
     parser.add_argument("--workspace", type=Path, required=True)
     parser.add_argument("--simulate", action="store_true")
+    parser.add_argument("--scenario", type=Path)
     parser.add_argument("--duration", type=float, default=0.8)
     parser.add_argument("--timeout", type=float, default=300.0)
     args = parser.parse_args()
@@ -215,7 +260,7 @@ def main():
     checkpoint()
     try:
         asyncio.run(run(args, report, checkpoint))
-    except Exception as error:
+    except Exception as error:  # noqa: BLE001 - persist the complete attempt verdict
         report["status"] = "FAIL"
         report["error"] = (
             error.to_dict()

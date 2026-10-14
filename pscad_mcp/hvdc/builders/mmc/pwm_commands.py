@@ -300,7 +300,7 @@ class _Editor:
             ).text = "true"
             canvas = definition.find("schematic")
             self.user(canvas, "master:import", 7200, 216, {"Name": "McpReset"})
-            self.label(canvas, "McpResetLocal", (7236, 216))
+            self.label(canvas, "McpReset", (7236, 216))
         converter = definitions["VSCConverter"].find("schematic")
         children = [
             u
@@ -315,7 +315,7 @@ class _Editor:
             (-90, -72),
             child.get("orient", "0"),
         )
-        self.label(converter, "McpResetLocal", point)
+        self.label(converter, "McpReset", point)
         self.routes.append(
             {
                 "role": "reset_command",
@@ -344,13 +344,18 @@ class _Editor:
             wires = []
             for wire in canvas.findall("Wire"):
                 vertices = wire.findall("vertex")
-                if any(
+                coordinates = [
                     (
                         int(wire.get("x", "0")) + int(v.get("x")),
                         int(wire.get("y", "0")) + int(v.get("y")),
                     )
-                    == point
                     for v in vertices
+                ]
+                if any(
+                    min(a[0], b[0]) <= point[0] <= max(a[0], b[0])
+                    and min(a[1], b[1]) <= point[1] <= max(a[1], b[1])
+                    and (a[0] == b[0] or a[1] == b[1])
+                    for a, b in pairwise(coordinates)
                 ):
                     wires.append(wire)
             if len(wires) > 1:
@@ -371,12 +376,39 @@ class _Editor:
                     )
                     for v in vertices
                 ]
-                if point not in (coordinates[0], coordinates[-1]):
-                    raise _error(
-                        "A PI reset route cannot be separated without changing a shared net."
+                if point in (coordinates[0], coordinates[-1]):
+                    kept = (
+                        coordinates[1:] if point == coordinates[0] else coordinates[:-1]
                     )
-                kept = coordinates[1:] if point == coordinates[0] else coordinates[:-1]
-                moved = kept[0] if point == coordinates[0] else kept[-1]
+                    moved = kept[0] if point == coordinates[0] else kept[-1]
+                else:
+                    kept = [coordinates[0]]
+                    for a, b in pairwise(coordinates):
+                        if min(a[0], b[0]) <= point[0] <= max(a[0], b[0]) and min(
+                            a[1], b[1]
+                        ) <= point[1] <= max(a[1], b[1]):
+                            if a[1] == b[1]:
+                                direction = 1 if b[0] > a[0] else -1
+                                kept.extend(
+                                    [
+                                        (point[0] - 18 * direction, point[1]),
+                                        (point[0] - 18 * direction, point[1] - 18),
+                                        (point[0] + 18 * direction, point[1] - 18),
+                                        (point[0] + 18 * direction, point[1]),
+                                    ]
+                                )
+                            else:
+                                direction = 1 if b[1] > a[1] else -1
+                                kept.extend(
+                                    [
+                                        (point[0], point[1] - 18 * direction),
+                                        (point[0] - 18, point[1] - 18 * direction),
+                                        (point[0] - 18, point[1] + 18 * direction),
+                                        (point[0], point[1] + 18 * direction),
+                                    ]
+                                )
+                        kept.append(b)
+                    moved = coordinates[0]
                 for vertex in vertices:
                     wire.remove(vertex)
                 if len(kept) > 1:
@@ -407,7 +439,7 @@ class _Editor:
             x, y = 7560, 432 + index * 180
             self.user(canvas, self.namespace + ":McpPwmResetOr", x, y, {})
             self.label(canvas, original_signal, (x - 72, y - 36))
-            self.label(canvas, "McpResetLocal", (x - 72, y + 36))
+            self.label(canvas, "McpReset", (x - 72, y + 36))
             self.label(canvas, combined_signal, (x + 72, y))
             self.label(canvas, combined_signal, point)
             self.probe(
@@ -470,7 +502,8 @@ class _Editor:
                     )
                 wire, vertices = matches[0]
                 line_point = vertices[-1] if vertices[0] == point else vertices[0]
-                # Preserve existing voltage-node names that lay on this wire.
+                # PSCAD requires one consistent name for an electrical bus.
+                original_node_names = []
                 for label in main.findall("User"):
                     if label.get("defn") != "master:nodelabel":
                         continue
@@ -483,13 +516,19 @@ class _Editor:
                     ):
                         label.set("x", str(line_point[0]))
                         label.set("y", str(line_point[1]))
+                        original_node_names.append(_params(label)["Name"])
                 main.remove(wire)
-                arm_net, line_net = (
-                    f"McpDcArm{station}_{pole}",
-                    f"McpDcLine{station}_{pole}",
+                if len(set(original_node_names)) > 1:
+                    raise _error("The original DC wire has ambiguous node names.")
+                arm_net = f"McpDcArm{station}_{pole}"
+                line_net = (
+                    original_node_names[0]
+                    if original_node_names
+                    else f"McpDcLine{station}_{pole}"
                 )
                 self.label(main, arm_net, point, electrical=True)
-                self.label(main, line_net, line_point, electrical=True)
+                if not original_node_names:
+                    self.label(main, line_net, line_point, electrical=True)
                 x, y = 8100, 432 + (station * 2 + pole) * 216
                 state = f"McpDcClosed{station}_{pole}"
                 switch = self.user(
@@ -772,10 +811,16 @@ def materialize_pwm_command_interface(
         values = _params(component)
         if values.get("Name") == "Fault Time":
             _set(component, "Value", "100")
-        if values.get("Name") == "DC_flt_2_PN":
+        if (
+            component.get("defn") == "master:fault_sw"
+            and values.get("Name") == "DC_flt_2_PN"
+        ):
             _set(component, "Name", "McpDcPnFault")
             _set(component, "OpCur", "1")
-        if values.get("Name") == "DC_flt_2_P":
+        if (
+            component.get("defn") == "master:fault_sw"
+            and values.get("Name") == "DC_flt_2_P"
+        ):
             _set(component, "Name", "McpDcPgFault")
             _set(component, "OpCur", "1")
     ac_fault = main.find("User[@id='75317492']")
