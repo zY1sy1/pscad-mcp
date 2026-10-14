@@ -23,6 +23,7 @@ _PARAMETER_BINDINGS = {
     "active_power_mw": "requested_active_power_mw",
     "VdcBase": "rated_dc_voltage_kv",
     "Sbase": "rated_power_mw",
+    "freq": "frequency_hz",
     "fref": "frequency_hz",
 }
 _TERMINAL_SCENARIO_STATES = {"completed", "failed", "timed_out"}

@@ -10,6 +10,7 @@ from pscad_mcp.core.backend.base import BackendError
 from pscad_mcp.hvdc.builders.mmc.engines.pwm import (
     _copy_library_support,
     _legacy_output_settings,
+    _planned_parameter_writes,
     execute_pwm_candidate,
 )
 from tests.mmc_parametric_fakes import (
@@ -490,3 +491,16 @@ def test_pwm_engine_stops_at_public_mutation_boundary(
     names = [name for name, _ in service.calls]
     assert names[-1] == boundary
     assert not (tmp_path / "MMC_CASE_pwm.pscx").exists()
+
+
+def test_pwm_frequency_write_reaches_control_and_arm_models(tmp_path: Path):
+    project, library = make_synthetic_official_shape(tmp_path / "sources")
+    plan = pwm_plan(project, library, tmp_path)
+    plan = replace(plan, source_bindings=(
+        {"owner": "21", "parameter": "freq", "value": "60 [Hz]"},
+        {"owner": "31", "parameter": "fref", "value": "60 [Hz]"},
+    ))
+    candidate = replace(plan.candidates[0], parameters={**dict(plan.candidates[0].parameters), "frequency_hz": 50.0})
+    assert set(_planned_parameter_writes(plan, candidate)) == {
+        ("21", "freq", 50.0), ("31", "fref", 50.0),
+    }
