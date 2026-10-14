@@ -240,7 +240,14 @@ def plan_embedded_control(
                     "Embedded controls require bounded intervals and before/after values.",
                     field=field,
                 )
-        if event["end_time_s"] >= duration_s or event["time_s"] == 0:
+        shape = event.get("event_shape", "pulse")
+        if shape not in {"pulse", "step"}:
+            raise _error("Unsupported embedded event shape.", event_shape=shape)
+        if (
+            event["end_time_s"] > duration_s
+            if shape == "step"
+            else event["end_time_s"] >= duration_s
+        ) or event["time_s"] == 0:
             raise _error(
                 "An event needs observable samples before its rise and after its fall."
             )
@@ -260,7 +267,14 @@ def plan_embedded_control(
                 "The scheduled before value differs from the source/preceding event.",
                 target=target,
             )
-        if event["value"] in {event["before_value"], event["after_value"]}:
+        if shape == "step" and event["after_value"] != event["value"]:
+            raise _error(
+                "A sustained step must retain its value until the next transition."
+            )
+        if shape == "pulse" and event["value"] in {
+            event["before_value"],
+            event["after_value"],
+        }:
             raise _error("Each bounded event must expose both observable edges.")
         if owner not in channels:
             while str(next_id) in used_ids:
@@ -627,6 +641,70 @@ def bind_embedded_request(plan, source, requests, profile):
     return bindings
 
 
+def _measure_step_waveforms(plan, events, times, values, edges):
+    """Check every real step edge and the complete intervening plateaus."""
+    equal = lambda a, b: math.isclose(a, b, rel_tol=0, abs_tol=1e-9)
+    changes = [
+        event for event in events if not equal(event["before_value"], event["value"])
+    ]
+    if len(edges) != len(changes) or not equal(values[0], events[0]["before_value"]):
+        raise _error(
+            "A step waveform has missing or unexpected transitions.",
+            expected_edges=len(changes),
+            observed_edges=len(edges),
+        )
+    by_id = dict(zip((event["event_id"] for event in changes), edges))
+    records = []
+    for index, event in enumerate(events):
+        end = (
+            events[index + 1]["time_s"]
+            if index + 1 < len(events)
+            else plan["duration_s"]
+        )
+        if event["end_time_s"] != end:
+            raise _error(
+                "A step hold interval differs from its next transition or simulation end."
+            )
+        edge = by_id.get(event["event_id"])
+        error = None if edge is None else times[edge] - event["time_s"]
+        if error is not None and abs(error) > plan["max_timing_error_s"] + 1e-12:
+            raise _error(
+                "Measured step timing exceeds its fixed bound.",
+                event_id=event["event_id"],
+                rise_error_s=error,
+            )
+        start = event["time_s"] if edge is None else times[edge]
+        indices = [
+            i
+            for i, t in enumerate(times)
+            if start <= t < end or (index + 1 == len(events) and t == end)
+        ]
+        if not indices or any(not equal(values[i], event["value"]) for i in indices):
+            raise _error(
+                "The sustained step plateau differs from the requested value.",
+                event_id=event["event_id"],
+            )
+        records.append(
+            {
+                "event_id": event["event_id"],
+                "event_shape": "step",
+                "requested_time_s": event["time_s"],
+                "timing_measurement_applicable": edge is not None,
+                "rise_time_s": None if edge is None else times[edge],
+                "fall_time_s": None,
+                "rise_error_s": error,
+                "fall_error_s": None,
+                "duration_s": end - event["time_s"],
+                "active_sample_count": len(indices),
+                "sample_count": len(times),
+                "time_range_s": [times[0], times[-1]],
+                "units": event["units"],
+                "event_selector": deepcopy(event["event_selector"]),
+            }
+        )
+    return records
+
+
 def measure_event_waveforms(
     plan: Mapping[str, Any], samples: Mapping[str, Any]
 ) -> list[dict[str, Any]]:
@@ -690,6 +768,13 @@ def measure_event_waveforms(
             for index in range(1, len(times))
             if not equal(values[index], values[index - 1])
         ]
+        if any(event.get("event_shape") == "step" for event in events):
+            if any(event.get("event_shape") != "step" for event in events):
+                raise _error("One source cannot mix step and pulse contracts.")
+            measurements.extend(
+                _measure_step_waveforms(plan, events, times, values, edges)
+            )
+            continue
         if len(edges) != 2 * len(events) or not equal(
             values[0], events[0]["before_value"]
         ):
@@ -735,7 +820,14 @@ def measure_event_waveforms(
                     "event_selector": deepcopy(event["event_selector"]),
                 }
             )
-    return sorted(measurements, key=lambda item: item["rise_time_s"])
+    return sorted(
+        measurements,
+        key=lambda item: (
+            item["requested_time_s"]
+            if item.get("rise_time_s") is None
+            else item["rise_time_s"]
+        ),
+    )
 
 
 def read_event_evidence(

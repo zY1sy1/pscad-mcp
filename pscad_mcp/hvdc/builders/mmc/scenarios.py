@@ -68,7 +68,10 @@ def _timing(
     design: MmcDerivedParameters, engine: str, candidate: Mapping[str, Any]
 ) -> tuple[float, float]:
     settings = candidate["settings"]
-    if engine == "average_value" and "native_cable_profile_hash" in candidate["parameters"]:
+    if (
+        engine == "average_value"
+        and "native_cable_profile_hash" in candidate["parameters"]
+    ):
         return float(settings["time_step_s"]), float(settings["output_step_s"])
     control_sample = float(settings["control_sample_time_s"])
     if engine == "detailed_pwm":
@@ -81,7 +84,7 @@ def _timing(
     return time_step, max(time_step, control_sample)
 
 
-def _event(time_s: float, target: str, value: int | float) -> dict[str, Any]:
+def _event(time_s: float, target: str, value: float) -> dict[str, Any]:
     return {"time_s": time_s, "target": target, "value": value}
 
 
@@ -175,9 +178,7 @@ def recommend_scenarios(
     engine, candidate = _engine(design)
     time_step, output_step = _timing(design, engine, candidate)
     profile = (
-        "mmc_detailed_pwm_v2"
-        if engine == "detailed_pwm"
-        else "mmc_average_value_v2"
+        "mmc_detailed_pwm_v2" if engine == "detailed_pwm" else "mmc_average_value_v2"
     )
     default_project = "MMC_CASE_pwm" if engine == "detailed_pwm" else "MMC_CASE_avm"
     target_project = default_project if derived_project is None else derived_project
@@ -195,8 +196,7 @@ def recommend_scenarios(
         source_project = f"{target_project}_scenario_source"
     profile_data = bind_profile_project(load_profile(profile), target_project)
     result_selectors = {
-        item["canonical"]: item["path"]
-        for item in profile_data["result_channels"]
+        item["canonical"]: item["path"] for item in profile_data["result_channels"]
     }
     limitations = (
         "half_bridge_intrinsic_dc_fault_blocking=false",
@@ -280,32 +280,96 @@ def prepare_timed_scenario(
     source_hashes: Mapping[str, Mapping[str, str]] | None = None,
 ) -> dict[str, Any]:
     """Resolve a bounded PWM event request against the saved scenario source."""
+    from xml.etree import ElementTree as ET
+
     from ...bindings import resolve_requested_commands
     from ...scanner import scan_project
-    from .timed_control import plan_embedded_control
+    from .timed_control import _main, _owner, _params, plan_embedded_control
 
     result = deepcopy(dict(scenario))
     options = result.get("timed_control_options")
-    if not isinstance(options, Mapping) or set(options) != {"master_path", "max_timing_error_s"}:
-        raise _error("Embedded PWM timing requires exact Master and error-bound options.")
+    if not isinstance(options, Mapping) or set(options) != {
+        "master_path",
+        "max_timing_error_s",
+    }:
+        raise _error(
+            "Embedded PWM timing requires exact Master and error-bound options."
+        )
     evidence = scan_project(source)
-    profile = bind_profile_project(load_profile(str(result["profile"]), workspace_root=workspace_root), str(source))
+    profile = bind_profile_project(
+        load_profile(str(result["profile"]), workspace_root=workspace_root), str(source)
+    )
     requests = result.get("events", [])
     bindings = resolve_requested_commands(evidence, profile, requests)
     bound = []
+    canvas = _main(ET.parse(source).getroot())
+    previous_values = {}
     for index, (request, binding) in enumerate(zip(requests, bindings)):
-        components = [item for item in evidence.components if item.component_id == binding["component_id"]]
+        components = [
+            item
+            for item in evidence.components
+            if item.component_id == binding["component_id"]
+        ]
         if len(components) != 1:
-            raise _error("A timed PWM command is not uniquely bound to its source instance.")
+            raise _error(
+                "A timed PWM command is not uniquely bound to its source instance."
+            )
         component = components[0]
         event_id = str(request.get("event_id") or f"event-{index:06d}")
         request["event_id"] = event_id
-        bound.append({**request, "target": {"instance_path": component.source.canvas_name,
-            "owner": binding["component_id"], "definition": component.definition, "parameter": binding["parameter_name"]}})
-    result["timed_control"] = plan_embedded_control(source, bound,
-        master_path=options["master_path"], max_timing_error_s=options["max_timing_error_s"],
-        time_step_s=result["time_step_s"], output_step_s=result["output_step_s"], duration_s=result["duration_s"],
-        source_hashes=source_hashes)
+        owner = str(binding["component_id"])
+        if "end_time_s" not in request:
+            # Standard recommendations specify persistent setpoint changes.
+            # Their hold ends at the next change of this same source; no
+            # additional return-to-zero command is invented.
+            initial = float(_params(_owner(canvas, owner))["Value"])
+            later = [
+                float(item["time_s"])
+                for item, next_binding in zip(
+                    requests[index + 1 :], bindings[index + 1 :]
+                )
+                if str(next_binding["component_id"]) == owner
+            ]
+            request.update(
+                event_shape="step",
+                end_time_s=min(later, default=float(result["duration_s"])),
+                before_value=previous_values.get(owner, initial),
+                after_value=request["value"],
+            )
+            declarations = [
+                item
+                for item in profile.get("command_bindings", ())
+                if item.get("canonical") == binding["canonical"]
+            ]
+            units = declarations[0].get("units") if len(declarations) == 1 else None
+            if not isinstance(units, str) or not units:
+                raise _error(
+                    "A persistent PWM command must have verified binding units.",
+                    canonical=request.get("target"),
+                )
+            request["units"] = units
+        previous_values[owner] = request["after_value"]
+        bound.append(
+            {
+                **request,
+                "target": {
+                    "instance_path": component.source.canvas_name,
+                    "owner": binding["component_id"],
+                    "definition": component.definition,
+                    "parameter": binding["parameter_name"],
+                },
+            }
+        )
+    result["timed_control"] = plan_embedded_control(
+        source,
+        bound,
+        master_path=options["master_path"],
+        max_timing_error_s=options["max_timing_error_s"],
+        time_step_s=result["time_step_s"],
+        output_step_s=result["output_step_s"],
+        duration_s=result["duration_s"],
+        source_hashes=source_hashes,
+    )
     return result
 
 
