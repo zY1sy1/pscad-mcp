@@ -635,6 +635,9 @@ class PwmTemplateEngine:
         scenario_service: object | None = None,
         scenarios: Sequence[Mapping[str, Any]] | None = None,
     ) -> dict[str, object]:
+        if plan.capabilities.get("routed_pwm_preparation") is not None:
+            from ..pwm_routed_engine import execute_routed_pwm_candidate
+            return await execute_routed_pwm_candidate(plan, service, _candidate(plan, candidate_id), scenarios)
         sources = _source_files(plan)
         _preflight_dependencies(plan)
         _verify_sources(plan, sources)

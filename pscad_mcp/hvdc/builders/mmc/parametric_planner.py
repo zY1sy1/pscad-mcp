@@ -31,7 +31,7 @@ def _error(code: str, message: str, **details: object) -> BackendError:
 
 
 def _audit_dict(audit: object) -> dict[str, Any]:
-    if hasattr(audit, "to_dict") and callable(getattr(audit, "to_dict")):
+    if hasattr(audit, "to_dict") and callable(audit.to_dict):
         value = audit.to_dict()
     elif isinstance(audit, Mapping):
         value = dict(audit)
@@ -78,8 +78,12 @@ def _candidate_group(candidates: tuple[MmcCandidate, ...], engine: str) -> tuple
 
 
 def _pwm_reference(audit: Mapping[str, Any]) -> dict[str, Any]:
+    physical = audit.get("physical_reference", {})
+    if isinstance(physical, Mapping) and physical.get("available") is True:
+        return {**dict(physical), "evidence": f"audited-instantiated-arms:{audit['source_hashes']['project']}",
+                "native_pwm_timing": True}
     return {
-        "evidence": f"audited-template:{audit['source_hashes']['project']}",
+        "evidence": f"unverified-template-reference:{audit['source_hashes']['project']}",
         "reference_cells_per_arm": 400,
         "arm_inductance_h": 0.05,
         "arm_resistance_ohm": 0.15,
@@ -261,6 +265,11 @@ def create_parametric_plan(
                 "native_schedule": False,
                 "template_submodule_topology": declared_topology,
             }
+            if audit.get("physical_reference", {}).get("available") is True and declared_topology == "full_bridge":
+                from .pwm_routed_engine import require_supported_request
+                require_supported_request(parsed.to_dict())
+                capabilities["routed_pwm_preparation"] = {"version": 1, "request": parsed.to_dict(),
+                                                           "physical_reference": dict(audit["physical_reference"])}
         else:
             if parsed.converter == "full_bridge" and not native_inputs.get("source_paths"):
                 raise _error("MMC_AVM_NATIVE_INPUT_MISSING", "Full-bridge AVM requires the native bidirectional arm producer and its immutable inputs.")

@@ -39,6 +39,8 @@ def compose_pwm_channel_contract(project, contract):
             role, scope = None, None
             if channel_id.startswith("MCP_Q_T"):
                 role, scope = "q_reactive", channel_id[-2:]
+            elif channel_id.startswith("MCP_DC_PROTECTION_T"):
+                role, scope = "dc_protection_trip", channel_id[-2:]
             elif channel_id.startswith("MCP_AC_CLOSED_"):
                 role, scope = (
                     "ac_breaker_state",
@@ -133,8 +135,8 @@ def compose_pwm_scenario_contract(contract, scenario, namespace):
     """Apply only recorded initializer changes and the exact immutable renderer."""
     result = deepcopy(contract)
     baseline = ET.parse(contract["project_path"]).getroot()
-    schedule = scenario["timed_control"]
-    source = schedule["scenario_source"]["path"]
+    schedule = scenario.get("timed_control")
+    source = schedule["scenario_source"]["path"] if schedule else scenario["project"]
     initialization = scenario["pwm_initialization"]
     if initialization["source_sha256"] != contract["instrumented_project_sha256"]:
         raise RuntimeError(
@@ -159,7 +161,19 @@ def compose_pwm_scenario_contract(contract, scenario, namespace):
         != initialization["scenario_source_sha256"]
     ):
         raise RuntimeError("The initialized scenario source hash changed")
-    rendered = timed_control._render(schedule, namespace)
+    rendered = (
+        timed_control._render(schedule, namespace)
+        if schedule
+        else ET.parse(source).getroot()
+    )
+    if not schedule:
+        original_name = rendered.get("name")
+        rendered.set("name", namespace)
+        for component in rendered.iter():
+            for key in ("defn", "name"):
+                value = component.get(key, "")
+                if value.startswith(original_name + ":"):
+                    component.set(key, namespace + value[len(original_name) :])
     definitions = {
         d.get("name"): d for d in rendered.findall("./definitions/Definition")
     }
@@ -199,8 +213,9 @@ def compose_pwm_scenario_contract(contract, scenario, namespace):
             )
     result["reachable_instances"] = reachable_instances(rendered)
     result["scenario_composition"] = {
-        "schedule_sha256": schedule["schedule_sha256"],
+        "schedule_sha256": schedule["schedule_sha256"] if schedule else None,
         "initializer": initialization,
         "namespace": namespace,
     }
+    result["vendor_finalized"] = False
     return result
