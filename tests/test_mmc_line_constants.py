@@ -4,11 +4,22 @@ import pytest
 
 from pscad_mcp.hvdc.builders.mmc.line_constants import (
     LineConstantsArtifact,
+    TlineSegment,
     extract_tline_segments,
     rebind_template_line_constants,
     render_tli,
 )
 from pscad_mcp.hvdc.builders.mmc.catalog import parse_catalog
+
+
+def test_tli_emits_only_the_declared_ground_wire_positions():
+    segment = TlineSegment("OHL", 200, 0, 2, {}, {}, {
+        "RadiusC": "0.038", "DCResC": "0.032", "Y": "33.2",
+        "RadiusG": "0.0082", "DCResG": "0.2943", "NG": "1",
+    })
+    ground_section = render_tli(segment).split("GroundWires = 1")[1].split("Frequency Dep.")[0]
+    assert "P1 =" in ground_section
+    assert "P2 =" not in ground_section
 
 
 def test_extract_and_render_public_tline_input(tmp_path: Path) -> None:

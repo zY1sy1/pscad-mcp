@@ -184,7 +184,7 @@ def render_tli(segment: TlineSegment) -> str:
         f"      Ground Wire Relative Permeability = {_v(t, 'PERMG', '1'):g}",
         f"      Unique Ground Wires = {int(_v(t, 'GWSame', '1'))}",
         f"      P1 = {-_v(t, 'XG', '0'):g} {_v(t, 'YG', '0'):g}",
-        f"      P2 = {_v(t, 'XG', '0'):g} {_v(t, 'YG', '0'):g}",
+        *([f"      P2 = {_v(t, 'XG', '0'):g} {_v(t, 'YG', '0'):g}"] if int(_v(t, 'NG', '1')) > 1 else []),
         f"      Sag = {_v(t, 'SAGG', '0'):g}",
         "      }",
         "   }",
