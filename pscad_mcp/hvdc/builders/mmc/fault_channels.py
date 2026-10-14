@@ -200,7 +200,7 @@ async def read_fault_output_dataset(reader: Any, primary: str | Path, channel_co
     return {"channels": channels, "identity": manifest, "missing_selectors": missing, "evidence_kind": "pscad_output", "project_readback": project_readback}
 
 
-def instrument_fault_channels(source: str | Path, destination: str | Path, *, library: str | Path, master: str | Path, expected_source_hashes: Mapping[str, Any] | None = None) -> dict[str, Any]:
+def instrument_fault_channels(source: str | Path, destination: str | Path, *, library: str | Path, master: str | Path, expected_source_hashes: Mapping[str, Any] | None = None, fault_switch_name: str = "DC_flt_2_PN", recovery_signals: Mapping[str, str] | None = None) -> dict[str, Any]:
     paths = {"project": _regular(source), "library": _regular(library), "master": _regular(master)}
     hashes = {name: _sha256(path) for name, path in paths.items()}
     for name, expected in (expected_source_hashes or {}).items():
@@ -410,7 +410,7 @@ def instrument_fault_channels(source: str | Path, destination: str | Path, *, li
         add_probe(definition, role, scope, signal, sources[0], kind="control_quantity", units_override=units, extra={"quantity": quantity, "node": {"x": x, "y": y}})
 
     main = definitions["Main"]
-    switches = [item for item in _components(main) if item.get("defn") == "master:fault_sw" and dict(_parameters(item)).get("Name") == "DC_flt_2_PN"]
+    switches = [item for item in _components(main) if item.get("defn") == "master:fault_sw" and dict(_parameters(item)).get("Name") == fault_switch_name]
     if len(switches) != 1:
         raise _error("MMC_ACCEPTANCE_INCOMPLETE", "The terminal-2 pole-to-pole fault branch is not unique.")
     switch = switches[0]
@@ -510,7 +510,8 @@ def instrument_fault_channels(source: str | Path, destination: str | Path, *, li
         if len(voltage_sources) != 1:
             raise _error("MMC_ACCEPTANCE_INCOMPLETE", "The pole-to-pole terminal voltage meter is missing.", terminal=terminal)
         add_probe(main, "v_dc", terminal, "Edc" + number, voltage_sources[0], source_parameter="Name", nominal=640.0, extra={"quantity": "dc_pole_to_pole_voltage", "direction": "positive_pole_minus_negative_pole"})
-        controls = [item for item in _components(main) if item.get("defn", "").endswith(":VSCConverter") and dict(_parameters(item)).get("Dblk") == f"Dblk{number}P"]
+        recovery_signal = (recovery_signals or {}).get(terminal,f"Dblk{number}P")
+        controls = [item for item in _components(main) if item.get("defn", "").endswith(":VSCConverter") and dict(_parameters(item)).get("Dblk") == recovery_signal]
         if len(controls) != 1:
             raise _error("MMC_ACCEPTANCE_INCOMPLETE", "The terminal recovery enable is missing.", terminal=terminal)
         vsc_name = "MFE_VSC_" + terminal
@@ -559,7 +560,7 @@ def instrument_fault_channels(source: str | Path, destination: str | Path, *, li
         actual_id = [item for item in _components(control_definition) if item.get("defn") == "master:pgb" and dict(_parameters(item)).get("Name") == "id"]
         if len(actual_id) == 1:
             add_probe(control_definition, "controller_id_actual", terminal, "idpu", actual_id[0], units_override="pu", extra={"quantity": "measured_d_axis_current", "normalization": "Ibase2_pk"})
-        add_probe(main, "recovery_enable", terminal, f"Dblk{number}P", controls[0], kind="recovery_control", source_parameter="Dblk", polarity={"inactive": 0, "active": 1}, extra={"quantity": "deblocking_enable", "electrical_recovery_required": True})
+        add_probe(main, "recovery_enable", terminal, recovery_signal, controls[0], kind="recovery_control", source_parameter="Dblk", polarity={"inactive": 0, "active": 1}, extra={"quantity": "deblocking_enable", "electrical_recovery_required": True})
 
     for name, definition in definitions.items():
         if name.startswith("MFE_Pole_") and any(dict(_parameters(item)).get("Name") == "MmcVzEffective" for item in _components(definition)):
