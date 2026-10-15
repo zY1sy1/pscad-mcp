@@ -1,0 +1,145 @@
+{
+  "schema_version": 1,
+  "scope": "mmc.detailed_pwm.supplemental_handoff",
+  "status": "RECORDED",
+  "received_date": "2026-10-15",
+  "owner_chat": "01a13848-3726-7f91-a251-c8ba955b7501",
+  "source_chat": "01a13b41-360d-74c0-8196-f7fb4590ce7d",
+  "source_branch": "codex/mmc-pwm-closure",
+  "source_worktree": "C:\\Users\\335\\.codex\\worktrees\\mmc-pwm-closure\\pscad-mcp",
+  "common_base": "2287d93cedc709946a48809a78d073f2089507ff",
+  "source_implementation_commit": "8bf57ea5f88b25cb09d0bb4ce548d8d023725b43",
+  "source_documentation_commit": "e2e8b0de1daaacb1787a4bfe4f8a11496ac7f540",
+  "source_handoff_document": {
+    "path": "C:\\Users\\335\\.codex\\worktrees\\mmc-pwm-closure\\pscad-mcp\\docs\\acceptance\\mmc-pwm-closure-handoff-20261015.md",
+    "sha256": "9b0ec5dca2857e5d5973bdefd2b7fab69af9c64fad9c5fe54cbd8e0b742570d2"
+  },
+  "archived_handoff_document": {
+    "path": "docs/acceptance/mmc-pwm-closure-handoff-20261015.md",
+    "sha256": "9b0ec5dca2857e5d5973bdefd2b7fab69af9c64fad9c5fe54cbd8e0b742570d2"
+  },
+  "source_handoff_index": {
+    "path": "D:\\PA\\p15\\handoff.json",
+    "sha256": "3d9bf7dc0cec99d201840ba3bda0ac0ee6fccf0b78dbebe9b93d906adec660da"
+  },
+  "source_status_report": {
+    "path": "D:\\PA\\p15\\closure-status.json",
+    "sha256": "b2417c8780d72bbf296ce75439a4512c0ff3e4c404d22c0f1120e1f60b2835ee"
+  },
+  "accepted_baseline": {
+    "branch": "codex/mmc-detailed-pwm",
+    "tested_commit": "95655d1e06c45eda820b4ba22d2fefded55e1e39",
+    "report": {
+      "path": "D:\\PA\\pwm14\\public-v6\\report.json",
+      "sha256": "bf099c66d2c7b6ec2a074f6b3a9f0b117ddddf05b54269fb1dac18c604724136"
+    },
+    "model": {
+      "path": "D:\\PA\\pwm14\\public-v6\\MMC_PWM_pwm.pscx",
+      "sha256": "17aca95cd1e3934a1ffb94d254872fb7a7bb031c64eebdca0bcb5c468c895f47"
+    },
+    "status": "PASS",
+    "model_accepted": true
+  },
+  "alternative_protection": {
+    "disposition": "NOT_ADOPTED",
+    "implementation_commit": "903c2438903a0da1aad27ccda475b1c25eb07e46",
+    "physical_behavior": "7.5 kA pickup from actual I_AC1/I_AC2 currents opens existing AC breakers and inhibits firing; explicit AC-open command clears the latch",
+    "accepted_scope": "single-line-ground diagnostic only",
+    "checks": 484,
+    "measured_trip_s": 2.3032,
+    "fault_peak_ka": 30.273808521572,
+    "full_model_accepted": false,
+    "required_before_adoption": "Freeze a new revision and rerun affected physical scenarios and shared integrity contracts; all eleven mandatory scenes and independent reload remain required."
+  },
+  "source_full_matrix_status": "INCOMPLETE_ANALYSIS",
+  "source_full_model_accepted": false,
+  "acceptance_transferred": false,
+  "protection_cherry_picked": false,
+  "duplicate_implementations": {
+    "frozen_physical_revalidation": {
+      "source": [
+        "227efa8",
+        "79dbb62"
+      ],
+      "recipient": [
+        "4d9f486",
+        "95655d1"
+      ]
+    },
+    "compiler_support_publication": {
+      "source": [
+        "ddf42de"
+      ],
+      "recipient": [
+        "95655d1"
+      ]
+    },
+    "actual_measurements_and_renaming": {
+      "source": [
+        "45dae67",
+        "8bf57ea"
+      ],
+      "recipient": [
+        "738d91a",
+        "d0e547d"
+      ]
+    },
+    "complete_out_domains": {
+      "source": [
+        "5a3738d"
+      ],
+      "recipient": [
+        "3475c27"
+      ]
+    }
+  },
+  "verified_source_evidence": [
+    {
+      "path": "D:\\PA\\p15\\slg2\\report.json",
+      "sha256": "88e5f3bd5de63c17e5192d1713a41d571d665dcce5750e66148b946f83ec4a69"
+    },
+    {
+      "path": "D:\\PA\\p15\\slg2-analysis\\physical-checks.json",
+      "sha256": "3d03099d6527d20e7a3240e9f490c98468d1c1abbe766313f94c97df965b4b8a"
+    },
+    {
+      "path": "D:\\PA\\p15\\slg2-analysis\\evidence-identity.json",
+      "sha256": "3dc2654c76c8bdaae4c176c5bda3774914fa46b2288b03eae3030caff78ea0ba"
+    },
+    {
+      "path": "D:\\PA\\p15\\s1\\report.json",
+      "sha256": "ffe73d13b9f5b55c92bdfb115af09694e478c9aa767f86be294bdbb097c9e13e"
+    },
+    {
+      "path": "D:\\PA\\p15\\s1-interruption-cleanup.json",
+      "sha256": "4171dbf737124621f49479661b1bfd864e17b1ff1d012793c47c9a8ae37a279f"
+    },
+    {
+      "path": "D:\\PA\\p15\\offline-79dbb62.log",
+      "sha256": "c3f1a6dcc6b9b68b4eaf12554e8a9de10bb309c47e5cdd2a10108d04dceccf2a"
+    },
+    {
+      "path": "D:\\PA\\p15\\focused-8bf57ea.log",
+      "sha256": "bd4aa989be78b55d9f2f3752fccf4b1059af2fe7462c434e8ec403d1272191a9"
+    },
+    {
+      "path": "D:\\PA\\p15\\package-verification.json",
+      "sha256": "df3239a4f7fa93f808cee759c26cfd6b0dcab1899ba74459724f123fcb43c3fb"
+    },
+    {
+      "path": "D:\\PA\\p15\\physical-binding-audit.json",
+      "sha256": "7ea4ee31466c7d14dd8177225f451bbc68063c08da042cdc8540c34620bc3848"
+    }
+  ],
+  "owned_cleanup_evidence": {
+    "diagnostic_pid": 4444,
+    "suite_pid": 18828,
+    "reported_exited": true,
+    "interruption_audit": {
+      "path": "D:\\PA\\p15\\s1-interruption-cleanup.json",
+      "sha256": "4171dbf737124621f49479661b1bfd864e17b1ff1d012793c47c9a8ae37a279f"
+    },
+    "foreign_processes_not_stopped_or_attached": true
+  },
+  "verification_scope": "Hashes and recorded verdicts checked; no new licensed run or electrical-model acceptance. Source/recipient reports and model files remain unchanged."
+}

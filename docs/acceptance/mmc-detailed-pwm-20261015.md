@@ -197,3 +197,39 @@ or physical acceptance of a later changed runtime/model.
 The generic inspector identifies both native stations and twelve arms; its
 native TLine conductor graph still reports unknown. Dynamic acceptance uses
 the audited source identity and complete frozen component/wiring readback.
+
+## Supplemental handoff received (2026-10-15)
+
+The user designated this chat as the continuing owner. The supplemental branch
+`codex/mmc-pwm-closure` handed off implementation `8bf57ea` and documentation
+`e2e8b0d`, sharing baseline `2287d93`. Its original handoff is preserved
+[verbatim](mmc-pwm-closure-handoff-20261015.md); the
+[recipient index](mmc-pwm-supplemental-handoff-20261015.json) records source
+paths, revisions, hashes and dispositions. A receipt is also saved at
+`D:/PA/pwm14/supplemental-handoff-received-20261015.json`.
+
+| Supplemental work | Corresponding accepted implementation | Disposition |
+| --- | --- | --- |
+| Frozen physical re-evaluation, `227efa8` / `79dbb62` | `4d9f486` / `95655d1` | Existing implementation retained |
+| Compiler-library delivery, `ddf42de` | `95655d1` | Existing implementation retained |
+| Actual measurements and project renaming, `45dae67` / `8bf57ea` | `738d91a` / `d0e547d` | Existing implementation retained |
+| Complete OUT end domains, `5a3738d` | `3475c27` | Existing implementation retained |
+| Measured 7.5 kA AC overcurrent isolation, `903c243` | Separate protection behavior | Archived as an unadopted alternative |
+
+The protection alternative reads actual `I_AC1/I_AC2` phase currents, opens the
+existing physical AC breakers, inhibits firing and clears its latch through an
+explicit AC-open command. Its SLG diagnostic at `903c243` passes 484 checks,
+with physical opening at 2.3032 s and a 30.2738 kA fault crest. That evidence
+belongs to its diagnostic revision. It does not qualify implementation
+`8bf57ea` or a full eleven-scene model, and it does not inherit this branch's
+PASS. Adoption would change protection behavior and require a new frozen
+revision and affected physical/shared-contract acceptance; the eleven-scene
+and independent-reload requirements continue to apply.
+
+The supplemental full-suite attempt `D:/PA/p15/s1` was interrupted. Its source
+scope remains `INCOMPLETE_ANALYSIS` with `model_accepted=false`. The recorded
+cleanup covers its own PIDs 18828 and 4444; no process was newly controlled for
+this receipt. Nine cited evidence-file hashes and the diagnostic's recorded
+484-check verdict were verified. The report and delivered model hashes listed
+above still match; no electrical code, model, acceptance claim, merge or push
+is part of this documentation-only handoff.
