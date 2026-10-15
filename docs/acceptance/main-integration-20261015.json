@@ -1,0 +1,146 @@
+{
+  "schema_version": 1,
+  "recorded_at": "2026-10-15T15:00:44.301686+08:00",
+  "runtime_commit": "301c5c9fbb34ddfbe84322528ab77137415d3fe9",
+  "main_before": "a8fce2dd0ec2a4060e4234f5fa721199ab69d0cc",
+  "source_branch_tips": {
+    "codex/mmc-detailed-pwm": "ae4543eef41559ec520681e85a7f6864a9a87687",
+    "codex/mmc-overhead-avm": "31c222bf808d35365592d081480ecfe29a681d9b"
+  },
+  "scope": "Completed local implementation integration; no remote push or new-main electrical acceptance claim",
+  "licensed_pscad_acceptance_run": false,
+  "physical_reports_and_verdicts_unchanged": true,
+  "offline_pytest": {
+    "passed": 4180,
+    "skipped": 55,
+    "failed": 0,
+    "duration_seconds": 335.567,
+    "final_documentation_and_metadata_checks": {
+      "passed": 99,
+      "failed": 0,
+      "duration_seconds": 1.457
+    }
+  },
+  "package": {
+    "status": "PASS",
+    "installed_root": "D:\\PA\\integration-main-20261015\\package\\venv\\Lib\\site-packages\\pscad_mcp",
+    "version": "0.2.0",
+    "tools": 112,
+    "lcc_assets": 9,
+    "mmc_assets": 8,
+    "matched_source_modules": 235,
+    "wheel_sha256": "689ee0d2306029b1843f90027d7dbc2445c6a497d5a3e381d809651d21cfed4e"
+  },
+  "runtime_source_comparison": {
+    "pwm": 17,
+    "avm": 16
+  },
+  "planning": {
+    "identical_exact_requests": 10,
+    "compared": [
+      "candidates",
+      "settings",
+      "constraints",
+      "scenarios",
+      "source_bindings",
+      "dependencies",
+      "operations"
+    ]
+  },
+  "line_constants": {
+    "input_text_changed": true,
+    "reason": "Remove the ignored second ground-wire position when NG=1",
+    "affected_segments": [
+      "TL12a",
+      "TL12b"
+    ],
+    "fresh_native_constants_byte_identical": true,
+    "fresh_native_numeric_output_byte_identical": true,
+    "source_immutable": true,
+    "rerun_scope": "Regenerate the changed line-constants contract; unchanged numerical/model behavior does not require unrelated electrical scenarios"
+  },
+  "acceptance_inventory": {
+    "integrity_status": "INCOMPLETE",
+    "counts": {
+      "VERIFIED": 24,
+      "NO_DURABLE_REPORT": 2
+    },
+    "no_durable_report": [
+      "mmc_stage_a",
+      "modern_core_5"
+    ],
+    "release_complete": false
+  },
+  "other_checks": {
+    "compileall": "PASS",
+    "installed_pip_check": "PASS",
+    "git_diff_check": "PASS",
+    "runtime_unchanged_since_tested_merge": true
+  },
+  "not_adopted": {
+    "codex/mmc-pwm-closure": "The alternative 7.5 kA protection has diagnostic-only evidence and an interrupted full suite; overlapping fixes already exist in the accepted PWM branch.",
+    "legacy_branch_differences": [
+      "codex/lcc-acceptance-hardening",
+      "codex/mmc-autonomous-builder",
+      "codex/mmc-fault-evidence"
+    ],
+    "legacy_reason": "Applicable implementation already integrated; obsolete interfaces and unverified drafts remain recoverable."
+  },
+  "verification_files": [
+    {
+      "path": "D:\\PA\\integration-main-20261015\\pytest-integration.log",
+      "sha256": "43509198a13203447344b130a65a61e39f1fe70d33887462fc68406453d2604b",
+      "bytes": 4906
+    },
+    {
+      "path": "D:\\PA\\integration-main-20261015\\pytest-integration.xml",
+      "sha256": "5343750606f813cea677b4532bc3e4fe25bc85450691858851dc0f65833088dc",
+      "bytes": 648667
+    },
+    {
+      "path": "D:\\PA\\integration-main-20261015\\pytest-final-docs.log",
+      "sha256": "b000b28cc8f20b6d5dcb21f3fba26b624bfef0c9ea46f61de7a712070db030b1",
+      "bytes": 263
+    },
+    {
+      "path": "D:\\PA\\integration-main-20261015\\pytest-final-docs.xml",
+      "sha256": "f62a1828820a755d3c7bf1bf6f5dd97a2f9b9f3e1f5ff2bc4471d60de3169e8d",
+      "bytes": 14133
+    },
+    {
+      "path": "D:\\PA\\integration-main-20261015\\planning-comparison.json",
+      "sha256": "3fff3e6fdfa57408a343ae70be508ed87729987e562ae4a7c0bea976426759f6",
+      "bytes": 1391
+    },
+    {
+      "path": "D:\\PA\\integration-main-20261015\\line-constants-comparison.json",
+      "sha256": "f2c317669e795047c25ce454b3a5fb21552bb9b95c084d080ab202a3755e390c",
+      "bytes": 2212
+    },
+    {
+      "path": "D:\\PA\\integration-main-20261015\\runtime-comparison-final.json",
+      "sha256": "b6e409766a946f499b3aa5f75fd51e393e803998261e14b5fe58d7bcfec5fdb1",
+      "bytes": 9963
+    },
+    {
+      "path": "D:\\PA\\integration-main-20261015\\acceptance-inventory-final.json",
+      "sha256": "b791c28a0b603cca6a38e8e0325c32f973e75032143d9462ab9c2ba2bd48c0f6",
+      "bytes": 8308
+    },
+    {
+      "path": "D:\\PA\\integration-main-20261015\\package\\verification.json",
+      "sha256": "85e2c4649715d3afc6427b74a7f048f5f61835df6b9ab9f294d03c40d1d9b43f",
+      "bytes": 331
+    },
+    {
+      "path": "D:\\PA\\integration-main-20261015\\package-build.log",
+      "sha256": "f967c7b84e718c458c34a848ab27ec6fb091919c33d647b8d9e2e8a634ae9ae7",
+      "bytes": 1078
+    },
+    {
+      "path": "D:\\PA\\integration-main-20261015\\package-install.log",
+      "sha256": "36af1ffc421dda219c637f8c7e2c97dc4cd0cfc48e5127d122b210a75539b5d8",
+      "bytes": 7683
+    }
+  ]
+}

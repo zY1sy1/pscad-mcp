@@ -2,7 +2,7 @@
 
 The three exact 200 km overhead-line requests below passed licensed PSCAD 4.6.2 acceptance. Each suite contains a normal cold start, forward/reverse steady operation and reversal, four physical faults, and a fresh independent portable reload: 18 completed stages in total. Each suite has 38 passing consistency/acceptance checks and returns `model_accepted=true`.
 
-Runtime evidence belongs to **`743203006a60333c02dfdd13216cd13756f68f84`** on **`codex/mmc-overhead-avm`**, starting from `a8fce2d`. The implementation is local and unmerged. The later closeout commit changes documentation and inventory assertions only; it does not acquire a new simulation verdict. The broader `parametric_mmc` inventory remains `PARTIAL`.
+Runtime evidence belongs to **`743203006a60333c02dfdd13216cd13756f68f84`** on **`codex/mmc-overhead-avm`**, starting from `a8fce2d`. Its implementation is included in the [October 15 local main integration](current-status-20261015.md), without a remote push. The closeout and integration commits do not acquire a new simulation verdict. The broader `parametric_mmc` inventory remains `PARTIAL`.
 
 ## Accepted requests
 

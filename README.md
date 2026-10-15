@@ -7,10 +7,10 @@
 Release notes are tracked in [CHANGELOG.md](CHANGELOG.md). A portable stdio
 configuration template is available at [config.example.toml](config.example.toml).
 
-## Acceptance status (2026-10-14)
+## Acceptance status (2026-10-15)
 
 Several named scopes have passed licensed acceptance; whole-project acceptance
-is still incomplete. The [main integration and version boundaries](docs/acceptance/current-status-20261014.md)
+is still incomplete. The [main integration and version boundaries](docs/acceptance/current-status-20261015.md)
 and [machine-readable inventory](docs/acceptance-status.json) distinguish:
 
 - **Merged into local main:** the native half-bridge default six-stage suite
@@ -24,12 +24,21 @@ and [machine-readable inventory](docs/acceptance-status.json) distinguish:
   regression, three full-bridge cable AVM ratings and reproducible Corpus subset
   retain their [own tested revisions](docs/acceptance/current-status-20261013.md).
   The merged serial sweep passed a fresh three-scenario, 42-check licensed run.
-- **New isolated overhead AVM scope:** three full-bridge 200 km overhead requests
+- **Overhead AVM integrated:** three full-bridge 200 km overhead requests
   passed all 18 normal/fault/independent-reload stages at `7432030`.
   The [accepted requests and portable projects](docs/acceptance/mmc-overhead-avm-20261014.md)
-  remain on `codex/mmc-overhead-avm`, unmerged into main.
+  from `codex/mmc-overhead-avm` are included in local main.
+- **Detailed PWM integrated:** the full-bridge 640 kV/1000 MW/60 Hz/200 km
+  overhead reference passed eleven scenes, editable delivery and independent
+  reload (5698 physical checks), plus 404 checks on the published file.
+  [Exact request and evidence](docs/acceptance/mmc-detailed-pwm-20261015.md)
+  retain electrical revision `d0e547d` and publication revision `95655d1`.
+- **Sweep recovery integrated:** licensed cancellation, cross-process restart,
+  crash/orphan guards and measured metrics passed their
+  [scoped checks](docs/acceptance/sweep-recovery-and-metrics-20261014.md).
+  PSOUT evidence covers existing-file replay; fresh PSOUT simulation remains pending.
 - **Remaining work:** public parametric LCC physical mappings and its rating
-  matrix, detailed PWM and other MMC model/rating scopes, broader Blueprint
+  matrix, other PWM/MMC model and rating scopes, broader Blueprint
   coverage and PSCAD 5.x real acceptance. LCC ratings use total system power, pole-to-ground
   voltage and per-pole current: bipolar `P=2UI`, monopolar `P=UI`.
   The [rating correction and three template diagnostics](docs/acceptance/lcc-rating-convention.md)

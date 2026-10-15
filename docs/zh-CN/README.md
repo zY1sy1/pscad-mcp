@@ -1,9 +1,9 @@
 # PSCAD MCP 中文使用与验收说明
 
-## 最新验收范围（2026-10-14）
+## 最新验收范围（2026-10-15）
 
 已有多个明确范围通过实机验收，整体仍有待完成项。完整证据和版本边界见
-[当前集成与验收说明](../acceptance/current-status-20261014.md)及[验收总表](../acceptance-status.json)。
+[当前集成与验收说明](../acceptance/current-status-20261015.md)及[验收总表](../acceptance-status.json)。
 
 - **已合入本地 main：** `5613ff7` 上原生半桥 MMC 默认模型六阶段通过；已发布全桥
   MMC 联合场景首轮及独立重放各 122 项物理检查通过，定时边沿误差为 0。
@@ -13,11 +13,18 @@
 - **十月已整合范围：** 指定 Blueprint 分压器、Legacy 15 项回归、三组全桥电缆 AVM
   和 Corpus 可复现子集保留[各自测试提交](../acceptance/current-status-20261013.md)。
   合并后的串行扫描另有新鲜三工况、42 项许可实机检查通过。
-- **新增独立分支范围：** 三组全桥、200 km 架空线 AVM 在 `7432030` 上的正常运行、
+- **架空线 AVM 已整合：** 三组全桥、200 km 架空线 AVM 在 `7432030` 上的正常运行、
   四类故障和独立重载共 18 个阶段全部通过。
   [验收请求与可用工程](../acceptance/mmc-overhead-avm-20261014.md)位于
-  `codex/mmc-overhead-avm`，尚未合入 main。
-- **仍需完成：** 参数化 LCC 的物理映射和额定矩阵、详细 PWM 与其他 MMC 参数范围、
+  `codex/mmc-overhead-avm`，现已纳入本地 main。
+- **详细 PWM 已整合：** 全桥 640 kV/1000 MW/60 Hz/200 km 架空线限定请求的
+  11 场景、可编辑交付和独立重载共 5698 项物理检查通过，实际发布文件另通过
+  404 项检查。[限定请求与完整证据](../acceptance/mmc-detailed-pwm-20261015.md)
+  保留电气代码 `d0e547d` 和发布修复 `95655d1` 的原始版本边界。
+- **扫描恢复已整合：** 取消、跨进程恢复、崩溃与孤儿实例防护及测量指标已有
+  [限定实机证据](../acceptance/sweep-recovery-and-metrics-20261014.md)。PSOUT 目前仅验证
+  已有文件读取，新鲜 PSOUT 仿真及完整扫描仍待验收。
+- **仍需完成：** 参数化 LCC 的物理映射和额定矩阵、其他 PWM 与 MMC 参数范围、
   更广的 Blueprint 覆盖及 PSCAD 5.x 实机验收。LCC 额定功率已确定为系统总功率，
   双极按 `P=2U极I极`、单极按 `P=UI`；[口径修复及三个模板功率点的诊断](../acceptance/lcc-rating-convention.md)
   已整合，但不能代替公开构建器仍缺的 13 类物理参数映射。
@@ -25,7 +32,7 @@
 总表的 `INCOMPLETE_ANALYSIS`、`PARTIAL` 或待运行状态必须按各自范围理解，不能
 解释为所有模型失败。[分支整合记录](../acceptance/branch-integration-20260926.md)另列避雷器工具、
 Corpus v2 与并发文档的处理。合入实现不会把原报告升级为其他版本的实机 PASS；
-旧失败报告及历史基线继续保留。[2026-10-14 main 集成与验证](../acceptance/current-status-20261014.md)。
+旧失败报告及历史基线继续保留。[2026-10-15 main 集成与验证](../acceptance/current-status-20261015.md)。
 
 执行 `python scripts/audit_acceptance_inventory.py` 可离线复核已登记报告、子报告和
 声明交付文件的哈希。退出码 0 表示完整性齐备，1 表示证据无效，2 表示仍缺持久化报告；

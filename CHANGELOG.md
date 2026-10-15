@@ -10,11 +10,21 @@ All notable changes to this project are documented here.
   geometry, fresh frequency-dependent phase constants, explicit four-terminal
   interfaces and physical series RC common-mode damping. Three full-bridge
   200 km requests passed all 18 normal/fault/independent-reload stages at
-  `7432030` on `codex/mmc-overhead-avm`; the feature branch remains unmerged.
+  `7432030` on `codex/mmc-overhead-avm`; its implementation is integrated into local main.
+- Qualified full-bridge detailed PWM at the exact 640 kV/1000 MW/60 Hz/200 km
+  overhead reference, with real control/fault wiring, 337 measured channels,
+  frozen physical validation, independent saved-model reload and isolated
+  publication with verified compiler libraries. Electrical evidence at
+  `d0e547d` passes 5698 checks; publication at `95655d1` passes another 404.
 - Seven parameter-sweep tools in the new `sweep` profile: offline hash-bound planning and snapshots, background serial execution in dedicated owned instances, durable progress, cancellation, explicit retry/resume, baseline comparison and constrained ranking of evaluated scenarios.
-- Sweep records retain source and artifact hashes; ambiguous orphan sessions block recovery. The opt-in vdiv three-scenario Legacy scope passed licensed acceptance at `a2aaa33`; cancellation, restart and PSOUT real acceptance remain outside that result.
+- Sweep records retain source and artifact hashes; ambiguous orphan sessions block recovery. The opt-in vdiv three-scenario Legacy scope passed licensed acceptance at `a2aaa33`. Later cancellation/restart/crash guards and metrics have separate evidence at `144ba5f`; PSOUT existing-file replay remains distinct from fresh simulation.
 
 ### Changed
+
+- Integrated the completed detailed-PWM and overhead-AVM histories without
+  promoting their original physical reports to a new main-revision PASS.
+  Ten accepted MMC requests retain their own version and model boundaries;
+  the supplemental 7.5 kA protection alternative remains unadopted.
 
 - Integrated the completed Legacy/MMC repairs, LCC total-power correction,
   offline corpus v2 implementation and five-arrester study tools. Arrester

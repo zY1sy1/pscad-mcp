@@ -39,7 +39,7 @@ def test_acceptance_status_manifest_separates_live_acceptance_scopes():
         "native_mmc_full_bridge_overhead_800kv_50hz",
     }
     assert scopes["legacy_core_462"]["licensed_status"] == "PASS"
-    assert scopes["legacy_core_462"]["implementation_status"] == "INTEGRATION_BRANCH"
+    assert scopes["legacy_core_462"]["implementation_status"] == "MERGED"
     topology = scopes["unified_topology_462"]
     assert topology["licensed_status"] == "PASS"
     assert topology["pscad_version"] == "4.6.2"
@@ -61,7 +61,7 @@ def test_acceptance_status_manifest_separates_live_acceptance_scopes():
     assert scopes["hvdc_scenarios"]["licensed_status"] == "PARTIAL"
     assert scopes["mmc_stage_a"]["implementation_status"] == "MERGED"
     assert scopes["mmc_stage_a"]["licensed_status"] == "INCOMPLETE_ANALYSIS"
-    assert scopes["parametric_mmc"]["implementation_status"] == "INTEGRATION_BRANCH"
+    assert scopes["parametric_mmc"]["implementation_status"] == "MERGED"
     assert scopes["parametric_mmc"]["licensed_status"] in {
         "NOT_RUN_ON_INTEGRATED_COMMIT",
         "PASS",
@@ -71,7 +71,7 @@ def test_acceptance_status_manifest_separates_live_acceptance_scopes():
     }
     assert (
         scopes["generic_blueprint_builder"]["implementation_status"]
-        == "INTEGRATION_BRANCH"
+        == "MERGED"
     )
     assert scopes["generic_blueprint_builder"]["licensed_status"] == "PASS"
 
@@ -207,7 +207,7 @@ def test_native_matrix_keeps_three_requests_and_component_only_scope_separate():
     }
     assert all(
         s["licensed_status"] == "PASS"
-        and s["implementation_status"] == "INTEGRATION_BRANCH"
+        and s["implementation_status"] == "MERGED"
         and s["implementation_source_branch"] == "codex/mmc-overhead-avm"
         and s["request"]["converter"] == "full_bridge"
         and s["request"]["model_fidelity"] == "average_value"

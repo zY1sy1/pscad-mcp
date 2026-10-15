@@ -7,9 +7,10 @@ owned instance. Public validation confirms the entire frozen matrix; source,
 published-model and compiler-input hashes match and all owned instances exit.
 
 The user authorized this work after choosing detailed PWM alongside a separate
-overhead-line AVM chat. This implementation is on `codex/mmc-detailed-pwm` and
-is not merged or pushed. Electrical producer revision: `d0e547d`; publication
-repair revision: `95655d1`.
+overhead-line AVM chat. The implementation from `codex/mmc-detailed-pwm` is
+included in the [October 15 local main integration](current-status-20261015.md);
+no remote push is included. Electrical producer revision: `d0e547d`; publication
+repair revision: `95655d1`. Integration does not change these physical verdicts.
 
 ## Exact request and physical reference
 

@@ -1,5 +1,10 @@
 # Main integration status (2026-10-14)
 
+Historical snapshot. The [October 15 integration](current-status-20261015.md)
+adds qualified detailed PWM and overhead AVM and records the already-merged
+sweep cancellation/recovery evidence. The pending statements below describe
+this earlier snapshot only.
+
 The current useful changes from `codex/acceptance-oct09` (`045968b`) and
 `codex/parameter-sweep-workflow` (`3114e10`) are integrated. The merge is clean;
 both histories and their precise acceptance revisions remain intact. The local
