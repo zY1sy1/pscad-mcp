@@ -1,6 +1,6 @@
 # Native MMC full physical acceptance
 
-The native half-bridge AVM gate runs one normal operating sequence, four
+The native half-bridge/full-bridge AVM gate runs one normal operating sequence, four
 electrical fault scenarios, and an independent portable reload. A complete
 suite returns `model_accepted=true` only when every required gate passes for
 the same engineering request, derived parameters, producer hashes and revision.
@@ -11,7 +11,7 @@ Run from a clean frozen checkout on the licensed PSCAD 4.6.2 host:
 ```powershell
 $env:PSCAD_MCP_ACCEPTANCE='1'
 $env:PSCAD_MCP_NATIVE_AVM_FULL_ACCEPTANCE='1'
-& D:/pscad-mcp/.venv/Scripts/python.exe scripts/run_mmc_native_avm_full_acceptance.py --workspace-root D:/PSCAD-Workspace/mmc-native-full
+& D:/pscad-mcp/.venv/Scripts/python.exe scripts/run_mmc_native_avm_full_acceptance.py --workspace-root D:/PA/mmc
 ```
 
 Use `--request-json <absolute-path>` for a complete parameterized request.
@@ -19,6 +19,14 @@ The default request is 640 kV, 1000 MW, 60 Hz, zero reactive power and a 100 km
 two-pole cable. Native planning derives valve modulation, arm storage and DC
 control from the physical grid, transformer, cable and neutral network.
 Inadequate explicit storage overrides are rejected rather than changed.
+
+The public native path also supports the audited two-conductor flat-tower
+overhead geometry. Three full-bridge 200 km overhead requests passed their
+[own complete suites at `7432030`](mmc-overhead-avm-20261014.md), including
+physical series RC damping and independent constants relocation. These
+feature-branch results retain their exact request/revision boundaries.
+Use a short workspace root: the PSCAD 4.6 generated compiler paths must fit
+within the vendor's MAX_PATH limit.
 
 The suite runs each licensed case sequentially in its own Python process,
 PSCAD instance and workspace. It confirms cleanup before starting another case.
@@ -35,7 +43,7 @@ Required cases are:
 4. DC pole-to-pole fault.
 5. DC pole-to-ground fault.
 6. Fresh compilation and repeated physical checks in an independently loaded
-   copy of the normal project, companion library and declared cable constants.
+   copy of the normal project, companion library and declared line constants.
 
 Normal acceptance includes DC and AC quantities, network identities, every
 arm's energy/capacitance consistency, ripple and balance, circulating current,
@@ -51,6 +59,8 @@ External AC/DC contacts, DC reactors, preinsertion resistors and native ZnO
 arresters provide isolation. A damped neutral reactor network restores the
 pole midpoint after ground faults. Device switching stress, switching
 harmonics, individual submodule balance and thermal behavior are not modeled.
+The accepted full-bridge overhead suites also use external isolation and do
+not certify intrinsic DC fault blocking without it.
 
 Each child keeps its immutable report, complete trace and native outputs.
 Failed attempts remain evidence for diagnosis; they are never overwritten by
@@ -58,7 +68,7 @@ a later PASS. The suite report lists all child report hashes and, on PASS,
 the accepted project/library paths and their final verified hashes.
 
 The independent copy contains only declared model files and constants. It
-copies no executable or prior solver output. Cable file references are rebound
+copies no executable or prior solver output. Line-constant references are rebound
 to the copy's verified constants, with exact relocation records. The original
 project, library, constants and reports retain their hashes.
 

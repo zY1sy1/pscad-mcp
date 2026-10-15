@@ -296,14 +296,16 @@ def _native_metadata(master: Path):
     return metadata, defaults
 
 
-def _module_definition(root, source_root, cable_name):
+def _module_definition(root, source_root, cable_name, *, interface_prototypes=None, overhead=False):
+    module_name = "MMCOverheadLink" if overhead else "MMCCableLink"
+    label = "Overhead line" if overhead else "Cable"
     definitions = root.find("definitions")
     module = ET.SubElement(
         definitions,
         "Definition",
         {
             "classid": "UserCmpDefn",
-            "name": "MMCCableLink",
+            "name": module_name,
             "id": "1750000000",
             "crc": "0",
             "view": "false",
@@ -311,11 +313,11 @@ def _module_definition(root, source_root, cable_name):
             "group": "HVDC FACTS PE",
         },
     )
-    _paramlist(module, {"Description": "Native coupled two-conductor cable"})
+    _paramlist(module, {"Description": "Native coupled two-conductor " + label.lower()})
     ET.SubElement(
         module,
         "form",
-        {"name": "Native coupled cable", "w": "320", "h": "240", "splitter": "60"},
+        {"name": "Native coupled overhead line" if overhead else "Native coupled cable", "w": "320", "h": "240", "splitter": "60"},
     )
     svg = ET.SubElement(module, "svg", {"viewBox": "-108 -72 108 72"})
     ET.SubElement(
@@ -333,7 +335,7 @@ def _module_definition(root, source_root, cable_name):
     )
     ET.SubElement(
         svg, "text", {"x": "0", "y": "0", "font-size": "Small", "fill": "Black"}
-    ).text = "Cable"
+    ).text = label
     for name, point in PORT_OFFSETS.items():
         ET.SubElement(
             svg,
@@ -363,7 +365,7 @@ def _module_definition(root, source_root, cable_name):
             "auto_sequence": "1",
         },
     )
-    prototypes = [
+    prototypes = interface_prototypes if overhead else [
         item
         for item in source_root.findall(".//User[@defn='master:cable_interface']")
         if _parameters(item).get("Name") == "Cable2"
@@ -375,16 +377,11 @@ def _module_definition(root, source_root, cable_name):
     for end_index, (end, x) in enumerate((("sending", 216), ("receiving", 576))):
         prototype = prototypes[end_index]
         parameters = _parameters(prototype)
+        expected = {"NC": "2", "View": "0", "dim_s": "0", "dim_r": "0", "alien": "2"} if overhead else {
+                "NCAB": "2", "C1T": "1", "C2T": "1", "dim_s": "0", "dim_r": "0", "pipe": "0"}
         if any(
             parameters.get(key) != value
-            for key, value in {
-                "NCAB": "2",
-                "C1T": "1",
-                "C2T": "1",
-                "dim_s": "0",
-                "dim_r": "0",
-                "pipe": "0",
-            }.items()
+            for key, value in expected.items()
         ):
             raise ValueError("Donor cable interface conductor ordering is unsupported")
         source_receipts[end] = {
@@ -396,7 +393,7 @@ def _module_definition(root, source_root, cable_name):
             id=str(1750000010 + end_index),
             name=end,
             x=str(x),
-            y="216",
+            y="234" if overhead else "216",
             orient="0",
             z="0",
         )
@@ -405,7 +402,7 @@ def _module_definition(root, source_root, cable_name):
         canvas.append(interface)
         for pole_index, pole in enumerate(("POS", "NEG")):
             port_name = ("SEND" if end_index == 0 else "RECV") + "_" + pole
-            y = 216 + 54 * pole_index
+            y = 216 + (36 if overhead else 54) * pole_index
             node = ET.SubElement(
                 canvas,
                 "User",
@@ -448,7 +445,7 @@ def _module_definition(root, source_root, cable_name):
                     "vertices": [[x - 72, y], [x - 18, y]],
                     "node_id": node.get("id"),
                     "interface_id": interface.get("id"),
-                    "native_port": "C" + str(pole_index + 1),
+                    "native_port": ("A", "C")[pole_index] if overhead else "C" + str(pole_index + 1),
                 }
             )
     return module, source_receipts, expected_wires

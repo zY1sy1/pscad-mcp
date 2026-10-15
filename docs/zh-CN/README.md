@@ -13,6 +13,10 @@
 - **十月已整合范围：** 指定 Blueprint 分压器、Legacy 15 项回归、三组全桥电缆 AVM
   和 Corpus 可复现子集保留[各自测试提交](../acceptance/current-status-20261013.md)。
   合并后的串行扫描另有新鲜三工况、42 项许可实机检查通过。
+- **新增独立分支范围：** 三组全桥、200 km 架空线 AVM 在 `7432030` 上的正常运行、
+  四类故障和独立重载共 18 个阶段全部通过。
+  [验收请求与可用工程](../acceptance/mmc-overhead-avm-20261014.md)位于
+  `codex/mmc-overhead-avm`，尚未合入 main。
 - **仍需完成：** 参数化 LCC 的物理映射和额定矩阵、详细 PWM 与其他 MMC 参数范围、
   更广的 Blueprint 覆盖及 PSCAD 5.x 实机验收。LCC 额定功率已确定为系统总功率，
   双极按 `P=2U极I极`、单极按 `P=UI`；[口径修复及三个模板功率点的诊断](../acceptance/lcc-rating-convention.md)

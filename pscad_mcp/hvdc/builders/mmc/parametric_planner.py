@@ -239,13 +239,16 @@ def create_parametric_plan(
     native_inputs = dict(avm_native_inputs or {})
     native_capabilities = dict(native_inputs.get("capabilities", {}))
     cable_profile = native_capabilities.get("native_cable_profile")
-    if native_capabilities.get("native_physical_assembly") is True and not isinstance(cable_profile, Mapping):
-        raise _error("MMC_AVM_CABLE_PROFILE_INVALID", "Native AVM planning requires the source cable geometry.")
+    overhead_profile = native_capabilities.get("native_overhead_profile")
+    selected_profile = overhead_profile if parsed.dc_link.kind == "overhead_line" else cable_profile
+    if native_capabilities.get("native_physical_assembly") is True and not isinstance(selected_profile, Mapping):
+        raise _error("MMC_AVM_CABLE_PROFILE_INVALID", "Native AVM planning requires the requested source DC-link geometry.")
     derived = derive_mmc_parameters(
         parsed,
         pwm_reference=_pwm_reference(audit) if "detailed_pwm" in requested_engines else None,
         avm_reference=_avm_reference(avm_assets),
         avm_cable_profile=cable_profile,
+        avm_overhead_profile=overhead_profile,
     )
     if not derived.feasible:
         raise _error("MMC_REQUEST_INFEASIBLE", "The MMC request failed analytic constraints.", diagnostics=list(derived.diagnostics))

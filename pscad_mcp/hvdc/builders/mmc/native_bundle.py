@@ -30,6 +30,7 @@ from .cable_companion import (
     DEFAULT_MASTER,
     append_native_cable_link,
 )
+from .overhead_companion import append_native_overhead_link, audit_native_overhead_link
 from .native_startup import STARTUP_NAME, STARTUP_INPUTS, STARTUP_OUTPUTS, STARTUP_DEFAULTS, append_precharge_readiness
 from .native_dq import PLL_NAME, PLL_OUTPUTS, PLL_DEFAULTS, DQ_NAME, DQ_DEFAULTS, DQ_INPUTS, DQ_OUTPUTS, append_native_pll_and_dq
 from .native_protection import PROTECTION_NAME, PROTECTION_INPUTS, PROTECTION_OUTPUTS, PROTECTION_DEFAULTS, append_native_protection
@@ -685,6 +686,7 @@ def materialize_native_avm_library(
     master_path: str | Path = DEFAULT_MASTER,
     source_project: str | Path = DEFAULT_DONOR,
     converter: str = "half_bridge",
+    dc_link_kind: str = "cable",
 ) -> dict:
     """Create the physical arm, modulator and cable in one native library."""
     target = Path(destination).resolve()
@@ -713,7 +715,9 @@ def materialize_native_avm_library(
         json.loads(evidence.read_text(encoding="utf-8"))["constants_path"]
     ).name
     constants_path = target.parent / "constants" / constants_name
-    added = append_native_cable_link(
+    if dc_link_kind not in {"cable", "overhead_line"}:
+        raise ValueError("Native AVM DC-link kind is unsupported")
+    added = (append_native_overhead_link if dc_link_kind == "overhead_line" else append_native_cable_link)(
         root,
         constants_evidence=evidence,
         source_project=source,
@@ -728,6 +732,17 @@ def materialize_native_avm_library(
         "schema_version": 1,
         "scope": "native_mmc_avm_library",
         "converter": converter,
+        "dc_link_kind": dc_link_kind,
+        "link_definition": "MMCOverheadLink" if dc_link_kind == "overhead_line" else "MMCCableLink",
+        "geometry_definition": "DCTL" if dc_link_kind == "overhead_line" else "Cable2",
+        "link_name": added["constants"]["segment"],
+        "link_length_km": added["constants"]["length_km"],
+        "link_configuration_id": added["configuration"].get("id"),
+        "link_topology": {
+            "module_wires": added["module_wires"],
+            "source_definition_receipts": added["source_definition_receipts"],
+            "geometry_semantics_sha256": added["geometry_semantics_sha256"],
+        },
         "library_path": str(target),
         "library_sha256": library_hash,
         "master_path": str(master),
@@ -849,6 +864,7 @@ def materialize_native_avm_fixture(
     constants_evidence: str | Path,
     master_path: str | Path = DEFAULT_MASTER,
     source_project: str | Path = DEFAULT_DONOR,
+    dc_link_kind: str = "cable",
     project_name: str = "mmc_native_avm_fixture",
     converter: str = "half_bridge",
     frequency_hz: float = 60.0,
@@ -902,6 +918,8 @@ def materialize_native_avm_fixture(
     neutral_inductance_h: float | None = None,
     neutral_resistance_ohm: float | None = None,
     neutral_phase_resistance_ohm: float | None = None,
+    station_dc_filter_resistance_ohm: float = 0.0,
+    station_dc_filter_capacitance_f: float = 0.0,
 ) -> dict:
     """Create a complete two-station, twelve-arm native integration fixture."""
     folder = Path(destination).resolve()
@@ -951,6 +969,9 @@ def materialize_native_avm_fixture(
     if control_kind not in {"scheduled_open_loop", "closed_loop", "dq_current"}:
         raise ValueError("control_kind must be scheduled_open_loop, closed_loop or dq_current")
     channels = {**FIXTURE_CHANNELS}
+    if dc_link_kind == "overhead_line":
+        channels.update({f"{s}_DC_FILTER_{q}_{pole}": unit for s in ("P", "V")
+                         for pole in ("POS", "NEG") for q, unit in (("I", "kA"), ("V", "kV"))})
     if fault_kind is not None and (fault_kind not in FAULT_KINDS or control_kind != "dq_current"):
         raise ValueError("Native fault injection requires a supported dq fault scenario")
     if control_kind == "dq_current":
@@ -1046,14 +1067,21 @@ def materialize_native_avm_fixture(
         master_path=master_path,
         source_project=source_project,
         converter=converter,
+        dc_link_kind=dc_link_kind,
     )
     master_metadata, master_hash, master_defaults = _audit_master(
         Path(master_path).resolve()
     )
     library_metadata = read_definition_metadata_document(library.read_bytes())
     cable_evidence = json.loads(Path(constants_evidence).read_text(encoding="utf-8"))
-    capacitances = [float(c["core_sheath_capacitance_f_per_km"]) for c in cable_evidence["configuration"]["cables"]]
-    dc_link_capacitance_f = float(cable_evidence["length_km"]) / math.fsum(1.0 / c for c in capacitances)
+    if dc_link_kind == "overhead_line":
+        station_dc_filter_resistance_ohm = _number(station_dc_filter_resistance_ohm, "station_dc_filter_resistance_ohm", positive=True)
+        station_dc_filter_capacitance_f = _number(station_dc_filter_capacitance_f, "station_dc_filter_capacitance_f", positive=True)
+        dc_link_capacitance_f = float(cable_evidence["length_km"]) * float(cable_evidence["differential_capacitance_f_per_km"])
+        dc_link_capacitance_f += station_dc_filter_capacitance_f
+    else:
+        capacitances = [float(c["core_sheath_capacitance_f_per_km"]) for c in cable_evidence["configuration"]["cables"]]
+        dc_link_capacitance_f = float(cable_evidence["length_km"]) / math.fsum(1.0 / c for c in capacitances)
     root = _project(project_name, library=False)
     settings = root.find("./paramlist[@name='Settings']")
     for name, value in {
@@ -1382,10 +1410,22 @@ def materialize_native_avm_fixture(
                            {"Name": prefix + "_CABLE_V" + pole}, {"N1": prefix + "_CABLE_" + pole, "N2": "GND"})
             writer.add(main, prefix + "_cable_voltage", "master:voltmeter", {"Name": prefix + "_CABLE_VDC"},
                        {"N1": prefix + "_CABLE_POS", "N2": prefix + "_CABLE_NEG"})
+    if dc_link_kind == "overhead_line":
+        for prefix in ("P", "V"):
+            for pole in ("POS", "NEG"):
+                role = prefix + "_dc_filter_" + pole
+                writer.add(main, role + "_meter", "master:ammeter", {"Name": prefix + "_DC_FILTER_I_" + pole},
+                           {"N1": prefix + "_CABLE_" + pole, "N2": role + "_R_IN"})
+                writer.add(main, role + "_resistor", "master:resistor", {"R": f"{station_dc_filter_resistance_ohm:.15g} [ohm]"},
+                           {"A": role + "_R_IN", "B": role + "_C_IN"})
+                writer.add(main, role + "_capacitor", "master:capacitor", {"C": f"{station_dc_filter_capacitance_f * 1e6:.15g} [uF]"},
+                           {"A": role + "_C_IN", "B": "GND"})
+                writer.add(main, role + "_voltage", "master:voltmeter", {"Name": prefix + "_DC_FILTER_V_" + pole},
+                           {"N1": role + "_C_IN", "N2": "GND"})
     cable = writer.add(
         main,
         "DC_CABLE",
-        f"{NATIVE_SCOPE}:MMCCableLink",
+        f"{NATIVE_SCOPE}:" + library_receipt["link_definition"],
         {},
         {
             "SEND_POS": "P_CABLE_POS",
@@ -1394,7 +1434,7 @@ def materialize_native_avm_fixture(
             "RECV_NEG": "V_CABLE_NEG",
         },
     )
-    custom.append((cable, "MMCCableLink"))
+    custom.append((cable, library_receipt["link_definition"]))
     if fault_kind is not None:
         writer.add(main, "fault_protocol", NATIVE_SCOPE + ":" + FAULT_NAME,
                    {**FAULT_DEFAULTS, "Fault_Delay_s": reversal_time_s - deblock_time_s + reversal_duration_s + 1.0},
@@ -1552,13 +1592,13 @@ def materialize_native_avm_fixture(
                 else 1 if component.get("name") == "V_controller" else 0
             ),
         )
-        if definition == "MMCCableLink":
+        if definition == library_receipt["link_definition"]:
             ET.SubElement(
                 call,
                 "call",
                 {
                     "link": library_receipt["cable_configuration_id"],
-                    "name": f"{NATIVE_SCOPE}:Cable2",
+                    "name": f"{NATIVE_SCOPE}:" + library_receipt["geometry_definition"],
                     "z": "-1",
                     "view": "false",
                     "instance": "0",
@@ -1629,6 +1669,10 @@ def materialize_native_avm_fixture(
             "time_step_s": time_step_s,
             "output_step_s": output_step_s,
             "cable_length_km": library_receipt["cable_length_km"],
+            "dc_link_kind": dc_link_kind,
+            "dc_link_length_km": library_receipt["link_length_km"],
+            "station_dc_filter_resistance_ohm": station_dc_filter_resistance_ohm,
+            "station_dc_filter_capacitance_f": station_dc_filter_capacitance_f,
             "arm": arm_values,
         },
         "electrical_nets": {name: dict(nets) for name, nets in writer.nets.items()},
@@ -1669,7 +1713,7 @@ def audit_native_avm_fixture(
         f"{NATIVE_SCOPE}:MMCAverageArm": 12,
         f"{NATIVE_SCOPE}:{control_definition}": 2,
         f"{NATIVE_SCOPE}:{MEASUREMENT_NAME}": 2,
-        f"{NATIVE_SCOPE}:MMCCableLink": 1,
+        f"{NATIVE_SCOPE}:" + receipt["library"].get("link_definition", "MMCCableLink"): 1,
         f"{NATIVE_SCOPE}:{STARTUP_NAME}": 1,
         f"{NATIVE_SCOPE}:{PLL_NAME}": 2,
         f"{NATIVE_SCOPE}:{SAMPLE_NAME}": 2 * len(KCL_MEASUREMENTS),
@@ -1687,6 +1731,11 @@ def audit_native_avm_fixture(
         required.update({f"{NATIVE_SCOPE}:{AC_ISOLATION}": 6, f"{NATIVE_SCOPE}:{DC_ISOLATION}": 4,
                          f"{NATIVE_SCOPE}:{NEUTRAL_GROUNDING}": 2,
                          f"{NATIVE_SCOPE}:{PROTECTION_NAME}": 1, "master:resistor": 10, "master:voltmeter": 24})
+    if receipt["parameters"].get("dc_link_kind") == "overhead_line":
+        required["master:resistor"] += 4
+        required["master:ammeter"] += 4
+        required["master:voltmeter"] += 4
+        required["master:capacitor"] = 4
     if receipt["parameters"].get("converter") == "full_bridge":
         required[NATIVE_SCOPE + ":" + AUXILIARY_NAME] = 16
     if any(counts[name] != count for name, count in required.items()):
@@ -1728,6 +1777,13 @@ def audit_native_avm_fixture(
         for pole in ("POS", "NEG"):
             if f"{prefix}_pole_ground_{pole}:A" not in nets[prefix + "_DC_" + pole] or f"{prefix}_pole_ground_{pole}:B" not in nets["GND"]:
                 raise ValueError("Native AVM symmetric high-impedance grounding is incomplete")
+            if receipt["parameters"].get("dc_link_kind") == "overhead_line":
+                role = prefix + "_dc_filter_" + pole
+                if (role + "_meter:N1" not in nets[prefix + "_CABLE_" + pole]
+                        or set(nets[role + "_R_IN"]) != {role + "_meter:N2", role + "_resistor:A"}
+                        or set(nets[role + "_C_IN"]) != {role + "_resistor:B", role + "_capacitor:A", role + "_voltage:N1"}
+                        or role + "_capacitor:B" not in nets["GND"]):
+                    raise ValueError("Native overhead RC damping branch is disconnected or bypassed")
         if isolated and f"{prefix}_neutral_grounding:G" not in nets["GND"]:
             raise ValueError("Native neutral resistor is not grounded")
         for phase in "ABC":
@@ -1801,18 +1857,22 @@ def audit_native_avm_fixture(
             "MMCControlErrors",
             "MMCModulationSynthesis",
             MEASUREMENT_NAME,
-            "MMCCableLink",
-            "Cable2",
+            receipt["library"].get("link_definition", "MMCCableLink"),
+            receipt["library"].get("geometry_definition", "Cable2"),
         }
         <= definitions
     ):
         raise ValueError("Native AVM companion definitions are incomplete")
+    overhead = receipt["parameters"].get("dc_link_kind", "cable") == "overhead_line"
+    if overhead:
+        audit_native_overhead_link(library, receipt["library"])
     return {
         "converter": converter,
+        **({"dc_link_kind": "overhead_line", "coupled_overhead_count": 1} if overhead else {}),
         "two_stations": True,
         "arm_count": 12,
         "phase_breakout_count": 2,
-        "coupled_cable_count": 1,
+        "coupled_cable_count": 0 if overhead else 1,
         "control_kind": receipt["control_kind"],
         "physical_power_control_closed": receipt["control_kind"] != "scheduled_open_loop",
     }

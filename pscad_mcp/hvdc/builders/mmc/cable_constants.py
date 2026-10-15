@@ -432,7 +432,7 @@ def parse_cable_phase_output(
     )
 
 
-def _coefficient_structure(constants: str, *, conductors: int, options: Mapping[str, float]) -> dict[str, object]:
+def _coefficient_structure(constants: str, *, conductors: int, options: Mapping[str, float], allow_multiple_delay_groups: bool = False) -> dict[str, object]:
     """Validate the complete coefficient layout observed in native two-core outputs."""
 
     lines = [line.strip() for line in constants.splitlines() if line.strip() and not line.lstrip().startswith("!")]
@@ -486,24 +486,27 @@ def _coefficient_structure(constants: str, *, conductors: int, options: Mapping[
     label("Fitting parameters for the propagation function:")
     label("N.o. delay groups:")
     delay_groups = count("delay-group count", conductors)
-    if delay_groups != 1:
+    if delay_groups != 1 and not allow_multiple_delay_groups:
         raise RuntimeError("Native cable coefficients with multiple delay groups require an independently verified layout")
     label("Time delays:")
-    delay = scalar("propagation time delay")
-    if delay <= 0:
+    delays = tuple(scalar("propagation time delay") for _ in range(delay_groups))
+    if any(delay <= 0 for delay in delays):
         raise RuntimeError("Native cable coefficients have a non-positive time delay")
     label("Poles:")
-    propagation_poles = count("propagation pole count", options["AMaxP"])
-    for _ in range(2 * propagation_poles):
-        scalar("propagation pole")
+    propagation_counts = []
+    for _ in range(delay_groups):
+        propagation_poles = count("propagation pole count", options["AMaxP"])
+        propagation_counts.append(propagation_poles)
+        for _ in range(2 * propagation_poles):
+            scalar("propagation pole")
     label("Residues:")
-    for _ in range(conductors**2 * 2 * propagation_poles):
+    for _ in range(conductors**2 * 2 * sum(propagation_counts)):
         scalar("propagation residue matrix")
     if position != len(lines):
         raise RuntimeError("Native cable coefficients contain trailing data after the residue matrices")
     return {
         "conductors": conductors, "admittance_pole_counts": tuple(admittance_counts),
-        "propagation_pole_counts": (propagation_poles,), "time_delays_s": (delay,),
+        "propagation_pole_counts": tuple(propagation_counts), "time_delays_s": delays,
         "delay_groups": delay_groups, "coefficient_scalar_count": scalar_count - delay_groups,
     }
 

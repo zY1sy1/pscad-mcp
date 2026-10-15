@@ -428,7 +428,7 @@
         "sha256": "2c3d7d158f5069e3358ad1427500cb2882844bfabcacb43a80a4732821db98c3",
         "commit": "9cfe1d41dd2113cb4e72e3a285b1da00397a2b6b"
       },
-      "note": "Six named cable AVM reference requests retain their exact evidence. The named full-bridge detailed-PWM 640 kV/1000 MW/60 Hz/200 km overhead reference now passes its eleven-scene/delivery/reload/publication scope on codex/mmc-detailed-pwm. Broader rating matrices, overhead-line AVM and both-fidelity requests require separate qualification.",
+      "note": "Nine named AVM requests (six cable and three full-bridge overhead) and one audited full-bridge detailed-PWM reference have their own accepted scopes. PWM electrical evidence belongs to d0e547d and publication validation to 95655d1; overhead AVM evidence belongs to 7432030. Broad parametric MMC remains PARTIAL; other rating matrices, half-bridge overhead and both-fidelity requests require separate qualification.",
       "historical_attempts": [
         {
           "evidence": {
@@ -502,7 +502,10 @@
         "native_mmc_full_bridge_640kv",
         "native_mmc_full_bridge_500kv_q100",
         "native_mmc_full_bridge_800kv_50hz",
-        "parametric_mmc_detailed_pwm"
+        "parametric_mmc_detailed_pwm",
+        "native_mmc_full_bridge_overhead_640kv",
+        "native_mmc_full_bridge_overhead_500kv_q100",
+        "native_mmc_full_bridge_overhead_800kv_50hz"
       ],
       "linked_evidence": [
         {
@@ -1606,6 +1609,327 @@
       "implementation_source_branch": "codex/sweep-recovery-metrics",
       "implementation_integrated_from_commit": "dd5638ca27679d1f8fdc212c619a6cdf416b8f75",
       "implementation_integrated_into": "local main"
+    },
+    {
+      "scope": "native_mmc_full_bridge_overhead_640kv",
+      "implementation_status": "INTEGRATION_BRANCH",
+      "licensed_status": "PASS",
+      "pscad_version": "4.6.2",
+      "request": {
+        "active_power_mw": 1000.0,
+        "converter": "full_bridge",
+        "dc_link": {
+          "kind": "overhead_line",
+          "length_km": 200.0
+        },
+        "dc_voltage_kv": 640.0,
+        "engineering_overrides": {},
+        "frequency_hz": 60.0,
+        "model_fidelity": "average_value",
+        "power_reversal_time_s": 1.0,
+        "reactive_power_mvar": 0.0,
+        "schema_version": 1,
+        "station_p": {
+          "ac_voltage_kv": 230.0,
+          "short_circuit_ratio": 5.0,
+          "x_over_r": 10.0
+        },
+        "station_vdc": {
+          "ac_voltage_kv": 230.0,
+          "short_circuit_ratio": 5.0,
+          "x_over_r": 10.0
+        },
+        "topology": "two_terminal_symmetrical_monopole"
+      },
+      "evidence": {
+        "report_path": "D:\\PA\\h14h\\suite-20261014-124252-a37f249c\\report.json",
+        "sha256": "daedb281c77e95db723911893de77501a202ffa9d4586b5ecdfaf40820bd585d",
+        "commit": "743203006a60333c02dfdd13216cd13756f68f84"
+      },
+      "evidence_checks": [
+        {
+          "pointer": "/status",
+          "equals": "PASS"
+        },
+        {
+          "pointer": "/model_accepted",
+          "equals": true
+        },
+        {
+          "pointer": "/scope",
+          "equals": "native_avm_full_physical_suite"
+        },
+        {
+          "pointer": "/request",
+          "equals": {
+            "active_power_mw": 1000.0,
+            "converter": "full_bridge",
+            "dc_link": {
+              "kind": "overhead_line",
+              "length_km": 200.0
+            },
+            "dc_voltage_kv": 640.0,
+            "engineering_overrides": {},
+            "frequency_hz": 60.0,
+            "model_fidelity": "average_value",
+            "power_reversal_time_s": 1.0,
+            "reactive_power_mvar": 0.0,
+            "schema_version": 1,
+            "station_p": {
+              "ac_voltage_kv": 230.0,
+              "short_circuit_ratio": 5.0,
+              "x_over_r": 10.0
+            },
+            "station_vdc": {
+              "ac_voltage_kv": 230.0,
+              "short_circuit_ratio": 5.0,
+              "x_over_r": 10.0
+            },
+            "topology": "two_terminal_symmetrical_monopole"
+          }
+        },
+        {
+          "pointer": "/failed_checks",
+          "equals": []
+        },
+        {
+          "pointer": "/checks/independent_reload",
+          "equals": true
+        },
+        {
+          "pointer": "/intrinsic_dc_fault_blocking",
+          "equals": false
+        }
+      ],
+      "accepted_project": "D:\\PA\\h14h\\suite-20261014-124252-a37f249c\\reload\\attempt-20261014-130627-394e7d81\\model\\AVM_1cbcfc73a0d6_avm_0.pscx",
+      "accepted_library": "D:\\PA\\h14h\\suite-20261014-124252-a37f249c\\reload\\attempt-20261014-130627-394e7d81\\model\\cigre_mmc_avm_v1.pslx",
+      "intrinsic_dc_fault_blocking": false,
+      "note": "Full-bridge 200 km overhead AVM with audited installed flat-tower geometry, fresh frequency-dependent phase constants, four passive series RC pole-to-ground filters, cold-start physical precharge and external AC/DC fault isolation. Normal/forward/reversal/reverse operation, all four faults and fresh portable reload passed at the exact recorded commit. This local feature branch is not merged or pushed. Intrinsic fault blocking, half-bridge overhead, arbitrary towers, detailed PWM, individual cells, switching stress/harmonics, thermal behavior and PSCAD 5.x are not certified.",
+      "linked_evidence": [
+        {
+          "path": "D:\\PA\\o14ohl-matrix-integrity.json",
+          "sha256": "1b1d6ba310b0a9854272b3e0973bcdbddc6cb1a13df358266129e2396996b47a"
+        },
+        {
+          "path": "D:\\PA\\o14ohl-inputs\\request-640.json",
+          "sha256": "c4db7a860dbe86a10fada3bfbda1ee089535c8286a8b6aa2fb02ad2ccdee55ad"
+        }
+      ],
+      "implementation_source_branch": "codex/mmc-overhead-avm"
+    },
+    {
+      "scope": "native_mmc_full_bridge_overhead_500kv_q100",
+      "implementation_status": "INTEGRATION_BRANCH",
+      "licensed_status": "PASS",
+      "pscad_version": "4.6.2",
+      "request": {
+        "active_power_mw": 750.0,
+        "converter": "full_bridge",
+        "dc_link": {
+          "kind": "overhead_line",
+          "length_km": 200.0
+        },
+        "dc_voltage_kv": 500.0,
+        "engineering_overrides": {},
+        "frequency_hz": 60.0,
+        "model_fidelity": "average_value",
+        "power_reversal_time_s": 1.0,
+        "reactive_power_mvar": 100.0,
+        "schema_version": 1,
+        "station_p": {
+          "ac_voltage_kv": 180.0,
+          "short_circuit_ratio": 5.0,
+          "x_over_r": 10.0
+        },
+        "station_vdc": {
+          "ac_voltage_kv": 180.0,
+          "short_circuit_ratio": 5.0,
+          "x_over_r": 10.0
+        },
+        "topology": "two_terminal_symmetrical_monopole"
+      },
+      "evidence": {
+        "report_path": "D:\\PA\\h14i\\suite-20261014-131029-e4d46cf3\\report.json",
+        "sha256": "020b3b895b9b49cba0c504c81bbfaff78a25c917f1281af7483430b4bb12c7a3",
+        "commit": "743203006a60333c02dfdd13216cd13756f68f84"
+      },
+      "evidence_checks": [
+        {
+          "pointer": "/status",
+          "equals": "PASS"
+        },
+        {
+          "pointer": "/model_accepted",
+          "equals": true
+        },
+        {
+          "pointer": "/scope",
+          "equals": "native_avm_full_physical_suite"
+        },
+        {
+          "pointer": "/request",
+          "equals": {
+            "active_power_mw": 750.0,
+            "converter": "full_bridge",
+            "dc_link": {
+              "kind": "overhead_line",
+              "length_km": 200.0
+            },
+            "dc_voltage_kv": 500.0,
+            "engineering_overrides": {},
+            "frequency_hz": 60.0,
+            "model_fidelity": "average_value",
+            "power_reversal_time_s": 1.0,
+            "reactive_power_mvar": 100.0,
+            "schema_version": 1,
+            "station_p": {
+              "ac_voltage_kv": 180.0,
+              "short_circuit_ratio": 5.0,
+              "x_over_r": 10.0
+            },
+            "station_vdc": {
+              "ac_voltage_kv": 180.0,
+              "short_circuit_ratio": 5.0,
+              "x_over_r": 10.0
+            },
+            "topology": "two_terminal_symmetrical_monopole"
+          }
+        },
+        {
+          "pointer": "/failed_checks",
+          "equals": []
+        },
+        {
+          "pointer": "/checks/independent_reload",
+          "equals": true
+        },
+        {
+          "pointer": "/intrinsic_dc_fault_blocking",
+          "equals": false
+        }
+      ],
+      "accepted_project": "D:\\PA\\h14i\\suite-20261014-131029-e4d46cf3\\reload\\attempt-20261014-133304-a4d8eb38\\model\\AVM_411b845510c9_avm_0.pscx",
+      "accepted_library": "D:\\PA\\h14i\\suite-20261014-131029-e4d46cf3\\reload\\attempt-20261014-133304-a4d8eb38\\model\\cigre_mmc_avm_v1.pslx",
+      "intrinsic_dc_fault_blocking": false,
+      "note": "Full-bridge 200 km overhead AVM with audited installed flat-tower geometry, fresh frequency-dependent phase constants, four passive series RC pole-to-ground filters, cold-start physical precharge and external AC/DC fault isolation. Normal/forward/reversal/reverse operation, all four faults and fresh portable reload passed at the exact recorded commit. This local feature branch is not merged or pushed. Intrinsic fault blocking, half-bridge overhead, arbitrary towers, detailed PWM, individual cells, switching stress/harmonics, thermal behavior and PSCAD 5.x are not certified.",
+      "linked_evidence": [
+        {
+          "path": "D:\\PA\\o14ohl-matrix-integrity.json",
+          "sha256": "1b1d6ba310b0a9854272b3e0973bcdbddc6cb1a13df358266129e2396996b47a"
+        },
+        {
+          "path": "D:\\PA\\o14ohl-inputs\\request-500.json",
+          "sha256": "8082507dff3d6124971fd3fdace9d6c44bd2962498c2ed02121d76ed19566c94"
+        }
+      ],
+      "implementation_source_branch": "codex/mmc-overhead-avm"
+    },
+    {
+      "scope": "native_mmc_full_bridge_overhead_800kv_50hz",
+      "implementation_status": "INTEGRATION_BRANCH",
+      "licensed_status": "PASS",
+      "pscad_version": "4.6.2",
+      "request": {
+        "active_power_mw": 1200.0,
+        "converter": "full_bridge",
+        "dc_link": {
+          "kind": "overhead_line",
+          "length_km": 200.0
+        },
+        "dc_voltage_kv": 800.0,
+        "engineering_overrides": {},
+        "frequency_hz": 50.0,
+        "model_fidelity": "average_value",
+        "power_reversal_time_s": 1.0,
+        "reactive_power_mvar": -120.0,
+        "schema_version": 1,
+        "station_p": {
+          "ac_voltage_kv": 320.0,
+          "short_circuit_ratio": 5.0,
+          "x_over_r": 10.0
+        },
+        "station_vdc": {
+          "ac_voltage_kv": 320.0,
+          "short_circuit_ratio": 5.0,
+          "x_over_r": 10.0
+        },
+        "topology": "two_terminal_symmetrical_monopole"
+      },
+      "evidence": {
+        "report_path": "D:\\PA\\h14j\\suite-20261014-194627-3562fe19\\report.json",
+        "sha256": "bbf6726f6771676ec96e875225c27cd7847189c5e0d709479bf1cb9e80ec5b3e",
+        "commit": "743203006a60333c02dfdd13216cd13756f68f84"
+      },
+      "evidence_checks": [
+        {
+          "pointer": "/status",
+          "equals": "PASS"
+        },
+        {
+          "pointer": "/model_accepted",
+          "equals": true
+        },
+        {
+          "pointer": "/scope",
+          "equals": "native_avm_full_physical_suite"
+        },
+        {
+          "pointer": "/request",
+          "equals": {
+            "active_power_mw": 1200.0,
+            "converter": "full_bridge",
+            "dc_link": {
+              "kind": "overhead_line",
+              "length_km": 200.0
+            },
+            "dc_voltage_kv": 800.0,
+            "engineering_overrides": {},
+            "frequency_hz": 50.0,
+            "model_fidelity": "average_value",
+            "power_reversal_time_s": 1.0,
+            "reactive_power_mvar": -120.0,
+            "schema_version": 1,
+            "station_p": {
+              "ac_voltage_kv": 320.0,
+              "short_circuit_ratio": 5.0,
+              "x_over_r": 10.0
+            },
+            "station_vdc": {
+              "ac_voltage_kv": 320.0,
+              "short_circuit_ratio": 5.0,
+              "x_over_r": 10.0
+            },
+            "topology": "two_terminal_symmetrical_monopole"
+          }
+        },
+        {
+          "pointer": "/failed_checks",
+          "equals": []
+        },
+        {
+          "pointer": "/checks/independent_reload",
+          "equals": true
+        },
+        {
+          "pointer": "/intrinsic_dc_fault_blocking",
+          "equals": false
+        }
+      ],
+      "accepted_project": "D:\\PA\\h14j\\suite-20261014-194627-3562fe19\\reload\\attempt-20261014-200417-995d9ffc\\model\\AVM_56adab039172_avm_0.pscx",
+      "accepted_library": "D:\\PA\\h14j\\suite-20261014-194627-3562fe19\\reload\\attempt-20261014-200417-995d9ffc\\model\\cigre_mmc_avm_v1.pslx",
+      "intrinsic_dc_fault_blocking": false,
+      "note": "Full-bridge 200 km overhead AVM with audited installed flat-tower geometry, fresh frequency-dependent phase constants, four passive series RC pole-to-ground filters, cold-start physical precharge and external AC/DC fault isolation. Normal/forward/reversal/reverse operation, all four faults and fresh portable reload passed at the exact recorded commit. This local feature branch is not merged or pushed. Intrinsic fault blocking, half-bridge overhead, arbitrary towers, detailed PWM, individual cells, switching stress/harmonics, thermal behavior and PSCAD 5.x are not certified.",
+      "linked_evidence": [
+        {
+          "path": "D:\\PA\\o14ohl-matrix-integrity.json",
+          "sha256": "1b1d6ba310b0a9854272b3e0973bcdbddc6cb1a13df358266129e2396996b47a"
+        },
+        {
+          "path": "D:\\PA\\o14ohl-inputs\\request-800.json",
+          "sha256": "4869bbbaf86b5418f87e90c4ce9d621e1a567aed41efbc474811dd9b8ec6ebdb"
+        }
+      ],
+      "implementation_source_branch": "codex/mmc-overhead-avm"
     }
   ],
   "program_baseline_note": "docs/acceptance/lcc-mmc-program-baseline.json is the frozen earlier program baseline. Later reports are indexed here without promoting that baseline or WP6.",
