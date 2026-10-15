@@ -1,5 +1,9 @@
 # 详细 PWM 隔离修复与待完成验收（2026-10-15）
 
+后续用户已指定由另一对话继续负责；接收分支已完成自己的完整验收。
+本文件保留本分支中断时的历史状态，最终交接及版本边界见
+[补充修复交接](mmc-pwm-closure-handoff-20261015.md)。
+
 完整模型验收尚未完成。工作树为
 `C:/Users/335/.codex/worktrees/mmc-pwm-closure/pscad-mcp`，分支为
 `codex/mmc-pwm-closure`，从 `2287d93cedc709946a48809a78d073f2089507ff`
