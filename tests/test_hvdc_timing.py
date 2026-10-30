@@ -1,8 +1,10 @@
 import asyncio
+from types import SimpleNamespace
 
 import pytest
 
 from pscad_mcp.core.backend.base import BackendError
+from pscad_mcp.hvdc import timing
 from pscad_mcp.hvdc.timing import dispatch_timed_events, select_timing_mode
 
 
@@ -88,6 +90,23 @@ def test_polling_rejects_a_stalled_simulation_clock(monkeypatch):
             max_stalled_polls=2,
         ))
     assert raised.value.code == "HVDC_TIMED_CONTROL_UNAVAILABLE"
+
+
+def test_polling_liveness_deadline_raises_timeout_before_dispatch(monkeypatch):
+    backend = PollingTimingBackend()
+    ticks = iter([100.0, 100.021])
+    monkeypatch.setattr(timing, "time", SimpleNamespace(monotonic=lambda: next(ticks)))
+
+    with pytest.raises(asyncio.TimeoutError, match="liveness deadline"):
+        asyncio.run(dispatch_timed_events(
+            backend,
+            "case",
+            [{"time_s": 1.0, "component_id": 17, "parameter_name": "Value", "value": 1}],
+            mode="simulation_clock_polling",
+            liveness_deadline_s=0.02,
+        ))
+
+    assert backend.writes == []
 
 
 def test_duplicate_event_ids_are_rejected_before_dispatch():

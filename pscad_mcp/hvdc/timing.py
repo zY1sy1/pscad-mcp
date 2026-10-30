@@ -171,7 +171,8 @@ async def dispatch_timed_events(
     started = time.monotonic()
     while pending:
         if liveness_deadline_s is not None and time.monotonic() - started > liveness_deadline_s:
-            raise _timing_error("Simulation clock polling exceeded its liveness deadline.", project_name=project_name)
+            # Match the scenario deadline signal whichever timer expires first.
+            raise asyncio.TimeoutError("Simulation clock polling exceeded its liveness deadline.")
         observed = float(await backend.get_simulation_time(project_name))
         if not math.isfinite(observed) or observed < 0 or (previous_time is not None and observed < previous_time):
             raise _timing_error("Reported simulation time must be finite and monotonic.", project_name=project_name, observed_time_s=observed)

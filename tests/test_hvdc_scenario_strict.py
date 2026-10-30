@@ -1,10 +1,12 @@
 import asyncio
 import json
+from types import SimpleNamespace
 
 import pytest
 
 from pscad_mcp.core.backend.base import BackendError
 from pscad_mcp.core.path_policy import PathPolicy
+from pscad_mcp.hvdc import timing
 from pscad_mcp.hvdc.service import HvdcDomainService
 
 
@@ -231,3 +233,35 @@ def test_clock_failure_stops_only_its_project_and_releases_scenario(tmp_path, fa
         assert "did not advance" in record["error"]["message"]
     if failure == "backward":
         assert "monotonic" in record["error"]["message"]
+
+
+def test_polling_deadline_before_worker_timeout_is_classified_and_contained(tmp_path, monkeypatch):
+    class ExpiredClockBackend(StrictBackend):
+        def __init__(self):
+            super().__init__()
+            self.stopped = []
+
+        async def stop_simulation(self, project_name):
+            self.stopped.append(project_name)
+            self.status = "stopped"
+
+    backend = ExpiredClockBackend()
+    service, source, derived = _service(tmp_path, backend)
+    scenario = _scenario(derived)
+    scenario["run"]["timeout_s"] = 3.0
+    ticks = iter([100.0, 104.0])
+    # Expire only the polling clock; the real asyncio worker deadline stays pending.
+    monkeypatch.setattr(timing, "time", SimpleNamespace(monotonic=lambda: next(ticks)))
+
+    async def exercise():
+        started = await service.run_scenario(str(source), scenario, confirm=True)
+        await service._scenario_tasks[started["scenario_id"]]
+        return await service.scenario_status(started["scenario_id"])
+
+    record = asyncio.run(exercise())
+    assert backend.stopped == [str(derived)]
+    assert record["reservation_held"] is False
+    assert record["partial_completion"]["applied_events"] == []
+    assert record["status"] == "timed_out"
+    assert record["error"]["code"] == "HVDC_SCENARIO_TIMEOUT"
+    assert record["outcome"] == "timed_out_contained"

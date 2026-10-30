@@ -4,6 +4,12 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+### Fixed
+
+- HVDC polling liveness deadlines now report the same scenario timeout as the
+  outer worker deadline, regardless of timer ordering. Deterministic regression
+  checks retain project-scoped stopping, reservation release and unapplied events.
+
 ### Added
 
 - Native parametric MMC overhead AVM planning/building with audited flat-tower
