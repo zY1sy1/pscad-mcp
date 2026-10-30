@@ -530,7 +530,11 @@ def test_timed_events_run_in_background_without_blocking_the_start_call(tmp_path
         before = asyncio.get_running_loop().time()
         started = await service.run_scenario(str(source), scenario, confirm=True)
         elapsed = asyncio.get_running_loop().time() - before
-        await asyncio.sleep(0.02)
+        deadline = asyncio.get_running_loop().time() + 0.5
+        while not any(call[0] == "set" for call in backend.calls):
+            if asyncio.get_running_loop().time() >= deadline:
+                raise AssertionError("timed event was not dispatched in the background")
+            await asyncio.sleep(0.001)
         interim = await service.scenario_status(started["scenario_id"])
         interim_calls = list(backend.calls)
         terminal = await _wait_for_terminal(service, started["scenario_id"])
