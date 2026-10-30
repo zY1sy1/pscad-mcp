@@ -1,0 +1,54 @@
+diff --git a/tests/test_mmc_acceptance.py b/tests/test_mmc_acceptance.py
+index 67f7454..1326920 100644
+--- a/tests/test_mmc_acceptance.py
++++ b/tests/test_mmc_acceptance.py
+@@ -27,6 +27,7 @@ from pscad_mcp.hvdc.builders.mmc.acceptance import (
+     reverse_steady_check,
+     reversal_check,
+     station_energy_check,
++    derive_physical_checks,
+ )
+ from pscad_mcp.hvdc.builders.mmc.models import MmcAcceptanceCheck
+ 
+@@ -203,6 +204,41 @@ def test_physical_evidence_with_missing_state_cannot_pass():
+     assert contract.state == AcceptanceState.MISSING.value
+ 
+ 
++def test_derive_physical_checks_builds_independent_evidence_from_declared_channels():
++    samples = {
++        "vdc_pole_to_pole": {"units": "kV", "time": [0.0, 1.0], "values": [640.0, 640.0]},
++        "dc_current_positive": {"units": "kA", "time": [0.0, 1.0], "values": [1.5625, 1.5625]},
++        "p_ac_p": {"units": "MW", "time": [0.0, 1.0], "values": [1000.0, 1000.0]},
++        "p_dc_p": {"units": "MW", "time": [0.0, 1.0], "values": [1000.0, 1000.0]},
++        "q_ac_p": {"units": "MVAr", "time": [0.0, 1.0], "values": [0.0, 0.0]},
++        "p_order": {"units": "MW", "time": [0.0, 1.0], "values": [1000.0, 1000.0]},
++        "q_order": {"units": "MVAr", "time": [0.0, 1.0], "values": [0.0, 0.0]},
++        "arm_current_p_a_upper": {"units": "kA", "time": [0.0, 1.0], "values": [4.7, 4.7]},
++        "arm_current_p_a_lower": {"units": "kA", "time": [0.0, 1.0], "values": [1.7, 1.7]},
++        "circ_p_a": {"units": "kA", "time": [0.0, 1.0], "values": [0.2, 0.2]},
++        "arm_energy_p_a_upper": {"units": "MJ", "time": [0.0, 1.0], "values": [2.0, 2.0]},
++        "cap_v_p_a_upper": {"units": "kV", "time": [0.0, 1.0], "values": [20.0, 20.0]},
++        "mod_unclipped_p": {"units": "1", "time": [0.0, 1.0], "values": [0.8, 0.8]},
++        "mod_clipped_p": {"units": "1", "time": [0.0, 1.0], "values": [0.8, 0.8]},
++        "mod_margin_p": {"units": "1", "time": [0.0, 1.0], "values": [0.2, 0.2]},
++        "sat_duration_p": {"units": "s", "time": [0.0, 1.0], "values": [0.0, 0.0]},
++    }
++    checks = derive_physical_checks(samples, nominal_vdc_kv=640.0, nominal_power_mw=1000.0)
++    by_name = {check.name: check for check in checks}
++    assert by_name["dc_link"].passed is True
++    assert by_name["dc_power"].passed is True
++    assert by_name["arm_current_equation"].passed is True
++    assert by_name["energy_consistency"].passed is True
++    assert by_name["physical_channels"].passed is True
++
++
++def test_derive_physical_checks_is_fail_closed_when_a_required_channel_is_missing():
++    checks = derive_physical_checks({"vdc_pole_to_pole": {"units": "kV", "time": [0.0], "values": [640.0]}}, nominal_vdc_kv=640.0, nominal_power_mw=1000.0)
++    physical = next(check for check in checks if check.name == "physical_channels")
++    assert physical.state == AcceptanceState.MISSING.value
++    assert physical.passed is False
++
++
+ def test_acceptance_requires_a_reviewed_golden_reference_before_pass():
+     report = evaluate_acceptance(_series(), CHECKS)
+     assert report.verdict == "INCOMPLETE_ANALYSIS"

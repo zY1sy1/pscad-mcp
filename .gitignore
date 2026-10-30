@@ -74,3 +74,10 @@ venv.bak/
 # Locally generated PSCAD API documentation
 docs/raw/
 docs/md/
+
+# Local authoring scratch space and private research deliverables.
+/.codex_artifacts/
+/.codex_tmp/
+/.sheetwork/
+/outputs/
+.ruff_cache/

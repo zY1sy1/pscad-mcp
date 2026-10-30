@@ -1,0 +1,66 @@
+{
+  "date": "2026-10-31",
+  "source_worktrees_modified": false,
+  "files": [
+    {
+      "workspace": "D:\\pscad-mcp\\.worktrees\\codex-lcc-parametric-auto-modeling",
+      "base_commit": "a8f45712e388536b459abc95740fb76de4d42d6d",
+      "source": [
+        "tests/test_lcc_template_bindings.py"
+      ],
+      "archive": "docs/archive/local-worktree-drafts-20261031/lcc-parametric/changes.patch",
+      "sha256": "978aa2a452417b6c3e5f3b29a5199ee34ed523de1b908a3f243eb5c1e8c53903",
+      "status": "unmerged historical draft; not executed as part of the current test suite"
+    },
+    {
+      "workspace": "D:\\pscad-mcp\\.worktrees\\codex-lcc-parametric-auto-modeling",
+      "base_commit": "a8f45712e388536b459abc95740fb76de4d42d6d",
+      "source": "docs/superpowers/plans/2026-08-24-lcc-real-template-execution.md",
+      "archive": "docs/archive/local-worktree-drafts-20261031/lcc-parametric/docs/superpowers/plans/2026-08-24-lcc-real-template-execution.md",
+      "sha256": "3279d22960862c0ef18cecca287482f6e1e87aa83bbc4f91cb0fd68878fc8d32",
+      "status": "historical draft; .py.txt copies are excluded from pytest collection"
+    },
+    {
+      "workspace": "D:\\pscad-mcp\\.worktrees\\codex-lcc-parametric-auto-modeling",
+      "base_commit": "a8f45712e388536b459abc95740fb76de4d42d6d",
+      "source": "docs/superpowers/specs/2026-08-24-real-lcc-template-binding-review.md",
+      "archive": "docs/archive/local-worktree-drafts-20261031/lcc-parametric/docs/superpowers/specs/2026-08-24-real-lcc-template-binding-review.md",
+      "sha256": "21069d70bd3108ee870168d6ed56dacb36f4d0efdaccd6aa534063ead4bac1c5",
+      "status": "historical draft; .py.txt copies are excluded from pytest collection"
+    },
+    {
+      "workspace": "D:\\pscad-mcp\\.worktrees\\codex-lcc-parametric-auto-modeling",
+      "base_commit": "a8f45712e388536b459abc95740fb76de4d42d6d",
+      "source": "docs/superpowers/specs/2026-08-25-complete-lcc-automation-execution-spec.md",
+      "archive": "docs/archive/local-worktree-drafts-20261031/lcc-parametric/docs/superpowers/specs/2026-08-25-complete-lcc-automation-execution-spec.md",
+      "sha256": "5f13b9bdb4479a5f113875210550022112e821125d472f54178539ca980151a4",
+      "status": "historical draft; .py.txt copies are excluded from pytest collection"
+    },
+    {
+      "workspace": "D:\\pscad-mcp\\.worktrees\\codex-mmc-autonomous-builder",
+      "base_commit": "8872a96f72c039ebca1925b8e6a6cfa8763e7d19",
+      "source": [
+        "tests/test_mmc_acceptance.py"
+      ],
+      "archive": "docs/archive/local-worktree-drafts-20261031/mmc-autonomous/changes.patch",
+      "sha256": "1a01a6f1d898dbb58828d946cf6a5e2c4a950693e1f8dbd243cdf2d66300c314",
+      "status": "unmerged historical draft; not executed as part of the current test suite"
+    },
+    {
+      "workspace": "D:\\pscad-mcp\\.worktrees\\lcc-acceptance-hardening",
+      "base_commit": "fc46d6656cec0f6645addb7b672772e947dc1e58",
+      "source": "tests/test_lcc_acceptance_hardening_baseline.py",
+      "archive": "docs/archive/local-worktree-drafts-20261031/lcc-hardening/tests/test_lcc_acceptance_hardening_baseline.py.txt",
+      "sha256": "520ff5d887e2e81d75e83c54265975e0ab82237669f8933b2739cba5febae1d8",
+      "status": "historical draft; .py.txt copies are excluded from pytest collection"
+    },
+    {
+      "workspace": "D:\\pscad-mcp\\.worktrees\\lcc-acceptance-hardening",
+      "base_commit": "fc46d6656cec0f6645addb7b672772e947dc1e58",
+      "source": "tests/test_lcc_asset_evidence.py",
+      "archive": "docs/archive/local-worktree-drafts-20261031/lcc-hardening/tests/test_lcc_asset_evidence.py.txt",
+      "sha256": "221b494043034a9a6ae7e305eb64fdfe166700e230bad56e60ec86509800ec20",
+      "status": "historical draft; .py.txt copies are excluded from pytest collection"
+    }
+  ]
+}

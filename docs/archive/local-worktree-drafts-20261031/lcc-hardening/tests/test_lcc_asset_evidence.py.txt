@@ -1,0 +1,154 @@
+import json
+
+import pytest
+
+from pscad_mcp.core.backend.base import BackendError
+
+
+def _write_assets(root, *, golden, manifest_overrides=None, provenance=True):
+    root.mkdir(parents=True)
+    (root / "golden.json").write_text(json.dumps(golden), encoding="utf-8")
+    manifest = {
+        "schema_version": 1,
+        "profile": "cigre_lcc_monopole_v1",
+        "catalog_sha256": "a" * 64,
+        "live_inventory_sha256": "b" * 64,
+        "library": {
+            "sha256": "c" * 64,
+            "loaded": True,
+            "compiled": True,
+            "reference_run": True,
+        },
+        "golden": {
+            "sha256": "d" * 64,
+            "reference_output_sha256": "e" * 64,
+        },
+        "provenance": {"reviewed": True},
+    }
+    if manifest_overrides:
+        manifest.update(manifest_overrides)
+    (root / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    if provenance:
+        (root / "PROVENANCE.md").write_text(
+            "# Provenance\n\nLicensed PSCAD 4.6.2 reference review record.\n",
+            encoding="utf-8",
+        )
+
+
+VALID_GOLDEN = {
+    "schema_version": 1,
+    "source": {
+        "reference_output_sha256": "e" * 64,
+        "library_sha256": "c" * 64,
+        "compiler": "GFortran 4.6",
+    },
+    "channels": [
+        {
+            "canonical": "dc_voltage",
+            "units": "kV",
+            "window": [0.8, 1.0],
+            "time": [0.8, 0.9, 1.0],
+            "values": [500.0, 501.0, 500.5],
+        }
+    ],
+}
+
+
+def test_fully_populated_independent_evidence_can_be_accepted(tmp_path):
+    from pscad_mcp.hvdc.builders.lcc.assets import load_asset_evidence
+
+    _write_assets(tmp_path, golden=VALID_GOLDEN)
+
+    evidence = load_asset_evidence(tmp_path)
+
+    assert evidence.accepted is True
+    assert evidence.missing == ()
+
+
+@pytest.mark.parametrize(
+    ("overrides", "missing"),
+    [
+        ({"live_inventory_sha256": None}, "live_definition_inventory"),
+        ({"library": {"sha256": "c" * 64, "loaded": False, "compiled": True, "reference_run": True}}, "library_load"),
+        ({"library": {"sha256": "c" * 64, "loaded": True, "compiled": False, "reference_run": True}}, "library_compile"),
+        ({"library": {"sha256": "c" * 64, "loaded": True, "compiled": True, "reference_run": False}}, "independent_reference_run"),
+        ({"provenance": {"reviewed": False}}, "provenance_review"),
+    ],
+)
+def test_missing_runtime_or_library_evidence_blocks_acceptance(tmp_path, overrides, missing):
+    from pscad_mcp.hvdc.builders.lcc.assets import load_asset_evidence
+
+    _write_assets(tmp_path, golden=VALID_GOLDEN, manifest_overrides=overrides)
+
+    evidence = load_asset_evidence(tmp_path)
+
+    assert evidence.accepted is False
+    assert missing in evidence.missing
+
+
+@pytest.mark.parametrize(
+    "golden",
+    [
+        {},
+        {"placeholder": True, "channels": []},
+        {**VALID_GOLDEN, "channels": []},
+        {
+            **VALID_GOLDEN,
+            "channels": [{**VALID_GOLDEN["channels"][0], "values": []}],
+        },
+    ],
+)
+def test_placeholder_or_empty_golden_data_blocks_acceptance(tmp_path, golden):
+    from pscad_mcp.hvdc.builders.lcc.assets import load_asset_evidence
+
+    _write_assets(tmp_path, golden=golden)
+
+    evidence = load_asset_evidence(tmp_path)
+
+    assert evidence.accepted is False
+    assert "golden_reference" in evidence.missing
+
+
+def test_catalog_hash_is_never_substituted_for_live_inventory_hash(tmp_path):
+    from pscad_mcp.hvdc.builders.lcc.assets import load_asset_evidence
+
+    _write_assets(
+        tmp_path,
+        golden=VALID_GOLDEN,
+        manifest_overrides={"live_inventory_sha256": None},
+    )
+
+    evidence = load_asset_evidence(tmp_path)
+
+    assert evidence.catalog_hash == "a" * 64
+    assert evidence.live_inventory_hash is None
+    assert "live_definition_inventory" in evidence.missing
+
+
+def test_require_acceptance_evidence_raises_stable_error(tmp_path):
+    from pscad_mcp.hvdc.builders.lcc.assets import load_asset_evidence
+    from pscad_mcp.hvdc.builders.lcc.evidence import require_acceptance_evidence
+
+    _write_assets(tmp_path, golden={"placeholder": True, "channels": []})
+
+    with pytest.raises(BackendError) as raised:
+        require_acceptance_evidence(load_asset_evidence(tmp_path))
+
+    assert raised.value.code == "ASSET_EVIDENCE_MISSING"
+    assert "golden_reference" in raised.value.details["missing"]
+
+
+def test_packaged_scaffold_is_explicitly_unverified():
+    from pscad_mcp.hvdc.builders.lcc.assets import packaged_asset_root, load_asset_evidence
+
+    evidence = load_asset_evidence(packaged_asset_root())
+
+    assert evidence.accepted is False
+    assert {
+        "live_definition_inventory",
+        "library_load",
+        "library_compile",
+        "independent_reference_run",
+        "golden_reference",
+        "provenance_review",
+    }.issubset(evidence.missing)

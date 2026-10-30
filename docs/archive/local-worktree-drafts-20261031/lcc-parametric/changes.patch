@@ -1,0 +1,60 @@
+diff --git a/tests/test_lcc_template_bindings.py b/tests/test_lcc_template_bindings.py
+index 8caa37e..7dff3bb 100644
+--- a/tests/test_lcc_template_bindings.py
++++ b/tests/test_lcc_template_bindings.py
+@@ -9,9 +9,11 @@ import pytest
+ from pscad_mcp.core.backend.base import BackendError
+ from pscad_mcp.hvdc.builders.lcc.assets import load_parametric_catalog
+ from pscad_mcp.hvdc.builders.lcc.template_audit import audit_lcc_parameter_bindings
++from pscad_mcp.hvdc.builders.lcc.parametric_executor import apply_template_bindings
+ 
+ 
+ FIXTURE = Path(__file__).parent / "fixtures" / "lcc_parametric" / "real_binding_template.pscx"
++REAL_TEMPLATE = Path(r"C:\Users\335\Desktop\moxing\HVDC_Bipolar_1000MW_500kV.pscx")
+ 
+ 
+ def test_real_template_bindings_are_reviewed_and_exact():
+@@ -47,3 +49,43 @@ def test_binding_catalog_is_json_serializable_and_deterministic():
+     assert json.dumps(catalog["template_bindings"], sort_keys=True)
+     selectors = [item["selector"] for item in catalog["template_bindings"]]
+     assert len(selectors) == len(set(selectors))
++
++
++def test_real_template_b001_frequency_stages_55_hz_without_source_mutation(tmp_path):
++    source_bytes = REAL_TEMPLATE.read_bytes()
++    source_hash = __import__("hashlib").sha256(source_bytes).hexdigest()
++    audit = audit_lcc_parameter_bindings(REAL_TEMPLATE)
++    binding = next(item for item in audit["bindings"] if item["logical_parameter"] == "frequency_hz" and item["role"] == "main_control")
++    plan = {
++        "template": {"path": str(REAL_TEMPLATE), "fingerprint": source_hash},
++        "project": {"staging_path": str(tmp_path / "b001.staging.pscx")},
++        "bindings": [{**binding, "value": "55.0 Hz", "expected_match_count": 1}],
++    }
++
++    evidence = apply_template_bindings(plan)
++
++    assert evidence["read_back"][0]["value"] == "55.0 Hz"
++    assert evidence["source_sha256"] == source_hash
++    assert REAL_TEMPLATE.read_bytes() == source_bytes
++    assert __import__("hashlib").sha256(REAL_TEMPLATE.read_bytes()).hexdigest() == source_hash
++
++
++def test_real_template_b002_b003_ac_voltage_group_stages_both_sides(tmp_path):
++    source_bytes = REAL_TEMPLATE.read_bytes()
++    source_hash = __import__("hashlib").sha256(source_bytes).hexdigest()
++    audit = audit_lcc_parameter_bindings(REAL_TEMPLATE)
++    bindings = [item for item in audit["bindings"] if item["logical_parameter"] == "ac_voltage_kv"]
++    assert {item["role"] for item in bindings} == {"rectifier_valve_group", "inverter_valve_group"}
++    assert all(item["matches"] == 1 and item["observed_units"] == "kV" for item in bindings)
++    staging = tmp_path / "b002-b003.staging.pscx"
++    plan = {
++        "template": {"path": str(REAL_TEMPLATE), "fingerprint": source_hash},
++        "project": {"staging_path": str(staging)},
++        "bindings": [{**item, "value": "400.0 kV", "expected_match_count": 1} for item in bindings],
++    }
++
++    evidence = apply_template_bindings(plan)
++
++    assert [item["value"] for item in evidence["read_back"]] == ["400.0 kV", "400.0 kV"]
++    assert evidence["source_sha256"] == source_hash
++    assert REAL_TEMPLATE.read_bytes() == source_bytes

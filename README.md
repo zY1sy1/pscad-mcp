@@ -7,6 +7,10 @@
 Release notes are tracked in [CHANGELOG.md](CHANGELOG.md). A portable stdio
 configuration template is available at [config.example.toml](config.example.toml).
 
+The [2026-10-31 repository synchronization](docs/repository-sync-20261031.md)
+indexes the integrated October implementation, preserved experimental histories
+and the latest static evidence audit.
+
 ## Acceptance status (2026-10-15)
 
 Several named scopes have passed licensed acceptance; whole-project acceptance

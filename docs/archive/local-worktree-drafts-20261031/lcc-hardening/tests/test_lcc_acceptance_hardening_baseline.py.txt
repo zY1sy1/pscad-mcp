@@ -1,0 +1,14 @@
+def test_acceptance_prerequisites_are_not_satisfied_by_packaged_catalog_only():
+    from pscad_mcp.hvdc.builders.lcc.evidence import AcceptanceEvidence
+
+    evidence = AcceptanceEvidence(
+        live_inventory_hash=None,
+        golden_placeholder=True,
+        library_compiled=False,
+    )
+    assert evidence.accepted is False
+    assert set(evidence.missing) == {
+        "live_definition_inventory",
+        "golden_reference",
+        "library_compile",
+    }
